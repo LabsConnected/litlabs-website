@@ -100,7 +100,17 @@ function mockCheckoutLookup(
     };
     return builder;
   });
-  vi.mocked(getSupabaseAdmin).mockReturnValue({ from } as any);
+  vi.mocked(getSupabaseAdmin).mockReturnValue({
+    from,
+    rpc: async (fn: string) => {
+      if (fn === "begin_checkout_reservation") {
+        return { data: { action: "create", token: "00000000-0000-4000-8000-000000000001" }, error: null };
+      }
+      if (fn === "commit_checkout_reservation") return { data: true, error: null };
+      if (fn === "abort_checkout_reservation") return { data: true, error: null };
+      return { data: null, error: { message: `unexpected rpc ${fn}` } };
+    },
+  } as any);
 }
 
 function makeWebhookRequest(body: string, signature: string | null): any {
@@ -148,6 +158,9 @@ function buildTrackingSupabase(
     currentPeriodEnd?: string | null;
     updatedAt?: string | null;
     lastStripeEventCreated?: number | string | null;
+    stripeSubscriptionId?: string | null;
+    subscriptionStatus?: string | null;
+    failConflictInsert?: boolean;
   } = {},
 ) {
   const rpcCalls: { fn: string; params: any }[] = [];
@@ -163,6 +176,8 @@ function buildTrackingSupabase(
     current_period_end: opts.currentPeriodEnd ?? null,
     updated_at: opts.updatedAt ?? null,
     last_stripe_event_created: opts.lastStripeEventCreated ?? null,
+    stripe_subscription_id: opts.stripeSubscriptionId ?? null,
+    status: opts.subscriptionStatus ?? null,
   };
   const claimedEvents = new Map<string, { id: string; result: string; processed_at: string }>();
   if (existingEvent) {
@@ -242,6 +257,9 @@ function buildTrackingSupabase(
     }),
     insert: vi.fn(async (row: any) => {
       inserts.push({ table, row });
+      if (table === "billing_subscription_conflicts" && opts.failConflictInsert) {
+        return { error: { code: "XX000", message: "conflict insert failed" } };
+      }
       if (table === "stripe_events") {
         if (existingEvent || claimedEvents.has(row.stripe_event_id)) {
           return {
@@ -730,6 +748,124 @@ describe("Webhook event processing — state mutations", () => {
     expect(subUpsert!.row.plan).toBe("pro_builder_beta");
     expect(subUpsert!.row.status).toBe("active");
     expect(subUpsert!.row.stripe_subscription_id).toBe("sub_test_456");
+  });
+
+  it("keeps the existing subscription when a second active one arrives", async () => {
+    const { sb, upserts, inserts, rpcCalls, updates } = buildTrackingSupabase(false, {
+      stripeSubscriptionId: "sub_old",
+      subscriptionStatus: "active",
+      subscriptionPlan: "creator_beta",
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
+      id: "evt_dup_sub",
+      object: {
+        id: "sub_new",
+        status: "active",
+        customer: "cus_dup",
+        metadata: { clerk_id: "user_123", plan_id: "pro_builder_beta" },
+        items: { data: [{ price: "price_test_pro", current_period_end: 1702678400 }] },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(upserts.filter((u) => u.table === "subscriptions")).toHaveLength(0);
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
+    expect(inserts.find((row) => row.table === "billing_subscription_conflicts")?.row).toMatchObject({
+      existing_subscription_id: "sub_old",
+      incoming_subscription_id: "sub_new",
+      stripe_event_id: "evt_dup_sub",
+      event_type: "customer.subscription.updated",
+    });
+    expect(updates.find((u) => u.table === "stripe_events" && u.patch?.result === "duplicate_subscription")).toBeDefined();
+  });
+
+  it("still applies an update for the same subscription id", async () => {
+    const { sb, upserts } = buildTrackingSupabase(false, {
+      stripeSubscriptionId: "sub_same",
+      subscriptionStatus: "active",
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
+      object: {
+        id: "sub_same",
+        status: "active",
+        customer: "cus_same",
+        metadata: { clerk_id: "user_123", plan_id: "pro_builder_beta" },
+        items: { data: [{ current_period_end: 1702678400 }] },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(upserts.find((u) => u.table === "subscriptions")?.row.stripe_subscription_id).toBe("sub_same");
+  });
+
+  it("replaces a canceled subscription with a new one", async () => {
+    const { sb, upserts, inserts } = buildTrackingSupabase(false, {
+      stripeSubscriptionId: "sub_old",
+      subscriptionStatus: "canceled",
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.created", {
+      object: {
+        id: "sub_new",
+        status: "active",
+        customer: "cus_resub",
+        metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+        items: { data: [{ current_period_end: 1702678400 }] },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(inserts.filter((row) => row.table === "billing_subscription_conflicts")).toHaveLength(0);
+    expect(upserts.find((u) => u.table === "subscriptions")?.row.stripe_subscription_id).toBe("sub_new");
+  });
+
+  it("returns 500 when a required subscription update has no admin client", async () => {
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(false);
+    vi.mocked(getAdminSupabase).mockReturnValue(null as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
+      object: {
+        id: "sub_no_admin",
+        status: "active",
+        customer: "cus_no_admin",
+        metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+        items: { data: [{ current_period_end: 1702678400 }] },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(500);
+  });
+
+  it("returns 500 when the duplicate subscription cannot be recorded", async () => {
+    const { sb, upserts } = buildTrackingSupabase(false, {
+      stripeSubscriptionId: "sub_old",
+      subscriptionStatus: "active",
+      failConflictInsert: true,
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
+      id: "evt_dup_unrecorded",
+      object: {
+        id: "sub_new",
+        status: "active",
+        customer: "cus_dup",
+        metadata: { clerk_id: "user_123", plan_id: "pro_builder_beta" },
+        items: { data: [{ current_period_end: 1702678400 }] },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(500);
+    expect(upserts.filter((u) => u.table === "subscriptions")).toHaveLength(0);
   });
 
   it("Creator→Pro price change grants 10500 once even when metadata stays creator_beta", async () => {
@@ -2932,6 +3068,7 @@ describe("Checkout failure modes", () => {
     vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
     process.env.STRIPE_SECRET_KEY = "sk_test_fake";
     process.env.STRIPE_PRICE_CREATOR_BETA = "price_test";
+    mockCheckoutLookup(null);
 
     const originalFetch = global.fetch;
     global.fetch = vi.fn(async () => ({

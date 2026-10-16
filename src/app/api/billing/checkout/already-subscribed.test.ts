@@ -38,7 +38,17 @@ function lookup(tables: Record<string, Row[]>) {
     };
     return query;
   });
-  vi.mocked(getSupabaseAdmin).mockReturnValue({ from } as never);
+  vi.mocked(getSupabaseAdmin).mockReturnValue({
+    from,
+    rpc: async (fn: string) => {
+      if (fn === "begin_checkout_reservation") {
+        return { data: { action: "create", token: "00000000-0000-4000-8000-000000000001" }, error: null };
+      }
+      if (fn === "commit_checkout_reservation") return { data: true, error: null };
+      if (fn === "abort_checkout_reservation") return { data: true, error: null };
+      return { data: null, error: { message: `unexpected rpc ${fn}` } };
+    },
+  } as never);
   return from;
 }
 

@@ -105,8 +105,9 @@ async function handler(req: NextRequest) {
     const mode = plan.billingType === "one_time" ? "payment" : "subscription";
 
     let storedCustomerId: string | null = null;
+    let reservationToken: string | null = null;
+    const admin = mode === "subscription" ? getSupabaseAdmin() : null;
     if (mode === "subscription") {
-      const admin = getSupabaseAdmin();
       if (!admin) {
         return NextResponse.json({ error: "Database not configured" }, { status: 503 });
       }
@@ -141,6 +142,53 @@ async function handler(req: NextRequest) {
           storedCustomerId = sub.stripe_customer_id;
         }
       }
+
+      const { data: reservation, error: reservationError } = await admin.rpc(
+        "begin_checkout_reservation",
+        {
+          p_clerk_id: clerkId,
+          p_user_id: user?.id ?? null,
+          p_plan_id: plan.id,
+          p_price_id: priceId,
+          p_now: new Date().toISOString(),
+          p_lease_seconds: 60,
+        },
+      );
+      if (reservationError) {
+        return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+      }
+      const decision = (Array.isArray(reservation) ? reservation[0] : reservation) as {
+        action?: string;
+        url?: string;
+        session_id?: string;
+        token?: string;
+      } | null;
+      if (decision?.action === "already_subscribed") {
+        return NextResponse.json(
+          {
+            error: "You already have a subscription. Manage it in the billing portal.",
+            code: "already_subscribed",
+            portalPath: "/api/billing/portal",
+          },
+          { status: 409 },
+        );
+      }
+      if (decision?.action === "in_progress") {
+        return NextResponse.json(
+          {
+            error: "A checkout is already open. Finish or wait for it to expire before starting another plan.",
+            code: "checkout_in_progress",
+          },
+          { status: 409 },
+        );
+      }
+      if (decision?.action === "reuse" && decision.url) {
+        return NextResponse.json({ url: decision.url, sessionId: decision.session_id ?? null });
+      }
+      if (decision?.action !== "create" || typeof decision.token !== "string") {
+        return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+      }
+      reservationToken = decision.token;
     }
 
     const params = new URLSearchParams();
@@ -195,10 +243,39 @@ async function handler(req: NextRequest) {
     const session = await stripeResponse.json();
 
     if (!stripeResponse.ok) {
+      if (admin && reservationToken) {
+        await admin.rpc("abort_checkout_reservation", {
+          p_clerk_id: clerkId,
+          p_token: reservationToken,
+        });
+      }
       return NextResponse.json(
         { error: session.error?.message || "Stripe error" },
         { status: stripeResponse.status },
       );
+    }
+
+    if (admin && reservationToken) {
+      const openUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const { data: committed, error: commitError } = await admin.rpc(
+        "commit_checkout_reservation",
+        {
+          p_clerk_id: clerkId,
+          p_token: reservationToken,
+          p_session_id: session.id,
+          p_url: session.url,
+          p_open_until: openUntil,
+        },
+      );
+      if (commitError || committed !== true) {
+        return NextResponse.json(
+          {
+            error: "A checkout is already open. Finish or wait for it to expire before starting another plan.",
+            code: "checkout_in_progress",
+          },
+          { status: 409 },
+        );
+      }
     }
 
     return NextResponse.json({ url: session.url, sessionId: session.id });
