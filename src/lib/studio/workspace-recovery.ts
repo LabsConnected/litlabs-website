@@ -58,9 +58,9 @@ export const PROVISIONING_LOCK_DEAD_MS = 45_000;
  * workspace_status='provisioning', so an observer firing it would keep a
  * dead owner's lock looking alive forever.
  */
-function startProvisioningHeartbeat(projectId: string, userId: string): () => void {
+function startProvisioningHeartbeat(projectId: string, userId: string, provisioningToken: string): () => void {
   const timer = setInterval(() => {
-    void touchProvisioningHeartbeat(projectId, userId);
+    void touchProvisioningHeartbeat(projectId, userId, provisioningToken);
   }, PROVISIONING_HEARTBEAT_MS);
   // The heartbeat must never keep a Node process alive by itself
   // (tests, one-shot scripts).
@@ -320,7 +320,11 @@ export async function provisionWorkspaceForProject(
   // liveness to observers for the whole prepare: without it a prepare
   // running longer than the dead-lock window looks identical to a crashed
   // process and gets reclaimed mid-flight.
-  const stopHeartbeat = startProvisioningHeartbeat(projectId, userId);
+  const provisioningToken = owner?.workspaceProvisioningToken;
+  if (!provisioningToken) {
+    throw new Error("Workspace provisioning claim did not return an ownership token");
+  }
+  const stopHeartbeat = startProvisioningHeartbeat(projectId, userId, provisioningToken);
   try {
     // Use the row returned by the atomic claim so adoption hints and source
     // metadata cannot come from the stale pre-lock read.
@@ -379,6 +383,8 @@ export async function provisionWorkspaceForProject(
       await updateProjectWorkspace(projectId, userId, {
         workspaceStatus: "failed",
         workspaceError: "Project has no valid source for workspace provisioning",
+        workspaceProvisioningToken: null,
+        expectedProvisioningToken: provisioningToken,
       });
       throw new Error("Project has no valid source for workspace provisioning");
     }
@@ -390,6 +396,8 @@ export async function provisionWorkspaceForProject(
       workspaceBranch: result.branch ?? null,
       workspacePreparedAt: new Date().toISOString(),
       workspaceError: null,
+      workspaceProvisioningToken: null,
+      expectedProvisioningToken: provisioningToken,
     });
     if (!persisted) {
       throw new Error("Workspace provisioned but the project record could not be persisted");
@@ -402,6 +410,8 @@ export async function provisionWorkspaceForProject(
       await updateProjectWorkspace(projectId, userId, {
         workspaceStatus: "failed",
         workspaceError: message,
+        workspaceProvisioningToken: null,
+        expectedProvisioningToken: provisioningToken,
       });
     } catch {
       // The write failure is already logged inside updateProjectWorkspace —

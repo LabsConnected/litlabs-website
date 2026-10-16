@@ -9,6 +9,7 @@
  * - Neither table is dropped or destructively migrated
  */
 
+import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase";
 import { studioLog } from "@/lib/studio/logger";
 import {
@@ -463,6 +464,9 @@ export async function updateProjectWorkspace(
     workspaceBranch?: string | null;
     workspaceError?: string | null;
     workspacePreparedAt?: string;
+    workspaceProvisioningToken?: string | null;
+    /** Require this provisioning attempt to still own the row. */
+    expectedProvisioningToken?: string;
   },
 ): Promise<CanonicalProject | null> {
   const update: Record<string, unknown> = {
@@ -476,15 +480,19 @@ export async function updateProjectWorkspace(
   if (updates.workspaceError !== undefined) update.workspace_error = updates.workspaceError;
   if (updates.workspacePreparedAt !== undefined)
     update.workspace_prepared_at = updates.workspacePreparedAt;
+  if (updates.workspaceProvisioningToken !== undefined)
+    update.workspace_provisioning_token = updates.workspaceProvisioningToken;
 
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from(TABLE)
     .update(update)
     .eq("id", projectId)
     .eq("user_id", userId)
-    .eq("is_system", false)
-    .select()
-    .maybeSingle();
+    .eq("is_system", false);
+  if (updates.expectedProvisioningToken !== undefined) {
+    query = query.eq("workspace_provisioning_token", updates.expectedProvisioningToken);
+  }
+  const { data, error } = await query.select().maybeSingle();
 
   if (data) {
     return rowToCanonical(data as StudioProjectRow);
@@ -759,11 +767,13 @@ export async function claimProvisioningLock(
   projectId: string,
   userId: string,
 ): Promise<CanonicalProject | null> {
+  const provisioningToken = randomUUID();
   const { data, error } = await supabaseAdmin
     .from(TABLE)
     .update({
       workspace_status: "provisioning",
       workspace_error: null,
+      workspace_provisioning_token: provisioningToken,
       updated_at: new Date().toISOString(),
     })
     .eq("id", projectId)
@@ -836,6 +846,7 @@ export async function recoverStaleProvisioning(
     .update({
       workspace_status: "failed",
       workspace_error: newError,
+      workspace_provisioning_token: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", projectId)
@@ -868,14 +879,18 @@ export async function recoverStaleProvisioning(
 export async function touchProvisioningHeartbeat(
   projectId: string,
   userId: string,
-): Promise<void> {
-  const { error } = await supabaseAdmin
+  provisioningToken: string,
+): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
     .from(TABLE)
     .update({ updated_at: new Date().toISOString() })
     .eq("id", projectId)
     .eq("user_id", userId)
     .eq("is_system", false)
-    .eq("workspace_status", "provisioning");
+    .eq("workspace_status", "provisioning")
+    .eq("workspace_provisioning_token", provisioningToken)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     studioLog("touchProvisioningHeartbeat:update_error", {
@@ -883,7 +898,9 @@ export async function touchProvisioningHeartbeat(
       userId,
       errorClass: error.message,
     });
+    return false;
   }
+  return Boolean(data);
 }
 
 /**

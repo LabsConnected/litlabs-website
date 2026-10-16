@@ -46,6 +46,7 @@ const fakeProject = (overrides: Partial<CanonicalProject> = {}): CanonicalProjec
     userId: "user-1",
     sourceType: "blank",
     workspaceId: null,
+    workspaceProvisioningToken: "token-1",
     workspaceStatus: "not_prepared",
     ...overrides,
   }) as unknown as CanonicalProject;
@@ -472,7 +473,7 @@ describe("workspace-recovery", () => {
         vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
         vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject({ workspaceStatus: "provisioning" }));
         vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
-        vi.mocked(touchProvisioningHeartbeat).mockResolvedValue(undefined);
+        vi.mocked(touchProvisioningHeartbeat).mockResolvedValue(true);
         vi.mocked(prepareWorkspaceInternal).mockReturnValue(
           new Promise<WorkspacePrepareResponse>((resolve) => {
             resolvePrepare = resolve;
@@ -491,6 +492,73 @@ describe("workspace-recovery", () => {
         const beats = vi.mocked(touchProvisioningHeartbeat).mock.calls.length;
         await vi.advanceTimersByTimeAsync(30_000);
         expect(vi.mocked(touchProvisioningHeartbeat).mock.calls.length).toBe(beats);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("fences a late success after the lock was reclaimed by a newer owner", async () => {
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(
+        fakeProject({ workspaceStatus: "provisioning", workspaceProvisioningToken: "old-token" }),
+      );
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-old", root: "/data/ws-old" }) as unknown as WorkspacePrepareResponse,
+      );
+      // Both terminal writes miss because recoverStaleProvisioning replaced
+      // old-token with a new owner's token before this worker returned.
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+
+      await expect(provisionWorkspaceForProject("proj-fenced", "user-1")).rejects.toThrow(/persisted|workspace update/i);
+      expect(vi.mocked(updateProjectWorkspace).mock.calls.every(([, , update]) =>
+        update.expectedProvisioningToken === "old-token",
+      )).toBe(true);
+      expect(vi.mocked(updateProjectWorkspace).mock.calls.some(([, , update]) =>
+        update.workspaceId === "ws-old",
+      )).toBe(true);
+    });
+
+    it("fences a late failure so it cannot replace the newer owner's state", async () => {
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(
+        fakeProject({ workspaceStatus: "provisioning", workspaceProvisioningToken: "old-token" }),
+      );
+      vi.mocked(prepareWorkspaceInternal).mockRejectedValue(new Error("old worker failed"));
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+
+      await expect(provisionWorkspaceForProject("proj-fenced-failure", "user-1")).rejects.toThrow("old worker failed");
+      expect(vi.mocked(updateProjectWorkspace).mock.calls).toHaveLength(1);
+      expect(vi.mocked(updateProjectWorkspace).mock.calls[0][2]).toMatchObject({
+        workspaceStatus: "failed",
+        workspaceProvisioningToken: null,
+        expectedProvisioningToken: "old-token",
+      });
+    });
+
+    it("does not heartbeat a reclaimed token", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+        vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+        vi.mocked(claimProvisioningLock).mockResolvedValue(
+          fakeProject({ workspaceStatus: "provisioning", workspaceProvisioningToken: "old-token" }),
+        );
+        vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+        vi.mocked(touchProvisioningHeartbeat).mockResolvedValue(false);
+        vi.mocked(prepareWorkspaceInternal).mockReturnValue(new Promise(() => {}));
+
+        void provisionWorkspaceForProject("proj-stale-heartbeat", "user-1");
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(touchProvisioningHeartbeat).toHaveBeenCalledWith(
+          "proj-stale-heartbeat",
+          "user-1",
+          "old-token",
+        );
+        // The database-enforced token predicate returns false for a
+        // reclaimed worker; no write can refresh the new owner's lease.
+        expect(await vi.mocked(touchProvisioningHeartbeat).mock.results[0].value).toBe(false);
       } finally {
         vi.useRealTimers();
       }
