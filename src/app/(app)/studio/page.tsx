@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
@@ -144,6 +144,12 @@ function StudioHub() {
   }>({ loading: true, hasProjects: null });
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // In-flight guard must be a ref: isCreating is state, so a second
+  // submit inside the same render window (double Enter/click before the
+  // disabled button re-renders) would pass a state check and fire a
+  // duplicate POST. The server does not dedupe creates — each POST
+  // inserts a project row.
+  const creatingRef = useRef(false);
 
   const handleRetry = useCallback(() => {
     // Retry restarts the failed initialization by forcing a full
@@ -187,6 +193,8 @@ function StudioHub() {
 
   const handleFirstRunSubmit = useCallback(
     async (idea: string) => {
+      if (creatingRef.current) return;
+      creatingRef.current = true;
       setIsCreating(true);
       setCreateError(null);
       try {
@@ -226,6 +234,7 @@ function StudioHub() {
       } catch (err) {
         setCreateError(err instanceof Error ? err.message : "Failed to create project");
       } finally {
+        creatingRef.current = false;
         setIsCreating(false);
       }
     },

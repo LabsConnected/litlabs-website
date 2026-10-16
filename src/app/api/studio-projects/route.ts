@@ -97,13 +97,28 @@ export async function POST(request: NextRequest) {
       // after the insert commits: awaiting it inline parked the POST for
       // up to the terminal-server prepare budget (180s), past the edge
       // timeout, and clients saw a failed create for a row that already
-      // existed. after() keeps the work inside the request lifecycle —
-      // the platform drains it instead of a detached fire-and-forget
-      // promise. provisionWorkspaceForProject is idempotent (atomic
-      // provisioning lock + adoption-first prepare), so a concurrent
-      // first-open cannot create a duplicate workspace. A failure leaves
-      // workspace_status=failed on the row and first-open retries it —
-      // the project itself was still created, so return it truthfully.
+      // existed.
+      //
+      // Durability boundary: on the standalone Node server, after() runs
+      // post-response in-process — it is NOT durable across a deploy,
+      // restart, or crash. An interruption before the lock claim leaves
+      // workspace_status=not_prepared; one mid-prepare leaves a dead
+      // "provisioning" lock. Both are recovered by the first-open
+      // contract: preview POST (auto-provision on !workspaceId),
+      // workspace prepare POST, and the files/conversation routes all
+      // re-enter provisionWorkspaceForProject, and workspace GET joins
+      // an in-flight "provisioning". The shared path is idempotent (atomic
+      // provisioning lock + stale-lock recovery + adoption-first
+      // prepare), so recovery cannot create a duplicate workspace for
+      // THIS project row.
+      //
+      // Scope boundary: create itself is NOT idempotent. A retried or
+      // concurrent POST still inserts a new project row (with its own
+      // workspace). The prompt 201 removes the phantom-failure retry
+      // that multiplied projects, and client-side in-flight guards
+      // cover double-submit — but a true create-dedupe would need a
+      // client-supplied idempotency key persisted on the row. That is a
+      // deliberate follow-up, not claimed here.
       after(() =>
         provisionWorkspaceForProject(project.id, userId).catch(
           (provisionErr) => {

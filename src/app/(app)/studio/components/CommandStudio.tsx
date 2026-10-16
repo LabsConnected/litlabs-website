@@ -1415,6 +1415,12 @@ function CommandStudioContent() {
   }, []);
 
   const [creatingProject, setCreatingProject] = useState(false);
+  // Synchronous in-flight guard for create POSTs: a state check reads the
+  // value captured at render, so a second submit inside the same render
+  // window (double click/Enter before the busy state re-renders) would
+  // pass it and fire a duplicate POST. The server does not dedupe
+  // creates — each POST inserts a project row.
+  const creatingProjectRef = useRef(false);
 
   // Auto-reveal the dock Activity tab when LiTT starts executing,
   // without stealing focus. This does NOT call .focus() on any
@@ -1816,7 +1822,8 @@ function CommandStudioContent() {
   }, [watchPausedRunId, watchConversationId]);
 
   const handleStartBlank = useCallback(async (name: string) => {
-    if (creatingProject) return;
+    if (creatingProject || creatingProjectRef.current) return;
+    creatingProjectRef.current = true;
     setCreatingProject(true);
     setProjectCreateError(null);
     try {
@@ -1879,6 +1886,7 @@ function CommandStudioContent() {
       console.error("[handleStartBlank] Error:", err);
       if (isMobileLitt) mobileDiag("project", "create_threw", { errorName: err instanceof Error ? err.name : typeof err });
     } finally {
+      creatingProjectRef.current = false;
       setCreatingProject(false);
     }
   }, [creatingProject, searchParams, pathname, router, refreshCapabilities, userId, getToken, isMobileLitt]);
