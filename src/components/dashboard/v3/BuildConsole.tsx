@@ -16,7 +16,8 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import {
   createManagedStudioProject,
   deriveProjectNameFromPrompt,
-  newIdempotencyKey,
+  takeSubmissionKey,
+  type CreateSubmission,
 } from "@/lib/projects/create-project-request";
 
 /**
@@ -30,6 +31,21 @@ import {
  */
 
 const LIME = "#a8ff2f";
+
+// Creation-domain intents for which the dashboard composer may mint a
+// project up front. Non-build intents (deploy, debug, research,
+// project_action) and unknown/unspecified intents never create.
+const BUILD_INTENTS = new Set([
+  "code",
+  "website",
+  "image",
+  "video",
+  "music",
+  "design",
+  "game",
+  "agent_task",
+  "mixed",
+]);
 
 const SUGGESTIONS = [
   { label: "Website", href: "/studio?tool=chat", icon: Layout },
@@ -47,9 +63,9 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
   const [prompt, setPrompt] = useState(initialPrompt);
   const [isRouting, setIsRouting] = useState(false);
   const [routingMessage, setRoutingMessage] = useState<string | null>(null);
-  // One idempotency key per create submission; a retry of the SAME
-  // submission reuses it and is served the project it already made.
-  const createIdempotencyKeyRef = useRef<string | null>(null);
+  // Submission key bound to the prompt fingerprint: an identical retry
+  // reuses it; an edited prompt mints a fresh key.
+  const createSubmissionRef = useRef<CreateSubmission | null>(null);
 
   // Deep links (e.g. the legacy /create redirect) can pre-fill the composer.
   useEffect(() => {
@@ -101,20 +117,26 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
     const planId = payload.plan?.id;
     const action = payload.result?.action;
 
-    // Build requests ("create"/"generate") mint a project first and pin
-    // its id in the Studio URL — ?prompt= alone would resolve to the
-    // most-recently-touched project and run inside it. Other actions
-    // (edit, fix, continue, analyze, deploy, publish) target the user's
-    // existing work: route the prompt into Studio against the current
-    // project without minting an empty project.
-    if (action === "create" || action === "generate") {
-      createIdempotencyKeyRef.current ??= newIdempotencyKey();
+    // Only an explicit build signal may mint a project: a create/generate
+    // verb AND a creation-domain intent. "create" is the router's default
+    // action for unmatched prompts, so the action alone cannot carry the
+    // signal — chat, questions, research, vague project_action and any
+    // unknown/missing intent fall through to the non-creating route into
+    // Studio chat against the user's current project. Only then does a
+    // build request mint and pin ?project=<new id> — ?prompt= alone would
+    // resolve to the most-recently-touched project and run inside it.
+    const isBuildRequest =
+      (action === "create" || action === "generate") &&
+      typeof primaryIntent === "string" &&
+      BUILD_INTENTS.has(primaryIntent);
+    if (isBuildRequest) {
+      createSubmissionRef.current = takeSubmissionKey(createSubmissionRef.current, text);
       try {
         const project = await createManagedStudioProject({
           name: deriveProjectNameFromPrompt(text),
           templateId: "blank-static",
           getToken,
-          idempotencyKey: createIdempotencyKeyRef.current,
+          idempotencyKey: createSubmissionRef.current.key,
         });
         const params = new URLSearchParams({
           tool: "chat",
@@ -124,7 +146,7 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
         if (primaryIntent) params.set("intent", primaryIntent);
         if (planId) params.set("planId", planId);
         router.push(`/studio?${params.toString()}`);
-        createIdempotencyKeyRef.current = null;
+        createSubmissionRef.current = null;
       } catch (err) {
         setRoutingMessage(
           err instanceof Error ? err.message : "Couldn't create your project. Try again.",

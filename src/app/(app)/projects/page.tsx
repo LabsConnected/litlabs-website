@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { createManagedStudioProject, newIdempotencyKey } from "@/lib/projects/create-project-request";
+import { createManagedStudioProject, takeSubmissionKey, type CreateSubmission } from "@/lib/projects/create-project-request";
 import ProjectNameDialog from "@/app/(app)/studio/components/ProjectNameDialog";
 import {
   ArrowRight,
@@ -58,9 +58,9 @@ export default function ProjectsPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  // One idempotency key per dialog submission; retries of the same
-  // submission reuse it and get the row they already made.
-  const createIdempotencyKeyRef = useRef<string | null>(null);
+  // Submission key bound to the input fingerprint: an identical retry
+  // reuses it, an edit/cancel/reopen mints a fresh one.
+  const createSubmissionRef = useRef<CreateSubmission | null>(null);
   const [query, setQuery] = useState("");
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [lastOpenedId, setLastOpenedId] = useState<string | null>(null);
@@ -121,12 +121,14 @@ export default function ProjectsPage() {
       if (creatingProject) return;
       setCreatingProject(true);
       setCreateError(null);
-      createIdempotencyKeyRef.current ??= newIdempotencyKey();
+      // The key is bound to this exact name: retrying an identical
+      // submission reuses it, an edited name is a new submission.
+      createSubmissionRef.current = takeSubmissionKey(createSubmissionRef.current, name.trim());
       try {
         const project = await createManagedStudioProject({
           name,
           getToken,
-          idempotencyKey: createIdempotencyKeyRef.current,
+          idempotencyKey: createSubmissionRef.current.key,
         });
         // Close the dialog immediately so a pending navigation cannot
         // accept a second submission; the busy flag stays set until this
@@ -134,7 +136,7 @@ export default function ProjectsPage() {
         setCreateDialogOpen(false);
         router.push(`/studio?project=${encodeURIComponent(project.id)}`);
         setCreatingProject(false);
-        createIdempotencyKeyRef.current = null;
+        createSubmissionRef.current = null;
       } catch (err) {
         setCreateError(err instanceof Error ? err.message : "Couldn't create your project. Try again.");
         setCreatingProject(false);
@@ -572,7 +574,7 @@ export default function ProjectsPage() {
         open={createDialogOpen}
         busy={creatingProject}
         error={createError}
-        onCancel={() => { if (!creatingProject) setCreateDialogOpen(false); }}
+        onCancel={() => { if (!creatingProject) { createSubmissionRef.current = null; setCreateDialogOpen(false); } }}
         onSubmit={(name) => { void handleCreateProject(name); }}
       />
     </PageShell>

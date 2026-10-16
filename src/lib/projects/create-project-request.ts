@@ -47,16 +47,36 @@ export async function createManagedStudioProject(input: {
 }
 
 /**
- * One unique key per user "New project" submission. Generate it lazily
- * inside a stable ref at the create call-site so retries of the SAME
- * submission reuse the key (and get the project they already made)
- * while a genuinely new submission — dialog reopened, new prompt —
- * gets a fresh key. The database enforces uniqueness per user.
+ * One unique key per user "New project" submission. Used via
+ * takeSubmissionKey below, which binds the key to an input fingerprint.
  */
 export function newIdempotencyKey(): string {
   return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+export interface CreateSubmission {
+  key: string;
+  fingerprint: string;
+}
+
+/**
+ * Returns the submission key bound to `fingerprint` (the trimmed input),
+ * minting a fresh key whenever the fingerprint differs — an input edit,
+ * a reopened dialog, or a new prompt is a NEW submission and must never
+ * inherit a prior key. The identical input keeps its key so a retry of
+ * the SAME submission (lost response, transient failure) is served the
+ * project it already made instead of minting a duplicate. Callers store
+ * the returned object in a stable ref and clear it on success, cancel,
+ * and dialog close.
+ */
+export function takeSubmissionKey(
+  current: CreateSubmission | null,
+  fingerprint: string,
+): CreateSubmission {
+  if (current && current.fingerprint === fingerprint) return current;
+  return { key: newIdempotencyKey(), fingerprint };
 }
 
 /**

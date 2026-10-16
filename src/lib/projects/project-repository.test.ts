@@ -433,6 +433,7 @@ const supabaseMock = supabaseAdmin as unknown as {
   _keyStore: Map<string, Record<string, unknown>>;
   _idempotencyMissCount: number;
   _insertConflictArmed: boolean;
+  _lastInsert: Record<string, unknown> | null;
 };
 
 describe("project-repository ownership enforcement", () => {
@@ -794,6 +795,22 @@ describe("project-repository ownership enforcement", () => {
       ).rejects.toThrow(/Failed to create project/);
     });
 
+    it("fails loudly when the key pre-check errors — e.g. a pre-migration database", async () => {
+      // On a schema without idempotency_key the lookup errors with
+      // 42703 undefined column. That must surface immediately: silently
+      // continuing would mint the duplicates the index exists to stop.
+      supabaseMock._injectError = { message: "column idempotency_key does not exist", code: "42703" };
+      await expect(
+        createBlankProject({
+          userId: "user-A",
+          name: "Test Project",
+          templateId: "blank-static",
+          idempotencyKey: "pre-migration-key",
+        }),
+      ).rejects.toThrow(/Failed to check create idempotency/);
+      expect(supabaseMock._insertCount).toBe(0);
+    });
+
     it("inserts without a key for programmatic callers (canvas promote, agent tools)", async () => {
       const project = await createBlankProject({
         userId: "user-A",
@@ -802,6 +819,26 @@ describe("project-repository ownership enforcement", () => {
       });
       expect(project.id).toBe("proj-new");
       expect(supabaseMock._insertCount).toBe(1);
+    });
+
+    it("omits the idempotency_key column entirely for unkeyed creates — pre-migration safe", async () => {
+      await createBlankProject({
+        userId: "user-A",
+        name: "Programmatic",
+        templateId: "blank-static",
+      });
+      expect(supabaseMock._lastInsert).toBeTruthy();
+      expect(supabaseMock._lastInsert).not.toHaveProperty("idempotency_key");
+    });
+
+    it("includes the idempotency_key column for keyed creates", async () => {
+      await createBlankProject({
+        userId: "user-A",
+        name: "Test Project",
+        templateId: "blank-static",
+        idempotencyKey: "sub-1",
+      });
+      expect(supabaseMock._lastInsert).toHaveProperty("idempotency_key", "sub-1");
     });
   });
 

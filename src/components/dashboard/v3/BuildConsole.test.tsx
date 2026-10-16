@@ -131,6 +131,85 @@ describe("BuildConsole project creation", () => {
     ).toBe(false);
   });
 
+  it("creates a project for mixed intents when the action is generate", async () => {
+    mockFetch({
+      intent: () =>
+        new Response(
+          JSON.stringify({
+            type: "intent",
+            result: { primaryIntent: "mixed", action: "generate" },
+          }),
+          { status: 200 },
+        ),
+      create: () =>
+        new Response(JSON.stringify({ project: { id: "proj-mixed" } }), { status: 201 }),
+    });
+    const user = userEvent.setup();
+    render(<BuildConsole />);
+
+    await user.type(screen.getByLabelText("Describe what you want to make"), "Build a site and deploy it");
+    await user.click(screen.getByRole("button", { name: /create/i }));
+
+    const url = pushedUrl();
+    expect(url.searchParams.get("project")).toBe("proj-mixed");
+  });
+
+  it.each([
+    ["research", "create"],
+    ["project_action", "create"],
+    ["deploy", "create"],
+  ])(
+    "does NOT create a project for non-build intent %s even when the action is %s",
+    async (primaryIntent, action) => {
+      const fetchMock = mockFetch({
+        intent: () =>
+          new Response(
+            JSON.stringify({ type: "intent", result: { primaryIntent, action } }),
+            { status: 200 },
+          ),
+        create: () => {
+          throw new Error(`create must not be called for ${primaryIntent}`);
+        },
+      });
+      const user = userEvent.setup();
+      render(<BuildConsole />);
+
+      await user.type(screen.getByLabelText("Describe what you want to make"), "Tell me something");
+      await user.click(screen.getByRole("button", { name: /create/i }));
+
+      const url = pushedUrl();
+      expect(url.searchParams.get("project")).toBeNull();
+      expect(
+        fetchMock.mock.calls.some(([i]) =>
+          String(i instanceof Request ? i.url : String(i)).includes("/api/studio-projects"),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("does NOT create a project when the router omits intent and action (unknown fallback)", async () => {
+    const fetchMock = mockFetch({
+      intent: () =>
+        new Response(JSON.stringify({ type: "intent", result: {} }), { status: 200 }),
+      create: () => {
+        throw new Error("create must not be called for an unknown intent");
+      },
+    });
+    const user = userEvent.setup();
+    render(<BuildConsole />);
+
+    await user.type(screen.getByLabelText("Describe what you want to make"), "???");
+    await user.click(screen.getByRole("button", { name: /create/i }));
+
+    const url = pushedUrl();
+    expect(url.searchParams.get("project")).toBeNull();
+    expect(
+      fetchMock.mock.calls.some(([i]) =>
+        String(i instanceof Request ? i.url : String(i)).includes("/api/studio-projects"),
+      ),
+    ).toBe(false);
+  });
+
   it("surfaces a retryable error when the intent router is unreachable — never guesses build vs chat", async () => {
     const fetchMock = mockFetch({
       intent: () => {

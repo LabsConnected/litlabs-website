@@ -134,4 +134,51 @@ describe("/projects — New project", () => {
       expect(posts).toHaveLength(1);
     });
   });
+
+  it("reuses the idempotency key for an identical retry but mints a fresh key on an edit", async () => {
+    const fetchMock = mockFetch({
+      create: () => new Response(JSON.stringify({ error: "network lost" }), { status: 500 }),
+    });
+    const user = userEvent.setup();
+    render(<ProjectsPage />);
+
+    const createPosts = () =>
+      fetchMock.mock.calls
+        .filter(
+          ([input, init]) =>
+            String(input instanceof Request ? input.url : String(input)).includes("/api/studio-projects") &&
+            (init as RequestInit | undefined)?.method === "POST",
+        )
+        .map(([, init]) => JSON.parse((init as RequestInit).body as string));
+
+    await user.click(screen.getByRole("button", { name: /new project/i }));
+    await user.clear(screen.getByLabelText("Project name"));
+    await user.type(screen.getByLabelText("Project name"), "Landing revamp");
+    await user.click(screen.getByRole("button", { name: /create project/i }));
+    await waitFor(() => expect(createPosts()).toHaveLength(1));
+    const firstKey = createPosts()[0].idempotencyKey;
+    expect(typeof firstKey).toBe("string");
+
+    // Identical retry after a lost response — same name, same key.
+    await user.click(screen.getByRole("button", { name: /create project/i }));
+    await waitFor(() => expect(createPosts()).toHaveLength(2));
+    expect(createPosts()[1].idempotencyKey).toBe(firstKey);
+
+    // An edited name is a NEW submission — fresh key.
+    await user.clear(screen.getByLabelText("Project name"));
+    await user.type(screen.getByLabelText("Project name"), "Cafe site");
+    await user.click(screen.getByRole("button", { name: /create project/i }));
+    await waitFor(() => expect(createPosts()).toHaveLength(3));
+    expect(createPosts()[2].idempotencyKey).not.toBe(firstKey);
+
+    // Cancel closes the submission — reopening mints a fresh key even
+    // for the same text.
+    await user.click(screen.getByRole("button", { name: /cancel/i }));
+    await user.click(screen.getByRole("button", { name: /new project/i }));
+    await user.clear(screen.getByLabelText("Project name"));
+    await user.type(screen.getByLabelText("Project name"), "Cafe site");
+    await user.click(screen.getByRole("button", { name: /create project/i }));
+    await waitFor(() => expect(createPosts()).toHaveLength(4));
+    expect(createPosts()[3].idempotencyKey).not.toBe(createPosts()[2].idempotencyKey);
+  });
 });

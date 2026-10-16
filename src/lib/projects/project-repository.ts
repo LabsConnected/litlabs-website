@@ -131,19 +131,25 @@ export async function createBlankProject(
       ? input.idempotencyKey.trim()
       : null;
   if (idempotencyKey) {
-    const { data: existing } = await supabaseAdmin
+    const { data: existing, error: keyError } = await supabaseAdmin
       .from(TABLE)
       .select("*")
       .eq("user_id", input.userId)
       .eq("idempotency_key", idempotencyKey)
       .maybeSingle();
+    // Fail loudly on lookup errors — e.g. a pre-migration database where
+    // the column does not exist yet. Silently continuing would mint the
+    // duplicates the index exists to prevent; keyed creates only ship
+    // after migration 20261018000000 has been applied.
+    if (keyError) {
+      throw new Error(`Failed to check create idempotency: ${keyError.message}`);
+    }
     if (existing) {
       return rowToCanonical(existing as StudioProjectRow);
     }
   }
 
   const insert: Record<string, unknown> = {
-    idempotency_key: idempotencyKey,
     user_id: input.userId,
     name,
     slug,
@@ -168,6 +174,13 @@ export async function createBlankProject(
     workspace_status: "not_prepared",
     runtime_status: "stopped",
   };
+
+  // The column only exists once migration 20261018000000 is applied.
+  // Keyed inserts always carry it; unkeyed programmatic creates omit the
+  // column entirely so they keep working against a pre-migration schema.
+  if (idempotencyKey) {
+    insert.idempotency_key = idempotencyKey;
+  }
 
   const { data, error } = await supabaseAdmin
     .from(TABLE)

@@ -253,10 +253,12 @@ describe("Dashboard v3 — universal composer", () => {
   it("routes prompts through the intent router (never a dead end)", () => {
     expect(src).toContain('fetch("/api/litt/intent"');
     expect(src).toContain('params.set("intent"');
-    // The composer creates the project first and pins ?project=<new id> —
-    // /studio?prompt=… without an explicit project resolves to the
-    // most-recently-touched project and runs the prompt inside it.
+    // For explicit build requests the composer creates the project first
+    // and pins ?project=<new id> — /studio?prompt=… without an explicit
+    // project resolves to the most-recently-touched project and runs the
+    // prompt inside it. Non-build intents route without creating.
     expect(src).toContain("createManagedStudioProject");
+    expect(src).toContain("BUILD_INTENTS.has(primaryIntent)");
     expect(src).toContain("project: project.id");
     expect(src).toContain("/studio?${params.toString()}");
   });
