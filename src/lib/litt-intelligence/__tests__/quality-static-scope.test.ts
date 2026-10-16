@@ -34,6 +34,7 @@ import {
   finalizeQualityLoop,
   harvestStageMarkers,
   noteBuildArtifacts,
+  noteMutationReadBack,
   notePreviewReady,
   noteStaticArtifactCheck,
   noteToolResult,
@@ -169,5 +170,58 @@ describe("static quality gate — verdicts", () => {
     completeStaticBuildEvidence(restored);
     const finale = finalizeQualityLoop(restored, { deployRequested: false });
     expect(finale.verdict.ok).toBe(true);
+  });
+
+  it("heals the flag on a pre-fix snapshot when the resume re-derives it", () => {
+    // A run paused before this fix carries no isStaticWorkspace flag.
+    const s = makeStaticSession();
+    const snap = snapshotQualityLoopSession(s);
+    delete snap.state.isStaticWorkspace;
+    const resumed = startQualityLoopSession({
+      runId: "run-static",
+      projectId: "proj-1",
+      userId: "user-1",
+      userRequest: "Build me a bakery website",
+      snapshot: snap,
+      isStaticWorkspace: true, // approvals route re-derives server-side
+    });
+    expect(resumed.state.isStaticWorkspace).toBe(true);
+    completeStaticBuildEvidence(resumed);
+    const finale = finalizeQualityLoop(resumed, { deployRequested: false });
+    expect(finale.verdict.ok).toBe(true);
+  });
+
+  it("the real read-back path cannot wedge the gate (review regression)", () => {
+    // Production calls noteMutationReadBack after every successful
+    // files.write — in the static lane it must not file INSPECT evidence,
+    // or the stage machine pins on a stage that can never pass.
+    const s = makeStaticSession();
+    completeStaticBuildEvidence(s);
+    noteMutationReadBack(s, {
+      path: "index.html",
+      readable: true,
+      contentMatches: true,
+    });
+    expect(s.state.stages.inspect.evidence).toHaveLength(0);
+    const finale = finalizeQualityLoop(s, { deployRequested: false });
+    expect(finale.verdict.ok).toBe(true);
+  });
+
+  it("stale non-required stage evidence cannot wedge the gate either", () => {
+    // Belt-and-suspenders: even if INSPECT evidence landed by any other
+    // path (e.g. a session predating the noteMutationReadBack gate), a
+    // stage outside the applicable set must not pin the machine.
+    const s = makeStaticSession();
+    s.state.stages.inspect.evidence.push({
+      summary: "legacy read-back evidence",
+      by: "system",
+      at: new Date().toISOString(),
+      detail: { readBackVerified: true },
+    });
+    s.state.stages.inspect.status = "active";
+    completeStaticBuildEvidence(s);
+    const finale = finalizeQualityLoop(s, { deployRequested: false });
+    expect(finale.verdict.ok).toBe(true);
+    expect(s.state.stages.inspect.status).toBe("skipped");
   });
 });

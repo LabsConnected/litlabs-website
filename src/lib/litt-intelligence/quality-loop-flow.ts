@@ -141,7 +141,18 @@ export function startQualityLoopSession(opts: {
   ) {
     // A resume never loosens the gate — the snapshot carries its scope
     // and its workspace-capability flag.
-    return restoreQualityLoopSession(opts.snapshot);
+    const restored = restoreQualityLoopSession(opts.snapshot);
+    // Snapshots written before the static flag existed (in-flight paused
+    // runs) resume without it; the server re-derives the workspace kind on
+    // every resume, so a missing flag can be healed, never the reverse.
+    if (restored.state.isStaticWorkspace !== true && opts.isStaticWorkspace === true) {
+      restored.state.isStaticWorkspace = true;
+      restored.inspectionNote ??=
+        "Static (gitless) workspace: the browser-inspection/judge path does " +
+        "not apply in the static lane. Verification is the served static " +
+        "preview plus verified read-back evidence.";
+    }
+    return restored;
   }
 
   const session: QualityLoopSession = {
@@ -470,7 +481,12 @@ function reconcile(session: QualityLoopSession): void {
           // Strict engine refused; leave the stage open.
         }
       } else if (
-        s.evidence.length === 0 &&
+        // A stage outside the applicable set must never pin the machine.
+        // In the static lane that includes stages that hold evidence which
+        // cannot pass there (e.g. read-back INSPECT evidence predating the
+        // static-lane gate).
+        (s.evidence.length === 0 ||
+          (state.isStaticWorkspace === true && scopeSkippable)) &&
         laterHasEvidence &&
         (IMPLICATION_SKIPPABLE.has(c) || scopeSkippable) &&
         (s.status === "pending" || s.status === "active")
@@ -596,6 +612,12 @@ export function noteMutationReadBack(
 ): void {
   try {
     if (!session.mutationSeen) return;
+    // In the static lane INSPECT is not an applicable stage — filing
+    // evidence here would pin the stage machine on a stage that can never
+    // pass (a successful files.write always produces this observation).
+    // The read-back's role there is TEST evidence, which the caller files
+    // separately via noteStaticArtifactCheck.
+    if (session.state.isStaticWorkspace === true) return;
     const ok = check.readable && check.contentMatches !== false;
     fileObservation(session, "inspect", {
       summary: ok
@@ -967,7 +989,10 @@ export function finalizeQualityLoop(
             ? session.inspectionNote
             : "Stage produced no evidence during the run.";
         skipStage(state, c, reason);
-      } else if (s.evidence.length === 0 && scopeSkippable) {
+      } else if (
+        (s.evidence.length === 0 || state.isStaticWorkspace === true) &&
+        scopeSkippable
+      ) {
         skipStageOutOfScope(
           state,
           c,
