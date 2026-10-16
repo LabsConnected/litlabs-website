@@ -374,6 +374,16 @@ export const toolCreateProject: ToolHandler = async (userId, args) => {
       templateId: templateId as "blank-static" | "nextjs" | "react-vite" | "expo-react-native",
       accessMode: "private",
     });
+    // Match POST /api/studio-projects: a managed project provisions its
+    // durable workspace at create time. Tolerant — a provisioning failure
+    // leaves workspace_status=failed and first-open retries it; creation
+    // itself still succeeded and must not be reported as failed.
+    try {
+      const { provisionWorkspaceForProject } = await import("@/lib/studio/workspace-recovery");
+      await provisionWorkspaceForProject(project.id, userId);
+    } catch {
+      // Provisioning failure is surfaced via workspace_status on the row.
+    }
     return ok(project.id, `Created project "${project.name}".`, {
       projectId: project.id, name: project.name,
     });
