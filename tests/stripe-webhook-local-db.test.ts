@@ -8,18 +8,36 @@
  *
  * Database and API default to the Supabase CLI local stack
  * (`supabase start`): Postgres on 127.0.0.1:54322 and PostgREST on
- * 127.0.0.1:54321, with the published local demo JWTs. Override with
- * SUPABASE_DB_URL and SUPABASE_LOCAL_API_URL.
+ * 127.0.0.1:54321. The anon and service-role JWTs are signed at runtime
+ * with SUPABASE_JWT_SECRET (default is a local fixture string, not a
+ * credential). Override the database and API with SUPABASE_DB_URL and
+ * SUPABASE_LOCAL_API_URL.
  *
  * Signature checks use Stripe's test-header generator. subscriptions.retrieve
  * is mocked: invoice.paid re-reads the live subscription, and this file
  * must not call api.stripe.com. No billing_admin role and no stand-in
  * PostgREST are created here.
  */
+import { createHmac } from "node:crypto";
 import { writeFileSync } from "fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import Stripe from "stripe";
+
+function fixtureJwt(role: "anon" | "service_role"): string {
+  const encode = (value: object) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  const secret =
+    process.env.SUPABASE_JWT_SECRET ??
+    "local-webhook-fixture-secret-not-a-credential";
+  const unsigned = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({
+    iss: "supabase-demo",
+    role,
+    exp: 1983812996,
+  })}`;
+  const signature = createHmac("sha256", secret).update(unsigned).digest("base64url");
+  return `${unsigned}.${signature}`;
+}
 
 vi.mock("stripe", async () => {
   const actual = await vi.importActual<typeof import("stripe")>("stripe");
@@ -49,11 +67,8 @@ const STRIPE_KEY = "sk_test_local_fixture_not_a_live_key";
 const DB_URL =
   process.env.SUPABASE_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 const API_URL = process.env.SUPABASE_LOCAL_API_URL ?? "http://127.0.0.1:54321";
-// Supabase CLI local demo keys. They only verify against the local JWT secret.
-const ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
-const SERVICE_ROLE_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
+const ANON_KEY = fixtureJwt("anon");
+const SERVICE_ROLE_KEY = fixtureJwt("service_role");
 
 type Scenario = {
   id: number;
@@ -89,6 +104,8 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
     post = mod.POST as unknown as (req: Request) => Promise<Response>;
     await db.connect();
     await db.query(`
+      DELETE FROM public.billing_subscription_conflicts
+      WHERE stripe_event_id LIKE 'evt_local658_%';
       DELETE FROM public.credit_ledger
       WHERE user_id IN (SELECT id FROM public.users WHERE clerk_id LIKE 'local658_%');
       DELETE FROM public.subscriptions
@@ -454,6 +471,105 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
       };
     });
 
+    await run(9, "A second active subscription does not replace the stored id", async () => {
+      const clerk = "local658_conflict";
+      const uid = await userId(clerk);
+      await db.query(
+        `INSERT INTO public.subscriptions (
+           user_id, stripe_customer_id, stripe_subscription_id, plan, status, last_stripe_event_created
+         ) VALUES ($1, 'cus_local658_original', 'sub_local658_original', 'creator_beta', 'active', 100)`,
+        [uid],
+      );
+      const incoming = await deliver(
+        subscriptionCreated(
+          "evt_local658_conflict",
+          "sub_local658_incoming",
+          clerk,
+          "pro_builder_beta",
+          "price_pro_local",
+        ),
+      );
+      const stored = await db.query(
+        `SELECT stripe_subscription_id, plan, status FROM public.subscriptions WHERE user_id = $1`,
+        [uid],
+      );
+      const conflicts = await db.query(
+        `SELECT existing_subscription_id, incoming_subscription_id
+         FROM public.billing_subscription_conflicts WHERE stripe_event_id = 'evt_local658_conflict'`,
+      );
+      const events = await db.query(
+        `SELECT result FROM public.stripe_events WHERE stripe_event_id = 'evt_local658_conflict'`,
+      );
+      const ok = incoming.status === 200
+        && stored.rows.length === 1
+        && stored.rows[0].stripe_subscription_id === "sub_local658_original"
+        && stored.rows[0].plan === "creator_beta"
+        && stored.rows[0].status === "active"
+        && conflicts.rows.length === 1
+        && conflicts.rows[0].existing_subscription_id === "sub_local658_original"
+        && conflicts.rows[0].incoming_subscription_id === "sub_local658_incoming"
+        && events.rows[0]?.result === "duplicate_subscription";
+      return {
+        http: incoming.status,
+        detail: ok
+          ? `incoming ${incoming.status}, kept sub_local658_original, conflict recorded`
+          : `FAIL status=${incoming.status} stored=${JSON.stringify(stored.rows)} conflicts=${JSON.stringify(conflicts.rows)} events=${JSON.stringify(events.rows)} body=${JSON.stringify(incoming.body)}`,
+        db: { stored: stored.rows, conflicts: conflicts.rows, events: events.rows },
+      };
+    });
+
+    await run(10, "A conflict that cannot be recorded returns 500 and keeps the original id", async () => {
+      const clerk = "local658_conflict_fail";
+      const uid = await userId(clerk);
+      await db.query(
+        `INSERT INTO public.subscriptions (
+           user_id, stripe_customer_id, stripe_subscription_id, plan, status, last_stripe_event_created
+         ) VALUES ($1, 'cus_local658_keep', 'sub_local658_keep', 'pro_builder_beta', 'active', 100)`,
+        [uid],
+      );
+      let incoming: { status: number; body: unknown } = { status: 0, body: null };
+      try {
+        await db.query(
+          `REVOKE INSERT ON TABLE public.billing_subscription_conflicts FROM service_role, PUBLIC`,
+        );
+        incoming = await deliver(
+          subscriptionCreated(
+            "evt_local658_conflict_fail",
+            "sub_local658_other",
+            clerk,
+            "creator_beta",
+            "price_creator_local",
+          ),
+        );
+      } finally {
+        await db.query(
+          `GRANT INSERT ON TABLE public.billing_subscription_conflicts TO service_role`,
+        );
+      }
+      const stored = await db.query(
+        `SELECT stripe_subscription_id, plan FROM public.subscriptions WHERE user_id = $1`,
+        [uid],
+      );
+      const conflicts = await db.query(
+        `SELECT id FROM public.billing_subscription_conflicts WHERE stripe_event_id = 'evt_local658_conflict_fail'`,
+      );
+      const events = await db.query(
+        `SELECT result FROM public.stripe_events WHERE stripe_event_id = 'evt_local658_conflict_fail'`,
+      );
+      const ok = incoming.status === 500
+        && stored.rows[0]?.stripe_subscription_id === "sub_local658_keep"
+        && stored.rows[0]?.plan === "pro_builder_beta"
+        && conflicts.rows.length === 0
+        && events.rows.length === 0;
+      return {
+        http: incoming.status,
+        detail: ok
+          ? `conflict insert denied, webhook ${incoming.status}, kept sub_local658_keep, event not processed`
+          : `FAIL status=${incoming.status} stored=${JSON.stringify(stored.rows)} conflicts=${conflicts.rows.length} events=${JSON.stringify(events.rows)} body=${JSON.stringify(incoming.body)}`,
+        db: { stored: stored.rows, conflicts: conflicts.rows.length, events: events.rows },
+      };
+    });
+
     const anon = await fetch(`${API_URL}/rest/v1/credit_ledger?select=id`, {
       headers: { Authorization: `Bearer ${ANON_KEY}`, apikey: ANON_KEY, Accept: "application/json" },
     });
@@ -471,5 +587,5 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
 
     const failed = report.filter((row) => row.status !== "PASS");
     expect(failed, JSON.stringify(failed, null, 2)).toEqual([]);
-  }, 60_000);
+  }, 90_000);
 });

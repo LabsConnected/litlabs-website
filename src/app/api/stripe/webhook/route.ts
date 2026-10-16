@@ -982,11 +982,16 @@ export async function POST(req: NextRequest) {
             `[stripe] ${event.type} ${sub.id}: cannot resolve the customer to a user`,
           );
         }
-        const { data: existingSub } = await sb
+        const { data: existingSub, error: existingError } = await sb
           .from("subscriptions")
           .select("plan, status, stripe_subscription_id, current_period_end, last_stripe_event_created")
           .eq("user_id", subUserId)
           .maybeSingle();
+        if (existingError) {
+          throw new Error(
+            `[stripe] ${event.type} ${event.id}: could not read the current subscription: ${existingError.message}`,
+          );
+        }
         // Order by the Stripe event second last applied to this row.
         // updated_at is the app wall clock and can land after a later
         // event.created (whole seconds), which dropped real downgrades.
