@@ -6,16 +6,15 @@
  * Two parts:
  *
  * 1. GhlAffiliateScript (exported as default)
- *    Visitor tracking — loads GHL `am.js` on every page and calls
- *    `affiliateManager.init()` so the `am_id` cookie is set when a
- *    visitor arrives via an affiliate referral link.
+ *    Visitor tracking — loads GHL `am.js` only with marketing consent,
+ *    then calls `affiliateManager.init()` to attribute eligible referrals.
  *    No Clerk dependency — safe to render outside ClerkProvider.
  *
  * 2. GhlAffiliateSignupTracker (named export)
  *    Signup tracking — uses Clerk's `useUser()` to detect signed-in
  *    users and calls the SERVER endpoint /api/affiliate/track-lead
  *    which enforces idempotency via the `ghl_lead_tracked` DB column.
- *    This is truly one-time per Clerk user, not per browser session.
+ *    Requests are gated by marketing consent and deduplicated per Clerk user.
  *    MUST be rendered inside <ClerkProvider>.
  *
  * Campaign: LiTTree Partner Program
@@ -28,9 +27,10 @@
  *   The server endpoint receives the am_id and passes it to GHL.
  */
 import Script from "next/script";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { logger } from "@/lib/client-logger";
+import { COOKIE_CONSENT_UPDATED_EVENT, hasConsent } from "@/lib/cookie-consent";
 
 const GHL_LOCATION_ID = "sT0yL2XFTU0l87Ooce3h";
 const GHL_BACKEND_URL = "https://backend.leadconnectorhq.com";
@@ -60,8 +60,7 @@ declare global {
 }
 
 /**
- * Capture am_id from the URL on first load, before any redirect.
- * Called at module scope so it runs immediately on client hydration.
+ * Capture am_id only after marketing consent, before a signup redirect.
  */
 function captureAmIdFromUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -90,14 +89,46 @@ function captureAmIdFromUrl(): string | null {
   }
 }
 
+/** Do not initialize affiliate tracking or send leads without explicit opt-in. */
+function useMarketingConsent(): boolean {
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    const sync = () => {
+      const allowed = hasConsent("marketing");
+      if (!allowed) {
+        // Best-effort removal of our attribution data on withdrawal.
+        try {
+          localStorage.removeItem(AM_ID_STORAGE_KEY);
+          document.cookie = "am_id=; Max-Age=0; Path=/; SameSite=Lax";
+          document.cookie = "am_id=; Max-Age=0; Path=/; Domain=.litlabs.net; SameSite=Lax";
+        } catch {
+          // Cookie/localStorage can be unavailable in private browsing modes.
+        }
+      }
+      setEnabled(allowed);
+    };
+
+    sync();
+    window.addEventListener(COOKIE_CONSENT_UPDATED_EVENT, sync);
+    return () => window.removeEventListener(COOKIE_CONSENT_UPDATED_EVENT, sync);
+  }, []);
+
+  return enabled;
+}
+
 // ─── Part 1: Visitor Tracking Script ────────────────────────────
 // No Clerk dependency — safe to render anywhere in the body.
 
 export function GhlAffiliateScript() {
-  // Capture am_id immediately on mount, before any navigation
+  const marketingAllowed = useMarketingConsent();
+
   useEffect(() => {
-    captureAmIdFromUrl();
-  }, []);
+    if (marketingAllowed) captureAmIdFromUrl();
+  }, [marketingAllowed]);
+
+  // Next.js must never request the vendor script before marketing opt-in.
+  if (!marketingAllowed) return null;
 
   return (
     <Script
@@ -105,6 +136,7 @@ export function GhlAffiliateScript() {
       src={GHL_AM_SCRIPT_SRC}
       strategy="afterInteractive"
       onLoad={() => {
+        if (!hasConsent("marketing")) return;
         try {
           window.affiliateManager?.init(
             GHL_LOCATION_ID,
@@ -127,10 +159,11 @@ export function GhlAffiliateScript() {
 
 export function GhlAffiliateSignupTracker() {
   const { isLoaded, isSignedIn, user } = useUser();
+  const marketingAllowed = useMarketingConsent();
   const callInFlightRef = useRef(false);
 
   useEffect(() => {
-    if (!isLoaded || !isSignedIn || !user) return;
+    if (!marketingAllowed || !isLoaded || !isSignedIn || !user) return;
     if (callInFlightRef.current) return;
 
     const primaryEmail = user.primaryEmailAddress?.emailAddress;
@@ -176,7 +209,7 @@ export function GhlAffiliateSignupTracker() {
       .finally(() => {
         callInFlightRef.current = false;
       });
-  }, [isLoaded, isSignedIn, user]);
+  }, [marketingAllowed, isLoaded, isSignedIn, user]);
 
   return null;
 }
