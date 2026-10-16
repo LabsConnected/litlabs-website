@@ -153,7 +153,7 @@
   {
     "type": "preview_result",
     "success": true,
-    "previewUrl": "https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=6fbfec4fd43b2b77388eda37213a541d5694a97dca6a82bc4eacd88b8ab2991f"
+    "previewUrl": "https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=REDACTED"
   },
   {
     "type": "text",
@@ -362,7 +362,7 @@
       ]
     },
     "launchStatus": "preview_ready",
-    "previewUrl": "https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=6fbfec4fd43b2b77388eda37213a541d5694a97dca6a82bc4eacd88b8ab2991f"
+    "previewUrl": "https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=REDACTED"
   },
   {
     "type": "DONE"
