@@ -1,9 +1,76 @@
 #!/usr/bin/env bash
-# Disposable Postgres + PostgREST stack for the billing concurrency suites.
-# Refuses any database name or URL that contains "prod".
-# PostgREST listens on 127.0.0.1:55431. scripts/rest-proxy.mjs listens on
-# 127.0.0.1:55321 and strips the /rest/v1 prefix.
+# Disposable Postgres + PostgREST for billing concurrency proofs.
+#
+# Docker (Windows or Linux; cygpath is optional):
+#   billing-disposable-db.sh up   <path-to-supabase/migrations> [tag]
+#   billing-disposable-db.sh down [tag]
+#
+# Safety: never touches the Supabase CLI stack (supabase_*_Prod, port 54321/54322).
+# Postgres binds 127.0.0.1:55432, PostgREST 127.0.0.1:55431, data lives on tmpfs.
+# PostgREST has no /rest/v1 prefix, so a tiny loopback proxy on :55321 adds it.
+#
+# Linux CI (GitHub service Postgres on 127.0.0.1:5432, no Docker images):
+#   billing-disposable-db.sh
+# Creates litlabs_billing and litlabs_billing_race, applies the billing
+# migrations, and starts /tmp/postgrest plus scripts/rest-proxy.mjs.
 set -euo pipefail
+export MSYS_NO_PATHCONV=1
+
+if [[ "${1:-}" == "up" || "${1:-}" == "down" ]]; then
+  CMD="$1"
+  if [[ "$CMD" == "up" ]]; then MIG="${2:?migrations dir}"; TAG="${3:-r1}"; else TAG="${2:-r1}"; fi
+  NET="litt-billing-net-$TAG"; PG="litt-billing-pg-$TAG"; REST="litt-billing-rest-$TAG"
+  SECRET="super-secret-jwt-token-with-at-least-32-characters-long"
+  IMAGE_PG="public.ecr.aws/supabase/postgres:17.6.1.156"
+  IMAGE_REST="public.ecr.aws/supabase/postgrest:v14.15"
+
+  if [[ "$CMD" == "down" ]]; then
+    docker stop "$REST" "$PG" 2>/dev/null || true
+    echo "stopped. remove with: docker rm $REST $PG && docker network rm $NET"
+    exit 0
+  fi
+
+  docker network create "$NET" >/dev/null
+  docker run -d --name "$PG" --network "$NET" -p 127.0.0.1:55432:5432 \
+    --tmpfs /var/lib/postgresql/data -e POSTGRES_PASSWORD=isolated-test-only "$IMAGE_PG" >/dev/null
+  for _ in $(seq 1 60); do
+    docker exec "$PG" psql -U postgres -d postgres -Atc "select 1" >/dev/null 2>&1 && break
+    sleep 2
+  done
+
+  # Stand-ins for objects the full Supabase stack (storage-api, gotrue) normally provides.
+  docker exec "$PG" psql -U supabase_admin -d postgres -q -c "
+    create schema if not exists storage;
+    create table if not exists storage.buckets(id text primary key, name text, public boolean default false, file_size_limit bigint, allowed_mime_types text[]);
+    create table if not exists storage.objects(id uuid default gen_random_uuid() primary key, bucket_id text, name text, owner uuid, metadata jsonb);
+    alter table storage.objects enable row level security;
+    grant all on all tables in schema storage to postgres;
+    create or replace function auth.jwt() returns jsonb language sql stable as \$\$ select coalesce(nullif(current_setting('request.jwt.claims', true),''),'{}')::jsonb \$\$;
+    grant execute on all functions in schema auth to postgres, service_role, authenticated, anon;
+    alter role authenticator with password 'isolated-test-only';" >/dev/null 2>&1
+
+  if command -v cygpath >/dev/null 2>&1; then
+    MIG_HOST="$(cygpath -w "$MIG")"
+  else
+    MIG_HOST="$MIG"
+  fi
+  docker cp "$MIG_HOST" "$PG:/tmp/mig"
+  docker exec "$PG" bash -c 'cd /tmp/mig; n=0; for f in $(ls *.sql | sort); do
+    out=$(psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q -f "$f" 2>&1 >/dev/null) || { echo "MIGRATION FAILED: $f"; echo "$out" | grep -v NOTICE | head -4; exit 1; }
+    n=$((n+1)); done; echo "migrations applied: $n of $(ls *.sql | wc -l)"'
+
+  docker run -d --name "$REST" --network "$NET" -p 127.0.0.1:55431:3000 \
+    -e PGRST_DB_URI="postgres://authenticator:isolated-test-only@$PG:5432/postgres" \
+    -e PGRST_DB_SCHEMAS=public -e PGRST_DB_ANON_ROLE=anon -e PGRST_JWT_SECRET="$SECRET" "$IMAGE_REST" >/dev/null
+  sleep 6
+  cat <<EOT
+READY (start the :55321 proxy separately: node rest-proxy.mjs)
+  SUPABASE_DB_URL=postgresql://postgres:isolated-test-only@127.0.0.1:55432/postgres
+  SUPABASE_LOCAL_API_URL=http://127.0.0.1:55321
+  SUPABASE_JWT_SECRET=$SECRET
+EOT
+  exit 0
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADMIN_URL="${BILLING_REPLAY_ADMIN_URL:-postgresql://litlabs_test:litlabs_test@127.0.0.1:5432/postgres}"
