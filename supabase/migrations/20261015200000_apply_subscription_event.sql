@@ -16,6 +16,14 @@
 -- 'recheck' unless p_authoritative is true, so the webhook can re-read
 -- Stripe before it writes.
 --
+-- invoice.paid uses ordering 'apply' with p_update_plan false. That call
+-- grants and may refresh status, but it does not move
+-- last_stripe_event_created. A customer.subscription.updated with an
+-- earlier Stripe second can still change the plan after the invoice
+-- lands. Deleted and payment_failed events use skip_if_older and still
+-- move the clock, so a newer cancellation is not revived by an older
+-- invoice. A conflict insert that fails rolls the function back.
+--
 -- The partial unique index is the backstop: one protected subscription
 -- row per user. user_id is already unique; the index states the rule in
 -- the predicate the function uses. Do not apply this file to a hosted
@@ -139,7 +147,10 @@ BEGIN
       p_period_start,
       p_period_end,
       p_cancel_at_period_end,
-      p_event_created,
+      CASE
+        WHEN p_ordering = 'apply' AND NOT COALESCE(p_update_plan, false) THEN NULL
+        ELSE p_event_created
+      END,
       now()
     )
     ON CONFLICT (user_id) DO NOTHING;
@@ -219,6 +230,7 @@ BEGIN
     END IF;
 
     v_last := CASE
+      WHEN p_ordering = 'apply' AND NOT COALESCE(p_update_plan, false) THEN v_row.last_stripe_event_created
       WHEN v_row.last_stripe_event_created IS NULL OR p_event_created >= v_row.last_stripe_event_created
         THEN p_event_created
       ELSE v_row.last_stripe_event_created

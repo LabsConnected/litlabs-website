@@ -399,6 +399,77 @@ describe.skipIf(!dbUp)("atomic subscription apply", () => {
     }
   });
 
+  it("keeps a plan upgrade that arrives after a newer invoice.paid", async () => {
+    const id = await userId();
+    const client = connect();
+    await client.connect();
+    const period = "2023-12-15T22:13:20.000Z";
+    try {
+      const createdCall = applyCall({
+        p_user_id: id,
+        p_incoming_subscription_id: "sub_invoice_first",
+        p_stripe_event_id: "evt_invoice_first_created",
+        p_event_type: "customer.subscription.created",
+        p_event_created: 1_700_000_100,
+        p_plan: "creator_beta",
+        p_grant_mode: "none",
+        p_period_end: period,
+      });
+      await client.query(createdCall.text, createdCall.values);
+      const invoiceCall = applyCall({
+        p_user_id: id,
+        p_incoming_subscription_id: "sub_invoice_first",
+        p_stripe_event_id: "evt_invoice_first_paid",
+        p_event_type: "invoice.paid",
+        p_event_created: 1_700_000_300,
+        p_ordering: "apply",
+        p_authoritative: true,
+        p_update_plan: false,
+        p_status_policy: "activate_unless_terminal",
+        p_live_status: "active",
+        p_plan: "creator_beta",
+        p_grant_mode: "invoice_full",
+        p_grant_amount: 7500,
+        p_grant_idempotency_key: "invoice_grant_in_invoice_first",
+        p_grant_description: "Creator Beta monthly grant — 7500 LiTTBits",
+        p_grant_reference_id: "period_plan_sub_invoice_first_1702678400_creator_beta",
+        p_skip_grant_idempotency_key: "plan_upgrade_sub_invoice_first_1702678400_pro_builder_beta",
+        p_period_start: null,
+        p_period_end: null,
+      });
+      await client.query(invoiceCall.text, invoiceCall.values);
+      const upgradeCall = applyCall({
+        p_user_id: id,
+        p_incoming_subscription_id: "sub_invoice_first",
+        p_stripe_event_id: "evt_invoice_first_upgrade",
+        p_event_type: "customer.subscription.updated",
+        p_event_created: 1_700_000_200,
+        p_plan: "pro_builder_beta",
+        p_grant_mode: "upgrade_delta",
+        p_grant_idempotency_key: "plan_upgrade_sub_invoice_first_1702678400_pro_builder_beta",
+        p_grant_reference_id: "period_plan_sub_invoice_first_1702678400_pro_builder_beta",
+        p_period_end: period,
+      });
+      const upgraded = await client.query(upgradeCall.text, upgradeCall.values);
+      expect(upgraded.rows[0].result.outcome).toBe("applied");
+      const stored = await client.query(
+        `SELECT plan, stripe_subscription_id, last_stripe_event_created
+         FROM public.subscriptions WHERE user_id = $1`,
+        [id],
+      );
+      expect(stored.rows[0].stripe_subscription_id).toBe("sub_invoice_first");
+      expect(stored.rows[0].plan).toBe("pro_builder_beta");
+      expect(Number(stored.rows[0].last_stripe_event_created)).toBe(1_700_000_200);
+      const ledger = await client.query(
+        `SELECT COALESCE(SUM(amount), 0) AS sum FROM public.credit_ledger WHERE user_id = $1`,
+        [id],
+      );
+      expect(Number(ledger.rows[0].sum)).toBe(18000);
+    } finally {
+      await client.end();
+    }
+  });
+
   it("does not regress the plan when an upgrade and an older downgrade run together", async () => {
     const id = await userId();
     const seed = connect();
@@ -467,6 +538,67 @@ describe.skipIf(!dbUp)("atomic subscription apply", () => {
       expect(Number(ledger.rows[0].amount)).toBe(10500);
     } finally {
       await Promise.all([upgrade.end(), downgrade.end()]);
+    }
+  });
+
+  it("does not let an older invoice.paid revive a newer cancellation", async () => {
+    const id = await userId();
+    const client = connect();
+    await client.connect();
+    try {
+      const createdCall = applyCall({
+        p_user_id: id,
+        p_incoming_subscription_id: "sub_cancel_guard",
+        p_stripe_event_id: "evt_cancel_guard_created",
+        p_event_type: "customer.subscription.created",
+        p_event_created: 1_700_000_100,
+        p_plan: "creator_beta",
+        p_grant_mode: "none",
+      });
+      await client.query(createdCall.text, createdCall.values);
+      const deletedCall = applyCall({
+        p_user_id: id,
+        p_incoming_subscription_id: "sub_cancel_guard",
+        p_stripe_event_id: "evt_cancel_guard_deleted",
+        p_event_type: "customer.subscription.deleted",
+        p_event_created: 1_700_000_400,
+        p_plan: null,
+        p_status: "canceled",
+        p_update_plan: false,
+        p_status_policy: "write",
+        p_grant_mode: "none",
+      });
+      await client.query(deletedCall.text, deletedCall.values);
+      const invoiceCall = applyCall({
+        p_user_id: id,
+        p_incoming_subscription_id: "sub_cancel_guard",
+        p_stripe_event_id: "evt_cancel_guard_invoice",
+        p_event_type: "invoice.paid",
+        p_event_created: 1_700_000_300,
+        p_ordering: "apply",
+        p_update_plan: false,
+        p_status_policy: "activate_unless_terminal",
+        p_live_status: "active",
+        p_plan: "creator_beta",
+        p_grant_mode: "invoice_full",
+        p_grant_amount: 7500,
+        p_grant_idempotency_key: "invoice_grant_in_cancel_guard",
+        p_grant_description: "Creator Beta monthly grant — 7500 LiTTBits",
+        p_grant_reference_id: "period_plan_sub_cancel_guard_na_creator_beta",
+        p_period_start: null,
+        p_period_end: null,
+      });
+      const invoiced = await client.query(invoiceCall.text, invoiceCall.values);
+      expect(invoiced.rows[0].result.outcome).toBe("applied");
+      const stored = await client.query(
+        `SELECT plan, status, last_stripe_event_created FROM public.subscriptions WHERE user_id = $1`,
+        [id],
+      );
+      expect(stored.rows[0].status).toBe("canceled");
+      expect(stored.rows[0].plan).toBe("creator_beta");
+      expect(Number(stored.rows[0].last_stripe_event_created)).toBe(1_700_000_400);
+    } finally {
+      await client.end();
     }
   });
 
