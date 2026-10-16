@@ -32,7 +32,6 @@ import "server-only";
 import {
   MAX_DESIGN_PASSES,
   QUALITY_STAGES,
-  REQUIRED_STAGES_BY_SCOPE,
   STAGE_REQUIREMENTS,
   classifyTaskScope,
   createQualityLoop,
@@ -40,6 +39,7 @@ import {
   declareSuccess,
   passStage,
   recordEvidence,
+  requiredStagesFor,
   skipStage,
   skipStageOutOfScope,
   summarizeLoop,
@@ -77,6 +77,7 @@ export interface QualityLoopSession {
   deployedUrl?: string;
   /** True once the post-answer visual inspection has run. */
   inspectionRan: boolean;
+  inspectionResult?: InspectionResult;
   /** Why INSPECT/CRITIQUE were skipped, when they were. */
   inspectionNote?: string;
   /** True after a below-threshold critique — next mutations count as fixes. */
@@ -105,6 +106,7 @@ export interface QualityLoopSnapshot {
   previewUrl?: string;
   deployedUrl?: string;
   inspectionRan: boolean;
+  inspectionResult?: InspectionResult;
   inspectionNote?: string;
   critiqueFailed: boolean;
   observations: QualityLoopObservation[];
@@ -129,14 +131,28 @@ export function startQualityLoopSession(opts: {
   userId: string;
   userRequest: string;
   snapshot?: QualityLoopSnapshot;
+  /** Static (gitless) workspace — narrows the required stage set. */
+  isStaticWorkspace?: boolean;
 }): QualityLoopSession {
   if (
     opts.snapshot &&
     opts.snapshot.state.projectId === opts.projectId &&
     opts.snapshot.state.userId === opts.userId
   ) {
-    // A resume never loosens the gate — the snapshot carries its scope.
-    return restoreQualityLoopSession(opts.snapshot);
+    // A resume never loosens the gate — the snapshot carries its scope
+    // and its workspace-capability flag.
+    const restored = restoreQualityLoopSession(opts.snapshot);
+    // Snapshots written before the static flag existed (in-flight paused
+    // runs) resume without it; the server re-derives the workspace kind on
+    // every resume, so a missing flag can be healed, never the reverse.
+    if (restored.state.isStaticWorkspace !== true && opts.isStaticWorkspace === true) {
+      restored.state.isStaticWorkspace = true;
+      restored.inspectionNote ??=
+        "Static (gitless) workspace: the browser-inspection/judge path does " +
+        "not apply in the static lane. Verification is the served static " +
+        "preview plus verified read-back evidence.";
+    }
+    return restored;
   }
 
   const session: QualityLoopSession = {
@@ -153,6 +169,17 @@ export function startQualityLoopSession(opts: {
     observations: [],
     mutationSeen: false,
   };
+  // Workspace capability is recorded on the persisted state so the
+  // required-stage set (requiredStagesFor) survives an approval resume.
+  if (opts.isStaticWorkspace === true) {
+    session.state.isStaticWorkspace = true;
+    // Recorded up front so the finalize sweep and any inspection skip
+    // carry an explicit reason — never a silent omission.
+    session.inspectionNote =
+      "Static (gitless) workspace: the browser-inspection/judge path does " +
+      "not apply in the static lane. Verification is the served static " +
+      "preview plus verified read-back evidence.";
+  }
 
   // UNDERSTAND for targeted work is established by the request itself:
   // the system records it instead of demanding a written brief. A full
@@ -162,6 +189,20 @@ export function startQualityLoopSession(opts: {
       summary: `Request captured (${session.taskScope} task): ${opts.userRequest.trim().slice(0, 300)}`,
       by: "system",
       detail: { taskScope: session.taskScope },
+    });
+    // PLAN for targeted work is likewise the system's own: every run is
+    // scope-classified and capability-planned before the agent executes,
+    // and that plan governs the run. Demanding agent marker prose instead
+    // deadlocked the gate — the marker format exists only in the
+    // harvester; no prompt ever taught it, so PLAN could never file and
+    // every later stage's evidence stayed stuck behind it (Gate B,
+    // 2026-10-13: a completed static build reported plan/build/test
+    // pending and the agent rewrote its file 26 times until the output
+    // budget killed the run). A full build still needs the agent's plan.
+    fileObservation(session, "plan", {
+      summary: `System run plan (${session.taskScope} task): capability-planned execution for: ${opts.userRequest.trim().slice(0, 300)}`,
+      by: "system",
+      detail: { taskScope: session.taskScope, systemPlanned: true },
     });
   }
   return session;
@@ -402,7 +443,8 @@ function blockedReason(state: QualityLoopState, stage: QualityStage): string | n
 
 function reconcile(session: QualityLoopSession): void {
   const state = session.state;
-  const required = new Set<QualityStage>(REQUIRED_STAGES_BY_SCOPE[session.taskScope]);
+  const requiredStages = requiredStagesFor(session.taskScope, state);
+  const required = new Set<QualityStage>(requiredStages);
   let progressed = true;
   while (progressed) {
     progressed = false;
@@ -439,7 +481,12 @@ function reconcile(session: QualityLoopSession): void {
           // Strict engine refused; leave the stage open.
         }
       } else if (
-        s.evidence.length === 0 &&
+        // A stage outside the applicable set must never pin the machine.
+        // In the static lane that includes stages that hold evidence which
+        // cannot pass there (e.g. read-back INSPECT evidence predating the
+        // static-lane gate).
+        (s.evidence.length === 0 ||
+          (state.isStaticWorkspace === true && scopeSkippable)) &&
         laterHasEvidence &&
         (IMPLICATION_SKIPPABLE.has(c) || scopeSkippable) &&
         (s.status === "pending" || s.status === "active")
@@ -457,7 +504,12 @@ function reconcile(session: QualityLoopSession): void {
               state,
               c,
               session.taskScope,
-              `Stage does not apply to the ${session.taskScope} task scope (system-determined).`,
+              (c === "inspect" || c === "critique") && state.isStaticWorkspace
+                ? `Stage does not apply in a static (gitless) workspace: no browser ` +
+                  `inspection path exists there; verification is the served static ` +
+                  `preview plus read-back evidence.`
+                : `Stage does not apply to the ${session.taskScope} task scope (system-determined).`,
+              requiredStages,
             );
           }
           progressed = true;
@@ -560,6 +612,12 @@ export function noteMutationReadBack(
 ): void {
   try {
     if (!session.mutationSeen) return;
+    // In the static lane INSPECT is not an applicable stage — filing
+    // evidence here would pin the stage machine on a stage that can never
+    // pass (a successful files.write always produces this observation).
+    // The read-back's role there is TEST evidence, which the caller files
+    // separately via noteStaticArtifactCheck.
+    if (session.state.isStaticWorkspace === true) return;
     const ok = check.readable && check.contentMatches !== false;
     fileObservation(session, "inspect", {
       summary: ok
@@ -571,6 +629,35 @@ export function noteMutationReadBack(
       detail: ok
         ? { readBackVerified: true, contentMatches: check.contentMatches }
         : { readBackVerified: false, passed: false, reason: `Read-back of ${check.path} did not confirm the edit` },
+    });
+  } catch {
+    // Never break the run.
+  }
+}
+
+/**
+ * Record the static-lane artifact check as TEST evidence. The command
+ * checks (test.run / build.run / typecheck.run / lint.run) execute on the
+ * host and are Gate-1 blocked in static workspaces, so the check that can
+ * actually run there is the read-back verification the loop already
+ * performs: the written file is re-read from the workspace and its bytes
+ * compared against what the run wrote. Only a verified match is recorded —
+ * a mismatch files nothing here (the failed read-back is already recorded
+ * honestly by noteMutationReadBack), so TEST can never be satisfied by an
+ * unverified write. Callers gate this on the workspace being static.
+ */
+export function noteStaticArtifactCheck(
+  session: QualityLoopSession,
+  check: { path: string; contentMatches: boolean | null },
+): void {
+  try {
+    if (!session.mutationSeen) return;
+    if (check.contentMatches !== true) return;
+    fileObservation(session, "test", {
+      summary: `Static artifact check passed: ${check.path} was read back from the workspace and its content matches the written file.`,
+      artifacts: [check.path],
+      by: "system",
+      detail: { passed: true, executedChecks: true, via: "static-readback" },
     });
   } catch {
     // Never break the run.
@@ -708,9 +795,8 @@ export async function runQualityInspection(
   },
 ): Promise<InspectionResult> {
   if (session.inspectionRan) {
-    return { ran: true, needsRedesign: false, fixes: [], reason: "Inspection already ran for this run." };
+    return session.inspectionResult ?? { ran: false, needsRedesign: false, fixes: [], reason: "No persisted visual inspection result is available." };
   }
-  session.inspectionRan = true;
 
   const url = session.previewUrl;
   if (!url) {
@@ -718,6 +804,12 @@ export async function runQualityInspection(
       "No preview URL was available, so the visual inspection could not run. No score was fabricated.";
     return { ran: false, needsRedesign: false, fixes: [], reason: session.inspectionNote };
   }
+
+  session.inspectionRan = true;
+  const remember = (result: InspectionResult): InspectionResult => {
+    session.inspectionResult = result;
+    return result;
+  };
 
   let outcome: JudgeOutcome;
   try {
@@ -756,17 +848,17 @@ export async function runQualityInspection(
       },
     });
     session.critiqueFailed = true;
-    return {
+    return remember({
       ran: true,
       needsRedesign: true,
       fixes: ["Inspect the preview CSS/Tailwind setup and repair the styling root cause before reloading the preview."],
       reason,
-    };
+    });
   }
 
   if (outcome.status === "unavailable" || !outcome.scorecard || !outcome.verdict) {
     session.inspectionNote = outcome.reason ?? "Verification unavailable: visual inspection could not run.";
-    return { ran: false, needsRedesign: false, fixes: [], reason: session.inspectionNote };
+    return remember({ ran: false, needsRedesign: false, fixes: [], reason: session.inspectionNote });
   }
 
   const card = outcome.scorecard;
@@ -802,13 +894,13 @@ export async function runQualityInspection(
     session.critiqueFailed = true;
     if (session.state.designPasses < MAX_DESIGN_PASSES) {
       session.state.designPasses += 1;
-      return {
+      return remember({
         ran: true,
         needsRedesign: true,
         fixes: card.prioritizedFixes,
         reason: verdict.reason,
         score: card.overall,
-      };
+      });
     }
     fileObservation(session, "fix", {
       summary:
@@ -817,13 +909,13 @@ export async function runQualityInspection(
       artifacts: [url],
       by: "system",
     });
-    return {
+    return remember({
       ran: true,
       needsRedesign: false,
       fixes: card.prioritizedFixes,
       reason: `${verdict.reason} (automatic design passes exhausted)`,
       score: card.overall,
-    };
+    });
   }
 
   session.critiqueFailed = false;
@@ -832,7 +924,7 @@ export async function runQualityInspection(
     artifacts: [url],
     by: "judge",
   });
-  return { ran: true, needsRedesign: false, fixes: [], reason: verdict.reason, score: card.overall };
+  return remember({ ran: true, needsRedesign: false, fixes: [], reason: verdict.reason, score: card.overall });
 }
 
 /** The follow-up prompt injected when the judge demands another design pass. */
@@ -872,7 +964,8 @@ export function finalizeQualityLoop(
   opts: { deployRequested: boolean },
 ): QualityFinale {
   const state = session.state;
-  const required = new Set<QualityStage>(REQUIRED_STAGES_BY_SCOPE[session.taskScope]);
+  const requiredStages = requiredStagesFor(session.taskScope, state);
+  const required = new Set<QualityStage>(requiredStages);
 
   // Final sweep: file what became due, then pass or skip whatever is still
   // open, in order. Observations must be filed as the current stage moves
@@ -896,12 +989,20 @@ export function finalizeQualityLoop(
             ? session.inspectionNote
             : "Stage produced no evidence during the run.";
         skipStage(state, c, reason);
-      } else if (s.evidence.length === 0 && scopeSkippable) {
+      } else if (
+        (s.evidence.length === 0 || state.isStaticWorkspace === true) &&
+        scopeSkippable
+      ) {
         skipStageOutOfScope(
           state,
           c,
           session.taskScope,
-          `Stage does not apply to the ${session.taskScope} task scope (system-determined).`,
+          (c === "inspect" || c === "critique") && state.isStaticWorkspace
+            ? `Stage does not apply in a static (gitless) workspace: no browser ` +
+              `inspection path exists there; verification is the served static ` +
+              `preview plus read-back evidence.`
+            : `Stage does not apply to the ${session.taskScope} task scope (system-determined).`,
+          requiredStages,
         );
       } else {
         // Either no evidence on a required stage (gate holds), or the

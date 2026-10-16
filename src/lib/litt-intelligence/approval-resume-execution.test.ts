@@ -22,6 +22,13 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
   ...(await importOriginal() as Record<string, unknown>),
   callLLMWithTools: vi.fn(),
 }));
+vi.mock("@/lib/action-runtime/tool-runtime", async (original) => ({
+  ...(await original() as Record<string, unknown>),
+  recordActionToolStarted: vi.fn(async () => ({})),
+  recordActionToolCompleted: vi.fn(async () => ({})),
+  recordActionToolFailed: vi.fn(async () => ({})),
+  markActionToolRunPersistenceDegraded: vi.fn(async () => undefined),
+}));
 
 import { resumeAgentLoopV2, type ResumeInput } from "./agent-loop-v2";
 import { buildAssistantToolCallMessage, type LLMMessage } from "./llm-tool-calling";
@@ -83,6 +90,42 @@ describe("resumeAgentLoopV2 — approved mutation executes", () => {
       finishReason: "stop",
       model: "test-model",
     });
+  });
+
+  it("does not enter shell-based build checks after a static approval", async () => {
+    const { transport, mkdirCalls } = makeTransport();
+    transport.discoverPackageInfo = vi.fn(async () => { throw new Error("Gate 1: exec forbidden"); });
+    const result = await resumeAgentLoopV2(makePausedInput({
+      config: { systemPrompt: "You are LiTT.", executionMode: "act", enableBuildFix: true, isStaticWorkspace: true },
+    }), transport);
+    expect(mkdirCalls).toEqual([MKDIR_PATH]);
+    expect(transport.discoverPackageInfo).not.toHaveBeenCalled();
+    expect(result.buildFixResult).toBeUndefined();
+    expect(result.cancelled).toBe(false);
+  });
+  it("does not execute a legacy preview.start approval in a static workspace", async () => {
+    const { transport } = makeTransport();
+    transport.startPreview = vi.fn(async () => { throw new Error("HOST_EXECUTION_DISABLED"); });
+    const result = await resumeAgentLoopV2(makePausedInput({ toolId: "preview.start", inputs: {},
+      config: { systemPrompt: "You are LiTT", userId: "u-test", executionMode: "act", enableBuildFix: false, isStaticWorkspace: true },
+    }), transport);
+    expect(transport.startPreview).not.toHaveBeenCalled();
+    expect(result.toolCalls[0].success).toBe(false);
+  });
+  it("credits an approved code.writeFile delegate as a real file write", async () => {
+    const { transport } = makeTransport();
+    transport.writeFile = vi.fn(async () => ({ saved: true }));
+    transport.readFile = vi.fn(async () => ({ content: "<h1>Built</h1>", size: 14 }));
+    const result = await resumeAgentLoopV2(makePausedInput({ toolId: "code.writeFile", inputs: { path: "index.html", content: "<h1>Built</h1>" },
+      config: { systemPrompt: "Build the site", userId: "u-test", executionMode: "act", isStaticWorkspace: true, enableBuildFix: false, buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+        actionContext: { actionRunId: "run-test", userId: "u-test", projectId: "p-test" },
+        qualityLoop: { enabled: true, runId: "quality-test", projectId: "p-test", userId: "u-test", userRequest: "Build a Hello Gate 3 webpage with HTML, CSS, and JavaScript" },
+      },
+    }), transport);
+    expect(result.finalMessages?.filter((message) => message.role === "tool").map((message) => message.content).join("\n")).not.toContain("Error:");
+    expect(transport.writeFile).toHaveBeenCalledWith("index.html", "<h1>Built</h1>");
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.qualityLoopState?.state.stages.test.evidence.some((evidence) => evidence.detail?.via === "static-readback")).toBe(true);
   });
 
   it("executes the approved files.mkdir exactly once with the frozen inputs", async () => {

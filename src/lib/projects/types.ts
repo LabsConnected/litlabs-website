@@ -53,6 +53,8 @@ export interface CanonicalProject {
   workspaceRoot: string | null;
   workspaceError: string | null;
   workspacePreparedAt: string | null;
+  /** Opaque fencing token held by the current provisioning attempt. */
+  workspaceProvisioningToken: string | null;
 
   // Runtime fields
   runtimeStatus: RuntimeStatus;
@@ -100,6 +102,7 @@ export interface StudioProjectRow {
   workspace_root: string | null;
   workspace_error: string | null;
   workspace_prepared_at: string | null;
+  workspace_provisioning_token?: string | null;
   runtime_status: RuntimeStatus;
   preview_url: string | null;
   runtime_error: string | null;
@@ -164,6 +167,7 @@ export function rowToCanonical(row: StudioProjectRow): CanonicalProject {
     workspaceRoot: row.workspace_root,
     workspaceError: row.workspace_error,
     workspacePreparedAt: row.workspace_prepared_at,
+    workspaceProvisioningToken: row.workspace_provisioning_token ?? null,
     runtimeStatus: row.runtime_status,
     previewUrl: row.preview_url,
     runtimeError: row.runtime_error,
@@ -204,6 +208,7 @@ export function legacyRowToCanonical(row: LegacyProjectRow): CanonicalProject {
     workspaceRoot: null,
     workspaceError: null,
     workspacePreparedAt: null,
+    workspaceProvisioningToken: null,
     runtimeStatus: "stopped",
     previewUrl: null,
     runtimeError: null,

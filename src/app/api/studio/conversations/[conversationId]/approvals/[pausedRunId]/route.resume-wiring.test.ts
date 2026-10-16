@@ -60,6 +60,8 @@ vi.mock("@/lib/litt-intelligence/workspace-transport", () => ({
       userId: "user_123",
       workspaceRoot: "/tmp/test",
       projectId: "proj-123",
+      writeFile: vi.fn(async () => ({ saved: true })),
+      readFile: vi.fn(async () => ({ content: "<html><body>Built site</body></html>", size: 40 })),
       mkdir: vi.fn(async (path: string) => {
         mkdirCalls.push(path);
         return { created: true };
@@ -80,6 +82,7 @@ vi.mock("@/lib/litt-intelligence/llm-tool-calling", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/projects/project-repository", () => ({
+  getProject: vi.fn(() => Promise.resolve(null)),
   verifyProjectWorkspace: vi.fn(() =>
     Promise.resolve({ workspaceId: "ws-123", workspaceRoot: "/tmp/test" }),
   ),
@@ -94,6 +97,10 @@ vi.mock("@/lib/studio/conversation-service", () => ({
 vi.mock("@/lib/studio/logger", () => ({
   studioLog: vi.fn(),
 }));
+vi.mock("@/lib/studio/task-service", () => ({
+  attachActionRunToConversationTask: vi.fn(() => Promise.resolve()),
+  settleConversationTask: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock("@/lib/litt-intelligence/quality-loop-flow", async (importOriginal) => ({
   ...(await importOriginal() as Record<string, unknown>),
@@ -102,6 +109,8 @@ vi.mock("@/lib/litt-intelligence/quality-loop-flow", async (importOriginal) => (
 
 import { auth } from "@/lib/auth";
 import { POST } from "./route";
+import { getProject } from "@/lib/projects/project-repository";
+import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import {
   getPausedRun,
   resolvePausedRun,
@@ -175,6 +184,7 @@ describe("POST approval → real resume executes the approved mutation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mkdirCalls.length = 0;
+    vi.mocked(getProject).mockResolvedValue(null);
     vi.mocked(auth).mockResolvedValue({ userId: "user_123" } as never);
     vi.mocked(getPausedRun).mockResolvedValue(pendingRun() as never);
     vi.mocked(resolvePausedRun).mockImplementation(async () => pendingRun() as never);
@@ -185,6 +195,29 @@ describe("POST approval → real resume executes the approved mutation", () => {
       finishReason: "stop",
       model: "test-model",
     } as never);
+  });
+
+  it("completes a static file approval without shell checks or a preview process", async () => {
+    vi.mocked(getProject).mockResolvedValue({ framework: "static" } as never);
+    const run = {
+      ...pendingRun(), toolId: "files.write", toolCallId: "tc-write-1",
+      inputs: { projectId: "proj-123", path: "index.html", content: "<html><body>Built site</body></html>" },
+      pausedMessages: [
+        { role: "user" as const, content: "Build a roofing site" },
+        buildAssistantToolCallMessage([{ toolId: "files.write", toolCallId: "tc-write-1", inputs: { projectId: "proj-123", path: "index.html", content: "<html><body>Built site</body></html>" } }], "Writing the site.", undefined),
+      ],
+    };
+    vi.mocked(getPausedRun).mockResolvedValue(run as never);
+    vi.mocked(resolvePausedRun).mockResolvedValue(run as never);
+    expect((await POST(makeRequest("approved"), routeParams)).status).toBe(202);
+    await waitFor(() => vi.mocked(transitionActionRunEventActivity).mock.calls.some((c) => c[0].status === "completed"));
+    const transport = await vi.mocked(createWorkspaceTransport).mock.results[0].value;
+    expect(transport.writeFile).toHaveBeenCalledTimes(1);
+    expect(transport.writeFile).toHaveBeenCalledWith("index.html", run.inputs.content);
+    expect(transport.discoverPackageInfo).not.toHaveBeenCalled();
+    expect(transport.startPreview).not.toHaveBeenCalled();
+    expect(transport.getPreviewStatus).not.toHaveBeenCalled();
+    expect(vi.mocked(transitionActionRunEventActivity).mock.calls.some((c) => c[0].status === "failed")).toBe(false);
   });
 
   it("returns 202 and the detached resume executes files.mkdir, then settles the canonical run", async () => {

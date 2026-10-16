@@ -36,6 +36,8 @@ export default defineConfig({
       // Requires a built terminal server and the platform-specific node-pty binary.
       // Run this separately as an integration smoke test in a prepared environment.
       "tests/terminal-server-smoke.test.ts",
+      // Real Chromium fixture, run separately with test:preview-browser.
+      "tests/preview-static-browser.test.ts",
       // Integration tests that require live Supabase + OpenRouter credentials.
       // Run via `pnpm test:integration` (uses vitest.integration.config.ts).
       "tests/growth-engine-smoke.test.ts",

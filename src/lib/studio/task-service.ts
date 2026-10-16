@@ -181,12 +181,13 @@ export async function attachActionRunToConversationTask(
   conversationId: string,
   actionRunId: string,
 ): Promise<void> {
-  await admin()
+  const { error } = await admin()
     .from("studio_tasks")
-    .update({ active_action_run_id: actionRunId, latest_action_run_id: actionRunId, status: "working", last_opened_at: new Date().toISOString() })
+    .update({ active_action_run_id: actionRunId, latest_action_run_id: actionRunId, status: "working", verification_state: { verified: false }, last_opened_at: new Date().toISOString() })
     .eq("user_id", userId)
     .eq("conversation_id", conversationId)
     .is("archived_at", null);
+  if (error) throw new Error(`Task run association failed: ${error.message}`);
 }
 
 export async function attachBrowserSessionToConversationTask(
@@ -207,14 +208,19 @@ export async function settleConversationTask(
   conversationId: string,
   actionStatus: "completed" | "failed" | "cancelled" | "waiting_approval",
   verified: boolean,
+  actionRunId?: string,
 ): Promise<void> {
   const status = actionStatus === "completed" ? (verified ? "complete" : "needs_verification") : actionStatus === "waiting_approval" ? "waiting_approval" : actionStatus === "cancelled" ? "failed" : "failed";
-  await admin()
+  const update = admin()
     .from("studio_tasks")
-    .update({ active_action_run_id: null, status })
+    .update({ active_action_run_id: null, status, verification_state: { verified: actionStatus === "completed" && verified } })
     .eq("user_id", userId)
     .eq("conversation_id", conversationId)
     .is("archived_at", null);
+  // A late executor must not settle the task for a newer run.
+  if (actionRunId) update.eq("latest_action_run_id", actionRunId);
+  const { error } = await update;
+  if (error) throw new Error(`Task settlement failed: ${error.message}`);
 }
 
 export async function updateStudioTask(
