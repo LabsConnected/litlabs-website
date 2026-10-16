@@ -13,6 +13,9 @@ describe("billing migration precheck", () => {
       "20261015000000_subscriptions_cancel_at_period_end.sql",
       "20261015120000_media_cap_holds.sql",
       "20261015140000_subscriptions_last_stripe_event_created.sql",
+      "20261015160000_checkout_reservations.sql",
+      "20261015170000_billing_subscription_conflicts.sql",
+      "20261015180000_media_cap_hold_expiry.sql",
     ]) {
       expect(sql).toContain(file);
       expect(shell).toContain(file);
@@ -24,6 +27,11 @@ describe("billing migration precheck", () => {
     expect(sql).toContain("DROP TABLE IF EXISTS public.media_cap_holds");
     expect(sql).toContain("DROP COLUMN IF EXISTS last_stripe_event_created");
     expect(shell).toContain("DROP COLUMN IF EXISTS last_stripe_event_created");
+    expect(sql).toContain("DROP TABLE IF EXISTS public.checkout_reservations");
+    expect(sql).toContain("DROP TABLE IF EXISTS public.billing_subscription_conflicts");
+    expect(sql).toContain("DROP COLUMN IF EXISTS settled_at");
+    expect(shell).toContain("DROP TABLE public.checkout_reservations");
+    expect(shell).toContain("DROP TABLE public.billing_subscription_conflicts");
     expect(sql).toContain("stripe_subscription_id");
     expect(sql).toContain("generation_jobs");
     expect(sql).toContain("public.users");

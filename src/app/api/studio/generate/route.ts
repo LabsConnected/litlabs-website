@@ -8,6 +8,7 @@ import {
   assertGenerationWithinPlanCaps,
   planLimitResponse,
   releaseMediaCapHold,
+  settleMediaCapHold,
 } from "@/lib/generation/enforce-media-caps";
 import { resolveInternalUserId } from "@/lib/generation/identity";
 
@@ -15,6 +16,24 @@ async function handler(request: NextRequest) {
   const { userId, clerkId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  let openHold: string | null = null;
+  const clerk = clerkId ?? userId;
+  async function settleOpen() {
+    const requestId = openHold;
+    if (!requestId) return;
+    openHold = null;
+    const internalUserId = await resolveInternalUserId(clerk).catch(() => null);
+    if (!internalUserId) return;
+    await settleMediaCapHold({ internalUserId, requestId }).catch(() => undefined);
+  }
+  async function releaseOpen() {
+    const requestId = openHold;
+    if (!requestId) return;
+    openHold = null;
+    const internalUserId = await resolveInternalUserId(clerk).catch(() => null);
+    if (!internalUserId) return;
+    await releaseMediaCapHold({ internalUserId, requestId }).catch(() => undefined);
   }
   try {
     const body = await request.json();
@@ -48,7 +67,6 @@ async function handler(request: NextRequest) {
     };
 
     const { width, height } = getDimensions(aspectRatio || "1:1");
-    const clerk = clerkId ?? userId;
     const batchCount = Math.min(Math.max(Number(batchSize) || 1, 1), 4);
 
     async function reserve(opts: {
@@ -58,7 +76,7 @@ async function handler(request: NextRequest) {
       providerCostCents: number;
       units?: number;
     }) {
-      return assertGenerationWithinPlanCaps({
+      const denial = await assertGenerationWithinPlanCaps({
         clerkId: clerk,
         requestId: opts.requestId,
         modality: "image",
@@ -67,6 +85,8 @@ async function handler(request: NextRequest) {
         providerCostCents: opts.providerCostCents,
         units: opts.units,
       });
+      if (!denial) openHold = opts.requestId;
+      return denial;
     }
 
     // Pollinations.ai fallback (always works, no API key needed)
@@ -92,6 +112,7 @@ async function handler(request: NextRequest) {
         timestamp: Date.now(),
       }));
 
+      await settleOpen();
       return NextResponse.json({
         images,
         provider: "pollinations",
@@ -178,6 +199,7 @@ async function handler(request: NextRequest) {
             finishedAt: new Date(),
           });
           geminiDelivered = true;
+          await settleOpen();
           return NextResponse.json({
             images: [
               {
@@ -192,22 +214,10 @@ async function handler(request: NextRequest) {
           });
         }
         if (!geminiDelivered) {
-          const internalUserId = await resolveInternalUserId(clerk).catch(() => null);
-          if (internalUserId) {
-            await releaseMediaCapHold({
-              internalUserId,
-              requestId: meteringRequestId,
-            }).catch(() => undefined);
-          }
+          await releaseOpen();
         }
       } catch (geminiErr) {
-        const internalUserId = await resolveInternalUserId(clerk).catch(() => null);
-        if (internalUserId) {
-          await releaseMediaCapHold({
-            internalUserId,
-            requestId: meteringRequestId,
-          }).catch(() => undefined);
-        }
+        await releaseOpen();
         // Silenced for the caller (falls back to pollinations below), but
         // the failed attempt is still metered for retry-waste analysis.
         void emitUsageEvent({
@@ -241,6 +251,7 @@ async function handler(request: NextRequest) {
       .reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const stableSeed = promptHash2 % 1000000;
 
+    await settleOpen();
     return NextResponse.json({
       images: [
         {
@@ -258,6 +269,7 @@ async function handler(request: NextRequest) {
           : undefined,
     });
   } catch {
+    await releaseOpen();
     return NextResponse.json(
       { error: "Failed to generate image" },
       { status: 500 },

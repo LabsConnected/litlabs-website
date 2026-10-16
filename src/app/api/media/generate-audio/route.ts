@@ -15,6 +15,8 @@ import { calculateRetailBits } from "@/lib/generation/cost-engine";
 import {
   assertGenerationWithinPlanCaps,
   planLimitResponse,
+  releaseMediaCapHold,
+  settleMediaCapHold,
 } from "@/lib/generation/enforce-media-caps";
 import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 
@@ -93,6 +95,7 @@ async function handler(req: NextRequest) {
     );
   }
 
+  let claimedRequestId: string | null = null;
   try {
     const {
       prompt,
@@ -124,6 +127,7 @@ async function handler(req: NextRequest) {
       billingExempt: audioExempt,
     });
     if (audioLimit) return planLimitResponse(audioLimit);
+    claimedRequestId = requestId;
 
     // Compose final prompt with optional delivery direction
     const finalPrompt = styleDirection
@@ -220,6 +224,11 @@ async function handler(req: NextRequest) {
       assetPersistenceFailed = true;
     }
 
+    if (internalUserId) {
+      await settleMediaCapHold({ internalUserId, requestId }).catch(() => undefined);
+    }
+    claimedRequestId = null;
+
     return NextResponse.json({
       audioBase64: `data:audio/wav;base64,${base64Audio}`,
       audioUrl: durableUrl,
@@ -230,6 +239,15 @@ async function handler(req: NextRequest) {
       assetPersistenceFailed,
     });
   } catch (err: unknown) {
+    if (claimedRequestId) {
+      const internalUserId = await resolveInternalUserId(userId).catch(() => null);
+      if (internalUserId) {
+        await releaseMediaCapHold({
+          internalUserId,
+          requestId: claimedRequestId,
+        }).catch(() => undefined);
+      }
+    }
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "TTS failed" },
       { status: 500 },

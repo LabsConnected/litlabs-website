@@ -8,7 +8,10 @@ import { calculateRetailBits } from "@/lib/generation/cost-engine";
 import {
   assertGenerationWithinPlanCaps,
   planLimitResponse,
+  releaseMediaCapHold,
+  settleMediaCapHold,
 } from "@/lib/generation/enforce-media-caps";
+import { resolveInternalUserId } from "@/lib/generation/identity";
 import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 
 // ── Route configuration ──────────────────────────────────────────
@@ -37,6 +40,7 @@ async function handler(req: NextRequest) {
     );
   }
 
+  let claimedRequestId: string | null = null;
   try {
     const {
       prompt,
@@ -68,6 +72,7 @@ async function handler(req: NextRequest) {
       billingExempt: musicExempt,
     });
     if (musicLimit) return planLimitResponse(musicLimit);
+    claimedRequestId = requestId;
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
@@ -124,12 +129,27 @@ async function handler(req: NextRequest) {
       musicBalance = reservation.balance;
     }
 
+    const internalUserId = await resolveInternalUserId(userId).catch(() => null);
+    if (internalUserId) {
+      await settleMediaCapHold({ internalUserId, requestId }).catch(() => undefined);
+    }
+    claimedRequestId = null;
+
     return NextResponse.json({
       audioBase64: `data:${audioMime};base64,${audioPart.inlineData.data}`,
       cost: COST,
       balance: musicBalance,
     });
   } catch (err: unknown) {
+    if (claimedRequestId) {
+      const internalUserId = await resolveInternalUserId(userId).catch(() => null);
+      if (internalUserId) {
+        await releaseMediaCapHold({
+          internalUserId,
+          requestId: claimedRequestId,
+        }).catch(() => undefined);
+      }
+    }
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Music generation failed" },
       { status: 500 },

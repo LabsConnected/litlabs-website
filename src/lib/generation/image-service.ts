@@ -35,6 +35,8 @@ import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase";
 import { calculateRetailBits } from "@/lib/generation/cost-engine";
 import {
   assertGenerationWithinPlanCaps,
+  releaseMediaCapHold,
+  settleMediaCapHold,
   type PlanLimitDenial,
 } from "@/lib/generation/enforce-media-caps";
 import {
@@ -1097,6 +1099,8 @@ export interface ImageServiceDeps {
     providerCostCents: number;
     billingExempt: boolean;
   }) => Promise<PlanLimitDenial | null>;
+  releaseCapHold?: (input: { internalUserId: string; requestId: string }) => Promise<void>;
+  settleCapHold?: (input: { internalUserId: string; requestId: string }) => Promise<void>;
 }
 
 const defaultDeps: ImageServiceDeps = {
@@ -1356,7 +1360,12 @@ export async function generateImage(
     }
   }
 
+  const releaseCap = deps.releaseCapHold ?? releaseMediaCapHold;
+  const settleCap = deps.settleCapHold ?? settleMediaCapHold;
   const failJob = async (error: string): Promise<void> => {
+    if (internalUserId) {
+      await releaseCap({ internalUserId, requestId }).catch(() => undefined);
+    }
     if (job) {
       await deps
         .setJobStatus(job.id, "failed", { error: error.slice(0, 1000) })
@@ -1447,6 +1456,9 @@ export async function generateImage(
         break;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error("Provider error");
+        if (internalUserId) {
+          await releaseCap({ internalUserId, requestId }).catch(() => undefined);
+        }
       }
     }
   } else {
@@ -1460,6 +1472,9 @@ export async function generateImage(
       result = await deps.dispatch(providerId, input, prompt);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error("Provider error");
+      if (internalUserId) {
+        await releaseCap({ internalUserId, requestId }).catch(() => undefined);
+      }
     }
   }
 
@@ -1584,6 +1599,10 @@ export async function generateImage(
     }
   } else {
     assetPersistenceFailed = true;
+  }
+
+  if (internalUserId) {
+    await settleCap({ internalUserId, requestId }).catch(() => undefined);
   }
 
   const duration = Date.now() - startTime;

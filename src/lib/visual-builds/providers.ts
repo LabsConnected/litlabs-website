@@ -3,6 +3,8 @@ import { calculateRetailBits } from "@/lib/generation/cost-engine";
 import {
   assertGenerationWithinPlanCaps,
   PlanLimitError,
+  releaseMediaCapHoldForClerk,
+  settleMediaCapHoldForClerk,
 } from "@/lib/generation/enforce-media-caps";
 import { AssetInspection, VisualSourceType } from "./types";
 
@@ -45,7 +47,7 @@ async function reserveGeneratedImage(
   input: ImageGenerationInput,
   provider: string,
   model: string,
-): Promise<void> {
+): Promise<string> {
   if (!input.clerkId) {
     throw new PlanLimitError({
       status: 402,
@@ -54,6 +56,7 @@ async function reserveGeneratedImage(
       error: "Plan usage could not be read. Nothing was generated.",
     });
   }
+  const requestId = `visual:${input.missionId}:${input.sectionKey}:${provider}:${crypto.randomUUID()}`;
   const providerCostCents = calculateRetailBits({
     modality: "image",
     provider,
@@ -61,13 +64,27 @@ async function reserveGeneratedImage(
   }).providerCostCents;
   const denial = await assertGenerationWithinPlanCaps({
     clerkId: input.clerkId,
-    requestId: `visual:${input.missionId}:${input.sectionKey}:${provider}:${crypto.randomUUID()}`,
+    requestId,
     modality: "image",
     provider,
     model,
     providerCostCents,
   });
   if (denial) throw new PlanLimitError(denial);
+  return requestId;
+}
+
+async function finishGeneratedImage(
+  input: ImageGenerationInput,
+  requestId: string,
+  succeeded: boolean,
+): Promise<void> {
+  if (!input.clerkId) return;
+  if (succeeded) {
+    await settleMediaCapHoldForClerk(input.clerkId, requestId);
+    return;
+  }
+  await releaseMediaCapHoldForClerk(input.clerkId, requestId);
 }
 
 export interface GeneratedAssetResult {
@@ -177,7 +194,8 @@ class PexelsStockAssetProvider implements StockAssetProvider {
 
 class PollinationsImageGenerationProvider implements ImageGenerationProvider {
   async generate(input: ImageGenerationInput): Promise<GeneratedAssetResult> {
-    await reserveGeneratedImage(input, "pollinations", "flux");
+    const requestId = await reserveGeneratedImage(input, "pollinations", "flux");
+    try {
     const url = new URL(`https://image.pollinations.ai/prompt/${encodeURIComponent(input.prompt)}`);
     url.searchParams.set("width", String(Math.min(input.width, 1024)));
     url.searchParams.set("height", String(Math.min(input.height, 1024)));
@@ -188,7 +206,7 @@ class PollinationsImageGenerationProvider implements ImageGenerationProvider {
       url.searchParams.set("negative", input.negativePrompt.trim());
     }
 
-    return {
+    const result: GeneratedAssetResult = {
       sourceType: "generated",
       provider: "pollinations",
       id: `pollinations-${Date.now()}`,
@@ -202,6 +220,12 @@ class PollinationsImageGenerationProvider implements ImageGenerationProvider {
       costCents: 0,
       sectionKey: input.sectionKey,
     };
+    await finishGeneratedImage(input, requestId, true);
+    return result;
+    } catch (err) {
+      await finishGeneratedImage(input, requestId, false);
+      throw err;
+    }
   }
 }
 
@@ -216,7 +240,8 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
     // Migrated from deprecated Imagen 3 to Nano Banana (gemini-2.5-flash-image).
     // Imagen 3 shuts down August 17, 2026.
     const model = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
-    await reserveGeneratedImage(input, "gemini", model);
+    const requestId = await reserveGeneratedImage(input, "gemini", model);
+    try {
     const ai = new GoogleGenAI({ apiKey: this.apiKey });
 
     const response = await ai.models.generateContent({
@@ -235,7 +260,7 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
 
     const mimeType = imagePart.inlineData.mimeType || "image/png";
 
-    return {
+    const result: GeneratedAssetResult = {
       sourceType: "generated",
       provider: "gemini",
       id: `gemini-${Date.now()}`,
@@ -249,6 +274,12 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
       costCents: 100,
       sectionKey: input.sectionKey,
     };
+    await finishGeneratedImage(input, requestId, true);
+    return result;
+    } catch (err) {
+      await finishGeneratedImage(input, requestId, false);
+      throw err;
+    }
   }
 }
 
@@ -260,7 +291,8 @@ class FalImageGenerationProvider implements ImageGenerationProvider {
   }
 
   async generate(input: ImageGenerationInput): Promise<GeneratedAssetResult> {
-    await reserveGeneratedImage(input, "fal", "flux-pro");
+    const holdId = await reserveGeneratedImage(input, "fal", "flux-pro");
+    try {
     const response = await fetch("https://queue.fal.run/fal-ai/flux/schnell", {
       method: "POST",
       headers: {
@@ -290,7 +322,7 @@ class FalImageGenerationProvider implements ImageGenerationProvider {
 
     const directUrl = payload.images?.[0]?.url;
     if (directUrl) {
-      return {
+      const result: GeneratedAssetResult = {
         sourceType: "generated",
         provider: "fal",
         id: `fal-${Date.now()}`,
@@ -304,6 +336,8 @@ class FalImageGenerationProvider implements ImageGenerationProvider {
         costCents: 300,
         sectionKey: input.sectionKey,
       };
+      await finishGeneratedImage(input, holdId, true);
+      return result;
     }
 
     if (!payload.request_id) {
@@ -324,12 +358,12 @@ class FalImageGenerationProvider implements ImageGenerationProvider {
         const resultResponse = await fetch(resultUrl, {
           headers: { Authorization: `Key ${this.apiKey}` },
         });
-        const result = (await resultResponse.json()) as { images?: Array<{ url?: string }> };
-        const image = result.images?.[0]?.url;
+        const completed = (await resultResponse.json()) as { images?: Array<{ url?: string }> };
+        const image = completed.images?.[0]?.url;
         if (!image) {
           throw new Error("FAL returned no image URL");
         }
-        return {
+        const delivered: GeneratedAssetResult = {
           sourceType: "generated",
           provider: "fal",
           id: `fal-${requestId}`,
@@ -343,6 +377,8 @@ class FalImageGenerationProvider implements ImageGenerationProvider {
           costCents: 300,
           sectionKey: input.sectionKey,
         };
+        await finishGeneratedImage(input, holdId, true);
+        return delivered;
       }
       if (status.status === "FAILED") {
         throw new Error("FAL image generation failed");
@@ -350,6 +386,10 @@ class FalImageGenerationProvider implements ImageGenerationProvider {
     }
 
     throw new Error("FAL image generation timed out");
+    } catch (err) {
+      await finishGeneratedImage(input, holdId, false);
+      throw err;
+    }
   }
 }
 

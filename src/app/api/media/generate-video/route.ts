@@ -12,6 +12,7 @@ import { calculateRetailBits } from "@/lib/generation/cost-engine";
 import {
   assertGenerationWithinPlanCaps,
   planLimitResponse,
+  releaseMediaCapHold,
 } from "@/lib/generation/enforce-media-caps";
 import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 import {
@@ -79,9 +80,15 @@ async function createQueuedVideoRow(opts: {
  * Never throws — the refund outcome is always recorded, so a `pending`
  * refund can be completed by a later retry with the same requestId.
  */
+async function releaseVideoHold(internalUserId: string | null, requestId: string): Promise<void> {
+  if (!internalUserId) return;
+  await releaseMediaCapHold({ internalUserId, requestId }).catch(() => undefined);
+}
+
 async function settleFailedSubmission(opts: {
   genRowId: string | null;
   userId: string;
+  internalUserId: string | null;
   exempt: boolean;
   cost: number;
   modelLabel: string;
@@ -105,6 +112,7 @@ async function settleFailedSubmission(opts: {
         : "Video submission failed";
     await failGenerationJob(opts.genRowId, msg, refundStatus);
   }
+  await releaseVideoHold(opts.internalUserId, opts.requestId);
   const baseMsg =
     opts.submitErr instanceof Error
       ? opts.submitErr.message
@@ -272,8 +280,10 @@ async function handler(req: NextRequest) {
       if (!exempt) {
         // Check balance
         const balances = await getCreditBalances(userId);
-        if (balances.total < cost)
+        if (balances.total < cost) {
+          await releaseVideoHold(internalUserId, requestId);
           return NextResponse.json({ error: `Need ${cost} LiTTBits` }, { status: 402 });
+        }
       }
 
       // Staged refunds: record the durable job row BEFORE the debit so
@@ -294,6 +304,7 @@ async function handler(req: NextRequest) {
           duration: Number(duration),
         });
         if (!genRowId) {
+          await releaseVideoHold(internalUserId, requestId);
           return NextResponse.json(
             { error: "Could not record the video job. No LiTTBits were charged — please retry." },
             { status: 500 },
@@ -400,6 +411,7 @@ async function handler(req: NextRequest) {
         throw await settleFailedSubmission({
           genRowId,
           userId,
+          internalUserId,
           exempt,
           cost,
           modelLabel: videoModel.label,
@@ -436,6 +448,7 @@ async function handler(req: NextRequest) {
       // Check balance
       const balances = await getCreditBalances(userId);
       if (balances.total < cost) {
+        await releaseVideoHold(internalUserId, requestId);
         return NextResponse.json(
           { error: `Need ${cost} LiTTBits` },
           { status: 402 },
@@ -459,6 +472,7 @@ async function handler(req: NextRequest) {
         duration: Number(duration),
       });
       if (!veoGenRowId) {
+        await releaseVideoHold(internalUserId, requestId);
         return NextResponse.json(
           { error: "Could not record the video job. No LiTTBits were charged — please retry." },
           { status: 500 },
@@ -587,6 +601,7 @@ async function handler(req: NextRequest) {
       throw await settleFailedSubmission({
         genRowId: veoGenRowId,
         userId,
+        internalUserId,
         exempt: veoExempt,
         cost,
         modelLabel: videoModel.label,

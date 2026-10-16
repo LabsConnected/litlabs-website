@@ -189,6 +189,43 @@ describe("generateImage", () => {
     expect(calls.debit).toHaveLength(0);
   });
 
+  it("releases the cap hold when the provider fails and settles it on success", async () => {
+    const releaseCapHold = vi.fn(async () => undefined);
+    const settleCapHold = vi.fn(async () => undefined);
+    const failed = makeDeps({
+      releaseCapHold,
+      settleCapHold,
+      dispatch: async () => {
+        throw new Error("provider down");
+      },
+    });
+    const failure = await generateImage(
+      { userId: "user_abc", requestId: "op_hold_fail" },
+      paidInput,
+      failed.deps,
+    );
+    expect(failure.success).toBe(false);
+    expect(releaseCapHold).toHaveBeenCalledWith({
+      internalUserId: "internal_1",
+      requestId: "op_hold_fail",
+    });
+    expect(settleCapHold).not.toHaveBeenCalled();
+
+    releaseCapHold.mockClear();
+    const succeeded = makeDeps({ releaseCapHold, settleCapHold });
+    const success = await generateImage(
+      { userId: "user_abc", requestId: "op_hold_ok" },
+      paidInput,
+      succeeded.deps,
+    );
+    expect(success.success).toBe(true);
+    expect(settleCapHold).toHaveBeenCalledWith({
+      internalUserId: "internal_1",
+      requestId: "op_hold_ok",
+    });
+    expect(releaseCapHold).not.toHaveBeenCalled();
+  });
+
   it("happy path: generates, debits exactly once with an idempotent key", async () => {
     const { deps, calls } = makeDeps();
     const result = await generateImage(

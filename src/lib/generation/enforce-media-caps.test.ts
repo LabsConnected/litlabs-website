@@ -628,4 +628,16 @@ describe("claim_media_cap_slot migration", () => {
     }
     expect(sql).toContain("request_id <> p_request_id");
   });
+
+  it("expires unsettled holds and settles successful ones", () => {
+    const expiry = readFileSync(
+      "supabase/migrations/20261015180000_media_cap_hold_expiry.sql",
+      "utf8",
+    );
+    expect(expiry).toContain("settled_at");
+    expect(expiry).toContain("settle_media_cap_hold");
+    expect(expiry).toContain("sweep_expired_media_cap_holds");
+    expect(expiry).toContain("interval '24 hours'");
+    expect(expiry).toContain("failed");
+  });
 });

@@ -422,3 +422,49 @@ export async function releaseMediaCapHold(input: {
     console.error("[media-cap] release failed:", error.message);
   }
 }
+
+/** Keep a successful generation inside the cap after the provider returns. */
+export async function settleMediaCapHold(input: {
+  internalUserId: string;
+  requestId: string;
+  now?: Date;
+}): Promise<void> {
+  const admin = getSupabaseAdmin();
+  if (!admin || typeof admin.rpc !== "function") return;
+  const { error } = await admin.rpc("settle_media_cap_hold", {
+    p_user_id: input.internalUserId,
+    p_request_id: input.requestId,
+    p_now: (input.now ?? new Date()).toISOString(),
+  });
+  if (error) {
+    console.error("[media-cap] settle failed:", error.message);
+  }
+}
+
+async function withClerkHold(
+  clerkId: string,
+  requestId: string,
+  run: (internalUserId: string) => Promise<void>,
+): Promise<void> {
+  try {
+    const admin = getSupabaseAdmin();
+    if (!admin || typeof admin.rpc !== "function") return;
+    const plan = await resolvePlan(admin, clerkId);
+    if ("error" in plan || !plan.internalUserId) return;
+    await run(plan.internalUserId);
+  } catch (err) {
+    console.error("[media-cap] hold update failed:", err instanceof Error ? err.message : err);
+  }
+}
+
+export function releaseMediaCapHoldForClerk(clerkId: string, requestId: string): Promise<void> {
+  return withClerkHold(clerkId, requestId, (internalUserId) =>
+    releaseMediaCapHold({ internalUserId, requestId }),
+  );
+}
+
+export function settleMediaCapHoldForClerk(clerkId: string, requestId: string): Promise<void> {
+  return withClerkHold(clerkId, requestId, (internalUserId) =>
+    settleMediaCapHold({ internalUserId, requestId }),
+  );
+}
