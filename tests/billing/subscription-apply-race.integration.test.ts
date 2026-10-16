@@ -32,6 +32,9 @@ async function canConnect(): Promise<boolean> {
 }
 
 const dbUp = await canConnect();
+if ((process.env.BILLING_REQUIRE_DB === "1" || process.env.RUN_BILLING_CONCURRENCY_DB === "1") && !dbUp) {
+  throw new Error("BILLING_REQUIRE_DB: subscription replay database is unreachable");
+}
 
 function replayUrl(): string {
   const url = new URL(ADMIN_URL);
@@ -193,6 +196,8 @@ describe.skipIf(!dbUp)("atomic subscription apply", () => {
         "supabase/migrations/20261015170000_billing_subscription_conflicts.sql",
         "supabase/migrations/20261015180000_media_cap_hold_expiry.sql",
         "supabase/migrations/20261015200000_apply_subscription_event.sql",
+        "supabase/migrations/20261015210000_checkout_session_lease.sql",
+        "supabase/migrations/20261015220000_schedule_media_cap_sweep.sql",
       ]) {
         await client.query(readFileSync(file, "utf8"));
       }

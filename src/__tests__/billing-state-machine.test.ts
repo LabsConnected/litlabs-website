@@ -33,13 +33,18 @@ vi.mock("@/lib/rate-limiter", () => ({
 const mockConstructEvent = vi.fn();
 const mockSubscriptionsRetrieve = vi.fn();
 const mockRefundsList = vi.fn();
-vi.mock("stripe", () => ({
-  default: vi.fn().mockImplementation(() => ({
+vi.mock("stripe", () => {
+  class StripeInvalidRequestError extends Error {}
+  const ctor = vi.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
     subscriptions: { retrieve: mockSubscriptionsRetrieve },
     refunds: { list: mockRefundsList },
-  })),
-}));
+  }));
+  (ctor as unknown as { errors: { StripeInvalidRequestError: typeof StripeInvalidRequestError } }).errors = {
+    StripeInvalidRequestError,
+  };
+  return { default: ctor };
+});
 
 const { confirmBookingPaymentMock } = vi.hoisted(() => ({
   confirmBookingPaymentMock: vi.fn(async () => ({ ok: true, data: {} })),
@@ -51,6 +56,7 @@ vi.mock("@/lib/business-operations", () => ({
 
 // ─── Imports ─────────────────────────────────────────────────────────
 
+import Stripe from "stripe";
 import { auth } from "@/lib/auth";
 import { POST as checkoutPOST } from "@/app/api/billing/checkout/route";
 import { getSupabaseAdmin } from "@/lib/supabase";
@@ -809,6 +815,163 @@ describe("POST /api/billing/checkout — checkout session creation", () => {
     }
   });
 
+  it("creates a 31 minute session and keeps the lease at least that long", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    const now = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+    const rpcCalls: { fn: string; args: any }[] = [];
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: null, error: null }),
+          }),
+        }),
+      }),
+      rpc: async (fn: string, args: any) => {
+        rpcCalls.push({ fn, args });
+        if (fn === "begin_checkout_reservation") {
+          return { data: { action: "create", token: "00000000-0000-4000-8000-000000000001" }, error: null };
+        }
+        if (fn === "commit_checkout_reservation") return { data: true, error: null };
+        return { data: null, error: null };
+      },
+    } as any);
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "cs_ttl", url: "https://checkout.stripe.com/ttl" }),
+    })) as any;
+    try {
+      const res = await checkoutPOST(makeNextRequest(JSON.stringify({ planId: "creator_beta" })));
+      expect(res.status).toBe(200);
+      const params = new URLSearchParams((global.fetch as any).mock.calls[0][1].body as string);
+      expect(params.get("expires_at")).toBe(String(Math.floor(now / 1000) + 31 * 60));
+      expect((global.fetch as any).mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+      const begin = rpcCalls.find((call) => call.fn === "begin_checkout_reservation");
+      const commit = rpcCalls.find((call) => call.fn === "commit_checkout_reservation");
+      expect(begin?.args.p_lease_seconds).toBe(31 * 60);
+      expect(commit?.args.p_open_until).toBe(new Date(now + 31 * 60 * 1000).toISOString());
+    } finally {
+      nowSpy.mockRestore();
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("expires the prior open session before issuing a different plan", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
+    const now = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+    const bucket = Math.floor(now / 600_000);
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: { id: "db-user" }, error: null }),
+          }),
+        }),
+      }),
+      rpc: async (fn: string) => {
+        if (fn === "begin_checkout_reservation") {
+          return {
+            data: {
+              action: "replace",
+              token: "00000000-0000-4000-8000-000000000002",
+              expire_session_id: "cs_old",
+              previous_url: "https://checkout.stripe.com/old",
+              previous_plan_id: "creator_beta",
+              previous_price_id: "price_test_creator",
+              previous_expires_at: new Date(now + 60_000).toISOString(),
+            },
+            error: null,
+          };
+        }
+        if (fn === "commit_checkout_reservation") return { data: true, error: null };
+        return { data: null, error: null };
+      },
+    } as any);
+    const originalFetch = global.fetch;
+    const urls: string[] = [];
+    global.fetch = vi.fn(async (url: string) => {
+      urls.push(String(url));
+      if (String(url).endsWith("/expire")) {
+        return { ok: true, status: 200, json: async () => ({ id: "cs_old", status: "expired" }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ id: "cs_new", url: "https://checkout.stripe.com/new" }) };
+    }) as any;
+    try {
+      const res = await checkoutPOST(makeNextRequest(JSON.stringify({ planId: "pro_builder_beta" })));
+      expect(res.status).toBe(200);
+      expect(urls[0]).toBe("https://api.stripe.com/v1/checkout/sessions/cs_old/expire");
+      expect(urls[1]).toBe("https://api.stripe.com/v1/checkout/sessions");
+      const key = (global.fetch as any).mock.calls[1][1].headers["Idempotency-Key"];
+      expect(key).toBe(`billing_user_123_price_test_pro_${bucket}_after_cs_old`);
+    } finally {
+      nowSpy.mockRestore();
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("does not issue a new session when the prior checkout already completed", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
+    const rpcCalls: string[] = [];
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: null, error: null }),
+          }),
+        }),
+      }),
+      rpc: async (fn: string) => {
+        rpcCalls.push(fn);
+        if (fn === "begin_checkout_reservation") {
+          return {
+            data: {
+              action: "replace",
+              token: "00000000-0000-4000-8000-000000000003",
+              expire_session_id: "cs_paid",
+              previous_plan_id: "creator_beta",
+              previous_price_id: "price_old",
+              previous_expires_at: new Date().toISOString(),
+              previous_url: "https://checkout.stripe.com/paid",
+            },
+            error: null,
+          };
+        }
+        return { data: true, error: null };
+      },
+    } as any);
+    const originalFetch = global.fetch;
+    const urls: string[] = [];
+    global.fetch = vi.fn(async (url: string) => {
+      urls.push(String(url));
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: { message: "This Checkout Session has a status of `complete` and cannot be expired." },
+        }),
+      };
+    }) as any;
+    try {
+      const res = await checkoutPOST(makeNextRequest(JSON.stringify({ planId: "pro_builder_beta" })));
+      expect(res.status).toBe(409);
+      expect((await res.json()).code).toBe("checkout_completed");
+      expect(urls).toEqual(["https://api.stripe.com/v1/checkout/sessions/cs_paid/expire"]);
+      expect(rpcCalls).toContain("restore_open_checkout_reservation");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   // Was: "uses payment mode for one-time Founder plan". The $149 tier is
   // retired, so the contract is now the opposite — no Stripe session may be
   // created for it even with STRIPE_PRICE_FOUNDER present in the environment,
@@ -872,6 +1035,42 @@ describe("POST /api/stripe/webhook — signature verification", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toContain("Webhook Error");
   });
+
+  it("sets an explicit Stripe client timeout and retry cap", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake";
+    mockConstructEvent.mockImplementation(() => {
+      throw new Error("Invalid signature");
+    });
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    await webhookPOST(makeWebhookRequest("raw_body", "sig"));
+    expect(vi.mocked(Stripe)).toHaveBeenCalledWith(
+      "sk_test_fake",
+      expect.objectContaining({
+        apiVersion: "2025-08-27.basil",
+        timeout: 20_000,
+        maxNetworkRetries: 2,
+      }),
+    );
+  });
+
+  it("sets an explicit timeout on the receipt Stripe client", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    const { GET } = await import("@/app/api/stripe/session/route");
+    const req = {
+      nextUrl: { searchParams: new URLSearchParams("session_id=cs_test_receipt") },
+      headers: { get: () => null },
+      cookies: { get: () => undefined },
+      url: "http://localhost/api/stripe/session?session_id=cs_test_receipt",
+    } as any;
+    const res = await GET(req);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(vi.mocked(Stripe)).toHaveBeenCalledWith(
+      "sk_test_fake_key",
+      expect.objectContaining({ timeout: 20_000, maxNetworkRetries: 2 }),
+    );
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════
@@ -882,6 +1081,39 @@ describe("Webhook event processing — state mutations", () => {
   beforeEach(() => {
     process.env.STRIPE_SECRET_KEY = "sk_test_fake";
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake";
+  });
+
+  it("checkout.session.expired releases the plan reservation", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("checkout.session.expired", {
+      id: "evt_expired_plan",
+      object: {
+        id: "cs_expired_plan",
+        metadata: { product_type: "plan", clerk_id: "user_123" },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(rpcCalls.find((call) => call.fn === "release_checkout_reservation")?.params).toEqual({
+      p_session_id: "cs_expired_plan",
+    });
+  });
+
+  it("checkout.session.expired for a plan returns 500 when the database is down", async () => {
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(false);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("checkout.session.expired", {
+      id: "evt_expired_plan_nodb",
+      object: {
+        id: "cs_expired_plan_nodb",
+        metadata: { product_type: "plan" },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(500);
   });
 
   it("checkout.session.completed for Founder → upserts subscription plan=founder status=active, NO credit grant", async () => {

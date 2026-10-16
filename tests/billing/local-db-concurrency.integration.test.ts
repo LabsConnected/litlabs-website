@@ -26,6 +26,9 @@ async function canConnect(): Promise<boolean> {
 }
 
 const dbUp = await canConnect();
+if ((process.env.BILLING_REQUIRE_DB === "1" || process.env.RUN_BILLING_CONCURRENCY_DB === "1") && !dbUp) {
+  throw new Error(`BILLING_REQUIRE_DB: concurrency database is unreachable at ${DATABASE_URL}`);
+}
 
 function connect(): Client {
   return new Client({ connectionString: DATABASE_URL });
@@ -61,6 +64,7 @@ describe.skipIf(!dbUp)("local billing database", () => {
           id uuid PRIMARY KEY,
           clerk_id text
         );
+        ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email text;
         CREATE TABLE IF NOT EXISTS public.subscriptions (
           user_id uuid PRIMARY KEY,
           status text,
@@ -79,12 +83,15 @@ describe.skipIf(!dbUp)("local billing database", () => {
           modality text,
           actual_provider_cost_cents integer
         );
+        ALTER TABLE public.generation_jobs ADD COLUMN IF NOT EXISTS prompt text;
       `);
       for (const file of [
         "supabase/migrations/20261015120000_media_cap_holds.sql",
         "supabase/migrations/20261015160000_checkout_reservations.sql",
         "supabase/migrations/20261015170000_billing_subscription_conflicts.sql",
         "supabase/migrations/20261015180000_media_cap_hold_expiry.sql",
+        "supabase/migrations/20261015210000_checkout_session_lease.sql",
+        "supabase/migrations/20261015220000_schedule_media_cap_sweep.sql",
       ]) {
         await client.query(readFileSync(file, "utf8"));
       }
@@ -103,11 +110,11 @@ describe.skipIf(!dbUp)("local billing database", () => {
     const now = new Date().toISOString();
     try {
       await admin.query(
-        "INSERT INTO public.users (id, clerk_id) VALUES ($1, $2)",
-        [userId, clerkId],
+        "INSERT INTO public.users (id, clerk_id, email) VALUES ($1, $2, $3)",
+        [userId, clerkId, `${clerkId}@example.test`],
       );
       const begin = (client: Client, planId: string, priceId: string) =>
-        query<{ decision: { action: string; token?: string; url?: string; price_id?: string } }>(
+        query<{ decision: { action: string; token?: string; url?: string; price_id?: string; expire_session_id?: string | null } }>(
           client,
           `SELECT public.begin_checkout_reservation(
              $1, $2::uuid, $3, $4, $5::timestamptz, 60
@@ -127,7 +134,7 @@ describe.skipIf(!dbUp)("local billing database", () => {
       expect(winner?.token).toBeTruthy();
       const winnerPrice = creatorRows[0].decision.action === "create" ? "price_creator" : "price_pro";
       const otherPrice = winnerPrice === "price_creator" ? "price_pro" : "price_creator";
-      const openUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const openUntil = new Date(Date.now() + 31 * 60 * 1000).toISOString();
       const committed = await query<{ committed: boolean }>(
         admin,
         `SELECT public.commit_checkout_reservation(
@@ -141,7 +148,32 @@ describe.skipIf(!dbUp)("local billing database", () => {
       expect(reuse[0].decision.action).toBe("reuse");
       expect(reuse[0].decision.url).toBe("https://checkout.test/session");
       const blocked = await begin(pro, "pro_builder_beta", otherPrice);
-      expect(blocked[0].decision.action).toBe("in_progress");
+      expect(blocked[0].decision.action).toBe("replace");
+      expect(blocked[0].decision.expire_session_id).toBe("cs_test_open");
+
+      const expiredAt = new Date(Date.parse(now) - 60_000).toISOString();
+      await admin.query(
+        `UPDATE public.checkout_reservations
+         SET status = 'open',
+             stripe_session_id = 'cs_orphan',
+             stripe_session_url = 'https://checkout.test/orphan',
+             price_id = $2,
+             expires_at = $3::timestamptz
+         WHERE clerk_id = $1`,
+        [clerkId, winnerPrice, expiredAt],
+      );
+      const orphan = await begin(creator, "creator_beta", otherPrice);
+      expect(orphan[0].decision.action).toBe("create");
+      expect(orphan[0].decision.expire_session_id).toBe("cs_orphan");
+      const released = await query<{ n: string }>(
+        admin,
+        `WITH gone AS (
+           SELECT public.release_checkout_reservation('cs_missing')
+         )
+         SELECT count(*)::text AS n FROM public.checkout_reservations WHERE clerk_id = $1`,
+        [clerkId],
+      );
+      expect(released[0].n).toBe("1");
 
       const rows = await query<{ n: string }>(
         admin,
@@ -161,9 +193,10 @@ describe.skipIf(!dbUp)("local billing database", () => {
     await client.connect();
     const userId = crypto.randomUUID();
     try {
-      await client.query("INSERT INTO public.users (id, clerk_id) VALUES ($1, $2)", [
+      await client.query("INSERT INTO public.users (id, clerk_id, email) VALUES ($1, $2, $3)", [
         userId,
         `clerk_${userId}`,
+        `clerk_${userId}@example.test`,
       ]);
       const claim = (requestId: string) =>
         query<{ claim: { allowed: boolean; reason?: string } }>(
@@ -195,8 +228,8 @@ describe.skipIf(!dbUp)("local billing database", () => {
       await client.query(
         `INSERT INTO public.generation_jobs (
            id, user_id, request_id, created_at, status, refund_status,
-           provider, model, modality, actual_provider_cost_cents
-         ) VALUES ($1, $2, 'fail-1', now(), 'failed', 'none', 'gemini', 'gemini-2.5-flash-image', 'image', 10)`,
+           provider, model, modality, actual_provider_cost_cents, prompt
+         ) VALUES ($1, $2, 'fail-1', now(), 'failed', 'none', 'gemini', 'gemini-2.5-flash-image', 'image', 10, 'hold')`,
         [crypto.randomUUID(), userId],
       );
       const duringFailure = await claim("fail-2");
@@ -237,8 +270,8 @@ describe.skipIf(!dbUp)("local billing database", () => {
       await client.query(
         `INSERT INTO public.generation_jobs (
            id, user_id, request_id, created_at, status, refund_status,
-           provider, model, modality, actual_provider_cost_cents
-         ) VALUES ($1, $2, 'done-1', now() - interval '25 hours', 'completed', 'none', 'gemini', 'gemini-2.5-flash-image', 'image', 10)`,
+           provider, model, modality, actual_provider_cost_cents, prompt
+         ) VALUES ($1, $2, 'done-1', now() - interval '25 hours', 'completed', 'none', 'gemini', 'gemini-2.5-flash-image', 'image', 10, 'hold')`,
         [crypto.randomUUID(), userId],
       );
       await client.query(

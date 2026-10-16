@@ -13,7 +13,9 @@
 -- claim function reads settled_at, so the column and the function ship
 -- together. Apply 20261015200000 before the webhook that calls
 -- apply_subscription_event. That webhook returns 500 when the function
--- is missing.
+-- is missing. Apply 20261015210000 before checkout expires a prior
+-- session, and 20261015220000 to schedule the media-hold sweep. The 24
+-- hour claim filter remains the backstop when cron is absent.
 --
 --   1. supabase/migrations/20261014000000_subscriptions_stripe_subscription_id_unique.sql
 --   2. supabase/migrations/20261015000000_subscriptions_cancel_at_period_end.sql
@@ -23,6 +25,8 @@
 --   6. supabase/migrations/20261015170000_billing_subscription_conflicts.sql
 --   7. supabase/migrations/20261015180000_media_cap_hold_expiry.sql
 --   8. supabase/migrations/20261015200000_apply_subscription_event.sql
+--   9. supabase/migrations/20261015210000_checkout_session_lease.sql
+--  10. supabase/migrations/20261015220000_schedule_media_cap_sweep.sql
 --
 -- Preflight (this file):
 --   - public.users and public.generation_jobs exist
@@ -60,6 +64,13 @@
 --   20261015200000:
 --     DROP FUNCTION IF EXISTS public.apply_subscription_event(uuid, text, text, text, bigint, boolean, text, boolean, text, text, boolean, text, text, text, timestamptz, timestamptz, boolean, text, text, integer, text, text, text, timestamptz, text, jsonb);
 --     DROP INDEX IF EXISTS public.subscriptions_one_protected_per_user;
+--   20261015210000:
+--     DROP FUNCTION IF EXISTS public.release_checkout_reservation(text);
+--     DROP FUNCTION IF EXISTS public.restore_open_checkout_reservation(text, uuid, text, text, text, text, timestamptz);
+--     Restore begin_checkout_reservation from 20261015160000_checkout_reservations.sql.
+--   20261015220000:
+--     Unschedule sweep-expired-media-cap-holds when pg_cron is installed.
+--     The 24 hour claim filter still ignores stale unsettled holds.
 
 DO $$
 DECLARE

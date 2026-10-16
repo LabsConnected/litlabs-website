@@ -61,7 +61,10 @@ vi.mock("stripe", async () => {
   return { ...actual, default: StripeWithLocalSubscription };
 });
 
-const ENABLED = process.env.RUN_STRIPE_LOCAL_DB === "1";
+const ENABLED = process.env.RUN_STRIPE_LOCAL_DB === "1" || process.env.BILLING_REQUIRE_DB === "1";
+if (process.env.BILLING_REQUIRE_DB === "1" && process.env.RUN_STRIPE_LOCAL_DB !== "1") {
+  throw new Error("BILLING_REQUIRE_DB requires RUN_STRIPE_LOCAL_DB=1 so the webhook suite cannot skip");
+}
 const WHSEC = "whsec_local_db_fixture";
 const STRIPE_KEY = "sk_test_local_fixture_not_a_live_key";
 const DB_URL =
@@ -698,6 +701,49 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
       };
     });
 
+    await run(13, "invoice.paid for a second subscription grants nothing and is retryable", async () => {
+      const clerk = "local658_conflict_invoice";
+      await userId(clerk);
+      const created = await deliver(
+        subscriptionCreated(
+          "evt_local658_conflict_invoice_sub",
+          "sub_local658_conflict_invoice_a",
+          clerk,
+          "creator_beta",
+          "price_creator_local",
+        ),
+      );
+      const paid = await deliver(
+        invoicePaid(
+          "evt_local658_conflict_invoice_b",
+          "in_local658_conflict_invoice_b",
+          "sub_local658_conflict_invoice_b",
+        ),
+      );
+      const dbRows = await snapshot(clerk, [
+        "evt_local658_conflict_invoice_sub",
+        "evt_local658_conflict_invoice_b",
+      ]);
+      const stored = await db.query(
+        `SELECT stripe_subscription_id FROM public.subscriptions s
+         JOIN public.users u ON u.id = s.user_id WHERE u.clerk_id = $1`,
+        [clerk],
+      );
+      const amount = dbRows.ledger.reduce((sum, row) => sum + Number(row.amount), 0);
+      const ok = created.status === 200
+        && paid.status === 500
+        && amount === 0
+        && stored.rows[0]?.stripe_subscription_id === "sub_local658_conflict_invoice_a"
+        && dbRows.events.every((row) => row.stripe_event_id !== "evt_local658_conflict_invoice_b");
+      return {
+        http: paid.status,
+        detail: ok
+          ? `kept sub_local658_conflict_invoice_a, conflicting invoice ${paid.status}, ledger ${amount}`
+          : `FAIL created=${created.status} paid=${paid.status} amount=${amount} stored=${JSON.stringify(stored.rows)} events=${JSON.stringify(dbRows.events)} body=${JSON.stringify(paid.body)}`,
+        db: { stored: stored.rows, ledger: dbRows.ledger, events: dbRows.events },
+      };
+    });
+
     const anon = await fetch(`${API_URL}/rest/v1/credit_ledger?select=id`, {
       headers: { Authorization: `Bearer ${ANON_KEY}`, apikey: ANON_KEY, Accept: "application/json" },
     });
@@ -715,5 +761,5 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
 
     const failed = report.filter((row) => row.status !== "PASS");
     expect(failed, JSON.stringify(failed, null, 2)).toEqual([]);
-  }, 90_000);
+  }, 120_000);
 });

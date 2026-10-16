@@ -11,6 +11,94 @@ const BLOCKING_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"
 /** Double-clicks inside this window share one Stripe idempotency key. */
 const CHECKOUT_IDEMPOTENCY_BUCKET_MS = 600_000;
 
+/**
+ * Stripe rejects a Checkout expires_at sooner than 30 minutes. 31 minutes
+ * stays above that floor. The reservation lease uses the same window so a
+ * crashed create cannot outlive the payable session, and an open session
+ * does not trap a plan switch for 24 hours.
+ */
+const CHECKOUT_SESSION_TTL_SECONDS = 31 * 60;
+const STRIPE_HTTP_TIMEOUT_MS = 20_000;
+
+type ReservationDecision = {
+  action?: string;
+  url?: string;
+  session_id?: string;
+  token?: string;
+  expire_session_id?: string | null;
+  previous_url?: string | null;
+  previous_plan_id?: string | null;
+  previous_price_id?: string | null;
+  previous_expires_at?: string | null;
+};
+
+type ExpireResult = "expired" | "completed" | "error";
+
+async function expireStripeCheckoutSession(
+  stripeKey: string,
+  sessionId: string,
+): Promise<ExpireResult> {
+  try {
+    const response = await fetch(
+      `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}/expire`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${stripeKey}` },
+        signal: AbortSignal.timeout(STRIPE_HTTP_TIMEOUT_MS),
+      },
+    );
+    if (response.ok) return "expired";
+    const body = (await response.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    const message = body?.error?.message ?? "";
+    if (
+      response.status === 404 ||
+      /status of [`']?expired/i.test(message) ||
+      /already expired/i.test(message)
+    ) {
+      return "expired";
+    }
+    if (/status of [`']?complete/i.test(message) || /has been paid/i.test(message)) {
+      return "completed";
+    }
+    return "error";
+  } catch {
+    return "error";
+  }
+}
+
+async function restoreOpenReservation(
+  admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
+  clerkId: string,
+  decision: ReservationDecision,
+): Promise<void> {
+  if (
+    decision.expire_session_id &&
+    decision.token &&
+    decision.previous_plan_id &&
+    decision.previous_price_id &&
+    decision.previous_expires_at
+  ) {
+    await admin.rpc("restore_open_checkout_reservation", {
+      p_clerk_id: clerkId,
+      p_token: decision.token,
+      p_session_id: decision.expire_session_id,
+      p_url: decision.previous_url ?? "",
+      p_plan_id: decision.previous_plan_id,
+      p_price_id: decision.previous_price_id,
+      p_open_until: decision.previous_expires_at,
+    });
+    return;
+  }
+  if (decision.token) {
+    await admin.rpc("abort_checkout_reservation", {
+      p_clerk_id: clerkId,
+      p_token: decision.token,
+    });
+  }
+}
+
 export const runtime = "nodejs";
 
 function getAppUrl(): string {
@@ -106,6 +194,7 @@ async function handler(req: NextRequest) {
 
     let storedCustomerId: string | null = null;
     let reservationToken: string | null = null;
+    let decision: ReservationDecision | null = null;
     const admin = mode === "subscription" ? getSupabaseAdmin() : null;
     if (mode === "subscription") {
       if (!admin) {
@@ -151,18 +240,13 @@ async function handler(req: NextRequest) {
           p_plan_id: plan.id,
           p_price_id: priceId,
           p_now: new Date().toISOString(),
-          p_lease_seconds: 60,
+          p_lease_seconds: CHECKOUT_SESSION_TTL_SECONDS,
         },
       );
       if (reservationError) {
         return NextResponse.json({ error: "Database not configured" }, { status: 503 });
       }
-      const decision = (Array.isArray(reservation) ? reservation[0] : reservation) as {
-        action?: string;
-        url?: string;
-        session_id?: string;
-        token?: string;
-      } | null;
+      decision = (Array.isArray(reservation) ? reservation[0] : reservation) as ReservationDecision | null;
       if (decision?.action === "already_subscribed") {
         return NextResponse.json(
           {
@@ -185,10 +269,36 @@ async function handler(req: NextRequest) {
       if (decision?.action === "reuse" && decision.url) {
         return NextResponse.json({ url: decision.url, sessionId: decision.session_id ?? null });
       }
-      if (decision?.action !== "create" || typeof decision.token !== "string") {
+      if (
+        (decision?.action !== "create" && decision?.action !== "replace") ||
+        typeof decision.token !== "string"
+      ) {
         return NextResponse.json({ error: "Database not configured" }, { status: 503 });
       }
       reservationToken = decision.token;
+      const previousSessionId =
+        typeof decision.expire_session_id === "string" && decision.expire_session_id
+          ? decision.expire_session_id
+          : null;
+      if (previousSessionId) {
+        const expired = await expireStripeCheckoutSession(stripeKey, previousSessionId);
+        if (expired !== "expired") {
+          await restoreOpenReservation(admin, clerkId, decision);
+          if (expired === "completed") {
+            return NextResponse.json(
+              {
+                error: "The previous checkout already completed. Wait for the subscription before starting another plan.",
+                code: "checkout_completed",
+              },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json(
+            { error: "Could not expire the previous checkout session." },
+            { status: 503 },
+          );
+        }
+      }
     }
 
     const params = new URLSearchParams();
@@ -225,7 +335,16 @@ async function handler(req: NextRequest) {
     // Deterministic for the user, price, and a 10-minute bucket. A raw
     // millisecond timestamp made every click a new Stripe session.
     const bucket = Math.floor(Date.now() / CHECKOUT_IDEMPOTENCY_BUCKET_MS);
-    const idempotencyKey = `billing_${clerkId}_${priceId}_${bucket}`;
+    let idempotencyKey = `billing_${clerkId}_${priceId}_${bucket}`;
+    // A replaced or orphaned session in the same 10-minute bucket would
+    // replay the session we just expired if the key stayed the same.
+    if (decision?.expire_session_id) {
+      idempotencyKey += `_after_${decision.expire_session_id}`;
+    }
+    params.append(
+      "expires_at",
+      String(Math.floor(Date.now() / 1000) + CHECKOUT_SESSION_TTL_SECONDS),
+    );
 
     const stripeResponse = await fetch(
       "https://api.stripe.com/v1/checkout/sessions",
@@ -237,6 +356,7 @@ async function handler(req: NextRequest) {
           "Idempotency-Key": idempotencyKey,
         },
         body: params.toString(),
+        signal: AbortSignal.timeout(STRIPE_HTTP_TIMEOUT_MS),
       },
     );
 
@@ -256,7 +376,7 @@ async function handler(req: NextRequest) {
     }
 
     if (admin && reservationToken) {
-      const openUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const openUntil = new Date(Date.now() + CHECKOUT_SESSION_TTL_SECONDS * 1000).toISOString();
       const { data: committed, error: commitError } = await admin.rpc(
         "commit_checkout_reservation",
         {
@@ -268,6 +388,11 @@ async function handler(req: NextRequest) {
         },
       );
       if (commitError || committed !== true) {
+        await expireStripeCheckoutSession(stripeKey, session.id);
+        await admin.rpc("abort_checkout_reservation", {
+          p_clerk_id: clerkId,
+          p_token: reservationToken,
+        });
         return NextResponse.json(
           {
             error: "A checkout is already open. Finish or wait for it to expire before starting another plan.",

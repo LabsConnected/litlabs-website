@@ -641,7 +641,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No webhook secret" }, { status: 500 });
   }
 
-  const stripe = new Stripe(key, { apiVersion: "2025-08-27.basil" });
+  const stripe = new Stripe(key, {
+    apiVersion: "2025-08-27.basil",
+    timeout: 20_000,
+    maxNetworkRetries: 2,
+  });
 
   let event: Stripe.Event;
   try {
@@ -835,7 +839,7 @@ export async function POST(req: NextRequest) {
         const expiredOrderId = expiredMeta.marketplace_order_id;
         const expiresAgentOrder = Boolean(expiredOrderId && expiredMeta.product_type === "agent");
         if (!sb) {
-          if (expiresAgentOrder) {
+          if (expiresAgentOrder || expiredMeta.product_type === "plan") {
             throw new Error(
               `[stripe] checkout.session.expired ${event.id}: admin supabase is not configured`,
             );
@@ -849,6 +853,14 @@ export async function POST(req: NextRequest) {
           if (rpcError) {
             throw new Error(`expire_pending_order failed: ${rpcError.message}`);
           }
+        }
+        const { error: releaseError } = await sb.rpc("release_checkout_reservation", {
+          p_session_id: expiredSession.id,
+        });
+        if (releaseError) {
+          throw new Error(
+            `release_checkout_reservation failed: ${releaseError.message}`,
+          );
         }
         break;
       }
