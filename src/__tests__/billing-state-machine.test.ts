@@ -385,6 +385,7 @@ function buildTrackingSupabase(
   const upserts: { table: string; row: any; onConflict?: string }[] = [];
   const updates: { table: string; patch: any; matches: any[] }[] = [];
   const inserts: { table: string; row: any }[] = [];
+  const deletes: { table: string; matches: { col: string; val: unknown }[] }[] = [];
   const debitedKeys = new Set<string>();
   const grantedKeys = new Set<string>();
   const grantedRefs = new Set<string>();
@@ -497,9 +498,20 @@ function buildTrackingSupabase(
       return { error: null };
     }),
     delete: vi.fn(() => {
+      const matches: { col: string; val: unknown }[] = [];
       const builder: any = {
-        eq: vi.fn(() => builder),
-        then: (resolve: (value: any) => void) => resolve({ error: null }),
+        eq: vi.fn((col: string, val: unknown) => {
+          matches.push({ col, val });
+          return builder;
+        }),
+        then: (resolve: (value: any) => void) => {
+          deletes.push({ table, matches: [...matches] });
+          if (table === "stripe_events") {
+            const id = matches.find((match) => match.col === "stripe_event_id")?.val;
+            if (typeof id === "string") claimedEvents.delete(id);
+          }
+          resolve({ error: null });
+        },
       };
       return builder;
     }),
@@ -558,7 +570,18 @@ function buildTrackingSupabase(
     }),
   };
 
-  return { sb, rpcCalls, upserts, updates, inserts, grantedKeys, debitedKeys, subscriptionState };
+  return {
+    sb,
+    rpcCalls,
+    upserts,
+    updates,
+    inserts,
+    deletes,
+    claimedEvents,
+    grantedKeys,
+    debitedKeys,
+    subscriptionState,
+  };
 }
 
 // ─── Setup/teardown ──────────────────────────────────────────────────
@@ -1730,28 +1753,123 @@ describe("Webhook event processing — state mutations", () => {
     );
   });
 
-  it("invoice.payment_failed returns 500 when a stale status re-read fails", async () => {
+  it.each([
+    ["timeout", Object.assign(new Error("Request aborted due to timeout"), { type: "StripeConnectionError" })],
+    ["http 500", Object.assign(new Error("Internal Server Error"), { statusCode: 500, type: "StripeAPIError" })],
+    ["network", Object.assign(new Error("ECONNRESET"), { type: "StripeConnectionError", code: "ECONNRESET" })],
+  ])(
+    "stale invoice.payment_failed applies nothing when the live re-read fails (%s)",
+    async (_kind, outage) => {
+      const tracked = buildTrackingSupabase(false, {
+        subscriptionPlan: "pro_builder_beta",
+        subscriptionStatus: "incomplete",
+        lastStripeEventCreated: 1792121662,
+        stripeSubscriptionId: "sub_fail_order",
+      });
+      vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+      vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+      mockSubscriptionsRetrieve.mockRejectedValue(outage);
+      mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.payment_failed", {
+        id: "evt_fail_reread",
+        created: 1792121661,
+        object: {
+          id: "in_fail_reread",
+          parent: { subscription_details: { subscription: "sub_fail_order" } },
+        },
+      }));
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      expect(res.status).toBeLessThan(600);
+      expect(tracked.subscriptionState.status).toBe("incomplete");
+      expect(tracked.subscriptionState.plan).toBe("pro_builder_beta");
+      expect(tracked.subscriptionState.last_stripe_event_created).toBe(1792121662);
+      expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+      expect(tracked.updates.filter((row) => row.table === "subscriptions")).toHaveLength(0);
+      expect(tracked.updates.find((row) => row.table === "stripe_events" && row.patch?.result === "processed")).toBeUndefined();
+      expect(tracked.claimedEvents.has("evt_fail_reread")).toBe(false);
+    },
+  );
+
+  it("retries the same payment_failed after a Stripe outage and then sets past_due", async () => {
     const tracked = buildTrackingSupabase(false, {
+      subscriptionPlan: "pro_builder_beta",
       subscriptionStatus: "incomplete",
       lastStripeEventCreated: 1792121662,
       stripeSubscriptionId: "sub_fail_order",
     });
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
-    mockSubscriptionsRetrieve.mockRejectedValue(new Error("stripe down"));
-    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.payment_failed", {
-      id: "evt_fail_reread",
+    mockSubscriptionsRetrieve
+      .mockRejectedValueOnce(Object.assign(new Error("Request aborted due to timeout"), { type: "StripeConnectionError" }))
+      .mockResolvedValueOnce({ id: "sub_fail_order", status: "incomplete" });
+    const failed = makeStripeEvent("invoice.payment_failed", {
+      id: "evt_fail_reread_retry",
       created: 1792121661,
       object: {
-        id: "in_fail_reread",
+        id: "in_fail_reread_retry",
         parent: { subscription_details: { subscription: "sub_fail_order" } },
       },
-    }));
+    });
+    mockConstructEvent.mockReturnValue(failed);
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
-    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
-    expect(res.status).toBe(500);
+    const first = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(first.status).toBe(500);
     expect(tracked.subscriptionState.status).toBe("incomplete");
+    expect(tracked.claimedEvents.has("evt_fail_reread_retry")).toBe(false);
+
+    mockConstructEvent.mockReturnValue(failed);
+    const second = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(second.status).toBe(200);
+    expect((await second.json()).replayed).toBeUndefined();
+    expect(tracked.subscriptionState.status).toBe("past_due");
+    expect(tracked.subscriptionState.plan).toBe("pro_builder_beta");
     expect(tracked.subscriptionState.last_stripe_event_created).toBe(1792121662);
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+    expect(tracked.claimedEvents.get("evt_fail_reread_retry")?.result).toBe("processed");
+  });
+
+  it("a Stripe outage on a stale subscription.updated returns 500 and does not rewind the plan", async () => {
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    const tracked = buildTrackingSupabase(false, {
+      subscriptionPlan: "pro_builder_beta",
+      subscriptionStatus: "active",
+      lastStripeEventCreated: 1710000000,
+      stripeSubscriptionId: "sub_delayed",
+      currentPeriodEnd: new Date(1702678400 * 1000).toISOString(),
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+    const delayed = makeStripeEvent("customer.subscription.updated", {
+      id: "evt_delayed_outage",
+      created: 1700000000,
+      object: {
+        id: "sub_delayed",
+        status: "active",
+        customer: "cus_delayed",
+        metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+        items: { data: [{ price: "price_test_creator", current_period_end: 1702678400 }] },
+      },
+    });
+    mockConstructEvent.mockReturnValue(delayed);
+    mockSubscriptionsRetrieve.mockRejectedValueOnce(
+      Object.assign(new Error("Internal Server Error"), { statusCode: 500, type: "StripeAPIError" }),
+    );
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const first = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(first.status).toBe(500);
+    expect(tracked.subscriptionState.plan).toBe("pro_builder_beta");
+    expect(tracked.subscriptionState.last_stripe_event_created).toBe(1710000000);
+    expect(tracked.upserts.filter((row) => row.table === "subscriptions")).toHaveLength(0);
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+    expect(tracked.claimedEvents.has("evt_delayed_outage")).toBe(false);
+
+    mockConstructEvent.mockReturnValue(delayed);
+    mockSubscriptionsRetrieve.mockResolvedValueOnce({ id: "sub_delayed", status: "active" });
+    const second = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(second.status).toBe(200);
+    expect(tracked.subscriptionState.plan).toBe("pro_builder_beta");
+    expect(tracked.subscriptionState.last_stripe_event_created).toBe(1710000000);
     expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
   });
 
