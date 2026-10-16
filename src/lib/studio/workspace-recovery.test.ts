@@ -33,7 +33,7 @@ vi.mock("@/lib/github-app", () => ({
 }));
 
 import { ensureWorkspaceAlive, normalizeFileError, provisionWorkspaceForProject, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
-import { getProject, updateProjectWorkspace, claimProvisioningLock, ensureCanonicalStudioProject } from "@/lib/projects/project-repository";
+import { getProject, updateProjectWorkspace, claimProvisioningLock, recoverStaleProvisioning, ensureCanonicalStudioProject } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal, prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
 import type { CanonicalProject } from "@/lib/projects/types";
@@ -421,6 +421,53 @@ describe("workspace-recovery", () => {
 
       expect(results).toEqual(["ws-winner", "ws-winner"]);
       expect(prepareWorkspaceInternal).toHaveBeenCalledTimes(1);
+    });
+
+    it("recovers a dead provisioning lock and re-provisions in the same request", async () => {
+      // The interrupted-after() case: create-time provisioning ran
+      // post-response and the process died mid-prepare, leaving
+      // workspace_status="provisioning" with a dead owner. The first
+      // open that observes it must recover the stale lock and provision
+      // — not error after the wait window and force a second request.
+      vi.useFakeTimers();
+      try {
+        let recovered = false;
+        // First call is the pre-claim sweep (5-min window): the lock is
+        // fresh, not stale. The post-deadline call inside
+        // waitForProvisioning (120s window) is the one that recovers.
+        vi.mocked(recoverStaleProvisioning).mockImplementation(
+          async (_p: string, _u: string, maxAgeMs?: number) => {
+            if ((maxAgeMs ?? 300000) <= 120000) {
+              recovered = true;
+              return true;
+            }
+            return false;
+          },
+        );
+        vi.mocked(getProject).mockImplementation(async () =>
+          fakeProject({ workspaceStatus: recovered ? "failed" : "provisioning" }),
+        );
+        vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(
+          fakeProject({ workspaceStatus: "provisioning" }),
+        );
+        vi.mocked(claimProvisioningLock).mockResolvedValue(
+          fakeProject({ workspaceStatus: "provisioning" }),
+        );
+        vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+          ({ workspaceId: "ws-recovered", root: "/data/ws-recovered" }) as unknown as WorkspacePrepareResponse,
+        );
+        vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+
+        const promise = provisionWorkspaceForProject("proj-1", "user-1");
+        // Burn through the 120s observation window instantly.
+        await vi.advanceTimersByTimeAsync(130_000);
+
+        await expect(promise).resolves.toBe("ws-recovered");
+        expect(claimProvisioningLock).toHaveBeenCalledTimes(1);
+        expect(prepareWorkspaceInternal).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("throws when project is not found", async () => {

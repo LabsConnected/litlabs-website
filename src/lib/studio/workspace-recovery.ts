@@ -72,12 +72,19 @@ async function waitForProvisioning(
 
   // The lock owner did not finish in time. Only now is it safe to recover the
   // stale lock and let the caller below attempt one new claim.
-  await recoverStaleProvisioning(projectId, userId, PROVISIONING_WAIT_MS);
+  const recovered = await recoverStaleProvisioning(projectId, userId, PROVISIONING_WAIT_MS);
   const current = await getProject(projectId, userId);
   if (current?.workspaceStatus === "ready" && current.workspaceId) {
     return current.workspaceId;
   }
-  if (current?.workspaceStatus === "failed") {
+  // Only propagate a failure we did not just produce: our own stale-lock
+  // recovery transitions the row to "failed", and throwing here would leave
+  // the recovered project waiting for a SECOND request before anyone can
+  // claim it — the interrupted-create path (post-response after() work
+  // killed mid-prepare) would error on every first open instead of
+  // self-healing. A "failed" status after our recovery falls through so
+  // the caller claims the now-released lock in this same request.
+  if (!recovered && current?.workspaceStatus === "failed") {
     throw workspaceProvisioningError(current);
   }
   return null;

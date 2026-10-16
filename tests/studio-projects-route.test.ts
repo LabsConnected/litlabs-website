@@ -333,4 +333,32 @@ describe("POST /api/studio-projects managed create-time provisioning", () => {
     // In-flight status is reported truthfully, never as ready.
     expect(body.project.workspaceStatus).toBe("provisioning");
   });
+
+  it("documents that repeated create POSTs each insert a project row", async () => {
+    // Boundary characterization, not a prevention claim: create is NOT
+    // server-idempotent — concurrent or retried POSTs each produce a
+    // project row (each with its own workspace). The prompt 201 removes
+    // the phantom-failure retry, and client-side in-flight refs cover
+    // same-page resubmits; cross-tab/manual retries still duplicate.
+    // True dedupe needs a client idempotency key — tracked follow-up.
+    mocks.createBlankProject
+      .mockResolvedValueOnce({ id: "proj-dup-1" })
+      .mockResolvedValueOnce({ id: "proj-dup-2" });
+    mocks.provisionWorkspaceForProject.mockResolvedValue("ws");
+    mocks.getProject.mockImplementation(async (id: string) => ({
+      id,
+      workspaceStatus: "not_prepared",
+    }));
+
+    const [res1, res2] = await Promise.all([
+      POST(request(managedBody)),
+      POST(request(managedBody)),
+    ]);
+
+    expect(res1.status).toBe(201);
+    expect(res2.status).toBe(201);
+    expect(mocks.createBlankProject).toHaveBeenCalledTimes(2);
+    const [body1, body2] = await Promise.all([res1.json(), res2.json()]);
+    expect(body1.project.id).not.toBe(body2.project.id);
+  });
 });
