@@ -241,8 +241,12 @@ function simulateApplySubscriptionEvent(
   }
   const plan = params?.p_update_plan ? params?.p_plan : state.plan;
   const periodEnd = params?.p_period_end ?? state.current_period_end;
-  const lastEvent =
-    stored === null || !Number.isFinite(stored) || incoming >= stored ? incoming : stored;
+  const keepClock = params?.p_ordering === "apply" && !params?.p_update_plan;
+  const lastEvent = keepClock
+    ? stored
+    : stored === null || !Number.isFinite(stored) || incoming >= stored
+      ? incoming
+      : stored;
   const wroteActive =
     params?.p_status_policy === "activate_unless_terminal" &&
     status === "active" &&
@@ -1683,8 +1687,72 @@ describe("Webhook event processing — state mutations", () => {
     expect(res.status).toBe(200);
     expect(tracked.upserts.filter((row) => row.table === "subscriptions")).toHaveLength(0);
     expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
-    expect(warn.mock.calls.some((call) => String(call[0]).includes("skipping stale subscription event"))).toBe(true);
+    expect(warn.mock.calls.some((call) => String(call[0]).includes("plan is unchanged"))).toBe(true);
+    expect(tracked.subscriptionState.plan).toBe("pro_builder_beta");
+    expect(tracked.subscriptionState.last_stripe_event_created).toBe(1710000000);
     warn.mockRestore();
+  });
+
+  it("invoice.payment_failed one second before subscription.created still sets past_due", async () => {
+    const tracked = buildTrackingSupabase(false, {
+      subscriptionPlan: "pro_builder_beta",
+      subscriptionStatus: "incomplete",
+      lastStripeEventCreated: 1792121662,
+      stripeSubscriptionId: "sub_fail_order",
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+    mockSubscriptionsRetrieve.mockResolvedValue({
+      id: "sub_fail_order",
+      status: "incomplete",
+    });
+    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.payment_failed", {
+      id: "evt_1UR1uUR6p33q6IGf0iIqiY3g",
+      created: 1792121661,
+      object: {
+        id: "in_fail_order",
+        parent: { subscription_details: { subscription: "sub_fail_order" } },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(tracked.subscriptionState.status).toBe("past_due");
+    expect(tracked.subscriptionState.plan).toBe("pro_builder_beta");
+    expect(tracked.subscriptionState.last_stripe_event_created).toBe(1792121662);
+    expect(tracked.subscriptionState.stripe_subscription_id).toBe("sub_fail_order");
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+    expect(tracked.inserts.filter((row) => row.table === "billing_subscription_conflicts")).toHaveLength(0);
+    expect(mockSubscriptionsRetrieve).toHaveBeenCalledWith(
+      "sub_fail_order",
+      undefined,
+      { timeout: 8000 },
+    );
+  });
+
+  it("invoice.payment_failed returns 500 when a stale status re-read fails", async () => {
+    const tracked = buildTrackingSupabase(false, {
+      subscriptionStatus: "incomplete",
+      lastStripeEventCreated: 1792121662,
+      stripeSubscriptionId: "sub_fail_order",
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+    mockSubscriptionsRetrieve.mockRejectedValue(new Error("stripe down"));
+    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.payment_failed", {
+      id: "evt_fail_reread",
+      created: 1792121661,
+      object: {
+        id: "in_fail_reread",
+        parent: { subscription_details: { subscription: "sub_fail_order" } },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(500);
+    expect(tracked.subscriptionState.status).toBe("incomplete");
+    expect(tracked.subscriptionState.last_stripe_event_created).toBe(1792121662);
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
   });
 
   it("a downgrade in the next second applies when updated_at is a later wall clock", async () => {

@@ -134,13 +134,75 @@ async function applySubscriptionEvent(
   }
   if (outcome === "stale") {
     console.warn(
-      `[stripe] ${args.event.type} ${args.event.id}: skipping stale subscription event created ${eventCreatedSeconds(args.event)}; last applied Stripe event is newer`,
+      `[stripe] ${args.event.type} ${args.event.id}: subscription clock is newer than ${eventCreatedSeconds(args.event)}; plan is unchanged, status is reconciled from the live subscription`,
     );
   }
   return {
     outcome,
     existingSubscriptionId: row?.existing_subscription_id,
   };
+}
+
+/**
+ * A newer subscription event must not erase an invoice status, and a stale
+ * event must not be acknowledged until the live Stripe status is stored.
+ * This write does not change the plan and does not move
+ * last_stripe_event_created, so an older plan change still cannot land.
+ */
+async function readLiveSubscription(
+  stripe: Stripe,
+  event: Stripe.Event,
+  subscriptionId: string,
+): Promise<Stripe.Subscription> {
+  try {
+    return await stripe.subscriptions.retrieve(subscriptionId, undefined, {
+      timeout: 8000,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    throw new Error(
+      `[stripe] ${event.type} ${event.id}: live subscription re-read failed: ${message}`,
+    );
+  }
+}
+
+async function applyReconciledStatus(
+  sb: AdminClient,
+  event: Stripe.Event,
+  userId: string,
+  subscriptionId: string,
+  status: string,
+): Promise<void> {
+  const decision = await applySubscriptionEvent(sb, {
+    userId,
+    incomingSubscriptionId: subscriptionId,
+    event,
+    authoritative: true,
+    ordering: "apply",
+    requireExisting: true,
+    plan: null,
+    status,
+    updatePlan: false,
+    statusPolicy: "write",
+    liveStatus: status,
+    stripeCustomerId: null,
+    periodStart: null,
+    periodEnd: null,
+    cancelAtPeriodEnd: null,
+    incomingPlan: null,
+    grantMode: "none",
+    grantAmount: null,
+    grantIdempotencyKey: null,
+    grantDescription: null,
+    grantReferenceId: null,
+    grantExpiresAt: null,
+    skipGrantIdempotencyKey: null,
+  });
+  if (decision.outcome !== "applied") {
+    throw new Error(
+      `[stripe] ${event.type} ${event.id}: status ${status} was not applied (${decision.outcome})`,
+    );
+  }
 }
 
 function isMissingRow(error: DbError): boolean {
@@ -992,7 +1054,18 @@ export async function POST(req: NextRequest) {
             grantExpiresAt: null,
             skipGrantIdempotencyKey: null,
           });
-          if (decision.outcome === "stale" || decision.outcome === "applied") {
+          if (decision.outcome === "applied") {
+            settled = true;
+            break;
+          }
+          if (decision.outcome === "stale") {
+            const live = await readLiveSubscription(stripe, event, sub.id);
+            if (!live.status) {
+              throw new Error(
+                `[stripe] ${event.type} ${event.id}: live subscription has no status`,
+              );
+            }
+            await applyReconciledStatus(sb, event, subUserId, sub.id, live.status);
             settled = true;
             break;
           }
@@ -1041,7 +1114,7 @@ export async function POST(req: NextRequest) {
             `[stripe] customer.subscription.deleted ${delSub.id}: no subscription row`,
           );
         }
-        await applySubscriptionEvent(sb, {
+        const deleted = await applySubscriptionEvent(sb, {
           userId: delMatch.user_id,
           incomingSubscriptionId: delSub.id,
           event,
@@ -1066,6 +1139,19 @@ export async function POST(req: NextRequest) {
           grantExpiresAt: null,
           skipGrantIdempotencyKey: null,
         });
+        if (deleted.outcome === "stale") {
+          const live = await readLiveSubscription(stripe, event, delSub.id);
+          if (!live.status) {
+            throw new Error(
+              `[stripe] customer.subscription.deleted ${event.id}: live subscription has no status`,
+            );
+          }
+          await applyReconciledStatus(sb, event, delMatch.user_id, delSub.id, live.status);
+        } else if (deleted.outcome !== "applied") {
+          throw new Error(
+            `[stripe] customer.subscription.deleted ${event.id}: cancellation was not applied`,
+          );
+        }
         break;
       }
 
@@ -1283,7 +1369,7 @@ export async function POST(req: NextRequest) {
         }
         const { data: failMatch, error: failLookupError } = await sb
           .from("subscriptions")
-          .select("user_id")
+          .select("user_id, status, last_stripe_event_created")
           .eq("stripe_subscription_id", failSubId)
           .single();
         if (failLookupError && !isMissingRow(failLookupError)) {
@@ -1296,7 +1382,7 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.payment_failed ${event.id}: no subscription row for ${failSubId}`,
           );
         }
-        await applySubscriptionEvent(sb, {
+        const failed = await applySubscriptionEvent(sb, {
           userId: failMatch.user_id,
           incomingSubscriptionId: failSubId,
           event,
@@ -1321,6 +1407,38 @@ export async function POST(req: NextRequest) {
           grantExpiresAt: null,
           skipGrantIdempotencyKey: null,
         });
+        if (failed.outcome === "stale") {
+          // subscription.created can be one second newer and leave the row
+          // incomplete. That clock must not drop this status. A live
+          // active, trialing, or ended subscription still wins over past_due.
+          const live = await readLiveSubscription(stripe, event, failSubId);
+          const liveStatus = live.status ?? "";
+          const superseding = new Set([
+            "active",
+            "trialing",
+            "canceled",
+            "incomplete_expired",
+            "unpaid",
+            "paused",
+          ]);
+          const status = superseding.has(liveStatus) ? liveStatus : "past_due";
+          if (!status) {
+            throw new Error(
+              `[stripe] invoice.payment_failed ${event.id}: live subscription has no status`,
+            );
+          }
+          await applyReconciledStatus(
+            sb,
+            event,
+            failMatch.user_id,
+            failSubId,
+            status,
+          );
+        } else if (failed.outcome !== "applied") {
+          throw new Error(
+            `[stripe] invoice.payment_failed ${event.id}: past_due was not applied`,
+          );
+        }
         break;
       }
 
