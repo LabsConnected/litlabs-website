@@ -145,7 +145,11 @@ test.describe.serial("Setup: User A creates test resources", () => {
 
   test("User A can create a project", async ({ request }) => {
     const res = await request.post("/api/studio-projects", {
-      data: { name: `isolation-test-${Date.now()}` },
+      data: {
+        sourceType: "blank",
+        name: `isolation-test-${Date.now()}`,
+        templateId: "blank-static",
+      },
     });
     // Accept 200 or 201
     expect([200, 201]).toContain(res.status());
