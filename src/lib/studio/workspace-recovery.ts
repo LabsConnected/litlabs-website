@@ -5,6 +5,7 @@ import {
   claimProvisioningLock,
   recoverStaleProvisioning,
   ensureCanonicalStudioProject,
+  touchProvisioningHeartbeat,
 } from "@/lib/projects/project-repository";
 import {
   getWorkspaceInternal,
@@ -33,6 +34,39 @@ export interface RecoveredWorkspace {
 
 const PROVISIONING_POLL_MS = 500;
 const PROVISIONING_WAIT_MS = 120_000;
+
+/**
+ * How often the lock owner bumps the row while a prepare is in flight.
+ * The heartbeat is the liveness signal that distinguishes "actively
+ * provisioning" from "the process holding this lock is gone".
+ */
+export const PROVISIONING_HEARTBEAT_MS = 10_000;
+
+/**
+ * A "provisioning" row whose updated_at has not moved in this long is
+ * dead: the owner crashed, was redeployed, or its invocation was killed
+ * mid-prepare. Comfortably above the heartbeat interval so transient
+ * write slowness never gets a live job reclaimed by an observer.
+ */
+export const PROVISIONING_LOCK_DEAD_MS = 45_000;
+
+/**
+ * Beat the provisioning lock while this process owns it. Returns a stop
+ * function — the caller must invoke it when the prepare settles.
+ *
+ * Only the claim winner may run this: the heartbeat is conditioned on
+ * workspace_status='provisioning', so an observer firing it would keep a
+ * dead owner's lock looking alive forever.
+ */
+function startProvisioningHeartbeat(projectId: string, userId: string, provisioningToken: string): () => void {
+  const timer = setInterval(() => {
+    void touchProvisioningHeartbeat(projectId, userId, provisioningToken);
+  }, PROVISIONING_HEARTBEAT_MS);
+  // The heartbeat must never keep a Node process alive by itself
+  // (tests, one-shot scripts).
+  (timer as { unref?: () => void }).unref?.();
+  return () => clearInterval(timer);
+}
 
 function workspaceProvisioningError(project: CanonicalProject): Error {
   return new Error(project.workspaceError || "Workspace provisioning failed");
@@ -67,6 +101,25 @@ async function waitForProvisioning(
       throw workspaceProvisioningError(current);
     }
     if (current.workspaceStatus !== "provisioning") return null;
+
+    // Dead-owner detection. A live owner heartbeats updated_at while its
+    // prepare runs; a row frozen past the dead-lock window means the
+    // process holding the lock is gone (crash, redeploy, killed
+    // invocation). Recover it now — inside the observation loop, not
+    // after the full wait — and return null so the caller claims the
+    // freed lock itself. recoverStaleProvisioning's conditional UPDATE
+    // only matches a row that is still stale, so an owner that heartbeats
+    // between our read and the reclaim is never touched.
+    const lockAgeMs = Date.now() - Date.parse(current.updatedAt);
+    if (lockAgeMs > PROVISIONING_LOCK_DEAD_MS) {
+      const recovered = await recoverStaleProvisioning(
+        projectId,
+        userId,
+        PROVISIONING_LOCK_DEAD_MS,
+      );
+      if (recovered) return null;
+    }
+
     await new Promise((resolve) => setTimeout(resolve, PROVISIONING_POLL_MS));
   }
 
@@ -222,8 +275,11 @@ export async function provisionWorkspaceForProject(
     });
   }
 
-  // Recover stale provisioning locks before attempting a fresh claim.
-  await recoverStaleProvisioning(projectId, userId);
+  // Recover dead provisioning locks before attempting a fresh claim.
+  // Live owners heartbeat updated_at, so the dead-lock window — not the
+  // old 5-minute timeout — is the safe reclaim threshold: an interrupted
+  // lock frees in ~45s instead of hanging every caller for 120s+.
+  await recoverStaleProvisioning(projectId, userId, PROVISIONING_LOCK_DEAD_MS);
 
   // Ensure the project exists as a canonical studio_projects row.
   let canonical: CanonicalProject;
@@ -260,7 +316,15 @@ export async function provisionWorkspaceForProject(
     owner = retryClaim;
   }
 
-  // We own the lock — provision the workspace.
+  // We own the lock — provision the workspace. The heartbeat proves
+  // liveness to observers for the whole prepare: without it a prepare
+  // running longer than the dead-lock window looks identical to a crashed
+  // process and gets reclaimed mid-flight.
+  const provisioningToken = owner?.workspaceProvisioningToken;
+  if (!provisioningToken) {
+    throw new Error("Workspace provisioning claim did not return an ownership token");
+  }
+  const stopHeartbeat = startProvisioningHeartbeat(projectId, userId, provisioningToken);
   try {
     // Use the row returned by the atomic claim so adoption hints and source
     // metadata cannot come from the stale pre-lock read.
@@ -319,6 +383,8 @@ export async function provisionWorkspaceForProject(
       await updateProjectWorkspace(projectId, userId, {
         workspaceStatus: "failed",
         workspaceError: "Project has no valid source for workspace provisioning",
+        workspaceProvisioningToken: null,
+        expectedProvisioningToken: provisioningToken,
       });
       throw new Error("Project has no valid source for workspace provisioning");
     }
@@ -330,6 +396,8 @@ export async function provisionWorkspaceForProject(
       workspaceBranch: result.branch ?? null,
       workspacePreparedAt: new Date().toISOString(),
       workspaceError: null,
+      workspaceProvisioningToken: null,
+      expectedProvisioningToken: provisioningToken,
     });
     if (!persisted) {
       throw new Error("Workspace provisioned but the project record could not be persisted");
@@ -342,12 +410,16 @@ export async function provisionWorkspaceForProject(
       await updateProjectWorkspace(projectId, userId, {
         workspaceStatus: "failed",
         workspaceError: message,
+        workspaceProvisioningToken: null,
+        expectedProvisioningToken: provisioningToken,
       });
     } catch {
       // The write failure is already logged inside updateProjectWorkspace —
       // don't let it mask the provisioning error being rethrown below.
     }
     throw new Error(message);
+  } finally {
+    stopHeartbeat();
   }
 }
 

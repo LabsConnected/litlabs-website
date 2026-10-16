@@ -1,9 +1,24 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getProject } from "@/lib/projects/project-repository";
 import type { ProjectRuntimeState, RuntimePhase, ProjectRuntimeError } from "@/lib/projects/runtime-state";
 import { describeProjectSource } from "@/lib/projects/project-source";
+import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+
+const FAILED_RECOVERY_BACKOFF_MS = 30_000;
+const STALE_PROVISIONING_MS = 45_000;
+
+function scheduleWorkspaceRecovery(projectId: string, userId: string): void {
+  after(() =>
+    provisionWorkspaceForProject(projectId, userId).catch((err) => {
+      console.error(
+        `[project-runtime] background workspace recovery failed for ${projectId}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }),
+  );
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,16 +97,36 @@ export async function GET(request: NextRequest) {
   const workspaceStatus = project.workspaceStatus;
   const workspacePath = project.workspaceRoot;
 
+  // Runtime polling is the Studio's always-on recovery path. It kicks
+  // never-started work immediately, retries a failed attempt only after
+  // the same backoff used by GET /workspace, and only observes a healthy
+  // provisioning owner while its heartbeat keeps updated_at fresh. This
+  // prevents every 15s poll from creating another worker.
+  const updatedAtMs = Date.parse(project.updatedAt);
+  const ageMs = Number.isNaN(updatedAtMs) ? Number.POSITIVE_INFINITY : Date.now() - updatedAtMs;
+  const recoveryDue =
+    project.workspaceStatus === "not_prepared" ||
+    (project.workspaceStatus === "failed" && ageMs > FAILED_RECOVERY_BACKOFF_MS) ||
+    (project.workspaceStatus === "provisioning" && ageMs > STALE_PROVISIONING_MS);
+  if (recoveryDue) scheduleWorkspaceRecovery(project.id, userId);
+
   // Determine workspace phase
   let phase: RuntimePhase;
   let error: ProjectRuntimeError | undefined;
 
   if (!workspaceId) {
     phase = "workspace_not_provisioned";
+    const isPreparing = workspaceStatus === "provisioning" || workspaceStatus === "preparing";
+    const isFailed = workspaceStatus === "failed" || workspaceStatus === "error";
     error = {
-      code: "WORKSPACE_NOT_PROVISIONED",
-      message: `Source for "${project.name}" has not been provisioned yet. LiTT will prepare it — no GitHub repository is required.`,
-      recoveryAction: "provision_workspace",
+      code: isFailed ? "WORKSPACE_PROVISIONING_FAILED" : isPreparing ? "WORKSPACE_PROVISIONING" : "WORKSPACE_NOT_PROVISIONED",
+      message: isFailed
+        ? (project.workspaceError ?? "Workspace preparation failed. Retry to try again.")
+        : isPreparing
+          ? "Workspace is preparing. This will update automatically."
+          : `Source for "${project.name}" has not been provisioned yet. LiTT will prepare it — no GitHub repository is required.`,
+      recoveryAction: isFailed ? "retry_workspace" : "provision_workspace",
+      ...(isFailed ? { recoveryHref: "/settings" } : {}),
     };
   } else if (workspaceStatus !== "ready") {
     phase = "workspace_not_ready";
@@ -111,7 +146,7 @@ export async function GET(request: NextRequest) {
   const state: ProjectRuntimeState = {
     phase,
     executionAvailable: phase === "ready", // hook will refine with terminal state
-    workspaceProvisioned: Boolean(workspaceId),
+    workspaceProvisioned: Boolean(workspaceId) && workspaceStatus === "ready",
     terminalConnected: false, // client-side hook sets this
     terminalServerReachable: false, // client-side hook sets this
     projectId: project.id,

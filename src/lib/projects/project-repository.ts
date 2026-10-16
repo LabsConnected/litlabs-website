@@ -9,6 +9,7 @@
  * - Neither table is dropped or destructively migrated
  */
 
+import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase";
 import { studioLog } from "@/lib/studio/logger";
 import {
@@ -160,12 +161,55 @@ export async function createBlankProject(
 }
 
 /**
+ * Thrown when a create would violate the one-project-per-repository
+ * invariant. Carries the already-connected project so callers can surface
+ * an actionable 409 instead of a raw constraint error.
+ */
+export class ProjectConflictError extends Error {
+  readonly existing: CanonicalProject;
+  constructor(existing: CanonicalProject) {
+    super(
+      `Repository ${existing.githubFullName ?? ""} is already connected as project "${existing.name}".`,
+    );
+    this.name = "ProjectConflictError";
+    this.existing = existing;
+  }
+}
+
+/** Find the canonical project a user already connected for a repository. */
+export async function findProjectByGithubRepository(
+  userId: string,
+  githubRepositoryId: number,
+): Promise<CanonicalProject | null> {
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("github_repository_id", githubRepositoryId)
+    .eq("is_system", false)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to check for an existing project: ${error.message}`);
+  }
+  return data ? rowToCanonical(data as StudioProjectRow) : null;
+}
+
+/**
  * Create a GitHub-backed project in the canonical studio_projects table.
  * Does NOT touch the legacy `projects` table.
+ * Throws ProjectConflictError when the repository is already connected.
  */
 export async function createGithubProject(
   input: CreateGithubProjectInput,
 ): Promise<CanonicalProject> {
+  const existing = await findProjectByGithubRepository(
+    input.userId,
+    input.githubRepositoryId,
+  );
+  if (existing) {
+    throw new ProjectConflictError(existing);
+  }
+
   const slug = input.slug || slugify(input.githubRepo);
 
   const insert: Record<string, unknown> = {
@@ -193,6 +237,16 @@ export async function createGithubProject(
     .single();
 
   if (error || !data) {
+    // Unique-race fallback: another request connected the same repository
+    // between the pre-check and this insert. Report it as a conflict, not
+    // a raw Postgres error.
+    if (error?.code === "23505") {
+      const winner = await findProjectByGithubRepository(
+        input.userId,
+        input.githubRepositoryId,
+      );
+      if (winner) throw new ProjectConflictError(winner);
+    }
     throw new Error(`Failed to create project: ${error?.message ?? "unknown error"}`);
   }
 
@@ -410,6 +464,9 @@ export async function updateProjectWorkspace(
     workspaceBranch?: string | null;
     workspaceError?: string | null;
     workspacePreparedAt?: string;
+    workspaceProvisioningToken?: string | null;
+    /** Require this provisioning attempt to still own the row. */
+    expectedProvisioningToken?: string;
   },
 ): Promise<CanonicalProject | null> {
   const update: Record<string, unknown> = {
@@ -423,15 +480,19 @@ export async function updateProjectWorkspace(
   if (updates.workspaceError !== undefined) update.workspace_error = updates.workspaceError;
   if (updates.workspacePreparedAt !== undefined)
     update.workspace_prepared_at = updates.workspacePreparedAt;
+  if (updates.workspaceProvisioningToken !== undefined)
+    update.workspace_provisioning_token = updates.workspaceProvisioningToken;
 
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from(TABLE)
     .update(update)
     .eq("id", projectId)
     .eq("user_id", userId)
-    .eq("is_system", false)
-    .select()
-    .maybeSingle();
+    .eq("is_system", false);
+  if (updates.expectedProvisioningToken !== undefined) {
+    query = query.eq("workspace_provisioning_token", updates.expectedProvisioningToken);
+  }
+  const { data, error } = await query.select().maybeSingle();
 
   if (data) {
     return rowToCanonical(data as StudioProjectRow);
@@ -706,11 +767,13 @@ export async function claimProvisioningLock(
   projectId: string,
   userId: string,
 ): Promise<CanonicalProject | null> {
+  const provisioningToken = randomUUID();
   const { data, error } = await supabaseAdmin
     .from(TABLE)
     .update({
       workspace_status: "provisioning",
       workspace_error: null,
+      workspace_provisioning_token: provisioningToken,
       updated_at: new Date().toISOString(),
     })
     .eq("id", projectId)
@@ -783,6 +846,7 @@ export async function recoverStaleProvisioning(
     .update({
       workspace_status: "failed",
       workspace_error: newError,
+      workspace_provisioning_token: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", projectId)
@@ -800,6 +864,43 @@ export async function recoverStaleProvisioning(
     return false;
   }
   return true;
+}
+
+/**
+ * Heartbeat for a held provisioning lock.
+ *
+ * The lock owner calls this on an interval while prepareWorkspaceInternal
+ * is in flight. It only bumps updated_at while the row is still
+ * "provisioning" — it cannot resurrect a lock that already settled or was
+ * recovered, and it is what lets recoverStaleProvisioning use a short
+ * dead-lock window without ever reclaiming an actively running job: a
+ * live owner's row stays fresh, a dead one's freezes.
+ */
+export async function touchProvisioningHeartbeat(
+  projectId: string,
+  userId: string,
+  provisioningToken: string,
+): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .eq("is_system", false)
+    .eq("workspace_status", "provisioning")
+    .eq("workspace_provisioning_token", provisioningToken)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    studioLog("touchProvisioningHeartbeat:update_error", {
+      projectId,
+      userId,
+      errorClass: error.message,
+    });
+    return false;
+  }
+  return Boolean(data);
 }
 
 /**
