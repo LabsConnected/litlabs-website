@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { createManagedStudioProject } from "@/lib/projects/create-project-request";
+import { createManagedStudioProject, newIdempotencyKey } from "@/lib/projects/create-project-request";
 import ProjectNameDialog from "@/app/(app)/studio/components/ProjectNameDialog";
 import {
   ArrowRight,
@@ -58,6 +58,9 @@ export default function ProjectsPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // One idempotency key per dialog submission; retries of the same
+  // submission reuse it and get the row they already made.
+  const createIdempotencyKeyRef = useRef<string | null>(null);
   const [query, setQuery] = useState("");
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [lastOpenedId, setLastOpenedId] = useState<string | null>(null);
@@ -118,12 +121,22 @@ export default function ProjectsPage() {
       if (creatingProject) return;
       setCreatingProject(true);
       setCreateError(null);
+      createIdempotencyKeyRef.current ??= newIdempotencyKey();
       try {
-        const project = await createManagedStudioProject({ name, getToken });
+        const project = await createManagedStudioProject({
+          name,
+          getToken,
+          idempotencyKey: createIdempotencyKeyRef.current,
+        });
+        // Close the dialog immediately so a pending navigation cannot
+        // accept a second submission; the busy flag stays set until this
+        // submission fully resolves.
+        setCreateDialogOpen(false);
         router.push(`/studio?project=${encodeURIComponent(project.id)}`);
+        setCreatingProject(false);
+        createIdempotencyKeyRef.current = null;
       } catch (err) {
         setCreateError(err instanceof Error ? err.message : "Couldn't create your project. Try again.");
-      } finally {
         setCreatingProject(false);
       }
     },

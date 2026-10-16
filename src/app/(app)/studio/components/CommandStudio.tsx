@@ -30,7 +30,7 @@ import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
 import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_OPEN_FILE, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
 import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
-import { createManagedStudioProject } from "@/lib/projects/create-project-request";
+import { createManagedStudioProject, newIdempotencyKey } from "@/lib/projects/create-project-request";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 import {
   isOnboardingComplete,
@@ -1416,6 +1416,11 @@ function CommandStudioContent() {
   }, []);
 
   const [creatingProject, setCreatingProject] = useState(false);
+  // One idempotency key per create submission: held in a ref so a retry
+  // of the same submission (after a lost response or transient failure)
+  // reuses the key and gets the project it already made instead of a
+  // duplicate. Reset on success so the next submission is distinct.
+  const createIdempotencyKeyRef = useRef<string | null>(null);
 
   // Auto-reveal the dock Activity tab when LiTT starts executing,
   // without stealing focus. This does NOT call .focus() on any
@@ -1820,8 +1825,14 @@ function CommandStudioContent() {
     if (creatingProject) return;
     setCreatingProject(true);
     setProjectCreateError(null);
+    createIdempotencyKeyRef.current ??= newIdempotencyKey();
     try {
-      const project = await createManagedStudioProject({ name, templateId: "blank-static", getToken });
+      const project = await createManagedStudioProject({
+        name,
+        templateId: "blank-static",
+        getToken,
+        idempotencyKey: createIdempotencyKeyRef.current,
+      });
       // Persist the new project ID to localStorage immediately so that
       // the conversation controller can find it via getActiveProjectId's
       // localStorage fallback. The key is scoped by user.
@@ -1852,6 +1863,7 @@ function CommandStudioContent() {
       setStudioMode("work");
       setWorkSurface("conversation");
       setProjectNameDialogOpen(false);
+      createIdempotencyKeyRef.current = null;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Network error while creating project.";
       setProjectCreateError(msg);

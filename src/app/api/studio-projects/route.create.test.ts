@@ -178,7 +178,6 @@ describe("blank creation", () => {
       name: "My Site",
       templateId: "blank-static",
       accessMode: "private",
-      dedupeWithinMs: 30_000,
     });
     expect(mockProvision).toHaveBeenCalledWith("p1", USER);
     const payload = await res.json();
@@ -193,6 +192,59 @@ describe("blank creation", () => {
     );
     expect(res.status).toBe(201);
     expect((await res.json()).project.workspaceStatus).toBe("failed");
+  });
+
+  it("passes the submission's idempotencyKey through to the repository", async () => {
+    const res = await POST(
+      req("POST", {
+        sourceType: "blank",
+        name: "My Site",
+        templateId: "blank-static",
+        idempotencyKey: "sub-abc-123",
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockCreateBlank).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: "sub-abc-123" }),
+    );
+  });
+
+  it("a same-key retry returns the project the first submission made", async () => {
+    // The repository enforces uniqueness at the DB level; the mock
+    // models the row the first (already committed) attempt created.
+    mockCreateBlank
+      .mockResolvedValueOnce({ id: "p1", name: "My Site" } as never)
+      .mockResolvedValueOnce({ id: "p1", name: "My Site" } as never);
+    const first = await POST(
+      req("POST", { sourceType: "blank", name: "My Site", templateId: "blank-static", idempotencyKey: "sub-abc-123" }),
+    );
+    const second = await POST(
+      req("POST", { sourceType: "blank", name: "My Site", templateId: "blank-static", idempotencyKey: "sub-abc-123" }),
+    );
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect((await first.json()).project.id).toBe("p1");
+    expect((await second.json()).project.id).toBe("p1");
+    expect(mockCreateBlank).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: "sub-abc-123" }),
+    );
+  });
+
+  it("400s on an invalid idempotencyKey", async () => {
+    const res = await POST(
+      req("POST", { sourceType: "blank", name: "My Site", templateId: "blank-static", idempotencyKey: 42 }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockCreateBlank).not.toHaveBeenCalled();
+    const tooLong = await POST(
+      req("POST", {
+        sourceType: "blank",
+        name: "My Site",
+        templateId: "blank-static",
+        idempotencyKey: "x".repeat(200),
+      }),
+    );
+    expect(tooLong.status).toBe(400);
   });
 });
 

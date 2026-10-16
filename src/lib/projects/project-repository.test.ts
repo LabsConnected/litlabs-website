@@ -23,11 +23,19 @@ vi.mock("@/lib/supabase", () => {
     // When true, the first github_repository_id=4242 lookup reports "free"
     // and subsequent lookups see the connected row — simulates a create race.
     _simulateCreateRace: false,
-    // When true, a non-single select filtered by slug returns a recent
-    // same-slug row — simulates the project a repeated create made already.
-    _simulateDuplicateCreate: false,
     // Counts awaited insert() queries so tests can prove no row was minted.
     _insertCount: 0,
+    // Committed rows keyed by idempotency_key — models the state that
+    // persists across separate create attempts (the unique index).
+    _keyStore: new Map<string, Record<string, unknown>>(),
+    // Number of upcoming idempotency-key selects that miss before the
+    // key store is consulted — models the pre-check of a create that
+    // lost the concurrent-insert race.
+    _idempotencyMissCount: 0,
+    // When true, the next insert carrying an idempotency key returns
+    // 23505 and commits a winner row — the losing request in a race.
+    _insertConflictArmed: false,
+    _lastInsert: null as Record<string, unknown> | null,
 
     from(table: string) {
       this._table = table;
@@ -43,9 +51,10 @@ vi.mock("@/lib/supabase", () => {
       this._selectColumns = cols ?? "*";
       return this;
     },
-    insert() {
+    insert(values: Record<string, unknown>) {
       this._method = "insert";
       this._insertCount++;
+      this._lastInsert = values;
       return this;
     },
     update() {
@@ -103,50 +112,19 @@ vi.mock("@/lib/supabase", () => {
       const userIdFilter = this._filters.find((f) => f.column === "user_id");
       const idFilter = this._filters.find((f) => f.column === "id");
 
-      // Dedupe lookup: non-single select filtered by slug. Only returns a
-      // row when the test simulates a project the repeated create made.
-      if (this._method === "select" && !this._isMaybeSingle && !this._isSingle) {
-        const slugFilter = this._filters.find((f) => f.column === "slug");
-        if (slugFilter && this._simulateDuplicateCreate) {
-          this._simulateDuplicateCreate = false;
+      // Idempotency pre-check / post-conflict select: maybeSingle scoped
+      // by idempotency_key. Misses armed by _idempotencyMissCount model
+      // a create whose pre-check ran before the winner committed.
+      if (this._method === "select") {
+        const keyFilter = this._filters.find((f) => f.column === "idempotency_key");
+        if (keyFilter && (this._isMaybeSingle || this._isSingle)) {
+          if (this._idempotencyMissCount > 0) {
+            this._idempotencyMissCount--;
+            resolve({ data: null, error: null });
+            return;
+          }
           resolve({
-            data: [
-              {
-                id: "proj-deduped",
-                user_id: "user-A",
-                name: "Test Project",
-                slug: "test-project",
-                source_type: "blank",
-                access_mode: "private",
-                template_id: "blank-static",
-                github_installation_id: null,
-                github_repository_id: null,
-                github_owner: null,
-                github_repo: null,
-                github_full_name: null,
-                github_default_branch: null,
-                github_branch: null,
-                latest_commit_sha: null,
-                workspace_id: null,
-                workspace_status: "not_prepared",
-                workspace_root: null,
-                workspace_error: null,
-                workspace_prepared_at: null,
-                runtime_status: "stopped",
-                preview_url: null,
-                runtime_error: null,
-                framework: "static",
-                package_manager: "none",
-                root_directory: ".",
-                development_command: null,
-                build_command: null,
-                test_command: null,
-                install_command: null,
-                workspace_type: "website",
-                created_at: "2024-01-01T00:00:00Z",
-                updated_at: "2024-01-01T00:00:00Z",
-              },
-            ],
+            data: this._keyStore.get(keyFilter.value as string) ?? null,
             error: null,
           });
           return;
@@ -219,6 +197,31 @@ vi.mock("@/lib/supabase", () => {
           // createBlankProject inserts without eq filters, so detect that
           // case by the absence of id/userId filters and return a canonical row.
           if (!userIdFilter && !idFilter && this._isSingle) {
+            // Unique-key enforcement: a same-key row already committed, or
+            // a race armed by _insertConflictArmed, fails this insert with
+            // 23505 — the winner's row stays in the key store so the
+            // loser's post-conflict select finds it.
+            const insertKey = this._lastInsert?.idempotency_key as string | null | undefined;
+            if (insertKey && (this._insertConflictArmed || this._keyStore.has(insertKey))) {
+              this._insertConflictArmed = false;
+              if (!this._keyStore.has(insertKey)) {
+                this._keyStore.set(insertKey, idempotencyRow(insertKey));
+              }
+              resolve({
+                data: null,
+                error: {
+                  code: "23505",
+                  message: "duplicate key value violates unique constraint studio_projects_idempotency_key_uq",
+                },
+              });
+              return;
+            }
+            if (insertKey) {
+              const row = idempotencyRow(insertKey);
+              this._keyStore.set(insertKey, row);
+              resolve({ data: row, error: null });
+              return;
+            }
             resolve({
               data: {
                 id: "proj-new",
@@ -383,12 +386,53 @@ import { rowToCanonical, type StudioProjectRow } from "./types";
 import { supabaseAdmin } from "@/lib/supabase";
 import { studioLog } from "@/lib/studio/logger";
 
+function idempotencyRow(key: string): Record<string, unknown> {
+  return {
+    id: `proj-idem-${key}`,
+    user_id: "user-A",
+    name: "Test Project",
+    slug: "test-project",
+    source_type: "blank",
+    access_mode: "private",
+    template_id: "blank-static",
+    github_installation_id: null,
+    github_repository_id: null,
+    github_owner: null,
+    github_repo: null,
+    github_full_name: null,
+    github_default_branch: null,
+    github_branch: null,
+    latest_commit_sha: null,
+    workspace_id: null,
+    workspace_status: "not_prepared",
+    workspace_root: null,
+    workspace_error: null,
+    workspace_prepared_at: null,
+    runtime_status: "stopped",
+    preview_url: null,
+    runtime_error: null,
+    framework: "static",
+    package_manager: "none",
+    root_directory: ".",
+    development_command: null,
+    build_command: null,
+    test_command: null,
+    install_command: null,
+    workspace_type: "website",
+    idempotency_key: key,
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+  };
+}
+
 const supabaseMock = supabaseAdmin as unknown as {
   _injectError: { message: string; code?: string } | null;
   _injectErrorAfterQueries: number;
   _simulateCreateRace: boolean;
-  _simulateDuplicateCreate: boolean;
   _insertCount: number;
+  _keyStore: Map<string, Record<string, unknown>>;
+  _idempotencyMissCount: number;
+  _insertConflictArmed: boolean;
 };
 
 describe("project-repository ownership enforcement", () => {
@@ -397,8 +441,10 @@ describe("project-repository ownership enforcement", () => {
     supabaseMock._injectError = null;
     supabaseMock._injectErrorAfterQueries = 0;
     supabaseMock._simulateCreateRace = false;
-    supabaseMock._simulateDuplicateCreate = false;
     supabaseMock._insertCount = 0;
+    supabaseMock._keyStore.clear();
+    supabaseMock._idempotencyMissCount = 0;
+    supabaseMock._insertConflictArmed = false;
   });
 
   describe("getProject", () => {
@@ -659,30 +705,103 @@ describe("project-repository ownership enforcement", () => {
     });
   });
 
-  describe("createBlankProject — idempotent create (dedupeWithinMs)", () => {
-    it("returns the recently created same-slug project instead of inserting a duplicate", async () => {
-      supabaseMock._simulateDuplicateCreate = true;
-      const insertsBefore = supabaseMock._insertCount;
-      const project = await createBlankProject({
+  describe("createBlankProject — database-backed idempotency key", () => {
+    it("a retried submission with the same key returns the project it already made — no second insert", async () => {
+      const first = await createBlankProject({
         userId: "user-A",
         name: "Test Project",
         templateId: "blank-static",
-        dedupeWithinMs: 30_000,
+        idempotencyKey: "sub-1",
       });
-      expect(project.id).toBe("proj-deduped");
-      expect(supabaseMock._insertCount).toBe(insertsBefore);
+      expect(first.id).toBe("proj-idem-sub-1");
+      const insertsAfterFirst = supabaseMock._insertCount;
+
+      const retried = await createBlankProject({
+        userId: "user-A",
+        name: "Test Project",
+        templateId: "blank-static",
+        idempotencyKey: "sub-1",
+      });
+      expect(retried.id).toBe(first.id);
+      expect(supabaseMock._insertCount).toBe(insertsAfterFirst);
     });
 
-    it("inserts normally when no recent same-slug project exists", async () => {
-      const insertsBefore = supabaseMock._insertCount;
-      const project = await createBlankProject({
+    it("two different keys with identical names produce two distinct projects", async () => {
+      const a = await createBlankProject({
         userId: "user-A",
         name: "Test Project",
         templateId: "blank-static",
-        dedupeWithinMs: 30_000,
+        idempotencyKey: "sub-1",
+      });
+      const b = await createBlankProject({
+        userId: "user-A",
+        name: "Test Project",
+        templateId: "blank-static",
+        idempotencyKey: "sub-2",
+      });
+      expect(a.id).not.toBe(b.id);
+      expect(supabaseMock._insertCount).toBe(2);
+    });
+
+    it("different templates and access modes never coalesce — keys differ per submission", async () => {
+      const a = await createBlankProject({
+        userId: "user-A",
+        name: "Shared Name",
+        templateId: "blank-static",
+        accessMode: "private",
+        idempotencyKey: "sub-private",
+      });
+      const b = await createBlankProject({
+        userId: "user-A",
+        name: "Shared Name",
+        templateId: "nextjs",
+        accessMode: "shared",
+        idempotencyKey: "sub-shared",
+      });
+      expect(a.id).not.toBe(b.id);
+      expect(supabaseMock._insertCount).toBe(2);
+    });
+
+    it("atomic race path: an insert-time 23505 resolves to the winner's committed row", async () => {
+      // Models two concurrent same-key POSTs: the loser pre-checks before
+      // the winner commits (miss), its insert then conflicts (23505),
+      // and the post-conflict select returns the winner's row — one
+      // project total, both callers get the same id.
+      supabaseMock._idempotencyMissCount = 1;
+      supabaseMock._insertConflictArmed = true;
+
+      const loser = await createBlankProject({
+        userId: "user-A",
+        name: "Test Project",
+        templateId: "blank-static",
+        idempotencyKey: "race-key",
+      });
+      expect(loser.id).toBe("proj-idem-race-key");
+      // Exactly one attempted insert — the loser's — and no second row.
+      expect(supabaseMock._insertCount).toBe(1);
+    });
+
+    it("a genuine conflict with no winner still surfaces as an error", async () => {
+      supabaseMock._injectError = { message: "duplicate key value", code: "23505" };
+      supabaseMock._injectErrorAfterQueries = 1; // let the pre-check pass, fail the insert
+      await expect(
+        createBlankProject({
+          userId: "user-A",
+          name: "Test Project",
+          templateId: "blank-static",
+          idempotencyKey: "ghost-key",
+        }),
+      ).rejects.toThrow(/Failed to create project/);
+    });
+
+    it("inserts without a key for programmatic callers (canvas promote, agent tools)", async () => {
+      const project = await createBlankProject({
+        userId: "user-A",
+        name: "Programmatic",
+        templateId: "blank-static",
       });
       expect(project.id).toBe("proj-new");
-      expect(supabaseMock._insertCount).toBe(insertsBefore + 1);
+      expect(supabaseMock._insertCount).toBe(1);
     });
   });
 

@@ -492,11 +492,14 @@ describe("CommandStudio — New project journey", () => {
           (init as RequestInit | undefined)?.method === "POST",
       );
       expect(posts).toHaveLength(1);
-      expect(JSON.parse((posts[0][1] as RequestInit).body as string)).toMatchObject({
+      const body = JSON.parse((posts[0][1] as RequestInit).body as string);
+      expect(body).toMatchObject({
         sourceType: "blank",
         name: "Landing revamp",
         templateId: "blank-static",
       });
+      expect(typeof body.idempotencyKey).toBe("string");
+      expect(body.idempotencyKey.length).toBeGreaterThan(0);
     });
 
     await waitFor(() => {

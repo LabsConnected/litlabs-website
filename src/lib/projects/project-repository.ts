@@ -121,29 +121,29 @@ export async function createBlankProject(
   const name = normalizeProjectName(input.name);
   const slug = slugify(name) || `project-${Date.now()}`;
 
-  // Idempotent create: a repeated submission of the same project —
-  // double click, network retry, or two concurrent POSTs that resolve
-  // sequentially — must not mint a second project. The slug is derived
-  // deterministically from the name, so a same-slug row created inside
-  // the dedupe window IS the same logical request. The UI-layer busy
-  // guards cover in-flight repeats; this closes the sequential-retry gap
-  // the guards can't see.
-  if (input.dedupeWithinMs && input.dedupeWithinMs > 0) {
-    const { data: recent } = await supabaseAdmin
+  // Idempotent create: the caller supplies one key per user submission
+  // and reuses it only for retries of the SAME submission. The partial
+  // unique index on (user_id, idempotency_key) makes the guarantee
+  // database-backed rather than heuristic: a same-key row is the project
+  // this submission already made, so return it instead of inserting.
+  const idempotencyKey =
+    typeof input.idempotencyKey === "string" && input.idempotencyKey.trim()
+      ? input.idempotencyKey.trim()
+      : null;
+  if (idempotencyKey) {
+    const { data: existing } = await supabaseAdmin
       .from(TABLE)
       .select("*")
       .eq("user_id", input.userId)
-      .eq("slug", slug)
-      .gte("created_at", new Date(Date.now() - input.dedupeWithinMs).toISOString())
-      .order("created_at", { ascending: false })
-      .limit(1);
-    const existing = Array.isArray(recent) ? recent[0] : null;
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
     if (existing) {
       return rowToCanonical(existing as StudioProjectRow);
     }
   }
 
   const insert: Record<string, unknown> = {
+    idempotency_key: idempotencyKey,
     user_id: input.userId,
     name,
     slug,
@@ -176,6 +176,21 @@ export async function createBlankProject(
     .single();
 
   if (error || !data) {
+    // 23505 unique_violation: a concurrent create carrying the same
+    // submission key committed between our pre-check and this insert.
+    // The winner IS the project this submission already made — fetch and
+    // return it instead of surfacing a conflict error to a retry.
+    if (idempotencyKey && (error as { code?: string } | null)?.code === "23505") {
+      const { data: existing } = await supabaseAdmin
+        .from(TABLE)
+        .select("*")
+        .eq("user_id", input.userId)
+        .eq("idempotency_key", idempotencyKey)
+        .maybeSingle();
+      if (existing) {
+        return rowToCanonical(existing as StudioProjectRow);
+      }
+    }
     throw new Error(`Failed to create project: ${error?.message ?? "unknown error"}`);
   }
 

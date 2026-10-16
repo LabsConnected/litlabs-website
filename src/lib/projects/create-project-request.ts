@@ -15,6 +15,7 @@ export async function createManagedStudioProject(input: {
   name: string;
   templateId?: ProjectTemplateId;
   getToken?: () => Promise<string | null>;
+  idempotencyKey?: string;
 }): Promise<{ id: string; name: string; workspaceStatus?: string | null }> {
   const token = await input.getToken?.();
   const res = await fetch("/api/studio-projects", {
@@ -28,6 +29,7 @@ export async function createManagedStudioProject(input: {
       sourceType: "blank",
       name: input.name,
       templateId: input.templateId ?? "blank-static",
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
     }),
   });
   const payload = (await res.json().catch(() => ({}))) as {
@@ -42,6 +44,19 @@ export async function createManagedStudioProject(input: {
     name: payload.project.name ?? input.name,
     workspaceStatus: payload.project.workspaceStatus ?? null,
   };
+}
+
+/**
+ * One unique key per user "New project" submission. Generate it lazily
+ * inside a stable ref at the create call-site so retries of the SAME
+ * submission reuse the key (and get the project they already made)
+ * while a genuinely new submission — dialog reopened, new prompt —
+ * gets a fresh key. The database enforces uniqueness per user.
+ */
+export function newIdempotencyKey(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 /**

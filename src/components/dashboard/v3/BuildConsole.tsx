@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Code2,
@@ -16,6 +16,7 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import {
   createManagedStudioProject,
   deriveProjectNameFromPrompt,
+  newIdempotencyKey,
 } from "@/lib/projects/create-project-request";
 
 /**
@@ -46,6 +47,9 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
   const [prompt, setPrompt] = useState(initialPrompt);
   const [isRouting, setIsRouting] = useState(false);
   const [routingMessage, setRoutingMessage] = useState<string | null>(null);
+  // One idempotency key per create submission; a retry of the SAME
+  // submission reuses it and is served the project it already made.
+  const createIdempotencyKeyRef = useRef<string | null>(null);
 
   // Deep links (e.g. the legacy /create redirect) can pre-fill the composer.
   useEffect(() => {
@@ -58,22 +62,25 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
     if (!text || isRouting) return;
     setIsRouting(true);
     setRoutingMessage(null);
-    let planId: string | undefined;
-    let primaryIntent: string | undefined;
+    let payload: {
+      type?: "intent" | "clarification";
+      request?: { question?: string };
+      result?: { primaryIntent?: string; action?: string };
+      plan?: { id?: string };
+      error?: string;
+    };
     try {
       const response = await fetch("/api/litt/intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: text }),
       });
-      const payload = (await response.json()) as {
-        type?: "intent" | "clarification";
-        request?: { question?: string };
-        result?: { primaryIntent?: string };
-        plan?: { id?: string };
-        error?: string;
-      };
-      if (!response.ok) throw new Error(payload.error || "LiTT could not route that request.");
+      payload = (await response.json()) as typeof payload;
+      if (!response.ok) {
+        setRoutingMessage(payload.error || "LiTT could not route that request — try again.");
+        setIsRouting(false);
+        return;
+      }
       if (payload.type === "clarification") {
         setRoutingMessage(
           payload.request?.question || "Tell LiTT what you want to work on.",
@@ -81,38 +88,59 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
         setIsRouting(false);
         return;
       }
-      primaryIntent = payload.result?.primaryIntent;
-      planId = payload.plan?.id;
     } catch {
-      // Intent router unreachable — still create the project and hand the
-      // raw prompt to Studio instead of leaving the user on a dead button.
-    }
-    try {
-      // Create the project BEFORE navigating: /studio?prompt=… without an
-      // explicit ?project= resolves to the most-recently-touched project,
-      // which silently attached "create something new" runs to an existing
-      // one. The new project id is pinned in the URL so the prompt can
-      // only ever land in the project this submission created.
-      const project = await createManagedStudioProject({
-        name: deriveProjectNameFromPrompt(text),
-        templateId: "blank-static",
-        getToken,
-      });
-      const params = new URLSearchParams({
-        tool: "chat",
-        prompt: text,
-        project: project.id,
-      });
-      if (primaryIntent) params.set("intent", primaryIntent);
-      if (planId) params.set("planId", planId);
-      router.push(`/studio?${params.toString()}`);
-    } catch (err) {
-      setRoutingMessage(
-        err instanceof Error ? err.message : "Couldn't create your project. Try again.",
-      );
-    } finally {
+      // The router could not tell a build request from a chat request —
+      // creating a project or redirecting into an existing one would be a
+      // silent misroute, so surface a retryable error instead of guessing.
+      setRoutingMessage("LiTT could not route that request — try again.");
       setIsRouting(false);
+      return;
     }
+
+    const primaryIntent = payload.result?.primaryIntent;
+    const planId = payload.plan?.id;
+    const action = payload.result?.action;
+
+    // Build requests ("create"/"generate") mint a project first and pin
+    // its id in the Studio URL — ?prompt= alone would resolve to the
+    // most-recently-touched project and run inside it. Other actions
+    // (edit, fix, continue, analyze, deploy, publish) target the user's
+    // existing work: route the prompt into Studio against the current
+    // project without minting an empty project.
+    if (action === "create" || action === "generate") {
+      createIdempotencyKeyRef.current ??= newIdempotencyKey();
+      try {
+        const project = await createManagedStudioProject({
+          name: deriveProjectNameFromPrompt(text),
+          templateId: "blank-static",
+          getToken,
+          idempotencyKey: createIdempotencyKeyRef.current,
+        });
+        const params = new URLSearchParams({
+          tool: "chat",
+          prompt: text,
+          project: project.id,
+        });
+        if (primaryIntent) params.set("intent", primaryIntent);
+        if (planId) params.set("planId", planId);
+        router.push(`/studio?${params.toString()}`);
+        createIdempotencyKeyRef.current = null;
+      } catch (err) {
+        setRoutingMessage(
+          err instanceof Error ? err.message : "Couldn't create your project. Try again.",
+        );
+        setIsRouting(false);
+      }
+      // On success isRouting intentionally stays true: the button must
+      // not accept a second submission while the navigation is pending.
+      return;
+    }
+
+    const params = new URLSearchParams({ tool: "chat", prompt: text });
+    if (primaryIntent) params.set("intent", primaryIntent);
+    if (planId) params.set("planId", planId);
+    router.push(`/studio?${params.toString()}`);
+    // Same here: isRouting stays true until the page unmounts.
   };
 
   return (

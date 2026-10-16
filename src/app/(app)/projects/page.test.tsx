@@ -91,7 +91,10 @@ describe("/projects — New project", () => {
         (init as RequestInit | undefined)?.method === "POST",
     );
     expect(createCalls).toHaveLength(1);
-    expect(JSON.parse((createCalls[0][1] as RequestInit).body as string).name).toBe("Landing revamp");
+    const body = JSON.parse((createCalls[0][1] as RequestInit).body as string);
+    expect(body.name).toBe("Landing revamp");
+    expect(typeof body.idempotencyKey).toBe("string");
+    expect(body.idempotencyKey.length).toBeGreaterThan(0);
   });
 
   it("shows the create error in the dialog and does not navigate", async () => {
