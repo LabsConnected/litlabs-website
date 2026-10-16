@@ -261,6 +261,12 @@ describe("Dashboard v3 — universal composer", () => {
     expect(src).toContain('id="dashboard-guided-start"');
   });
 
+  it("offers real prompt examples that fill the canonical composer", () => {
+    expect(src).toContain("EXAMPLE_PROMPTS");
+    expect(src).toContain("Try a brief");
+    expect(src).toContain("setPrompt(example)");
+  });
+
   it("uses the LIME canonical accent", () => {
     expect(src).toContain("#a8ff2f");
     expect(src).not.toContain("#a78bfa");
