@@ -11,7 +11,9 @@
 -- before checkout reservations, 20261015170000 before the duplicate
 -- subscription guard, and 20261015180000 before settle/sweep. The replaced
 -- claim function reads settled_at, so the column and the function ship
--- together.
+-- together. Apply 20261015200000 before the webhook that calls
+-- apply_subscription_event. That webhook returns 500 when the function
+-- is missing.
 --
 --   1. supabase/migrations/20261014000000_subscriptions_stripe_subscription_id_unique.sql
 --   2. supabase/migrations/20261015000000_subscriptions_cancel_at_period_end.sql
@@ -20,11 +22,15 @@
 --   5. supabase/migrations/20261015160000_checkout_reservations.sql
 --   6. supabase/migrations/20261015170000_billing_subscription_conflicts.sql
 --   7. supabase/migrations/20261015180000_media_cap_hold_expiry.sql
+--   8. supabase/migrations/20261015200000_apply_subscription_event.sql
 --
 -- Preflight (this file):
 --   - public.users and public.generation_jobs exist
 --   - no duplicate non-null stripe_subscription_id values
 --     (the unique index migration fails closed if any exist)
+--   - no user has more than one protected subscription row
+--     (status other than canceled or incomplete_expired, with a
+--     subscription id). The partial unique index fails closed if any exist.
 --
 -- Rollback, after the application code that depends on them is reverted:
 --   20261014000000:
@@ -51,6 +57,9 @@
 --     DROP FUNCTION IF EXISTS public.settle_media_cap_hold(uuid, text, timestamptz);
 --     ALTER TABLE public.media_cap_holds DROP COLUMN IF EXISTS settled_at;
 --     Restore claim_media_cap_slot from 20261015120000_media_cap_holds.sql.
+--   20261015200000:
+--     DROP FUNCTION IF EXISTS public.apply_subscription_event(uuid, text, text, text, bigint, boolean, text, boolean, text, text, boolean, text, text, text, timestamptz, timestamptz, boolean, text, text, integer, text, text, text, timestamptz, text, jsonb);
+--     DROP INDEX IF EXISTS public.subscriptions_one_protected_per_user;
 
 DO $$
 DECLARE
@@ -83,5 +92,19 @@ BEGIN
   ) duplicates;
   IF dup_count > 0 THEN
     RAISE EXCEPTION 'precheck failed: % duplicate stripe_subscription_id values; do not apply 20261014000000', dup_count;
+  END IF;
+
+  SELECT count(*) INTO dup_count FROM (
+    SELECT user_id
+    FROM public.subscriptions
+    WHERE stripe_subscription_id IS NOT NULL
+      AND stripe_subscription_id <> ''
+      AND status IS NOT NULL
+      AND status NOT IN ('canceled', 'incomplete_expired')
+    GROUP BY user_id
+    HAVING count(*) > 1
+  ) protected_duplicates;
+  IF dup_count > 0 THEN
+    RAISE EXCEPTION 'precheck failed: % users have more than one protected subscription; do not apply 20261015200000', dup_count;
   END IF;
 END $$;

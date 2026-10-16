@@ -28,37 +28,119 @@ function isUniqueViolation(error: DbError): boolean {
   );
 }
 
-const BLOCKING_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"]);
-
-function heldSubscriptionBlocksIncoming(
-  existing: { status?: string | null; stripe_subscription_id?: string | null } | null | undefined,
-  incomingId: string,
-): boolean {
-  const held = existing?.stripe_subscription_id;
-  if (typeof held !== "string" || held.length === 0 || held === incomingId) return false;
-  return BLOCKING_SUBSCRIPTION_STATUSES.has(existing?.status ?? "");
+function subscriptionAllowances(): Record<string, number> {
+  const allowances: Record<string, number> = {};
+  for (const plan of Object.values(PLANS)) {
+    allowances[plan.id] = subscriptionCreditAllowance(plan.id);
+  }
+  return allowances;
 }
 
-async function recordSubscriptionConflict(
+function unixSecondsToIso(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return new Date(value * 1000).toISOString();
+}
+
+type ApplyOutcome = "applied" | "conflict" | "stale" | "recheck";
+
+/**
+ * One locked transaction decides identity, plan, ordering, and the grant.
+ * conflict and any database error throw, so the claim is released and
+ * Stripe retries. A conflict row committed by the function is not a 200.
+ */
+async function applySubscriptionEvent(
   sb: AdminClient,
-  row: {
-    user_id: string;
-    existing_subscription_id: string;
-    incoming_subscription_id: string;
-    stripe_event_id: string;
-    event_type: string;
-    incoming_plan: string | null;
+  args: {
+    userId: string;
+    incomingSubscriptionId: string;
+    event: Stripe.Event;
+    authoritative: boolean;
+    ordering: "skip_if_older" | "apply";
+    requireExisting: boolean;
+    plan: string | null;
+    status: string | null;
+    updatePlan: boolean;
+    statusPolicy: "write" | "activate_unless_terminal" | "leave";
+    liveStatus: string | null;
+    stripeCustomerId: string | null;
+    periodStart: string | null;
+    periodEnd: string | null;
+    cancelAtPeriodEnd: boolean | null;
+    incomingPlan: string | null;
+    grantMode: "none" | "upgrade_delta" | "invoice_full";
+    grantAmount: number | null;
+    grantIdempotencyKey: string | null;
+    grantDescription: string | null;
+    grantReferenceId: string | null;
+    grantExpiresAt: string | null;
+    skipGrantIdempotencyKey: string | null;
   },
-): Promise<void> {
-  const { error } = await sb.from("billing_subscription_conflicts").insert(row);
-  if (error && !isUniqueViolation(error)) {
+): Promise<{ outcome: ApplyOutcome; existingSubscriptionId?: string }> {
+  const { data, error } = await sb.rpc("apply_subscription_event", {
+    p_user_id: args.userId,
+    p_incoming_subscription_id: args.incomingSubscriptionId,
+    p_stripe_event_id: args.event.id,
+    p_event_type: args.event.type,
+    p_event_created: eventCreatedSeconds(args.event),
+    p_authoritative: args.authoritative,
+    p_ordering: args.ordering,
+    p_require_existing: args.requireExisting,
+    p_plan: args.plan,
+    p_status: args.status,
+    p_update_plan: args.updatePlan,
+    p_status_policy: args.statusPolicy,
+    p_live_status: args.liveStatus,
+    p_stripe_customer_id: args.stripeCustomerId,
+    p_period_start: args.periodStart,
+    p_period_end: args.periodEnd,
+    p_cancel_at_period_end: args.cancelAtPeriodEnd,
+    p_incoming_plan: args.incomingPlan,
+    p_grant_mode: args.grantMode,
+    p_grant_amount: args.grantAmount,
+    p_grant_idempotency_key: args.grantIdempotencyKey,
+    p_grant_description: args.grantDescription,
+    p_grant_reference_id: args.grantReferenceId,
+    p_grant_expires_at: args.grantExpiresAt,
+    p_skip_grant_idempotency_key: args.skipGrantIdempotencyKey,
+    p_allowances: subscriptionAllowances(),
+  });
+  if (error) {
     throw new Error(
-      `[stripe] ${row.stripe_event_id}: could not record duplicate subscription ${row.incoming_subscription_id}: ${error.message}`,
+      `[stripe] ${args.event.type} ${args.event.id}: apply_subscription_event failed: ${error.message}`,
     );
   }
-  console.error(
-    `[stripe] ${row.event_type} ${row.stripe_event_id}: kept ${row.existing_subscription_id}; refused overwrite by ${row.incoming_subscription_id}`,
-  );
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { outcome?: string; existing_subscription_id?: string }
+    | null
+    | undefined;
+  const outcome = row?.outcome;
+  if (
+    outcome !== "applied" &&
+    outcome !== "conflict" &&
+    outcome !== "stale" &&
+    outcome !== "recheck"
+  ) {
+    throw new Error(
+      `[stripe] ${args.event.type} ${args.event.id}: apply_subscription_event returned no outcome`,
+    );
+  }
+  if (outcome === "conflict") {
+    console.error(
+      `[stripe] ${args.event.type} ${args.event.id}: kept ${row?.existing_subscription_id}; refused overwrite by ${args.incomingSubscriptionId}`,
+    );
+    throw new Error(
+      `[stripe] ${args.event.type} ${args.event.id}: duplicate subscription ${args.incomingSubscriptionId} conflicts with ${row?.existing_subscription_id ?? "the stored subscription"}`,
+    );
+  }
+  if (outcome === "stale") {
+    console.warn(
+      `[stripe] ${args.event.type} ${args.event.id}: skipping stale subscription event created ${eventCreatedSeconds(args.event)}; last applied Stripe event is newer`,
+    );
+  }
+  return {
+    outcome,
+    existingSubscriptionId: row?.existing_subscription_id,
+  };
 }
 
 function isMissingRow(error: DbError): boolean {
@@ -203,51 +285,11 @@ function requireSubscriptionGrantPlan(
   return resolved;
 }
 
-/**
- * Statuses a late invoice.paid must not overwrite with "active".
- * `refunded` is local-only (plan refunds); the others match Stripe.
- */
-const TERMINAL_SUBSCRIPTION_STATUSES = new Set([
-  "canceled",
-  "past_due",
-  "unpaid",
-  "incomplete_expired",
-  "refunded",
-]);
-
-/** Live Stripe statuses that mean "do not mark this subscription active". */
-const LIVE_NON_ACTIVE_STATUSES = new Set([
-  "canceled",
-  "past_due",
-  "unpaid",
-  "incomplete",
-  "incomplete_expired",
-  "paused",
-]);
-
-function eventCreatedMs(event: Stripe.Event): number {
-  return eventCreatedSeconds(event) * 1000;
-}
-
 /** Stripe `event.created` is whole seconds. Missing values use the current second. */
 function eventCreatedSeconds(event: Stripe.Event): number {
   return typeof event.created === "number" && event.created > 0
     ? Math.floor(event.created)
     : Math.floor(Date.now() / 1000);
-}
-
-function eventTimestamp(event: Stripe.Event): string {
-  return new Date(eventCreatedMs(event)).toISOString();
-}
-
-/** PostgREST may return bigint as a number or a string. */
-function storedStripeEventSeconds(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return Math.floor(value);
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return Math.floor(parsed);
-  }
-  return null;
 }
 
 type ListedRefund = { id: string; amount: number; created: number };
@@ -311,53 +353,6 @@ function refundsInSnapshot(
   }
   if (sum !== amountRefunded || covered.length === 0) return [];
   return covered;
-}
-
-function periodEndSeconds(value: string | number | null | undefined): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value) {
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) return Math.floor(parsed / 1000);
-  }
-  return null;
-}
-
-async function ledgerHasIdempotencyKey(
-  sb: AdminClient,
-  userId: string,
-  key: string,
-): Promise<boolean> {
-  const { data, error } = await sb
-    .from("credit_ledger")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("idempotency_key", key)
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    throw new Error(`[stripe] ledger lookup failed for ${key}: ${error.message}`);
-  }
-  return !!data;
-}
-
-async function ledgerHasReference(
-  sb: AdminClient,
-  userId: string,
-  referenceId: string,
-): Promise<boolean> {
-  const { data, error } = await sb
-    .from("credit_ledger")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("reference_id", referenceId)
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    throw new Error(
-      `[stripe] ledger lookup failed for ${referenceId}: ${error.message}`,
-    );
-  }
-  return !!data;
 }
 
 async function refundAlreadyDebited(
@@ -629,46 +624,6 @@ async function debitCreditsOrThrow(
     | undefined;
   if (!row || row.success !== true) {
     throw new Error(`[stripe] ${context}: debit_credits returned success=false`);
-  }
-}
-
-async function grantSubscriptionCredits(
-  sb: NonNullable<ReturnType<typeof getAdminSupabase>>,
-  userId: string,
-  planId: PlanId,
-  idempotencyKey: string,
-  expiresAt?: string | null,
-  referenceId?: string,
-): Promise<void> {
-  const plan = PLANS[planId];
-  if (!plan || plan.monthlyCredits <= 0) return;
-  try {
-    // Supabase rpc() returns { data, error } — it does NOT throw on a
-    // database error. Both must be treated as failures.
-    const { error: rpcError } = await sb.rpc("grant_credits", {
-      p_user_id: userId,
-      p_amount: plan.monthlyCredits,
-      p_category: "subscription_grant",
-      p_balance_bucket: "monthly",
-      p_description: `${plan.name} monthly grant — ${plan.monthlyCredits} LiTTBits`,
-      p_idempotency_key: idempotencyKey,
-      p_reference_type: "subscription",
-      p_reference_id: referenceId,
-      p_expires_at: expiresAt ?? undefined,
-    });
-    if (rpcError) {
-      throw new Error(`grant_credits RPC error: ${rpcError.message}`);
-    }
-  } catch (err) {
-    // Log AND propagate: a failed grant must surface as HTTP 500 so Stripe
-    // retries. The per-invoice idempotency key makes retries safe (the RPC
-    // returns granted=false instead of double-granting). Swallowing here
-    // would permanently leave the customer without purchased credits.
-    console.error(
-      `[stripe] grantSubscriptionCredits failed for user ${userId} plan ${planId}:`,
-      err,
-    );
-    throw err;
   }
 }
 
@@ -982,132 +937,71 @@ export async function POST(req: NextRequest) {
             `[stripe] ${event.type} ${sub.id}: cannot resolve the customer to a user`,
           );
         }
-        const { data: existingSub, error: existingError } = await sb
-          .from("subscriptions")
-          .select("plan, status, stripe_subscription_id, current_period_end, last_stripe_event_created")
-          .eq("user_id", subUserId)
-          .maybeSingle();
-        if (existingError) {
-          throw new Error(
-            `[stripe] ${event.type} ${event.id}: could not read the current subscription: ${existingError.message}`,
-          );
-        }
-        // Order by the Stripe event second last applied to this row.
-        // updated_at is the app wall clock and can land after a later
-        // event.created (whole seconds), which dropped real downgrades.
-        const storedEventSeconds = storedStripeEventSeconds(
-          existingSub?.last_stripe_event_created,
-        );
-        const incomingSeconds = eventCreatedSeconds(event);
-        if (storedEventSeconds !== null && incomingSeconds < storedEventSeconds) {
-          console.warn(
-            `[stripe] ${event.type} ${event.id}: skipping stale subscription event created ${incomingSeconds}; last applied Stripe event ${storedEventSeconds}`,
-          );
-          // A strictly older event is not a required update. The newer one
-          // already wrote the row. Acknowledging it stops a useless retry.
-          break;
-        }
-        // Same second: the payload and a sibling event are unordered.
-        // The live subscription is the one to write.
+        // Identity, ordering, the plan write, and any upgrade delta run in
+        // one locked transaction. A conflict throws so this delivery is 500.
         let applied = sub;
-        if (storedEventSeconds !== null && incomingSeconds === storedEventSeconds) {
-          try {
-            applied = await stripe.subscriptions.retrieve(sub.id, undefined, {
-              timeout: 8000,
-            });
-          } catch (readErr) {
-            const message = readErr instanceof Error ? readErr.message : "unknown error";
-            throw new Error(
-              `[stripe] ${event.type} ${event.id}: same-second subscription re-read failed: ${message}`,
-            );
-          }
-        }
-        if (heldSubscriptionBlocksIncoming(existingSub, sub.id)) {
-          await recordSubscriptionConflict(sb, {
-            user_id: subUserId,
-            existing_subscription_id: existingSub?.stripe_subscription_id as string,
-            incoming_subscription_id: sub.id,
-            stripe_event_id: event.id,
-            event_type: event.type,
-            incoming_plan: subPlanId,
-          });
-          eventResult = "duplicate_subscription";
-          break;
-        }
-        const appliedMeta = applied.metadata || {};
-        const planId = resolveSubscriptionPlan(
-          (appliedMeta.plan_id as PlanId) || subPlanId,
-          priceIdFromSubscription(applied),
-          `${event.type} ${sub.id}`,
-        );
-        // Grant the upgrade difference before writing the new plan. A retry
-        // after a failed upsert still sees the old plan; the idempotency key
-        // makes a second grant a no-op. Created events do not grant — the
-        // first invoice.paid grants the full period. Downgrades grant nothing
-        // until the next renewal.
-        if (event.type === "customer.subscription.updated") {
-          const previous = subscriptionCreditAllowance(existingSub?.plan);
-          const next = subscriptionCreditAllowance(planId);
-          const periodEnd = applied.items?.data?.[0]?.current_period_end ?? "na";
-          const storedPeriod = periodEndSeconds(existingSub?.current_period_end);
-          const incomingPeriod = periodEndSeconds(
-            applied.items?.data?.[0]?.current_period_end,
+        let authoritative = false;
+        let settled = false;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const appliedMeta = applied.metadata || {};
+          const planId = resolveSubscriptionPlan(
+            (appliedMeta.plan_id as PlanId) || subPlanId,
+            priceIdFromSubscription(applied),
+            `${event.type} ${sub.id}`,
           );
-          // A new period is a renewal. invoice.paid grants that period once.
-          // The delta is only the mid-cycle top-up, while the period end stays put.
-          const periodRolled =
-            storedPeriod !== null &&
-            incomingPeriod !== null &&
-            storedPeriod !== incomingPeriod;
-          if (!periodRolled && previous > 0 && next > previous) {
-            const delta = next - previous;
-            const periodRef = `period_plan_${sub.id}_${periodEnd}_${planId}`;
-            // A renewal invoice for this same period and plan already paid
-            // the allowance. Do not add the delta on top.
-            if (!(await ledgerHasReference(sb, subUserId, periodRef))) {
-              const { error: upgradeError } = await sb.rpc("grant_credits", {
-                p_user_id: subUserId,
-                p_amount: delta,
-                p_category: "subscription_grant",
-                p_balance_bucket: "monthly",
-                p_description: `Plan upgrade to ${planId} — ${delta} LiTTBits`,
-                p_idempotency_key: `plan_upgrade_${sub.id}_${periodEnd}_${planId}`,
-                p_reference_type: "subscription",
-                p_reference_id: periodRef,
-              });
-              if (upgradeError) {
-                throw new Error(
-                  `[stripe] ${event.type} ${sub.id}: upgrade grant failed: ${upgradeError.message}`,
-                );
-              }
-            }
-          }
-        }
-        const { error: subUpsertError } = await sb.from("subscriptions").upsert(
-          {
-            user_id: subUserId,
-            stripe_customer_id:
-              typeof applied.customer === "string"
-                ? applied.customer
-                : applied.customer?.id,
-            stripe_subscription_id: sub.id,
+          const periodEndUnix = applied.items?.data?.[0]?.current_period_end;
+          const periodStartUnix = applied.items?.data?.[0]?.current_period_start;
+          const periodToken = periodEndUnix ?? "na";
+          const decision = await applySubscriptionEvent(sb, {
+            userId: subUserId,
+            incomingSubscriptionId: sub.id,
+            event,
+            authoritative,
+            ordering: "skip_if_older",
+            requireExisting: false,
             plan: planId,
             status: applied.status,
-            current_period_start: applied.items?.data?.[0]?.current_period_start
-              ? new Date(applied.items.data[0].current_period_start * 1000).toISOString()
-              : null,
-            current_period_end: applied.items?.data?.[0]?.current_period_end
-              ? new Date(applied.items.data[0].current_period_end * 1000).toISOString()
-              : null,
-            cancel_at_period_end: applied.cancel_at_period_end === true,
-            last_stripe_event_created: incomingSeconds,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id", ignoreDuplicates: false },
-        );
-        if (subUpsertError) {
+            updatePlan: true,
+            statusPolicy: "write",
+            liveStatus: null,
+            stripeCustomerId:
+              typeof applied.customer === "string"
+                ? applied.customer
+                : applied.customer?.id ?? null,
+            periodStart: unixSecondsToIso(periodStartUnix),
+            periodEnd: unixSecondsToIso(periodEndUnix),
+            cancelAtPeriodEnd: applied.cancel_at_period_end === true,
+            incomingPlan: planId,
+            grantMode: event.type === "customer.subscription.updated" ? "upgrade_delta" : "none",
+            grantAmount: null,
+            grantIdempotencyKey: `plan_upgrade_${sub.id}_${periodToken}_${planId}`,
+            grantDescription: null,
+            grantReferenceId: `period_plan_${sub.id}_${periodToken}_${planId}`,
+            grantExpiresAt: null,
+            skipGrantIdempotencyKey: null,
+          });
+          if (decision.outcome === "stale" || decision.outcome === "applied") {
+            settled = true;
+            break;
+          }
+          if (decision.outcome === "recheck") {
+            try {
+              applied = await stripe.subscriptions.retrieve(sub.id, undefined, {
+                timeout: 8000,
+              });
+            } catch (readErr) {
+              const message = readErr instanceof Error ? readErr.message : "unknown error";
+              throw new Error(
+                `[stripe] ${event.type} ${event.id}: same-second subscription re-read failed: ${message}`,
+              );
+            }
+            authoritative = true;
+            continue;
+          }
+        }
+        if (!settled) {
           throw new Error(
-            `[stripe] ${event.type} ${sub.id}: subscription upsert failed: ${subUpsertError.message}`,
+            `[stripe] ${event.type} ${event.id}: subscription event was not applied`,
           );
         }
         break;
@@ -1120,40 +1014,46 @@ export async function POST(req: NextRequest) {
           );
         }
         const delSub = event.data.object as Stripe.Subscription;
-        const { data: delMatch } = await sb
+        const { data: delMatch, error: delLookupError } = await sb
           .from("subscriptions")
-          .select("user_id, last_stripe_event_created")
+          .select("user_id")
           .eq("stripe_subscription_id", delSub.id)
           .single();
+        if (delLookupError && !isMissingRow(delLookupError)) {
+          throw new Error(
+            `[stripe] customer.subscription.deleted ${delSub.id}: ${delLookupError.message}`,
+          );
+        }
         if (!delMatch) {
           throw new Error(
             `[stripe] customer.subscription.deleted ${delSub.id}: no subscription row`,
           );
         }
-        const storedDeleteSeconds = storedStripeEventSeconds(
-          delMatch.last_stripe_event_created,
-        );
-        const deleteSeconds = eventCreatedSeconds(event);
-        if (storedDeleteSeconds !== null && deleteSeconds < storedDeleteSeconds) {
-          console.warn(
-            `[stripe] customer.subscription.deleted ${event.id}: skipping stale subscription event created ${deleteSeconds}; last applied Stripe event ${storedDeleteSeconds}`,
-          );
-          break;
-        }
-        const { error: cancelError } = await sb
-          .from("subscriptions")
-          .update({
-            status: "canceled",
-            cancel_at_period_end: false,
-            last_stripe_event_created: deleteSeconds,
-            updated_at: eventTimestamp(event),
-          })
-          .eq("user_id", delMatch.user_id);
-        if (cancelError) {
-          throw new Error(
-            `[stripe] customer.subscription.deleted ${delSub.id}: ${cancelError.message}`,
-          );
-        }
+        await applySubscriptionEvent(sb, {
+          userId: delMatch.user_id,
+          incomingSubscriptionId: delSub.id,
+          event,
+          authoritative: true,
+          ordering: "skip_if_older",
+          requireExisting: true,
+          plan: null,
+          status: "canceled",
+          updatePlan: false,
+          statusPolicy: "write",
+          liveStatus: null,
+          stripeCustomerId: null,
+          periodStart: null,
+          periodEnd: null,
+          cancelAtPeriodEnd: false,
+          incomingPlan: null,
+          grantMode: "none",
+          grantAmount: null,
+          grantIdempotencyKey: null,
+          grantDescription: null,
+          grantReferenceId: null,
+          grantExpiresAt: null,
+          skipGrantIdempotencyKey: null,
+        });
         break;
       }
 
@@ -1207,21 +1107,25 @@ export async function POST(req: NextRequest) {
             await new Promise((resolve) => setTimeout(resolve, 2000));
           }
         }
-        // Self-healing fallback: if the subscription.created event was lost
-        // or is still delayed, reconstruct the row from the Stripe API
-        // instead of leaving the customer without credits.
+        // Self-healing fallback: if subscription.created was lost, resolve
+        // the user from Stripe. The write and the grant share one transaction
+        // below, so a failed grant does not leave a reconstructed row behind.
+        let reconstruct: {
+          planId: string;
+          status: string;
+          customerId: string | null;
+          periodStart: string | null;
+          periodEnd: string | null;
+          cancelAtPeriodEnd: boolean;
+        } | null = null;
         if (!invMatch) {
           console.warn(
             `[stripe] invoice.paid ${event.id}: subscription row missing after retries, resolving via Stripe API`,
           );
           try {
-            // Bounded: 8s max for the Stripe API call. Combined with the
-            // 10s retry loop, the worst case stays under Stripe's 30s
-            // webhook timeout even if the API hangs.
             const fullSub = await stripe.subscriptions.retrieve(invSubId, undefined, {
               timeout: 8000,
             });
-            // Resolve the user from the subscription's own metadata — no guessing.
             const clerkId: string | undefined =
               typeof fullSub.metadata?.clerk_id === "string"
                 ? fullSub.metadata.clerk_id
@@ -1233,79 +1137,27 @@ export async function POST(req: NextRequest) {
                 .eq("clerk_id", clerkId)
                 .single();
               if (u) {
-                const { data: heldRow, error: heldError } = await sb
-                  .from("subscriptions")
-                  .select("status, stripe_subscription_id")
-                  .eq("user_id", u.id)
-                  .maybeSingle();
-                if (heldError) {
-                  throw new Error(
-                    `[stripe] invoice.paid ${event.id}: subscription lookup failed: ${heldError.message}`,
-                  );
-                }
-                if (heldSubscriptionBlocksIncoming(heldRow, invSubId)) {
-                  await recordSubscriptionConflict(sb, {
-                    user_id: u.id,
-                    existing_subscription_id: heldRow?.stripe_subscription_id as string,
-                    incoming_subscription_id: invSubId,
-                    stripe_event_id: event.id,
-                    event_type: event.type,
-                    incoming_plan: typeof fullSub.metadata?.plan_id === "string"
-                      ? fullSub.metadata.plan_id
-                      : null,
-                  });
-                  eventResult = "duplicate_subscription";
-                  break;
-                }
                 const planId = resolveSubscriptionPlan(
                   fullSub.metadata?.plan_id,
                   priceIdFromSubscription(fullSub),
                   `invoice.paid ${event.id} fallback`,
                 );
-                const { error: fallbackUpsertError } = await sb
-                  .from("subscriptions")
-                  .upsert(
-                    {
-                      user_id: u.id,
-                      stripe_customer_id:
-                        typeof inv.customer === "string"
-                          ? inv.customer
-                          : inv.customer?.id ?? null,
-                      stripe_subscription_id: invSubId,
-                      plan: planId,
-                      status: fullSub.status,
-                      current_period_start: fullSub.items?.data?.[0]?.current_period_start
-                        ? new Date(
-                            fullSub.items.data[0].current_period_start * 1000,
-                          ).toISOString()
-                        : null,
-                      current_period_end: fullSub.items?.data?.[0]?.current_period_end
-                        ? new Date(
-                            fullSub.items.data[0].current_period_end * 1000,
-                          ).toISOString()
-                        : null,
-                      cancel_at_period_end: fullSub.cancel_at_period_end === true,
-                      last_stripe_event_created: eventCreatedSeconds(event),
-                      updated_at: new Date().toISOString(),
-                    },
-                    // subscriptions.user_id is the unique row identity.
-                    // stripe_subscription_id is additionally unique (see
-                    // migration) but is not the conflict target: a user may
-                    // already have a row whose subscription id is still null.
-                    { onConflict: "user_id", ignoreDuplicates: false },
-                  );
-                if (fallbackUpsertError) {
-                  // Do NOT proceed to grant: the row wasn't reconstructed.
-                  // Throw so Stripe retries (recoverable, not silently dropped).
-                  throw new Error(
-                    `[stripe] invoice.paid ${event.id}: fallback upsert failed: ${fallbackUpsertError.message}`,
-                  );
-                }
+                reconstruct = {
+                  planId,
+                  status: fullSub.status,
+                  customerId:
+                    typeof inv.customer === "string"
+                      ? inv.customer
+                      : inv.customer?.id ?? null,
+                  periodStart: unixSecondsToIso(fullSub.items?.data?.[0]?.current_period_start),
+                  periodEnd: unixSecondsToIso(fullSub.items?.data?.[0]?.current_period_end),
+                  cancelAtPeriodEnd: fullSub.cancel_at_period_end === true,
+                };
                 invMatch = {
                   user_id: u.id,
                   plan: planId,
                   status: fullSub.status,
-                  last_stripe_event_created: eventCreatedSeconds(event),
+                  last_stripe_event_created: null,
                 };
               }
             }
@@ -1325,19 +1177,8 @@ export async function POST(req: NextRequest) {
           );
         }
         // A late invoice.paid must not revive a newer canceled or past_due
-        // row. Compare event.created with the last applied Stripe event
-        // second, not updated_at, and re-read the subscription from Stripe
-        // so a canceled/past_due object is never forced to active.
-        // A failed re-read is 500: guessing "active" is the bug.
-        const storedInvoiceSeconds = storedStripeEventSeconds(
-          invMatch.last_stripe_event_created,
-        );
-        const invoiceSeconds = eventCreatedSeconds(event);
-        const newerTerminalStatus =
-          !!invMatch.status &&
-          TERMINAL_SUBSCRIPTION_STATUSES.has(invMatch.status) &&
-          storedInvoiceSeconds !== null &&
-          storedInvoiceSeconds > invoiceSeconds;
+        // row. The locked function compares event.created with the stored
+        // Stripe second. A failed re-read is 500: guessing "active" is the bug.
         let liveStatus = "";
         try {
           const liveSub = await stripe.subscriptions.retrieve(
@@ -1353,65 +1194,65 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.paid ${event.id}: subscription status re-read failed: ${message}`,
           );
         }
-        const liveBlocksActive = LIVE_NON_ACTIVE_STATUSES.has(liveStatus);
-        if (!newerTerminalStatus && !liveBlocksActive) {
-          const { error: statusUpdateError } = await sb
-            .from("subscriptions")
-            .update({
-              status: "active",
-              last_stripe_event_created:
-                storedInvoiceSeconds === null || invoiceSeconds >= storedInvoiceSeconds
-                  ? invoiceSeconds
-                  : storedInvoiceSeconds,
-              updated_at: eventTimestamp(event),
-            })
-            .eq("user_id", invMatch.user_id);
-          if (statusUpdateError) {
+        // A proration invoice must not grant the full monthly amount.
+        // The price check stays after this branch: a proration whose price
+        // disagrees with the stored plan is not a failed renewal.
+        const isProration = inv.billing_reason === "subscription_update";
+        let grantMode: "none" | "invoice_full" = "none";
+        let grantAmount: number | null = null;
+        let grantKey: string | null = null;
+        let grantDescription: string | null = null;
+        let grantReferenceId: string | null = null;
+        let grantExpiresAt: string | null = null;
+        let skipGrantKey: string | null = null;
+        let planForCall = invMatch.plan;
+        if (!isProration) {
+          const planId = requireSubscriptionGrantPlan(
+            invMatch.plan,
+            `invoice.paid ${event.id}`,
+          );
+          const pricedPlan = planIdFromPrice(priceIdFromInvoice(inv));
+          if (pricedPlan && pricedPlan !== planId) {
             throw new Error(
-              `[stripe] invoice.paid ${event.id}: status update failed: ${statusUpdateError.message}`,
+              `[stripe] invoice.paid ${event.id}: price resolves to ${pricedPlan} but subscription plan is ${planId}`,
             );
           }
-        } else {
-          console.warn(
-            `[stripe] invoice.paid ${event.id}: leaving status ${invMatch.status ?? "unknown"} (live ${liveStatus || "unknown"})`,
-          );
+          const periodEnd = inv.lines.data[0]?.period?.end;
+          const periodToken = periodEnd ?? "na";
+          planForCall = planId;
+          grantMode = "invoice_full";
+          grantAmount = PLANS[planId].monthlyCredits;
+          grantKey = `invoice_grant_${inv.id}`;
+          grantDescription = `${PLANS[planId].name} monthly grant — ${PLANS[planId].monthlyCredits} LiTTBits`;
+          grantReferenceId = `period_plan_${invSubId}_${periodToken}_${planId}`;
+          grantExpiresAt = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
+          skipGrantKey = `plan_upgrade_${invSubId}_${periodToken}_${planId}`;
         }
-        // A proration invoice (plan change) must not grant the full monthly
-        // amount. The upgrade delta is granted once on subscription.updated;
-        // the next renewal (subscription_cycle) grants the plan stored then.
-        if (inv.billing_reason === "subscription_update") {
-          break;
-        }
-        // Invoice payment is the only source of full subscription grants.
-        // This prevents the first billing period from being granted twice.
-        // If the grant throws, the error propagates → HTTP 500 → Stripe
-        // retries. The per-invoice idempotency key makes retries safe.
-        const planId = requireSubscriptionGrantPlan(
-          invMatch.plan,
-          `invoice.paid ${event.id}`,
-        );
-        const pricedPlan = planIdFromPrice(priceIdFromInvoice(inv));
-        if (pricedPlan && pricedPlan !== planId) {
-          throw new Error(
-            `[stripe] invoice.paid ${event.id}: price resolves to ${pricedPlan} but subscription plan is ${planId}`,
-          );
-        }
-        const periodEnd = inv.lines.data[0]?.period?.end;
-        const periodRef = `period_plan_${invSubId}_${periodEnd ?? "na"}_${planId}`;
-        const upgradeKey = `plan_upgrade_${invSubId}_${periodEnd ?? "na"}_${planId}`;
-        // The upgrade delta for this period and plan already landed.
-        // Granting the full allowance again would stack the two events.
-        if (await ledgerHasIdempotencyKey(sb, invMatch.user_id, upgradeKey)) {
-          break;
-        }
-        await grantSubscriptionCredits(
-          sb,
-          invMatch.user_id,
-          planId,
-          `invoice_grant_${inv.id}`,
-          periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
-          periodRef,
-        );
+        await applySubscriptionEvent(sb, {
+          userId: invMatch.user_id,
+          incomingSubscriptionId: invSubId,
+          event,
+          authoritative: true,
+          ordering: "apply",
+          requireExisting: reconstruct === null,
+          plan: planForCall,
+          status: reconstruct?.status ?? null,
+          updatePlan: reconstruct !== null,
+          statusPolicy: "activate_unless_terminal",
+          liveStatus,
+          stripeCustomerId: reconstruct?.customerId ?? null,
+          periodStart: reconstruct?.periodStart ?? null,
+          periodEnd: reconstruct?.periodEnd ?? null,
+          cancelAtPeriodEnd: reconstruct?.cancelAtPeriodEnd ?? null,
+          incomingPlan: planForCall,
+          grantMode,
+          grantAmount,
+          grantIdempotencyKey: grantKey,
+          grantDescription,
+          grantReferenceId,
+          grantExpiresAt,
+          skipGrantIdempotencyKey: skipGrantKey,
+        });
         break;
       }
 
@@ -1430,7 +1271,7 @@ export async function POST(req: NextRequest) {
         }
         const { data: failMatch, error: failLookupError } = await sb
           .from("subscriptions")
-          .select("user_id, last_stripe_event_created")
+          .select("user_id")
           .eq("stripe_subscription_id", failSubId)
           .single();
         if (failLookupError && !isMissingRow(failLookupError)) {
@@ -1443,29 +1284,31 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.payment_failed ${event.id}: no subscription row for ${failSubId}`,
           );
         }
-        const storedFailSeconds = storedStripeEventSeconds(
-          failMatch.last_stripe_event_created,
-        );
-        const failSeconds = eventCreatedSeconds(event);
-        if (storedFailSeconds !== null && failSeconds < storedFailSeconds) {
-          console.warn(
-            `[stripe] invoice.payment_failed ${event.id}: skipping stale subscription event created ${failSeconds}; last applied Stripe event ${storedFailSeconds}`,
-          );
-          break;
-        }
-        const { error: pastDueError } = await sb
-          .from("subscriptions")
-          .update({
-            status: "past_due",
-            last_stripe_event_created: failSeconds,
-            updated_at: eventTimestamp(event),
-          })
-          .eq("user_id", failMatch.user_id);
-        if (pastDueError) {
-          throw new Error(
-            `[stripe] invoice.payment_failed ${event.id}: ${pastDueError.message}`,
-          );
-        }
+        await applySubscriptionEvent(sb, {
+          userId: failMatch.user_id,
+          incomingSubscriptionId: failSubId,
+          event,
+          authoritative: true,
+          ordering: "skip_if_older",
+          requireExisting: true,
+          plan: null,
+          status: "past_due",
+          updatePlan: false,
+          statusPolicy: "write",
+          liveStatus: null,
+          stripeCustomerId: null,
+          periodStart: null,
+          periodEnd: null,
+          cancelAtPeriodEnd: null,
+          incomingPlan: null,
+          grantMode: "none",
+          grantAmount: null,
+          grantIdempotencyKey: null,
+          grantDescription: null,
+          grantReferenceId: null,
+          grantExpiresAt: null,
+          skipGrantIdempotencyKey: null,
+        });
         break;
       }
 

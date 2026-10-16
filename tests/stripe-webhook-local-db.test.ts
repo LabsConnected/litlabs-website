@@ -19,7 +19,7 @@
  * PostgREST are created here.
  */
 import { createHmac } from "node:crypto";
-import { writeFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import Stripe from "stripe";
@@ -103,6 +103,12 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
     const mod = await import("@/app/api/stripe/webhook/route");
     post = mod.POST as unknown as (req: Request) => Promise<Response>;
     await db.connect();
+    await db.query(readFileSync(
+      "supabase/migrations/20261015200000_apply_subscription_event.sql",
+      "utf8",
+    ));
+    await db.query(`NOTIFY pgrst, 'reload schema'`);
+    await new Promise((resolve) => setTimeout(resolve, 400));
     await db.query(`
       DELETE FROM public.billing_subscription_conflicts
       WHERE stripe_event_id LIKE 'evt_local658_%';
@@ -500,7 +506,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
       const events = await db.query(
         `SELECT result FROM public.stripe_events WHERE stripe_event_id = 'evt_local658_conflict'`,
       );
-      const ok = incoming.status === 200
+      const ok = incoming.status === 500
         && stored.rows.length === 1
         && stored.rows[0].stripe_subscription_id === "sub_local658_original"
         && stored.rows[0].plan === "creator_beta"
@@ -508,11 +514,11 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
         && conflicts.rows.length === 1
         && conflicts.rows[0].existing_subscription_id === "sub_local658_original"
         && conflicts.rows[0].incoming_subscription_id === "sub_local658_incoming"
-        && events.rows[0]?.result === "duplicate_subscription";
+        && events.rows.length === 0;
       return {
         http: incoming.status,
         detail: ok
-          ? `incoming ${incoming.status}, kept sub_local658_original, conflict recorded`
+          ? `incoming ${incoming.status}, kept sub_local658_original, conflict recorded, event not acknowledged`
           : `FAIL status=${incoming.status} stored=${JSON.stringify(stored.rows)} conflicts=${JSON.stringify(conflicts.rows)} events=${JSON.stringify(events.rows)} body=${JSON.stringify(incoming.body)}`,
         db: { stored: stored.rows, conflicts: conflicts.rows, events: events.rows },
       };
@@ -567,6 +573,128 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
           ? `conflict insert denied, webhook ${incoming.status}, kept sub_local658_keep, event not processed`
           : `FAIL status=${incoming.status} stored=${JSON.stringify(stored.rows)} conflicts=${conflicts.rows.length} events=${JSON.stringify(events.rows)} body=${JSON.stringify(incoming.body)}`,
         db: { stored: stored.rows, conflicts: conflicts.rows.length, events: events.rows },
+      };
+    });
+
+    await run(11, "Eight parallel new subscriptions leave one row and 500 the rest", async () => {
+      const clerk = "local658_parallel_subs";
+      await userId(clerk);
+      const deliveries = await Promise.all(
+        Array.from({ length: 8 }, (_, index) =>
+          deliver({
+            ...subscriptionCreated(
+              `evt_local658_parallel_${index}`,
+              `sub_local658_parallel_${index}`,
+              clerk,
+              index % 2 === 0 ? "creator_beta" : "pro_builder_beta",
+              index % 2 === 0 ? "price_creator_local" : "price_pro_local",
+            ),
+            created: 1700000500,
+          }),
+        ),
+      );
+      const stored = await db.query(
+        `SELECT stripe_subscription_id, plan, status
+         FROM public.subscriptions s
+         JOIN public.users u ON u.id = s.user_id
+         WHERE u.clerk_id = $1`,
+        [clerk],
+      );
+      const conflicts = await db.query(
+        `SELECT incoming_subscription_id
+         FROM public.billing_subscription_conflicts
+         WHERE stripe_event_id LIKE 'evt_local658_parallel_%'`,
+      );
+      const wins = deliveries.filter((delivery) => delivery.status === 200);
+      const failures = deliveries.filter((delivery) => delivery.status === 500);
+      const ok = stored.rows.length === 1
+        && stored.rows[0].status === "active"
+        && wins.length === 1
+        && failures.length === 7
+        && conflicts.rows.length === 7;
+      return {
+        http: wins[0]?.status ?? failures[0]?.status ?? 0,
+        detail: ok
+          ? `one 200 for ${stored.rows[0].stripe_subscription_id}, seven 500s, seven conflicts`
+          : `FAIL wins=${wins.length} failures=${failures.map((d) => d.status).join(",")} stored=${JSON.stringify(stored.rows)} conflicts=${conflicts.rows.length} bodies=${JSON.stringify(deliveries.map((d) => d.body))}`,
+        db: { stored: stored.rows, conflicts: conflicts.rows.length, statuses: deliveries.map((d) => d.status) },
+      };
+    });
+
+    await run(12, "A newer upgrade beats a parallel older downgrade and grants once", async () => {
+      const clerk = "local658_updown";
+      await userId(clerk);
+      const created = await deliver({
+        ...subscriptionCreated(
+          "evt_local658_updown_created",
+          "sub_local658_updown",
+          clerk,
+          "creator_beta",
+          "price_creator_local",
+        ),
+        created: 1700000100,
+      });
+      const upgrade = {
+        id: "evt_local658_updown_upgrade",
+        type: "customer.subscription.updated",
+        created: 1700000300,
+        data: {
+          object: {
+            id: "sub_local658_updown",
+            status: "active",
+            customer: "cus_sub_local658_updown",
+            metadata: { clerk_id: clerk, plan_id: "creator_beta" },
+            items: {
+              data: [{
+                price: { id: "price_pro_local" },
+                current_period_start: 1700000000,
+                current_period_end: 1702678400,
+              }],
+            },
+          },
+        },
+      };
+      const downgrade = {
+        id: "evt_local658_updown_downgrade",
+        type: "customer.subscription.updated",
+        created: 1700000200,
+        data: {
+          object: {
+            id: "sub_local658_updown",
+            status: "active",
+            customer: "cus_sub_local658_updown",
+            metadata: { clerk_id: clerk, plan_id: "pro_builder_beta" },
+            items: {
+              data: [{
+                price: { id: "price_creator_local" },
+                current_period_start: 1700000000,
+                current_period_end: 1702678400,
+              }],
+            },
+          },
+        },
+      };
+      const [up, down] = await Promise.all([deliver(upgrade), deliver(downgrade)]);
+      const rows = await snapshot(clerk, [
+        "evt_local658_updown_created",
+        "evt_local658_updown_upgrade",
+        "evt_local658_updown_downgrade",
+      ]);
+      const amount = rows.ledger.reduce((sum, row) => sum + Number(row.amount), 0);
+      const ok = created.status === 200
+        && (up.status === 200 || up.status === 500)
+        && (down.status === 200 || down.status === 500)
+        && rows.subscription.length === 1
+        && rows.subscription[0].plan === "pro_builder_beta"
+        && rows.subscription[0].stripe_subscription_id === "sub_local658_updown"
+        && rows.ledger.length === 1
+        && amount === 10500;
+      return {
+        http: up.status,
+        detail: ok
+          ? `plan stayed pro_builder_beta, one 10500 grant, statuses ${created.status}/${up.status}/${down.status}`
+          : `FAIL created=${created.status} up=${up.status} down=${down.status} sub=${JSON.stringify(rows.subscription)} ledger=${JSON.stringify(rows.ledger)} upBody=${JSON.stringify(up.body)} downBody=${JSON.stringify(down.body)}`,
+        db: rows,
       };
     });
 

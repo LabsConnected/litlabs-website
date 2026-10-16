@@ -17,6 +17,7 @@ Order:
   5. supabase/migrations/20261015160000_checkout_reservations.sql
   6. supabase/migrations/20261015170000_billing_subscription_conflicts.sql
   7. supabase/migrations/20261015180000_media_cap_hold_expiry.sql
+  8. supabase/migrations/20261015200000_apply_subscription_event.sql
 
 Rollback, after the matching code is reverted:
   20261014000000: DROP INDEX IF EXISTS public.subscriptions_stripe_subscription_id_uidx;
@@ -36,6 +37,8 @@ Rollback, after the matching code is reverted:
                   DROP FUNCTION public.settle_media_cap_hold(uuid, text, timestamptz);
                   ALTER TABLE public.media_cap_holds DROP COLUMN IF EXISTS settled_at;
                   Restore claim_media_cap_slot from 20261015120000_media_cap_holds.sql.
+  20261015200000: DROP FUNCTION public.apply_subscription_event(uuid, text, text, text, bigint, boolean, text, boolean, text, text, boolean, text, text, text, timestamptz, timestamptz, boolean, text, text, integer, text, text, text, timestamptz, text, jsonb);
+                  DROP INDEX public.subscriptions_one_protected_per_user;
 EOF
 
 if [[ "${1:-}" == "--print" ]]; then
