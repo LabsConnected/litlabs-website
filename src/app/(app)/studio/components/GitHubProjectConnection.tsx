@@ -57,6 +57,9 @@ type Project = {
   repositoryId: number;
   repositoryFullName: string | null;
   repositoryPrivate: boolean | null;
+  /** Canonical projects live in studio_projects; legacy rows in projects. */
+  canonical?: boolean;
+  name?: string;
 };
 
 export default function GitHubProjectConnection() {
@@ -182,32 +185,43 @@ export default function GitHubProjectConnection() {
   const createProject = async () => {
     if (!selectedRepo || !selectedBranch) return;
     if (!selectedInstallation && !patInfo?.connected) return;
+    // The canonical contract (POST /api/studio-projects sourceType=github)
+    // verifies the repository through a GitHub App installation — a PAT-only
+    // connection can browse repos but cannot create a project.
+    if (!selectedInstallation) {
+      setError(
+        "A GitHub App installation is required to connect a project. " +
+          "Install the app from the Installations section, then retry.",
+      );
+      return;
+    }
     setCreating(true);
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch("/api/projects", {
+      const res = await fetch("/api/studio-projects", {
         method: "POST",
         credentials: "include",
         headers: await authHeaders(true),
         body: JSON.stringify({
-          github_installation_id: selectedInstallation || null,
-          repository_id: selectedRepo.id,
-          owner: selectedRepo.owner,
-          repository: selectedRepo.name,
-          default_branch: selectedRepo.defaultBranch,
-          working_branch: selectedBranch,
-          repository_full_name: selectedRepo.fullName,
-          repository_html_url: selectedRepo.htmlUrl,
-          repository_private: selectedRepo.private,
+          sourceType: "github",
+          name: selectedRepo.fullName,
+          githubInstallationId: selectedInstallation,
+          githubRepositoryId: selectedRepo.id,
+          githubOwner: selectedRepo.owner,
+          githubRepo: selectedRepo.name,
+          githubFullName: selectedRepo.fullName,
+          githubDefaultBranch: selectedRepo.defaultBranch,
+          githubBranch: selectedBranch,
         }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to create project");
+        throw new Error(data.error || `Failed to create project (${res.status})`);
       }
-      const data = await res.json();
-      setProjects((prev) => [data.project, ...prev]);
+      // Refresh server truth rather than trusting a local merge — the
+      // response shape differs from the connection-state row shape.
+      await fetchConnectionState();
       setSuccess(`Project ${selectedRepo.fullName} connected on branch ${selectedBranch}`);
       setSelectedRepo(null);
       setSelectedBranch("");
@@ -219,19 +233,24 @@ export default function GitHubProjectConnection() {
     }
   };
 
-  const deleteProject = async (projectId: string) => {
+  const deleteProject = async (project: Project) => {
     if (!window.confirm("Remove this project? The GitHub installation will remain.")) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}`, {
-        method: "DELETE",
-        credentials: "include",
-        headers: await authHeaders(),
-      });
+      const res = await fetch(
+        project.canonical === false
+          ? `/api/projects/${project.id}`
+          : `/api/studio-projects/${project.id}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+          headers: await authHeaders(),
+        },
+      );
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to delete project");
       }
-      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
@@ -329,7 +348,7 @@ export default function GitHubProjectConnection() {
                 </div>
               </div>
               <button
-                onClick={() => deleteProject(p.id)}
+                onClick={() => deleteProject(p)}
                 className="rounded-lg p-1.5 text-xs opacity-60 transition hover:opacity-100"
                 style={{ color: tokens.textMuted }}
                 title="Remove project"

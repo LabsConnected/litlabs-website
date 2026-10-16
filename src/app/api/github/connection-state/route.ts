@@ -46,6 +46,24 @@ export async function GET(request: NextRequest) {
 
     if (projError) throw projError;
 
+    // Canonical GitHub-backed projects (studio_projects, source_type=github)
+    // are returned alongside legacy rows so projects created through
+    // POST /api/studio-projects stay visible to the connection surface.
+    const { data: canonicalProjects, error: canonicalError } = await supabaseAdmin
+      .from("studio_projects")
+      .select(
+        "id, name, github_owner, github_repo, github_full_name, github_branch, github_default_branch, github_installation_id, github_repository_id, workspace_status, updated_at",
+      )
+      .eq("user_id", userId)
+      .eq("is_system", false)
+      .eq("source_type", "github");
+
+    if (canonicalError) throw canonicalError;
+
+    const canonicalRepoIds = new Set(
+      (canonicalProjects || []).map((p) => p.github_repository_id),
+    );
+
     // Check PAT connection
     const patConnection = await getPATConnection(userId);
 
@@ -60,21 +78,46 @@ export async function GET(request: NextRequest) {
         accountName: patConnection.accountName,
         scopes: patConnection.scopes,
       } : { connected: false },
-      projects: (projects || []).map((p) => ({
-        id: p.id,
-        owner: p.owner,
-        repository: p.repository,
-        workingBranch: p.working_branch,
-        selectedBranch: p.selected_branch,
-        status: p.status,
-        connectionStatus: p.connection_status,
-        connectionError: p.connection_error,
-        connectedAt: p.connected_at,
-        installationId: p.github_installation_id,
-        repositoryId: p.repository_id,
-        repositoryFullName: p.repository_full_name,
-        repositoryPrivate: p.repository_private,
-      })),
+      projects: [
+        // Canonical projects first — they own the repository connection.
+        ...(canonicalProjects || []).map((p) => ({
+          id: p.id,
+          owner: p.github_owner,
+          repository: p.github_repo,
+          workingBranch: p.github_branch,
+          selectedBranch: p.github_branch,
+          status: "connected",
+          connectionStatus: "connected",
+          connectionError: null,
+          connectedAt: p.updated_at,
+          installationId: p.github_installation_id,
+          repositoryId: p.github_repository_id,
+          repositoryFullName: p.github_full_name,
+          repositoryPrivate: null,
+          canonical: true,
+          name: p.name,
+          workspaceStatus: p.workspace_status,
+        })),
+        // Legacy rows only when no canonical twin exists for the repo.
+        ...(projects || [])
+          .filter((p) => !canonicalRepoIds.has(p.repository_id))
+          .map((p) => ({
+            id: p.id,
+            owner: p.owner,
+            repository: p.repository,
+            workingBranch: p.working_branch,
+            selectedBranch: p.selected_branch,
+            status: p.status,
+            connectionStatus: p.connection_status,
+            connectionError: p.connection_error,
+            connectedAt: p.connected_at,
+            installationId: p.github_installation_id,
+            repositoryId: p.repository_id,
+            repositoryFullName: p.repository_full_name,
+            repositoryPrivate: p.repository_private,
+            canonical: false,
+          })),
+      ],
     }, {
       headers: { "Cache-Control": "no-store, max-age=0" },
     });

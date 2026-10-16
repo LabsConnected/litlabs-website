@@ -15,7 +15,14 @@ vi.mock("@/lib/supabase", () => {
     _isSingle: false,
     // When set, the next awaited query resolves with this error — lets
     // tests simulate a real database failure on any write/read.
-    _injectError: null as { message: string } | null,
+    _injectError: null as { message: string; code?: string } | null,
+    // Number of awaited queries to let pass before the injected error is
+    // delivered — simulates an error that lands mid-sequence (e.g. a
+    // unique-violation on insert after a clean pre-check).
+    _injectErrorAfterQueries: 0,
+    // When true, the first github_repository_id=4242 lookup reports "free"
+    // and subsequent lookups see the connected row — simulates a create race.
+    _simulateCreateRace: false,
 
     from(table: string) {
       this._table = table;
@@ -69,10 +76,14 @@ vi.mock("@/lib/supabase", () => {
     then(resolve: (v: unknown) => void) {
       // Injected database failure takes precedence over all mock data
       if (this._injectError) {
-        const e = this._injectError;
-        this._injectError = null;
-        resolve({ data: null, error: e });
-        return;
+        if (this._injectErrorAfterQueries > 0) {
+          this._injectErrorAfterQueries--;
+        } else {
+          const e = this._injectError;
+          this._injectError = null;
+          resolve({ data: null, error: e });
+          return;
+        }
       }
 
       // Return mock data based on filters
@@ -91,6 +102,56 @@ vi.mock("@/lib/supabase", () => {
 
       if (this._method === "select") {
         if (this._isMaybeSingle || this._isSingle) {
+          // findProjectByGithubRepository: repo 4242 is already connected.
+          // _simulateCreateRace makes the first lookup report "free" so a
+          // test can exercise the insert-time 23505 fallback.
+          const repoIdFilter = this._filters.find((f) => f.column === "github_repository_id");
+          if (repoIdFilter && repoIdFilter.value === 4242) {
+            if (this._simulateCreateRace) {
+              this._simulateCreateRace = false;
+              resolve({ data: null, error: null });
+              return;
+            }
+            resolve({
+              data: {
+                id: "proj-existing",
+                user_id: "user-A",
+                name: "Existing Repo Project",
+                slug: "existing-repo",
+                source_type: "github",
+                access_mode: "private",
+                template_id: null,
+                github_installation_id: 111,
+                github_repository_id: 4242,
+                github_owner: "acme",
+                github_repo: "site",
+                github_full_name: "acme/site",
+                github_default_branch: "main",
+                github_branch: "main",
+                latest_commit_sha: null,
+                workspace_id: null,
+                workspace_status: "not_prepared",
+                workspace_root: null,
+                workspace_error: null,
+                workspace_prepared_at: null,
+                runtime_status: "stopped",
+                preview_url: null,
+                runtime_error: null,
+                framework: "nextjs",
+                package_manager: "pnpm",
+                root_directory: ".",
+                development_command: null,
+                build_command: null,
+                test_command: null,
+                install_command: null,
+                workspace_type: "website",
+                created_at: "2024-01-01T00:00:00Z",
+                updated_at: "2024-01-01T00:00:00Z",
+              },
+              error: null,
+            });
+            return;
+          }
           // insert().select().single() — return the inserted row.
           // createBlankProject inserts without eq filters, so detect that
           // case by the absence of id/userId filters and return a canonical row.
@@ -249,7 +310,10 @@ import {
   updateProjectRuntime,
   updateProjectWorkspaceType,
   createBlankProject,
+  createGithubProject,
+  findProjectByGithubRepository,
   claimProvisioningLock,
+  ProjectConflictError,
   PROJECT_TEMPLATES,
 } from "./project-repository";
 import { rowToCanonical, type StudioProjectRow } from "./types";
@@ -257,13 +321,17 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { studioLog } from "@/lib/studio/logger";
 
 const supabaseMock = supabaseAdmin as unknown as {
-  _injectError: { message: string } | null;
+  _injectError: { message: string; code?: string } | null;
+  _injectErrorAfterQueries: number;
+  _simulateCreateRace: boolean;
 };
 
 describe("project-repository ownership enforcement", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     supabaseMock._injectError = null;
+    supabaseMock._injectErrorAfterQueries = 0;
+    supabaseMock._simulateCreateRace = false;
   });
 
   describe("getProject", () => {
@@ -521,6 +589,56 @@ describe("project-repository ownership enforcement", () => {
       // directly (no build step). This is the "STATIC" badge in the UI.
       expect(project.framework).toBe("static");
       expect(project.packageManager).toBe("none");
+    });
+  });
+
+  describe("createGithubProject duplicate prevention", () => {
+    const githubInput = {
+      userId: "user-A",
+      name: "acme/site",
+      slug: "acme-site",
+      githubInstallationId: 111,
+      githubRepositoryId: 4242,
+      githubOwner: "acme",
+      githubRepo: "site",
+      githubFullName: "acme/site",
+    };
+
+    it("throws ProjectConflictError with the existing project when the repository is already connected", async () => {
+      const err = await createGithubProject(githubInput).catch((e) => e);
+      expect(err).toBeInstanceOf(ProjectConflictError);
+      expect((err as ProjectConflictError).existing.id).toBe("proj-existing");
+      expect(err.message).toContain("already connected");
+    });
+
+    it("findProjectByGithubRepository returns the connected project for repo 4242", async () => {
+      const existing = await findProjectByGithubRepository("user-A", 4242);
+      expect(existing?.id).toBe("proj-existing");
+      expect(existing?.sourceType).toBe("github");
+    });
+
+    it("creates a project for an unconnected repository", async () => {
+      const project = await createGithubProject({ ...githubInput, githubRepositoryId: 777 });
+      expect(project).not.toBeNull();
+      expect(project.id).toBe("proj-new");
+    });
+
+    it("maps a 23505 insert race to ProjectConflictError instead of a raw Postgres error", async () => {
+      // Pre-check reports the repository free, the insert loses a unique
+      // race, and the follow-up lookup resolves the winning row.
+      supabaseMock._simulateCreateRace = true;
+      supabaseMock._injectErrorAfterQueries = 1;
+      supabaseMock._injectError = { message: "duplicate key", code: "23505" };
+      const err = await createGithubProject(githubInput).catch((e) => e);
+      expect(err).toBeInstanceOf(ProjectConflictError);
+      expect((err as ProjectConflictError).existing.id).toBe("proj-existing");
+    });
+
+    it("a failing duplicate pre-check fails closed instead of inserting", async () => {
+      supabaseMock._injectError = { message: "db timeout" };
+      const err = await createGithubProject(githubInput).catch((e) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toContain("Failed to check for an existing project");
     });
   });
 });

@@ -40,7 +40,10 @@ export async function POST(
     }
 
     const body = await req.json().catch(() => ({}));
-    const name = (body.name as string) || canvas.title;
+    const name =
+      (typeof body.name === "string" && body.name.trim()) ||
+      canvas.title?.trim() ||
+      "Promoted canvas";
 
     // Create a blank project (throws on error)
     const project = await createBlankProject({
@@ -48,6 +51,16 @@ export async function POST(
       name,
       templateId: "blank-static",
     });
+
+    // Match POST /api/studio-projects: provision the durable workspace at
+    // create time so the promoted project opens ready. A failure leaves
+    // workspace_status=failed and first-open retries it.
+    try {
+      const { provisionWorkspaceForProject } = await import("@/lib/studio/workspace-recovery");
+      await provisionWorkspaceForProject(project.id, userId);
+    } catch {
+      // Provisioning failure is surfaced via workspace_status on the row.
+    }
 
     // Link the canvas to the new project
     const { getSupabaseAdmin } = await import("@/lib/supabase");

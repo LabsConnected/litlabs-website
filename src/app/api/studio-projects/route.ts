@@ -5,6 +5,7 @@ import {
   createBlankProject,
   createGithubProject,
   listProjects,
+  ProjectConflictError,
   PROJECT_TEMPLATES,
 } from "@/lib/projects/project-repository";
 import { supabaseAdmin } from "@/lib/supabase";
@@ -165,20 +166,34 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const project = await createGithubProject({
-        userId,
-        name,
-        slug: (body.slug as string) || verifiedRepo,
-        githubInstallationId,
-        githubRepositoryId,
-        githubOwner: verifiedOwner,
-        githubRepo: verifiedRepo,
-        githubFullName: verifiedFullName,
-        githubDefaultBranch: verifiedDefaultBranch,
-        githubBranch: (body.githubBranch as string) || verifiedDefaultBranch,
-        accessMode: body.accessMode === "shared" ? "shared" : "private",
-      });
-      return NextResponse.json({ project }, { status: 201 });
+      try {
+        const project = await createGithubProject({
+          userId,
+          name,
+          slug: (body.slug as string) || verifiedRepo,
+          githubInstallationId,
+          githubRepositoryId,
+          githubOwner: verifiedOwner,
+          githubRepo: verifiedRepo,
+          githubFullName: verifiedFullName,
+          githubDefaultBranch: verifiedDefaultBranch,
+          githubBranch: (body.githubBranch as string) || verifiedDefaultBranch,
+          accessMode: body.accessMode === "shared" ? "shared" : "private",
+        });
+        return NextResponse.json({ project }, { status: 201 });
+      } catch (createErr) {
+        if (createErr instanceof ProjectConflictError) {
+          return NextResponse.json(
+            {
+              error: createErr.message,
+              projectId: createErr.existing.id,
+              existingProject: createErr.existing,
+            },
+            { status: 409 },
+          );
+        }
+        throw createErr;
+      }
     }
 
     return NextResponse.json(

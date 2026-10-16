@@ -75,11 +75,6 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
       const params = new URLSearchParams({ tool: "chat", prompt: text });
       if (payload.result?.primaryIntent)
         params.set("intent", payload.result.primaryIntent);
-      // planId survives the Studio handoff at the URL level: both create
-      // paths re-seed their params from the current query (page.tsx
-      // handleFirstRunSubmit, CommandStudio handleStartBlank / project
-      // select), so it reaches /studio intact. Nothing in Studio consumes
-      // it yet — wiring it into conversation start is a separate follow-up.
       if (payload.plan?.id) params.set("planId", payload.plan.id);
       router.push(`/studio?${params.toString()}`);
     } catch {
