@@ -676,7 +676,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ received: true, replayed: true });
     }
 
-    let eventResult = "processed";
+    const eventResult = "processed";
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
