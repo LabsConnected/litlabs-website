@@ -856,6 +856,37 @@ export async function recoverStaleProvisioning(
 }
 
 /**
+ * Heartbeat for a held provisioning lock.
+ *
+ * The lock owner calls this on an interval while prepareWorkspaceInternal
+ * is in flight. It only bumps updated_at while the row is still
+ * "provisioning" — it cannot resurrect a lock that already settled or was
+ * recovered, and it is what lets recoverStaleProvisioning use a short
+ * dead-lock window without ever reclaiming an actively running job: a
+ * live owner's row stays fresh, a dead one's freezes.
+ */
+export async function touchProvisioningHeartbeat(
+  projectId: string,
+  userId: string,
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from(TABLE)
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .eq("is_system", false)
+    .eq("workspace_status", "provisioning");
+
+  if (error) {
+    studioLog("touchProvisioningHeartbeat:update_error", {
+      projectId,
+      userId,
+      errorClass: error.message,
+    });
+  }
+}
+
+/**
  * Update runtime fields on a canonical project.
  */
 export async function updateProjectRuntime(

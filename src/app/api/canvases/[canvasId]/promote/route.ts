@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@/lib/auth";
 import { getCanvas } from "@/lib/canvas/repository";
 import { createBlankProject } from "@/lib/projects/project-repository";
@@ -53,14 +53,22 @@ export async function POST(
     });
 
     // Match POST /api/studio-projects: provision the durable workspace at
-    // create time so the promoted project opens ready. A failure leaves
-    // workspace_status=failed and first-open retries it.
-    try {
-      const { provisionWorkspaceForProject } = await import("@/lib/studio/workspace-recovery");
-      await provisionWorkspaceForProject(project.id, userId);
-    } catch {
-      // Provisioning failure is surfaced via workspace_status on the row.
-    }
+    // create time so the promoted project opens ready — but post-response
+    // via after(). Awaiting it inline parked the promote on the full
+    // prepare budget (up to ~180s); a failure leaves workspace_status=
+    // failed and first-open / GET workspace recovery retries it.
+    after(async () => {
+      try {
+        const { provisionWorkspaceForProject } = await import("@/lib/studio/workspace-recovery");
+        await provisionWorkspaceForProject(project.id, userId);
+      } catch (provisionErr) {
+        // Provisioning failure is surfaced via workspace_status on the row.
+        console.error(
+          `[promote] post-create provisioning failed for ${project.id}:`,
+          provisionErr instanceof Error ? provisionErr.message : provisionErr,
+        );
+      }
+    });
 
     // Link the canvas to the new project
     const { getSupabaseAdmin } = await import("@/lib/supabase");

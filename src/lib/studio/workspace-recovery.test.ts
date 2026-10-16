@@ -10,6 +10,7 @@ vi.mock("@/lib/projects/project-repository", () => ({
   claimProvisioningLock: vi.fn(),
   recoverStaleProvisioning: vi.fn(),
   ensureCanonicalStudioProject: vi.fn(),
+  touchProvisioningHeartbeat: vi.fn(),
 }));
 
 vi.mock("@/lib/terminal-internal-client", () => ({
@@ -32,8 +33,8 @@ vi.mock("@/lib/github-app", () => ({
   getInstallationTokenForClone: vi.fn(),
 }));
 
-import { ensureWorkspaceAlive, normalizeFileError, provisionWorkspaceForProject, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
-import { getProject, updateProjectWorkspace, claimProvisioningLock, ensureCanonicalStudioProject } from "@/lib/projects/project-repository";
+import { ensureWorkspaceAlive, normalizeFileError, provisionWorkspaceForProject, reprepareWorkspace, PROVISIONING_LOCK_DEAD_MS } from "@/lib/studio/workspace-recovery";
+import { getProject, updateProjectWorkspace, claimProvisioningLock, ensureCanonicalStudioProject, recoverStaleProvisioning, touchProvisioningHeartbeat } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal, prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
 import type { CanonicalProject } from "@/lib/projects/types";
@@ -395,6 +396,104 @@ describe("workspace-recovery", () => {
       await expect(provisionWorkspaceForProject("proj-1", "user-1")).resolves.toBe("ws-owner");
       expect(claimProvisioningLock).not.toHaveBeenCalled();
       expect(prepareWorkspaceInternal).not.toHaveBeenCalled();
+    });
+
+    it("provisions a workspace whose previous run failed (failed → recovery)", async () => {
+      // Regression: a project whose first provision failed must recover on
+      // the next call — the lock claim transitions failed → provisioning.
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({ workspaceId: null, workspaceStatus: "failed", workspaceError: "Disk full" }),
+      );
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "failed" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject({ workspaceStatus: "provisioning" }));
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-retry", root: "/data/ws-retry" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      await expect(provisionWorkspaceForProject("proj-failed", "user-1")).resolves.toBe("ws-retry");
+      expect(claimProvisioningLock).toHaveBeenCalledWith("proj-failed", "user-1");
+      expect(prepareWorkspaceInternal).toHaveBeenCalled();
+    });
+
+    it("reclaims an interrupted provisioning lock instead of observing it for the full wait window", async () => {
+      // Regression (process restart): the owner claimed the lock and died
+      // mid-prepare, leaving workspace_status='provisioning' with a frozen
+      // updated_at. The observer must recover the dead lock on sight —
+      // not poll for the full 120s wait window.
+      const staleUpdatedAt = new Date(Date.now() - 2 * PROVISIONING_LOCK_DEAD_MS).toISOString();
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({ workspaceStatus: "provisioning", updatedAt: staleUpdatedAt }),
+      );
+      // Entry-point recovery races the in-loop recovery: either way the
+      // dead lock is freed and this caller proceeds to claim.
+      vi.mocked(recoverStaleProvisioning).mockResolvedValue(true);
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(
+        fakeProject({ workspaceStatus: "provisioning", updatedAt: staleUpdatedAt }),
+      );
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject({ workspaceStatus: "provisioning" }));
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-revived", root: "/data/ws-revived" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      await expect(provisionWorkspaceForProject("proj-dead", "user-1")).resolves.toBe("ws-revived");
+      expect(recoverStaleProvisioning).toHaveBeenCalledWith("proj-dead", "user-1", PROVISIONING_LOCK_DEAD_MS);
+      expect(claimProvisioningLock).toHaveBeenCalledWith("proj-dead", "user-1");
+      expect(prepareWorkspaceInternal).toHaveBeenCalled();
+    });
+
+    it("does not reclaim a lock whose owner is actively heartbeating", async () => {
+      // Protection: a fresh updated_at means the owner is alive. The
+      // observer must keep polling — never recover — until the owner
+      // finishes and the row flips to ready.
+      const freshUpdatedAt = new Date().toISOString();
+      vi.mocked(recoverStaleProvisioning).mockResolvedValue(false);
+      vi.mocked(getProject)
+        .mockResolvedValueOnce(fakeProject({ workspaceStatus: "provisioning", updatedAt: freshUpdatedAt }))
+        .mockResolvedValueOnce(fakeProject({ workspaceStatus: "provisioning", updatedAt: freshUpdatedAt }))
+        .mockResolvedValue(fakeProject({ workspaceId: "ws-live", workspaceStatus: "ready" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(
+        fakeProject({ workspaceStatus: "provisioning", updatedAt: freshUpdatedAt }),
+      );
+
+      await expect(provisionWorkspaceForProject("proj-live", "user-1")).resolves.toBe("ws-live");
+      // Only the entry-point sweep ran — no in-loop reclaim was attempted.
+      expect(recoverStaleProvisioning).toHaveBeenCalledTimes(1);
+      expect(claimProvisioningLock).not.toHaveBeenCalled();
+      expect(prepareWorkspaceInternal).not.toHaveBeenCalled();
+    });
+
+    it("heartbeats the lock while a prepare is in flight and stops when it settles", async () => {
+      vi.useFakeTimers();
+      try {
+        let resolvePrepare: ((v: WorkspacePrepareResponse) => void) | undefined;
+        vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+        vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+        vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject({ workspaceStatus: "provisioning" }));
+        vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+        vi.mocked(touchProvisioningHeartbeat).mockResolvedValue(undefined);
+        vi.mocked(prepareWorkspaceInternal).mockReturnValue(
+          new Promise<WorkspacePrepareResponse>((resolve) => {
+            resolvePrepare = resolve;
+          }),
+        );
+
+        const pending = provisionWorkspaceForProject("proj-hb", "user-1");
+        await vi.advanceTimersByTimeAsync(25_000);
+        // Two beats in 25s — the lock stays fresh for observers.
+        expect(vi.mocked(touchProvisioningHeartbeat).mock.calls.length).toBeGreaterThanOrEqual(2);
+
+        resolvePrepare!({ workspaceId: "ws-hb", root: "/data/ws-hb" } as WorkspacePrepareResponse);
+        await expect(pending).resolves.toBe("ws-hb");
+
+        // After the prepare settles the heartbeat stops — no stray writes.
+        const beats = vi.mocked(touchProvisioningHeartbeat).mock.calls.length;
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(vi.mocked(touchProvisioningHeartbeat).mock.calls.length).toBe(beats);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("allows only the winning concurrent caller to prepare a workspace", async () => {

@@ -375,15 +375,19 @@ export const toolCreateProject: ToolHandler = async (userId, args) => {
       accessMode: "private",
     });
     // Match POST /api/studio-projects: a managed project provisions its
-    // durable workspace at create time. Tolerant — a provisioning failure
-    // leaves workspace_status=failed and first-open retries it; creation
-    // itself still succeeded and must not be reported as failed.
-    try {
-      const { provisionWorkspaceForProject } = await import("@/lib/studio/workspace-recovery");
-      await provisionWorkspaceForProject(project.id, userId);
-    } catch {
-      // Provisioning failure is surfaced via workspace_status on the row.
-    }
+    // durable workspace at create time — but without parking the tool
+    // result on the prepare. A detached run is safe here: the DB lock is
+    // atomic, failures land on workspace_status=failed, and an interrupted
+    // run leaves a dead lock that observers reclaim after the dead-lock
+    // window (the owner stops heartbeating). First-open and GET workspace
+    // recovery retry whatever remains unfinished.
+    const { provisionWorkspaceForProject } = await import("@/lib/studio/workspace-recovery");
+    void provisionWorkspaceForProject(project.id, userId).catch((provisionErr) => {
+      console.error(
+        `[create_project] post-create provisioning failed for ${project.id}:`,
+        provisionErr instanceof Error ? provisionErr.message : provisionErr,
+      );
+    });
     return ok(project.id, `Created project "${project.name}".`, {
       projectId: project.id, name: project.name,
     });
