@@ -108,6 +108,20 @@ beforeEach(() => {
   mocks.createGithubProject.mockResolvedValue({ id: "project-1" });
 });
 
+describe("POST /api/studio-projects authentication", () => {
+  it("returns 401 and never writes when the request is unauthenticated", async () => {
+    mocks.auth.mockResolvedValue({ userId: null, clerkId: null });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
+    expect(mocks.createGithubProject).not.toHaveBeenCalled();
+    expect(mocks.createBlankProject).not.toHaveBeenCalled();
+    expect(mocks.provisionWorkspaceForProject).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/studio-projects GitHub authorization", () => {
   it("rejects an installation not owned by the authenticated user", async () => {
     mocks.installationResult.data = null as unknown as { installation_id: number };
