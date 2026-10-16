@@ -1,36 +1,59 @@
 /**
  * Local-database proof for the Stripe webhook.
  *
- * Runs only when RUN_STRIPE_LOCAL_DB=1. It talks to a local Postgres that
- * has the repo migrations applied (RLS left on) through PostgREST, using a
- * service_role JWT the same way the webhook's admin client does. Payloads
- * are signed with Stripe's test-header generator. No live Stripe key is used.
+ * Skipped unless RUN_STRIPE_LOCAL_DB=1. Run this file by itself so the
+ * admin client captures the local URL (it reads env at module load):
+ *
+ *   RUN_STRIPE_LOCAL_DB=1 pnpm exec vitest run tests/stripe-webhook-local-db.test.ts
+ *
+ * Database and API default to the Supabase CLI local stack
+ * (`supabase start`): Postgres on 127.0.0.1:54322 and PostgREST on
+ * 127.0.0.1:54321, with the published local demo JWTs. Override with
+ * SUPABASE_DB_URL and SUPABASE_LOCAL_API_URL.
+ *
+ * Signature checks use Stripe's test-header generator. subscriptions.retrieve
+ * is mocked: invoice.paid re-reads the live subscription, and this file
+ * must not call api.stripe.com. No billing_admin role and no stand-in
+ * PostgREST are created here.
  */
-import { createHmac } from "crypto";
-import http from "http";
 import { writeFileSync } from "fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import Stripe from "stripe";
 
+vi.mock("stripe", async () => {
+  const actual = await vi.importActual<typeof import("stripe")>("stripe");
+  const RealStripe = actual.default;
+  function StripeWithLocalSubscription(
+    this: unknown,
+    key: string,
+    config?: ConstructorParameters<typeof RealStripe>[1],
+  ) {
+    const client = new RealStripe(key, config);
+    client.subscriptions.retrieve = (async (id: string) => ({
+      id,
+      status: "active" as const,
+      metadata: {},
+      items: { data: [] },
+      cancel_at_period_end: false,
+      customer: null,
+    })) as unknown as typeof client.subscriptions.retrieve;
+    return client;
+  }
+  return { ...actual, default: StripeWithLocalSubscription };
+});
+
 const ENABLED = process.env.RUN_STRIPE_LOCAL_DB === "1";
-const JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
 const WHSEC = "whsec_local_db_fixture";
 const STRIPE_KEY = "sk_test_local_fixture_not_a_live_key";
-const DB_URL = "postgres://billing_admin:billing_admin@127.0.0.1:5432/litlabs_billing";
-
-function jwt(role: string): string {
-  const pack = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
-  const header = pack({ alg: "HS256", typ: "JWT" });
-  const payload = pack({
-    role,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 60 * 60,
-  });
-  const data = `${header}.${payload}`;
-  const sig = createHmac("sha256", JWT_SECRET).update(data).digest("base64url");
-  return `${data}.${sig}`;
-}
+const DB_URL =
+  process.env.SUPABASE_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const API_URL = process.env.SUPABASE_LOCAL_API_URL ?? "http://127.0.0.1:54321";
+// Supabase CLI local demo keys. They only verify against the local JWT secret.
+const ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
+const SERVICE_ROLE_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
 
 type Scenario = {
   id: number;
@@ -47,53 +70,21 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
   const db = new Client({ connectionString: DB_URL });
   const stripe = new Stripe(STRIPE_KEY);
   let post: (req: Request) => Promise<Response>;
-  let proxy: http.Server;
-  const originalFetch = globalThis.fetch.bind(globalThis);
 
   beforeAll(async () => {
     if (!STRIPE_KEY.startsWith("sk_test_")) {
       throw new Error("refusing non-test Stripe key");
     }
-    proxy = http.createServer(async (req, res) => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) chunks.push(chunk as Buffer);
-      const body = Buffer.concat(chunks);
-      const path = (req.url || "/").replace(/^\/rest\/v1/, "") || "/";
-      const headers = new Headers();
-      for (const [key, value] of Object.entries(req.headers)) {
-        if (key === "host" || value == null) continue;
-        headers.set(key, Array.isArray(value) ? value.join(",") : value);
-      }
-      const upstream = await originalFetch(`http://127.0.0.1:3000${path}`, {
-        method: req.method,
-        headers,
-        body: req.method === "GET" || req.method === "HEAD" ? undefined : body,
-      });
-      const out = Buffer.from(await upstream.arrayBuffer());
-      const responseHeaders: Record<string, string> = {};
-      upstream.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
-      });
-      res.writeHead(upstream.status, responseHeaders);
-      res.end(out);
-    });
-    await new Promise<void>((resolve) => proxy.listen(54321, "127.0.0.1", () => resolve()));
 
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "http://127.0.0.1:54321";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = jwt("service_role");
+    process.env.NEXT_PUBLIC_SUPABASE_URL = API_URL;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = SERVICE_ROLE_KEY;
+    delete process.env.SUPABASE_SECRET_KEY;
     process.env.STRIPE_SECRET_KEY = STRIPE_KEY;
     process.env.STRIPE_WEBHOOK_SECRET = WHSEC;
     process.env.STRIPE_PRICE_CREATOR_BETA = "price_creator_local";
     process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_pro_local";
 
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      if (url.includes("api.stripe.com")) {
-        throw new Error(`refusing Stripe network call during local DB proof: ${url}`);
-      }
-      return originalFetch(input, init);
-    };
-
+    vi.resetModules();
     const mod = await import("@/app/api/stripe/webhook/route");
     post = mod.POST as unknown as (req: Request) => Promise<Response>;
     await db.connect();
@@ -108,9 +99,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
   }, 30_000);
 
   afterAll(async () => {
-    globalThis.fetch = originalFetch;
     await db.end().catch(() => undefined);
-    await new Promise<void>((resolve) => proxy?.close(() => resolve()));
     writeFileSync("/tmp/stripe-webhook-scenarios.json", JSON.stringify(report, null, 2));
     console.log("\nLOCAL_DB_SCENARIOS\n" + JSON.stringify(report, null, 2));
   });
@@ -465,14 +454,14 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
       };
     });
 
-    const anon = await originalFetch("http://127.0.0.1:54321/rest/v1/credit_ledger?select=id", {
-      headers: { Authorization: `Bearer ${jwt("anon")}`, apikey: jwt("anon"), Accept: "application/json" },
+    const anon = await fetch(`${API_URL}/rest/v1/credit_ledger?select=id`, {
+      headers: { Authorization: `Bearer ${ANON_KEY}`, apikey: ANON_KEY, Accept: "application/json" },
     });
     const anonBody = await anon.json();
-    const service = await originalFetch("http://127.0.0.1:54321/rest/v1/credit_ledger?select=id", {
+    const service = await fetch(`${API_URL}/rest/v1/credit_ledger?select=id`, {
       headers: {
-        Authorization: `Bearer ${jwt("service_role")}`,
-        apikey: jwt("service_role"),
+        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+        apikey: SERVICE_ROLE_KEY,
         Accept: "application/json",
       },
     });
