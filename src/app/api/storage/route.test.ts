@@ -63,10 +63,13 @@ describe("GET /api/storage media bucket self-provisioning", () => {
     expect(mocks.signedCalls).toBe(0);
   });
 
-  it("self-provisions a missing media bucket and returns 200", async () => {
+  it.each([
+    "Bucket not found",
+    "The related resource does not exist",
+  ])("self-provisions a missing media bucket (%s) and returns 200", async (message) => {
     mocks.signedQueue.push({
       data: null,
-      error: { message: "Bucket not found" },
+      error: { message },
     });
     const res = await GET(req());
     expect(res.status).toBe(200);

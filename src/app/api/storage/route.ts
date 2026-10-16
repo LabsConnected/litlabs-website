@@ -7,7 +7,11 @@ import { auth } from "@/lib/auth";
 const MEDIA_BUCKET = "media";
 
 function isMissingBucketError(error: { message?: string }): boolean {
-  return /bucket not found|bucket.*does not exist/i.test(error.message ?? "");
+  // Supabase Storage reports a missing bucket as "Bucket not found" on some
+  // versions and "The related resource does not exist" (observed on staging)
+  // via the PostgREST-style gateway on others.
+  return /bucket not found|bucket.*does not exist|related resource does not exist/i
+    .test(error.message ?? "");
 }
 
 export async function GET(req: NextRequest) {
