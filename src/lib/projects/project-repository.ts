@@ -160,12 +160,55 @@ export async function createBlankProject(
 }
 
 /**
+ * Thrown when a create would violate the one-project-per-repository
+ * invariant. Carries the already-connected project so callers can surface
+ * an actionable 409 instead of a raw constraint error.
+ */
+export class ProjectConflictError extends Error {
+  readonly existing: CanonicalProject;
+  constructor(existing: CanonicalProject) {
+    super(
+      `Repository ${existing.githubFullName ?? ""} is already connected as project "${existing.name}".`,
+    );
+    this.name = "ProjectConflictError";
+    this.existing = existing;
+  }
+}
+
+/** Find the canonical project a user already connected for a repository. */
+export async function findProjectByGithubRepository(
+  userId: string,
+  githubRepositoryId: number,
+): Promise<CanonicalProject | null> {
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("github_repository_id", githubRepositoryId)
+    .eq("is_system", false)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to check for an existing project: ${error.message}`);
+  }
+  return data ? rowToCanonical(data as StudioProjectRow) : null;
+}
+
+/**
  * Create a GitHub-backed project in the canonical studio_projects table.
  * Does NOT touch the legacy `projects` table.
+ * Throws ProjectConflictError when the repository is already connected.
  */
 export async function createGithubProject(
   input: CreateGithubProjectInput,
 ): Promise<CanonicalProject> {
+  const existing = await findProjectByGithubRepository(
+    input.userId,
+    input.githubRepositoryId,
+  );
+  if (existing) {
+    throw new ProjectConflictError(existing);
+  }
+
   const slug = input.slug || slugify(input.githubRepo);
 
   const insert: Record<string, unknown> = {
@@ -193,6 +236,16 @@ export async function createGithubProject(
     .single();
 
   if (error || !data) {
+    // Unique-race fallback: another request connected the same repository
+    // between the pre-check and this insert. Report it as a conflict, not
+    // a raw Postgres error.
+    if (error?.code === "23505") {
+      const winner = await findProjectByGithubRepository(
+        input.userId,
+        input.githubRepositoryId,
+      );
+      if (winner) throw new ProjectConflictError(winner);
+    }
     throw new Error(`Failed to create project: ${error?.message ?? "unknown error"}`);
   }
 

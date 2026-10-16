@@ -127,7 +127,7 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
 }
 
 function StudioHub() {
-  const { isLoaded, isSignedIn, userId } = useClerkAuth();
+  const { isLoaded, isSignedIn, userId, getToken } = useClerkAuth();
   const router = useRouter();
   const [retryKey, setRetryKey] = useState(0);
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
@@ -190,10 +190,16 @@ function StudioHub() {
       setIsCreating(true);
       setCreateError(null);
       try {
+        // Bearer + cookie — cookies alone can be dropped by WebView/proxy
+        // contexts, producing a 401 that looks like a creation failure.
+        const token = await getToken?.();
         const res = await fetch("/api/studio-projects", {
           method: "POST",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({
             sourceType: "blank",
             name: idea.slice(0, 60) || "Untitled Project",
@@ -225,7 +231,7 @@ function StudioHub() {
         setIsCreating(false);
       }
     },
-    [router, userId]
+    [router, userId, getToken]
   );
 
   const handleFirstRunRetry = useCallback(() => {
