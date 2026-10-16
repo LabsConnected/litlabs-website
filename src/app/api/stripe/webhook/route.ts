@@ -49,6 +49,18 @@ function unixSecondsToIso(value: number | null | undefined): string | null {
   return new Date(value * 1000).toISOString();
 }
 
+function clerkIdFromInvoice(inv: Stripe.Invoice): string | undefined {
+  const details = inv.parent?.subscription_details as
+    | { metadata?: { clerk_id?: unknown } | null }
+    | null
+    | undefined;
+  const fromDetails = details?.metadata?.clerk_id;
+  if (typeof fromDetails === "string" && fromDetails.trim()) return fromDetails.trim();
+  const fromInvoice = inv.metadata?.clerk_id;
+  if (typeof fromInvoice === "string" && fromInvoice.trim()) return fromInvoice.trim();
+  return undefined;
+}
+
 type ApplyOutcome = "applied" | "conflict" | "stale" | "recheck";
 
 /**
@@ -150,6 +162,71 @@ async function applySubscriptionEvent(
     outcome,
     existingSubscriptionId: row?.existing_subscription_id,
   };
+}
+
+/**
+ * An invoice for a different subscription id must not grant, and must not
+ * retry forever, when this user already holds a protected subscription.
+ * The locked apply records the conflict and throws SupersededSubscriptionError.
+ * No clerk id, or no other held id, leaves the caller on the retry path.
+ */
+async function acknowledgeIfSupersededInvoice(
+  sb: AdminClient,
+  event: Stripe.Event,
+  clerkId: string,
+  incomingSubscriptionId: string,
+): Promise<void> {
+  const { data: user, error: userError } = await sb
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .maybeSingle();
+  if (userError) {
+    throw new Error(
+      `[stripe] ${event.type} ${event.id}: user lookup failed: ${userError.message}`,
+    );
+  }
+  if (!user) return;
+  const { data: held, error: heldError } = await sb
+    .from("subscriptions")
+    .select("stripe_subscription_id, status")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (heldError) {
+    throw new Error(
+      `[stripe] ${event.type} ${event.id}: subscription lookup failed: ${heldError.message}`,
+    );
+  }
+  const heldId =
+    typeof held?.stripe_subscription_id === "string" ? held.stripe_subscription_id.trim() : "";
+  const status = typeof held?.status === "string" ? held.status : "";
+  if (!heldId || heldId === incomingSubscriptionId) return;
+  if (status === "canceled" || status === "incomplete_expired") return;
+  await applySubscriptionEvent(sb, {
+    userId: user.id,
+    incomingSubscriptionId,
+    event,
+    authoritative: true,
+    ordering: "apply",
+    requireExisting: true,
+    plan: null,
+    status: null,
+    updatePlan: false,
+    statusPolicy: "leave",
+    liveStatus: null,
+    stripeCustomerId: null,
+    periodStart: null,
+    periodEnd: null,
+    cancelAtPeriodEnd: null,
+    incomingPlan: null,
+    grantMode: "none",
+    grantAmount: null,
+    grantIdempotencyKey: null,
+    grantDescription: null,
+    grantReferenceId: null,
+    grantExpiresAt: null,
+    skipGrantIdempotencyKey: null,
+  });
 }
 
 /**
@@ -658,7 +735,10 @@ async function subscriptionMetaForCharge(
   stripe: Stripe,
   charge: Stripe.Charge,
 ): Promise<{ planId: string | null; clerkId: string | null; subscriptionId: string | null }> {
-  const invoiceRef = charge.invoice;
+  // Basil Charge types omit `invoice`. Webhook payloads still send it.
+  const invoiceRef = (
+    charge as Stripe.Charge & { invoice?: string | { id?: string } | null }
+  ).invoice;
   const invoiceId = typeof invoiceRef === "string" ? invoiceRef : invoiceRef?.id ?? null;
   if (!invoiceId) return { planId: null, clerkId: null, subscriptionId: null };
   let invoice: Stripe.Invoice;
@@ -1245,6 +1325,10 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.paid ${event.id}: missing parent subscription id`,
           );
         }
+        const invoiceClerk = clerkIdFromInvoice(inv);
+        if (invoiceClerk) {
+          await acknowledgeIfSupersededInvoice(sb, event, invoiceClerk, invSubId);
+        }
         // The customer.subscription.created event is usually still in flight
         // when invoice.paid arrives: it performs a multi-query upsert while
         // this handler does a single SELECT, so without a wait the lookup
@@ -1441,6 +1525,10 @@ export async function POST(req: NextRequest) {
           throw new Error(
             `[stripe] invoice.payment_failed ${event.id}: missing subscription id`,
           );
+        }
+        const failedClerk = clerkIdFromInvoice(failInv);
+        if (failedClerk) {
+          await acknowledgeIfSupersededInvoice(sb, event, failedClerk, failSubId);
         }
         const { data: failMatch, error: failLookupError } = await sb
           .from("subscriptions")

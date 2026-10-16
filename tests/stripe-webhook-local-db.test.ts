@@ -219,7 +219,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
     };
   }
 
-  function invoicePaid(id: string, invoiceId: string, subId: string) {
+  function invoicePaid(id: string, invoiceId: string, subId: string, clerkId?: string) {
     return {
       id,
       type: "invoice.paid",
@@ -227,7 +227,12 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
         object: {
           id: invoiceId,
           customer: `cus_${subId}`,
-          parent: { subscription_details: { subscription: subId } },
+          parent: {
+            subscription_details: {
+              subscription: subId,
+              ...(clerkId ? { metadata: { clerk_id: clerkId, product_type: "plan" } } : {}),
+            },
+          },
           lines: { data: [{ period: { end: 1702678400 }, pricing: { price_details: { price: "" } } }] },
         },
       },
@@ -723,6 +728,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
           "evt_local658_conflict_invoice_b",
           "in_local658_conflict_invoice_b",
           "sub_local658_conflict_invoice_b",
+          clerk,
         ),
       );
       const dbRows = await snapshot(clerk, [

@@ -29,8 +29,13 @@ updates that token under `FOR UPDATE`. Finalize and release match the token.
 A second stale retry cannot delete the winner's row.
 
 A subscription event whose id is not the stored protected subscription is
-finalized as `superseded_subscription` and acknowledged with HTTP 200. A
-conflict that cannot be recorded still returns HTTP 500.
+finalized as `superseded_subscription` and acknowledged with HTTP 200. The
+same ack applies to `invoice.paid` and `invoice.payment_failed` when the
+invoice carries the Clerk id and that user already holds a different
+protected subscription. The invoice does not grant or change that row.
+An invoice with no identity still returns HTTP 500 so a late
+`customer.subscription.created` can be retried. A conflict that cannot be
+recorded still returns HTTP 500.
 
 ## Disputes and subscription refunds
 

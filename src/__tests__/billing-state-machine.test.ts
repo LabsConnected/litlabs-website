@@ -1520,7 +1520,19 @@ describe("Webhook event processing — state mutations", () => {
     process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
     process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
     const { sb, upserts } = buildTrackingSupabase();
-    (sb as any).rpc = vi.fn(async () => ({ data: null, error: { message: "ledger down" } }));
+    (sb as any).rpc = vi.fn(async (fnName: string) => {
+      if (
+        fnName === "claim_stripe_event" ||
+        fnName === "finalize_stripe_event" ||
+        fnName === "release_stripe_event"
+      ) {
+        return {
+          data: fnName === "claim_stripe_event" ? "owned" : fnName === "finalize_stripe_event" ? true : "released",
+          error: null,
+        };
+      }
+      return { data: null, error: { message: "ledger down" } };
+    });
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
     mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
@@ -3002,7 +3014,19 @@ describe("Webhook event processing — state mutations", () => {
 
   it("credit pack grant RPC error → 500 and the event is not marked processed", async () => {
     const { sb, inserts } = buildTrackingSupabase();
-    (sb as any).rpc = vi.fn(async () => ({ data: null, error: { message: "ledger down" } }));
+    (sb as any).rpc = vi.fn(async (fnName: string) => {
+      if (
+        fnName === "claim_stripe_event" ||
+        fnName === "finalize_stripe_event" ||
+        fnName === "release_stripe_event"
+      ) {
+        return {
+          data: fnName === "claim_stripe_event" ? "owned" : fnName === "finalize_stripe_event" ? true : "released",
+          error: null,
+        };
+      }
+      return { data: null, error: { message: "ledger down" } };
+    });
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
 
@@ -3078,7 +3102,19 @@ describe("Webhook event processing — state mutations", () => {
 
   it("charge.refunded debit RPC error → 500 (event not acknowledged)", async () => {
     const { sb } = buildTrackingSupabase();
-    (sb as any).rpc = vi.fn(async () => ({ data: null, error: { message: "debit failed" } }));
+    (sb as any).rpc = vi.fn(async (fnName: string) => {
+      if (
+        fnName === "claim_stripe_event" ||
+        fnName === "finalize_stripe_event" ||
+        fnName === "release_stripe_event"
+      ) {
+        return {
+          data: fnName === "claim_stripe_event" ? "owned" : fnName === "finalize_stripe_event" ? true : "released",
+          error: null,
+        };
+      }
+      return { data: null, error: { message: "debit failed" } };
+    });
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
     mockSucceededRefunds([{ id: "re_refund_fail", amount: 1000, created: 1700000001 }]);
