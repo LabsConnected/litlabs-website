@@ -104,9 +104,26 @@ function fakeDb(opts: { subRowAfter?: number; grantError?: boolean; plan?: strin
       q.then = (resolve: any, reject: any) => exec().then(resolve, reject);
       return q;
     },
-    async rpc(_n: string, a: any) {
-      if (opts.grantError) return { error: { message: "boom" } };
-      if (!db.ledger.has(a.p_idempotency_key)) db.ledger.set(a.p_idempotency_key, a.p_amount);
+    async rpc(name: string, a: any) {
+      if (opts.grantError && (name === "grant_credits" || name === "apply_subscription_event")) {
+        return { error: { message: "boom" } };
+      }
+      if (name === "apply_subscription_event") {
+        if (a.p_update_plan) {
+          db.upserts.push({
+            table: "subscriptions",
+            row: { plan: a.p_plan, stripe_subscription_id: a.p_incoming_subscription_id },
+            onConflict: "user_id",
+          });
+        }
+        if (a.p_grant_mode === "invoice_full" && a.p_grant_idempotency_key && !db.ledger.has(a.p_grant_idempotency_key)) {
+          db.ledger.set(a.p_grant_idempotency_key, a.p_grant_amount);
+        }
+        return { data: { outcome: "applied" }, error: null };
+      }
+      if (name === "grant_credits" && a.p_idempotency_key && !db.ledger.has(a.p_idempotency_key)) {
+        db.ledger.set(a.p_idempotency_key, a.p_amount);
+      }
       return { error: null };
     },
   };
