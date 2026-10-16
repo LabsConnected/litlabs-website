@@ -25,6 +25,7 @@
     "test:e2e:production": "playwright test --grep=\"@production|@smoke\"",
     "test:e2e:update-snapshots": "playwright test --update-snapshots",
     "test:e2e:report": "playwright show-report",
+    "test:e2e:qa-mcp": "tools/qa/qa-browser.sh",
     "build:workspace-deps": "pnpm --filter @litt/agent-core --filter @litt/models build",
     "type-check": "pnpm build:workspace-deps && tsc --noEmit",
     "type-check:tests": "pnpm build:workspace-deps && tsc --noEmit --project tsconfig.test.json",

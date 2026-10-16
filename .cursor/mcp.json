@@ -1,8 +1,11 @@
 {
   "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": ["@playwright/mcp@0.0.82"]
+    "playwright-qa": {
+      "command": "node",
+      "args": ["${workspaceFolder}/tools/qa/qa-launch.mjs"],
+      "env": {
+        "QA_TARGET_URL": "https://<preview-name>.up.railway.app"
+      }
     }
   }
 }
