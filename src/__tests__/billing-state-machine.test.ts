@@ -147,6 +147,7 @@ function buildTrackingSupabase(
     subscriptionPlan?: string;
     currentPeriodEnd?: string | null;
     updatedAt?: string | null;
+    lastStripeEventCreated?: number | string | null;
   } = {},
 ) {
   const rpcCalls: { fn: string; params: any }[] = [];
@@ -161,6 +162,7 @@ function buildTrackingSupabase(
     plan: opts.subscriptionPlan ?? "creator_beta",
     current_period_end: opts.currentPeriodEnd ?? null,
     updated_at: opts.updatedAt ?? null,
+    last_stripe_event_created: opts.lastStripeEventCreated ?? null,
   };
   const claimedEvents = new Map<string, { id: string; result: string; processed_at: string }>();
   if (existingEvent) {
@@ -232,6 +234,9 @@ function buildTrackingSupabase(
           subscriptionState.current_period_end = row.current_period_end;
         }
         if (typeof row.updated_at === "string") subscriptionState.updated_at = row.updated_at;
+        if (row.last_stripe_event_created != null) {
+          subscriptionState.last_stripe_event_created = row.last_stripe_event_created;
+        }
       }
       return { error: null };
     }),
@@ -1061,7 +1066,8 @@ describe("Webhook event processing — state mutations", () => {
     process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
     const tracked = buildTrackingSupabase(false, {
       subscriptionPlan: "pro_builder_beta",
-      updatedAt: "2026-06-01T00:00:00.000Z",
+      updatedAt: "2020-01-01T00:00:00.000Z",
+      lastStripeEventCreated: 1710000000,
       currentPeriodEnd: new Date(1702678400 * 1000).toISOString(),
     });
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
@@ -1077,10 +1083,90 @@ describe("Webhook event processing — state mutations", () => {
         items: { data: [{ price: "price_test_creator", current_period_end: 1702678400 }] },
       },
     }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
     const res = await webhookPOST(makeWebhookRequest("body", "sig"));
     expect(res.status).toBe(200);
     expect(tracked.upserts.filter((row) => row.table === "subscriptions")).toHaveLength(0);
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+    expect(warn.mock.calls.some((call) => String(call[0]).includes("skipping stale subscription event"))).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("a downgrade in the next second applies when updated_at is a later wall clock", async () => {
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
+    const tracked = buildTrackingSupabase(false, {
+      subscriptionPlan: "pro_builder_beta",
+      // invoice.paid at second 42 finished its Stripe re-read after second 43.
+      updatedAt: new Date(1700000044 * 1000).toISOString(),
+      lastStripeEventCreated: "1700000042",
+      currentPeriodEnd: new Date(1702678400 * 1000).toISOString(),
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
+      id: "evt_downgrade_next_second",
+      created: 1700000043,
+      object: {
+        id: "sub_down_clock",
+        status: "active",
+        customer: "cus_down_clock",
+        metadata: { clerk_id: "user_123", plan_id: "pro_builder_beta" },
+        items: { data: [{ price: "price_test_creator", current_period_end: 1702678400 }] },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    const row = tracked.upserts.find((entry) => entry.table === "subscriptions")?.row;
+    expect(row?.plan).toBe("creator_beta");
+    expect(row?.last_stripe_event_created).toBe(1700000043);
+    expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+  });
+
+  it("a same-second subscription event re-reads Stripe and applies the live plan", async () => {
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
+    const tracked = buildTrackingSupabase(false, {
+      subscriptionPlan: "pro_builder_beta",
+      updatedAt: new Date(1700000043 * 1000 + 800).toISOString(),
+      lastStripeEventCreated: 1700000043,
+      currentPeriodEnd: new Date(1702678400 * 1000).toISOString(),
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+    mockSubscriptionsRetrieve.mockResolvedValue({
+      id: "sub_same_second",
+      status: "active",
+      customer: "cus_same_second",
+      cancel_at_period_end: false,
+      metadata: { clerk_id: "user_123", plan_id: "pro_builder_beta" },
+      items: { data: [{ price: "price_test_creator", current_period_end: 1702678400 }] },
+    });
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
+      id: "evt_same_second",
+      created: 1700000043,
+      object: {
+        id: "sub_same_second",
+        status: "active",
+        customer: "cus_same_second",
+        metadata: { clerk_id: "user_123", plan_id: "pro_builder_beta" },
+        items: { data: [{ price: "price_test_pro", current_period_end: 1702678400 }] },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(mockSubscriptionsRetrieve).toHaveBeenCalledWith(
+      "sub_same_second",
+      undefined,
+      { timeout: 8000 },
+    );
+    const row = tracked.upserts.find((entry) => entry.table === "subscriptions")?.row;
+    expect(row?.plan).toBe("creator_beta");
+    expect(row?.last_stripe_event_created).toBe(1700000043);
     expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
   });
 
@@ -1864,6 +1950,7 @@ describe("Webhook event processing — state mutations", () => {
                 plan: "creator_beta",
                 status: "canceled",
                 updated_at: "2030-01-01T00:00:00.000Z",
+                last_stripe_event_created: 1893456000,
               },
               error: null,
             };

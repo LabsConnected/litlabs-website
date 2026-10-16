@@ -193,13 +193,28 @@ const LIVE_NON_ACTIVE_STATUSES = new Set([
 ]);
 
 function eventCreatedMs(event: Stripe.Event): number {
+  return eventCreatedSeconds(event) * 1000;
+}
+
+/** Stripe `event.created` is whole seconds. Missing values use the current second. */
+function eventCreatedSeconds(event: Stripe.Event): number {
   return typeof event.created === "number" && event.created > 0
-    ? event.created * 1000
-    : Date.now();
+    ? Math.floor(event.created)
+    : Math.floor(Date.now() / 1000);
 }
 
 function eventTimestamp(event: Stripe.Event): string {
   return new Date(eventCreatedMs(event)).toISOString();
+}
+
+/** PostgREST may return bigint as a number or a string. */
+function storedStripeEventSeconds(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.floor(value);
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.floor(parsed);
+  }
+  return null;
 }
 
 type ListedRefund = { id: string; amount: number; created: number };
@@ -914,23 +929,41 @@ export async function POST(req: NextRequest) {
         }
         const { data: existingSub } = await sb
           .from("subscriptions")
-          .select("plan, current_period_end, updated_at")
+          .select("plan, current_period_end, last_stripe_event_created")
           .eq("user_id", subUserId)
           .maybeSingle();
-        // A delayed subscription event must not rewind a newer plan write
-        // or grant on top of it. The newer row already decided this period.
-        const storedUpdatedMs = existingSub?.updated_at
-          ? Date.parse(existingSub.updated_at)
-          : Number.NaN;
-        if (
-          Number.isFinite(storedUpdatedMs) &&
-          storedUpdatedMs > eventCreatedMs(event)
-        ) {
+        // Order by the Stripe event second last applied to this row.
+        // updated_at is the app wall clock and can land after a later
+        // event.created (whole seconds), which dropped real downgrades.
+        const storedEventSeconds = storedStripeEventSeconds(
+          existingSub?.last_stripe_event_created,
+        );
+        const incomingSeconds = eventCreatedSeconds(event);
+        if (storedEventSeconds !== null && incomingSeconds < storedEventSeconds) {
+          console.warn(
+            `[stripe] ${event.type} ${event.id}: skipping stale subscription event created ${incomingSeconds}; last applied Stripe event ${storedEventSeconds}`,
+          );
           break;
         }
+        // Same second: the payload and a sibling event are unordered.
+        // The live subscription is the one to write.
+        let applied = sub;
+        if (storedEventSeconds !== null && incomingSeconds === storedEventSeconds) {
+          try {
+            applied = await stripe.subscriptions.retrieve(sub.id, undefined, {
+              timeout: 8000,
+            });
+          } catch (readErr) {
+            const message = readErr instanceof Error ? readErr.message : "unknown error";
+            throw new Error(
+              `[stripe] ${event.type} ${event.id}: same-second subscription re-read failed: ${message}`,
+            );
+          }
+        }
+        const appliedMeta = applied.metadata || {};
         const planId = resolveSubscriptionPlan(
-          subPlanId,
-          priceIdFromSubscription(sub),
+          (appliedMeta.plan_id as PlanId) || subPlanId,
+          priceIdFromSubscription(applied),
           `${event.type} ${sub.id}`,
         );
         // Grant the upgrade difference before writing the new plan. A retry
@@ -941,10 +974,10 @@ export async function POST(req: NextRequest) {
         if (event.type === "customer.subscription.updated") {
           const previous = subscriptionCreditAllowance(existingSub?.plan);
           const next = subscriptionCreditAllowance(planId);
-          const periodEnd = sub.items?.data?.[0]?.current_period_end ?? "na";
+          const periodEnd = applied.items?.data?.[0]?.current_period_end ?? "na";
           const storedPeriod = periodEndSeconds(existingSub?.current_period_end);
           const incomingPeriod = periodEndSeconds(
-            sub.items?.data?.[0]?.current_period_end,
+            applied.items?.data?.[0]?.current_period_end,
           );
           // A new period is a renewal. invoice.paid grants that period once.
           // The delta is only the mid-cycle top-up, while the period end stays put.
@@ -980,19 +1013,20 @@ export async function POST(req: NextRequest) {
           {
             user_id: subUserId,
             stripe_customer_id:
-              typeof sub.customer === "string"
-                ? sub.customer
-                : sub.customer?.id,
+              typeof applied.customer === "string"
+                ? applied.customer
+                : applied.customer?.id,
             stripe_subscription_id: sub.id,
             plan: planId,
-            status: sub.status,
-            current_period_start: sub.items?.data?.[0]?.current_period_start
-              ? new Date(sub.items.data[0].current_period_start * 1000).toISOString()
+            status: applied.status,
+            current_period_start: applied.items?.data?.[0]?.current_period_start
+              ? new Date(applied.items.data[0].current_period_start * 1000).toISOString()
               : null,
-            current_period_end: sub.items?.data?.[0]?.current_period_end
-              ? new Date(sub.items.data[0].current_period_end * 1000).toISOString()
+            current_period_end: applied.items?.data?.[0]?.current_period_end
+              ? new Date(applied.items.data[0].current_period_end * 1000).toISOString()
               : null,
-            cancel_at_period_end: sub.cancel_at_period_end === true,
+            cancel_at_period_end: applied.cancel_at_period_end === true,
+            last_stripe_event_created: incomingSeconds,
             updated_at: new Date().toISOString(),
           },
           { onConflict: "user_id", ignoreDuplicates: false },
@@ -1010,7 +1044,7 @@ export async function POST(req: NextRequest) {
         const delSub = event.data.object as Stripe.Subscription;
         const { data: delMatch } = await sb
           .from("subscriptions")
-          .select("user_id")
+          .select("user_id, last_stripe_event_created")
           .eq("stripe_subscription_id", delSub.id)
           .single();
         if (!delMatch) {
@@ -1018,11 +1052,22 @@ export async function POST(req: NextRequest) {
             `[stripe] customer.subscription.deleted ${delSub.id}: no subscription row`,
           );
         }
+        const storedDeleteSeconds = storedStripeEventSeconds(
+          delMatch.last_stripe_event_created,
+        );
+        const deleteSeconds = eventCreatedSeconds(event);
+        if (storedDeleteSeconds !== null && deleteSeconds < storedDeleteSeconds) {
+          console.warn(
+            `[stripe] customer.subscription.deleted ${event.id}: skipping stale subscription event created ${deleteSeconds}; last applied Stripe event ${storedDeleteSeconds}`,
+          );
+          break;
+        }
         const { error: cancelError } = await sb
           .from("subscriptions")
           .update({
             status: "canceled",
             cancel_at_period_end: false,
+            last_stripe_event_created: deleteSeconds,
             updated_at: eventTimestamp(event),
           })
           .eq("user_id", delMatch.user_id);
@@ -1062,12 +1107,12 @@ export async function POST(req: NextRequest) {
           user_id: string;
           plan: string;
           status?: string | null;
-          updated_at?: string | null;
+          last_stripe_event_created?: number | string | null;
         } | null = null;
         for (let attempt = 0; attempt < 6; attempt++) {
           const { data, error: lookupError } = await sb
             .from("subscriptions")
-            .select("user_id, plan, status, updated_at")
+            .select("user_id, plan, status, last_stripe_event_created")
             .eq("stripe_subscription_id", invSubId)
             .single();
           if (lookupError && !isMissingRow(lookupError)) {
@@ -1138,6 +1183,7 @@ export async function POST(req: NextRequest) {
                           ).toISOString()
                         : null,
                       cancel_at_period_end: fullSub.cancel_at_period_end === true,
+                      last_stripe_event_created: eventCreatedSeconds(event),
                       updated_at: new Date().toISOString(),
                     },
                     // subscriptions.user_id is the unique row identity.
@@ -1157,7 +1203,7 @@ export async function POST(req: NextRequest) {
                   user_id: u.id,
                   plan: planId,
                   status: fullSub.status,
-                  updated_at: eventTimestamp(event),
+                  last_stripe_event_created: eventCreatedSeconds(event),
                 };
               }
             }
@@ -1177,18 +1223,19 @@ export async function POST(req: NextRequest) {
           );
         }
         // A late invoice.paid must not revive a newer canceled or past_due
-        // row. Compare this event's created time with the timestamp stored
-        // by the newer status write, and re-read the subscription from
-        // Stripe so a canceled/past_due object is never forced to active.
+        // row. Compare event.created with the last applied Stripe event
+        // second, not updated_at, and re-read the subscription from Stripe
+        // so a canceled/past_due object is never forced to active.
         // A failed re-read is 500: guessing "active" is the bug.
-        const storedMs = invMatch.updated_at
-          ? Date.parse(invMatch.updated_at)
-          : Number.NaN;
+        const storedInvoiceSeconds = storedStripeEventSeconds(
+          invMatch.last_stripe_event_created,
+        );
+        const invoiceSeconds = eventCreatedSeconds(event);
         const newerTerminalStatus =
           !!invMatch.status &&
           TERMINAL_SUBSCRIPTION_STATUSES.has(invMatch.status) &&
-          Number.isFinite(storedMs) &&
-          storedMs > eventCreatedMs(event);
+          storedInvoiceSeconds !== null &&
+          storedInvoiceSeconds > invoiceSeconds;
         let liveStatus = "";
         try {
           const liveSub = await stripe.subscriptions.retrieve(
@@ -1210,6 +1257,10 @@ export async function POST(req: NextRequest) {
             .from("subscriptions")
             .update({
               status: "active",
+              last_stripe_event_created:
+                storedInvoiceSeconds === null || invoiceSeconds >= storedInvoiceSeconds
+                  ? invoiceSeconds
+                  : storedInvoiceSeconds,
               updated_at: eventTimestamp(event),
             })
             .eq("user_id", invMatch.user_id);
@@ -1273,7 +1324,7 @@ export async function POST(req: NextRequest) {
         }
         const { data: failMatch, error: failLookupError } = await sb
           .from("subscriptions")
-          .select("user_id")
+          .select("user_id, last_stripe_event_created")
           .eq("stripe_subscription_id", failSubId)
           .single();
         if (failLookupError && !isMissingRow(failLookupError)) {
@@ -1286,10 +1337,21 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.payment_failed ${event.id}: no subscription row for ${failSubId}`,
           );
         }
+        const storedFailSeconds = storedStripeEventSeconds(
+          failMatch.last_stripe_event_created,
+        );
+        const failSeconds = eventCreatedSeconds(event);
+        if (storedFailSeconds !== null && failSeconds < storedFailSeconds) {
+          console.warn(
+            `[stripe] invoice.payment_failed ${event.id}: skipping stale subscription event created ${failSeconds}; last applied Stripe event ${storedFailSeconds}`,
+          );
+          break;
+        }
         const { error: pastDueError } = await sb
           .from("subscriptions")
           .update({
             status: "past_due",
+            last_stripe_event_created: failSeconds,
             updated_at: eventTimestamp(event),
           })
           .eq("user_id", failMatch.user_id);

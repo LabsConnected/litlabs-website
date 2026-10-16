@@ -13,6 +13,7 @@ Order:
   1. supabase/migrations/20261014000000_subscriptions_stripe_subscription_id_unique.sql
   2. supabase/migrations/20261015000000_subscriptions_cancel_at_period_end.sql
   3. supabase/migrations/20261015120000_media_cap_holds.sql
+  4. supabase/migrations/20261015140000_subscriptions_last_stripe_event_created.sql
 
 Rollback, after the matching code is reverted:
   20261014000000: DROP INDEX IF EXISTS public.subscriptions_stripe_subscription_id_uidx;
@@ -22,6 +23,7 @@ Rollback, after the matching code is reverted:
                   DROP FUNCTION public.claim_media_cap_slot(uuid, text, text, text, text, integer, boolean, boolean, integer, integer, integer, integer, integer, timestamptz);
                   DROP FUNCTION public.media_job_is_free(text, text, integer);
                   DROP TABLE public.media_cap_holds;
+  20261015140000: ALTER TABLE public.subscriptions DROP COLUMN IF EXISTS last_stripe_event_created;
 EOF
 
 if [[ "${1:-}" == "--print" ]]; then

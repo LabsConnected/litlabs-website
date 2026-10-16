@@ -4,11 +4,14 @@
 -- Deployment order: run the migrations before the application code that
 -- reads the new columns or calls claim_media_cap_slot. Code that ships
 -- first fails closed on a missing function (generation returns 402
--- usage_unavailable) and can 500 on a missing cancel_at_period_end column.
+-- usage_unavailable) and can 500 on a missing cancel_at_period_end or
+-- last_stripe_event_created column. Apply 20261015140000 before the webhook
+-- that orders events by that column.
 --
 --   1. supabase/migrations/20261014000000_subscriptions_stripe_subscription_id_unique.sql
 --   2. supabase/migrations/20261015000000_subscriptions_cancel_at_period_end.sql
 --   3. supabase/migrations/20261015120000_media_cap_holds.sql
+--   4. supabase/migrations/20261015140000_subscriptions_last_stripe_event_created.sql
 --
 -- Preflight (this file):
 --   - public.users and public.generation_jobs exist
@@ -26,6 +29,8 @@
 --     DROP FUNCTION IF EXISTS public.claim_media_cap_slot(uuid, text, text, text, text, integer, boolean, boolean, integer, integer, integer, integer, integer, timestamptz);
 --     DROP FUNCTION IF EXISTS public.media_job_is_free(text, text, integer);
 --     DROP TABLE IF EXISTS public.media_cap_holds;
+--   20261015140000:
+--     ALTER TABLE public.subscriptions DROP COLUMN IF EXISTS last_stripe_event_created;
 
 DO $$
 DECLARE
