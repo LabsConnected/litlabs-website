@@ -55,6 +55,19 @@ vi.mock("@/lib/supabase", () => ({
   })(),
 }));
 
+// Route registers post-response work via next/server after(). In the real
+// runtime the platform drains it after the response is sent; tests run the
+// callback eagerly (unawaited) so registration stays observable.
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return {
+    ...actual,
+    after: (callback: () => unknown) => {
+      void callback();
+    },
+  };
+});
+
 const { POST } = await import("@/app/api/studio-projects/route");
 
 const githubProject = {
@@ -244,5 +257,66 @@ describe("POST /api/studio-projects managed create-time provisioning", () => {
     expect(response.status).toBe(201);
     const body = await response.json();
     expect(body.project.workspaceStatus).toBe("failed");
+  });
+
+  it("returns 201 promptly even when provisioning never resolves", async () => {
+    // The regression this guards: an inline await on provisioning parked
+    // the POST past the edge timeout, so clients saw a failed create for
+    // a row that already existed. Provisioning now runs post-response via
+    // after() — a hung terminal server must not stall the response.
+    mocks.createBlankProject.mockResolvedValue({ id: "proj-hang-1" });
+    mocks.provisionWorkspaceForProject.mockReturnValue(
+      new Promise<string>(() => {}),
+    );
+    mocks.getProject.mockResolvedValue({
+      id: "proj-hang-1",
+      workspaceStatus: "not_prepared",
+    });
+
+    const response = await POST(request(managedBody));
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.project.id).toBe("proj-hang-1");
+    expect(mocks.provisionWorkspaceForProject).toHaveBeenCalledWith(
+      "proj-hang-1",
+      "user-1",
+    );
+  });
+
+  it("returns 500 without provisioning when the insert fails", async () => {
+    mocks.createBlankProject.mockRejectedValue(
+      new Error("Failed to create project: insert failed"),
+    );
+
+    const response = await POST(request(managedBody));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: "Failed to create project: insert failed",
+    });
+    expect(mocks.provisionWorkspaceForProject).not.toHaveBeenCalled();
+  });
+
+  it("inserts and provisions exactly once per create request", async () => {
+    // A request must never fan out a second insert or a second provision —
+    // idempotent provisioning plus a single insert is what keeps a retried
+    // create from multiplying workspaces.
+    mocks.createBlankProject.mockResolvedValue({ id: "proj-once-1" });
+    mocks.provisionWorkspaceForProject.mockResolvedValue("ws-once");
+    mocks.getProject.mockResolvedValue({
+      id: "proj-once-1",
+      workspaceStatus: "provisioning",
+    });
+
+    const response = await POST(request(managedBody));
+
+    expect(response.status).toBe(201);
+    expect(mocks.createBlankProject).toHaveBeenCalledTimes(1);
+    expect(mocks.provisionWorkspaceForProject).toHaveBeenCalledTimes(1);
+    const body = await response.json();
+    expect(body.project.id).toBe("proj-once-1");
+    // In-flight status is reported truthfully, never as ready.
+    expect(body.project.workspaceStatus).toBe("provisioning");
   });
 });

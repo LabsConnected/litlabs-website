@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@/lib/auth";
 import { getInstallationOctokit } from "@/lib/github-app";
 import {
@@ -92,19 +92,27 @@ export async function POST(request: NextRequest) {
 
       // Provision durable source at create time — a managed project must
       // not wait for Preview auto-start to get its workspace, Git repo
-      // and branch. provisionWorkspaceForProject is idempotent (atomic
+      // and branch. This runs via after() so the response is sent right
+      // after the insert commits: awaiting it inline parked the POST for
+      // up to the terminal-server prepare budget (180s), past the edge
+      // timeout, and clients saw a failed create for a row that already
+      // existed. after() keeps the work inside the request lifecycle —
+      // the platform drains it instead of a detached fire-and-forget
+      // promise. provisionWorkspaceForProject is idempotent (atomic
       // provisioning lock + adoption-first prepare), so a concurrent
       // first-open cannot create a duplicate workspace. A failure leaves
       // workspace_status=failed on the row and first-open retries it —
       // the project itself was still created, so return it truthfully.
-      try {
-        await provisionWorkspaceForProject(project.id, userId);
-      } catch (provisionErr) {
-        console.error(
-          `[studio-projects] create-time provisioning failed for ${project.id}:`,
-          provisionErr instanceof Error ? provisionErr.message : provisionErr,
-        );
-      }
+      after(() =>
+        provisionWorkspaceForProject(project.id, userId).catch(
+          (provisionErr) => {
+            console.error(
+              `[studio-projects] post-create provisioning failed for ${project.id}:`,
+              provisionErr instanceof Error ? provisionErr.message : provisionErr,
+            );
+          },
+        ),
+      );
       const refreshed = await getProject(project.id, userId);
       return NextResponse.json({ project: refreshed ?? project }, { status: 201 });
     }
