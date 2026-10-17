@@ -54,6 +54,22 @@ describe("explicit new-project signal (requestsNewProject + actionMatched)", () 
     ["make changes to the site", { actionMatched: true, requestsNewProject: false }],
     ["start the app", { actionMatched: false, requestsNewProject: false }],
     ["fix the broken checkout page", { actionMatched: true, requestsNewProject: false }],
+    // B-A: "new X" where X is a file/asset-scope artifact FOR an existing
+    // project — prepositions and possessives/determiners in the gap mean
+    // the deliverable is the target, not the thing being created.
+    ["new component for my app", { actionMatched: false, requestsNewProject: false }],
+    ["new feature in my app", { actionMatched: false, requestsNewProject: false }],
+    ["new logo for my website", { actionMatched: false, requestsNewProject: false }],
+    ["new section for the homepage", { actionMatched: false, requestsNewProject: false }],
+    ["make my website better", { actionMatched: true, requestsNewProject: false }],
+    ["build the website", { actionMatched: true, requestsNewProject: false }],
+    // B-B: questions and instructions ABOUT creating — the creation
+    // phrase is inside a discussion frame, not a command.
+    ["tell me how to build a new app", { actionMatched: true, requestsNewProject: false }],
+    ["explain how to create a project", { actionMatched: true, requestsNewProject: false }],
+    ["should i build a website?", { actionMatched: true, requestsNewProject: false }],
+    ["how do i make an app", { actionMatched: true, requestsNewProject: false }],
+    ["what is the best way to create a website", { actionMatched: true, requestsNewProject: false }],
   ])("does not signal project creation for %j", async (prompt, expected) => {
     const output = await routeIntent({ prompt, context: {} });
     expect(output.type).toBe("intent");
@@ -70,12 +86,31 @@ describe("explicit new-project signal (requestsNewProject + actionMatched)", () 
     "make me a landing page",
     "start a new project",
     "spin up a new site",
+    // Direct creation commands phrased politely stay commands — "can
+    // you" and "help me" request the work, they don't ask about it.
+    "can you build me a website",
+    "help me create a website",
   ])("signals a new project for %j", async (prompt) => {
     const output = await routeIntent({ prompt, context: {} });
     expect(output.type).toBe("intent");
     if (output.type === "intent") {
       expect(output.result.actionMatched).toBe(true);
       expect(output.result.requestsNewProject).toBe(true);
+    }
+  });
+
+  it("pins the active project as target even for explicit new-project asks", async () => {
+    // Studio's second hop re-routes the same prompt with the pinned
+    // project id — target.projectId is what makes the planner refuse a
+    // second create_project step.
+    const output = await routeIntent({
+      prompt: "build me a new app",
+      context: { activeProjectId: "proj-pinned" },
+    });
+    expect(output.type).toBe("intent");
+    if (output.type === "intent") {
+      expect(output.result.requestsNewProject).toBe(true);
+      expect(output.result.target?.projectId).toBe("proj-pinned");
     }
   });
 

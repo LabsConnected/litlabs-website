@@ -26,28 +26,75 @@ function needsApproval(result: Pick<IntentRouterResult, "consequence" | "primary
 const PROJECT_DELIVERABLE =
   "(?:project|website|web\\s*site|web\\s*app|webapp|web\\s*page|webpage|landing\\s*page|home\\s*page|site|app|application|game)";
 
+// Prepositions between the signal word(s) and the deliverable mean the
+// deliverable is the TARGET of other work, not the thing being created:
+// "new component for my app", "changes to the site", "image for my
+// website". Possessives/determiners are excluded the same way — "new
+// logo for my website", "make my website better" target an existing
+// project, never a new one.
+const PREP_GAP = "on\\b|to\\b|into\\b|in\\b|inside\\b|within\\b|for\\b|of\\b|with\\b|about\\b|at\\b";
+const DETERMINER_GAP = "the\\b|this\\b|that\\b|these\\b|those\\b|my\\b|your\\b|our\\b|their\\b|existing\\b|current\\b";
+
 const NEW_PROJECT_PATTERNS = [
   // "new <deliverable>": "a new website", "new app", "my new project".
-  new RegExp(`\\bnew\\s+(?:[\\w-]+\\s+){0,3}${PROJECT_DELIVERABLE}\\b`, "i"),
+  // The gap allows only adjectives — no prepositions and no determiners,
+  // so "new component for my app" and "new feature in my app" fail.
+  new RegExp(
+    `\\bnew\\s+(?:(?!${PREP_GAP}|${DETERMINER_GAP}|a\\b|an\\b)[\\w-]+\\s+){0,3}${PROJECT_DELIVERABLE}\\b`,
+    "i",
+  ),
   // A creation verb governing a project deliverable: "create a website",
-  // "build me an app", "spin up a landing page". Prepositions between the
-  // verb and the noun ("working on the site", "changes to the app",
-  // "image for my website") describe work on an existing project or a
-  // non-project artifact and are excluded from the gap.
+  // "build me an app", "spin up a landing page". The indefinite article
+  // and "new" stay allowed ("create a website", "build a new app");
+  // prepositions and possessives/determiners do not.
   new RegExp(
     `\\b(?:create|build|make|scaffold|generate|develop|spin\\s+up|set\\s+up(?=\\s+(?:a|an|new)\\b)|start(?=\\s+(?:a|an|new)\\b))\\b\\s+(?:me\\s+|us\\s+)?` +
-      `(?:(?!on\\b|to\\b|into\\b|in\\b|inside\\b|within\\b|for\\b|of\\b|with\\b|about\\b|at\\b|existing\\b|current\\b)[\\w-]+\\s+){0,4}` +
+      `(?:(?!${PREP_GAP}|${DETERMINER_GAP})[\\w-]+\\s+){0,4}` +
       `${PROJECT_DELIVERABLE}\\b`,
     "i",
   ),
 ];
 
 /**
- * True only for an unambiguous new-project request. Bare nouns, questions,
- * comparisons, file-scope artifacts, and edits to an existing project all
- * return false — the caller must fail closed.
+ * Question and instruction frames — the prompt asks ABOUT creation, it
+ * does not command it. "Tell me how to build a new app", "Explain how to
+ * create a project", "Should I build a website?" all carry matching
+ * creation phrases but are chat requests. Direct commands phrased
+ * politely ("can you build me a website", "help me create a site") keep
+ * their signal — "can you"/"help me" are requests, not questions.
+ */
+const DISCUSSION_FRAME = new RegExp(
+  "\\b(?:" +
+    "how\\s+to\\b|" +
+    "how\\s+(?:do|does|did|can|could|should|would|might|may)\\b|" +
+    "what(?:'s|\\s+is|\\s+are|\\s+was|\\s+were|\\s+does|\\s+do|\\s+did|\\s+would|\\s+should)\\b|" +
+    "why\\s+(?:should|would|could|do|does|did|is|are|was|were)\\b|" +
+    "tell\\s+me\\b|" +
+    "explain\\b|" +
+    "describe\\b|" +
+    "teach\\s+me\\b|" +
+    "show\\s+me\\b|" +
+    "walk\\s+me\\b|" +
+    "should\\s+i\\b|" +
+    "could\\s+i\\b|" +
+    "do\\s+i\\s+need\\b|" +
+    "difference\\s+between\\b|" +
+    "steps?\\s+to\\b|" +
+    "guide\\s+(?:me|through|on)\\b|" +
+    "tutorial\\b|" +
+    "learn\\s+(?:how|to)\\b" +
+    ")",
+  "i",
+);
+
+/**
+ * True only for an unambiguous new-project request. Questions,
+ * instructions about building, comparisons, file-scope artifacts, and
+ * work on an existing project all return false — the caller must fail
+ * closed.
  */
 function promptRequestsNewProject(prompt: string): boolean {
+  if (DISCUSSION_FRAME.test(prompt)) return false;
   return NEW_PROJECT_PATTERNS.some((pattern) => pattern.test(prompt));
 }
 

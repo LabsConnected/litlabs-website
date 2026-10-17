@@ -79,4 +79,25 @@ describe("LiTT planner", () => {
     expect(explicit.steps.some((step) => step.type === "create_project")).toBe(true);
     expect(() => validatePlan(explicit)).not.toThrow();
   });
+
+  it("never plans create_project when a project is already pinned — no double-creation", () => {
+    // The dashboard composer mints the project up front and pins its id
+    // in ?project=<id>. Studio's second hop runs the same prompt through
+    // routeIntent with activeProjectId set, so result.target.projectId
+    // is present — and the plan must not mint a second project no matter
+    // how explicit the original ask was.
+    const pinned = buildPlan(
+      "build me a new app",
+      result({
+        primaryIntent: "code",
+        secondaryIntents: [],
+        action: "generate",
+        actionMatched: true,
+        requestsNewProject: true,
+        target: { projectId: "proj-pinned" },
+      }),
+    );
+    expect(pinned.steps.some((step) => step.type === "create_project")).toBe(false);
+    expect(() => validatePlan(pinned)).not.toThrow();
+  });
 });

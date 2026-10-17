@@ -94,6 +94,7 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
       request?: { question?: string };
       result?: {
         primaryIntent?: string;
+        secondaryIntents?: string[];
         action?: string;
         actionMatched?: boolean;
         requestsNewProject?: boolean;
@@ -135,22 +136,6 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
     // Strictly-true checks so missing or malformed metadata fails closed.
     const actionMatched = payload.result?.actionMatched === true;
     const requestsNewProject = payload.result?.requestsNewProject === true;
-
-    // Media/design intents route to the Studio surface that produces them
-    // (the same surfaces the suggestion chips deep-link to) — they never
-    // mint a blank-static project. The actionMatched requirement keeps a
-    // mere question mentioning an image ("how do images work?") in chat.
-    const surface =
-      actionMatched && typeof primaryIntent === "string" ? INTENT_SURFACES[primaryIntent] : undefined;
-    if (surface) {
-      const params = new URLSearchParams({ prompt: text });
-      if (surface.creator) params.set("creator", surface.creator);
-      if (surface.tool) params.set("tool", surface.tool);
-      if (primaryIntent) params.set("intent", primaryIntent);
-      if (planId) params.set("planId", planId);
-      router.push(`/studio?${params.toString()}`);
-      return;
-    }
 
     // Only an explicit, unambiguous new-project request may mint a
     // project: a matched create/generate verb AND the router's
@@ -194,6 +179,32 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
       }
       // On success isRouting intentionally stays true: the button must
       // not accept a second submission while the navigation is pending.
+      return;
+    }
+
+    // Media/design intents route to the Studio surface that produces
+    // them (the same surfaces the suggestion chips deep-link to) — they
+    // never mint a blank-static project. For a mixed classification the
+    // media/design member resolves the surface ("design a logo" → image
+    // creator; "an image for my website" → image creator targeting the
+    // existing project). The actionMatched requirement keeps a mere
+    // question mentioning an image ("how do images work?") in chat.
+    const mediaIntent =
+      typeof primaryIntent === "string" && INTENT_SURFACES[primaryIntent]
+        ? primaryIntent
+        : primaryIntent === "mixed"
+          ? (payload.result?.secondaryIntents ?? []).find(
+              (intent) => typeof intent === "string" && INTENT_SURFACES[intent],
+            )
+          : undefined;
+    const surface = actionMatched && mediaIntent ? INTENT_SURFACES[mediaIntent] : undefined;
+    if (surface) {
+      const params = new URLSearchParams({ prompt: text });
+      if (surface.creator) params.set("creator", surface.creator);
+      if (surface.tool) params.set("tool", surface.tool);
+      if (primaryIntent) params.set("intent", primaryIntent);
+      if (planId) params.set("planId", planId);
+      router.push(`/studio?${params.toString()}`);
       return;
     }
 
