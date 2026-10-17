@@ -82,6 +82,9 @@ describe("build routing — explicit creation requests", () => {
     "create a new website project",
     "build me a new app",
     "can you build me a website?",
+    // A purpose qualifier after the deliverable — "for my bakery" — is
+    // context for the NEW project, not a reference to an existing one.
+    "create a new website for my bakery",
     "could you create a new app?",
     "start a new project",
     "spin up a new site",
