@@ -57,6 +57,7 @@ export function resolveBuildRoute(
     actionMatched?: boolean;
     requestsNewProject?: boolean;
     requestsMediaGeneration?: boolean;
+    mediaScopeIntents?: string[];
   } | null | undefined,
 ): BuildRouteDecision {
   const actionMatched = result?.actionMatched === true;
@@ -87,7 +88,12 @@ export function resolveBuildRoute(
   }
 
   if (primaryIntent === "mixed") {
-    const constituents = result?.intents;
+    // mediaScopeIntents masks project-destination qualifiers for
+    // standalone media deliverables: "a video for my new app" is media
+    // work bound for a project, not a mixed request — the app is context.
+    // When it is absent, the full constituent list applies, so conjunct
+    // deliverables and project-targeted assets still fail closed.
+    const constituents = result?.mediaScopeIntents ?? result?.intents;
     if (
       Array.isArray(constituents) &&
       constituents.length > 0 &&

@@ -82,6 +82,20 @@ describe("explicit new-project signal (requestsNewProject + actionMatched)", () 
     // F2: a trailing "?" without a direct polite command is a question.
     ["build me a website?", { actionMatched: true, requestsNewProject: false }],
     ["create a new app?", { actionMatched: true, requestsNewProject: false }],
+    // F2: information-seeking openers — asking about creating is not a
+    // creation command even when the prompt contains a creation phrase.
+    ["could you explain how to create a site", { actionMatched: true, requestsNewProject: false }],
+    ["can i build a website with this", { actionMatched: true, requestsNewProject: false }],
+    ["any idea how to build a website", { actionMatched: true, requestsNewProject: false }],
+    ["give me steps to build a website", { actionMatched: true, requestsNewProject: false }],
+    ["i'm wondering if i should make an app", { actionMatched: true, requestsNewProject: false }],
+    ["i think i should build an app, what do you think", { actionMatched: true, requestsNewProject: false }],
+    ["i want to know how to build an app", { actionMatched: true, requestsNewProject: false }],
+    ["recommend a stack to build a new app", { actionMatched: true, requestsNewProject: false }],
+    // F2: a project noun bound by a destination qualifier names an
+    // existing thing — "my new app" is context, not a creation ask.
+    ["create a video for my new app", { actionMatched: true, requestsNewProject: false }],
+    ["help me with my new app", { actionMatched: false, requestsNewProject: false }],
   ])("does not signal project creation for %j", async (prompt, expected) => {
     const output = await routeIntent({ prompt, context: {} });
     expect(output.type).toBe("intent");
@@ -120,7 +134,7 @@ describe("explicit new-project signal (requestsNewProject + actionMatched)", () 
     }
   });
 
-  // The Studio second-hop chain (routeIntent with the pinned project →
+  // The pinned-project chain (routeIntent inside the resolved project →
   // buildPlan → no create_project) is covered end-to-end in
   // src/components/dashboard/v3/build-routing.test.ts — here we only
   // assert the router's own contract: the pinned id lands on target.
@@ -180,12 +194,57 @@ describe("media-generation signal (requestsMediaGeneration + intents)", () => {
     ["make an image for my website", { requestsMediaGeneration: true, intents: ["website", "image"] }],
     ["tell me how to make a logo", { requestsMediaGeneration: false, intents: ["image"] }],
     ["how does the image editor work", { requestsMediaGeneration: false, intents: ["image"] }],
+    // F1: a media noun followed by a software-artifact head noun names a
+    // SOFTWARE deliverable — "music player" is a program, not a song.
+    ["make a music player", { requestsMediaGeneration: false, intents: ["music"] }],
+    ["build an image gallery", { requestsMediaGeneration: false, intents: ["image"] }],
+    ["write a song parser", { requestsMediaGeneration: false, intents: ["music"] }],
+    ["write a clip scheduler", { requestsMediaGeneration: false, intents: ["video"] }],
+    ["write a beat tracker in python", { requestsMediaGeneration: false, intents: ["music"] }],
+    ["create a design system", { requestsMediaGeneration: false, intents: ["design"] }],
+    // F1: the governed noun supplies the media intent even when no
+    // keyword does — media detection and classification are harmonized.
+    ["compose a jingle", { requestsMediaGeneration: true, intents: ["music"] }],
+    ["create a banner", { requestsMediaGeneration: true, intents: ["image"] }],
+    ["record a voiceover", { requestsMediaGeneration: true, intents: ["music"] }],
+    ["draw a dragon", { requestsMediaGeneration: true, intents: ["image"] }],
+    ["make a thumbnail for my video", { requestsMediaGeneration: true, intents: ["video"] }],
+    // F1: a standalone media deliverable bound to a project by a
+    // destination qualifier carries the full intents AND the masked
+    // scope — media work with project context, not a creation request.
+    ["create a video for my new app", { requestsMediaGeneration: true, intents: ["code", "video"] }],
   ])("classifies %j correctly", async (prompt, expected) => {
     const output = await routeIntent({ prompt, context: {} });
     expect(output.type).toBe("intent");
     if (output.type === "intent") {
       expect(output.result.requestsMediaGeneration).toBe(expected.requestsMediaGeneration);
       expect(output.result.intents).toEqual(expected.intents);
+    }
+  });
+
+  it("masks project-destination qualifiers only for standalone media deliverables", async () => {
+    // "a video for my new app" — the app is where the asset lands, not a
+    // second deliverable: the masked scope is media-only.
+    const videoForApp = await routeIntent({ prompt: "create a video for my new app", context: {} });
+    expect(videoForApp.type).toBe("intent");
+    if (videoForApp.type === "intent") {
+      expect(videoForApp.result.mediaScopeIntents).toEqual(["video"]);
+    }
+
+    // Conjunct deliverables are never masked — "and a website" is real
+    // project work, so the scope stays the full constituent list.
+    const videoAndSite = await routeIntent({ prompt: "make a video and a website", context: {} });
+    expect(videoAndSite.type).toBe("intent");
+    if (videoAndSite.type === "intent") {
+      expect(videoAndSite.result.mediaScopeIntents).toBeUndefined();
+    }
+
+    // Image/design assets destined for a project keep the full scope —
+    // the asset is part of that project, not a standalone deliverable.
+    const imageForSite = await routeIntent({ prompt: "make an image for my website", context: {} });
+    expect(imageForSite.type).toBe("intent");
+    if (imageForSite.type === "intent") {
+      expect(imageForSite.result.mediaScopeIntents).toBeUndefined();
     }
   });
 });

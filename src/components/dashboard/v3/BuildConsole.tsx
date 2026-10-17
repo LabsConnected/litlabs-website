@@ -133,6 +133,14 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
           project: project.id,
         });
         if (primaryIntent) params.set("intent", primaryIntent);
+        // planId is carried for traceability only — Studio does not read
+        // it and the plan is never executed as-is. The prompt lands in
+        // the LiTT composer and a run re-plans against the pinned
+        // project, where the planner's pinned-target guard suppresses a
+        // second create_project. If plan execution is ever wired to
+        // ?planId=, it MUST resolve against the pinned project id, not
+        // the plan's create_project step — otherwise this chain mints a
+        // second project.
         if (planId) params.set("planId", planId);
         router.push(`/studio?${params.toString()}`);
         createSubmissionRef.current = null;

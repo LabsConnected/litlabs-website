@@ -421,6 +421,25 @@ describe("BuildConsole project creation", () => {
       param: "creator",
       value: "video",
     },
+    // F1: a standalone media deliverable bound to a project destination
+    // ("for my new app") routes to its creator — the qualifier's project
+    // intents are context, masked in mediaScopeIntents, and never mint a
+    // second project.
+    {
+      prompt: "create a video for my new app",
+      result: {
+        primaryIntent: "mixed",
+        secondaryIntents: ["video"],
+        intents: ["code", "video"],
+        mediaScopeIntents: ["video"],
+        action: "create",
+        actionMatched: true,
+        requestsNewProject: false,
+        requestsMediaGeneration: true,
+      },
+      param: "creator",
+      value: "video",
+    },
   ])(
     "resolves the media/design member of a mixed intent to its surface: %j",
     async ({ prompt, result, param, value }) => {

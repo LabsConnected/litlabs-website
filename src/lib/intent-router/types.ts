@@ -182,8 +182,23 @@ export interface IntentRouterResult {
    * "design a logo", "compose a song"). Media keywords inside a work
    * prompt ("fix the image upload bug", "write tests for the audio
    * player") never set this, and neither do questions about media.
+   * Software-artifact compounds ("a music player", "a design system")
+   * are software deliverables and never set this either.
    */
   requestsMediaGeneration: boolean;
+  /**
+   * Intents remaining after project-destination qualifiers are masked —
+   * set only for a standalone media deliverable (video/music) bound to a
+   * project through a "for my app"-style qualifier ("create a video for
+   * my new app" → ["video"]). Lets the routing layer distinguish media
+   * work carrying project context from genuine mixed work: a masked
+   * scope that is still all-media can surface-route, while conjunct
+   * deliverables survive masking and fail closed. Undefined when no
+   * qualifier was masked or the deliverable is an image/design asset —
+   * those are part of the project they land in ("an image for my
+   * website" stays project work).
+   */
+  mediaScopeIntents?: LiTTIntent[];
   goals: string[];
   target?: { projectId?: string; assetId?: string; filePath?: string; deploymentId?: string };
   requirements: {
