@@ -64,6 +64,17 @@ export async function POST(request: NextRequest) {
   const sourceType = body.sourceType;
   const name = typeof body.name === "string" ? body.name.trim() : "";
 
+  // One unique key per user submission, reused only by retries of the
+  // SAME submission; enforced unique per user at the database level.
+  const idempotencyKey =
+    typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : null;
+  if (body.idempotencyKey !== undefined && (!idempotencyKey || idempotencyKey.length > 128)) {
+    return NextResponse.json(
+      { error: "Invalid idempotencyKey" },
+      { status: 400 },
+    );
+  }
+
   const nameError = validateProjectName(name);
   if (nameError) {
     return NextResponse.json(
@@ -89,6 +100,11 @@ export async function POST(request: NextRequest) {
         name,
         templateId,
         accessMode: body.accessMode === "shared" ? "shared" : "private",
+        // Same-key repeats (retry of this submission — double click,
+        // network retry, sequential concurrent POSTs) return the row
+        // they already made; enforced by a unique index on
+        // (user_id, idempotency_key), never by name or slug.
+        ...(idempotencyKey ? { idempotencyKey } : {}),
       });
 
       // Provision durable source at create time — a managed project must

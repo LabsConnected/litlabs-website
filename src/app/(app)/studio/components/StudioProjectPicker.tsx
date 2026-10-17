@@ -64,20 +64,32 @@ export default function StudioProjectPicker({
     setOpen((value) => !value);
   };
 
-  // Dismiss the open menu on Escape, scroll, or resize — the anchored rect
-  // goes stale otherwise, and mobile users must never be trapped.
+  // Dismiss the open menu on Escape, outside scroll, or resize — the
+  // anchored rect goes stale otherwise, and mobile users must never be
+  // trapped. Scroll does not bubble, but a capture-phase listener still
+  // sees scrolls inside every element — including the menu's own
+  // overflow-y list. Scrolling INSIDE the menu must not dismiss it: with
+  // more projects than the max height fits, the "New project" action at
+  // the bottom is unreachable when every scroll snaps the menu shut.
   useEffect(() => {
     if (!open) return;
     const close = () => setOpen(false);
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-testid="project-picker-menu"]')) {
+        return;
+      }
+      close();
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
     };
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", close);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", close);
     };
   }, [open ]);
@@ -377,7 +389,9 @@ function ProjectPickerMenu({
           )
         ))
       )}
-      {onCreateProject && !loading && !error && (
+      {/* Creation is the one action that must always be reachable — even
+          while the list is still loading or after it failed to load. */}
+      {onCreateProject && (
         <>
           <div className="mx-1 my-1 h-px" style={{ backgroundColor: "var(--studio-border)" }} />
           <button

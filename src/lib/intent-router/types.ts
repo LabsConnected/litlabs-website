@@ -151,10 +151,54 @@ export interface IntentRouterResult {
   schemaVersion: "1.1";
   primaryIntent: LiTTIntent;
   secondaryIntents: LiTTIntent[];
+  /**
+   * Every matched intent in detection order. For a "mixed" primary this
+   * is the complete constituent set — secondaryIntents omits the first
+   * match — so callers can verify e.g. that a mixed classification is
+   * exclusively media/design before routing to a creator surface.
+   */
+  intents: LiTTIntent[];
   confidence: number;
   ambiguity: "none" | "low" | "material";
   consequence: "reversible" | "external_write" | "destructive";
   action: ActionVerb;
+  /**
+   * True when `action` was derived from an explicit pattern match.
+   * False when it is the router's "create" fallback for unmatched
+   * prompts — a defaulted action is never an explicit creation signal.
+   */
+  actionMatched: boolean;
+  /**
+   * True only when the prompt unambiguously requests a NEW project —
+   * "new" + a project-scope deliverable ("a new app", "new website") or
+   * a creation verb governing one ("create a website", "build me an
+   * app"). Questions, comparisons, file-scope work ("write a function"),
+   * media generation, and edits to existing projects never set this.
+   */
+  requestsNewProject: boolean;
+  /**
+   * True only when the prompt unambiguously requests media/design
+   * GENERATION — a creation verb governing a media noun ("make an image",
+   * "design a logo", "compose a song"). Media keywords inside a work
+   * prompt ("fix the image upload bug", "write tests for the audio
+   * player") never set this, and neither do questions about media.
+   * Software-artifact compounds ("a music player", "a design system")
+   * are software deliverables and never set this either.
+   */
+  requestsMediaGeneration: boolean;
+  /**
+   * Intents remaining after project-destination qualifiers are masked —
+   * set only for a standalone media deliverable (video/music) bound to a
+   * project through a "for my app"-style qualifier ("create a video for
+   * my new app" → ["video"]). Lets the routing layer distinguish media
+   * work carrying project context from genuine mixed work: a masked
+   * scope that is still all-media can surface-route, while conjunct
+   * deliverables survive masking and fail closed. Undefined when no
+   * qualifier was masked or the deliverable is an image/design asset —
+   * those are part of the project they land in ("an image for my
+   * website" stays project work).
+   */
+  mediaScopeIntents?: LiTTIntent[];
   goals: string[];
   target?: { projectId?: string; assetId?: string; filePath?: string; deploymentId?: string };
   requirements: {
