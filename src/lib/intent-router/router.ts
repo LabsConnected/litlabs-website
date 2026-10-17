@@ -18,17 +18,54 @@ function needsApproval(result: Pick<IntentRouterResult, "consequence" | "primary
   return result.consequence !== "reversible" || result.primaryIntent === "deploy";
 }
 
+/**
+ * Project-scope deliverables — a request whose object is one of these is
+ * a request for a NEW project. File-scope artifacts (function, component,
+ * endpoint, test) are work INSIDE a project and never justify minting one.
+ */
+const PROJECT_DELIVERABLE =
+  "(?:project|website|web\\s*site|web\\s*app|webapp|web\\s*page|webpage|landing\\s*page|home\\s*page|site|app|application|game)";
+
+const NEW_PROJECT_PATTERNS = [
+  // "new <deliverable>": "a new website", "new app", "my new project".
+  new RegExp(`\\bnew\\s+(?:[\\w-]+\\s+){0,3}${PROJECT_DELIVERABLE}\\b`, "i"),
+  // A creation verb governing a project deliverable: "create a website",
+  // "build me an app", "spin up a landing page". Prepositions between the
+  // verb and the noun ("working on the site", "changes to the app",
+  // "image for my website") describe work on an existing project or a
+  // non-project artifact and are excluded from the gap.
+  new RegExp(
+    `\\b(?:create|build|make|scaffold|generate|develop|spin\\s+up|set\\s+up(?=\\s+(?:a|an|new)\\b)|start(?=\\s+(?:a|an|new)\\b))\\b\\s+(?:me\\s+|us\\s+)?` +
+      `(?:(?!on\\b|to\\b|into\\b|in\\b|inside\\b|within\\b|for\\b|of\\b|with\\b|about\\b|at\\b|existing\\b|current\\b)[\\w-]+\\s+){0,4}` +
+      `${PROJECT_DELIVERABLE}\\b`,
+    "i",
+  ),
+];
+
+/**
+ * True only for an unambiguous new-project request. Bare nouns, questions,
+ * comparisons, file-scope artifacts, and edits to an existing project all
+ * return false — the caller must fail closed.
+ */
+function promptRequestsNewProject(prompt: string): boolean {
+  return NEW_PROJECT_PATTERNS.some((pattern) => pattern.test(prompt));
+}
+
 function intentForPrompt(prompt: string, context: RouterInput["context"]): {
   primaryIntent: LiTTIntent;
   secondaryIntents: LiTTIntent[];
   action: ActionVerb;
+  actionMatched: boolean;
+  requestsNewProject: boolean;
   goals: string[];
 } {
   const intents: LiTTIntent[] = [];
   const add = (intent: LiTTIntent) => {
     if (!intents.includes(intent)) intents.push(intent);
   };
-  const action: ActionVerb = (context.selectedAssetId && has(prompt, /\b(darker|lighter|edit|change|update|redesign|restyle|modify|variation)\b/i))
+  // null when no verb pattern matches — "create" is only the fallback
+  // label below and must never count as an explicit creation signal.
+  const matchedAction: ActionVerb | null = (context.selectedAssetId && has(prompt, /\b(darker|lighter|edit|change|update|redesign|restyle|modify|variation)\b/i))
     ? "edit"
     : has(prompt, /\b(fix|debug|repair|resolve)\b/i)
       ? "fix"
@@ -40,9 +77,11 @@ function intentForPrompt(prompt: string, context: RouterInput["context"]): {
           ? "analyze"
           : has(prompt, /\b(continue|again|another|same)\b/i)
             ? "continue"
-            : has(prompt, /\b(generate|make|create|build|write)\b/i)
+            : has(prompt, /\b(generate|make|build|write)\b/i)
               ? "generate"
-              : "create";
+              : has(prompt, /\b(create|scaffold|spin\s*up|set\s*up|start\s+(?=a\s|an\s|new\s))/i)
+                ? "create"
+                : null;
 
   if (has(prompt, /\b(deploy|publish|release|ship|production|prod)\b/i)) add("deploy");
   if (has(prompt, /\b(fix|debug|repair|resolve|broken|error|bug|failed)\b/i)) add("debug");
@@ -66,7 +105,9 @@ function intentForPrompt(prompt: string, context: RouterInput["context"]): {
   return {
     primaryIntent: finalPrimary,
     secondaryIntents,
-    action,
+    action: matchedAction ?? "create",
+    actionMatched: matchedAction !== null,
+    requestsNewProject: promptRequestsNewProject(prompt),
     goals: [prompt.trim()],
   };
 }
@@ -104,6 +145,8 @@ export async function routeIntent(input: RouterInput): Promise<RouterOutput> {
     ambiguity: vague ? "low" : classification.primaryIntent === "project_action" ? "material" : "none",
     consequence: impact,
     action: classification.action,
+    actionMatched: classification.actionMatched,
+    requestsNewProject: classification.requestsNewProject,
     goals: classification.goals,
     target: targetProjectId ? { projectId: targetProjectId } : undefined,
     requirements: {

@@ -155,6 +155,20 @@ export interface IntentRouterResult {
   ambiguity: "none" | "low" | "material";
   consequence: "reversible" | "external_write" | "destructive";
   action: ActionVerb;
+  /**
+   * True when `action` was derived from an explicit pattern match.
+   * False when it is the router's "create" fallback for unmatched
+   * prompts — a defaulted action is never an explicit creation signal.
+   */
+  actionMatched: boolean;
+  /**
+   * True only when the prompt unambiguously requests a NEW project —
+   * "new" + a project-scope deliverable ("a new app", "new website") or
+   * a creation verb governing one ("create a website", "build me an
+   * app"). Questions, comparisons, file-scope work ("write a function"),
+   * media generation, and edits to existing projects never set this.
+   */
+  requestsNewProject: boolean;
   goals: string[];
   target?: { projectId?: string; assetId?: string; filePath?: string; deploymentId?: string };
   requirements: {

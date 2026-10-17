@@ -54,7 +54,12 @@ describe("BuildConsole project creation", () => {
         new Response(
           JSON.stringify({
             type: "intent",
-            result: { primaryIntent: "website", action: "create" },
+            result: {
+              primaryIntent: "website",
+              action: "create",
+              actionMatched: true,
+              requestsNewProject: true,
+            },
             plan: { id: "plan-1" },
           }),
           { status: 200 },
@@ -67,14 +72,14 @@ describe("BuildConsole project creation", () => {
 
     await user.type(
       screen.getByLabelText("Describe what you want to make"),
-      "A website for my landscaping business",
+      "Create a new website for my landscaping business",
     );
     await user.click(screen.getByRole("button", { name: /create/i }));
 
     const url = pushedUrl();
     expect(url.pathname).toBe("/studio");
     expect(url.searchParams.get("project")).toBe("proj-new");
-    expect(url.searchParams.get("prompt")).toBe("A website for my landscaping business");
+    expect(url.searchParams.get("prompt")).toBe("Create a new website for my landscaping business");
     expect(url.searchParams.get("intent")).toBe("website");
     expect(url.searchParams.get("planId")).toBe("plan-1");
 
@@ -100,7 +105,12 @@ describe("BuildConsole project creation", () => {
         new Response(
           JSON.stringify({
             type: "intent",
-            result: { primaryIntent: "debug", action: "fix" },
+            result: {
+              primaryIntent: "debug",
+              action: "fix",
+              actionMatched: true,
+              requestsNewProject: false,
+            },
             plan: { id: "plan-2" },
           }),
           { status: 200 },
@@ -131,13 +141,20 @@ describe("BuildConsole project creation", () => {
     ).toBe(false);
   });
 
-  it("creates a project for mixed intents when the action is generate", async () => {
+  it("creates a project for mixed intents when the request is an explicit new-project ask", async () => {
+    // "Build a site and deploy it" classifies mixed (deploy + website) —
+    // mixed stays eligible ONLY because requestsNewProject is signalled.
     mockFetch({
       intent: () =>
         new Response(
           JSON.stringify({
             type: "intent",
-            result: { primaryIntent: "mixed", action: "generate" },
+            result: {
+              primaryIntent: "mixed",
+              action: "generate",
+              actionMatched: true,
+              requestsNewProject: true,
+            },
           }),
           { status: 200 },
         ),
@@ -164,7 +181,12 @@ describe("BuildConsole project creation", () => {
       const fetchMock = mockFetch({
         intent: () =>
           new Response(
-            JSON.stringify({ type: "intent", result: { primaryIntent, action } }),
+            JSON.stringify({
+              type: "intent",
+              // Even a full explicit-creation signal cannot create for a
+              // non-project-scope intent.
+              result: { primaryIntent, action, actionMatched: true, requestsNewProject: true },
+            }),
             { status: 200 },
           ),
         create: () => {
@@ -175,6 +197,133 @@ describe("BuildConsole project creation", () => {
       render(<BuildConsole />);
 
       await user.type(screen.getByLabelText("Describe what you want to make"), "Tell me something");
+      await user.click(screen.getByRole("button", { name: /create/i }));
+
+      const url = pushedUrl();
+      expect(url.searchParams.get("project")).toBeNull();
+      expect(
+        fetchMock.mock.calls.some(([i]) =>
+          String(i instanceof Request ? i.url : String(i)).includes("/api/studio-projects"),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      prompt: "how does the api component work",
+      result: { primaryIntent: "code", action: "create", actionMatched: false, requestsNewProject: false },
+    },
+    {
+      prompt: "what is the difference between a website and an app",
+      result: { primaryIntent: "mixed", action: "create", actionMatched: false, requestsNewProject: false },
+    },
+    {
+      prompt: "write a function to parse dates",
+      result: { primaryIntent: "code", action: "generate", actionMatched: true, requestsNewProject: false },
+    },
+    // agent_task is conservative: a matched generate verb alone is not a
+    // new-project signal.
+    {
+      prompt: "automate my deployment workflow",
+      result: { primaryIntent: "agent_task", action: "generate", actionMatched: true, requestsNewProject: false },
+    },
+    // mixed without an unambiguous new-project request never creates.
+    {
+      prompt: "make a song and a video",
+      result: { primaryIntent: "mixed", action: "generate", actionMatched: true, requestsNewProject: false },
+    },
+  ])(
+    "does NOT create a project for chat / existing-project work: %j",
+    async ({ prompt, result }) => {
+      const fetchMock = mockFetch({
+        intent: () =>
+          new Response(JSON.stringify({ type: "intent", result }), { status: 200 }),
+        create: () => {
+          throw new Error(`create must not be called for "${prompt}"`);
+        },
+      });
+      const user = userEvent.setup();
+      render(<BuildConsole />);
+
+      await user.type(screen.getByLabelText("Describe what you want to make"), prompt);
+      await user.click(screen.getByRole("button", { name: /create/i }));
+
+      const url = pushedUrl();
+      expect(url.pathname).toBe("/studio");
+      expect(url.searchParams.get("project")).toBeNull();
+      expect(url.searchParams.get("prompt")).toBe(prompt);
+      expect(
+        fetchMock.mock.calls.some(([i]) =>
+          String(i instanceof Request ? i.url : String(i)).includes("/api/studio-projects"),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("routes media generation to its creator surface — never a blank project", async () => {
+    const fetchMock = mockFetch({
+      intent: () =>
+        new Response(
+          JSON.stringify({
+            type: "intent",
+            result: {
+              primaryIntent: "image",
+              action: "generate",
+              actionMatched: true,
+              requestsNewProject: false,
+            },
+          }),
+          { status: 200 },
+        ),
+      create: () => {
+        throw new Error("create must not be called for media generation");
+      },
+    });
+    const user = userEvent.setup();
+    render(<BuildConsole />);
+
+    await user.type(screen.getByLabelText("Describe what you want to make"), "make an image of a cat");
+    await user.click(screen.getByRole("button", { name: /create/i }));
+
+    const url = pushedUrl();
+    expect(url.pathname).toBe("/studio");
+    expect(url.searchParams.get("creator")).toBe("image");
+    expect(url.searchParams.get("prompt")).toBe("make an image of a cat");
+    expect(url.searchParams.get("project")).toBeNull();
+    expect(
+      fetchMock.mock.calls.some(([i]) =>
+        String(i instanceof Request ? i.url : String(i)).includes("/api/studio-projects"),
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    // Missing actionMatched — a defaulted/unspecified action is never a
+    // creation signal even when everything else says "create".
+    { primaryIntent: "website", action: "create", requestsNewProject: true },
+    // Missing requestsNewProject — a matched verb alone is not enough.
+    { primaryIntent: "website", action: "create", actionMatched: true },
+    // Missing primaryIntent — nothing routes the work, so nothing creates.
+    { action: "create", actionMatched: true, requestsNewProject: true },
+    // Contradictory: edit action + new-project signal.
+    { primaryIntent: "website", action: "edit", actionMatched: true, requestsNewProject: true },
+    // Contradictory: new-project signal but the verb never matched.
+    { primaryIntent: "website", action: "generate", actionMatched: false, requestsNewProject: true },
+  ])(
+    "fails closed on missing or contradictory intent metadata: %j",
+    async (result) => {
+      const fetchMock = mockFetch({
+        intent: () =>
+          new Response(JSON.stringify({ type: "intent", result }), { status: 200 }),
+        create: () => {
+          throw new Error("create must not be called on ambiguous metadata");
+        },
+      });
+      const user = userEvent.setup();
+      render(<BuildConsole />);
+
+      await user.type(screen.getByLabelText("Describe what you want to make"), "something ambiguous");
       await user.click(screen.getByRole("button", { name: /create/i }));
 
       const url = pushedUrl();
@@ -268,7 +417,15 @@ describe("BuildConsole project creation", () => {
     mockFetch({
       intent: () =>
         new Response(
-          JSON.stringify({ type: "intent", result: { primaryIntent: "website", action: "create" } }),
+          JSON.stringify({
+            type: "intent",
+            result: {
+              primaryIntent: "website",
+              action: "create",
+              actionMatched: true,
+              requestsNewProject: true,
+            },
+          }),
           { status: 200 },
         ),
       create: () =>
@@ -289,7 +446,15 @@ describe("BuildConsole project creation", () => {
     const fetchMock = mockFetch({
       intent: () =>
         new Response(
-          JSON.stringify({ type: "intent", result: { primaryIntent: "code", action: "generate" } }),
+          JSON.stringify({
+            type: "intent",
+            result: {
+              primaryIntent: "code",
+              action: "generate",
+              actionMatched: true,
+              requestsNewProject: true,
+            },
+          }),
           { status: 200 },
         ),
       create: () =>

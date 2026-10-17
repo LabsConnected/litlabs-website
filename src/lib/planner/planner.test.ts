@@ -10,6 +10,8 @@ const result = (overrides: Partial<IntentRouterResult>): IntentRouterResult => (
   ambiguity: "none",
   consequence: "reversible",
   action: "create",
+  actionMatched: false,
+  requestsNewProject: false,
   goals: ["make a song and a website"],
   requirements: { needsProject: true, needsFiles: false, needsApproval: false, needsExternalService: true },
   ...overrides,
@@ -35,5 +37,46 @@ describe("LiTT planner", () => {
     const plan = buildPlan("deploy it", result({ primaryIntent: "deploy", secondaryIntents: [], action: "deploy", consequence: "external_write" }));
     expect(plan.steps.find((step) => step.type === "deploy_project")?.approval).toBe("before_external_write");
     expect(plan.steps.find((step) => step.type === "publish_project")?.approval).toBe("before_publish");
+  });
+
+  it("omits create_project unless the prompt is an explicit, matched new-project request", () => {
+    // needsProject alone is not a creation signal: file-scope work inside a
+    // project must not plan a silent create_project step.
+    const fileScope = buildPlan(
+      "write a function to parse dates",
+      result({
+        primaryIntent: "code",
+        secondaryIntents: [],
+        action: "generate",
+        actionMatched: true,
+        requestsNewProject: false,
+      }),
+    );
+    expect(fileScope.steps.some((step) => step.type === "create_project")).toBe(false);
+
+    // A defaulted "create" action (unmatched) must not count either.
+    const defaulted = buildPlan(
+      "what is the difference between a website and an app",
+      result({
+        primaryIntent: "mixed",
+        secondaryIntents: ["website", "code"],
+        requestsNewProject: true,
+        actionMatched: false,
+      }),
+    );
+    expect(defaulted.steps.some((step) => step.type === "create_project")).toBe(false);
+
+    const explicit = buildPlan(
+      "create a new website",
+      result({
+        primaryIntent: "website",
+        secondaryIntents: [],
+        action: "create",
+        actionMatched: true,
+        requestsNewProject: true,
+      }),
+    );
+    expect(explicit.steps.some((step) => step.type === "create_project")).toBe(true);
+    expect(() => validatePlan(explicit)).not.toThrow();
   });
 });

@@ -32,20 +32,31 @@ import {
 
 const LIME = "#a8ff2f";
 
-// Creation-domain intents for which the dashboard composer may mint a
-// project up front. Non-build intents (deploy, debug, research,
-// project_action) and unknown/unspecified intents never create.
+// Project-scope intents for which the dashboard composer may mint a
+// project up front — and only when the router reports an explicit,
+// unambiguous new-project request (actionMatched && requestsNewProject).
+// Media intents route to their creator surfaces instead; chat,
+// questions, debug/research/deploy and file-scope work never create.
+// "mixed" and "agent_task" stay eligible so an explicit request like
+// "create a new website project" (classified mixed) still works — the
+// requestsNewProject signal is what gates them, not the intent alone.
 const BUILD_INTENTS = new Set([
   "code",
   "website",
-  "image",
-  "video",
-  "music",
-  "design",
   "game",
   "agent_task",
   "mixed",
 ]);
+
+// Media/design intents route into the Studio surface that actually
+// produces them — minting a blank-static project for an image, a video
+// or a song was a silent misroute.
+const INTENT_SURFACES: Record<string, { creator?: string; tool?: string }> = {
+  image: { creator: "image" },
+  video: { creator: "video" },
+  music: { creator: "music" },
+  design: { tool: "design" },
+};
 
 const SUGGESTIONS = [
   { label: "Website", href: "/studio?tool=chat", icon: Layout },
@@ -81,7 +92,12 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
     let payload: {
       type?: "intent" | "clarification";
       request?: { question?: string };
-      result?: { primaryIntent?: string; action?: string };
+      result?: {
+        primaryIntent?: string;
+        action?: string;
+        actionMatched?: boolean;
+        requestsNewProject?: boolean;
+      };
       plan?: { id?: string };
       error?: string;
     };
@@ -116,16 +132,39 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
     const primaryIntent = payload.result?.primaryIntent;
     const planId = payload.plan?.id;
     const action = payload.result?.action;
+    // Strictly-true checks so missing or malformed metadata fails closed.
+    const actionMatched = payload.result?.actionMatched === true;
+    const requestsNewProject = payload.result?.requestsNewProject === true;
 
-    // Only an explicit build signal may mint a project: a create/generate
-    // verb AND a creation-domain intent. "create" is the router's default
-    // action for unmatched prompts, so the action alone cannot carry the
-    // signal — chat, questions, research, vague project_action and any
-    // unknown/missing intent fall through to the non-creating route into
-    // Studio chat against the user's current project. Only then does a
-    // build request mint and pin ?project=<new id> — ?prompt= alone would
-    // resolve to the most-recently-touched project and run inside it.
+    // Media/design intents route to the Studio surface that produces them
+    // (the same surfaces the suggestion chips deep-link to) — they never
+    // mint a blank-static project. The actionMatched requirement keeps a
+    // mere question mentioning an image ("how do images work?") in chat.
+    const surface =
+      actionMatched && typeof primaryIntent === "string" ? INTENT_SURFACES[primaryIntent] : undefined;
+    if (surface) {
+      const params = new URLSearchParams({ prompt: text });
+      if (surface.creator) params.set("creator", surface.creator);
+      if (surface.tool) params.set("tool", surface.tool);
+      if (primaryIntent) params.set("intent", primaryIntent);
+      if (planId) params.set("planId", planId);
+      router.push(`/studio?${params.toString()}`);
+      return;
+    }
+
+    // Only an explicit, unambiguous new-project request may mint a
+    // project: a matched create/generate verb AND the router's
+    // requestsNewProject signal AND a project-scope intent. "create" is
+    // also the router's default action for unmatched prompts, so the
+    // action alone cannot carry the signal — chat, questions,
+    // comparisons, file-scope work ("write a function"), edits to an
+    // existing project, and any missing/contradictory metadata fall
+    // through to the non-creating Studio chat route. Only an explicit
+    // build mints and pins ?project=<new id> — ?prompt= alone resolves
+    // to the most-recently-touched project and runs inside it.
     const isBuildRequest =
+      actionMatched &&
+      requestsNewProject &&
       (action === "create" || action === "generate") &&
       typeof primaryIntent === "string" &&
       BUILD_INTENTS.has(primaryIntent);
