@@ -55,29 +55,44 @@ const NEW_PROJECT_PATTERNS = [
   ),
 ];
 
+// Conversation openers that carry no semantic load — a cue after them
+// still frames the whole prompt ("okay, tell me how to build an app").
+const OPENING_FILLER = "(?:so|ok|okay|hey|hi|hello|now|well|um|uh|please|actually|just)[,!.]?\\s+";
+
 /**
- * Question and instruction frames — the prompt asks ABOUT creation, it
- * does not command it. "Tell me how to build a new app", "Explain how to
- * create a project", "Should I build a website?" all carry matching
- * creation phrases but are chat requests. Direct commands phrased
- * politely ("can you build me a website", "help me create a site") keep
- * their signal — "can you"/"help me" are requests, not questions.
+ * Question and instruction frames — START-anchored (after optional
+ * filler). A prompt that opens by asking about creation ("Tell me how
+ * to build a new app", "Should I build a website?", "Is it possible to
+ * create a project") is a chat request, not a creation command. The
+ * cues are anchored so a legitimate request is never vetoed because its
+ * job description merely contains "tutorial", "describe", or "what is"
+ * ("build me a site with a tutorial section" stays a build).
  */
 const DISCUSSION_FRAME = new RegExp(
-  "\\b(?:" +
-    "how\\s+to\\b|" +
-    "how\\s+(?:do|does|did|can|could|should|would|might|may)\\b|" +
-    "what(?:'s|\\s+is|\\s+are|\\s+was|\\s+were|\\s+does|\\s+do|\\s+did|\\s+would|\\s+should)\\b|" +
-    "why\\s+(?:should|would|could|do|does|did|is|are|was|were)\\b|" +
+  `^\\s*(?:${OPENING_FILLER})*(?:` +
+    "how\\b|" +
+    "what(?:'s)?\\b|" +
+    "why\\b|" +
+    "where\\b|" +
+    "when\\b|" +
+    "who\\b|" +
+    "which\\b|" +
+    "is\\b|" +
+    "are\\b|" +
+    "does\\b|" +
+    "would\\b|" +
+    "will\\b|" +
+    "am\\s+i\\b|" +
+    "i\\s+wonder\\b|" +
+    "do\\s+(?:i|you)\\b|" +
+    "should\\s+i\\b|" +
+    "could\\s+i\\b|" +
     "tell\\s+me\\b|" +
     "explain\\b|" +
     "describe\\b|" +
     "teach\\s+me\\b|" +
     "show\\s+me\\b|" +
     "walk\\s+me\\b|" +
-    "should\\s+i\\b|" +
-    "could\\s+i\\b|" +
-    "do\\s+i\\s+need\\b|" +
     "difference\\s+between\\b|" +
     "steps?\\s+to\\b|" +
     "guide\\s+(?:me|through|on)\\b|" +
@@ -88,22 +103,74 @@ const DISCUSSION_FRAME = new RegExp(
 );
 
 /**
+ * A trailing "?" usually means the prompt is ASKING, not commanding —
+ * "build me a website?" is chat until proven otherwise. Exception: a
+ * prompt that clearly opens with a direct polite command naming a
+ * creation verb ("can you build me a website?", "please create a
+ * site?") — the mark is courtesy, not a question about whether/how.
+ * "can you tell me how to build an app?" still vetoes — "tell" is not
+ * a creation verb.
+ */
+const POLITE_COMMAND = new RegExp(
+  `^\\s*(?:${OPENING_FILLER})*` +
+    "(?:(?:can|could)\\s+you\\s+(?:please\\s+)?|please\\s+)" +
+    "(?:create|build|make|scaffold|generate|develop|spin\\s+up|set\\s+up|start)\\b",
+  "i",
+);
+
+/**
+ * Media/design generation nouns and verbs. The same guarded gap as the
+ * project patterns — prepositions or possessives between the verb and
+ * the media noun ("tests for the audio player", "the image upload bug")
+ * describe work on an existing project, not a media request.
+ */
+const MEDIA_NOUN =
+  "(?:image|logo|artwork|illustration|picture|photos?|graphic|banner|thumbnail|icon|video|clip|animation|song|music|soundtrack|beat|track|audio|jingle|voiceover|podcast|design|wireframe|mockup|palette)";
+const MEDIA_REQUEST = new RegExp(
+  `\\b(?:create|make|build|generate|produce|design|draw|paint|render|compose|write|record|spin\\s+up)\\b\\s+(?:me\\s+|us\\s+)?` +
+    `(?:(?!${PREP_GAP}|${DETERMINER_GAP})[\\w-]+\\s+){0,4}` +
+    `${MEDIA_NOUN}\\b`,
+  "i",
+);
+
+/**
+ * Shared vetoes for both request signals — a question or instruction
+ * frame, or a prompt ending in "?" that doesn't open with a direct
+ * polite creation command, is chat, never a creation request.
+ */
+function isDiscussion(prompt: string): boolean {
+  if (DISCUSSION_FRAME.test(prompt)) return true;
+  return prompt.trimEnd().endsWith("?") && !POLITE_COMMAND.test(prompt);
+}
+
+/**
  * True only for an unambiguous new-project request. Questions,
  * instructions about building, comparisons, file-scope artifacts, and
  * work on an existing project all return false — the caller must fail
  * closed.
  */
 function promptRequestsNewProject(prompt: string): boolean {
-  if (DISCUSSION_FRAME.test(prompt)) return false;
+  if (isDiscussion(prompt)) return false;
   return NEW_PROJECT_PATTERNS.some((pattern) => pattern.test(prompt));
+}
+
+/**
+ * True only for an unambiguous media/design-generation request. The
+ * same fail-closed vetoes apply — asking how to make a logo is chat.
+ */
+function promptRequestsMediaGeneration(prompt: string): boolean {
+  if (isDiscussion(prompt)) return false;
+  return MEDIA_REQUEST.test(prompt);
 }
 
 function intentForPrompt(prompt: string, context: RouterInput["context"]): {
   primaryIntent: LiTTIntent;
   secondaryIntents: LiTTIntent[];
+  intents: LiTTIntent[];
   action: ActionVerb;
   actionMatched: boolean;
   requestsNewProject: boolean;
+  requestsMediaGeneration: boolean;
   goals: string[];
 } {
   const intents: LiTTIntent[] = [];
@@ -124,7 +191,7 @@ function intentForPrompt(prompt: string, context: RouterInput["context"]): {
           ? "analyze"
           : has(prompt, /\b(continue|again|another|same)\b/i)
             ? "continue"
-            : has(prompt, /\b(generate|make|build|write)\b/i)
+            : has(prompt, /\b(generate|make|build|write|design|draw|paint|render|compose|produce|record)\b/i)
               ? "generate"
               : has(prompt, /\b(create|scaffold|spin\s*up|set\s*up|start\s+(?=a\s|an\s|new\s))/i)
                 ? "create"
@@ -152,9 +219,11 @@ function intentForPrompt(prompt: string, context: RouterInput["context"]): {
   return {
     primaryIntent: finalPrimary,
     secondaryIntents,
+    intents: [...intents],
     action: matchedAction ?? "create",
     actionMatched: matchedAction !== null,
     requestsNewProject: promptRequestsNewProject(prompt),
+    requestsMediaGeneration: promptRequestsMediaGeneration(prompt),
     goals: [prompt.trim()],
   };
 }
@@ -188,12 +257,14 @@ export async function routeIntent(input: RouterInput): Promise<RouterOutput> {
     schemaVersion: "1.1",
     primaryIntent: classification.primaryIntent,
     secondaryIntents: classification.secondaryIntents,
+    intents: classification.intents,
     confidence: vague ? 0.68 : classification.primaryIntent === "project_action" ? 0.62 : 0.9,
     ambiguity: vague ? "low" : classification.primaryIntent === "project_action" ? "material" : "none",
     consequence: impact,
     action: classification.action,
     actionMatched: classification.actionMatched,
     requestsNewProject: classification.requestsNewProject,
+    requestsMediaGeneration: classification.requestsMediaGeneration,
     goals: classification.goals,
     target: targetProjectId ? { projectId: targetProjectId } : undefined,
     requirements: {

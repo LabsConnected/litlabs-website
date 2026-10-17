@@ -19,6 +19,7 @@ import {
   takeSubmissionKey,
   type CreateSubmission,
 } from "@/lib/projects/create-project-request";
+import { resolveBuildRoute } from "./build-routing";
 
 /**
  * BuildConsole — the dashboard's one universal composer.
@@ -31,32 +32,6 @@ import {
  */
 
 const LIME = "#a8ff2f";
-
-// Project-scope intents for which the dashboard composer may mint a
-// project up front — and only when the router reports an explicit,
-// unambiguous new-project request (actionMatched && requestsNewProject).
-// Media intents route to their creator surfaces instead; chat,
-// questions, debug/research/deploy and file-scope work never create.
-// "mixed" and "agent_task" stay eligible so an explicit request like
-// "create a new website project" (classified mixed) still works — the
-// requestsNewProject signal is what gates them, not the intent alone.
-const BUILD_INTENTS = new Set([
-  "code",
-  "website",
-  "game",
-  "agent_task",
-  "mixed",
-]);
-
-// Media/design intents route into the Studio surface that actually
-// produces them — minting a blank-static project for an image, a video
-// or a song was a silent misroute.
-const INTENT_SURFACES: Record<string, { creator?: string; tool?: string }> = {
-  image: { creator: "image" },
-  video: { creator: "video" },
-  music: { creator: "music" },
-  design: { tool: "design" },
-};
 
 const SUGGESTIONS = [
   { label: "Website", href: "/studio?tool=chat", icon: Layout },
@@ -95,9 +70,11 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
       result?: {
         primaryIntent?: string;
         secondaryIntents?: string[];
+        intents?: string[];
         action?: string;
         actionMatched?: boolean;
         requestsNewProject?: boolean;
+        requestsMediaGeneration?: boolean;
       };
       plan?: { id?: string };
       error?: string;
@@ -132,28 +109,16 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
 
     const primaryIntent = payload.result?.primaryIntent;
     const planId = payload.plan?.id;
-    const action = payload.result?.action;
-    // Strictly-true checks so missing or malformed metadata fails closed.
-    const actionMatched = payload.result?.actionMatched === true;
-    const requestsNewProject = payload.result?.requestsNewProject === true;
-
-    // Only an explicit, unambiguous new-project request may mint a
-    // project: a matched create/generate verb AND the router's
-    // requestsNewProject signal AND a project-scope intent. "create" is
-    // also the router's default action for unmatched prompts, so the
-    // action alone cannot carry the signal — chat, questions,
-    // comparisons, file-scope work ("write a function"), edits to an
-    // existing project, and any missing/contradictory metadata fall
-    // through to the non-creating Studio chat route. Only an explicit
-    // build mints and pins ?project=<new id> — ?prompt= alone resolves
-    // to the most-recently-touched project and runs inside it.
-    const isBuildRequest =
-      actionMatched &&
-      requestsNewProject &&
-      (action === "create" || action === "generate") &&
-      typeof primaryIntent === "string" &&
-      BUILD_INTENTS.has(primaryIntent);
-    if (isBuildRequest) {
+    // The routing decision lives in build-routing.resolveBuildRoute so
+    // tests exercise the exact same logic against real routeIntent
+    // output. "create" requires the router's explicit new-project signal
+    // — the defaulted "create" action, missing metadata, questions,
+    // file-scope work, and edits to an existing project all fall through
+    // to the non-creating Studio chat route. Only an explicit build
+    // mints and pins ?project=<new id> — ?prompt= alone resolves to the
+    // most-recently-touched project and runs inside it.
+    const decision = resolveBuildRoute(payload.result);
+    if (decision.kind === "create") {
       createSubmissionRef.current = takeSubmissionKey(createSubmissionRef.current, text);
       try {
         const project = await createManagedStudioProject({
@@ -182,26 +147,16 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
       return;
     }
 
-    // Media/design intents route to the Studio surface that produces
-    // them (the same surfaces the suggestion chips deep-link to) — they
-    // never mint a blank-static project. For a mixed classification the
-    // media/design member resolves the surface ("design a logo" → image
-    // creator; "an image for my website" → image creator targeting the
-    // existing project). The actionMatched requirement keeps a mere
-    // question mentioning an image ("how do images work?") in chat.
-    const mediaIntent =
-      typeof primaryIntent === "string" && INTENT_SURFACES[primaryIntent]
-        ? primaryIntent
-        : primaryIntent === "mixed"
-          ? (payload.result?.secondaryIntents ?? []).find(
-              (intent) => typeof intent === "string" && INTENT_SURFACES[intent],
-            )
-          : undefined;
-    const surface = actionMatched && mediaIntent ? INTENT_SURFACES[mediaIntent] : undefined;
-    if (surface) {
+    // Media/design generation requests route to the Studio surface that
+    // produces them — never a blank project. resolveBuildRoute restricts
+    // this to single media/design classifications and mixed
+    // classifications made exclusively of media/design intents; a mixed
+    // result containing code, website, debug, deploy or research is
+    // project work and falls through to chat.
+    if (decision.kind === "surface") {
       const params = new URLSearchParams({ prompt: text });
-      if (surface.creator) params.set("creator", surface.creator);
-      if (surface.tool) params.set("tool", surface.tool);
+      if (decision.surface.creator) params.set("creator", decision.surface.creator);
+      if (decision.surface.tool) params.set("tool", decision.surface.tool);
       if (primaryIntent) params.set("intent", primaryIntent);
       if (planId) params.set("planId", planId);
       router.push(`/studio?${params.toString()}`);

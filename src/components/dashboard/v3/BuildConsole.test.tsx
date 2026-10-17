@@ -229,15 +229,88 @@ describe("BuildConsole project creation", () => {
       result: { primaryIntent: "agent_task", action: "generate", actionMatched: true, requestsNewProject: false },
     },
     // mixed without an unambiguous new-project request never creates —
-    // here it resolves to the music creator instead (no project minted).
+    // here it resolves to the video creator instead (no project minted).
     {
       prompt: "make a song and a video",
       result: {
         primaryIntent: "mixed",
         secondaryIntents: ["music"],
+        intents: ["video", "music"],
         action: "generate",
         actionMatched: true,
         requestsNewProject: false,
+        requestsMediaGeneration: true,
+      },
+    },
+    // F1: media keywords inside non-media work never route to a creator
+    // surface — a mixed result containing code/website/debug/deploy/
+    // research fails closed to chat.
+    {
+      prompt: "fix the image upload bug",
+      result: {
+        primaryIntent: "mixed",
+        secondaryIntents: ["image"],
+        intents: ["debug", "image"],
+        action: "fix",
+        actionMatched: true,
+        requestsNewProject: false,
+        requestsMediaGeneration: false,
+      },
+    },
+    {
+      prompt: "deploy the video app",
+      result: {
+        primaryIntent: "mixed",
+        secondaryIntents: ["code", "video"],
+        intents: ["deploy", "code", "video"],
+        action: "deploy",
+        actionMatched: true,
+        requestsNewProject: false,
+        requestsMediaGeneration: false,
+      },
+    },
+    // Even a real media-generation signal cannot rescue a mixed result
+    // containing a non-media intent — the photo is one artifact of
+    // project work, so it belongs in chat.
+    {
+      prompt: "make a photo gallery component",
+      result: {
+        primaryIntent: "mixed",
+        secondaryIntents: ["image"],
+        intents: ["code", "image"],
+        action: "generate",
+        actionMatched: true,
+        requestsNewProject: false,
+        requestsMediaGeneration: true,
+      },
+    },
+    // Media targeting an existing project is project work, not a bare
+    // creator request.
+    {
+      prompt: "make an image for my website",
+      result: {
+        primaryIntent: "mixed",
+        secondaryIntents: ["image"],
+        intents: ["website", "image"],
+        action: "generate",
+        actionMatched: true,
+        requestsNewProject: false,
+        requestsMediaGeneration: true,
+      },
+    },
+    // A single media intent without a generation request is a media
+    // keyword inside work — "audio player" is a component to test, not
+    // a song to make.
+    {
+      prompt: "write tests for the audio player",
+      result: {
+        primaryIntent: "music",
+        secondaryIntents: [],
+        intents: ["music"],
+        action: "generate",
+        actionMatched: true,
+        requestsNewProject: false,
+        requestsMediaGeneration: false,
       },
     },
   ])(
@@ -283,9 +356,12 @@ describe("BuildConsole project creation", () => {
               type: "intent",
               result: {
                 primaryIntent: intent,
+                secondaryIntents: [],
+                intents: [intent],
                 action: "generate",
                 actionMatched: true,
                 requestsNewProject: false,
+                requestsMediaGeneration: true,
               },
             }),
             { status: 200 },
@@ -314,33 +390,36 @@ describe("BuildConsole project creation", () => {
   );
 
   it.each([
-    // B-C: mixed classifications resolve their media/design member to
-    // that creator surface — "design a logo" lands in the design
-    // surface, "an image for my website" lands in the image creator
-    // (the asset targets the existing project, never a new one).
+    // F1: mixed classifications made EXCLUSIVELY of media/design
+    // intents resolve to the first constituent's creator surface —
+    // "design a logo" (image + design) lands in the image creator.
     {
       prompt: "design a logo",
       result: {
         primaryIntent: "mixed",
         secondaryIntents: ["design"],
+        intents: ["image", "design"],
         action: "generate",
         actionMatched: true,
         requestsNewProject: false,
-      },
-      param: "tool",
-      value: "design",
-    },
-    {
-      prompt: "make an image for my website",
-      result: {
-        primaryIntent: "mixed",
-        secondaryIntents: ["image"],
-        action: "generate",
-        actionMatched: true,
-        requestsNewProject: false,
+        requestsMediaGeneration: true,
       },
       param: "creator",
       value: "image",
+    },
+    {
+      prompt: "make a song and a video",
+      result: {
+        primaryIntent: "mixed",
+        secondaryIntents: ["music"],
+        intents: ["video", "music"],
+        action: "generate",
+        actionMatched: true,
+        requestsNewProject: false,
+        requestsMediaGeneration: true,
+      },
+      param: "creator",
+      value: "video",
     },
   ])(
     "resolves the media/design member of a mixed intent to its surface: %j",

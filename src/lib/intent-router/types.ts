@@ -151,6 +151,13 @@ export interface IntentRouterResult {
   schemaVersion: "1.1";
   primaryIntent: LiTTIntent;
   secondaryIntents: LiTTIntent[];
+  /**
+   * Every matched intent in detection order. For a "mixed" primary this
+   * is the complete constituent set — secondaryIntents omits the first
+   * match — so callers can verify e.g. that a mixed classification is
+   * exclusively media/design before routing to a creator surface.
+   */
+  intents: LiTTIntent[];
   confidence: number;
   ambiguity: "none" | "low" | "material";
   consequence: "reversible" | "external_write" | "destructive";
@@ -169,6 +176,14 @@ export interface IntentRouterResult {
    * media generation, and edits to existing projects never set this.
    */
   requestsNewProject: boolean;
+  /**
+   * True only when the prompt unambiguously requests media/design
+   * GENERATION — a creation verb governing a media noun ("make an image",
+   * "design a logo", "compose a song"). Media keywords inside a work
+   * prompt ("fix the image upload bug", "write tests for the audio
+   * player") never set this, and neither do questions about media.
+   */
+  requestsMediaGeneration: boolean;
   goals: string[];
   target?: { projectId?: string; assetId?: string; filePath?: string; deploymentId?: string };
   requirements: {

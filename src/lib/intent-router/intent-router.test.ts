@@ -70,6 +70,18 @@ describe("explicit new-project signal (requestsNewProject + actionMatched)", () 
     ["should i build a website?", { actionMatched: true, requestsNewProject: false }],
     ["how do i make an app", { actionMatched: true, requestsNewProject: false }],
     ["what is the best way to create a website", { actionMatched: true, requestsNewProject: false }],
+    // F2: interrogative openers — the prompt asks, it doesn't command.
+    ["is it possible to create a website", { actionMatched: true, requestsNewProject: false }],
+    ["are there ways to build an app", { actionMatched: true, requestsNewProject: false }],
+    ["would you build me a website?", { actionMatched: true, requestsNewProject: false }],
+    ["does this create a project", { actionMatched: true, requestsNewProject: false }],
+    ["do you know how to make an app", { actionMatched: true, requestsNewProject: false }],
+    ["will you create a website for me", { actionMatched: true, requestsNewProject: false }],
+    ["am i able to create a project", { actionMatched: true, requestsNewProject: false }],
+    ["i wonder if you could build me a site", { actionMatched: true, requestsNewProject: false }],
+    // F2: a trailing "?" without a direct polite command is a question.
+    ["build me a website?", { actionMatched: true, requestsNewProject: false }],
+    ["create a new app?", { actionMatched: true, requestsNewProject: false }],
   ])("does not signal project creation for %j", async (prompt, expected) => {
     const output = await routeIntent({ prompt, context: {} });
     expect(output.type).toBe("intent");
@@ -87,9 +99,18 @@ describe("explicit new-project signal (requestsNewProject + actionMatched)", () 
     "start a new project",
     "spin up a new site",
     // Direct creation commands phrased politely stay commands — "can
-    // you" and "help me" request the work, they don't ask about it.
+    // you" and "help me" request the work, they don't ask about it. A
+    // trailing "?" after a polite command is courtesy, not a question.
     "can you build me a website",
+    "can you build me a website?",
+    "could you create a new app?",
     "help me create a website",
+    // F2: job-description words mid-prompt never veto a direct command —
+    // "tutorial", "describe", and "what is" here are part of the work,
+    // not a question frame.
+    "build me a site that includes a tutorial section",
+    "create a website where users describe their photos",
+    "make an app that shows what is new",
   ])("signals a new project for %j", async (prompt) => {
     const output = await routeIntent({ prompt, context: {} });
     expect(output.type).toBe("intent");
@@ -99,17 +120,17 @@ describe("explicit new-project signal (requestsNewProject + actionMatched)", () 
     }
   });
 
-  it("pins the active project as target even for explicit new-project asks", async () => {
-    // Studio's second hop re-routes the same prompt with the pinned
-    // project id — target.projectId is what makes the planner refuse a
-    // second create_project step.
+  // The Studio second-hop chain (routeIntent with the pinned project →
+  // buildPlan → no create_project) is covered end-to-end in
+  // src/components/dashboard/v3/build-routing.test.ts — here we only
+  // assert the router's own contract: the pinned id lands on target.
+  it("pins the active project as result.target when the context supplies one", async () => {
     const output = await routeIntent({
       prompt: "build me a new app",
       context: { activeProjectId: "proj-pinned" },
     });
     expect(output.type).toBe("intent");
     if (output.type === "intent") {
-      expect(output.result.requestsNewProject).toBe(true);
       expect(output.result.target?.projectId).toBe("proj-pinned");
     }
   });
@@ -142,6 +163,29 @@ describe("explicit new-project signal (requestsNewProject + actionMatched)", () 
       expect(output.result.action).toBe("generate");
       expect(output.result.actionMatched).toBe(true);
       expect(output.result.requestsNewProject).toBe(false);
+    }
+  });
+});
+
+describe("media-generation signal (requestsMediaGeneration + intents)", () => {
+  // A media keyword alone is not a media request — the verb must govern
+  // a media noun, or the prompt is work ON a media-adjacent feature.
+  it.each([
+    ["make an image of a cat", { requestsMediaGeneration: true, intents: ["image"] }],
+    ["design a logo", { requestsMediaGeneration: true, intents: ["image", "design"] }],
+    ["make a song and a video", { requestsMediaGeneration: true, intents: ["video", "music"] }],
+    ["generate a thumbnail for the video", { requestsMediaGeneration: true, intents: ["video"] }],
+    ["fix the image upload bug", { requestsMediaGeneration: false, intents: ["debug", "image"] }],
+    ["write tests for the audio player", { requestsMediaGeneration: false, intents: ["music"] }],
+    ["make an image for my website", { requestsMediaGeneration: true, intents: ["website", "image"] }],
+    ["tell me how to make a logo", { requestsMediaGeneration: false, intents: ["image"] }],
+    ["how does the image editor work", { requestsMediaGeneration: false, intents: ["image"] }],
+  ])("classifies %j correctly", async (prompt, expected) => {
+    const output = await routeIntent({ prompt, context: {} });
+    expect(output.type).toBe("intent");
+    if (output.type === "intent") {
+      expect(output.result.requestsMediaGeneration).toBe(expected.requestsMediaGeneration);
+      expect(output.result.intents).toEqual(expected.intents);
     }
   });
 });

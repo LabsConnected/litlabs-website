@@ -251,14 +251,18 @@ describe("Dashboard v3 — universal composer", () => {
   });
 
   it("routes prompts through the intent router (never a dead end)", () => {
+    const routingSrc = readSrc("build-routing.ts");
     expect(src).toContain('fetch("/api/litt/intent"');
     expect(src).toContain('params.set("intent"');
     // For explicit build requests the composer creates the project first
     // and pins ?project=<new id> — /studio?prompt=… without an explicit
     // project resolves to the most-recently-touched project and runs the
-    // prompt inside it. Non-build intents route without creating.
+    // prompt inside it. Non-build intents route without creating. The
+    // create/surface/chat decision lives in build-routing.resolveBuildRoute
+    // so tests drive the exact same logic the component runs.
     expect(src).toContain("createManagedStudioProject");
-    expect(src).toContain("BUILD_INTENTS.has(primaryIntent)");
+    expect(src).toContain("resolveBuildRoute");
+    expect(routingSrc).toContain("BUILD_INTENTS.has(primaryIntent)");
     expect(src).toContain("project: project.id");
     expect(src).toContain("/studio?${params.toString()}");
   });
