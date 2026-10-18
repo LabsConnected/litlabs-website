@@ -1,0 +1,11 @@
+#!/data/data/com.termux/files/usr/bin/bash
+R="$HOME/bin/rish"
+
+echo -n "Peak: "
+$R -c 'settings get system peak_refresh_rate'
+
+echo -n "Min:  "
+$R -c 'settings get system min_refresh_rate'
+
+$R -c 'dumpsys display | grep -m1 "mActiveSfDisplayMode="' 2>/dev/null |
+grep -o 'refreshRate=[0-9.]*'

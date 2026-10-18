@@ -1,0 +1,51 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -Eeuo pipefail
+
+LITT_MOBILE_HOME="$HOME/litt"
+INBOX_DIR="$LITT_MOBILE_HOME/inbox"
+
+mkdir -p "$INBOX_DIR"
+
+stamp="$(date '+%Y-%m-%d_%H-%M-%S')"
+file="$INBOX_DIR/$stamp.md"
+
+clipboard=""
+if command -v termux-clipboard-get >/dev/null 2>&1; then
+  clipboard="$(termux-clipboard-get 2>/dev/null || true)"
+fi
+
+device="$(getprop ro.product.model 2>/dev/null || uname -n)"
+android_version="$(getprop ro.build.version.release 2>/dev/null || echo unknown)"
+
+{
+  echo "# Mobile Capture"
+  echo
+  echo "- Captured: $(date -Iseconds)"
+  echo "- Device: $device"
+  echo "- Android: $android_version"
+  echo "- Source: LiTT Pocket Ops"
+  echo
+  echo "## Clipboard"
+  echo
+  if [ -n "$clipboard" ]; then
+    printf '%s
+' "$clipboard"
+  else
+    echo "_Clipboard was empty._"
+  fi
+  echo
+  echo "## Notes"
+  echo
+  echo "_Add context, next steps, tags, prompt, bug report, lyric, or idea here._"
+} > "$file"
+
+if command -v termux-notification >/dev/null 2>&1; then
+  termux-notification \
+    --id 101 \
+    --title "LiTT Capture Saved" \
+    --content "$(basename "$file")" \
+    --priority high 2>/dev/null || true
+fi
+
+printf '%s
+' "$file"

@@ -1,0 +1,23 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+R="$HOME/bin/rish"
+
+echo "⚡ Trimming heavy social apps..."
+
+for pkg in \
+  com.instagram.android \
+  com.facebook.katana \
+  com.facebook.stella \
+  com.facebook.services \
+  com.facebook.appmanager \
+  com.facebook.system
+do
+  "$R" -c "am force-stop $pkg" 2>/dev/null
+done
+
+echo
+echo "⚡ Available memory:"
+"$R" -c 'grep -E "MemAvailable|SwapFree" /proc/meminfo'
+
+echo
+echo "✅ Zipper, Life360, Wispr, LiTT and system apps untouched."

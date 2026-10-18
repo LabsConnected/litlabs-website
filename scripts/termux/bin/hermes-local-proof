@@ -1,0 +1,16 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -e
+
+MODEL='ggml-org/Qwen3.5-0.8B-GGUF:Q4_0'
+
+litt-local-ai start >/dev/null
+
+cd "$HOME"
+
+exec hermes \
+  --no-restore-cwd \
+  --provider custom \
+  -m "$MODEL" \
+  -t clarify \
+  --ignore-rules \
+  -z "Do not call tools. Reply exactly: HERMES LOCAL MODEL ONLINE"

@@ -1,0 +1,65 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -e
+
+MODEL='ggml-org/Qwen3.5-0.8B-GGUF:Q4_0'
+HOST_REPO="$HOME/litt-canonical"
+GUEST_REPO="/termux-home/litt-canonical"
+
+litt-local-ai start >/dev/null
+
+cd "$HOST_REPO"
+
+PROMPT='READ-ONLY TOOL PROOF.
+
+You MUST use the terminal tool.
+
+The repository you must inspect is:
+/termux-home/litt-canonical
+
+First run:
+cd /termux-home/litt-canonical
+
+Then use only read-only commands to determine:
+
+pwd
+git rev-parse --show-toplevel
+git branch --show-current
+git status --porcelain=v1 | wc -l
+node -p "require(\"./package.json\").name"
+
+Also test whether these directories exist:
+packages/litt-models
+packages/litt-agent-core
+packages/litt-cli
+
+Do not modify anything.
+Do not install anything.
+Do not create files.
+Do not commit.
+Do not stash.
+Do not reset.
+Do not clean.
+Do not push.
+Do not deploy.
+
+Return:
+
+LOCAL TOOL INSPECTION: COMPLETE
+DIRECTORY: <pwd>
+GIT ROOT: <git root>
+BRANCH: <branch>
+DIRTY FILE COUNT: <number>
+PROJECT: <package name>
+LITT-MODELS: YES/NO
+LITT-AGENT-CORE: YES/NO
+LITT-CLI: YES/NO
+MUTATIONS: NONE'
+
+exec hermes \
+  --no-restore-cwd \
+  --provider custom \
+  -m "$MODEL" \
+  -t terminal \
+  --ignore-rules \
+  --in "$GUEST_REPO" \
+  -z "$PROMPT"

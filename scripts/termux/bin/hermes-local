@@ -1,0 +1,26 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -e
+
+MODEL='ggml-org/Qwen3.5-0.8B-GGUF:Q4_0'
+HOST_REPO="$HOME/litt-canonical"
+GUEST_REPO="/termux-home/litt-canonical"
+
+litt-local-ai start >/dev/null
+
+cd "$HOST_REPO"
+
+echo "⚕ LiTT Local Hermes"
+echo "Model : $MODEL"
+echo "Host  : $HOST_REPO"
+echo "Guest : $GUEST_REPO"
+echo "Tools : terminal"
+echo
+
+exec hermes \
+  --no-restore-cwd \
+  --provider custom \
+  -m "$MODEL" \
+  -t terminal \
+  --ignore-rules \
+  --in "$GUEST_REPO" \
+  chat

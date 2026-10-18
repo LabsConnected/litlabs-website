@@ -1,0 +1,36 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -Eeuo pipefail
+
+INBOX="$HOME/litt/inbox"
+mkdir -p "$INBOX"
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: litt-note "Your idea here""
+  exit 1
+fi
+
+stamp="$(date '+%Y-%m-%d_%H-%M-%S')"
+file="$INBOX/$stamp.md"
+
+{
+  echo "# LiTT Note"
+  echo
+  echo "- Captured: $(date -Iseconds)"
+  echo "- Device: $(getprop ro.product.model 2>/dev/null || uname -n)"
+  echo "- Source: LiTT Phone"
+  echo
+  echo "## Note"
+  echo
+  printf '%s
+' "$*"
+} > "$file"
+
+if command -v termux-notification >/dev/null 2>&1; then
+  termux-notification \
+    --id 102 \
+    --title "LiTT Note Saved" \
+    --content "$(basename "$file")" \
+    --priority high 2>/dev/null || true
+fi
+
+echo "Saved: $file"

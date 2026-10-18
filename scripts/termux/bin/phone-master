@@ -1,0 +1,276 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+R="$HOME/bin/rish"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+LOG="$HOME/phone-health-$STAMP.txt"
+MODE="${1:-audit}"
+
+if [ ! -x "$R" ]; then
+  echo "❌ rish not found at $R"
+  exit 1
+fi
+
+exec > >(tee "$LOG") 2>&1
+
+section() {
+  echo
+  echo "=================================================="
+  echo " $1"
+  echo "=================================================="
+}
+
+section "PHONE MASTER CHECK"
+echo "Time:  $(date)"
+echo "Mode:  $MODE"
+echo "Model: $($R -c 'getprop ro.product.model' | tail -1)"
+echo "Build: $($R -c 'getprop ro.build.display.id' | tail -1)"
+
+if [ "$MODE" = "--fix" ] || [ "$MODE" = "fix" ]; then
+  section "SAFE PERFORMANCE FIXES"
+
+  BACKUP="$HOME/.phone-master-original-settings"
+
+  if [ ! -f "$BACKUP" ]; then
+    {
+      echo "peak_refresh_rate=$($R -c 'settings get system peak_refresh_rate' | tail -1)"
+      echo "min_refresh_rate=$($R -c 'settings get system min_refresh_rate' | tail -1)"
+      echo "window_animation_scale=$($R -c 'settings get global window_animation_scale' | tail -1)"
+      echo "transition_animation_scale=$($R -c 'settings get global transition_animation_scale' | tail -1)"
+      echo "animator_duration_scale=$($R -c 'settings get global animator_duration_scale' | tail -1)"
+    } > "$BACKUP"
+
+    echo "✅ Original settings backed up:"
+    cat "$BACKUP"
+  fi
+
+  echo
+  echo "Applying:"
+  echo "  • Peak refresh: 120 Hz"
+  echo "  • Minimum refresh: 120 Hz"
+  echo "  • Animations: 0.5x"
+
+  $R -c 'settings put system peak_refresh_rate 120.0'
+  $R -c 'settings put system min_refresh_rate 120.0'
+
+  $R -c '
+    settings put global window_animation_scale 0.5
+    settings put global transition_animation_scale 0.5
+    settings put global animator_duration_scale 0.5
+  '
+
+  sleep 2
+  echo "✅ Safe performance settings applied"
+fi
+
+section "REFRESH RATE"
+
+echo "Peak setting:"
+$R -c 'settings get system peak_refresh_rate'
+
+echo "Minimum setting:"
+$R -c 'settings get system min_refresh_rate'
+
+echo
+echo "Active physical display:"
+$R -c 'dumpsys display | grep -m1 "mActiveSfDisplayMode="'
+
+echo
+echo "Display mode state:"
+$R -c 'dumpsys display | grep -E "mActiveModeId=|mDefaultModeId=|mUserPreferredModeId=|mDesiredDisplayModeSpecs=" | head -10'
+
+echo
+echo "Supported modes:"
+$R -c 'dumpsys display | grep -m1 "supportedModes"'
+
+section "POWER / BATTERY SAVER"
+
+LOWPOWER="$($R -c 'settings get global low_power' | tail -1)"
+echo "Battery Saver: $LOWPOWER"
+
+$R -c 'dumpsys power | grep -E "mWakefulness=|mIsPowered=|mLowPowerModeEnabled=" | head -10'
+
+if [ "$LOWPOWER" = "1" ]; then
+  echo
+  echo "⚠️ BATTERY SAVER IS ON"
+  echo "This can reduce refresh rate and performance."
+else
+  echo "✅ Battery Saver is not forcing low-power mode."
+fi
+
+section "DISPLAY SIZE / DENSITY"
+
+$R -c 'wm size'
+$R -c 'wm density'
+
+echo "Font scale:"
+$R -c 'settings get system font_scale'
+
+section "ANIMATION SPEED"
+
+echo -n "Window:     "
+$R -c 'settings get global window_animation_scale'
+
+echo -n "Transition: "
+$R -c 'settings get global transition_animation_scale'
+
+echo -n "Animator:   "
+$R -c 'settings get global animator_duration_scale'
+
+section "DEFAULT LAUNCHER"
+
+HOME="$($R -c 'cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME' | tail -1)"
+echo "$HOME"
+
+section "ACCESSIBILITY"
+
+ACC_ENABLED="$($R -c 'settings get secure accessibility_enabled' | tail -1)"
+ACC_SERVICES="$($R -c 'settings get secure enabled_accessibility_services' | tail -1)"
+
+echo "Enabled:  $ACC_ENABLED"
+echo "Services: $ACC_SERVICES"
+
+if [ "$ACC_ENABLED" = "1" ]; then
+  echo "⚠️ Accessibility service active."
+else
+  echo "✅ No active accessibility service."
+fi
+
+section "REAL MEMORY STATUS"
+
+$R -c 'grep -E "MemTotal|MemAvailable|Cached:|AnonPages|SwapTotal|SwapFree" /proc/meminfo'
+
+AVAIL="$($R -c 'grep "^MemAvailable:" /proc/meminfo' | awk '{print $2}')"
+
+if [ -n "$AVAIL" ]; then
+  AVAIL_MB=$((AVAIL / 1024))
+  echo
+  echo "Available RAM: ${AVAIL_MB} MB"
+
+  if [ "$AVAIL_MB" -lt 1000 ]; then
+    echo "⚠️ LOW available RAM"
+  elif [ "$AVAIL_MB" -lt 2000 ]; then
+    echo "🟡 RAM getting moderately tight"
+  else
+    echo "✅ RAM availability looks good"
+  fi
+fi
+
+section "STORAGE"
+
+$R -c 'df -h /data | tail -1'
+
+section "LIVE CPU"
+
+$R -c 'top -b -n 1 -m 15 | head -30'
+
+echo
+echo "NOTE:"
+echo "Ignore the raw load average on this MediaTek kernel."
+echo "Its persistent D-state vendor threads artificially inflate it."
+
+section "BLOCKED / D-STATE KERNEL TASKS"
+
+$R -c 'ps -A -o PID,STAT,NAME | awk "$2 ~ /^D/ {print}"'
+
+echo
+echo "Count:"
+$R -c 'ps -A -o STAT | awk "$1 ~ /^D/ {n++} END {print n+0}"'
+
+section "THERMAL"
+
+$R -c 'dumpsys thermalservice | grep -m1 "Thermal Status:"'
+
+echo
+echo "Current HAL temperatures:"
+$R -c 'dumpsys thermalservice | awk "
+  /Current temperatures from HAL:/ {show=1; next}
+  /Current cooling devices from HAL:/ {show=0}
+  show
+"'
+
+echo
+echo "Cooling devices:"
+$R -c 'dumpsys thermalservice | awk "
+  /Current cooling devices from HAL:/ {show=1; next}
+  /Temperature static thresholds from HAL:/ {show=0}
+  show
+"'
+
+section "ZIPPER LOCKSCREEN"
+
+ZIPPER="zipper.lockscreens.customize.wallpaper"
+
+echo "PID:"
+$R -c "pidof $ZIPPER || echo not-running"
+
+echo
+echo "Live CPU:"
+$R -c "top -b -n 1 -m 30 | grep '$ZIPPER' || echo no-live-process"
+
+echo
+echo "Memory:"
+$R -c "dumpsys meminfo $ZIPPER | grep -E 'TOTAL PSS|TOTAL RSS|TOTAL SWAP PSS|Native Heap|Graphics' | tail -8"
+
+section "LIFE360 / WISPR"
+
+echo "Life360:"
+$R -c 'pidof com.life360.android.safetymapd || echo stopped'
+
+echo
+echo "Wispr:"
+$R -c 'pidof com.wispr.flowapp || echo stopped'
+
+echo
+echo "Wispr accessibility process:"
+$R -c 'pidof com.wispr.flowapp:accessibility || echo stopped'
+
+section "SYSTEMUI FRAME HEALTH"
+
+$R -c 'dumpsys gfxinfo com.android.systemui |
+grep -E "Total frames rendered|Janky frames|50th percentile|90th percentile|95th percentile|99th percentile|Missed Vsync|High input latency|Slow UI thread|Slow bitmap uploads|Slow issue draw commands" |
+head -30'
+
+section "SMART LAUNCHER FRAME HEALTH"
+
+$R -c 'dumpsys gfxinfo ginlemon.flowerfree |
+grep -E "Total frames rendered|Janky frames|50th percentile|90th percentile|95th percentile|99th percentile|Missed Vsync|High input latency|Slow UI thread|Slow bitmap uploads|Slow issue draw commands" |
+head -30'
+
+section "QUICK VERDICT"
+
+ACTIVE="$($R -c 'dumpsys display | grep -m1 "mActiveSfDisplayMode="' )"
+
+echo "$ACTIVE" | grep -q 'refreshRate=120' &&
+  echo "✅ Display is actually running at 120 Hz" ||
+  echo "⚠️ Display is NOT currently running at 120 Hz"
+
+THERMAL="$($R -c 'dumpsys thermalservice | grep -m1 "Thermal Status:"' | awk '{print $3}')"
+
+if [ "$THERMAL" = "0" ]; then
+  echo "✅ No thermal throttling reported"
+else
+  echo "⚠️ Thermal status is elevated: $THERMAL"
+fi
+
+if [ "$LOWPOWER" = "1" ]; then
+  echo "⚠️ Battery Saver may be limiting performance"
+else
+  echo "✅ Battery Saver not limiting performance"
+fi
+
+if [ "$ACC_ENABLED" = "1" ]; then
+  echo "🟡 Accessibility processing is enabled"
+else
+  echo "✅ Accessibility path clean"
+fi
+
+echo
+echo "🔒 Zipper was NOT stopped or modified."
+echo "📍 Life360 was NOT stopped or modified."
+echo "🎙️ Wispr was NOT stopped or modified."
+echo "💻 LiTT/Termux files were NOT touched."
+
+section "DONE"
+
+echo "Full report saved to:"
+echo "$LOG"

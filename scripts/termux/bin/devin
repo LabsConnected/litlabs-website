@@ -1,0 +1,22 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# devin - one-command entry to the Devin CLI from native Termux.
+# Same mechanism as the existing `ur devin` bash function, but works from
+# any shell or menu (ur only exists in interactive shells). Devin runs in
+# the ubuntu proot; Dex runs natively - the two stay separate processes.
+set -u
+
+# Already inside the proot (or any env where devin resolves): just run it.
+if command -v devin >/dev/null 2>&1 && [ "$(uname -o 2>/dev/null)" != "Android" ]; then
+  exec devin "$@"
+fi
+
+if ! command -v proot-distro >/dev/null 2>&1; then
+  echo "devin: proot-distro not found - Devin lives in the ubuntu proot." >&2
+  echo "  enter it first with: litt-ubuntu   (or: u)" >&2
+  exit 1
+fi
+
+# bash -lc: a login shell so /root/.bashrc PATH (~/.local/bin) applies.
+# Lands in ~/litt-canonical like interactive sessions do.
+exec proot-distro login ubuntu -- \
+  bash -lc 'cd "$HOME/litt-canonical" 2>/dev/null; exec devin "$@"' -- "$@"

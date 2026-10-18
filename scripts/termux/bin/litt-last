@@ -1,0 +1,21 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -Eeuo pipefail
+
+INBOX="$HOME/litt/inbox"
+
+latest="$(find "$INBOX" -maxdepth 1 -type f -name '*.md' -printf '%T@ %p
+' 2>/dev/null \
+  | sort -nr \
+  | head -n 1 \
+  | cut -d' ' -f2-)"
+
+if [ -z "${latest:-}" ]; then
+  echo "No LiTT notes found."
+  exit 0
+fi
+
+if command -v bat >/dev/null 2>&1; then
+  bat --style=plain "$latest"
+else
+  cat "$latest"
+fi

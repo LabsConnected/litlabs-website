@@ -1,0 +1,150 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -u
+
+LLAMA_DIR="$HOME/llama.cpp"
+STATE_DIR="$HOME/.litt-local-ai"
+PID_FILE="$STATE_DIR/server.pid"
+LOG_FILE="$STATE_DIR/server.log"
+
+MODEL="ggml-org/Qwen3.5-0.8B-GGUF:Q4_0"
+HOST="127.0.0.1"
+PORT="8080"
+CTX="65536"
+THREADS="4"
+
+mkdir -p "$STATE_DIR"
+
+running() {
+  [ -f "$PID_FILE" ] || return 1
+  PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+  [ -n "${PID:-}" ] && kill -0 "$PID" 2>/dev/null
+}
+
+case "${1:-status}" in
+  start)
+    if running; then
+      echo "✅ LiTT Local AI already running"
+      echo "PID: $(cat "$PID_FILE")"
+      echo "API: http://$HOST:$PORT/v1"
+      exit 0
+    fi
+
+    rm -f "$PID_FILE"
+
+    echo "🔥 Starting LiTT Local AI..."
+    termux-wake-lock 2>/dev/null || true
+
+    cd "$LLAMA_DIR" || exit 1
+
+    nohup ./build/bin/llama-server \
+      -hf "$MODEL" \
+      --host "$HOST" \
+      --port "$PORT" \
+      -c "$CTX" \
+      -t "$THREADS" \
+      --chat-template-kwargs '{"enable_thinking":false}' \
+      >"$LOG_FILE" 2>&1 &
+
+    echo $! > "$PID_FILE"
+
+    printf "Loading"
+    for i in $(seq 1 120); do
+      if curl -fsS "http://$HOST:$PORT/v1/models" >/dev/null 2>&1; then
+        echo
+        echo "✅ LITT LOCAL AI ONLINE"
+        echo "API: http://$HOST:$PORT/v1"
+        echo "PID: $(cat "$PID_FILE")"
+        exit 0
+      fi
+      printf "."
+      sleep 1
+    done
+
+    echo
+    echo "❌ Server failed to become ready"
+    tail -80 "$LOG_FILE"
+    exit 1
+    ;;
+
+  stop)
+    if running; then
+      PID="$(cat "$PID_FILE")"
+      echo "Stopping PID $PID..."
+      kill "$PID" 2>/dev/null || true
+      sleep 2
+    fi
+    rm -f "$PID_FILE"
+    termux-wake-unlock 2>/dev/null || true
+    echo "✅ LiTT Local AI stopped"
+    ;;
+
+  restart)
+    "$0" stop
+    sleep 2
+    "$0" start
+    ;;
+
+  status)
+    if running; then
+      echo "✅ LITT LOCAL AI ONLINE"
+      echo "PID: $(cat "$PID_FILE")"
+      echo "API: http://$HOST:$PORT/v1"
+      echo
+      curl -sS "http://$HOST:$PORT/v1/models"
+      echo
+    else
+      echo "❌ LiTT Local AI offline"
+    fi
+    ;;
+
+  test)
+    if ! running; then
+      echo "❌ Run: litt-local-ai start"
+      exit 1
+    fi
+
+    MODEL_ID="$(
+      curl -fsS "http://$HOST:$PORT/v1/models" |
+      python -c 'import sys,json; print(json.load(sys.stdin)["data"][0]["id"])'
+    )"
+
+    echo "Model: $MODEL_ID"
+    echo
+
+    curl -sS "http://$HOST:$PORT/v1/chat/completions" \
+      -H "Content-Type: application/json" \
+      -d "$(python - "$MODEL_ID" <<'PY'
+import json,sys
+print(json.dumps({
+  "model": sys.argv[1],
+  "messages": [
+    {"role":"user","content":"Reply exactly: LITT LOCAL ONLINE"}
+  ],
+  "temperature": 0.0,
+  "max_tokens": 32
+}))
+PY
+)"
+    echo
+    ;;
+
+  logs)
+    tail -f "$LOG_FILE"
+    ;;
+
+  model)
+    curl -fsS "http://$HOST:$PORT/v1/models" |
+      python -c 'import sys,json; print(json.load(sys.stdin)["data"][0]["id"])'
+    ;;
+
+  *)
+    echo "Usage:"
+    echo "  litt-local-ai start"
+    echo "  litt-local-ai stop"
+    echo "  litt-local-ai restart"
+    echo "  litt-local-ai status"
+    echo "  litt-local-ai test"
+    echo "  litt-local-ai model"
+    echo "  litt-local-ai logs"
+    ;;
+esac
