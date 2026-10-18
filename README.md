@@ -12,9 +12,9 @@ LiTT is built by **LiTTree LabStudios**. Describe the software you want, watch i
 
 ---
 
-# LiTTree Lab Studios
+## About this repository
 
-LiTTree Lab Studios is a multi-agent creative workspace built with Next.js 16, React 19, Tailwind CSS 4, Clerk, Supabase, Stripe, and several AI providers.
+This repository holds LiTT — a multi-agent creative workspace built with Next.js 16, React 19, Tailwind CSS 4, Clerk, Supabase, Stripe, and several AI providers.
 
 ## Requirements
 
