@@ -143,13 +143,24 @@ async function collect() {
 
 // -- plain-text fallback (non-TTY) ------------------------------------------
 function dexFilesState(s) {
-  return s.dexBin && s.dexAgent ? "LIVE" : "UNAVAILABLE";
+  return s.dexBin && s.dexAgent ? "INSTALLED" : "UNAVAILABLE";
 }
 function dexFilesValue(s) {
   if (!s.dexBin && !s.dexAgent) return "launcher + agent missing";
   if (!s.dexBin) return "launcher missing";
   if (!s.dexAgent) return "agent.py missing";
-  return "launcher + agent v1.19 on disk";
+  return "launcher + agent on disk";
+}
+function agentReadyState(s) {
+  // READY only when the agent can actually answer now: files present,
+  // Ollama API up, and a model resident. Idle-but-pulled is not READY.
+  return s.dexBin && s.dexAgent && s.ollama === "up" && s.modelName
+    ? "READY" : "NOT CONNECTED";
+}
+function agentReadyValue(s) {
+  if (!(s.dexBin && s.dexAgent)) return "files missing";
+  if (s.ollama !== "up") return "brain offline";
+  return s.modelName ? `answering via ${s.modelName.replace(/.*\//, "")}` : "idle — model not loaded";
 }
 function ollamaValue(s) {
   if (s.ollama !== "up") return "api not reachable";
@@ -164,6 +175,7 @@ function printStatic(s) {
   if (s.repo) line("project", `${s.repo.path.replace(/^.*\//, "")} · ${s.repo.branch} · ${s.repo.sha}` + (s.repo.dirty ? ` +${s.repo.dirty}` : " clean"), "LIVE");
   else line("project", "no git repo found", "UNAVAILABLE");
   line("dex", dexFilesValue(s), dexFilesState(s));
+  line("agent", agentReadyValue(s), agentReadyState(s));
   line("ollama", ollamaValue(s), s.ollama === "up" ? "LIVE" : "NOT CONNECTED");
   line("gh cli", s.gh === "LIVE" ? "authenticated" : s.gh.toLowerCase(), s.gh);
   line("railway", s.railway === "LIVE" ? "cli logged in" : s.railway.toLowerCase(), s.railway);
@@ -181,8 +193,8 @@ const LABEL_W = COLS <= 44 ? 8 : 9;
 const STATE_W = COLS <= 44 ? 5 : 13;
 const VALUE_W = Math.max(10, ROW_W - LABEL_W - STATE_W - 4);
 const clip = (s, w) => (s.length > w ? s.slice(0, Math.max(1, w - 1)) + "…" : s);
-const STATE_COLOR = { LIVE: "green", "NOT CONNECTED": "yellow", UNAVAILABLE: "gray" };
-const STATE_SHORT = { LIVE: "LIVE", "NOT CONNECTED": "N/C", UNAVAILABLE: "N/A" };
+const STATE_COLOR = { LIVE: "green", READY: "green", INSTALLED: "cyan", "NOT CONNECTED": "yellow", UNAVAILABLE: "gray" };
+const STATE_SHORT = { LIVE: "LIVE", READY: "READY", INSTALLED: "INST", "NOT CONNECTED": "N/C", UNAVAILABLE: "N/A" };
 
 function StatusRow({ label, value, state }) {
   const shown = COLS <= 44 ? (STATE_SHORT[state] || state) : state;
@@ -236,6 +248,7 @@ function App({ done }) {
                 value: `${s.repo.path.replace(/^.*\//, "")} · ${s.repo.branch} · ${s.repo.sha}${s.repo.dirty ? ` +${s.repo.dirty}` : " clean"}` })
             : h(StatusRow, { label: "project", value: "no git repo found", state: "UNAVAILABLE" }),
           h(StatusRow, { label: "dex", state: dexFilesState(s), value: dexFilesValue(s) }),
+          h(StatusRow, { label: "agent", state: agentReadyState(s), value: agentReadyValue(s) }),
           h(StatusRow, { label: "ollama", state: s.ollama === "up" ? "LIVE" : "NOT CONNECTED", value: ollamaValue(s) }),
           h(StatusRow, { label: "gh cli", state: s.gh, value: s.gh === "LIVE" ? "authenticated" : s.gh.toLowerCase() }),
           h(StatusRow, { label: "railway", state: s.railway, value: s.railway === "LIVE" ? "cli logged in" : s.railway.toLowerCase() }),
