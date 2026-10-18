@@ -188,6 +188,12 @@ export interface AgentLoopConfig {
   /** Parent ActionRun owning this work; injected server-side. */
   actionRunId?: string;
   /**
+   * Canonical LiTTBits estimate for this run (same number the reservation
+   * held). Appended to approval reasons so the card discloses the expected
+   * debit BEFORE the user approves — no hidden metering.
+   */
+  billingEstimateBits?: number;
+  /**
    * Item 5a — optional durable event sink for the Activity truth.
    * When set, every ProgressEvent emitted through this run's
    * `localProgress` is also offered to the hook. The loop invokes it in
@@ -1533,7 +1539,9 @@ async function runAgentLoopV2Inner(
           toolCall.toolId,
           toolCall.inputs,
           permResult.reason ?? "Approval required",
-        );
+        ) + (cfg.billingEstimateBits
+          ? ` Estimated cost: ${cfg.billingEstimateBits} LiTTBits (debited on success; failed work debits zero).`
+          : "");
         localProgress.emit({
           type: "approval_required",
           toolId: toolCall.toolId,
@@ -3033,7 +3041,9 @@ async function resumeAgentLoopV2Inner(
           toolCall.toolId,
           toolCall.inputs,
           permResult.reason ?? "Approval required",
-        );
+        ) + (cfg.billingEstimateBits
+          ? ` Estimated cost: ${cfg.billingEstimateBits} LiTTBits (debited on success; failed work debits zero).`
+          : "");
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: approvalReason });
 
         // Pause for approval in AUTO as well as ACT — the same contract as

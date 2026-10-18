@@ -50,6 +50,7 @@ import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
 import { deploymentEvidenceFrom } from "@/lib/studio/completion-evidence";
 import {
+  appendActionEvent,
   createActionRun,
   requestActionRunCancellation,
   transitionActionRun,
@@ -810,6 +811,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       );
     }
 
+    // Disclose the canonical estimate on the approval card — the same
+    // number the reservation held (no invented prices).
+    if (v2Config) v2Config.billingEstimateBits = estimatedCost;
     agentRunId = reserveResult.runId;
     reservedCredits = reserveResult.reservedCredits;
     reservationId = reserveResult.reservationId;
@@ -1357,6 +1361,22 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               failureCode: finalMessageStatus === "failed" ? "TASK_FAILED" : null,
               failureMessage: finalMessageStatus === "failed" ? assistantText.slice(0, 500) : null,
             });
+            // Write the canonical run.completed/run.failed outcome event
+            // carrying the quality verdict — publish reads this same
+            // evidence the gate uses, not a parallel flag.
+            if (finalMessageStatus === "completed" || finalMessageStatus === "failed") {
+              await appendActionEvent({
+                runId: actionContext.actionRunId,
+                userId: actionContext.userId,
+                type: finalMessageStatus === "completed" ? "run.completed" : "run.failed",
+                payload: {
+                  result: {
+                    finalText: assistantText,
+                    qualityLoop: v2Result?.qualityLoop ?? undefined,
+                  },
+                },
+              });
+            }
           } catch (settleErr) {
             actionRunPersistenceFailed = true;
             studioLog("message:action_run_settle_failed", {
@@ -1399,7 +1419,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           });
         }
         if (agentRunId) {
-          const actualCredits = runtimeAgent
+          // Metered Studio builds (metersRun) settle the estimated amount —
+          // a successful build debiting zero is a defect.
+          const actualCredits = metersRun
             ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
             : 0;
           settleRun(agentRunId, {
@@ -1653,7 +1675,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                     : undefined),
           );
           if (agentRunId) {
-            const actualCredits = runtimeAgent
+            const actualCredits = metersRun
               ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
               : 0;
             settleRun(agentRunId, {

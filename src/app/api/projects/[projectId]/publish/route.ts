@@ -111,18 +111,19 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   let gatePassed = false;
   try {
     const runs = await listActionRuns(owner.userId, { projectId, limit: 10 });
-    for (const run of runs.filter((r) => r.status === "completed")) {
-      const events = await listActionEvents(run.id, owner.userId, { limit: 200 });
-      const hasPassedVerdict = events.some(
+    // Gate on the LATEST completed build — a stale pass cannot authorize
+    // publishing a project whose newest run failed or never ran.
+    const latestCompleted = runs.find((r) => r.status === "completed");
+    if (latestCompleted) {
+      // Full event window (store cap) — the verdict must not hide behind
+      // pagination.
+      const events = await listActionEvents(latestCompleted.id, owner.userId, { limit: 500 });
+      gatePassed = events.some(
         (e) =>
           e.type === "run.completed" &&
           (e.payload as { result?: { qualityLoop?: { verdict?: { ok?: boolean } } } })
             ?.result?.qualityLoop?.verdict?.ok === true,
       );
-      if (hasPassedVerdict) {
-        gatePassed = true;
-        break;
-      }
     }
   } catch {
     return NextResponse.json(
