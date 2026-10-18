@@ -18,6 +18,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import http from "node:http";
 import os from "node:os";
+import fs from "node:fs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -76,6 +77,22 @@ function httpJson(url, ms = 1500) {
 
 const isTermux = (process.env.PREFIX || "").includes("com.termux");
 const HOME_DIR = isTermux ? "/data/data/com.termux/files/home" : os.homedir();
+// private-agent lives on the Termux side; it's visible from both environments.
+const AGENT_DIR = [
+  "/data/data/com.termux/files/home/private-agent",
+  `${HOME_DIR}/private-agent`,
+].find((d) => fs.existsSync(`${d}/agent.py`)) || `${HOME_DIR}/private-agent`;
+
+/** Resolve a launchable path for a binary: PATH first, then ~/bin. */
+function resolveBin(name) {
+  const onPath = sh("sh", ["-c", `command -v ${name}`], 1500);
+  if (onPath) return onPath;
+  for (const dir of [`${HOME_DIR}/bin`, "/data/data/com.termux/files/home/bin",
+    "/data/data/com.termux/files/usr/bin"]) {
+    if (fs.existsSync(`${dir}/${name}`)) return `${dir}/${name}`;
+  }
+  return null;
+}
 
 async function collect() {
   // repo: prefer cwd, else canonical checkout
@@ -91,11 +108,16 @@ async function collect() {
       break;
     }
   }
-  // ollama/dex
+  // Dex readiness is three SEPARATE facts — never merge them into one label:
+  //   1. launcher files: `dex` binary + deployed agent.py exist on disk
+  //   2. ollama api: the model server answers /api/ps
+  //   3. brain: a model is actually resident (or idle but pulled)
+  const dexBin = resolveBin("dex");
+  const dexAgent = fs.existsSync(`${AGENT_DIR}/agent.py`);
   const ps = await httpJson("http://127.0.0.1:11434/api/ps");
   const tags = await httpJson("http://127.0.0.1:11434/api/tags");
-  const dexBin = have("dex");
-  // github / railway (presence + auth state only; never prints secrets)
+  // github / railway: these labels mean *authenticated CLI availability*
+  // only — NOT verified service health. Never claim more than was checked.
   const gh = have("gh")
     ? (sh("gh", ["auth", "status"], 3000) !== null || sh("gh", ["auth", "token"], 2000) !== null
         ? "LIVE" : "NOT CONNECTED")
@@ -105,11 +127,14 @@ async function collect() {
     : "UNAVAILABLE";
   return {
     repo,
+    dexBin,
+    dexAgent,
+    littBin: resolveBin("litt"),
+    littMenu: resolveBin("litt-menu"),
     ollama: ps === null ? "down" : "up",
     modelsLoaded: ps?.models?.length ?? 0,
     modelName: ps?.models?.[0]?.name || null,
     modelsPulled: tags?.models?.length ?? 0,
-    dexBin,
     gh,
     railway,
     lane: isTermux ? "termux" : "proot",
@@ -117,15 +142,30 @@ async function collect() {
 }
 
 // -- plain-text fallback (non-TTY) ------------------------------------------
+function dexFilesState(s) {
+  return s.dexBin && s.dexAgent ? "LIVE" : "UNAVAILABLE";
+}
+function dexFilesValue(s) {
+  if (!s.dexBin && !s.dexAgent) return "launcher + agent missing";
+  if (!s.dexBin) return "launcher missing";
+  if (!s.dexAgent) return "agent.py missing";
+  return "launcher + agent v1.19 on disk";
+}
+function ollamaValue(s) {
+  if (s.ollama !== "up") return "api not reachable";
+  return s.modelName
+    ? `up · ${s.modelName.replace(/.*\//, "")} loaded`
+    : `up · idle (${s.modelsPulled} pulled)`;
+}
+
 function printStatic(s) {
   const line = (k, v, st) => console.log(`  ${k.padEnd(9)} ${v.padEnd(34)} ${st}`);
   console.log("◬ LiTT Home (preview) — non-interactive snapshot");
   if (s.repo) line("project", `${s.repo.path.replace(/^.*\//, "")} · ${s.repo.branch} · ${s.repo.sha}` + (s.repo.dirty ? ` +${s.repo.dirty}` : " clean"), "LIVE");
   else line("project", "no git repo found", "UNAVAILABLE");
-  if (s.ollama === "up") line("dex/ollama", s.modelName ? `up · ${s.modelName}` : `up · idle (${s.modelsPulled} pulled)`, "LIVE");
-  else line("dex/ollama", "api not reachable", "NOT CONNECTED");
-  line("dex bin", s.dexBin ? "dex" : "missing", s.dexBin ? "LIVE" : "UNAVAILABLE");
-  line("github", s.gh === "LIVE" ? "gh authenticated" : s.gh.toLowerCase(), s.gh);
+  line("dex", dexFilesValue(s), dexFilesState(s));
+  line("ollama", ollamaValue(s), s.ollama === "up" ? "LIVE" : "NOT CONNECTED");
+  line("gh cli", s.gh === "LIVE" ? "authenticated" : s.gh.toLowerCase(), s.gh);
   line("railway", s.railway === "LIVE" ? "cli logged in" : s.railway.toLowerCase(), s.railway);
   line("n8n", "not wired yet", "UNAVAILABLE");
   line("trig.dev", "not integrated", "UNAVAILABLE");
@@ -133,15 +173,23 @@ function printStatic(s) {
 }
 
 // -- Ink UI ------------------------------------------------------------------
-const W = 54;
-const clip = (s, w = W) => (s.length > w ? s.slice(0, w - 1) + "…" : s);
+// Phone-width adaptive: everything is derived from the real terminal width,
+// clamped so a 40-col Termux screen still renders clean rows.
+const COLS = Math.max(36, Math.min(process.stdout.columns || 80, 64));
+const ROW_W = COLS - 4;
+const LABEL_W = COLS <= 44 ? 8 : 9;
+const STATE_W = COLS <= 44 ? 5 : 13;
+const VALUE_W = Math.max(10, ROW_W - LABEL_W - STATE_W - 4);
+const clip = (s, w) => (s.length > w ? s.slice(0, Math.max(1, w - 1)) + "…" : s);
 const STATE_COLOR = { LIVE: "green", "NOT CONNECTED": "yellow", UNAVAILABLE: "gray" };
+const STATE_SHORT = { LIVE: "LIVE", "NOT CONNECTED": "N/C", UNAVAILABLE: "N/A" };
 
 function StatusRow({ label, value, state }) {
+  const shown = COLS <= 44 ? (STATE_SHORT[state] || state) : state;
   return h(Box, null,
-    h(Text, { color: "gray" }, "  " + label.padEnd(9)),
-    h(Text, null, clip(value, 30).padEnd(30)),
-    h(Text, { color: STATE_COLOR[state] || "gray" }, state));
+    h(Text, { color: "gray" }, "  " + label.padEnd(LABEL_W).slice(0, LABEL_W)),
+    h(Text, null, clip(value, VALUE_W).padEnd(VALUE_W)),
+    h(Text, { color: STATE_COLOR[state] || "gray" }, shown));
 }
 
 function App({ done }) {
@@ -152,9 +200,9 @@ function App({ done }) {
   useEffect(() => { collect().then(setSnap); }, [tick]);
 
   const items = [
-    { k: "dex", label: "Dex", note: snap?.dexBin ? "private agent" : "missing" },
-    { k: "litt", label: "litt cockpit", note: "installed CLI" },
-    { k: "menu", label: "litt-menu", note: "ops launcher" },
+    { k: "dex", label: "Dex", note: snap?.dexBin ? "private agent" : "missing", bin: snap?.dexBin },
+    { k: "litt", label: "litt cockpit", note: snap?.littBin ? "installed CLI" : "missing", bin: snap?.littBin },
+    { k: "menu", label: "litt-menu", note: snap?.littMenu ? "ops launcher" : "missing", bin: snap?.littMenu },
     { k: "refresh", label: "Refresh", note: "re-read status" },
     { k: "quit", label: "Quit", note: "" },
   ];
@@ -164,21 +212,22 @@ function App({ done }) {
     if (key.escape || (key.ctrl && input === "c") || (bare && input === "q")) { done("quit"); exit(); return; }
     if (key.upArrow || (bare && input === "k")) { setSel((s) => (s + items.length - 1) % items.length); return; }
     if (key.downArrow || (bare && input === "j")) { setSel((s) => (s + 1) % items.length); return; }
-    if (bare && input === "d") { done("dex"); exit(); return; }
-    if (bare && input === "l") { done("litt"); exit(); return; }
+    if (bare && input === "d") { if (snap?.dexBin) { done({ k: "dex", bin: snap.dexBin }); exit(); } return; }
+    if (bare && input === "l") { if (snap?.littBin) { done({ k: "litt", bin: snap.littBin }); exit(); } return; }
     if (bare && input === "r") { setTick((t) => t + 1); return; }
     if (key.return) {
       const it = items[sel];
       if (it.k === "refresh") { setTick((t) => t + 1); return; }
-      done(it.k === "menu" ? "litt-menu" : it.k);
+      if (!it.bin && (it.k === "dex" || it.k === "litt" || it.k === "menu")) return;  // missing binary: stay put
+      done(it.k === "menu" ? { k: "menu", bin: it.bin } : { k: it.k, bin: it.bin ?? null });
       exit();
     }
   });
 
   const s = snap;
-  return h(Box, { flexDirection: "column", width: W + 4 },
+  return h(Box, { flexDirection: "column", width: COLS },
     h(Text, { bold: true, color: "cyan" }, "◬ LiTT Home", "  ", h(Text, { color: "gray" }, `preview · ${s?.lane || ""}`)),
-    h(Text, { color: "gray" }, "  " + "─".repeat(W)),
+    h(Text, { color: "gray" }, "  " + "─".repeat(ROW_W)),
     !s
       ? h(Text, { color: "gray" }, "  reading status…")
       : h(React.Fragment, null,
@@ -186,22 +235,20 @@ function App({ done }) {
             ? h(StatusRow, { label: "project", state: "LIVE",
                 value: `${s.repo.path.replace(/^.*\//, "")} · ${s.repo.branch} · ${s.repo.sha}${s.repo.dirty ? ` +${s.repo.dirty}` : " clean"}` })
             : h(StatusRow, { label: "project", value: "no git repo found", state: "UNAVAILABLE" }),
-          s.ollama === "up"
-            ? h(StatusRow, { label: "dex", state: "LIVE",
-                value: s.modelName ? `ollama up · ${s.modelName.replace(/.*\//, "")}` : `ollama up · idle (${s.modelsPulled} pulled)` })
-            : h(StatusRow, { label: "dex", value: "ollama api not reachable", state: "NOT CONNECTED" }),
-          h(StatusRow, { label: "github", state: s.gh, value: s.gh === "LIVE" ? "gh authenticated" : s.gh.toLowerCase() }),
+          h(StatusRow, { label: "dex", state: dexFilesState(s), value: dexFilesValue(s) }),
+          h(StatusRow, { label: "ollama", state: s.ollama === "up" ? "LIVE" : "NOT CONNECTED", value: ollamaValue(s) }),
+          h(StatusRow, { label: "gh cli", state: s.gh, value: s.gh === "LIVE" ? "authenticated" : s.gh.toLowerCase() }),
           h(StatusRow, { label: "railway", state: s.railway, value: s.railway === "LIVE" ? "cli logged in" : s.railway.toLowerCase() }),
           h(StatusRow, { label: "n8n", value: "not wired yet", state: "UNAVAILABLE" }),
           h(StatusRow, { label: "trig.dev", value: "not integrated", state: "UNAVAILABLE" })),
-    h(Text, { color: "gray" }, "  " + "─".repeat(W)),
+    h(Text, { color: "gray" }, "  " + "─".repeat(ROW_W)),
     ...items.map((it, i) =>
       h(Box, { key: it.k },
         h(Text, { color: i === sel ? "cyan" : "gray" }, i === sel ? " › " : "   "),
         h(Text, { bold: i === sel }, it.label.padEnd(14)),
         h(Text, { color: "gray" }, it.note))),
-    h(Text, { color: "gray" }, "  " + "─".repeat(W)),
-    h(Text, { color: "gray" }, "  ↑/↓ select · enter open · d dex · r refresh · q quit"));
+    h(Text, { color: "gray" }, "  " + "─".repeat(ROW_W)),
+    h(Text, { color: "gray" }, clip("  ↑/↓ select · enter open · d dex · r refresh · q quit", ROW_W)));
 }
 
 async function runUI() {
@@ -213,13 +260,13 @@ async function runUI() {
 
 async function main() {
   if (!process.stdout.isTTY) { printStatic(await collect()); return; }
+  const SPAWN = { dex: "dex", litt: "litt", menu: "litt-menu" };
   while (true) {
     const action = await runUI();
-    if (!action || action === "quit" || action === "refresh") {
-      if (action === "refresh") continue;
-      break;
-    }
-    spawnSync(action, [], { stdio: "inherit" });   // existing launch paths only
+    if (!action || action === "quit") break;
+    const bin = action.bin || SPAWN[action.k];
+    if (!bin) continue;                            // nothing to launch
+    if (action.k in SPAWN) spawnSync(bin, [], { stdio: "inherit" });  // existing launch paths only
   }
   process.exit(0);
 }
