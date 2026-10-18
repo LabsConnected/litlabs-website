@@ -1,0 +1,185 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# litt-menu - LiTT Command Center for Termux.
+# One-key launcher for LiTT / Dex / Devin / Brain / Ollama / Git / Health /
+# Logs / Recovery info. No tmux. No network, Ollama start, or background
+# work on render - every action runs only after an explicit choice and
+# returns here when it exits. Recovery is information-only.
+set -u
+export LC_ALL=C
+
+TP="${PREFIX:-/data/data/com.termux/files/usr}"
+TH=/data/data/com.termux/files/home          # Termux home (stable in proot too)
+PA="$TH/private-agent"
+CTL="$PA/tune/dex-ctl"
+BIN="$TH/bin"
+CANON="$HOME/litt-canonical"                  # resolves per env (same object)
+
+# In proot, $HOME=/root; point at the Termux view so paths are consistent.
+[ -d "$CANON/.git" ] || CANON="$TH/litt-canonical"
+
+if [ "$(uname -o 2>/dev/null)" = "Android" ]; then LANE="termux"; else LANE="proot"; fi
+
+B=$'\e[1m'; D=$'\e[2m'; C=$'\e[36m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; N=$'\e[0m'
+
+have() { command -v "$1" >/dev/null 2>&1 || [ -x "$1" ]; }
+need() { have "$1" || { echo "${R}missing: $1${N}"; return 1; }; }
+pause() { echo; read -r -p "${D}Enter = back to menu${N} " _ || true; }
+note() { echo "${D}$*${N}"; }
+hdr()  { printf '\033[2J\033[H'; echo "${B}${C}== LiTT Command Center ==${N} ${D}[${LANE}]${N}"; echo; }
+
+run() {  # run a verified command, show its failure instead of dying
+  echo "${D}\$ $*${N}"
+  "$@" || echo "${R}exit $? - command failed${N}"
+}
+
+dex_menu() {
+  while true; do
+    hdr; echo "${B}Dex - personal AI${N}"
+    echo "  ${G}1${N}) dex        (4B, full tools)"
+    echo "  ${G}2${N}) dex fast   (1.7B)"
+    echo "  ${G}3${N}) dex fast2  (1.7B + routed tools)"
+    echo "  ${G}4${N}) dex status (read-only health)"
+    echo "  ${G}0${N}) back"
+    echo; read -r -p "> " c || return 0
+    case "$c" in
+      1) need dex && run dex; pause;;
+      2) need dex && run dex fast; pause;;
+      3) need dex && run dex fast2; pause;;
+      4) need "$CTL" && run bash "$CTL" status; pause;;
+      0) return;;
+      *) ;;
+    esac
+  done
+}
+
+devin_item() {
+  hdr; echo "${B}Devin - coding agent${N}"; echo
+  if [ "$LANE" = "proot" ]; then
+    if have devin; then run devin; else
+      echo "${R}Devin not on PATH inside proot (expected /root/.local/bin/devin).${N}"
+    fi
+  elif [ -x "$BIN/devin" ]; then
+    run "$BIN/devin"
+  elif have proot-distro; then
+    echo "${D}via: proot-distro login ubuntu -- devin${N}"
+    run proot-distro login ubuntu -- bash -lc 'exec devin'
+  else
+    echo "${R}proot-distro not found - Devin lives in the ubuntu proot.${N}"
+    note "Open ubuntu first (litt-ubuntu / u), then run: devin"
+  fi
+  pause
+}
+
+brain_item() {
+  hdr; echo "${B}Brain - long-term memory${N}"; echo
+  local f="$PA/brain.txt" b="$PA/brain.txt.bak"
+  for x in "$f" "$b" "$PA/my-number.txt"; do
+    if [ -f "$x" ]; then
+      printf "  %s  %s bytes  mode %s  %s\n" "${x##*/}" \
+        "$(wc -c <"$x")" "$(stat -c %a "$x")" "$(stat -c %y "$x" | cut -d. -f1)"
+    else
+      echo "  ${x##*/}  ${Y}absent${N}"
+    fi
+  done
+  [ -f "$f" ] && note "facts stored: $(grep -c . "$f" 2>/dev/null || echo 0)"
+  echo
+  read -r -p "Show remembered facts? [y/N] " v || return
+  if [ "$v" = "y" ] || [ "$v" = "Y" ]; then
+    echo; run cat "$f"
+  fi
+  pause
+}
+
+git_item() {
+  hdr; echo "${B}GitHub - local repository${N}  ${D}$CANON${N}"; echo
+  if need git; then
+    run git -C "$CANON" status -sb
+    echo; run git -C "$CANON" log --oneline -5
+  fi
+  echo; read -r -p "gh auth status (contacts github.com)? [y/N] " g || true
+  if [ "$g" = "y" ] || [ "$g" = "Y" ]; then
+    need gh && run gh auth status
+  fi
+  pause
+}
+
+health_item() {
+  hdr; echo "${B}Health - diagnostics${N}"; echo
+  grep -E "MemTotal|MemAvailable" /proc/meminfo
+  echo "loadavg: $(cat /proc/loadavg)"
+  echo "uptime:  $(cut -d' ' -f1 /proc/uptime)s"
+  echo
+  if have termux-battery-status; then run termux-battery-status
+  else echo "${Y}termux-battery-status not installed${N}"; fi
+  echo
+  df -h "$TH" 2>/dev/null | tail -1
+  pause
+}
+
+logs_item() {
+  while true; do
+    hdr; echo "${B}Logs${N}"
+    echo "  ${G}1${N}) audit.log      (Dex tool decisions, tail 30)"
+    echo "  ${G}2${N}) ollama-serve   (runner log, tail 30)"
+    echo "  ${G}3${N}) RUNBOOK        (ops runbook)"
+    echo "  ${G}0${N}) back"
+    echo; read -r -p "> " c || return 0
+    case "$c" in
+      1) run tail -30 "$PA/audit.log"; pause;;
+      2) run tail -30 "$PA/ollama-serve.log"; pause;;
+      3) run cat "$PA/tune/RUNBOOK.md"; pause;;
+      0) return;;
+      *) ;;
+    esac
+  done
+}
+
+recovery_item() {
+  hdr; echo "${B}Recovery - information only (nothing is run)${N}"; echo
+  cat <<EOF
+  Full rollback of the 2026-10-16 tune changes:
+    bash $PA/tune/restore.sh
+    (restores dex + agent.py from backups-20261016 with
+     sha256 verification; .bashrc is never touched)
+
+  Ollama lifecycle:
+    dex stop    /  bash $CTL stop    - stop + reap orphans
+    bash $CTL status                 - health read-only
+    bash $CTL logs                   - server log
+
+  Snapshot dirs:
+EOF
+  ls -d "$PA"/tune/backups-*/ "$PA"/tune/results-*/ 2>/dev/null | sed 's/^/    /'
+  echo
+  note "sha256 manifests live inside each backups-*/ dir (checksums.sha256)."
+  pause
+}
+
+while true; do
+  hdr
+  echo "  ${G}1${N}) LiTT      - workspace cockpit"
+  echo "  ${G}2${N}) Dex       - personal AI"
+  echo "  ${G}3${N}) Devin     - coding agent ${D}(${LANE} lane)${N}"
+  echo "  ${G}4${N}) Brain     - memory status"
+  echo "  ${G}5${N}) Ollama    - model/service status"
+  echo "  ${G}6${N}) GitHub    - repo status"
+  echo "  ${G}7${N}) Health    - diagnostics"
+  echo "  ${G}8${N}) Logs      - troubleshooting"
+  echo "  ${G}9${N}) Recovery  - safe recovery info"
+  echo "  ${G}0${N}) Exit"
+  echo
+  read -r -p "> " c || exit 0
+  case "$c" in
+    1) need litt && run litt; pause;;
+    2) dex_menu;;
+    3) devin_item;;
+    4) brain_item;;
+    5) need "$CTL" && run bash "$CTL" status; pause;;
+    6) git_item;;
+    7) health_item;;
+    8) logs_item;;
+    9) recovery_item;;
+    0|q|quit|exit) printf '\033[2J\033[H'; exit 0;;
+    *) ;;
+  esac
+done
