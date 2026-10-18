@@ -747,11 +747,13 @@ export async function getRunOutcomeForPausedRun(
       return { ...EMPTY_OUTCOME, runStatus: record.runStatus };
     }
     const events = await listActionEvents(record.actionRunId, userId, { limit: 200, descending: true });
-    // Latest outcome-bearing event wins. Terminal transition events carry
-    // the RunResult in payload.result (written atomically with the status
-    // change by action_runtime_transition_event_activity). Descending order
-    // keeps terminal events inside the window even for >200-event runs.
-    for (let i = events.length - 1; i >= 0; i--) {
+    // Latest outcome-bearing event wins. Events arrive newest-first, so
+    // scan forward from index 0 — the first outcome event is the latest.
+    // Terminal transition events carry the RunResult in payload.result
+    // (written atomically with the status change by
+    // action_runtime_transition_event_activity). Descending order keeps
+    // terminal events inside the window even for >200-event runs.
+    for (let i = 0; i < events.length; i++) {
       const payload = (events[i].payload ?? {}) as { result?: RunResult; pausedRunId?: string };
       // Gates share a parent run. An outcome for a later gate is never the
       // outcome of this one. Legacy terminal events without a gate ID still
