@@ -130,7 +130,7 @@ integrations_item() {
     echo "  voice out    ${R}missing termux-tts-speak${N}"
   fi
   if have termux-speech-to-text; then
-    echo "  voice in     ${Y}installed${N} - needs RECORD_AUDIO permission + screen tap"
+    echo "  voice in     ${G}available${N} - termux-speech-to-text (use /talk inside dex)"
   else
     echo "  voice in     ${R}missing termux-speech-to-text${N}"
   fi
