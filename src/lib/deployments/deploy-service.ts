@@ -467,7 +467,10 @@ export async function deployUserProject(
     let publicUrl: string;
     try {
       const baseUrl = await hosting.resolveBaseUrl();
-      publicUrl = `${baseUrl.replace(/\/+$/, "")}/sites/${record.id}/`;
+      // The customer-facing URL is the STABLE per-project link — it
+      // resolves to the newest ready revision, so republishing keeps the
+      // same URL. Per-revision links (/sites/<deploymentId>/) still work.
+      publicUrl = `${baseUrl.replace(/\/+$/, "")}/sites/p/${projectId}/`;
     } catch (err) {
       const described = describeDeploymentFailure(err);
       await store.update(record.id, {

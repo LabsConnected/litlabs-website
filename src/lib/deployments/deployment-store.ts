@@ -239,6 +239,32 @@ export async function readPublishedFile(
  * storage is unavailable or nothing has ever been deployed, so the context
  * degrades to "not_started" rather than guessing.
  */
+/**
+ * The newest `ready` deployment for a project — no user scoping.
+ *
+ * Powers the stable per-project public URL (/sites/p/<projectId>/): the
+ * customer-facing link never changes on republish; it always resolves to
+ * the latest live revision. Deployments are public capability URLs by
+ * design (per-revision /sites/<deploymentId>/ links are already public),
+ * so this lookup is intentionally not user-scoped. Only `ready` rows are
+ * eligible, exactly like the per-revision serving path.
+ */
+export async function findLatestReadyForProject(
+  projectId: string,
+): Promise<DeploymentRecord | null> {
+  if (!supabaseAdmin) return null;
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("status", "ready")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToRecord(data as DeploymentRow);
+}
+
 export async function findLatestDeploymentForProject(
   projectId: string,
   userId: string,

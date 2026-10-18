@@ -247,7 +247,9 @@ describe("A. static project deploys and returns a verified live URL", () => {
     if (!result.ok) return;
     expect(result.status).toBe("ready");
     expect(result.publicUrl).toContain(BASE);
-    expect(result.publicUrl).toContain(result.deploymentId);
+    // Customer-facing URL is the STABLE per-project link, not the
+    // per-revision deployment id.
+    expect(result.publicUrl).toContain("/sites/p/proj_ember/");
     expect(result.urlVerified).toBe(true);
     expect(result.target).toBe("litt-static");
     expect(result.projectId).toBe("proj_ember");
@@ -1000,7 +1002,7 @@ describe("LiTT Hosting backend", () => {
     // The URL comes from the backend's resolved infrastructure base —
     // never from caller input.
     expect(result.publicUrl).toContain("https://infra-resolved.example");
-    expect(result.publicUrl).toContain(result.deploymentId);
+    expect(result.publicUrl).toContain("/sites/p/proj_ember/");
     expect(result.urlVerified).toBe(true);
     const row = store.rows.find((r) => r.id === result.deploymentId);
     expect(row?.publicUrl).toBe(result.publicUrl);

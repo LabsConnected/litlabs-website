@@ -119,7 +119,20 @@ function fakeFetch(store: { files: Map<string, Array<{ path: string; content: st
   return async (url: string) => {
     const match = url.match(/\/sites\/([^/]+)\/(.*)$/);
     if (!match) return { ok: false, status: 404 };
-    const [, depId, path] = match;
+    let [, depId, path] = match;
+    if (depId === "p") {
+      // Emulates the stable project route: newest ready row for the
+      // project serves. projectId is the next path segment.
+      const p = url.match(/\/sites\/p\/([^/]+)\/?(.*)$/);
+      if (!p) return { ok: false, status: 404 };
+      const [, pid, ppath] = p;
+      const latest = [...store.rows]
+        .reverse()
+        .find((r) => r.projectId === pid && r.status === "ready");
+      if (!latest) return { ok: false, status: 404 };
+      depId = latest.id;
+      path = ppath;
+    }
     const fileList = store.files.get(depId);
     const file = fileList?.find((f) => f.path === (path || "index.html"));
     if (!file) return { ok: false, status: 404 };
@@ -177,7 +190,7 @@ describe("static publishing end-to-end", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.publicUrl).toMatch(/^https:\/\/sites\.test\/sites\/dep_1\/$/);
+      expect(result.publicUrl).toMatch(/^https:\/\/sites\.test\/sites\/p\/proj_alice\/$/);
       expect(result.status).toBe("ready");
       expect(result.urlVerified).toBe(true);
     }
@@ -224,6 +237,11 @@ describe("static publishing end-to-end", () => {
     expect(second.deploymentId).not.toBe(firstId);
     if (second.ok) {
       expect(second.reused).toBe(false);
+      // Paid-beta model: republishing preserves the SAME customer-facing
+      // URL — the stable per-project link always serves the newest ready
+      // revision, while each revision keeps its own /sites/<id>/ link.
+      expect(second.publicUrl).toBe(first.publicUrl);
+      expect(second.publicUrl).toContain("/sites/p/proj_alice/");
     }
 
     // Verify the new deployment serves the updated content
