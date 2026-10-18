@@ -228,3 +228,7 @@ COMMIT_MSG_DO_FIX*
 *.bak
 *.backup
 *.tar.gz
+
+# Command Center local event log + Trigger.dev build artifacts
+logs/
+.trigger/
