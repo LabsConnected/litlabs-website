@@ -34,18 +34,20 @@ run() {  # run a verified command, show its failure instead of dying
 
 dex_menu() {
   while true; do
-    hdr; echo "${B}Dex - personal AI${N}"
-    echo "  ${G}1${N}) dex        (4B, full tools)"
-    echo "  ${G}2${N}) dex fast   (1.7B)"
-    echo "  ${G}3${N}) dex fast2  (1.7B + routed tools)"
-    echo "  ${G}4${N}) dex status (read-only health)"
+    hdr; echo "${B}Dex - personal AI${N}  ${D}(default is FAST2)${N}"
+    echo "  ${G}1${N}) dex        (default: 1.7B + routed tools)"
+    echo "  ${G}2${N}) dex full   (4B, full tools)"
+    echo "  ${G}3${N}) dex fast   (1.7B, all-tools prompt)"
+    echo "  ${G}4${N}) dex voice  (default + spoken answers)"
+    echo "  ${G}5${N}) dex status (read-only health)"
     echo "  ${G}0${N}) back"
     echo; read -r -p "> " c || return 0
     case "$c" in
       1) need dex && run dex; pause;;
-      2) need dex && run dex fast; pause;;
-      3) need dex && run dex fast2; pause;;
-      4) need "$CTL" && run bash "$CTL" status; pause;;
+      2) need dex && run dex full; pause;;
+      3) need dex && run dex fast; pause;;
+      4) need dex && run dex voice; pause;;
+      5) need "$CTL" && run bash "$CTL" status; pause;;
       0) return;;
       *) ;;
     esac
@@ -100,6 +102,50 @@ git_item() {
   if [ "$g" = "y" ] || [ "$g" = "Y" ]; then
     need gh && run gh auth status
   fi
+  pause
+}
+
+railway_item() {
+  hdr; echo "${B}Railway - deployment CLI${N}"; echo
+  if have railway; then
+    echo "  railway CLI: installed at $(command -v railway)"
+    echo; read -r -p "railway whoami (contacts railway api)? [y/N] " r || true
+    if [ "$r" = "y" ] || [ "$r" = "Y" ]; then
+      run timeout 10 railway whoami
+    fi
+  else
+    echo "  ${R}railway CLI not installed${N}"
+  fi
+  pause
+}
+
+integrations_item() {
+  hdr; echo "${B}Integrations - honest status${N}"; echo
+  echo "  n8n          ${D}UNAVAILABLE - not wired into this phone${N}"
+  echo "  trigger.dev  ${D}UNAVAILABLE - not integrated${N}"
+  echo
+  if have termux-tts-speak; then
+    echo "  voice out    ${G}available${N} - termux-tts-speak (use 'dex voice')"
+  else
+    echo "  voice out    ${R}missing termux-tts-speak${N}"
+  fi
+  if have termux-speech-to-text; then
+    echo "  voice in     ${Y}installed${N} - needs RECORD_AUDIO permission + screen tap"
+  else
+    echo "  voice in     ${R}missing termux-speech-to-text${N}"
+  fi
+  pause
+}
+
+home_item() {
+  hdr; echo "${B}LiTT Home - preview screen${N}"; echo
+  local p
+  for p in "$TH/litt-worktrees/litt-home-preview/preview/litt-home.mjs" \
+           "$HOME/litt-worktrees/litt-home-preview/preview/litt-home.mjs"; do
+    if [ -f "$p" ]; then need node && run node "$p"; pause; return; fi
+  done
+  echo "  ${Y}preview not found - feat/litt-home-preview worktree absent${N}"
+  note "expected at ~/litt-worktrees/litt-home-preview/preview/litt-home.mjs"
   pause
 }
 
@@ -163,9 +209,12 @@ while true; do
   echo "  ${G}4${N}) Brain     - memory status"
   echo "  ${G}5${N}) Ollama    - model/service status"
   echo "  ${G}6${N}) GitHub    - repo status"
-  echo "  ${G}7${N}) Health    - diagnostics"
-  echo "  ${G}8${N}) Logs      - troubleshooting"
-  echo "  ${G}9${N}) Recovery  - safe recovery info"
+  echo "  ${G}7${N}) Railway   - deployment CLI"
+  echo "  ${G}8${N}) Integrations - n8n / trigger.dev / voice"
+  echo "  ${G}h${N}) Home      - LiTT Home preview"
+  echo "  ${G}9${N}) Health    - diagnostics"
+  echo " ${G}10${N}) Logs      - troubleshooting"
+  echo " ${G}11${N}) Recovery  - safe recovery info"
   echo "  ${G}0${N}) Exit"
   echo
   read -r -p "> " c || exit 0
@@ -176,9 +225,12 @@ while true; do
     4) brain_item;;
     5) need "$CTL" && run bash "$CTL" status; pause;;
     6) git_item;;
-    7) health_item;;
-    8) logs_item;;
-    9) recovery_item;;
+    7) railway_item;;
+    8) integrations_item;;
+    h|H) home_item;;
+    9) health_item;;
+    10) logs_item;;
+    11) recovery_item;;
     0|q|quit|exit) printf '\033[2J\033[H'; exit 0;;
     *) ;;
   esac
