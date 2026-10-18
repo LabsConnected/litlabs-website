@@ -2601,6 +2601,39 @@ describe("Webhook event processing — state mutations", () => {
     expect(debits[0].params.p_idempotency_key).toBe("refund_re_creator");
   });
 
+  it("charge.refunded (Founder) revokes entitlement and does not debit LiTTBits", async () => {
+    const { sb, rpcCalls, updates } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockSucceededRefunds([{ id: "re_founder", amount: 14900, created: 1700000001 }]);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      object: {
+        id: "ch_founder_refund",
+        amount: 14900,
+        amount_refunded: 14900,
+        currency: "usd",
+        payment_intent: "pi_founder_123",
+        metadata: {
+          product_type: "plan",
+          clerk_id: "clerk_123",
+          plan_id: "founder",
+        },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+    expect(res.status).toBe(200);
+    expect(updates.find((u) =>
+      u.patch.status === "refunded" &&
+      u.matches.some((m: { col: string; val: unknown }) => m.col === "plan" && m.val === "founder"),
+    )).toBeDefined();
+    expect(rpcCalls.filter((c) => c.fn === "debit_credits")).toHaveLength(0);
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
+  });
+
   it("charge.refunded on a subscription invoice uses subscription metadata", async () => {
     const { sb, rpcCalls, updates } = buildTrackingSupabase();
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
