@@ -34,6 +34,10 @@ vi.mock("@/lib/agent-billing", () => ({
   estimateCredits: vi.fn(() => 12),
 }));
 
+vi.mock("@/lib/wallet-ledger", () => ({
+  getCreditBalances: vi.fn(() => Promise.resolve({ total: 4 })),
+}));
+
 vi.mock("@/lib/litt-intelligence/paused-run-store", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -134,6 +138,7 @@ import {
   getAwaitingApprovalAssistantMessage,
   updateMessageStatus,
 } from "@/lib/studio/conversation-service";
+import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
 
 const CONV_ID = "conv-123";
 const PAUSED_ID = "paused-1";
@@ -479,5 +484,188 @@ describe("canonical identity — terminal-write order", () => {
     };
     expect(completedArgs.eventType).toBe("run.completed");
     expect(completedArgs.payload?.result?.finalText).toBe("Done.");
+  });
+});
+
+describe("resume billing — reservation and settlement", () => {
+  function approveRun() {
+    vi.mocked(getPausedRun).mockResolvedValue(basePausedRun() as never);
+    vi.mocked(resolvePausedRun).mockResolvedValue({ ...basePausedRun(), status: "approved" } as never);
+  }
+
+  it("reserves the disclosed estimate under a per-attempt idempotency key on approve", async () => {
+    approveRun();
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+    // The disclosed quote and the reserved (approved-cap) amount agree.
+    const body = await res.json();
+    expect(body.billingQuote).toEqual({ estimatedBits: 12 });
+    expect(vi.mocked(estimateCredits)).toHaveBeenCalled();
+    expect(vi.mocked(reserveCredits)).toHaveBeenCalledTimes(1);
+    const [scope, amount] = vi.mocked(reserveCredits).mock.calls[0];
+    expect(amount).toBe(12);
+    expect(scope).toEqual(
+      expect.objectContaining({
+        clerkId: "clerk_123",
+        conversationId: CONV_ID,
+        idempotencyKey: expect.stringMatching(/^resume:paused-1:/),
+      }),
+    );
+    // The resumed loop is configured with the same estimate so follow-up
+    // approval cards disclose the approved cost (D3c).
+    await vi.waitFor(() => expect(resumeAgentLoopV2).toHaveBeenCalled());
+    const resumeConfig = vi.mocked(resumeAgentLoopV2).mock.calls[0][0].config as {
+      billingEstimateBits?: number;
+    };
+    expect(resumeConfig.billingEstimateBits).toBe(12);
+  });
+
+  it("settles a successful resumed run within the approved cap", async () => {
+    approveRun();
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+    await vi.waitFor(() =>
+      expect(settleRun).toHaveBeenCalledWith(
+        "resume-run-1",
+        expect.objectContaining({ status: "completed" }),
+        12,
+        "resume-res-1",
+      ),
+    );
+    const outcome = vi.mocked(settleRun).mock.calls[0][1] as { actualCredits: number };
+    // Charged amount can never exceed what the user approved (reserved).
+    expect(outcome.actualCredits).toBeGreaterThan(0);
+    expect(outcome.actualCredits).toBeLessThanOrEqual(12);
+  });
+
+  it("releases the reservation (zero debit) when the resumed run fails", async () => {
+    approveRun();
+    vi.mocked(resumeAgentLoopV2).mockRejectedValue(new Error("model exploded") as never);
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+    await vi.waitFor(() =>
+      expect(settleRun).toHaveBeenCalledWith(
+        "resume-run-1",
+        expect.objectContaining({ status: "failed", actualCredits: 0 }),
+        12,
+        "resume-res-1",
+      ),
+    );
+  });
+
+  it("releases the reservation (zero debit) when the resumed run is cancelled", async () => {
+    approveRun();
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "Stopped.",
+      stepsUsed: 1,
+      toolCalls: [],
+      cancelled: true,
+      cancelReason: "user stopped",
+      pendingApproval: undefined,
+    } as never);
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+    await vi.waitFor(() =>
+      expect(settleRun).toHaveBeenCalledWith(
+        "resume-run-1",
+        expect.objectContaining({ status: "cancelled", actualCredits: 0 }),
+        12,
+        "resume-res-1",
+      ),
+    );
+  });
+
+  it("returns HTTP 402 with the estimate/balance/shortfall disclosure when the reservation fails", async () => {
+    approveRun();
+    vi.mocked(reserveCredits).mockResolvedValueOnce({
+      ok: false,
+      status: 402,
+      error: "Insufficient LiTTBits balance",
+    } as never);
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(402);
+    const body = await res.json();
+    expect(body.billingQuote).toEqual({
+      estimatedBits: 12,
+      balanceBits: 4,
+      shortfallBits: 8,
+    });
+    // The failed approval is settled honestly on the canonical run.
+    await vi.waitFor(() =>
+      expect(transitionActionRunEventActivity).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "failed", eventType: "run.failed" }),
+      ),
+    );
+    // The detached executor never launched.
+    expect(resumeAgentLoopV2).not.toHaveBeenCalled();
+  });
+});
+
+describe("outcome derivation — same-gate newest outcome wins", () => {
+  it("the newest outcome event for THIS gate wins over older events", async () => {
+    vi.mocked(getPausedRun).mockResolvedValue(
+      basePausedRun({ status: "approved", runStatus: "processing" }) as never,
+    );
+    vi.mocked(getActionRun).mockResolvedValue({
+      id: "run-1",
+      status: "completed",
+      startedAt: "2026-09-28T18:00:00.000Z",
+      completedAt: "2026-09-28T18:05:00.000Z",
+      failureMessage: null,
+    } as never);
+    // Events arrive newest-first: the retry's completion precedes the
+    // first attempt's failure in the stream.
+    vi.mocked(listActionEvents).mockResolvedValue([
+      {
+        type: "run.completed",
+        payload: {
+          pausedRunId: PAUSED_ID,
+          result: { finalText: "Retry succeeded.", stepsUsed: 3, toolCalls: [], cancelled: false },
+        },
+      },
+      {
+        type: "run.failed",
+        payload: { pausedRunId: PAUSED_ID },
+      },
+    ] as never);
+
+    const res = await GET(
+      new NextRequest(`http://localhost/api/studio/conversations/${CONV_ID}/approvals/${PAUSED_ID}`),
+      routeParams,
+    );
+    const body = await res.json();
+    expect(body.runStatus).toBe("completed");
+    expect(body.runResult.finalText).toBe("Retry succeeded.");
+  });
+
+  it("an outcome event for a different gate on the same run never resolves this one", async () => {
+    vi.mocked(getPausedRun).mockResolvedValue(
+      basePausedRun({ status: "approved", runStatus: "processing" }) as never,
+    );
+    vi.mocked(getActionRun).mockResolvedValue({
+      id: "run-1",
+      status: "working",
+      startedAt: "2026-09-28T18:00:00.000Z",
+      completedAt: null,
+      failureMessage: null,
+    } as never);
+    vi.mocked(listActionEvents).mockResolvedValue([
+      {
+        type: "run.completed",
+        payload: {
+          pausedRunId: "paused-OTHER",
+          result: { finalText: "Other gate done.", stepsUsed: 1, toolCalls: [], cancelled: false },
+        },
+      },
+    ] as never);
+
+    const res = await GET(
+      new NextRequest(`http://localhost/api/studio/conversations/${CONV_ID}/approvals/${PAUSED_ID}`),
+      routeParams,
+    );
+    const body = await res.json();
+    // No outcome for this gate: the run is still working → processing.
+    expect(body.runStatus).toBe("processing");
+    expect(body.runResult).toBeNull();
   });
 });

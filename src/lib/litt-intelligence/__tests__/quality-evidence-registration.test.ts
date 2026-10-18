@@ -122,4 +122,54 @@ describe("quality gate — evidence registration", () => {
     recordEvidence(state, "research", { summary: "research done", by: "agent" });
     expect(stagePassable(state, "research")).toBe(true);
   });
+
+  it("a rejected stale write leaves the ledger untouched (no activation, no startedAt)", async () => {
+    const { createQualityLoop, recordEvidence } = await import("../quality-loop");
+    const state = createQualityLoop({ runId: "r", projectId: "p", userId: "u" });
+    // "understand" is the current pending stage. Filing backdated evidence
+    // would activate it at now — which makes the explicit timestamp stale.
+    // The rejection must happen BEFORE the mutation: the stage stays
+    // pending with no startedAt stamped.
+    const staleAt = new Date(Date.now() - 60_000).toISOString();
+    expect(() =>
+      recordEvidence(state, "understand", {
+        summary: "forged early brief",
+        by: "agent",
+        at: staleAt,
+      }),
+    ).toThrow(/stale/i);
+    expect(state.stages.understand.status).toBe("pending");
+    expect(state.stages.understand.startedAt).toBeUndefined();
+    expect(state.stages.understand.evidence).toHaveLength(0);
+    // A fresh, untampered filing still activates the stage normally.
+    recordEvidence(state, "understand", { summary: "real brief", by: "agent" });
+    expect(state.stages.understand.status).toBe("active");
+    expect(state.stages.understand.startedAt).toBeTruthy();
+  });
+
+  it("stale observations dropped by the reconciliation path count as unfiled, never retried", async () => {
+    const session = fullStaticSession();
+    const staleAt = new Date(Date.now() - 60_000).toISOString();
+    // A machine observation carrying a timestamp from before the run —
+    // the reconcile path must reject it permanently (not buffered forever)
+    // and it must surface in the finale's unfiled count.
+    session.observations.push(
+      { stage: "understand", evidence: { summary: "stale brief", by: "agent", at: staleAt } },
+      { stage: "plan", evidence: { summary: "plan", by: "agent" } },
+      { stage: "design", evidence: { summary: "design", by: "agent" } },
+    );
+    noteToolResult(session, "files.write", {
+      success: true, result: {}, mutating: true, summary: "wrote index.html",
+    }, "ws-test");
+    noteBuildArtifacts(session, ["index.html"]);
+    notePreviewReady(session, "/api/preview/proj-test/");
+    noteStaticArtifactCheck(session, { path: "index.html", contentMatches: true });
+    const finale = finalizeQualityLoop(session, { deployRequested: false });
+    // Rejected by the engine every pass — stays buffered and is surfaced
+    // as unfiled evidence, never silently landed in the ledger.
+    expect(session.observations).toHaveLength(1);
+    expect(finale.unfiledObservations).toBe(1);
+    // The stale evidence never landed in the ledger.
+    expect(session.state.stages.understand.evidence.every((e) => e.summary !== "stale brief")).toBe(true);
+  });
 });

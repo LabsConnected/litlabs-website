@@ -422,7 +422,10 @@ function fileDueObservations(session: QualityLoopSession): boolean {
     try {
       recordEvidence(state, obs.stage, obs.evidence);
     } catch {
-      // Engine rejected it — never let the gate crash the run.
+      // Engine rejected it (e.g. stale evidence predating the stage's
+      // activation). Keep it buffered so the finale counts it as unfiled
+      // evidence rather than silently losing the observation — never let
+      // the gate crash the run.
       continue;
     }
     session.observations.splice(i, 1);

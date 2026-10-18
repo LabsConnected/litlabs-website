@@ -357,30 +357,33 @@ export function recordEvidence(
   stage: QualityStage,
   evidence: Omit<StageEvidence, "at"> & { at?: string },
 ): void {
-  // Activate first so the stage's startedAt is stamped before the evidence
-  // timestamp — evidence recorded in the same call counts as in-stage.
+  const s = state.stages[stage];
   const stageIndex = QUALITY_STAGES.indexOf(stage);
   const current = currentStage(state);
   const currentIndex = current ? QUALITY_STAGES.indexOf(current) : QUALITY_STAGES.length;
-  if (state.stages[stage].status === "pending" && stageIndex <= currentIndex) {
-    state.stages[stage].status = "active";
-    state.stages[stage].startedAt ??= new Date().toISOString();
-  }
-  const record: StageEvidence = {
-    ...evidence,
-    at: evidence.at ?? new Date().toISOString(),
-  };
+  // Filing on the current pending stage activates it — the activation
+  // timestamp is decided BEFORE the evidence is accepted so the stale
+  // check below can run without first mutating the ledger.
+  const activates = s.status === "pending" && stageIndex <= currentIndex;
+  const startedAt = s.startedAt ?? (activates ? new Date().toISOString() : undefined);
   // Stale-evidence guard: an explicit timestamp earlier than the stage's
-  // activation cannot describe work the stage actually did. Reject it
-  // rather than silently filing unusable evidence.
-  const stageStartedAt = state.stages[stage].startedAt;
-  if (evidence.at && stageStartedAt && evidence.at < stageStartedAt) {
+  // activation cannot describe work the stage actually did. Rejected
+  // before any state mutation — a stale write must not flip the stage to
+  // active or stamp startedAt.
+  if (evidence.at && startedAt && evidence.at < startedAt) {
     throw new StageGateError(
       stage,
-      `Evidence for stage "${stage}" is stale: recorded at ${evidence.at} before the stage began at ${stageStartedAt}.`,
+      `Evidence for stage "${stage}" is stale: recorded at ${evidence.at} before the stage began at ${startedAt}.`,
     );
   }
-  state.stages[stage].evidence.push(record);
+  if (activates) {
+    s.status = "active";
+    s.startedAt = startedAt;
+  }
+  s.evidence.push({
+    ...evidence,
+    at: evidence.at ?? new Date().toISOString(),
+  });
   touch(state);
 }
 

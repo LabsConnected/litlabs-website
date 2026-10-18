@@ -748,6 +748,11 @@ export async function POST(
     enableBuildFix: true,
     signal: abortController.signal,
     userId,
+    // Disclose the same estimate the approval authorized: the reservation
+    // above holds exactly this amount and the settlement is capped at it,
+    // so the approval card's quote, the held amount, and the maximum
+    // possible debit are the same number.
+    billingEstimateBits: resumeEstimatedBits,
     isStaticWorkspace: resumeProject?.framework === "static" ? true : undefined,
     // Item 5a — persist the resumed loop's ProgressEvents to the parent
     // run's action_events log, the same Activity truth as the initial run.
