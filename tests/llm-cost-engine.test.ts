@@ -226,6 +226,79 @@ describe("LLM Billing — chargeLlmUsage", () => {
     }));
   });
 
+  it("failover charges the successful model once and does not add the failed attempt", async () => {
+    mockRpc.mockResolvedValue({ data: { success: true, remaining: 1000 }, error: null });
+    const primary = calculateLlmCost({
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      promptTokens: 1000,
+      completionTokens: 500,
+      isByok: false,
+    });
+    const fallback = calculateLlmCost({
+      provider: "groq",
+      model: "openai/gpt-oss-120b",
+      promptTokens: 1000,
+      completionTokens: 500,
+      isByok: false,
+    });
+    // The failed primary is not passed to chargeLlmUsage. The debit is the
+    // successful provider's retail price, once. Summing both would be a
+    // second charge, which llm.ts forbids.
+    const result = await chargeLlmUsage({
+      clerkId: "clerk_failover",
+      provider: "groq",
+      model: "openai/gpt-oss-120b",
+      promptTokens: 1000,
+      completionTokens: 500,
+      isByok: false,
+      callId: "call-failover-1",
+      meteringBillableKey: "metering:llm:req-failover",
+    });
+    const debits = mockRpc.mock.calls.filter((c: unknown[]) => c[0] === "debit_credits");
+    expect(debits).toHaveLength(1);
+    expect((debits[0][1] as { p_amount: number }).p_amount).toBe(fallback.retailLiTTBits);
+    expect((debits[0][1] as { p_amount: number }).p_amount).not.toBe(
+      primary.retailLiTTBits + fallback.retailLiTTBits,
+    );
+    expect(result.debited).toBe(true);
+    expect(result.replayed).toBe(false);
+  });
+
+  it("replaying the real debit_credits success contract does not issue a second debit call amount", async () => {
+    mockRpc.mockResolvedValue({ data: { success: true, remaining: 400 }, error: null });
+    const first = await chargeLlmUsage({
+      clerkId: "clerk_replay",
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      promptTokens: 800,
+      completionTokens: 200,
+      isByok: false,
+      callId: "call-replay-real",
+    });
+    const second = await chargeLlmUsage({
+      clerkId: "clerk_replay",
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      promptTokens: 800,
+      completionTokens: 200,
+      isByok: false,
+      callId: "call-replay-real",
+    });
+    const debits = mockRpc.mock.calls.filter((c: unknown[]) => c[0] === "debit_credits");
+    expect(debits).toHaveLength(2);
+    const keys = debits.map((c) => (c[1] as { p_idempotency_key: string }).p_idempotency_key);
+    expect(keys).toEqual(["llm:call-replay-real", "llm:call-replay-real"]);
+    expect((debits[0][1] as { p_amount: number }).p_amount).toBe(
+      (debits[1][1] as { p_amount: number }).p_amount,
+    );
+    // The SQL function returns success=true on an existing key and inserts
+    // nothing. The app still reports debited=true for that replay.
+    expect(first.debited).toBe(true);
+    expect(second.debited).toBe(true);
+    expect(second.replayed).toBe(false);
+  });
+
   it("Retry with same callId → one debit only (idempotent)", async () => {
     mockRpc.mockResolvedValue({
       data: { success: false, remaining: 495 }, // replayed

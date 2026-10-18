@@ -73,6 +73,12 @@ function call(overrides = {}) {
 }
 
 describe("meteredLlmCall — bypass prevention", () => {
+  it("provider failure before a result does not debit", async () => {
+    generateTextMock.mockRejectedValue(new Error("all providers failed"));
+    await expect(call()).rejects.toThrow("all providers failed");
+    expect(chargeLlmUsageMock).not.toHaveBeenCalled();
+  });
+
   it("unfunded user: provider NEVER called, returns 402", async () => {
     getCreditBalancesMock.mockResolvedValue({ total: 0, monthly: 0, purchased: 0, betaPromotional: 0, lastDailyClaim: null });
 
