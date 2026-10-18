@@ -538,6 +538,10 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       10,
       "res-1",
     );
+    // D2: settlement can never exceed the reserved quote — an overage
+    // would be rejected by settle_bits and a completed run would debit zero.
+    const settleArgs = vi.mocked(settleRun).mock.calls[0];
+    expect(settleArgs[1].actualCredits).toBeLessThanOrEqual(10);
   });
 
   it("persists a pending approval when the transport disconnects mid-run", async () => {

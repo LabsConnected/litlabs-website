@@ -241,11 +241,10 @@ const MACHINE_EVIDENCE_STAGES: ReadonlySet<QualityStage> = new Set([
 ]);
 
 function hasMachineEvidence(
-  state: QualityLoopState,
-  stage: QualityStage,
+  evidence: StageEvidence[],
   predicate?: (detail: Record<string, unknown> | undefined) => boolean,
 ): boolean {
-  return state.stages[stage].evidence.some((e) => {
+  return evidence.some((e) => {
     if (e.by === "agent") return false;
     return predicate ? predicate(e.detail) : true;
   });
@@ -262,16 +261,21 @@ function hasMachineEvidence(
  * and demanding one would stall every trivial task forever. The agent's
  * word alone still never suffices (by !== "agent" is required).
  */
-function stagePassable(
+export function stagePassable(
   state: QualityLoopState,
   stage: QualityStage,
   taskScope: QualityTaskScope = "full",
 ): boolean {
   const s = state.stages[stage];
-  if (s.evidence.length === 0) return false;
+  // Stale-evidence guard at the gate: evidence recorded before the stage
+  // began cannot authorize a pass. Evidence filed while a future stage was
+  // still pending predates its startedAt and does not count — it must be
+  // re-recorded after activation.
+  const valid = s.startedAt ? s.evidence.filter((e) => e.at >= s.startedAt!) : s.evidence;
+  if (valid.length === 0) return false;
   if (blockedReason(state, stage)) return false;
   if (taskScope === "trivial" && stage === "build") {
-    return s.evidence.some((e) => e.by !== "agent");
+    return valid.some((e) => e.by !== "agent");
   }
   if (MACHINE_EVIDENCE_STAGES.has(stage)) {
     // Targeted work (trivial/standard scope) is verified at the scale of the
@@ -289,7 +293,7 @@ function stagePassable(
       deploy: (detail) => detail?.deploymentVerified === true,
       verify: (detail) => detail?.passed === true && detail?.httpStatus === 200,
     };
-    if (!hasMachineEvidence(state, stage, predicates[stage])) return false;
+    if (!hasMachineEvidence(valid, predicates[stage])) return false;
   }
   return true;
 }

@@ -243,6 +243,9 @@ export interface StageState {
   skipReason?: string;
   /** Set when status is "failed" — what went wrong. */
   failureReason?: string;
+  /** ISO timestamp of when the stage first became active. Evidence recorded
+   *  before this moment is stale and cannot authorize a pass. */
+  startedAt?: string;
 }
 
 export interface QualityLoopState {
@@ -334,6 +337,7 @@ export function beginStage(state: QualityLoopState, stage: QualityStage): void {
     );
   }
   state.stages[stage].status = "active";
+  state.stages[stage].startedAt ??= new Date().toISOString();
   touch(state);
 }
 
@@ -353,19 +357,30 @@ export function recordEvidence(
   stage: QualityStage,
   evidence: Omit<StageEvidence, "at"> & { at?: string },
 ): void {
-  const record: StageEvidence = {
-    ...evidence,
-    at: evidence.at ?? new Date().toISOString(),
-  };
-  state.stages[stage].evidence.push(record);
-  // Out-of-order evidence records the fact without activating the future
-  // stage — activation stays ordered so currentStage() never jumps ahead.
+  // Activate first so the stage's startedAt is stamped before the evidence
+  // timestamp — evidence recorded in the same call counts as in-stage.
   const stageIndex = QUALITY_STAGES.indexOf(stage);
   const current = currentStage(state);
   const currentIndex = current ? QUALITY_STAGES.indexOf(current) : QUALITY_STAGES.length;
   if (state.stages[stage].status === "pending" && stageIndex <= currentIndex) {
     state.stages[stage].status = "active";
+    state.stages[stage].startedAt ??= new Date().toISOString();
   }
+  const record: StageEvidence = {
+    ...evidence,
+    at: evidence.at ?? new Date().toISOString(),
+  };
+  // Stale-evidence guard: an explicit timestamp earlier than the stage's
+  // activation cannot describe work the stage actually did. Reject it
+  // rather than silently filing unusable evidence.
+  const stageStartedAt = state.stages[stage].startedAt;
+  if (evidence.at && stageStartedAt && evidence.at < stageStartedAt) {
+    throw new StageGateError(
+      stage,
+      `Evidence for stage "${stage}" is stale: recorded at ${evidence.at} before the stage began at ${stageStartedAt}.`,
+    );
+  }
+  state.stages[stage].evidence.push(record);
   touch(state);
 }
 

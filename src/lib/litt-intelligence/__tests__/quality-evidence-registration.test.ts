@@ -86,4 +86,40 @@ describe("quality gate — evidence registration", () => {
     expect(finale.verdict.ok).toBe(true);
     expect(finale.verdict.missing).toEqual([]);
   });
+
+  it("rejects explicitly stale evidence recorded before the stage began (D4)", async () => {
+    const { createQualityLoop, recordEvidence, beginStage } = await import("../quality-loop");
+    const state = createQualityLoop({ runId: "r", projectId: "p", userId: "u" });
+    beginStage(state, "understand");
+    const startedAt = state.stages.understand.startedAt!;
+    expect(startedAt).toBeTruthy();
+    const staleAt = new Date(Date.parse(startedAt) - 60_000).toISOString();
+    expect(() =>
+      recordEvidence(state, "understand", {
+        summary: "forged early evidence",
+        by: "agent",
+        at: staleAt,
+      }),
+    ).toThrow(/stale/i);
+  });
+
+  it("evidence filed for a still-pending future stage does not authorize a pass (D4)", async () => {
+    const { createQualityLoop, recordEvidence, beginStage, passStage, StageGateError } =
+      await import("../quality-loop");
+    const state = createQualityLoop({ runId: "r", projectId: "p", userId: "u" });
+    // Out-of-order filing for a future stage stays pending (the starvation
+    // fix) — but once that stage activates, its startedAt postdates the
+    // pre-filed evidence so it cannot authorize a pass.
+    const staleAt = new Date(Date.now() - 60_000).toISOString();
+    recordEvidence(state, "research", { summary: "early", by: "agent", at: staleAt });
+    expect(state.stages.research.status).toBe("pending");
+    recordEvidence(state, "understand", { summary: "brief understood", by: "agent" });
+    passStage(state, "understand");
+    beginStage(state, "research");
+    const { stagePassable } = await import("../quality-loop-flow");
+    expect(stagePassable(state, "research")).toBe(false);
+    // Fresh evidence recorded after activation does authorize.
+    recordEvidence(state, "research", { summary: "research done", by: "agent" });
+    expect(stagePassable(state, "research")).toBe(true);
+  });
 });

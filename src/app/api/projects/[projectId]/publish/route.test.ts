@@ -225,6 +225,54 @@ describe("POST /api/projects/[projectId]/publish", () => {
     assertZeroSubprocesses();
   });
 
+  it("refuses to publish when the newest run failed even if an older run passed", async () => {
+    // D1: the gate must look at the NEWEST run — a stale pass cannot
+    // authorize publishing a project whose newest run failed.
+    listActionRunsMock.mockResolvedValue([
+      { id: "run-new", status: "failed" } as never,
+      { id: "run-old", status: "completed" } as never,
+    ]);
+    listActionEventsMock.mockResolvedValue([
+      {
+        type: "run.completed",
+        payload: { result: { qualityLoop: { verdict: { ok: true } } } },
+      } as never,
+    ]);
+    const res = await POST(makeRequest("POST"), makeParams("proj-1"));
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.errorClass).toBe("QUALITY_GATE_REQUIRED");
+    expect(deployMock).not.toHaveBeenCalled();
+    // The failed run's events are never trusted.
+    expect(listActionEventsMock).not.toHaveBeenCalledWith("run-old", expect.anything(), expect.anything());
+    assertZeroSubprocesses();
+  });
+
+  it("refuses to publish when the newest run is still running", async () => {
+    listActionRunsMock.mockResolvedValue([
+      { id: "run-live", status: "processing" } as never,
+      { id: "run-old", status: "completed" } as never,
+    ]);
+    const res = await POST(makeRequest("POST"), makeParams("proj-1"));
+    expect(res.status).toBe(409);
+    expect(deployMock).not.toHaveBeenCalled();
+    assertZeroSubprocesses();
+  });
+
+  it("reads run events tail-first so the verdict survives the event cap", async () => {
+    // D1: terminal run.completed events are last; the gate must request
+    // descending order so >500-event runs still expose the verdict.
+    createTransportMock.mockResolvedValue({} as never);
+    deployMock.mockResolvedValue({ ok: true, deploymentId: "d", publicUrl: null } as never);
+    const res = await POST(makeRequest("POST"), makeParams("proj-1"));
+    expect(res.status).toBe(200);
+    expect(listActionEventsMock).toHaveBeenCalledWith(
+      "run-1",
+      "user-1",
+      expect.objectContaining({ descending: true }),
+    );
+  });
+
   it("publishes and returns the verified public URL", async () => {
     const fakeTransport = { userId: "user-1", projectId: "proj-1", workspaceId: "ws-1" };
     createTransportMock.mockResolvedValue(fakeTransport as never);

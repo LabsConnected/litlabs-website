@@ -111,13 +111,15 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   let gatePassed = false;
   try {
     const runs = await listActionRuns(owner.userId, { projectId, limit: 10 });
-    // Gate on the LATEST completed build — a stale pass cannot authorize
-    // publishing a project whose newest run failed or never ran.
-    const latestCompleted = runs.find((r) => r.status === "completed");
-    if (latestCompleted) {
-      // Full event window (store cap) — the verdict must not hide behind
-      // pagination.
-      const events = await listActionEvents(latestCompleted.id, owner.userId, { limit: 500 });
+    // Gate on the NEWEST run only — it must itself be completed. A stale
+    // pass cannot authorize publishing a project whose newest run failed,
+    // was cancelled, or is still running.
+    const newest = runs[0];
+    if (newest?.status === "completed") {
+      // Read the event window tail-first: terminal events (run.completed
+      // with the qualityLoop verdict) are last, so descending order keeps
+      // them inside the 500-event cap for very long runs.
+      const events = await listActionEvents(newest.id, owner.userId, { limit: 500, descending: true });
       gatePassed = events.some(
         (e) =>
           e.type === "run.completed" &&

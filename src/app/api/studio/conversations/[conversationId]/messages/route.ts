@@ -998,8 +998,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         safeEvent({
           type: "status",
           summary: reservedCredits > 0
-            ? `Approved quote: ${reservedCredits} LiTTBits — debited once on success; failed or cancelled work debits zero.`
-            : "Approved quote: 0 LiTTBits — billing-exempt run (audit record kept).",
+            ? `Estimated cost: ${reservedCredits} LiTTBits — debited once on success; failed or cancelled work debits zero.`
+            : "Estimated cost: 0 LiTTBits — billing-exempt run (audit record kept).",
           billingQuote: { estimatedBits: reservedCredits },
         });
       }
@@ -1435,9 +1435,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         }
         if (agentRunId) {
           // Metered Studio builds (metersRun) settle the estimated amount —
-          // a successful build debiting zero is a defect.
+          // a successful build debiting zero is a defect. Cap at the
+          // reservation so a long output can never settle above the quote
+          // the user approved (settle_bits rejects overage → zero debit).
           const actualCredits = metersRun
-            ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
+            ? Math.min(
+                estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1),
+                reservedCredits,
+              )
             : 0;
           settleRun(agentRunId, {
             inputTokens: Math.ceil(finalPrompt.length / 4),
@@ -1690,8 +1695,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                     : undefined),
           );
           if (agentRunId) {
+            // Same cap as the v2 path: settle never exceeds the reserved
+            // quote (overage would be rejected → completed run debits zero).
             const actualCredits = metersRun
-              ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
+              ? Math.min(
+                  estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1),
+                  reservedCredits,
+                )
               : 0;
             settleRun(agentRunId, {
               inputTokens: Math.ceil(finalPrompt.length / 4),

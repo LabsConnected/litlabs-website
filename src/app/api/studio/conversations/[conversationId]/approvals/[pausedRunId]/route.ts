@@ -602,6 +602,20 @@ export async function POST(
     if (!reserveResult.ok) {
       const message = reserveResult.error
         || "Insufficient LiTTBits balance — purchase credits to continue.";
+      // Surface the shortfall in the response so the client can render the
+      // estimated cost, current balance, and gap — same disclosure the
+      // initial-run 402 path provides.
+      let shortfall: { estimatedBits: number; balanceBits: number; shortfallBits: number } | null = null;
+      try {
+        const { getCreditBalances } = await import("@/lib/wallet-ledger");
+        const balances = await getCreditBalances(clerkId);
+        const balanceBits = Math.round(balances?.total ?? 0);
+        shortfall = {
+          estimatedBits: resumeEstimatedBits,
+          balanceBits,
+          shortfallBits: Math.max(0, resumeEstimatedBits - balanceBits),
+        };
+      } catch { /* disclosure is best-effort */ }
       try {
         await settleResumedRunOutcome({
           record: resolved,
@@ -622,7 +636,7 @@ export async function POST(
         );
       }
       return NextResponse.json(
-        { error: message, resolved: true, status: "failed", pausedRunId },
+        { error: message, resolved: true, status: "failed", pausedRunId, billingQuote: shortfall },
         { status: reserveResult.status || 402 },
       );
     }
@@ -1201,6 +1215,7 @@ export async function POST(
     status: "processing",
     pausedRunId,
     runStatus: "processing",
+    billingQuote: clerkId ? { estimatedBits: resumeReserved } : null,
   }, { status: 202 });
 }
 
