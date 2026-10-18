@@ -337,29 +337,33 @@ export function beginStage(state: QualityLoopState, stage: QualityStage): void {
   touch(state);
 }
 
-/** Record evidence for a stage. Evidence may be recorded for the current
- *  stage or any earlier stage (late evidence is allowed); never for a
- *  future stage. */
+/** Record evidence for a stage. Evidence is a verified fact about work
+ *  the run actually did, so it may be filed for the current stage, an
+ *  earlier stage (late evidence), OR a later stage (out-of-order
+ *  registration): a machine observation of build/run/test is real even
+ *  when an earlier cognitive stage has not yet produced its evidence.
+ *  Recording is not passing — begin/pass/skip transitions still enforce
+ *  strict stage order, so out-of-order filing can never weaken the gate.
+ *  Blocking later-stage evidence behind an unfinished earlier stage
+ *  produced the recurring "N required stage(s) lack evidence (pending)"
+ *  defect: real observations sat buffered in the session queue while the
+ *  ledger reported every stage pending. */
 export function recordEvidence(
   state: QualityLoopState,
   stage: QualityStage,
   evidence: Omit<StageEvidence, "at"> & { at?: string },
 ): void {
-  const stageIndex = QUALITY_STAGES.indexOf(stage);
-  const current = currentStage(state);
-  const currentIndex = current ? QUALITY_STAGES.indexOf(current) : QUALITY_STAGES.length;
-  if (stageIndex > currentIndex) {
-    throw new StageGateError(
-      stage,
-      `Cannot record evidence for future stage "${stage}" (current: "${current ?? "none"}").`,
-    );
-  }
   const record: StageEvidence = {
     ...evidence,
     at: evidence.at ?? new Date().toISOString(),
   };
   state.stages[stage].evidence.push(record);
-  if (state.stages[stage].status === "pending") {
+  // Out-of-order evidence records the fact without activating the future
+  // stage — activation stays ordered so currentStage() never jumps ahead.
+  const stageIndex = QUALITY_STAGES.indexOf(stage);
+  const current = currentStage(state);
+  const currentIndex = current ? QUALITY_STAGES.indexOf(current) : QUALITY_STAGES.length;
+  if (state.stages[stage].status === "pending" && stageIndex <= currentIndex) {
     state.stages[stage].status = "active";
   }
   touch(state);

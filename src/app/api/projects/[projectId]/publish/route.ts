@@ -100,6 +100,48 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const { supabaseDeploymentStore } = await import(
     "@/lib/deployments/deployment-store"
   );
+  const { listActionRuns, listActionEvents } = await import(
+    "@/lib/action-runtime/run-store"
+  );
+
+  // Gate ordering (owner ruling): publishing is available only after the
+  // build passed its quality gate. Read the verdict from the same evidence
+  // the gate itself uses — the canonical action_run outcome event's
+  // persisted qualityLoop verdict — never a parallel flag.
+  let gatePassed = false;
+  try {
+    const runs = await listActionRuns(owner.userId, { projectId, limit: 10 });
+    for (const run of runs.filter((r) => r.status === "completed")) {
+      const events = await listActionEvents(run.id, owner.userId, { limit: 200 });
+      const hasPassedVerdict = events.some(
+        (e) =>
+          e.type === "run.completed" &&
+          (e.payload as { result?: { qualityLoop?: { verdict?: { ok?: boolean } } } })
+            ?.result?.qualityLoop?.verdict?.ok === true,
+      );
+      if (hasPassedVerdict) {
+        gatePassed = true;
+        break;
+      }
+    }
+  } catch {
+    return NextResponse.json(
+      { error: "Publish failed.", detail: "Build verification state could not be read." },
+      { status: 503 },
+    );
+  }
+  if (!gatePassed) {
+    return NextResponse.json(
+      {
+        error: "Publish failed.",
+        detail:
+          "Publishing requires a build that passed its quality checks. Build the project in Studio first; a failed or unverified build cannot be published.",
+        errorClass: "QUALITY_GATE_REQUIRED",
+        retryable: true,
+      },
+      { status: 409 },
+    );
+  }
 
   let transport;
   try {

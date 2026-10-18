@@ -32,11 +32,34 @@ vi.mock("@/lib/deployments/deploy-service", () => ({
   unpublishDeployment: vi.fn(),
 }));
 
+vi.mock("@/lib/action-runtime/run-store", () => ({
+  listActionRuns: vi.fn(),
+  listActionEvents: vi.fn(),
+}));
+
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
 import { listLatestDeploymentsForUser } from "@/lib/deployments/deployment-store";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { deployUserProject, unpublishDeployment } from "@/lib/deployments/deploy-service";
+import { listActionRuns, listActionEvents } from "@/lib/action-runtime/run-store";
+
+const listActionRunsMock = vi.mocked(listActionRuns);
+const listActionEventsMock = vi.mocked(listActionEvents);
+
+/** Simulate a completed build run whose outcome event carries a passed
+ *  quality verdict — the same evidence the publish gate reads. */
+function mockGatePassed() {
+  listActionRunsMock.mockResolvedValue([
+    { id: "run-1", status: "completed" } as never,
+  ]);
+  listActionEventsMock.mockResolvedValue([
+    {
+      type: "run.completed",
+      payload: { result: { qualityLoop: { verdict: { ok: true } } } },
+    } as never,
+  ]);
+}
 
 const authMock = vi.mocked(auth);
 const getProjectMock = vi.mocked(getProject);
@@ -79,6 +102,7 @@ beforeEach(() => {
   spyOnChildProcess();
   authMock.mockResolvedValue({ userId: "user-1" } as never);
   getProjectMock.mockResolvedValue({ id: "proj-1", name: "Test" } as never);
+  mockGatePassed();
 });
 
 afterEach(() => {
@@ -179,6 +203,24 @@ describe("POST /api/projects/[projectId]/publish", () => {
     getProjectMock.mockResolvedValue(null);
     const res = await POST(makeRequest("POST"), makeParams("proj-1"));
     expect(res.status).toBe(404);
+    expect(deployMock).not.toHaveBeenCalled();
+    assertZeroSubprocesses();
+  });
+
+  it("refuses to publish when no completed run passed the quality gate", async () => {
+    listActionRunsMock.mockResolvedValue([
+      { id: "run-1", status: "completed" } as never,
+    ]);
+    listActionEventsMock.mockResolvedValue([
+      {
+        type: "run.completed",
+        payload: { result: { qualityLoop: { verdict: { ok: false } } } },
+      } as never,
+    ]);
+    const res = await POST(makeRequest("POST"), makeParams("proj-1"));
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.errorClass).toBe("QUALITY_GATE_REQUIRED");
     expect(deployMock).not.toHaveBeenCalled();
     assertZeroSubprocesses();
   });

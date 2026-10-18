@@ -753,28 +753,45 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let reservationId: string | null = null;
   let actionRun: ActionRun | null = null;
   let actionContext: ActionExecutionContext | null = null;
-  if (runtimeAgent?.agentInstanceId && clerkId) {
+  // Metered work covers custom agent runs AND Studio builds: a successful
+  // execution-bound build that debits zero is a defect (approved metering
+  // policy — no silent debits and no silent giveaways). Runs without a
+  // runtimeAgent reserve under the "studio-build" capability name.
+  const metersRun = clerkId && (runtimeAgent?.agentInstanceId || built.kernelResult.decision.routing.requiresExecution);
+  if (metersRun) {
     // Estimate the maximum cost: per-run fee + estimated tokens
     const estimatedTokens = Math.ceil(finalPrompt.length / 4) + 2048; // prompt + max output
     const estimatedCost = estimateCredits(estimatedTokens, 0, 1, 1);
     const reserveResult = await reserveCredits(
       {
         clerkId,
-        agentInstanceId: runtimeAgent.agentInstanceId,
-        agentId: runtimeAgent.agentId,
-        agentVersionId: runtimeAgent.agentVersionId,
+        agentInstanceId: runtimeAgent?.agentInstanceId ?? "studio-build",
+        agentId: runtimeAgent?.agentId ?? null,
+        agentVersionId: runtimeAgent?.agentVersionId ?? null,
         conversationId: conversation.id,
         messageId: assistantMessage.id,
         idempotencyKey: clientRequestId,
-        model: runtimeAgent.model,
+        model: runtimeAgent?.model,
       },
       estimatedCost,
     );
 
     if (!reserveResult.ok) {
-      // Insufficient balance — abort BEFORE the model call. Persist the
-      // reason so a reload shows what actually happened, not an empty
-      // failed bubble.
+      // Insufficient balance — abort BEFORE the model call with the EXACT
+      // shortfall (approved metering policy: told before work starts, never
+      // a mid-build failure or a negative balance). Persist the reason so a
+      // reload shows what actually happened, not an empty failed bubble.
+      let shortfallDetail = "Purchase credits in your wallet.";
+      if (reserveResult.status === 402) {
+        try {
+          const { getCreditBalances } = await import("@/lib/wallet-ledger");
+          const balances = await getCreditBalances(clerkId!);
+          const shortfall = Math.max(0, estimatedCost - balances.total);
+          shortfallDetail =
+            `Estimated cost: ${estimatedCost} LiTTBits · balance: ${balances.total} · ` +
+            `shortfall: ${shortfall}. Purchase credits to continue.`;
+        } catch { /* balance lookup failed — keep the generic detail */ }
+      }
       await updateMessageStatus(
         assistantMessage.id,
         userId,
@@ -784,7 +801,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       return NextResponse.json(
         {
           error: reserveResult.error || "Insufficient LiTTBits balance",
-          detail: "This agent requires LiTTBits to run. Purchase credits in your wallet.",
+          detail: shortfallDetail,
           userMessage,
           assistantMessage: { ...assistantMessage, status: "failed" as const },
           revision: conversation.revision,
