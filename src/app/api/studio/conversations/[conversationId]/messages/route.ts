@@ -989,6 +989,21 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       const safeEvent = (payload: Record<string, unknown>): boolean =>
         safeEnqueue(event(payload));
 
+      // Approved-quote disclosure on EVERY metered path — the approval
+      // card only reaches runs that pause; a build that never pauses must
+      // still show its quote before execution. `status` events render in
+      // the live activity feed; the structured field lets richer
+      // surfaces render it without re-parsing the text.
+      if (agentRunId) {
+        safeEvent({
+          type: "status",
+          summary: reservedCredits > 0
+            ? `Approved quote: ${reservedCredits} LiTTBits — debited once on success; failed or cancelled work debits zero.`
+            : "Approved quote: 0 LiTTBits — billing-exempt run (audit record kept).",
+          billingQuote: { estimatedBits: reservedCredits },
+        });
+      }
+
       // Heartbeat — emits SSE comments every 15s to prevent proxy idle timeouts
       // (Cloudflare/Railway close connections after ~100s of inactivity)
       const heartbeatTimer = setInterval(() => {

@@ -87,7 +87,10 @@ vi.mock("@/lib/agent-runtime", () => ({
 }));
 
 vi.mock("@/lib/agent-billing", () => ({
-  reserveCredits: vi.fn(),
+  // Builtin Studio builds are metered too — the default reserve must
+  // resolve so tests exercise the same path production takes.
+  reserveCredits: vi.fn(() =>
+    Promise.resolve({ ok: true, runId: "run-1", reservedCredits: 12, reservationId: "res-1" })),
   // The route calls settleRun(...).catch(...) — must return a promise.
   settleRun: vi.fn(() => Promise.resolve({ ok: true })),
   estimateCredits: vi.fn(() => 0),
@@ -120,6 +123,7 @@ const actionRuntimeMocks = vi.hoisted(() => ({
   createActionRun: vi.fn(),
   transitionActionRunEventActivity: vi.fn(),
   transitionActionRun: vi.fn(),
+  appendActionEvent: vi.fn(),
   requestActionRunCancellation: vi.fn(),
 }));
 
