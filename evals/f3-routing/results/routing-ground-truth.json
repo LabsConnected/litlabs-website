@@ -1,0 +1,546 @@
+{
+  "evalId": "eval-kAt-2026-10-19T08:30:31",
+  "results": {
+    "version": 3,
+    "timestamp": "2026-10-19T08:30:31.527Z",
+    "prompts": [
+      {
+        "raw": "{{prompt}}",
+        "label": "{{prompt}}",
+        "id": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "provider": "classify-direct",
+        "metrics": {
+          "score": 6,
+          "testPassCount": 6,
+          "testFailCount": 0,
+          "testErrorCount": 0,
+          "assertPassCount": 6,
+          "assertFailCount": 0,
+          "totalLatencyMs": 61,
+          "tokenUsage": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 6
+          },
+          "namedScores": {},
+          "namedScoresCount": {},
+          "cost": 0
+        }
+      }
+    ],
+    "results": [
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).intent === 'mission'"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "57dfd896-33f9-41b3-9a53-2cd80770f6c7",
+        "latencyMs": 18,
+        "namedScores": {},
+        "prompt": {
+          "raw": "Build me a simple personal portfolio website with an index.html homepage.",
+          "label": "{{prompt}}"
+        },
+        "promptId": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "promptIdx": 0,
+        "provider": {
+          "id": "litt-classify-direct",
+          "label": "classify-direct"
+        },
+        "response": {
+          "output": "{\"intent\":\"mission\",\"source\":\"real classifyIntent() — ink/controller.ts:2181\"}"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "explicit-build-1",
+            "prompt": "Build me a simple personal portfolio website with an index.html homepage."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).intent === 'mission'"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 0,
+        "vars": {
+          "id": "explicit-build-1",
+          "prompt": "Build me a simple personal portfolio website with an index.html homepage."
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).intent === 'mission'"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "a17a59ab-0a1e-466c-8d96-68dbe0e1cdc8",
+        "latencyMs": 11,
+        "namedScores": {},
+        "prompt": {
+          "raw": "Create a new project here and scaffold a basic Express API server.",
+          "label": "{{prompt}}"
+        },
+        "promptId": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "promptIdx": 0,
+        "provider": {
+          "id": "litt-classify-direct",
+          "label": "classify-direct"
+        },
+        "response": {
+          "output": "{\"intent\":\"mission\",\"source\":\"real classifyIntent() — ink/controller.ts:2181\"}"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "explicit-build-2",
+            "prompt": "Create a new project here and scaffold a basic Express API server."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).intent === 'mission'"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 1,
+        "vars": {
+          "id": "explicit-build-2",
+          "prompt": "Create a new project here and scaffold a basic Express API server."
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).intent === 'chat'"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "f7bd48bd-5e49-4a9e-866d-c1088786d043",
+        "latencyMs": 11,
+        "namedScores": {},
+        "prompt": {
+          "raw": "Hey, how's it going today?",
+          "label": "{{prompt}}"
+        },
+        "promptId": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "promptIdx": 0,
+        "provider": {
+          "id": "litt-classify-direct",
+          "label": "classify-direct"
+        },
+        "response": {
+          "output": "{\"intent\":\"chat\",\"source\":\"real classifyIntent() — ink/controller.ts:2181\"}"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "normal-chat-1",
+            "prompt": "Hey, how's it going today?"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).intent === 'chat'"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 2,
+        "vars": {
+          "id": "normal-chat-1",
+          "prompt": "Hey, how's it going today?"
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).intent === 'chat'"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "4077c65d-8539-4bce-9b49-cb40a0abe843",
+        "latencyMs": 12,
+        "namedScores": {},
+        "prompt": {
+          "raw": "What's the difference between let and const in JavaScript?",
+          "label": "{{prompt}}"
+        },
+        "promptId": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "promptIdx": 0,
+        "provider": {
+          "id": "litt-classify-direct",
+          "label": "classify-direct"
+        },
+        "response": {
+          "output": "{\"intent\":\"chat\",\"source\":\"real classifyIntent() — ink/controller.ts:2181\"}"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "normal-chat-2",
+            "prompt": "What's the difference between let and const in JavaScript?"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).intent === 'chat'"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 3,
+        "vars": {
+          "id": "normal-chat-2",
+          "prompt": "What's the difference between let and const in JavaScript?"
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).intent === 'chat'"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "00639d6d-86d4-4cca-b169-001a7f851e4e",
+        "latencyMs": 4,
+        "namedScores": {},
+        "prompt": {
+          "raw": "I don't know, maybe we should look at this later.",
+          "label": "{{prompt}}"
+        },
+        "promptId": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "promptIdx": 0,
+        "provider": {
+          "id": "litt-classify-direct",
+          "label": "classify-direct"
+        },
+        "response": {
+          "output": "{\"intent\":\"chat\",\"source\":\"real classifyIntent() — ink/controller.ts:2181\"}"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "ambiguous-1",
+            "prompt": "I don't know, maybe we should look at this later."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).intent === 'chat'"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 4,
+        "vars": {
+          "id": "ambiguous-1",
+          "prompt": "I don't know, maybe we should look at this later."
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).intent === 'chat'"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "744339fa-555d-4b42-b0d1-54ef0a23edff",
+        "latencyMs": 5,
+        "namedScores": {},
+        "prompt": {
+          "raw": "Something's off with the thing we talked about.",
+          "label": "{{prompt}}"
+        },
+        "promptId": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "promptIdx": 0,
+        "provider": {
+          "id": "litt-classify-direct",
+          "label": "classify-direct"
+        },
+        "response": {
+          "output": "{\"intent\":\"chat\",\"source\":\"real classifyIntent() — ink/controller.ts:2181\"}"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "ambiguous-2",
+            "prompt": "Something's off with the thing we talked about."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).intent === 'chat'"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 5,
+        "vars": {
+          "id": "ambiguous-2",
+          "prompt": "Something's off with the thing we talked about."
+        },
+        "metadata": {},
+        "failureReason": 0
+      }
+    ],
+    "stats": {
+      "successes": 6,
+      "failures": 0,
+      "errors": 0,
+      "tokenUsage": {
+        "cached": 0,
+        "completion": 0,
+        "prompt": 0,
+        "total": 0,
+        "numRequests": 6
+      }
+    }
+  },
+  "config": {
+    "tags": {},
+    "description": "F3 routing — ground truth. Calls LiTT's real classifyIntent() function (packages/litt-cli/src/lib/intent.ts), the exact code the interactive cockpit runs at ink/controller.ts:2181. No model, no network, $0 cost. This is the AUTHORITATIVE track per F3 step 5 — real end-to-end LiTT routing behavior, not model-only scoring.\n",
+    "prompts": [
+      "{{prompt}}"
+    ],
+    "providers": [
+      {
+        "id": "file://provider/classify-direct.cjs",
+        "label": "classify-direct"
+      }
+    ],
+    "tests": [
+      {
+        "vars": {
+          "id": "explicit-build-1",
+          "prompt": "Build me a simple personal portfolio website with an index.html homepage."
+        },
+        "assert": [
+          {
+            "type": "javascript",
+            "value": "JSON.parse(output).intent === 'mission'"
+          }
+        ]
+      },
+      {
+        "vars": {
+          "id": "explicit-build-2",
+          "prompt": "Create a new project here and scaffold a basic Express API server."
+        },
+        "assert": [
+          {
+            "type": "javascript",
+            "value": "JSON.parse(output).intent === 'mission'"
+          }
+        ]
+      },
+      {
+        "vars": {
+          "id": "normal-chat-1",
+          "prompt": "Hey, how's it going today?"
+        },
+        "assert": [
+          {
+            "type": "javascript",
+            "value": "JSON.parse(output).intent === 'chat'"
+          }
+        ]
+      },
+      {
+        "vars": {
+          "id": "normal-chat-2",
+          "prompt": "What's the difference between let and const in JavaScript?"
+        },
+        "assert": [
+          {
+            "type": "javascript",
+            "value": "JSON.parse(output).intent === 'chat'"
+          }
+        ]
+      },
+      {
+        "vars": {
+          "id": "ambiguous-1",
+          "prompt": "I don't know, maybe we should look at this later."
+        },
+        "assert": [
+          {
+            "type": "javascript",
+            "value": "JSON.parse(output).intent === 'chat'"
+          }
+        ]
+      },
+      {
+        "vars": {
+          "id": "ambiguous-2",
+          "prompt": "Something's off with the thing we talked about."
+        },
+        "assert": [
+          {
+            "type": "javascript",
+            "value": "JSON.parse(output).intent === 'chat'"
+          }
+        ]
+      }
+    ],
+    "scenarios": [],
+    "env": {},
+    "sharing": true,
+    "defaultTest": {
+      "vars": {},
+      "assert": [],
+      "options": {},
+      "metadata": {}
+    },
+    "outputPath": [
+      "results/routing-ground-truth.json"
+    ],
+    "extensions": [],
+    "metadata": {}
+  },
+  "shareableUrl": null
+}
