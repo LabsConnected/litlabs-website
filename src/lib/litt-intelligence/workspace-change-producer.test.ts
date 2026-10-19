@@ -40,6 +40,16 @@ const probe = (
   gitDiff: vi.fn(async () => ({ diff })),
 });
 
+/** A `git diff <sha>` for the given files — the baseline-diff shape the
+ *  producer now reads the changed-file list from. */
+const baseDiff = (...files: string[]) =>
+  files
+    .map(
+      (f) =>
+        `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-old\n+new`,
+    )
+    .join("\n");
+
 describe("computeWorkspaceChange", () => {
   // 1. checkpoint + empty diff → no changes
   it("reports unchanged when the diff is empty", async () => {
@@ -58,6 +68,7 @@ describe("computeWorkspaceChange", () => {
     const result = await computeWorkspaceChange(
       probe(async () =>
         status({ modified: [{ path: "index.html", status: "M" }], clean: false }),
+        baseDiff("index.html"),
       ),
       CHECKPOINT,
     );
@@ -91,6 +102,7 @@ describe("computeWorkspaceChange", () => {
           untracked: ["app.js"],
           clean: false,
         }),
+        baseDiff("index.html", "style.css"),
       ),
       CHECKPOINT,
     );
@@ -115,6 +127,7 @@ describe("computeWorkspaceChange", () => {
     const result = await computeWorkspaceChange(
       probe(async () =>
         status({ modified: [{ path: "old.html", status: "D" }], clean: false }),
+        baseDiff("old.html"),
       ),
       CHECKPOINT,
     );
@@ -129,6 +142,7 @@ describe("computeWorkspaceChange", () => {
     const result = await computeWorkspaceChange(
       probe(async () =>
         status({ modified: [{ path: "index.html", status: "M" }], clean: false }),
+        baseDiff("index.html"),
       ),
       CHECKPOINT,
     );
@@ -195,11 +209,62 @@ describe("computeWorkspaceChange", () => {
     const result = await computeWorkspaceChange(
       probe(async () =>
         status({ modified: [{ path: "index.html", status: "M" }], clean: true }),
+        baseDiff("index.html"),
       ),
       CHECKPOINT,
     );
 
     expect(result.status).toBe("changed");
+  });
+
+  // The diff runs against the BASELINE sha, not HEAD: work an intermediate
+  // pre-mutation checkpoint already committed (clean HEAD status) still
+  // counts — this is the "legitimate overwrite" case where a trailing
+  // no-op mutation must not erase earlier real work.
+  it("sees changes committed by later checkpoints — a clean HEAD status does not erase baseline diff evidence", async () => {
+    const gitDiff = vi.fn(async (opts?: { base?: string }) => ({
+      diff: opts?.base ? baseDiff("index.html") : "",
+    }));
+    const result = await computeWorkspaceChange(
+      { gitStatus: vi.fn(async () => status({ clean: true })), gitDiff },
+      CHECKPOINT,
+    );
+
+    expect(gitDiff).toHaveBeenCalledWith(expect.objectContaining({ base: "abc1234" }));
+    expect(result.status).toBe("changed");
+    expect(result.files).toEqual(["index.html"]);
+    expect(result.checkpointSha).toBe("abc1234");
+  });
+
+  it("reports unchanged when nothing differs from the baseline even though HEAD moved", async () => {
+    // A write that netted out identical to the run's start state: the
+    // baseline diff is empty, so "unchanged" is the honest verdict — a
+    // HEAD-only view could not tell this apart from real work.
+    const result = await computeWorkspaceChange(
+      probe(async () => status({ clean: true })),
+      CHECKPOINT,
+    );
+
+    expect(result.status).toBe("unchanged");
+  });
+
+  it("falls back to the status enumeration when the baseline diff fails", async () => {
+    // An unreachable/invalid baseline SHA must not fabricate "unchanged":
+    // the producer degrades to the HEAD-status evidence instead.
+    const result = await computeWorkspaceChange(
+      {
+        gitStatus: vi.fn(async () =>
+          status({ modified: [{ path: "index.html", status: "M" }], clean: false }),
+        ),
+        gitDiff: vi.fn(async () => {
+          throw new Error("fatal: bad revision 'abc1234'");
+        }),
+      },
+      CHECKPOINT,
+    );
+
+    expect(result.status).toBe("changed");
+    expect(result.files).toEqual(["index.html"]);
   });
 
   it("never auto-rolls-back — it only reports that rollback is possible", async () => {
@@ -236,6 +301,7 @@ describe("producer → completion evidence", () => {
     const workspaceChange = await computeWorkspaceChange(
       probe(async () =>
         status({ modified: [{ path: "index.html", status: "M" }], clean: false }),
+        baseDiff("index.html"),
       ),
       CHECKPOINT,
     );

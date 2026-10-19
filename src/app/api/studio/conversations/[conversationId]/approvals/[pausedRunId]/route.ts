@@ -949,7 +949,10 @@ export async function POST(
             pausedMessages: result.pendingApproval.pausedMessages,
             executionMode: resolved.executionMode,
             systemPrompt: resolved.systemPrompt,
-            checkpointId: null,
+            // Persist the run baseline (the original run's first
+            // pre-mutation checkpoint), not null: the next resume diffs
+            // the whole run's work instead of reporting "unknown".
+            checkpointId: result.baselineCheckpoint?.checkpointId ?? result.checkpoint?.checkpointId ?? null,
             actionRunId: resolved.actionRunId ?? null,
             qualityLoopState: result.pendingApproval.qualityLoopState,
             deferredToolCalls: result.pendingApproval.deferredToolCalls,

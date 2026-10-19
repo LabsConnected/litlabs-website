@@ -12,7 +12,10 @@
  * the user can click, which is the opposite of completed work.
  *
  * Evidence required, by request kind:
- *   build → at least one mutating tool call with a successful result
+ *   build → at least one mutating tool call whose success is VERIFIED by
+ *           persisted workspace state: a read-back that confirms the
+ *           claimed bytes landed, or the checkpoint diff showing the
+ *           declared file actually changed
  *   ship  → the above, plus a deployment that started, succeeded, and whose
  *           live URL was verified
  */
@@ -43,6 +46,25 @@ export interface ToolCallEvidence {
   success?: boolean;
   /** Whether this tool mutates state (files, git, external services). */
   mutating: boolean;
+  /**
+   * Workspace-relative file paths the call declared it would affect
+   * (files.write path, files.rename newPath, …). Absent for tools whose
+   * side effects are not declared on the call (terminal.execute, deploys):
+   * for those, any real workspace change is the only corroboration possible.
+   */
+  paths?: string[];
+  /**
+   * Read-back verification of the claimed mutation, taken by re-reading
+   * the workspace AFTER the tool reported success:
+   *   true  — the claimed change is really persisted (written content
+   *           matches, patch applied, deletion confirmed, rename landed)
+   *   false — the claim was contradicted by what is actually on disk
+   *   absent — not checked or not checkable for this tool
+   *
+   * This is the only evidence channel that works on gitless (static)
+   * workspaces, where no checkpoint diff can ever be produced.
+   */
+  persisted?: boolean;
 }
 
 export interface DeploymentEvidence {
@@ -148,6 +170,41 @@ function changeFields(change: WorkspaceChangeEvidence | null) {
     checkpointSha: change.checkpointSha,
     rollbackAvailable: change.rollbackAvailable,
   };
+}
+
+/**
+ * Normalize a file path for comparison between a tool's declared inputs and
+ * the paths the workspace diff enumerates: forward slashes, no leading "./"
+ * or "/", collapsed separators, no trailing slash.
+ */
+function normalizeEvidencePath(path: string): string {
+  return path
+    .replace(/\\/g, "/")
+    .replace(/^\.?\//, "")
+    .replace(/\/+/g, "/")
+    .replace(/\/$/, "");
+}
+
+/**
+ * Did this claimed successful mutation actually persist in the workspace?
+ *
+ * A read-back confirmation is the strongest signal — it names the exact
+ * file and content. A contradicted read-back vetoes the claim outright:
+ * a file reported written but read back with different content did not
+ * persist as claimed, no matter what the diff says. Failing that, a call
+ * that declares its target paths is verified only when the diff names at
+ * least one of them; a call that declares none (terminal.execute and other
+ * tools whose side effects are not enumerable from inputs) is corroborated
+ * by any verified workspace change at all.
+ */
+function mutationIsVerified(call: ToolCallEvidence, change: WorkspaceChangeEvidence | null): boolean {
+  if (call.persisted === false) return false;
+  if (call.persisted === true) return true;
+  const declared = (call.paths ?? []).map(normalizeEvidencePath);
+  if (change?.status !== "changed") return false;
+  if (declared.length === 0) return true;
+  const changedFiles = new Set((change.files ?? []).map(normalizeEvidencePath));
+  return declared.some((p) => changedFiles.has(p));
 }
 
 /** " (2 files)" / " (index.html)" — empty when the diff could not name them. */
@@ -270,24 +327,84 @@ function evaluateCompletionState(
   // true having written nothing (an exit-0 command whose output never
   // reached disk is the canonical case; it is exactly the "echo hello >
   // index.html, no shell, nothing written" shape, just on a different
-  // transport). Cross-check against the real workspace diff: only a
-  // VERIFIED "unchanged" diff actually contradicts the claim and is
-  // treated as a failure. "unknown" (no checkpoint taken, or the
-  // workspace was unreachable for the diff) is never treated as proof
-  // either way — same honesty rule as the branch above — so an
-  // unverifiable diff does not, by itself, turn a reported success into
-  // a failure.
+  // transport). "Complete" therefore requires at least one claimed
+  // mutation VERIFIED against what is really persisted — a read-back that
+  // confirms the claimed bytes landed, or the baseline checkpoint diff
+  // naming a file the call declared. The three failure shapes below are
+  // deliberately distinct:
+  //
+  //   contradicted  — a read-back or a verified-unchanged diff positively
+  //                   says the claimed change did not persist → failed
+  //   unattributable — the diff shows changes, but in none of the files
+  //                   the run declared it was writing → failed
+  //   unverifiable  — neither the diff nor a read-back could check the
+  //                   claim (no checkpoint, unreachable workspace,
+  //                   provisioning still settling) → partial, never
+  //                   "complete": a generation result must not be reported
+  //                   successful on an unverifiable workspace.
   if (requirement.mutation && successfulMutations > 0) {
     const change = evidence.workspaceChange ?? null;
-    if (change?.status === "unchanged") {
-      missing.push("workspace change matching the reported mutation");
+    const claimedMutations = toolCalls.filter((c) => c.mutating && c.success === true);
+    const verifiedMutation = claimedMutations.some((c) => mutationIsVerified(c, change));
+
+    if (!verifiedMutation) {
+      const contradicted = claimedMutations.find((c) => c.persisted === false);
+      if (contradicted) {
+        missing.push("the reported mutation to actually persist");
+        return {
+          ...base,
+          ...changeFields(change),
+          state: "failed",
+          missing,
+          reason:
+            `A tool reported a successful mutation, but re-reading the workspace did not find the claimed change` +
+            `${contradicted.paths?.length ? ` (${contradicted.paths.map(normalizeEvidencePath).join(", ")})` : ""}. ` +
+            `The reported success is not supported by the actual workspace state.`,
+        };
+      }
+
+      if (change?.status === "unchanged") {
+        missing.push("workspace change matching the reported mutation");
+        return {
+          ...base,
+          ...changeFields(change),
+          state: "failed",
+          missing,
+          reason: `A tool reported a successful mutation, but the workspace diff shows no changes. ` +
+            `The reported success is not supported by the actual workspace state.`,
+        };
+      }
+
+      if (change?.status === "changed") {
+        // Reachable only when every claimed mutation declared target paths
+        // and none of them appear in the diff — undeclared-side-effect
+        // tools are verified by any real change above.
+        missing.push("workspace change in a file the run declared it was writing");
+        return {
+          ...base,
+          ...changeFields(change),
+          state: "failed",
+          missing,
+          reason:
+            `A tool reported a successful mutation and the workspace changed${fileSummary(change)}, ` +
+            `but not in any file the run declared it was writing. The reported success is not ` +
+            `corroborated by the actual workspace state.`,
+        };
+      }
+
+      // The comparison could not be made at all. Absence of evidence is
+      // not evidence of absence — but it is never proof of success either,
+      // so the run stays short of "complete" and says why.
+      missing.push("verified workspace change matching the reported mutation");
       return {
         ...base,
         ...changeFields(change),
-        state: "failed",
+        state: "partial",
         missing,
-        reason: `A tool reported a successful mutation, but the workspace diff shows no changes. ` +
-          `The reported success is not supported by the actual workspace state.`,
+        reason:
+          `A tool reported a successful mutation, but the workspace could not be checked to confirm ` +
+          `the change persisted` +
+          `${change?.unknownReason ? ` (${change.unknownReason})` : ""}.`,
       };
     }
   }

@@ -233,25 +233,30 @@ describe("completion verdict vs. actual workspace state", () => {
     it("is corroborated by a changed diff → complete (the honest-success path still works)", () => {
       const verdict = evaluateCompletion(
         BUILD,
-        evidence([{ toolId: "files.write", mutating: true, success: true }], changed(["index.html"])),
+        evidence(
+          [{ toolId: "files.write", mutating: true, success: true, paths: ["index.html"] }],
+          changed(["index.html"]),
+        ),
       );
 
       expect(verdict.state).toBe("complete");
       expect(verdict.workspaceChange).toBe("changed");
     });
 
-    it("is neither confirmed nor denied by an UNKNOWN diff → still complete (never penalize an unverifiable diff)", () => {
-      // Absence of evidence is not evidence of absence, symmetrically: an
-      // unreachable/unknown diff must not turn a reported success into a
-      // false failure, the same way it must not turn a reported failure
-      // into a false "nothing changed" (tested above).
+    it("is neither confirmed nor denied by an UNKNOWN diff → NOT complete (unverifiable is never proof)", () => {
+      // Absence of evidence is not evidence of absence — but it is not
+      // proof of success either. A generation result whose mutation claim
+      // cannot be checked (no checkpoint yet, unreachable workspace,
+      // provisioning still settling) stays short of "complete".
       const verdict = evaluateCompletion(
         BUILD,
         evidence([{ toolId: "files.write", mutating: true, success: true }], null),
       );
 
-      expect(verdict.state).toBe("complete");
+      expect(verdict.state).toBe("partial");
+      expect(verdict.state).not.toBe("complete");
       expect(verdict.workspaceChange).toBe("unknown");
+      expect(verdict.missing).toContain("verified workspace change matching the reported mutation");
     });
 
     it("one of several mutating calls succeeded, diff verified unchanged → still failed", () => {
@@ -268,6 +273,104 @@ describe("completion verdict vs. actual workspace state", () => {
 
       expect(verdict.state).toBe("failed");
       expect(verdict.missing).toContain("workspace change matching the reported mutation");
+    });
+  });
+
+  describe("per-mutation persisted evidence (read-back + declared paths)", () => {
+    it("a read-back-confirmed write completes even with no usable diff (static/gitless workspace)", () => {
+      // Static workspaces can never produce a checkpoint diff — the
+      // read-back is their only persisted-change channel.
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: true }],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("complete");
+      expect(verdict.workspaceChange).toBe("unknown");
+    });
+
+    it("a contradicted read-back fails the run even when the diff is unverifiable", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: false }],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("failed");
+      expect(verdict.reason).toMatch(/did not find the claimed change/i);
+    });
+
+    it("a contradicted read-back vetoes a claim even when unrelated files changed", () => {
+      // The workspace did change — just not what the tool claimed.
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: false }],
+          changed(["index.html"]),
+        ),
+      );
+
+      expect(verdict.state).toBe("failed");
+    });
+
+    it("changes only in files the run never declared → failed, not complete (unrelated files)", () => {
+      // e.g. provisioning files landing mid-run, or churn the run did not
+      // make: a real diff that names none of the declared targets cannot
+      // corroborate the reported write.
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "files.write", mutating: true, success: true, paths: ["index.html"] }],
+          changed([".litt-run.log", "assets/provisioned.png"]),
+        ),
+      );
+
+      expect(verdict.state).toBe("failed");
+      expect(verdict.missing).toContain("workspace change in a file the run declared it was writing");
+      expect(verdict.reason).toMatch(/not in any file the run declared/i);
+    });
+
+    it("a tool with undeclared side effects is corroborated by any real change (terminal.execute)", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "terminal.execute", mutating: true, success: true }],
+          changed(["index.html"]),
+        ),
+      );
+
+      expect(verdict.state).toBe("complete");
+    });
+
+    it("a legitimate overwrite verified by read-back completes even when the diff reports unchanged", () => {
+      // The file ended up containing exactly what the tool claimed — the
+      // requested end state is persisted, so net-zero is not a failure.
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: true }],
+          unchanged,
+        ),
+      );
+
+      expect(verdict.state).toBe("complete");
+    });
+
+    it("unrelated changes alongside a verified write do not block completion", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: true }],
+          changed(["index.html", ".litt-run.log"]),
+        ),
+      );
+
+      expect(verdict.state).toBe("complete");
     });
   });
 });

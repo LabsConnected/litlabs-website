@@ -1208,7 +1208,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               pausedMessages: v2Result.pendingApproval.pausedMessages,
               executionMode: canonicalCtx.executionMode,
               systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
-              checkpointId: v2Result.checkpoint?.checkpointId ?? null,
+              // The paused run stores the run's FIRST pre-mutation
+              // checkpoint (the whole-run baseline), not the latest:
+              // mutations that landed before this gate are already
+              // committed inside later checkpoints, so diffing the resumed
+              // run against anything newer would erase them and falsely
+              // report "unchanged". Legacy rows kept the latest — their
+              // resumes keep the pre-change post-gate-only view.
+              checkpointId: v2Result.baselineCheckpoint?.checkpointId ?? v2Result.checkpoint?.checkpointId ?? null,
               actionRunId: actionContext?.actionRunId ?? null,
               qualityLoopState: v2Result.qualityLoopState,
               deferredToolCalls: v2Result.pendingApproval.deferredToolCalls,
@@ -1310,7 +1317,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         };
         const completionVerdict = (completionRequirement.mutation || completionRequirement.deployment)
           ? evaluateCompletion(completionRequirement, {
-              toolCalls: v2ToolCalls.map((c) => ({ toolId: c.toolId, success: c.success, mutating: c.mutating })),
+              toolCalls: v2ToolCalls.map((c) => ({ toolId: c.toolId, success: c.success, mutating: c.mutating, paths: c.paths, persisted: c.persisted })),
               deployment: deploymentEvidenceFrom(v2ToolCalls),
               workspaceChange: v2Result?.workspaceChange ?? null,
             })
@@ -1478,6 +1485,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                   toolId: c.toolId,
                   success: c.success,
                   mutating: c.mutating,
+                  paths: c.paths,
+                  persisted: c.persisted,
                 })),
                 deployment: deploymentEvidenceFrom(v2Result.toolCalls),
                 workspaceChange: v2Result.workspaceChange ?? null,

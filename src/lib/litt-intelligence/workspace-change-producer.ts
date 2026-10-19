@@ -27,7 +27,20 @@ import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 /** The slice of the transport this needs — keeps it trivially testable. */
 export interface WorkspaceChangeProbe {
   gitStatus(): Promise<GitStatusResult>;
-  gitDiff?(options?: { staged?: boolean; path?: string; untracked?: boolean }): Promise<{ diff: string }>;
+  gitDiff?(options?: { staged?: boolean; path?: string; untracked?: boolean; base?: string }): Promise<{ diff: string }>;
+}
+
+/** Paths from a unified diff's `diff --git a/x b/y` headers (the b/ side). */
+export function pathsFromDiff(diff: string): string[] {
+  const paths = new Set<string>();
+  for (const line of diff.split("\n")) {
+    const match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+    if (!match) continue;
+    const unquote = (p: string) =>
+      p.startsWith('"') && p.endsWith('"') ? p.slice(1, -1) : p;
+    paths.add(unquote(match[2]));
+  }
+  return [...paths];
 }
 
 function diffLineCounts(diff: string): { additions: number; deletions: number } {
@@ -102,14 +115,29 @@ export async function computeWorkspaceChange(
     };
   }
 
-  const files = changedPathsFromStatus(status);
   let diff = "";
-  if (probe.gitDiff) {
+  /**
+   * Diff the working tree against the checkpoint SHA itself, not merely
+   * HEAD. Pre-mutation checkpoints are taken before EVERY mutation and
+   * each one commits the tree, so HEAD at run end is the checkpoint
+   * immediately preceding the LAST mutation — work committed into it by
+   * earlier mutations is invisible to a HEAD-only status. The baseline
+   * diff covers the whole run: a legitimate overwrite that nets out
+   * identical (or any later no-op mutation) can no longer make a real
+   * build look "unchanged".
+   */
+  let baseFiles: string[] | null = null;
+  if (probe.gitDiff && checkpoint.gitSha) {
     try {
-      diff = (await probe.gitDiff()).diff;
-      // Git does not include untracked files in `git diff`; append a real
-      // no-index diff for each newly-created path so the Mission never says
-      // a new file changed without showing its contents.
+      diff = (await probe.gitDiff({ base: checkpoint.gitSha })).diff;
+      baseFiles = pathsFromDiff(diff);
+    } catch {
+      baseFiles = null;
+    }
+    // Git does not include untracked files in `git diff`; append a real
+    // no-index diff for each newly-created path so the Mission never says
+    // a new file changed without showing its contents.
+    try {
       for (const path of status.untracked ?? []) {
         const untrackedDiff = await probe.gitDiff({ path, untracked: true });
         if (untrackedDiff.diff) diff = `${diff}${diff ? "\n" : ""}${untrackedDiff.diff}`;
@@ -122,10 +150,19 @@ export async function computeWorkspaceChange(
   }
   const counts = diffLineCounts(diff);
 
+  // When the baseline diff ran, it is authoritative for tracked changes —
+  // `git status` only enumerates uncommitted work, so its staged/modified
+  // lists would silently drop everything an intermediate checkpoint
+  // committed. Untracked paths still come from status either way.
+  const files =
+    baseFiles !== null
+      ? [...new Set([...baseFiles, ...(status.untracked ?? [])])].sort()
+      : changedPathsFromStatus(status);
+
   // `clean` is git's own verdict; the enumerated paths are the detail. They
   // should agree, and when they do not the presence of a path wins — a named
   // changed file is stronger evidence than a summary flag.
-  if (files.length === 0 && status.clean !== false) {
+  if (files.length === 0 && (baseFiles !== null || status.clean !== false)) {
     return {
       status: "unchanged",
       files: [],

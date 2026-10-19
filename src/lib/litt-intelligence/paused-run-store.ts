@@ -92,7 +92,16 @@ export type RunStatus = "processing" | "completed" | "failed" | null;
 export interface RunResult {
   finalText: string;
   stepsUsed: number;
-  toolCalls: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }>;
+  toolCalls: Array<{
+    toolId: string;
+    success: boolean;
+    summary: string;
+    mutating: boolean;
+    /** Workspace paths the call declared it would affect, when declared. */
+    paths?: string[];
+    /** Read-back verification of a reported mutation — see ToolCallEvidence. */
+    persisted?: boolean;
+  }>;
   cancelled: boolean;
   cancelReason?: string;
   pendingApproval?: {
