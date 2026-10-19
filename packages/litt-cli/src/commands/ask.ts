@@ -25,6 +25,7 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
+import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
 import { hasAnyProviderKey, resolveProviderAdapter, providerLabel, resolveIdleStallMs } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { probeLocalLane } from "../lib/local-lane.js";
@@ -188,6 +189,8 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
     console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
 
+    const toolCallFilter = createToolCallStreamFilter();
+
     const result = await runAgentLoop(question, {
       model,
       tools,
@@ -215,7 +218,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       store,
       onModelStream: (event) => {
         if (event.type === "delta") {
-          process.stdout.write(event.text);
+          // Suppress tool_call/json protocol markup — never dump model
+          // protocol internals to the user-facing transcript.
+          const visible = toolCallFilter.next(event.text);
+          if (visible) process.stdout.write(visible);
         }
       },
       onToolStream: (chunk: StreamChunk) => {
@@ -231,12 +237,21 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
           const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
           console.log(`\n${c.blue}○${c.reset} Tool call: ${c.bold}${toolId}${c.reset}`);
         } else if (event.subtype === "agent_tool_result") {
-          const success = (event.data as { success?: boolean }).success;
-          const icon = success ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
-          console.log(`${icon} Tool result`);
+          const data = event.data as {
+            toolId?: string;
+            status?: string;
+            success?: boolean;
+            message?: string;
+          };
+          const icon = data.success ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
+          console.log(
+            `${icon} ${data.toolId ?? "Tool"}: ${data.message ?? data.status ?? "No details"}`,
+          );
         }
       },
     });
+    const streamTail = toolCallFilter.flush();
+    if (streamTail) process.stdout.write(streamTail);
 
     const completionLabel = result.termination === "complete"
       ? `${c.green}■${c.reset} Agent completed`
