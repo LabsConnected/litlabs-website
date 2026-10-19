@@ -230,3 +230,21 @@ describe("computeMissionDelta — generated artifacts", () => {
     expect(delta.generated).toEqual([]); // unchanged across the mission
   });
 });
+
+// LiTT writes its own mission state to <project>/.litt/. A read-only
+// inspection in a fresh project reported "1 file changed" — that file was
+// LiTT's runtime state, not an edit the operator asked for.
+describe("LiTT's own .litt/ state is never an authored change", () => {
+  it("classifies .litt/ paths as generated", () => {
+    expect(isGeneratedArtifact(".litt/")).toBe(true);
+    expect(isGeneratedArtifact(".litt/mission_1.json")).toBe(true);
+    expect(isGeneratedArtifact("packages/app/.litt/mission_1.json")).toBe(true);
+    expect(isGeneratedArtifact("src/litt.ts")).toBe(false);
+  });
+
+  it("an inspection that only created .litt/ changed no files", () => {
+    const delta = computeMissionDelta([], [".litt/"]);
+    expect(delta.changed).toEqual([]);
+    expect(delta.generated).toEqual([".litt/"]);
+  });
+});

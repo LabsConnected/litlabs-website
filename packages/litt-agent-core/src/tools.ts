@@ -26,6 +26,8 @@ import {
   gitBranch,
   listFiles,
   readFile,
+  writeProjectFile,
+  editProjectFile,
   searchFiles,
   inspectPackageJson,
   runTypecheck,
@@ -106,6 +108,41 @@ const READ_FILE_DEF: ToolDefinition = {
   readOnly: true,
 };
 
+const WRITE_FILE_DEF: ToolDefinition = {
+  id: "project.write_file",
+  name: "write_file",
+  description:
+    "Create or overwrite a file with the given full content. Use this (not shell commands) to create files. " +
+    "Requires approval in ACT mode.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "File path relative to project root" },
+      content: { type: "string", description: "The complete new file content" },
+    },
+    required: ["path", "content"],
+  },
+  readOnly: false,
+};
+
+const EDIT_FILE_DEF: ToolDefinition = {
+  id: "project.edit_file",
+  name: "edit_file",
+  description:
+    "Edit a file by replacing one exact, unique occurrence of old_string with new_string. " +
+    "Use this (not shell commands) to change existing files. Requires approval in ACT mode.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "File path relative to project root" },
+      old_string: { type: "string", description: "Exact existing text to replace (must occur exactly once)" },
+      new_string: { type: "string", description: "Replacement text" },
+    },
+    required: ["path", "old_string", "new_string"],
+  },
+  readOnly: false,
+};
+
 const SEARCH_DEF: ToolDefinition = {
   id: "project.search",
   name: "search",
@@ -173,6 +210,31 @@ const READ_ONLY_META: ToolMetadata = {
   projectScoped: false,
   mutating: false,
   readOnly: true,
+};
+
+/** File mutation: the gateway's metadata policy applies — PLAN denies,
+ *  ACT requires human approval, AUTO needs a verified grant. */
+const WRITE_META: ToolMetadata = {
+  projectScoped: true,
+  mutating: true,
+  readOnly: false,
+};
+
+const writeFileHandler: ToolHandler = async (ctx, args) => {
+  const filePath = typeof args.path === "string" ? args.path : "";
+  if (typeof args.content !== "string") {
+    return { status: "failed", success: false, message: "Missing required arg: content (string)", data: {} };
+  }
+  return writeProjectFile(ctx.shell, filePath, args.content);
+};
+
+const editFileHandler: ToolHandler = async (ctx, args) => {
+  const filePath = typeof args.path === "string" ? args.path : "";
+  const oldString = typeof args.old_string === "string" ? args.old_string : "";
+  if (typeof args.new_string !== "string") {
+    return { status: "failed", success: false, message: "Missing required arg: new_string (string)", data: {} };
+  }
+  return editProjectFile(ctx.shell, filePath, oldString, args.new_string);
 };
 
 const statusHandler: ToolHandler = async (ctx) => {
@@ -286,6 +348,8 @@ const ENTRIES: Record<string, ToolEntry> = {
   "project.branch": { definition: BRANCH_DEF, handler: branchHandler, metadata: READ_ONLY_META },
   "project.list_files": { definition: LIST_FILES_DEF, handler: listFilesHandler, metadata: READ_ONLY_META },
   "project.read_file": { definition: READ_FILE_DEF, handler: readFileHandler, metadata: READ_ONLY_META },
+  "project.write_file": { definition: WRITE_FILE_DEF, handler: writeFileHandler, metadata: WRITE_META },
+  "project.edit_file": { definition: EDIT_FILE_DEF, handler: editFileHandler, metadata: WRITE_META },
   "project.search": { definition: SEARCH_DEF, handler: searchHandler, metadata: READ_ONLY_META },
   "project.inspect_package": { definition: INSPECT_PKG_DEF, handler: inspectPkgHandler, metadata: READ_ONLY_META },
   "project.check": { definition: CHECK_DEF, handler: checkHandler, metadata: READ_ONLY_META },

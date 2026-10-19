@@ -507,6 +507,100 @@ export async function readFile(
   }
 }
 
+/** Largest file the write tools will produce (1 MB). */
+const MAX_WRITE_BYTES = 1_000_000;
+
+function writeFailure(message: string): ToolResult {
+  return { status: "failed", success: false, message, data: {} };
+}
+
+/**
+ * Resolve a project-relative path for writing, or explain why it is refused.
+ *
+ * isSafePath() rejects absolute paths, traversal and sensitive files. On top
+ * of that the nearest existing ancestor (and the file itself, if present) is
+ * resolved through real paths, so a symlink or junction inside the project
+ * cannot redirect a write outside it.
+ */
+function resolveWritablePath(projectRoot: string, filePath: string): { ok: true; target: string } | { ok: false; reason: string } {
+  if (!filePath) return { ok: false, reason: "Missing required arg: path" };
+  if (!isSafePath(filePath)) return { ok: false, reason: `Blocked: ${filePath} is outside the project or matches a sensitive file pattern` };
+  const realRoot = fs.realpathSync(projectRoot);
+  const target = path.resolve(projectRoot, filePath);
+  let probe = target;
+  while (!fs.existsSync(probe)) {
+    const parent = path.dirname(probe);
+    if (parent === probe) break;
+    probe = parent;
+  }
+  const realProbe = fs.realpathSync(probe);
+  const rel = path.relative(realRoot, realProbe);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    return { ok: false, reason: `Blocked: ${filePath} resolves outside the project` };
+  }
+  return { ok: true, target };
+}
+
+/** Create or overwrite a project file with the given content. */
+export async function writeProjectFile(
+  shell: ShellExecutor,
+  filePath: string,
+  content: string,
+): Promise<ToolResult> {
+  try {
+    const resolved = resolveWritablePath(shell.cwd, filePath);
+    if (!resolved.ok) return writeFailure(resolved.reason);
+    const bytes = Buffer.byteLength(content, "utf8");
+    if (bytes > MAX_WRITE_BYTES) return writeFailure(`Content too large: ${bytes} bytes (max ${MAX_WRITE_BYTES})`);
+    if (fs.existsSync(resolved.target) && fs.statSync(resolved.target).isDirectory()) {
+      return writeFailure(`Cannot write: ${filePath} is a directory`);
+    }
+    const existed = fs.existsSync(resolved.target);
+    fs.mkdirSync(path.dirname(resolved.target), { recursive: true });
+    fs.writeFileSync(resolved.target, content, "utf8");
+    return {
+      status: "success",
+      success: true,
+      message: `${existed ? "Wrote" : "Created"} ${filePath} (${bytes} bytes)`,
+      data: { path: filePath, bytes, created: !existed },
+    };
+  } catch (err) {
+    return writeFailure(`Failed to write ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** Replace exactly one occurrence of oldString with newString in a project file. */
+export async function editProjectFile(
+  shell: ShellExecutor,
+  filePath: string,
+  oldString: string,
+  newString: string,
+): Promise<ToolResult> {
+  try {
+    const resolved = resolveWritablePath(shell.cwd, filePath);
+    if (!resolved.ok) return writeFailure(resolved.reason);
+    if (!oldString) return writeFailure("Missing required arg: old_string");
+    if (!fs.existsSync(resolved.target)) return writeFailure(`File not found: ${filePath}`);
+    const original = fs.readFileSync(resolved.target, "utf8");
+    const occurrences = original.split(oldString).length - 1;
+    if (occurrences === 0) return writeFailure(`old_string not found in ${filePath}`);
+    if (occurrences > 1) {
+      return writeFailure(`old_string appears ${occurrences} times in ${filePath}; include more surrounding text so it is unique`);
+    }
+    const updated = original.replace(oldString, () => newString);
+    if (Buffer.byteLength(updated, "utf8") > MAX_WRITE_BYTES) return writeFailure(`Result too large (max ${MAX_WRITE_BYTES} bytes)`);
+    fs.writeFileSync(resolved.target, updated, "utf8");
+    return {
+      status: "success",
+      success: true,
+      message: `Edited ${filePath} (1 replacement)`,
+      data: { path: filePath, replacements: 1 },
+    };
+  } catch (err) {
+    return writeFailure(`Failed to edit ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 /**
  * Search file contents using git grep.
  *

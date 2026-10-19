@@ -190,6 +190,14 @@ export interface MissionVerificationGateOptions {
   hasFailedHealthCheck?: () => boolean;
   /** Human summary of failed optional health checks. */
   healthSummary?: () => string;
+  /**
+   * True when at least one change actually landed. A mutating mission whose
+   * every change attempt failed is not provable: the full gate would only
+   * re-prove the untouched baseline. Defaults to true (no tracking).
+   */
+  hasSuccessfulMutation?: () => boolean;
+  /** Human summary of the failed change attempts. */
+  failedMutationSummary?: () => string;
 }
 
 export class MissionVerificationGate implements VerificationGateLike {
@@ -210,6 +218,8 @@ export class MissionVerificationGate implements VerificationGateLike {
   private readonly _healthRequested: () => boolean;
   private readonly _hasFailedHealthCheck: () => boolean;
   private readonly _healthSummary: () => string;
+  private readonly _hasSuccessfulMutation: () => boolean;
+  private readonly _failedMutationSummary: () => string;
 
   constructor(options: MissionVerificationGateOptions) {
     this._fullGate = options.fullGate;
@@ -227,11 +237,22 @@ export class MissionVerificationGate implements VerificationGateLike {
     this._healthRequested = options.healthRequested ?? (() => false);
     this._hasFailedHealthCheck = options.hasFailedHealthCheck ?? (() => false);
     this._healthSummary = options.healthSummary ?? (() => "");
+    this._hasSuccessfulMutation = options.hasSuccessfulMutation ?? (() => true);
+    this._failedMutationSummary = options.failedMutationSummary ?? (() => "");
   }
 
   async verify(): Promise<VerificationResult> {
-    // Mutating missions keep the full runtime gate — nothing changes.
     if (!this._isReadOnly()) {
+      // A change was attempted but none landed: the full gate would only
+      // re-prove the untouched baseline, so it must not decide.
+      if (!this._hasSuccessfulMutation()) {
+        const failed = this._failedMutationSummary();
+        return this._rejectEvidence(
+          "No project change was detected — no change tool succeeded and the workspace shows no new changes" +
+            (failed ? `. Failed change attempts: ${failed}` : "."),
+        );
+      }
+      // Mutating missions keep the full runtime gate — nothing changes.
       return this._fullGate.verify();
     }
 
@@ -374,6 +395,47 @@ export class MissionVerificationGate implements VerificationGateLike {
     return result;
   }
 
+  /** A failed evidence verdict, emitted through the same lifecycle events. */
+  private _rejectEvidence(message: string): VerificationResult {
+    const runId = `verify_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this._emit("verification_start", { runId, checks: ["evidence"] }, runId);
+    if (this._store) this._store.setPhase("verifying");
+    const check: CheckResult = {
+      id: "evidence",
+      status: "failed",
+      success: false,
+      exitCode: 1,
+      message,
+      durationMs: 0,
+      runId,
+      toolCallId: "",
+    };
+    this._emit("verification_check_start", { runId, toolCallId: "", check: "evidence", label: "Evidence" }, runId, "");
+    this._emit(
+      "verification_check_result",
+      { runId, toolCallId: "", check: "evidence", status: "failed", success: false, exitCode: 1, durationMs: 0 },
+      runId,
+      "",
+    );
+    const result: VerificationResult = {
+      proven: false,
+      status: "failed",
+      checks: [check],
+      totalDurationMs: 0,
+      message,
+      runId,
+      ranChecks: ["evidence"],
+      skippedChecks: [],
+    };
+    this._emit(
+      "verification_result",
+      { runId, proven: false, status: "failed", ranChecks: result.ranChecks, skippedChecks: [], message, totalDurationMs: 0 },
+      runId,
+    );
+    if (this._store) this._store.setPhase("failed");
+    return result;
+  }
+
   private _emit(
     subtype: string,
     data: Record<string, unknown>,
@@ -428,6 +490,10 @@ export interface MissionEvidenceTracker {
   ): void;
   /** True when the mission mutated the project. */
   isReadOnly(): boolean;
+  /** True when at least one mutating tool call SUCCEEDED (a change landed). */
+  hasSuccessfulMutation(): boolean;
+  /** Human summary of failed mutating tool calls. */
+  failedMutationSummary(): string;
   /** True when at least one OBJECTIVE tool result succeeded. */
   hasSuccessfulEvidence(): boolean;
   /**
@@ -506,6 +572,45 @@ export async function markInspectionStepsComplete(
   }
 }
 
+/**
+ * Settle the plan steps of a MUTATING mission whose full verification gate
+ * proved the result, so the canonical mission can reach a terminal state.
+ *
+ * RuntimeStore.completeMission() refuses while any step is not passed or
+ * skipped. Without settling, a proven mission sat in "verifying" forever
+ * while the UI claimed Complete.
+ *
+ * Only call this when the gate proved the result AND a change actually
+ * landed (the gate rejects missions whose every change attempt failed).
+ * Steps that are not passed are marked SKIPPED — never "passed":
+ *   - failed steps: superseded attempts (an edit retried in a later step,
+ *     an optional typecheck in a plain-JS project). They are returned so
+ *     the caller discloses them instead of hiding them behind a green tick.
+ *   - never-reached steps (pending / blocked): the gate is the proof.
+ */
+export async function settleProvenMutatingSteps(
+  store: RuntimeStore,
+  reason: string,
+): Promise<{ failedSteps: string[] }> {
+  const mission = store.getMission();
+  if (!mission) return { failedSteps: [] };
+  const failedSteps = mission.steps
+    .filter((s) => s.status === "failed")
+    .map((s) => (s.failureReason ? `${s.title} (${s.failureReason})` : s.title));
+  for (const step of mission.steps) {
+    if (step.status === "failed") {
+      await store.updateMissionStepStatus(step.id, "skipped", {
+        verificationEvidence: `Superseded failed attempt — ${reason}`,
+      }).catch(() => {});
+    } else if (step.status === "pending" || step.status === "blocked") {
+      await store.updateMissionStepStatus(step.id, "skipped", {
+        verificationEvidence: `Not reached — ${reason}`,
+      }).catch(() => {});
+    }
+  }
+  return { failedSteps };
+}
+
 /** Bounded history — long missions must not grow memory forever. */
 const MAX_EVIDENCE_RESULTS = 200;
 
@@ -525,6 +630,12 @@ export function createMissionEvidenceTracker(
   options?: MissionEvidenceTrackerOptions,
 ): MissionEvidenceTracker {
   let mutated = false;
+  // A mutating CALL makes the mission "mutating" (it may have changed
+  // something), but only a successful mutating RESULT proves a change
+  // landed. Calls are matched to results in order, per tool id.
+  const pendingMutations: string[] = [];
+  let successfulMutations = 0;
+  const failedMutations: string[] = [];
   const cwd = options?.cwd;
   const onMutation = options?.onMutation;
   // A tool is an optional health check only if its CALL said so; the
@@ -542,9 +653,12 @@ export function createMissionEvidenceTracker(
   return {
     recordToolCall(toolId: string, inputs?: Record<string, unknown> | null): void {
       if (isHealthCheckTool(toolId, inputs)) healthTools.add(toolId);
-      if (!mutated && isMutatingToolCall(toolId, mutationTools, inputs, cwd)) {
-        mutated = true;
-        onMutation?.();
+      if (isMutatingToolCall(toolId, mutationTools, inputs, cwd)) {
+        pendingMutations.push(toolId);
+        if (!mutated) {
+          mutated = true;
+          onMutation?.();
+        }
       }
     },
     recordToolResult(
@@ -562,9 +676,23 @@ export function createMissionEvidenceTracker(
         health: healthTools.has(toolId),
       });
       if (results.length > MAX_EVIDENCE_RESULTS) results.shift();
+      const pending = pendingMutations.indexOf(toolId);
+      if (pending !== -1) {
+        pendingMutations.splice(pending, 1);
+        if (success) successfulMutations++;
+        else if (failedMutations.length < MAX_EVIDENCE_RESULTS) {
+          failedMutations.push(`${toolId}: ${message.slice(0, 100)}`);
+        }
+      }
     },
     isReadOnly(): boolean {
       return !mutated;
+    },
+    hasSuccessfulMutation(): boolean {
+      return successfulMutations > 0;
+    },
+    failedMutationSummary(): string {
+      return failedMutations.join("; ");
     },
     hasSuccessfulEvidence(): boolean {
       return results.some((r) => r.success && !r.health);

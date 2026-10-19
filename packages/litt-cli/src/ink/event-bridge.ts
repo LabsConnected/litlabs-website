@@ -23,6 +23,7 @@ import type { RuntimeState } from "@litt/agent-core";
 import type { CockpitStore, ActivityEntry, HoloState } from "./cockpit-store.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import { toolKind, toolPhase, humanizeToolLabel } from "./workstream-normalizer.js";
+import { applyMissionLifecycle } from "./workstream-lifecycle.js";
 
 let entryCounter = 0;
 
@@ -323,6 +324,7 @@ export function useEventBridge(
     // The normalization layer (workstream-normalizer.ts) maps raw tool
     // names to semantic kinds + human-readable labels.
     store.actions.workstreamPush((ws) => {
+      if (applyMissionLifecycle(ws, event.type, event.data as Record<string, unknown>)) return;
       switch (event.type) {
         case "run.started": {
           const cmd = String(event.data.command ?? "task");

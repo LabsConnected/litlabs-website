@@ -74,28 +74,29 @@ export interface TransportProjection {
 export function deriveTransport(input: TransportInput): TransportProjection {
   const { localRuntime, remoteRuntime, signedIn } = input;
 
+  // ─── Footer: local TOOL availability (never an execution claim) ───
+  // Independent of auth: local tools and the machine lane run signed out.
+  const footerLabel = localRuntime === "ready" ? "TOOLS"
+    : localRuntime === "error" ? "TOOLS ERR"
+    : "TOOLS…";
+  const footerSeverity: TransportProjection["footerSeverity"] =
+    localRuntime === "ready" ? "ok" : localRuntime === "error" ? "error" : "pending";
+
   if (signedIn === false) {
     return {
       executionPath: "none",
       headerLabel: "SIGNED OUT",
-      footerLabel: "TOOLS OFF",
+      footerLabel,
       remoteActive: false,
       showRemote: false,
       headerSeverity: "error",
-      footerSeverity: "error",
+      footerSeverity,
     };
   }
 
   const showRemote = remoteRuntime !== "offline";
   // REMOTE is claimed ONLY on a fully established connection.
   const remoteActive = remoteRuntime === "connected";
-
-  // ─── Footer: local TOOL availability (never an execution claim) ───
-  const footerLabel = localRuntime === "ready" ? "TOOLS"
-    : localRuntime === "error" ? "TOOLS ERR"
-    : "TOOLS…";
-  const footerSeverity: TransportProjection["footerSeverity"] =
-    localRuntime === "ready" ? "ok" : localRuntime === "error" ? "error" : "pending";
 
   // ─── Header: the actual execution path ────────────────────────────
   if (!showRemote) {

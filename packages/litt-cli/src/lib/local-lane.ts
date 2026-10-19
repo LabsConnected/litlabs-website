@@ -204,10 +204,13 @@ export function selectLocalModel(models: string[], preferred?: string): string |
 /**
  * Preference order for the local lane. litt-coder first: it is the build
  * tuned for this tool, so when the operator has installed it they meant
- * for LiTT to use it.
+ * for LiTT to use it. litt-coder:latest (Qwen3 4B, tool-capable) ranks
+ * above litt-coder:3b (Qwen2.5), which does not reliably call tools.
  */
 const LOCAL_MODEL_PREFERENCE = [
+  "litt-coder:quick",
   "litt-coder:fast",
+  "litt-coder:latest",
   "litt-coder:3b",
   "qwen2.5-coder:3b",
   "qwen3:4b",

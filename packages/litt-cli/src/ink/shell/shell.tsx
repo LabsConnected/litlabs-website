@@ -38,6 +38,7 @@ import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 import type { WorkstreamSnapshot } from "../workstream-store.js";
 import type { ExecutionTarget } from "../../lib/execution-target.js";
 import { WorkstreamDock } from "../workstream-dock.js";
+import { isWorkstreamLive } from "../workstream-lifecycle.js";
 
 /** Rows consumed by fixed chrome below the content region:
  *  composer margin(1) + composer(1) + status margin(1) + divider(1) + 2 status lines. */
@@ -135,10 +136,9 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   // ── Workstream dock: when LiTT is actively working, the dock becomes
   //    the primary center view. The transcript still renders below it
   //    (conversation record), but the workstream is the hero.
-  //    When idle, the Welcome or Transcript owns the center.
-  const hasWorkstream = workstream != null
-    && workstream.activities.length > 0
-    && (workstream.hasRunning || workstream.overallStatus !== "idle");
+  //    When idle or finished, the Welcome or Transcript owns the center —
+  //    a finished mission's answer lives in the transcript.
+  const hasWorkstream = isWorkstreamLive(workstream);
 
   // Guard for harnesses/surfaces that don't wire scroll yet.
   const anchor = transcriptAnchor ?? null;
