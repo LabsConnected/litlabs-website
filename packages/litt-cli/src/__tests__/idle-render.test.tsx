@@ -40,7 +40,7 @@ const stripAnsi = (s: string) =>
 let server: http.Server;
 let url: string;
 let littHome: string;
-const MANAGED = ["LITT_LOCAL_MODE", "LITT_OLLAMA_URL", "LITT_MODEL", "LITT_HOME", "LITT_TARGET_OVERRIDE"];
+const MANAGED = ["LITT_LOCAL_MODE", "LITT_OLLAMA_URL", "LITT_MODEL", "LITT_HOME", "LITT_TARGET_OVERRIDE", "LITT_REDUCED_MOTION"];
 const saved: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
@@ -62,6 +62,7 @@ beforeAll(async () => {
   process.env.LITT_LOCAL_MODE = "1";
   process.env.LITT_OLLAMA_URL = url;
   delete process.env.LITT_TARGET_OVERRIDE;
+  process.env.LITT_REDUCED_MOTION = "1";
 });
 
 afterAll(async () => {
