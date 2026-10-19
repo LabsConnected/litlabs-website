@@ -140,7 +140,7 @@ describe("reserveCredits — canonical reserve_bits flow", () => {
   it("returns 402 for insufficient balance", async () => {
     mockUserFound();
     mockRpc.mockResolvedValue({
-      data: { success: false, reason: "insufficient_balance", available_after: 0 },
+      data: [{ success: false, reservation_id: null, reason: "insufficient_balance", available_after: 0 }],
       error: null,
     });
 
@@ -198,12 +198,12 @@ describe("reserveCredits — canonical reserve_bits flow", () => {
   it("succeeds when reserve_bits and agent_runs insert both work", async () => {
     mockUserFound();
     mockRpc.mockResolvedValue({
-      data: {
+      data: [{
         success: true,
         reservation_id: "res-uuid-123",
         available_after: 90,
         reason: "reserved",
-      },
+      }],
       error: null,
     });
 
@@ -217,7 +217,7 @@ describe("reserveCredits — canonical reserve_bits flow", () => {
   it("calls reserve_bits with correct parameters", async () => {
     mockUserFound();
     mockRpc.mockResolvedValue({
-      data: { success: true, reservation_id: "res-1", available_after: 90, reason: "reserved" },
+      data: [{ success: true, reservation_id: "res-1", available_after: 90, reason: "reserved" }],
       error: null,
     });
 
@@ -234,12 +234,12 @@ describe("reserveCredits — canonical reserve_bits flow", () => {
     mockAgentRunsInsertFails();
     // reserve_bits succeeds
     mockRpc.mockResolvedValueOnce({
-      data: { success: true, reservation_id: "res-uuid-fail", available_after: 90, reason: "reserved" },
+      data: [{ success: true, reservation_id: "res-uuid-fail", available_after: 90, reason: "reserved" }],
       error: null,
     });
     // release_bits succeeds
     mockRpc.mockResolvedValueOnce({
-      data: { success: true, released_amount: 10, available_after: 100, reason: "released" },
+      data: [{ success: true, released_amount: 10, available_after: 100, reason: "released" }],
       error: null,
     });
 
@@ -255,12 +255,12 @@ describe("reserveCredits — canonical reserve_bits flow", () => {
   it("handles idempotent retry (already_reserved)", async () => {
     mockUserFound();
     mockRpc.mockResolvedValue({
-      data: {
+      data: [{
         success: true,
         reservation_id: "res-existing",
         available_after: 90,
         reason: "already_reserved",
-      },
+      }],
       error: null,
     });
 
@@ -278,13 +278,13 @@ describe("settleRun — canonical settle_bits/release_bits flow", () => {
   it("calls settle_bits on completed run with actual cost", async () => {
     mockSettleChains();
     mockRpc.mockResolvedValue({
-      data: {
+      data: [{
         success: true,
         settled_amount: 5,
         released_amount: 5,
         available_after: 95,
         reason: "settled",
-      },
+      }],
       error: null,
     });
 
@@ -307,7 +307,7 @@ describe("settleRun — canonical settle_bits/release_bits flow", () => {
   it("calls release_bits on failed run", async () => {
     mockSettleChains();
     mockRpc.mockResolvedValue({
-      data: { success: true, released_amount: 10, available_after: 100, reason: "released" },
+      data: [{ success: true, released_amount: 10, available_after: 100, reason: "released" }],
       error: null,
     });
 
@@ -329,7 +329,7 @@ describe("settleRun — canonical settle_bits/release_bits flow", () => {
   it("calls release_bits on cancelled run", async () => {
     mockSettleChains();
     mockRpc.mockResolvedValue({
-      data: { success: true, released_amount: 10, available_after: 100, reason: "released" },
+      data: [{ success: true, released_amount: 10, available_after: 100, reason: "released" }],
       error: null,
     });
 
@@ -349,7 +349,7 @@ describe("settleRun — canonical settle_bits/release_bits flow", () => {
   it("releases reservation on completed run with 0 actual cost (free run)", async () => {
     mockSettleChains();
     mockRpc.mockResolvedValue({
-      data: { success: true, released_amount: 10, available_after: 100, reason: "released" },
+      data: [{ success: true, released_amount: 10, available_after: 100, reason: "released" }],
       error: null,
     });
 
@@ -406,13 +406,13 @@ describe("settleRun — canonical settle_bits/release_bits flow", () => {
   it("handles settle_bits returning failure (overage rejected)", async () => {
     mockSettleChains();
     mockRpc.mockResolvedValue({
-      data: {
+      data: [{
         success: false,
         settled_amount: 0,
         released_amount: 0,
         available_after: 90,
         reason: "overage_rejected",
-      },
+      }],
       error: null,
     });
 
@@ -445,7 +445,7 @@ describe("settleRun — canonical settle_bits/release_bits flow", () => {
   it("updates agent_runs row with final status", async () => {
     mockSettleChains();
     mockRpc.mockResolvedValue({
-      data: { success: true, settled_amount: 5, released_amount: 5, available_after: 95, reason: "settled" },
+      data: [{ success: true, settled_amount: 5, released_amount: 5, available_after: 95, reason: "settled" }],
       error: null,
     });
 

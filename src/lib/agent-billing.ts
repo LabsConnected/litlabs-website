@@ -59,6 +59,63 @@ export interface SettleResult {
 }
 
 /**
+ * One row from reserve_bits / settle_bits / release_bits.
+ * Those RPCs are RETURNS TABLE, so PostgREST sends an array. A bare
+ * object is accepted for older callers. `success` is only set when the
+ * payload actually carried a boolean.
+ */
+interface BitsRpcRow {
+  success: boolean;
+  reason: string | null;
+  reservationId: string | null;
+  settledAmount: number | null;
+  releasedAmount: number | null;
+}
+
+type BitsRpcParse =
+  | { ok: true; row: BitsRpcRow }
+  | { ok: false; reservationId: string | null };
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function reservationIdOf(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * Normalize a PostgREST payload for a RETURNS TABLE bits RPC.
+ *
+ * An array uses row 0. A single object is accepted unchanged. An empty
+ * array, null, a non-object, or a row with no boolean `success` fails
+ * closed: the caller must not assume a charge or a release. A
+ * reservation id found on a rejected payload is kept so a hold the
+ * caller will not use can still be released.
+ */
+function unwrapBitsRpcRow(data: unknown): BitsRpcParse {
+  const candidate = Array.isArray(data) ? data[0] : data;
+  if (candidate == null || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return { ok: false, reservationId: null };
+  }
+  const record = candidate as Record<string, unknown>;
+  const reservationId = reservationIdOf(record.reservation_id);
+  if (typeof record.success !== "boolean") {
+    return { ok: false, reservationId };
+  }
+  return {
+    ok: true,
+    row: {
+      success: record.success,
+      reason: typeof record.reason === "string" ? record.reason : null,
+      reservationId,
+      settledAmount: finiteNumber(record.settled_amount),
+      releasedAmount: finiteNumber(record.released_amount),
+    },
+  };
+}
+
+/**
  * Reserve BITS BEFORE the model call.
  *
  * Flow:
@@ -156,8 +213,30 @@ export async function reserveCredits(
       };
     }
 
-    if (!reserveData?.success) {
-      const reason = reserveData?.reason ?? "unknown";
+    const parsed = unwrapBitsRpcRow(reserveData);
+    if (parsed.ok && parsed.row.success && parsed.row.reservationId) {
+      reservationId = parsed.row.reservationId;
+    } else if (
+      parsed.ok &&
+      parsed.row.reason === "already_reserved" &&
+      parsed.row.reservationId
+    ) {
+      // Idempotent retry — the original reservation already exists.
+      reservationId = parsed.row.reservationId;
+    } else {
+      // Fail closed. If the rejected payload still names a hold, release
+      // it so a reservation we will not use cannot stay stuck.
+      const leakedId = parsed.ok ? parsed.row.reservationId : parsed.reservationId;
+      if (leakedId) {
+        await confirmRelease(
+          leakedId,
+          ctx.idempotencyKey + ":release-on-reserve-fail",
+          estimatedCredits,
+          "release_after_reserve_failure",
+          ctx,
+        );
+      }
+      const reason = parsed.ok ? (parsed.row.reason ?? "unknown") : "unknown";
       if (reason === "insufficient_balance") {
         return {
           ok: false,
@@ -168,22 +247,14 @@ export async function reserveCredits(
           reservedCredits: 0,
         };
       }
-      // Idempotent retry — reservation already exists
-      if (reason === "already_reserved") {
-        reservationId = reserveData.reservation_id;
-        // Fall through to create/find the run row
-      } else {
-        return {
-          ok: false,
-          runId: null,
-          reservationId: null,
-          status: 503,
-          error: `Credit reservation failed: ${reason}`,
-          reservedCredits: 0,
-        };
-      }
-    } else {
-      reservationId = reserveData.reservation_id;
+      return {
+        ok: false,
+        runId: null,
+        reservationId: null,
+        status: 503,
+        error: `Credit reservation failed: ${reason}`,
+        reservedCredits: 0,
+      };
     }
   }
 
@@ -212,20 +283,15 @@ export async function reserveCredits(
     .single();
 
   if (runError) {
-    // Run-row insert failed — release the reservation if it was made
+    // Run-row insert failed — release the reservation if it was made.
     if (reservationId && estimatedCredits > 0) {
-      const { error: releaseErr } = await supabaseAdmin.rpc("release_bits", {
-        p_reservation_id: reservationId,
-        p_idempotency_key: ctx.idempotencyKey + ":release-on-insert-fail",
-      });
-      if (releaseErr) {
-        console.error(
-          `[agent-billing] CRITICAL: run insert failed AND release failed. ` +
-          `User ${ctx.clerkId} may have ${estimatedCredits} BITS stuck in reservation ${reservationId}. ` +
-          `Error: ${releaseErr.message}`,
-        );
-        await createReconciliationRecord(ctx, estimatedCredits, "release_after_insert_failure", releaseErr.message, reservationId);
-      }
+      await confirmRelease(
+        reservationId,
+        ctx.idempotencyKey + ":release-on-insert-fail",
+        estimatedCredits,
+        "release_after_insert_failure",
+        ctx,
+      );
     }
     return { ok: false, runId: null, reservationId: null, status: 500, error: runError.message, reservedCredits: 0 };
   }
@@ -263,6 +329,16 @@ export async function settleRun(
 
   let creditsCharged = 0;
   let creditsRefunded = 0;
+  // A bits RPC that does not positively succeed must not be recorded as
+  // a charge or a release. The run row is still updated below.
+  let billingAccepted = true;
+  const billingCtx: AgentRunContext = {
+    clerkId: "",
+    agentInstanceId: "",
+    agentId: null,
+    agentVersionId: null,
+    idempotencyKey: runId,
+  };
 
   if (result.status === "completed" && reservationId && result.actualCredits > 0) {
     // Settle: debit actual cost, release remainder. The amount is capped
@@ -281,58 +357,59 @@ export async function settleRun(
       p_description: `Agent run settled: ${runId}`,
     });
 
-    if (settleError) {
-      console.error(`[agent-billing] CRITICAL: settle_bits failed for run ${runId}. Error: ${settleError.message}`);
+    const parsed = unwrapBitsRpcRow(settleData);
+    // success:false, an empty/null/malformed payload, a transport error,
+    // or a success row with no settled_amount are all "not charged".
+    if (settleError || !parsed.ok || !parsed.row.success || parsed.row.settledAmount == null) {
+      billingAccepted = false;
+      const message = settleError
+        ? settleError.message
+        : !parsed.ok
+          ? "invalid_settlement_response"
+          : !parsed.row.success
+            ? (parsed.row.reason ?? "unknown")
+            : "settled_amount_missing";
+      console.error(`[agent-billing] settle_bits did not confirm a debit for run ${runId}: ${message}`);
       await createReconciliationRecord(
-        { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
+        billingCtx,
         result.actualCredits,
-        "settle_failed",
-        settleError.message,
+        settleError ? "settle_failed" : "settle_rejected",
+        message,
         reservationId,
       );
-    } else if (settleData?.success) {
-      creditsCharged = settleData.settled_amount;
-      creditsRefunded = settleData.released_amount;
     } else {
-      console.error(`[agent-billing] settle_bits returned failure for run ${runId}: ${settleData?.reason}`);
-      await createReconciliationRecord(
-        { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
-        result.actualCredits,
-        "settle_rejected",
-        settleData?.reason ?? "unknown",
-        reservationId,
-      );
+      creditsCharged = parsed.row.settledAmount;
+      creditsRefunded = parsed.row.releasedAmount ?? 0;
     }
   } else if (result.status !== "completed" && reservationId && reservedCredits > 0) {
-    // Release: execution failed, return all reserved BITS
-    const { error: releaseError } = await supabaseAdmin.rpc("release_bits", {
-      p_reservation_id: reservationId,
-      p_idempotency_key: runId + ":release",
-    });
-
-    if (releaseError) {
-      console.error(`[agent-billing] CRITICAL: release_bits failed for run ${runId}. Error: ${releaseError.message}`);
-      await createReconciliationRecord(
-        { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
-        reservedCredits,
-        "release_failed",
-        releaseError.message,
-        reservationId,
-      );
-    } else {
+    // Release: execution failed, return all reserved BITS. Only a
+    // confirmed success row counts as released.
+    const released = await confirmRelease(
+      reservationId,
+      runId + ":release",
+      reservedCredits,
+      "release_failed",
+      billingCtx,
+    );
+    if (released) {
       creditsRefunded = reservedCredits;
+    } else {
+      billingAccepted = false;
     }
   } else if (result.status === "completed" && result.actualCredits === 0) {
     // Free run — nothing to settle, but release the reservation if one was made
     if (reservationId && reservedCredits > 0) {
-      const { error: releaseError } = await supabaseAdmin.rpc("release_bits", {
-        p_reservation_id: reservationId,
-        p_idempotency_key: runId + ":release-free",
-      });
-      if (releaseError) {
-        console.error(`[agent-billing] release_bits failed for free run ${runId}. Error: ${releaseError.message}`);
-      } else {
+      const released = await confirmRelease(
+        reservationId,
+        runId + ":release-free",
+        reservedCredits,
+        "release_failed",
+        billingCtx,
+      );
+      if (released) {
         creditsRefunded = reservedCredits;
+      } else {
+        billingAccepted = false;
       }
     }
   }
@@ -370,6 +447,9 @@ export async function settleRun(
   // settle. Best-effort — never breaks settlement.
   await emitSettleMetering(runId, result, creditsCharged).catch(() => {});
 
+  if (!billingAccepted) {
+    return { ok: false, runId, reservationId, creditsCharged, creditsRefunded };
+  }
   return { ok: true, runId, reservationId, creditsCharged, creditsRefunded };
 }
 
@@ -566,6 +646,37 @@ export async function completeAgentRun(
   );
 
   return { runId, ok: settleResult.ok, creditsCharged: settleResult.creditsCharged };
+}
+
+/**
+ * Call release_bits and accept it only when the unwrapped row says
+ * success. Transport errors, empty/null/malformed payloads, and
+ * success:false are not a release — no amount is assumed returned.
+ */
+async function confirmRelease(
+  reservationId: string,
+  idempotencyKey: string,
+  credits: number,
+  reconcileReason: string,
+  ctx: AgentRunContext,
+): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+  const { data, error } = await supabaseAdmin.rpc("release_bits", {
+    p_reservation_id: reservationId,
+    p_idempotency_key: idempotencyKey,
+  });
+  const parsed = unwrapBitsRpcRow(data);
+  if (!error && parsed.ok && parsed.row.success) {
+    return true;
+  }
+  const message = error?.message
+    ?? (!parsed.ok ? "invalid_release_response" : (parsed.row.reason ?? "unknown"));
+  console.error(
+    `[agent-billing] CRITICAL: release_bits did not confirm a release for ${reservationId} ` +
+    `(${credits} BITS, key ${idempotencyKey}). Error: ${message}`,
+  );
+  await createReconciliationRecord(ctx, credits, reconcileReason, message, reservationId);
+  return false;
 }
 
 /**
