@@ -156,11 +156,6 @@ function mockSucceededRefunds(
   });
 }
 
-const PLAN_ALLOWANCES: Record<string, number> = {
-  creator_beta: 7500,
-  pro_builder_beta: 18000,
-};
-
 type SubscriptionFixture = {
   user_id: string;
   plan: string;
