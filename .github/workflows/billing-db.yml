@@ -11,6 +11,7 @@ on:
       - main
       - cursor/stripe-658-hardening-c039
       - fix/stripe-webhook-grant-race
+      - cursor/billing-paid-beta-remediation
   workflow_dispatch:
 
 concurrency:
@@ -108,3 +109,4 @@ jobs:
           run_required tests/billing/concurrent-subscription-conflict.integration.test.ts
           run_required tests/stripe-webhook-local-db.test.ts
           run_required tests/billing/stripe-event-claim-race.integration.test.ts
+          run_required tests/billing/settled-invoice-convergence.integration.test.ts

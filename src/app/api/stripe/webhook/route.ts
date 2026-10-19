@@ -1,4 +1,5 @@
-// Stripe webhook handler — idempotent event processing, plan-based credit grants
+// Stripe webhook handler — idempotent event processing.
+// Subscription credits are granted only from a settled invoice.paid, once per invoice id.
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import {
@@ -88,7 +89,7 @@ async function applySubscriptionEvent(
     periodEnd: string | null;
     cancelAtPeriodEnd: boolean | null;
     incomingPlan: string | null;
-    grantMode: "none" | "upgrade_delta" | "invoice_full";
+    grantMode: "none" | "invoice_full";
     grantAmount: number | null;
     grantIdempotencyKey: string | null;
     grantDescription: string | null;
@@ -330,15 +331,23 @@ function priceIdFromSubscription(sub: Stripe.Subscription): string | null {
   );
 }
 
-function priceIdFromInvoice(inv: Stripe.Invoice): string | null {
-  for (const line of inv.lines?.data ?? []) {
+type InvoiceLineCredit = {
+  plan: PlanId | null;
+  amount: number | null;
+};
+
+/** Every invoice line that names a configured price, with its signed amount. */
+function invoiceLineCredits(inv: Stripe.Invoice): InvoiceLineCredit[] {
+  return (inv.lines?.data ?? []).map((line) => {
     const carrier = line as Stripe.InvoiceLineItem & PriceCarrier;
-    const id =
+    const priceId =
       priceIdOf(carrier.price) ||
       priceIdOf(carrier.pricing?.price_details?.price);
-    if (id) return id;
-  }
-  return null;
+    return {
+      plan: planIdFromPrice(priceId),
+      amount: typeof line.amount === "number" ? line.amount : null,
+    };
+  });
 }
 
 function planIdFromMetadata(raw: unknown): PlanId | null {
@@ -394,8 +403,8 @@ function resolveBillablePlan(
  * #662 (head 702b9bbd, which contains #658's grant-race commits) still
  * throws when metadata and price disagree inside resolveBillablePlan.
  * Subscription events go through this function instead: the price wins.
- * A non-proration invoice.paid still throws if its price disagrees with
- * the plan stored on the row. Unmapped prices are still not guessed.
+ * A settled invoice grants the plan on that invoice. The stored row is not
+ * the source of the credit amount. Unmapped prices are still not guessed.
  */
 function resolveSubscriptionPlan(
   metadataPlan: unknown,
@@ -412,6 +421,37 @@ function subscriptionCreditAllowance(plan: string | null | undefined): number {
   const def = PLANS[plan as PlanId];
   if (def.billingType !== "subscription" || def.monthlyCredits <= 0) return 0;
   return def.monthlyCredits;
+}
+
+/**
+ * Credit amount for one settled subscription invoice.
+ * A base or renewal invoice grants that invoice's plan allowance.
+ * A subscription_update invoice grants the upgrade delta only when its
+ * lines show a negative amount on the old price and a positive amount on
+ * the higher new price. Anything else, including a plan change that has
+ * not settled, grants nothing. The figure does not read the stored plan
+ * when the invoice itself names a price.
+ */
+function settledInvoiceCredit(
+  inv: Stripe.Invoice,
+  storedPlan: string | null | undefined,
+  context: string,
+): { amount: number; plan: PlanId; kind: "base" | "upgrade" } | null {
+  if (inv.billing_reason === "subscription_update") {
+    const lines = invoiceLineCredits(inv);
+    const previous = lines.find((line) => line.plan && (line.amount ?? 0) < 0);
+    const next = lines.find((line) => line.plan && (line.amount ?? 0) > 0);
+    if (!previous?.plan || !next?.plan || previous.plan === next.plan) return null;
+    const delta =
+      subscriptionCreditAllowance(next.plan) - subscriptionCreditAllowance(previous.plan);
+    if (delta <= 0) return null;
+    return { amount: delta, plan: requireSubscriptionGrantPlan(next.plan, context), kind: "upgrade" };
+  }
+  const priced = invoiceLineCredits(inv).find((line) => line.plan)?.plan ?? null;
+  const plan = requireSubscriptionGrantPlan(priced ?? storedPlan, context);
+  const amount = subscriptionCreditAllowance(plan);
+  if (amount <= 0) return null;
+  return { amount, plan, kind: "base" };
 }
 
 function requireSubscriptionGrantPlan(
@@ -1166,8 +1206,8 @@ export async function POST(req: NextRequest) {
             `[stripe] ${event.type} ${sub.id}: cannot resolve the customer to a user`,
           );
         }
-        // Identity, ordering, the plan write, and any upgrade delta run in
-        // one locked transaction. A conflict throws so this delivery is 500.
+        // Identity, ordering, and the plan write run in one locked transaction.
+        // This event does not grant credits. A conflict throws so this delivery is 500.
         let applied = sub;
         let authoritative = false;
         let settled = false;
@@ -1180,7 +1220,6 @@ export async function POST(req: NextRequest) {
           );
           const periodEndUnix = applied.items?.data?.[0]?.current_period_end;
           const periodStartUnix = applied.items?.data?.[0]?.current_period_start;
-          const periodToken = periodEndUnix ?? "na";
           const decision = await applySubscriptionEvent(sb, {
             userId: subUserId,
             incomingSubscriptionId: sub.id,
@@ -1201,11 +1240,11 @@ export async function POST(req: NextRequest) {
             periodEnd: unixSecondsToIso(periodEndUnix),
             cancelAtPeriodEnd: applied.cancel_at_period_end === true,
             incomingPlan: planId,
-            grantMode: event.type === "customer.subscription.updated" ? "upgrade_delta" : "none",
+            grantMode: "none",
             grantAmount: null,
-            grantIdempotencyKey: `plan_upgrade_${sub.id}_${periodToken}_${planId}`,
+            grantIdempotencyKey: null,
             grantDescription: null,
-            grantReferenceId: `period_plan_${sub.id}_${periodToken}_${planId}`,
+            grantReferenceId: null,
             grantExpiresAt: null,
             skipGrantIdempotencyKey: null,
           });
@@ -1451,39 +1490,30 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.paid ${event.id}: subscription status re-read failed: ${message}`,
           );
         }
-        // A proration invoice must not grant the full monthly amount.
-        // The price check stays after this branch: a proration whose price
-        // disagrees with the stored plan is not a failed renewal.
-        const isProration = inv.billing_reason === "subscription_update";
+        // The credit is a function of this invoice alone. A base or renewal
+        // invoice grants that price's allowance. An upgrade invoice grants
+        // the delta only when Stripe settled the proration. A plan change
+        // that has not been paid grants nothing, and the stored plan cannot
+        // change the amount.
+        const settled = settledInvoiceCredit(inv, invMatch.plan, `invoice.paid ${event.id}`);
         let grantMode: "none" | "invoice_full" = "none";
         let grantAmount: number | null = null;
         let grantKey: string | null = null;
         let grantDescription: string | null = null;
         let grantReferenceId: string | null = null;
         let grantExpiresAt: string | null = null;
-        let skipGrantKey: string | null = null;
-        let planForCall = invMatch.plan;
-        if (!isProration) {
-          const planId = requireSubscriptionGrantPlan(
-            invMatch.plan,
-            `invoice.paid ${event.id}`,
-          );
-          const pricedPlan = planIdFromPrice(priceIdFromInvoice(inv));
-          if (pricedPlan && pricedPlan !== planId) {
-            throw new Error(
-              `[stripe] invoice.paid ${event.id}: price resolves to ${pricedPlan} but subscription plan is ${planId}`,
-            );
-          }
-          const periodEnd = inv.lines.data[0]?.period?.end;
-          const periodToken = periodEnd ?? "na";
-          planForCall = planId;
+        const planForCall = settled?.plan ?? invMatch.plan;
+        if (settled) {
+          const periodEnd = inv.lines?.data?.[0]?.period?.end;
           grantMode = "invoice_full";
-          grantAmount = PLANS[planId].monthlyCredits;
+          grantAmount = settled.amount;
           grantKey = `invoice_grant_${inv.id}`;
-          grantDescription = `${PLANS[planId].name} monthly grant — ${PLANS[planId].monthlyCredits} LiTTBits`;
-          grantReferenceId = `period_plan_${invSubId}_${periodToken}_${planId}`;
+          grantDescription =
+            settled.kind === "upgrade"
+              ? `Plan upgrade to ${PLANS[settled.plan].name} — ${settled.amount} LiTTBits`
+              : `${PLANS[settled.plan].name} monthly grant — ${settled.amount} LiTTBits`;
+          grantReferenceId = `invoice_${inv.id}`;
           grantExpiresAt = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
-          skipGrantKey = `plan_upgrade_${invSubId}_${periodToken}_${planId}`;
         }
         await applySubscriptionEvent(sb, {
           userId: invMatch.user_id,
@@ -1508,7 +1538,7 @@ export async function POST(req: NextRequest) {
           grantDescription,
           grantReferenceId,
           grantExpiresAt,
-          skipGrantIdempotencyKey: skipGrantKey,
+          skipGrantIdempotencyKey: null,
         });
         break;
       }

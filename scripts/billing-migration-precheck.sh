@@ -22,6 +22,8 @@ Order:
   10. supabase/migrations/20261015220000_schedule_media_cap_sweep.sql
   11. supabase/migrations/20261015230000_checkout_block_protected_subscription.sql
   12. supabase/migrations/20261015240000_stripe_event_claim_token.sql
+  13. supabase/migrations/20261019120000_settled_invoice_grants.sql
+      Do NOT apply 13 to a hosted database from automation.
 
 Rollback, after the matching code is reverted:
   20261014000000: DROP INDEX IF EXISTS public.subscriptions_stripe_subscription_id_uidx;
@@ -53,6 +55,8 @@ Rollback, after the matching code is reverted:
                   DROP FUNCTION public.claim_stripe_event(text, text, uuid, timestamptz);
                   ALTER TABLE public.stripe_events DROP COLUMN IF EXISTS claim_token;
                   DROP TABLE public.billing_alerts;
+  20261019120000: Re-apply 20261015200000_apply_subscription_event.sql.
+                  Do not apply 20261019120000 to a hosted database from automation.
 EOF
 
 if [[ "${1:-}" == "--print" ]]; then
