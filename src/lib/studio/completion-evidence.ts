@@ -265,6 +265,33 @@ function evaluateCompletionState(
     };
   }
 
+  // ── Mutation required, and a tool self-reported success — but that
+  // report alone is not proof. A tool can return success:true/mutating:
+  // true having written nothing (an exit-0 command whose output never
+  // reached disk is the canonical case; it is exactly the "echo hello >
+  // index.html, no shell, nothing written" shape, just on a different
+  // transport). Cross-check against the real workspace diff: only a
+  // VERIFIED "unchanged" diff actually contradicts the claim and is
+  // treated as a failure. "unknown" (no checkpoint taken, or the
+  // workspace was unreachable for the diff) is never treated as proof
+  // either way — same honesty rule as the branch above — so an
+  // unverifiable diff does not, by itself, turn a reported success into
+  // a failure.
+  if (requirement.mutation && successfulMutations > 0) {
+    const change = evidence.workspaceChange ?? null;
+    if (change?.status === "unchanged") {
+      missing.push("workspace change matching the reported mutation");
+      return {
+        ...base,
+        ...changeFields(change),
+        state: "failed",
+        missing,
+        reason: `A tool reported a successful mutation, but the workspace diff shows no changes. ` +
+          `The reported success is not supported by the actual workspace state.`,
+      };
+    }
+  }
+
   // ── Deployment required ──
   if (requirement.deployment) {
     const deployment = evidence.deployment ?? null;
