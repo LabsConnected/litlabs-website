@@ -26,6 +26,7 @@ import {
   gitBranch,
   listFiles,
   readFile,
+  writeFile,
   searchFiles,
   inspectPackageJson,
   runTypecheck,
@@ -81,13 +82,12 @@ const BRANCH_DEF: ToolDefinition = {
 const LIST_FILES_DEF: ToolDefinition = {
   id: "project.list_files",
   name: "list_files",
-  description: "List files in a directory (non-recursive)",
+  description: "List files in a directory (non-recursive). Omit path, or pass \".\" or \"\", to list the project root.",
   inputSchema: {
     type: "object",
     properties: {
-      path: { type: "string", description: "Directory path relative to project root" },
+      path: { type: "string", description: "Directory path relative to project root (default: project root)" },
     },
-    required: ["path"],
   },
   readOnly: true,
 };
@@ -155,16 +155,43 @@ const BUILD_DEF: ToolDefinition = {
 const RUN_DEF: ToolDefinition = {
   id: "project.run",
   name: "run",
-  description: "Run an arbitrary command in the project directory",
+  description:
+    "Run a single executable in the project directory. There is NO shell: " +
+    "\"command\" must be a bare executable name (e.g. \"pnpm\"), and every " +
+    "remaining word goes in \"args\" as its own array entry. Shell syntax " +
+    "(redirection \">\"/\">>\", pipes \"|\", \"&&\", \";\") is NOT " +
+    "interpreted and will be rejected. To create or overwrite a file, use " +
+    "project.write_file instead.",
   inputSchema: {
     type: "object",
     properties: {
-      command: { type: "string", description: "Command to run" },
-      args: { type: "array", items: { type: "string" }, description: "Arguments" },
+      command: { type: "string", description: "A single executable name, with no spaces or shell operators (e.g. \"pnpm\", not \"pnpm build && echo done\")" },
+      args: { type: "array", items: { type: "string" }, description: "Arguments, each as its own array entry" },
     },
     required: ["command"],
   },
   readOnly: true,
+};
+
+const WRITE_FILE_DEF: ToolDefinition = {
+  id: "project.write_file",
+  name: "write_file",
+  description:
+    "Create a file, or overwrite it if it already exists, with exact " +
+    "content. The only way to persist new file content — project.run has " +
+    "no shell and cannot do this via redirection. The path must be " +
+    "relative to the project root and stay inside it (no absolute paths, " +
+    "no \"..\"). Parent directories are created automatically. Mutating — " +
+    "requires approval in ACT mode.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "File path relative to the project root, e.g. \"index.html\" or \"src/app.js\"" },
+      content: { type: "string", description: "The exact file content to write" },
+    },
+    required: ["path", "content"],
+  },
+  readOnly: false,
 };
 
 // ─── Tool Handlers ────────────────────────────────────────────────
@@ -173,6 +200,12 @@ const READ_ONLY_META: ToolMetadata = {
   projectScoped: false,
   mutating: false,
   readOnly: true,
+};
+
+const MUTATING_META: ToolMetadata = {
+  projectScoped: true,
+  mutating: true,
+  readOnly: false,
 };
 
 const statusHandler: ToolHandler = async (ctx) => {
@@ -277,6 +310,15 @@ const runHandler: ToolHandler = async (ctx, args) => {
   return runCommand(ctx.shell, command, cmdArgs, { cwd: ctx.cwd, stdin });
 };
 
+const writeFileHandler: ToolHandler = async (ctx, args) => {
+  const filePath = typeof args.path === "string" ? args.path : "";
+  if (!filePath) {
+    return { status: "failed", success: false, message: "Missing required arg: path", data: {} };
+  }
+  const content = typeof args.content === "string" ? args.content : "";
+  return writeFile(ctx.shell, filePath, content);
+};
+
 // ─── Registry ─────────────────────────────────────────────────────
 
 const ENTRIES: Record<string, ToolEntry> = {
@@ -286,6 +328,7 @@ const ENTRIES: Record<string, ToolEntry> = {
   "project.branch": { definition: BRANCH_DEF, handler: branchHandler, metadata: READ_ONLY_META },
   "project.list_files": { definition: LIST_FILES_DEF, handler: listFilesHandler, metadata: READ_ONLY_META },
   "project.read_file": { definition: READ_FILE_DEF, handler: readFileHandler, metadata: READ_ONLY_META },
+  "project.write_file": { definition: WRITE_FILE_DEF, handler: writeFileHandler, metadata: MUTATING_META },
   "project.search": { definition: SEARCH_DEF, handler: searchHandler, metadata: READ_ONLY_META },
   "project.inspect_package": { definition: INSPECT_PKG_DEF, handler: inspectPkgHandler, metadata: READ_ONLY_META },
   "project.check": { definition: CHECK_DEF, handler: checkHandler, metadata: READ_ONLY_META },

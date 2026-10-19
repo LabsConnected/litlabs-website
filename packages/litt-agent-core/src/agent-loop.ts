@@ -31,6 +31,8 @@
  *   5. Respect maxRounds to prevent infinite loops
  */
 
+import * as fs from "fs";
+import * as path from "path";
 import type {
   ChatMessage,
   ModelProvider,
@@ -1211,11 +1213,11 @@ export async function runAgentLoop(
     }
 
     // ─── Mutation tracking ──────────────────────────────────────────
-    // Track whether a potentially-mutating tool (project.run) succeeded
-    // or failed. This drives the mutation completion requirement: if
-    // the user asked for an edit and no mutation succeeded, the run
-    // cannot report success.
-    if (entry.definition.id === "project.run") {
+    // Track whether a potentially-mutating tool (project.run,
+    // project.write_file) succeeded or failed. This drives the mutation
+    // completion requirement: if the user asked for an edit and no
+    // mutation succeeded, the run cannot report success.
+    if (entry.definition.id === "project.run" || entry.definition.id === "project.write_file") {
       if (result.success) {
         mutationSucceeded = true;
       } else {
@@ -1278,6 +1280,34 @@ export async function runAgentLoop(
   // is a verification request, not a file edit request) do NOT trigger
   // the mutation requirement. Only prompts that clearly ask for a file
   // to be changed/created/edited match.
+  //
+  // "build"/"scaffold"/"generate" a website/app/project are just as much
+  // a mutation request as "create a file" — a prompt like "build me a
+  // website with an index.html homepage" previously matched NONE of
+  // these patterns (no recognized verb, and the filename wasn't
+  // immediately adjacent to a verb), so a failed build silently fell
+  // through to the weaker generic check below and could be reported
+  // "complete". `creationRequested` (below) closes that gap, scoped
+  // deliberately narrower than general mutation detection — see there
+  // for why.
+  const ARTIFACT_FILENAME_RE = /\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|html?|py|rs|go|java|rb|php|sh|yaml|yml|toml)\b/gi;
+  const mentionedArtifactFiles = Array.from(
+    new Set(Array.from(prompt.matchAll(ARTIFACT_FILENAME_RE), (m) => m[0])),
+  );
+  // Verbs that imply a NEW artifact should come into existence, as
+  // opposed to edit/change/modify/update/... which imply a file that
+  // already exists. This distinction matters only for the artifact
+  // existence check below: requiring a freshly-touched file to exist on
+  // disk is right for "build me a website with index.html" (nothing
+  // existed before) but wrong for "edit file.ts" (the file was already
+  // there, and in a mocked/remote tool environment checking THIS
+  // process's disk for it is meaningless — only whether the mutation
+  // ran matters, which mutationSucceeded/mutationFailed already track).
+  const CREATION_VERB_RE = /\b(?:create|write|build|scaffold|generate|construct|set\s*up|make)\b/i;
+  const creationRequested =
+    (mentionedArtifactFiles.length > 0 && CREATION_VERB_RE.test(prompt))
+    // "build/scaffold/generate/set up/create/make me a website/app/project/page/server"
+    || /\b(?:build|scaffold|generate|set\s*up|create|make)\s+(?:me\s+|us\s+)?(?:a\s+|the\s+|this\s+|an\s+)?(?:\w+\s+){0,3}(?:website|web\s*site|web\s*app|webpage|web\s*page|homepage|home\s*page|landing\s*page|app|application|project|server|api)\b/i.test(prompt);
   const mutationRequested =
     // "edit/change/modify ... file/component/function/module/code/UI"
     /\b(?:edit|change|modify|update|create|write|add|delete|remove|refactor|patch|insert|replace|rename|move)\s+(?:a\s+|the\s+|this\s+|one\s+)?(?:file|component|function|module|code|line|class|interface|type|variable|constant|export|import|UI)\b/i.test(prompt)
@@ -1286,7 +1316,8 @@ export async function runAgentLoop(
     // "edit/change/modify <filename>" — verb followed by a file path
     || /\b(?:edit|change|modify|update|create|write|patch|refactor)\s+\S+\.(?:ts|tsx|js|jsx|json|md|css|html|py|rs|go|java|rb|php|sh|yaml|yml|toml)\b/i.test(prompt)
     // "make a tiny safe visible UI change" — the acceptance test phrasing
-    || /\bmake\s+one\s+tiny\s+safe\s+visible\s+UI\s+change\b/i.test(prompt);
+    || /\bmake\s+one\s+tiny\s+safe\s+visible\s+UI\s+change\b/i.test(prompt)
+    || creationRequested;
   let mutationSucceeded = false;
   let mutationFailed = false;
 
@@ -1696,10 +1727,56 @@ export async function runAgentLoop(
           content:
             `You were asked to make an edit/mutation, but no mutation was performed. ` +
             `Do not claim success without making the edit. ` +
-            `Use project.run to make the edit, then show the diff with project.diff. ` +
+            `Use project.write_file to create or overwrite a file (project.run has no ` +
+            `shell and cannot do this via redirection), or project.run for other edits, ` +
+            `then verify with project.read_file or project.diff. ` +
             `If the edit cannot be made, state plainly that it failed.`,
         });
         continue;
+      }
+
+      // ─── Required output artifact verification ───────────────────────
+      // A mutation tool reporting success (exit 0) is not proof the
+      // requested artifact exists — "echo hello > index.html" can exit 0
+      // having printed to stdout and written nothing, and a model can
+      // mark itself done after that. When the prompt asks to CREATE a
+      // new, specifically-named file, verify it actually exists on disk
+      // before accepting "complete" — this is the runtime check, not
+      // model self-report, that the file-creation case actually needs.
+      // Scoped to creationRequested, not general mutationRequested: an
+      // "edit file.ts" request doesn't need (or get, in a mocked/remote
+      // tool environment) a real-disk existence proof — only whether
+      // the edit tool itself succeeded, which is tracked separately.
+      if (creationRequested && mutationSucceeded && mentionedArtifactFiles.length > 0) {
+        const missingArtifacts = mentionedArtifactFiles.filter(
+          (f) => !fs.existsSync(path.resolve(options.cwd, f)),
+        );
+        if (missingArtifacts.length > 0) {
+          if (round >= maxRounds - 1) {
+            return {
+              content:
+                `A mutation tool reported success, but the requested file(s) still do not ` +
+                `exist on disk: ${missingArtifacts.join(", ")}. The task was NOT completed. ` +
+                `No success is being claimed.\n\n${cleanContent}`,
+              toolCalls,
+              rounds,
+              durationMs: Date.now() - startTime,
+              usage: { total_tokens: totalTokens },
+              termination: "failed",
+              escalations: escalationEvents.length ? escalationEvents : undefined,
+            };
+          }
+          messages.push({ role: "assistant", content: modelContent });
+          messages.push({
+            role: "user",
+            content:
+              `A tool call reported success, but the requested file(s) still do not exist: ` +
+              `${missingArtifacts.join(", ")}. A successful exit code is not proof the file was ` +
+              `written. Use project.write_file to actually create it, then verify with ` +
+              `project.read_file. Do not claim success until the file exists.`,
+          });
+          continue;
+        }
       }
 
       // ─── General failure propagation ────────────────────────────────

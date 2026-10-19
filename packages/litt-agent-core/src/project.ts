@@ -15,6 +15,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ShellExecutor, ProjectContext, ToolResult } from "./types.js";
+import { detectUnsupportedShellSyntax } from "./execution.js";
 
 // ─── Project Detection ────────────────────────────────────────────
 
@@ -418,7 +419,24 @@ export async function listFiles(
   shell: ShellExecutor,
   dirPath: string,
 ): Promise<ToolResult> {
-  const root = path.resolve(shell.cwd, dirPath);
+  // An empty/missing path means "the project root" — it must resolve
+  // there, not fall through to whatever `path.resolve` does with "".
+  // resolveSandboxedPath() rejects absolute paths (e.g. a model retrying
+  // with "/" after an empty path was rejected elsewhere), ".."
+  // traversal, and — since this walks the REAL, symlink-resolved path —
+  // an existing symlink inside the project that points outside it, so
+  // this directory listing can't escape the project sandbox either way.
+  const normalizedDirPath = dirPath.trim() === "" ? "." : dirPath;
+  const resolved = resolveSandboxedPath(shell.cwd, normalizedDirPath);
+  if (!resolved.ok) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Blocked: ${resolved.reason}`,
+      data: {},
+    };
+  }
+  const root = resolved.resolvedPath;
 
   if (!fs.existsSync(root)) {
     return {
@@ -459,17 +477,18 @@ export async function readFile(
   filePath: string,
   maxBytes = 100_000,
 ): Promise<ToolResult> {
-  const root = path.resolve(shell.cwd, filePath);
-
-  // Path safety — block sensitive files
-  if (!isSafePath(filePath)) {
+  // Path safety — blocks sensitive files AND an existing symlink inside
+  // the project that resolves outside it (see resolveSandboxedPath()).
+  const resolved = resolveSandboxedPath(shell.cwd, filePath);
+  if (!resolved.ok) {
     return {
       status: "failed",
       success: false,
-      message: `Blocked: ${filePath} matches sensitive file pattern`,
+      message: `Blocked: ${resolved.reason}`,
       data: {},
     };
   }
+  const root = resolved.resolvedPath;
 
   if (!fs.existsSync(root)) {
     return {
@@ -502,6 +521,63 @@ export async function readFile(
       status: "failed",
       success: false,
       message: `Failed to read: ${err instanceof Error ? err.message : String(err)}`,
+      data: {},
+    };
+  }
+}
+
+/**
+ * Create a file, or overwrite it if it already exists, with exact
+ * content (with path safety). This is the structured replacement for
+ * the shell-redirection pattern (`echo ... > file`) that project.run
+ * cannot execute — see detectUnsupportedShellSyntax() in execution.ts.
+ *
+ * Mutating. Callers (the ExecutionGateway) are responsible for approval
+ * — this function performs the write unconditionally once called, same
+ * as runCommand() does for project.run.
+ */
+export async function writeFile(
+  shell: ShellExecutor,
+  filePath: string,
+  content: string,
+  maxBytes = 5_000_000,
+): Promise<ToolResult> {
+  const resolved = resolveSandboxedPath(shell.cwd, filePath);
+  if (!resolved.ok) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Blocked: ${resolved.reason}`,
+      data: {},
+    };
+  }
+
+  const byteLength = Buffer.byteLength(content, "utf8");
+  if (byteLength > maxBytes) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Content too large: ${byteLength} bytes (max ${maxBytes})`,
+      data: { size: byteLength },
+    };
+  }
+
+  const root = resolved.resolvedPath;
+
+  try {
+    fs.mkdirSync(path.dirname(root), { recursive: true });
+    fs.writeFileSync(root, content, "utf8");
+    return {
+      status: "success",
+      success: true,
+      message: `Wrote ${byteLength} bytes to ${filePath}`,
+      data: { path: filePath, size: byteLength },
+    };
+  } catch (err) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Failed to write: ${err instanceof Error ? err.message : String(err)}`,
       data: {},
     };
   }
@@ -658,6 +734,23 @@ export async function runCommand(
   args: string[],
   options?: { cwd?: string; timeoutMs?: number; stdin?: string },
 ): Promise<ToolResult> {
+  // Reject shell-style invocations BEFORE spawning anything. No shell is
+  // ever used here (see execution.ts), so `echo 'x' > file` or a `>`
+  // token in args would previously reach spawn() and fail with a raw
+  // ENOENT (or, for an args-level token, silently do nothing useful).
+  // This does not add or enable shell execution — it only replaces a
+  // confusing low-level failure with an actionable one, pointing at
+  // project.write_file for the file-creation case that caused it most.
+  const shellSyntaxError = detectUnsupportedShellSyntax(command, args);
+  if (shellSyntaxError) {
+    return {
+      status: "failed",
+      success: false,
+      message: shellSyntaxError,
+      data: { code: "UNSUPPORTED_SHELL_SYNTAX", command, args },
+    };
+  }
+
   const cwd = options?.cwd ?? shell.cwd;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
@@ -826,4 +919,78 @@ export function isSafePath(filePath: string): boolean {
   if (filePath.includes("\0")) return false;
   // Block sensitive patterns
   return !BLOCKED_PATH_PATTERNS.some((re) => re.test(filePath));
+}
+
+/**
+ * Resolve `relativePath` against `cwd` and verify the REAL (symlink-
+ * resolved) location is still inside the REAL project root.
+ *
+ * isSafePath() alone is lexical: it rejects a STRING containing ".." or
+ * a leading "/", but a relative path that merely passes THROUGH an
+ * existing symlink can still land outside the sandbox at actual
+ * read/write time, because the OS resolves symlinks during the real
+ * fs.* syscall regardless of what the pre-resolution string looked
+ * like. A project that already contains a symlink pointing outside its
+ * root (shared-config symlinks, worktree-linked files, etc. — not
+ * exotic) would pass isSafePath() on a path like "shared/config.json"
+ * while actually reading/writing wherever that symlink points.
+ *
+ * This walks up from the target to the deepest EXISTING ancestor before
+ * calling realpathSync — realpathSync throws ENOENT on a path that
+ * doesn't exist yet, which is the common case for a file about to be
+ * created — then rejoins the not-yet-existing remainder onto the
+ * resolved real ancestor and checks containment against the real
+ * (symlink-resolved) project root.
+ *
+ * Fails closed: any resolution error is treated as unsafe.
+ */
+export function resolveSandboxedPath(
+  cwd: string,
+  relativePath: string,
+): { ok: true; resolvedPath: string } | { ok: false; reason: string } {
+  if (!isSafePath(relativePath)) {
+    return {
+      ok: false,
+      reason: `${relativePath} is outside the project sandbox or matches a sensitive file pattern`,
+    };
+  }
+
+  let root: string;
+  try {
+    root = fs.realpathSync(cwd);
+  } catch {
+    return { ok: false, reason: "project root could not be resolved" };
+  }
+
+  const resolvedPath = path.resolve(cwd, relativePath);
+
+  // Walk up to the deepest existing ancestor, collecting the
+  // not-yet-existing tail segments to rejoin afterward.
+  let existing = resolvedPath;
+  const remainder: string[] = [];
+  for (;;) {
+    if (fs.existsSync(existing)) break;
+    const parent = path.dirname(existing);
+    if (parent === existing) break; // filesystem root — cwd should have matched first
+    remainder.unshift(path.basename(existing));
+    existing = parent;
+  }
+
+  let realExisting: string;
+  try {
+    realExisting = fs.realpathSync(existing);
+  } catch {
+    return { ok: false, reason: `${relativePath} could not be resolved` };
+  }
+
+  const realTarget = remainder.length > 0 ? path.join(realExisting, ...remainder) : realExisting;
+
+  if (realTarget !== root && !realTarget.startsWith(root + path.sep)) {
+    return {
+      ok: false,
+      reason: `${relativePath} resolves outside the project sandbox (via a symlink)`,
+    };
+  }
+
+  return { ok: true, resolvedPath };
 }
