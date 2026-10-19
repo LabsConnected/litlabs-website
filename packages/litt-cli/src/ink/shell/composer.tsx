@@ -63,6 +63,15 @@ function debugInput(msg: string): void {
   } catch { /* ignore — debug only */ }
 }
 
+/** Welcome-screen single-key shortcuts (lowercase only — shift+h/m/s
+ *  still types a literal "H"/"M"/"S" into the draft, matching how "V"
+ *  does not trigger the failure-view shortcut above). */
+const WELCOME_SHORTCUT_KEYS: Record<string, "health" | "models" | "settings"> = {
+  h: "health",
+  m: "models",
+  s: "settings",
+};
+
 export interface ComposerProps {
   value: string;
   onChange: (value: string) => void;
@@ -81,6 +90,22 @@ export interface ComposerProps {
   onOpenContext: (query: string) => void;
   /** Opens the failure details overlay when the mission has failed. */
   onOpenFailureView?: () => void;
+  /**
+   * True only while the Welcome screen owns the center (no conversation
+   * started yet). Gates the h/m/s single-key shortcuts below — once a
+   * conversation exists the Composer reverts to plain text entry for
+   * every letter, same as today.
+   */
+  welcomeShortcutsEnabled?: boolean;
+  /**
+   * Welcome-screen single-key shortcuts — h/m/s on a still-EMPTY draft.
+   * Mirrors the existing "v opens the failure view on an empty draft"
+   * precedent below: a bare letter is intercepted only when it could not
+   * possibly be the first character of a real message in flight (the
+   * draft is empty) and the welcome screen is showing, so normal typing
+   * is never shadowed once the user is mid-conversation.
+   */
+  onWelcomeShortcut?: (action: "health" | "models" | "settings") => void;
   disabled: boolean;
   /** True while a mission/chat is processing — composer shows a live indicator. */
   busy?: boolean;
@@ -102,7 +127,8 @@ export interface ComposerProps {
 
 export function Composer({
   value, onChange, onSubmit, onNavigateHistory,
-  onOpenContext, onOpenFailureView, disabled, busy, runtimeState, scrolled, focusEpoch, onReturnToLive,
+  onOpenContext, onOpenFailureView, welcomeShortcutsEnabled, onWelcomeShortcut,
+  disabled, busy, runtimeState, scrolled, focusEpoch, onReturnToLive,
 }: ComposerProps): React.ReactElement {
   // The derived runtime state is the single copy authority. The raw
   // busy/disabled flags only apply when no runtime state was provided
@@ -184,6 +210,10 @@ export function Composer({
   useEffect(() => { onOpenContextRef.current = onOpenContext; }, [onOpenContext]);
   const onOpenFailureViewRef = useRef(onOpenFailureView);
   useEffect(() => { onOpenFailureViewRef.current = onOpenFailureView; }, [onOpenFailureView]);
+  const welcomeShortcutsEnabledRef = useRef(welcomeShortcutsEnabled);
+  useEffect(() => { welcomeShortcutsEnabledRef.current = welcomeShortcutsEnabled; }, [welcomeShortcutsEnabled]);
+  const onWelcomeShortcutRef = useRef(onWelcomeShortcut);
+  useEffect(() => { onWelcomeShortcutRef.current = onWelcomeShortcut; }, [onWelcomeShortcut]);
   const onReturnToLiveRef = useRef(onReturnToLive);
   useEffect(() => { onReturnToLiveRef.current = onReturnToLive; }, [onReturnToLive]);
   const pokeRef = useRef(cursor.poke);
@@ -249,6 +279,23 @@ export function Composer({
         if (evt.text === "v" && valueRef.current === "" && isFailureState(runtime) && onOpenFailureViewRef.current) {
           onOpenFailureViewRef.current();
           return;
+        }
+
+        // Welcome-screen shortcuts: h/m/s on an empty draft, same
+        // precedent as "v" above — only while the Welcome screen owns
+        // the center and nothing has been typed yet, so a real message
+        // typed after the conversation starts is never shadowed.
+        if (
+          welcomeShortcutsEnabledRef.current
+          && valueRef.current === ""
+          && !isBusyState(runtime)
+          && onWelcomeShortcutRef.current
+        ) {
+          const action = WELCOME_SHORTCUT_KEYS[evt.text ?? ""];
+          if (action) {
+            onWelcomeShortcutRef.current(action);
+            return;
+          }
         }
 
         // Typing while scrolled into history is an explicit "I'm back in

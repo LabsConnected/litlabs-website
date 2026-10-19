@@ -18,6 +18,17 @@
  *   - Hints in slightly brighter dim for readability
  *   - Repo status line: "litlabs-website · main · Git clean"
  *   - "Local tools ready" indicator
+ *
+ * Startup-experience upgrade (2026-10-19):
+ *   - Brain/routing line ("LiTT Auto → GPT-5.6 Luna") — the same label the
+ *     status bar shows, so the welcome screen never contradicts the
+ *     footer. Already resolved synchronously from store state; no extra
+ *     network call delays the reveal.
+ *   - A single-key shortcut row ([Enter] Start [H] Health [M] Models
+ *     [S] Settings) — the keys are handled by the Composer (see
+ *     composer.tsx's welcomeShortcutsEnabled/onWelcomeShortcut), which
+ *     already owns all printable input. They only intercept h/m/s on a
+ *     still-empty draft, before the user has typed anything.
  */
 
 import React, { useEffect, useState } from "react";
@@ -39,6 +50,11 @@ export interface WelcomeProps {
   gitUntracked?: number;
   /** Execution target — "local" or "remote". */
   executionTarget?: "local" | "remote";
+  /** The resolved routing/brain label (e.g. "LiTT Auto → GPT-5.6 Luna") —
+   *  the SAME string the status bar shows, so the welcome screen never
+   *  disagrees with the footer. Always resolved synchronously from store
+   *  state; never blocks the initial reveal. */
+  brain?: string;
 }
 
 export function Welcome({
@@ -47,6 +63,7 @@ export function Welcome({
   gitModified = 0,
   gitUntracked = 0,
   executionTarget = "local",
+  brain,
 }: WelcomeProps = {}): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
@@ -105,20 +122,51 @@ export function Welcome({
             </Text>
           </Box>
 
+          {/* Brain/routing line — same label as the status bar footer. */}
+          {brain && (
+            <Box paddingLeft={pad} marginTop={0}>
+              <Text color={COLORS.secondaryBright} dimColor>{brain}</Text>
+            </Box>
+          )}
+
+          {/* Primary shortcut row — Enter starts; H/M/S are single-key
+              jumps to Health/Models/Settings, handled by the Composer
+              only while the draft is still empty. */}
           <Box paddingLeft={pad} marginTop={2}>
             {w === "narrow" ? (
               <Box flexDirection="column">
-                <Text color={COLORS.secondary}>  / commands</Text>
-                <Text color={COLORS.secondary}>  @ context</Text>
-                <Text color={COLORS.secondary}>  ? help</Text>
+                <Text color={COLORS.secondary}>  [Enter] Start</Text>
+                <Text color={COLORS.secondary}>  [H] Health</Text>
+                <Text color={COLORS.secondary}>  [M] Models</Text>
+                <Text color={COLORS.secondary}>  [S] Settings</Text>
               </Box>
             ) : (
               <Text>
-                <Text color={COLORS.secondary}>  / commands</Text>
+                <Text color={COLORS.secondary}>  [Enter] Start</Text>
                 <Text color={COLORS.secondaryDim}>    </Text>
-                <Text color={COLORS.secondary}>@ context</Text>
+                <Text color={COLORS.secondary}>[H] Health</Text>
                 <Text color={COLORS.secondaryDim}>    </Text>
-                <Text color={COLORS.secondary}>? help</Text>
+                <Text color={COLORS.secondary}>[M] Models</Text>
+                <Text color={COLORS.secondaryDim}>    </Text>
+                <Text color={COLORS.secondary}>[S] Settings</Text>
+              </Text>
+            )}
+          </Box>
+
+          <Box paddingLeft={pad} marginTop={1}>
+            {w === "narrow" ? (
+              <Box flexDirection="column">
+                <Text color={COLORS.secondaryDim}>  / commands</Text>
+                <Text color={COLORS.secondaryDim}>  @ context</Text>
+                <Text color={COLORS.secondaryDim}>  ? help</Text>
+              </Box>
+            ) : (
+              <Text>
+                <Text color={COLORS.secondaryDim}>  / commands</Text>
+                <Text color={COLORS.secondaryDim}>    </Text>
+                <Text color={COLORS.secondaryDim}>@ context</Text>
+                <Text color={COLORS.secondaryDim}>    </Text>
+                <Text color={COLORS.secondaryDim}>? help</Text>
               </Text>
             )}
           </Box>

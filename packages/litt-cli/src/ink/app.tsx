@@ -500,6 +500,21 @@ export function CockpitApp({
             onClosePalette={closeOverlay}
             onOpenContext={controller.openContext}
             onOpenFailureView={controller.openFailureView}
+            onWelcomeShortcut={(action) => {
+              // Reuses the EXACT slash-command path the composer already
+              // dispatches on Enter — /doctor, /models, /settings are all
+              // handled by controller.submit(). No new command logic.
+              const command = action === "health" ? "/doctor" : action === "models" ? "/models" : "/settings";
+              void submit(command).catch((err) => {
+                store.actions.addActivity({
+                  id: `act_${Date.now()}_welcome_shortcut_err`,
+                  ts: Date.now(),
+                  type: "error",
+                  tag: "SHELL",
+                  text: `${command} failed: ${err instanceof Error ? err.message : String(err)}`,
+                });
+              });
+            }}
             composerDisabled={disabled}
             composerScrolled={store.state.transcriptAnchor !== null}
             composerFocusEpoch={store.state.focusEpoch}

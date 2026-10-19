@@ -76,6 +76,8 @@ export interface LiTTShellProps {
   onClosePalette?: () => void;
   onOpenContext: (query: string) => void;
   onOpenFailureView?: () => void;
+  /** Welcome-screen h/m/s shortcuts — see composer.tsx for the key gating. */
+  onWelcomeShortcut?: (action: "health" | "models" | "settings") => void;
   composerDisabled: boolean;
   /** True while the transcript is scrolled into history (no fake caret). */
   composerScrolled: boolean;
@@ -122,7 +124,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
     gitModified, gitUntracked, toolProgress, toolDetails = false,
     executionTarget, canonicalMission, workstream,
     composerValue, onComposerChange, onSubmit, onNavigateHistory,
-    onOpenPalette, onClosePalette, onOpenContext, onOpenFailureView, composerDisabled,
+    onOpenPalette, onClosePalette, onOpenContext, onOpenFailureView, onWelcomeShortcut, composerDisabled,
     composerScrolled, composerFocusEpoch, onComposerReturnToLive,
     transcriptAnchor, onTranscriptPageChange, onTranscriptAnchorChange,
     project, branch, localRuntime, remoteRuntime = "offline", brain, activeModel, activeProvider, mode,
@@ -315,6 +317,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
             gitModified={gitModified}
             gitUntracked={gitUntracked}
             executionTarget={executionTarget}
+            brain={brain}
           />
         )}
       </Box>
@@ -340,6 +343,8 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
         onClosePalette={onClosePalette}
         onOpenContext={onOpenContext}
         onOpenFailureView={onOpenFailureView}
+        welcomeShortcutsEnabled={!hasConversation && !hasWorkstream}
+        onWelcomeShortcut={onWelcomeShortcut}
         disabled={composerDisabled}
         busy={isProcessing}
         runtimeState={runtimeState}
