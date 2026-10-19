@@ -136,6 +136,8 @@ export async function reserveCredits(
     const { data: reserveData, error: reserveError } = await supabaseAdmin.rpc("reserve_bits", {
       p_user_id: user.id,
       p_amount: estimatedCredits,
+      // Long Studio builds (and plan caps) can exceed the old 10-minute default.
+      p_expires_seconds: 3 * 60 * 60,
       p_idempotency_key: ctx.idempotencyKey,
       p_run_id: ctx.idempotencyKey,
       p_usage_type: "agent_run",
@@ -156,8 +158,11 @@ export async function reserveCredits(
       };
     }
 
-    if (!reserveData?.success) {
-      const reason = reserveData?.reason ?? "unknown";
+    // reserve_bits RETURNS TABLE, so PostgREST supplies an array of rows.
+    // Keep object support for older mocks; a missing/malformed row fails closed.
+    const reservation = Array.isArray(reserveData) ? reserveData[0] : reserveData;
+    if (!reservation?.success) {
+      const reason = reservation?.reason ?? "invalid_reservation_response";
       if (reason === "insufficient_balance") {
         return {
           ok: false,
@@ -170,7 +175,7 @@ export async function reserveCredits(
       }
       // Idempotent retry — reservation already exists
       if (reason === "already_reserved") {
-        reservationId = reserveData.reservation_id;
+        reservationId = reservation.reservation_id;
         // Fall through to create/find the run row
       } else {
         return {
@@ -183,7 +188,7 @@ export async function reserveCredits(
         };
       }
     } else {
-      reservationId = reserveData.reservation_id;
+      reservationId = reservation.reservation_id;
     }
   }
 
@@ -263,6 +268,8 @@ export async function settleRun(
 
   let creditsCharged = 0;
   let creditsRefunded = 0;
+  // Settlement must never report success when the ledger operation failed.
+  let billingOk = true;
 
   if (result.status === "completed" && reservationId && result.actualCredits > 0) {
     // Settle: debit actual cost, release remainder
@@ -274,7 +281,10 @@ export async function settleRun(
       p_description: `Agent run settled: ${runId}`,
     });
 
+    // settle_bits also RETURNS TABLE, not a JSON object.
+    const settlement = Array.isArray(settleData) ? settleData[0] : settleData;
     if (settleError) {
+      billingOk = false;
       console.error(`[agent-billing] CRITICAL: settle_bits failed for run ${runId}. Error: ${settleError.message}`);
       await createReconciliationRecord(
         { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
@@ -283,33 +293,36 @@ export async function settleRun(
         settleError.message,
         reservationId,
       );
-    } else if (settleData?.success) {
-      creditsCharged = settleData.settled_amount;
-      creditsRefunded = settleData.released_amount;
+    } else if (settlement?.success) {
+      creditsCharged = settlement.settled_amount;
+      creditsRefunded = settlement.released_amount;
     } else {
-      console.error(`[agent-billing] settle_bits returned failure for run ${runId}: ${settleData?.reason}`);
+      billingOk = false;
+      console.error(`[agent-billing] settle_bits returned failure for run ${runId}: ${settlement?.reason}`);
       await createReconciliationRecord(
         { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
         result.actualCredits,
         "settle_rejected",
-        settleData?.reason ?? "unknown",
+        settlement?.reason ?? "unknown",
         reservationId,
       );
     }
   } else if (result.status !== "completed" && reservationId && reservedCredits > 0) {
     // Release: execution failed, return all reserved BITS
-    const { error: releaseError } = await supabaseAdmin.rpc("release_bits", {
+    const { data: releaseData, error: releaseError } = await supabaseAdmin.rpc("release_bits", {
       p_reservation_id: reservationId,
       p_idempotency_key: runId + ":release",
     });
+    const release = Array.isArray(releaseData) ? releaseData[0] : releaseData;
 
-    if (releaseError) {
-      console.error(`[agent-billing] CRITICAL: release_bits failed for run ${runId}. Error: ${releaseError.message}`);
+    if (releaseError || !release?.success) {
+      billingOk = false;
+      console.error(`[agent-billing] CRITICAL: release_bits failed for run ${runId}. Error: ${releaseError?.message ?? release?.reason ?? "invalid_release_response"}`);
       await createReconciliationRecord(
         { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
         reservedCredits,
         "release_failed",
-        releaseError.message,
+        releaseError?.message ?? release?.reason ?? "invalid_release_response",
         reservationId,
       );
     } else {
@@ -318,30 +331,52 @@ export async function settleRun(
   } else if (result.status === "completed" && result.actualCredits === 0) {
     // Free run — nothing to settle, but release the reservation if one was made
     if (reservationId && reservedCredits > 0) {
-      const { error: releaseError } = await supabaseAdmin.rpc("release_bits", {
+      const { data: releaseData, error: releaseError } = await supabaseAdmin.rpc("release_bits", {
         p_reservation_id: reservationId,
         p_idempotency_key: runId + ":release-free",
       });
-      if (releaseError) {
-        console.error(`[agent-billing] release_bits failed for free run ${runId}. Error: ${releaseError.message}`);
+      const release = Array.isArray(releaseData) ? releaseData[0] : releaseData;
+      if (releaseError || !release?.success) {
+        billingOk = false;
+        console.error(`[agent-billing] release_bits failed for free run ${runId}. Error: ${releaseError?.message ?? release?.reason ?? "invalid_release_response"}`);
+        await createReconciliationRecord(
+          { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
+          reservedCredits,
+          "release_free_failed",
+          releaseError?.message ?? release?.reason ?? "invalid_release_response",
+          reservationId,
+        );
       } else {
         creditsRefunded = reservedCredits;
       }
     }
   }
 
+  // A non-exempt request claiming a positive reservation without its ID
+  // cannot be charged. Do not silently turn this into a successful run.
+  if (result.status === "completed" && result.actualCredits > 0 && reservedCredits > 0 && !reservationId) {
+    billingOk = false;
+    await createReconciliationRecord(
+      { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
+      result.actualCredits,
+      "reservation_missing",
+      "Positive billed cost has no reservation id",
+      null,
+    );
+  }
+
   // Update the agent_runs row (using production schema columns)
   const { error: updateError } = await supabaseAdmin
     .from("agent_runs")
     .update({
-      status: result.status,
+      status: billingOk ? result.status : "failed",
       output: {
         input_tokens: result.inputTokens,
         output_tokens: result.outputTokens,
         credits_charged: creditsCharged,
         credits_refunded: creditsRefunded,
         reservation_id: reservationId,
-        error: result.error ?? null,
+        error: result.error ?? (billingOk ? null : "BILLING_SETTLEMENT_FAILED"),
       },
       updated_at: new Date().toISOString(),
     })
@@ -361,9 +396,10 @@ export async function settleRun(
 
   // Canonical metering (P0): token-level provider-cost evidence for the
   // settle. Best-effort — never breaks settlement.
-  await emitSettleMetering(runId, result, creditsCharged).catch(() => {});
+  // An unsuccessful ledger operation is not a billable, settled action.
+  if (billingOk) await emitSettleMetering(runId, result, creditsCharged).catch(() => {});
 
-  return { ok: true, runId, reservationId, creditsCharged, creditsRefunded };
+  return { ok: billingOk, runId, reservationId, creditsCharged, creditsRefunded };
 }
 
 // ─── Canonical metering (P0) ─────────────────────────────────────
