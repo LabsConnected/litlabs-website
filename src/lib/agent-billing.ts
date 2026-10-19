@@ -265,10 +265,17 @@ export async function settleRun(
   let creditsRefunded = 0;
 
   if (result.status === "completed" && reservationId && result.actualCredits > 0) {
-    // Settle: debit actual cost, release remainder
+    // Settle: debit actual cost, release remainder. The amount is capped
+    // at the reservation HERE, at the ledger boundary — not only by
+    // caller convention — so no caller (present or future) can settle
+    // above the quote the user approved. settle_bits would reject an
+    // overage (→ a completed run debiting zero, the D4 defect class);
+    // capping makes the debit land at the approved maximum instead.
+    const settleAmount =
+      reservedCredits > 0 ? Math.min(result.actualCredits, reservedCredits) : result.actualCredits;
     const { data: settleData, error: settleError } = await supabaseAdmin.rpc("settle_bits", {
       p_reservation_id: reservationId,
-      p_actual_amount: result.actualCredits,
+      p_actual_amount: settleAmount,
       p_idempotency_key: runId + ":settle",
       p_overage_policy: "reject",
       p_description: `Agent run settled: ${runId}`,
@@ -481,6 +488,46 @@ export function estimateCredits(
 ): number {
   const tokenCost = Math.ceil((inputTokens + outputTokens) / 1000) * per1kTokens;
   return perRun + tokenCost;
+}
+
+/**
+ * The binding quote for resuming a paused (approval-gated) run.
+ *
+ * SINGLE source of truth, used by both sides of the approval boundary:
+ * the messages route computes it from the frozen pausedMessages when the
+ * approval card is rendered and discloses it in the approval reason; the
+ * approvals route computes it from the same stored pausedMessages when
+ * the user approves and reserves exactly that amount. The inputs are
+ * frozen server-side at pause time and the formula is deterministic, so
+ * the figure the user approved IS the figure reserved — it can never be
+ * recomputed into a larger number after the click. (JSON key order can
+ * change across a DB round-trip, but reordering does not change the
+ * serialized length the estimate is derived from.)
+ */
+export function computeResumeQuoteBits(
+  pausedMessages: readonly unknown[] | null | undefined,
+): number {
+  return estimateCredits(
+    Math.ceil(JSON.stringify(pausedMessages ?? []).length / 4) + 2048,
+    0,
+    1,
+    1,
+  );
+}
+
+/**
+ * The disclosure appended to an approval reason at pause time so the
+ * card states the resume cost BEFORE the user approves — the same
+ * contract the initial-run estimate disclosure already follows.
+ */
+export function resumeQuoteDisclosure(
+  pausedMessages: readonly unknown[] | null | undefined,
+): string {
+  return (
+    ` Estimated resume cost: ${computeResumeQuoteBits(pausedMessages)} LiTTBits ` +
+    `(reserved when you approve and debited on success only — never more than this amount; ` +
+    `failed or cancelled work debits zero).`
+  );
 }
 
 // ── Legacy compatibility ──────────────────────────────────────────

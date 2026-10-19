@@ -32,6 +32,8 @@ vi.mock("@/lib/agent-billing", () => ({
     Promise.resolve({ ok: true, runId: "resume-run-1", reservedCredits: 12, reservationId: "resume-res-1" })),
   settleRun: vi.fn(() => Promise.resolve({ ok: true, creditsCharged: 0, creditsRefunded: 0 })),
   estimateCredits: vi.fn(() => 12),
+  computeResumeQuoteBits: vi.fn(() => 12),
+  resumeQuoteDisclosure: vi.fn(() => " Estimated resume cost: 12 LiTTBits (debited on success; failed work debits zero)."),
 }));
 
 vi.mock("@/lib/litt-intelligence/paused-run-store", () => ({

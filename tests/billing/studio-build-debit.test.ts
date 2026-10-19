@@ -56,6 +56,7 @@ vi.mock("@/lib/agent-billing", () => ({
     Promise.resolve({ ok: true, runId: "run-1", reservedCredits: 12, reservationId: "res-1" })),
   settleRun: vi.fn(() => Promise.resolve({ ok: true, creditsCharged: 0, creditsRefunded: 0 })),
   estimateCredits: vi.fn((inTok: number, outTok: number) => 1 + Math.ceil((inTok + outTok) / 1000)),
+  resumeQuoteDisclosure: vi.fn(() => ""),
 }));
 vi.mock("@/lib/litt-runtime", () => ({
   buildPrompt: vi.fn(() => ({

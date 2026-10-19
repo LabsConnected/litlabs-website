@@ -94,6 +94,7 @@ vi.mock("@/lib/agent-billing", () => ({
   // The route calls settleRun(...).catch(...) — must return a promise.
   settleRun: vi.fn(() => Promise.resolve({ ok: true })),
   estimateCredits: vi.fn(() => 0),
+  resumeQuoteDisclosure: vi.fn(() => ""),
 }));
 
 vi.mock("@/lib/litt-runtime", () => ({

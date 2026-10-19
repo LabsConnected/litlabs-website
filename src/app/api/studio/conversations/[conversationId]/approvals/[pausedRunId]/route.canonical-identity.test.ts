@@ -32,6 +32,8 @@ vi.mock("@/lib/agent-billing", () => ({
     Promise.resolve({ ok: true, runId: "resume-run-1", reservedCredits: 12, reservationId: "resume-res-1" })),
   settleRun: vi.fn(() => Promise.resolve({ ok: true, creditsCharged: 0, creditsRefunded: 0 })),
   estimateCredits: vi.fn(() => 12),
+  computeResumeQuoteBits: vi.fn(() => 12),
+  resumeQuoteDisclosure: vi.fn(() => " Estimated resume cost: 12 LiTTBits (debited on success; failed work debits zero)."),
 }));
 
 vi.mock("@/lib/wallet-ledger", () => ({
@@ -138,7 +140,7 @@ import {
   getAwaitingApprovalAssistantMessage,
   updateMessageStatus,
 } from "@/lib/studio/conversation-service";
-import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
+import { reserveCredits, settleRun, computeResumeQuoteBits } from "@/lib/agent-billing";
 
 const CONV_ID = "conv-123";
 const PAUSED_ID = "paused-1";
@@ -500,7 +502,10 @@ describe("resume billing — reservation and settlement", () => {
     // The disclosed quote and the reserved (approved-cap) amount agree.
     const body = await res.json();
     expect(body.billingQuote).toEqual({ estimatedBits: 12 });
-    expect(vi.mocked(estimateCredits)).toHaveBeenCalled();
+    // The reserved figure comes from the single-source resume-quote
+    // helper, computed over the stored pausedMessages — the same input
+    // the approval card's disclosure was computed from at pause time.
+    expect(vi.mocked(computeResumeQuoteBits)).toHaveBeenCalledWith(basePausedRun().pausedMessages);
     expect(vi.mocked(reserveCredits)).toHaveBeenCalledTimes(1);
     const [scope, amount] = vi.mocked(reserveCredits).mock.calls[0];
     expect(amount).toBe(12);

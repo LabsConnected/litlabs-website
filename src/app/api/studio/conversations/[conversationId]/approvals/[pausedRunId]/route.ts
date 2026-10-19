@@ -53,7 +53,7 @@ import { makePersistProgressEvent } from "@/lib/action-runtime/progress-event-pe
 import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
 import type { MessageStatus } from "@/lib/studio/types";
 import { attachActionRunToConversationTask, settleConversationTask } from "@/lib/studio/task-service";
-import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
+import { reserveCredits, settleRun, estimateCredits, computeResumeQuoteBits, resumeQuoteDisclosure } from "@/lib/agent-billing";
 
 /**
  * Write a resumed run's outcome back onto the conversation transcript.
@@ -581,12 +581,11 @@ export async function POST(
   let resumeSettle:
     | { status: "completed" | "failed" | "cancelled"; actualCredits: number; error?: string }
     | null = null;
-  const resumeEstimatedBits = estimateCredits(
-    Math.ceil(JSON.stringify(resolved.pausedMessages ?? []).length / 4) + 2048,
-    0,
-    1,
-    1,
-  );
+  // The binding quote: computed by the same helper, from the same frozen
+  // pausedMessages, that produced the figure disclosed on the approval
+  // card at pause time — the reservation below holds exactly the amount
+  // the user approved, never a number recomputed after their click.
+  const resumeEstimatedBits = computeResumeQuoteBits(resolved.pausedMessages);
   if (clerkId) {
     const reserveResult = await reserveCredits(
       {
@@ -1028,6 +1027,12 @@ export async function POST(
       // completed with the nested gate's pausedRunId.
       if (result.pendingApproval) {
         let nestedPausedRunId: string;
+        // The nested card discloses its own resume cost before the user
+        // approves it — same contract as the first gate. One disclosed
+        // reason, used for the stored record AND the outcome payload the
+        // client renders the next card from.
+        const nestedDisclosedReason =
+          result.pendingApproval.reason + resumeQuoteDisclosure(result.pendingApproval.pausedMessages);
         try {
           const nested = await createPausedRun({
             userId,
@@ -1037,7 +1042,7 @@ export async function POST(
             toolId: result.pendingApproval.toolId,
             toolCallId: result.pendingApproval.toolCallId,
             inputs: result.pendingApproval.inputs,
-            reason: result.pendingApproval.reason,
+            reason: nestedDisclosedReason,
             pausedMessages: result.pendingApproval.pausedMessages,
             executionMode: resolved.executionMode,
             systemPrompt: resolved.systemPrompt,
@@ -1085,7 +1090,7 @@ export async function POST(
         runResult.pendingApproval = {
           toolId: result.pendingApproval.toolId,
           pausedRunId: nestedPausedRunId,
-          reason: result.pendingApproval.reason,
+          reason: nestedDisclosedReason,
         };
         // Re-paused on a nested gate — release this attempt's reservation;
         // approving the nested gate reserves again under its own key.

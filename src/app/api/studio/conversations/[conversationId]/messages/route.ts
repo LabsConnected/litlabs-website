@@ -19,7 +19,7 @@ import { studioLog } from "@/lib/studio/logger";
 import type { AgentSlug, MessageStatus } from "@/lib/studio/types";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
-import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
+import { reserveCredits, settleRun, estimateCredits, resumeQuoteDisclosure } from "@/lib/agent-billing";
 import { runWithMeteringContext } from "@/lib/metering";
 import {
   buildPrompt,
@@ -1230,6 +1230,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         // If V2 paused for approval, persist the paused state and flag it
         let pausedRunId: string | undefined;
         let pausedRunPersistFailed = false;
+        // The approval card must state the RESUME cost before the user
+        // approves: the figure is computed now, at pause time, from the
+        // same frozen pausedMessages the approvals route will reserve
+        // against (computeResumeQuoteBits is the single source of truth
+        // for both sides), and it rides in the reason every card surface
+        // renders — the stored record, the live event, and the done
+        // payload all carry this same disclosed reason.
+        const disclosedApprovalReason = v2Result?.pendingApproval
+          ? v2Result.pendingApproval.reason +
+            resumeQuoteDisclosure(v2Result.pendingApproval.pausedMessages)
+          : undefined;
         if (v2Result?.pendingApproval) {
           try {
             const pausedRun = await createPausedRun({
@@ -1240,7 +1251,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               toolId: v2Result.pendingApproval.toolId,
               toolCallId: v2Result.pendingApproval.toolCallId,
               inputs: v2Result.pendingApproval.inputs,
-              reason: v2Result.pendingApproval.reason,
+              reason: disclosedApprovalReason!,
               pausedMessages: v2Result.pendingApproval.pausedMessages,
               executionMode: canonicalCtx.executionMode,
               systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
@@ -1302,7 +1313,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             safeEvent({
               type: "pending_approval",
               toolId: v2Result.pendingApproval.toolId,
-              reason: v2Result.pendingApproval.reason,
+              reason: disclosedApprovalReason,
               inputs: v2Result.pendingApproval.inputs,
               pausedRunId,
             });
@@ -1311,8 +1322,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
         // An approval gate that could not be persisted is not actionable —
         // surface it as a failed turn, never as a phantom approval card.
+        // The card payload carries the disclosed reason (with the resume
+        // quote) — the loop's raw reason never reaches the user without it.
         const actionableApproval = v2Result?.pendingApproval && !pausedRunPersistFailed
-          ? v2Result.pendingApproval
+          ? { ...v2Result.pendingApproval, reason: disclosedApprovalReason! }
           : undefined;
         if (pausedRunPersistFailed) {
           assistantText = "I needed your approval to continue, but the approval request couldn't be saved. Please send your request again and I'll ask for approval once more.";
