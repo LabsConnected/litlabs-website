@@ -139,6 +139,20 @@ const MAX_PATH_LENGTH = 4096;
 let dockerProbeCache: { value: boolean; reason: string; at: number } | null = null;
 const DOCKER_PROBE_TTL_MS = 30_000;
 
+/**
+ * Healthcheck handlers must answer inside the platform's probe window.
+ * The async probes (docker CLI spawn, isolation verdict) can stall longer
+ * than that window in environments without docker — bound them so a slow
+ * probe degrades the report instead of hanging the endpoint.
+ */
+const HEALTH_PROBE_TIMEOUT_MS = 4_000;
+function withHealthTimeout<T>(p: Promise<T>, fallback: T): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), HEALTH_PROBE_TIMEOUT_MS)),
+  ]);
+}
+
 async function probeDockerAvailability(): Promise<{ value: boolean; reason: string }> {
   if (!USE_DOCKER) return { value: false, reason: "TERMINAL_USE_DOCKER is not set to true" };
   if (dockerProbeCache && Date.now() - dockerProbeCache.at < DOCKER_PROBE_TTL_MS) {
@@ -715,7 +729,10 @@ app.get("/health/ready", async (_req, res) => {
   const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;
   const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
   const workspaceReady = workspaceRoot.length > 0;
-  const dockerProbe = await probeDockerAvailability();
+  const dockerProbe = await withHealthTimeout(probeDockerAvailability(), {
+    value: false,
+    reason: "docker probe timed out",
+  });
 
   const checks = {
     authConfigured,
@@ -734,7 +751,13 @@ app.get("/health/ready", async (_req, res) => {
   // services (prepare, preview, git, exec) are closed separately and report
   // 503 HOST_EXECUTION_DISABLED per request.
   const allReady = authConfigured && internalServiceConfigured && workspaceReady;
-  const isolation = await getTerminalIsolationVerdict();
+  const isolation = await withHealthTimeout(getTerminalIsolationVerdict(), {
+    terminalExecution: "disabled" as const,
+    status: "unknown" as never,
+    mode: "unknown" as never,
+    reason: "isolation verdict timed out",
+    productionLike: true,
+  });
 
   res.status(allReady ? 200 : 503).json({
     service: "terminal-server",
@@ -765,9 +788,18 @@ app.get("/health", async (_req, res) => {
   const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;
   const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
   const workspaceReady = workspaceRoot.length > 0;
-  const dockerProbe = await probeDockerAvailability();
+  const dockerProbe = await withHealthTimeout(probeDockerAvailability(), {
+    value: false,
+    reason: "docker probe timed out",
+  });
   const allReady = authConfigured && internalServiceConfigured && workspaceReady;
-  const isolation = await getTerminalIsolationVerdict();
+  const isolation = await withHealthTimeout(getTerminalIsolationVerdict(), {
+    terminalExecution: "disabled" as const,
+    status: "unknown" as never,
+    mode: "unknown" as never,
+    reason: "isolation verdict timed out",
+    productionLike: true,
+  });
 
   res.status(allReady ? 200 : 503).json({
     service: "terminal-server",
