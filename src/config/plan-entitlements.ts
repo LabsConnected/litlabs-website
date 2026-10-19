@@ -185,11 +185,11 @@ export function formatBits(bits: number): string {
 }
 
 /**
- * Modeled provider-cost conversion: 1,000 LiTTBits ≈ $1.00 of provider spend.
+ * Modeled provider-cost conversion: 100 LiTTBits = $1.00 of provider spend.
  * MODEL ONLY — not validated against measured costs. Do not use as ground
  * truth for billing; it exists for capacity planning and margin estimates.
  */
-export const BITS_PER_USD_MODELED = 1000;
+export const BITS_PER_USD_MODELED = 100;
 
 /** Idempotency key namespace for the Starter one-time grant. */
 export const STARTER_GRANT_KEY_PREFIX = "starter:v1:";
