@@ -196,6 +196,7 @@ describe.skipIf(!dbUp)("atomic subscription apply", () => {
         "supabase/migrations/20261015170000_billing_subscription_conflicts.sql",
         "supabase/migrations/20261015180000_media_cap_hold_expiry.sql",
         "supabase/migrations/20261015200000_apply_subscription_event.sql",
+        "supabase/migrations/20261019120000_settled_invoice_grants.sql",
         "supabase/migrations/20261015210000_checkout_session_lease.sql",
         "supabase/migrations/20261015220000_schedule_media_cap_sweep.sql",
       ]) {
@@ -389,11 +390,9 @@ describe.skipIf(!dbUp)("atomic subscription apply", () => {
       expect(stored.rows[0].stripe_subscription_id).toBe("sub_bundle");
       expect(stored.rows[0].plan).toBe("pro_builder_beta");
       const sum = ledger.rows.reduce((total, row) => total + Number(row.amount), 0);
-      expect(sum === 10500 || sum === 18000).toBe(true);
-      expect(sum).toBeLessThanOrEqual(18000);
-      if (sum === 18000 && ledger.rows.length === 2) {
-        expect(ledger.rows.map((row) => Number(row.amount)).sort((a, b) => a - b)).toEqual([7500, 10500]);
-      }
+      expect(ledger.rows).toHaveLength(1);
+      expect(sum).toBe(7500);
+      expect(ledger.rows[0].idempotency_key).toBe("invoice_grant_in_bundle");
     } finally {
       await Promise.all([created.end(), updated.end(), invoice.end()]);
     }
@@ -460,6 +459,32 @@ describe.skipIf(!dbUp)("atomic subscription apply", () => {
       expect(stored.rows[0].stripe_subscription_id).toBe("sub_invoice_first");
       expect(stored.rows[0].plan).toBe("pro_builder_beta");
       expect(Number(stored.rows[0].last_stripe_event_created)).toBe(1_700_000_200);
+      const beforeUpgradeInvoice = await client.query(
+        `SELECT COALESCE(SUM(amount), 0) AS sum FROM public.credit_ledger WHERE user_id = $1`,
+        [id],
+      );
+      expect(Number(beforeUpgradeInvoice.rows[0].sum)).toBe(7500);
+      const upgradeInvoice = applyCall({
+        p_user_id: id,
+        p_incoming_subscription_id: "sub_invoice_first",
+        p_stripe_event_id: "evt_invoice_first_upgrade_paid",
+        p_event_type: "invoice.paid",
+        p_event_created: 1_700_000_400,
+        p_ordering: "apply",
+        p_authoritative: true,
+        p_update_plan: false,
+        p_status_policy: "activate_unless_terminal",
+        p_live_status: "active",
+        p_plan: "pro_builder_beta",
+        p_grant_mode: "invoice_full",
+        p_grant_amount: 10500,
+        p_grant_idempotency_key: "invoice_grant_in_upgrade_first",
+        p_grant_description: "Plan upgrade to Pro Builder Beta — 10500 LiTTBits",
+        p_grant_reference_id: "invoice_in_upgrade_first",
+        p_period_start: null,
+        p_period_end: null,
+      });
+      await client.query(upgradeInvoice.text, upgradeInvoice.values);
       const ledger = await client.query(
         `SELECT COALESCE(SUM(amount), 0) AS sum FROM public.credit_ledger WHERE user_id = $1`,
         [id],
@@ -534,8 +559,7 @@ describe.skipIf(!dbUp)("atomic subscription apply", () => {
       );
       expect(stored.rows[0].plan).toBe("pro_builder_beta");
       expect(stored.rows[0].stripe_subscription_id).toBe("sub_updown");
-      expect(ledger.rows).toHaveLength(1);
-      expect(Number(ledger.rows[0].amount)).toBe(10500);
+      expect(ledger.rows).toHaveLength(0);
     } finally {
       await Promise.all([upgrade.end(), downgrade.end()]);
     }

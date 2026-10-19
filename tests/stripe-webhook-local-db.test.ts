@@ -110,6 +110,10 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
       "supabase/migrations/20261015200000_apply_subscription_event.sql",
       "utf8",
     ));
+    await db.query(readFileSync(
+      "supabase/migrations/20261019120000_settled_invoice_grants.sql",
+      "utf8",
+    ));
     await db.query(`NOTIFY pgrst, 'reload schema'`);
     await new Promise((resolve) => setTimeout(resolve, 400));
     await db.query(`
@@ -634,7 +638,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
       };
     });
 
-    await run(12, "A newer upgrade beats a parallel older downgrade and grants once", async () => {
+    await run(12, "A newer upgrade beats a parallel older downgrade and grants nothing", async () => {
       const clerk = "local658_updown";
       await userId(clerk);
       const created = await deliver({
@@ -700,12 +704,12 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
         && rows.subscription.length === 1
         && rows.subscription[0].plan === "pro_builder_beta"
         && rows.subscription[0].stripe_subscription_id === "sub_local658_updown"
-        && rows.ledger.length === 1
-        && amount === 10500;
+        && rows.ledger.length === 0
+        && amount === 0;
       return {
         http: up.status,
         detail: ok
-          ? `plan stayed pro_builder_beta, one 10500 grant, statuses ${created.status}/${up.status}/${down.status}`
+          ? `plan stayed pro_builder_beta, no upgrade grant, statuses ${created.status}/${up.status}/${down.status}`
           : `FAIL created=${created.status} up=${up.status} down=${down.status} sub=${JSON.stringify(rows.subscription)} ledger=${JSON.stringify(rows.ledger)} upBody=${JSON.stringify(up.body)} downBody=${JSON.stringify(down.body)}`,
         db: rows,
       };

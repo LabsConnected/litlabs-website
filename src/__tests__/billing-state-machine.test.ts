@@ -286,76 +286,24 @@ function simulateApplySubscriptionEvent(
     });
   }
 
-  const storedPeriod = state.current_period_end
-    ? Math.floor(Date.parse(state.current_period_end) / 1000)
-    : null;
-  const incomingPeriod = params?.p_period_end
-    ? Math.floor(Date.parse(params.p_period_end) / 1000)
-    : null;
-  const periodRolled =
-    storedPeriod !== null && incomingPeriod !== null && storedPeriod !== incomingPeriod;
-  if (
-    params?.p_grant_mode === "upgrade_delta" &&
-    params?.p_event_type === "customer.subscription.updated" &&
-    !periodRolled
-  ) {
-    const previous = PLAN_ALLOWANCES[state.plan] ?? 0;
-    const next = PLAN_ALLOWANCES[params?.p_plan] ?? 0;
-    if (
-      previous > 0 &&
-      next > previous &&
-      typeof params?.p_grant_reference_id === "string" &&
-      !tracks.grantedRefs.has(params.p_grant_reference_id)
-    ) {
-      const delta = next - previous;
-      tracks.rpcCalls.push({
-        fn: "grant_credits",
-        params: {
-          p_user_id: params.p_user_id,
-          p_amount: delta,
-          p_category: "subscription_grant",
-          p_balance_bucket: "monthly",
-          p_description: `Plan upgrade to ${params.p_plan} — ${delta} LiTTBits`,
-          p_idempotency_key: params.p_grant_idempotency_key,
-          p_reference_type: "subscription",
-          p_reference_id: params.p_grant_reference_id,
-        },
-      });
-      if (typeof params.p_grant_idempotency_key === "string") {
-        tracks.grantedKeys.add(params.p_grant_idempotency_key);
-      }
-      tracks.grantedRefs.add(params.p_grant_reference_id);
-    }
-  }
-  if (params?.p_grant_mode === "invoice_full") {
-    const skip = params?.p_skip_grant_idempotency_key;
-    if (!(typeof skip === "string" && tracks.grantedKeys.has(skip))) {
-      const allowance = PLAN_ALLOWANCES[plan] ?? 0;
-      if (params?.p_grant_amount !== allowance) {
-        return {
-          data: null,
-          error: { message: `invoice grant amount ${params?.p_grant_amount} does not match allowance ${allowance}` },
-        };
-      }
-      if (allowance > 0) {
-        tracks.rpcCalls.push({
-          fn: "grant_credits",
-          params: {
-            p_user_id: params.p_user_id,
-            p_amount: allowance,
-            p_category: "subscription_grant",
-            p_balance_bucket: "monthly",
-            p_description: params.p_grant_description,
-            p_idempotency_key: params.p_grant_idempotency_key,
-            p_reference_type: "subscription",
-            p_reference_id: params.p_grant_reference_id,
-            p_expires_at: params.p_grant_expires_at,
-          },
-        });
-        if (typeof params.p_grant_idempotency_key === "string") {
-          tracks.grantedKeys.add(params.p_grant_idempotency_key);
-        }
-      }
+  // upgrade_delta is closed. A plan change does not credit the ledger.
+  if (params?.p_grant_mode === "invoice_full" && Number(params?.p_grant_amount) > 0) {
+    tracks.rpcCalls.push({
+      fn: "grant_credits",
+      params: {
+        p_user_id: params.p_user_id,
+        p_amount: params.p_grant_amount,
+        p_category: "subscription_grant",
+        p_balance_bucket: "monthly",
+        p_description: params.p_grant_description,
+        p_idempotency_key: params.p_grant_idempotency_key,
+        p_reference_type: "subscription",
+        p_reference_id: params.p_grant_reference_id,
+        p_expires_at: params.p_grant_expires_at,
+      },
+    });
+    if (typeof params.p_grant_idempotency_key === "string") {
+      tracks.grantedKeys.add(params.p_grant_idempotency_key);
     }
   }
 
@@ -1439,7 +1387,7 @@ describe("Webhook event processing — state mutations", () => {
     expect(upserts.filter((u) => u.table === "subscriptions")).toHaveLength(0);
   });
 
-  it("Creator→Pro price change grants 10500 once even when metadata stays creator_beta", async () => {
+  it("Creator→Pro price change updates the plan and grants nothing", async () => {
     process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
     process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
     const { sb, rpcCalls, upserts } = buildTrackingSupabase();
@@ -1468,18 +1416,13 @@ describe("Webhook event processing — state mutations", () => {
     const first = await webhookPOST(makeWebhookRequest("body", "sig"));
     expect(first.status).toBe(200);
 
-    const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
-    expect(grants).toHaveLength(1);
-    expect(grants[0].params.p_amount).toBe(10500);
-    expect(grants[0].params.p_idempotency_key).toBe(
-      "plan_upgrade_sub_upgrade_1702678400_pro_builder_beta",
-    );
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
     expect(upserts.find((u) => u.table === "subscriptions")?.row.plan).toBe("pro_builder_beta");
 
     const replay = await webhookPOST(makeWebhookRequest("body", "sig"));
     expect(replay.status).toBe(200);
     expect((await replay.json()).replayed).toBe(true);
-    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(1);
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
   });
 
   it("parallel deliveries of one invoice.paid grant once, and a later replay grants nothing", async () => {
@@ -1558,7 +1501,7 @@ describe("Webhook event processing — state mutations", () => {
       (call: unknown[]) => call[0] === "apply_subscription_event",
     );
     expect(applyCalls).toHaveLength(1);
-    expect(applyCalls[0][1].p_grant_mode).toBe("upgrade_delta");
+    expect(applyCalls[0][1].p_grant_mode).toBe("none");
     expect(applyCalls[0][1].p_plan).toBe("pro_builder_beta");
     expect(applyCalls[0][1].p_allowances.pro_builder_beta - applyCalls[0][1].p_allowances.creator_beta).toBe(10500);
     expect(upserts.find((u) => u.table === "subscriptions")).toBeUndefined();
@@ -1702,7 +1645,12 @@ describe("Webhook event processing — state mutations", () => {
         id: "in_proration",
         billing_reason: "subscription_update",
         parent: { subscription_details: { subscription: "sub_race" } },
-        lines: { data: [{ price: "price_test_pro", period: { end: periodEnd } }] },
+        lines: {
+          data: [
+            { price: "price_test_creator", amount: -500, period: { end: periodEnd } },
+            { price: "price_test_pro", amount: 1500, period: { end: periodEnd } },
+          ],
+        },
       },
     });
 
@@ -1723,9 +1671,7 @@ describe("Webhook event processing — state mutations", () => {
     const grants = effectiveGrants(tracked.rpcCalls);
     expect(grants).toHaveLength(1);
     expect(grants[0].params.p_amount).toBe(10500);
-    expect(grants[0].params.p_idempotency_key).toBe(
-      "plan_upgrade_sub_race_1702678400_pro_builder_beta",
-    );
+    expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_proration");
     expect(tracked.upserts.some((row) => row.row.plan === "pro_builder_beta")).toBe(true);
   });
 
@@ -1760,14 +1706,15 @@ describe("Webhook event processing — state mutations", () => {
 
     mockConstructEvent.mockReturnValueOnce(cycle("evt_cycle_early"));
     const early = await webhookPOST(makeWebhookRequest("body", "sig"));
-    expect(early.status).toBe(500);
-    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+    expect(early.status).toBe(200);
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(1);
+    expect(effectiveGrants(tracked.rpcCalls)[0].params.p_amount).toBe(18000);
 
     mockConstructEvent.mockReturnValueOnce(rolled("evt_roll"));
     const changed = await webhookPOST(makeWebhookRequest("body", "sig"));
     expect(changed.status).toBe(200);
     expect(tracked.upserts.some((row) => row.row.plan === "pro_builder_beta")).toBe(true);
-    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(1);
 
     mockConstructEvent.mockReturnValueOnce(cycle("evt_cycle_retry"));
     const renewed = await webhookPOST(makeWebhookRequest("body", "sig"));
@@ -2165,7 +2112,7 @@ describe("Webhook event processing — state mutations", () => {
     expect(row.current_period_end).toBe(new Date(1702678400 * 1000).toISOString());
   });
 
-  it("a renewal invoice whose price disagrees with the stored plan still returns 500", async () => {
+  it("a renewal invoice grants the paid price even when the stored plan differs", async () => {
     process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
     const { sb, rpcCalls } = buildTrackingSupabase();
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
@@ -2180,8 +2127,11 @@ describe("Webhook event processing — state mutations", () => {
     }));
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
     const res = await webhookPOST(makeWebhookRequest("body", "sig"));
-    expect(res.status).toBe(500);
-    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
+    expect(res.status).toBe(200);
+    const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+    expect(grants).toHaveLength(1);
+    expect(grants[0].params.p_amount).toBe(18000);
+    expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_mismatch");
   });
 
   it("a subscription_update proration invoice does not grant the full plan amount", async () => {
