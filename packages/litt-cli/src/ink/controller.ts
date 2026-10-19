@@ -197,7 +197,11 @@ function routeForTarget(
         "LOCAL execution requires the local model daemon, but its status was not probed for this request.",
       );
     }
-    return modelRuntime.routeLocal(lane, requestedLocalModel(store.state.selectedModel));
+    return modelRuntime.routeLocal(
+      lane,
+      requestedLocalModel(store.state.selectedModel),
+      classifyIntent(input) === "chat" ? "fast" : "coder",
+    );
   }
   return modelRuntime.route(store.state.routingMode, store.state.selectedModel, input);
 }

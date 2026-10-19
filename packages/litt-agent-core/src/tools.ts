@@ -173,6 +173,18 @@ const RUN_DEF: ToolDefinition = {
   readOnly: true,
 };
 
+const SYSTEM_SNAPSHOT_DEF: ToolDefinition = {
+  id: "system.snapshot",
+  name: "system_snapshot",
+  description:
+    "Read-only host snapshot: CPU, memory, GPU/VRAM (when nvidia-smi is " +
+    "present), and Ollama runtime state (loaded models, VRAM use) when a " +
+    "local Ollama endpoint answers. Each section reports honest " +
+    "unavailability — never guessed values.",
+  inputSchema: { type: "object", properties: {} },
+  readOnly: true,
+};
+
 const WRITE_FILE_DEF: ToolDefinition = {
   id: "project.write_file",
   name: "write_file",
@@ -310,6 +322,79 @@ const runHandler: ToolHandler = async (ctx, args) => {
   return runCommand(ctx.shell, command, cmdArgs, { cwd: ctx.cwd, stdin });
 };
 
+const systemSnapshotHandler: ToolHandler = async () => {
+  const os = await import("node:os");
+  const data: Record<string, unknown> = {
+    cpu: {
+      model: os.cpus()[0]?.model ?? null,
+      cores: os.cpus().length,
+      loadAvg: os.loadavg(),
+    },
+    memory: {
+      totalMb: Math.round(os.totalmem() / 1048576),
+      freeMb: Math.round(os.freemem() / 1048576),
+    },
+    platform: `${os.platform()} ${os.release()}`,
+    uptimeSec: Math.round(os.uptime()),
+  };
+
+  // GPU via nvidia-smi — structured execFile, no shell, read-only query.
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const { stdout } = await promisify(execFile)(
+      "nvidia-smi",
+      ["--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu", "--format=csv,noheader,nounits"],
+      { timeout: 3_000 },
+    );
+    const [name, total, used, free, util] =
+      stdout.trim().split("\n")[0].split(",").map((s) => s.trim());
+    data.gpu = { name, vramTotalMb: +total, vramUsedMb: +used, vramFreeMb: +free, utilizationPct: +util };
+  } catch {
+    data.gpu = { available: false, reason: "nvidia-smi unavailable" };
+  }
+
+  // Ollama runtime — /api/ps on the configured/default endpoint.
+  const rawEndpoint =
+    process.env.LITT_OLLAMA_URL ?? process.env.OLLAMA_HOST ?? "http://localhost:11434";
+  let endpoint = rawEndpoint;
+  try {
+    const u = new URL(rawEndpoint);
+    u.username = "";
+    u.password = "";
+    endpoint = u.href.replace(/\/+$/, "");
+  } catch {
+    endpoint = "http://localhost:11434";
+  }
+  try {
+    const res = await fetch(`${endpoint.replace(/\/+$/, "")}/api/ps`, {
+      signal: AbortSignal.timeout(1_500),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = (await res.json()) as {
+      models?: Array<{ name?: string; size_vram?: number; context_length?: number; expires_at?: string }>;
+    };
+    data.ollama = {
+      endpoint,
+      reachable: true,
+      loadedModels: (body.models ?? []).map((m) => ({
+        name: m.name ?? null,
+        vramMb: m.size_vram ? Math.round(m.size_vram / 1048576) : null,
+        contextLength: m.context_length ?? null,
+        expiresAt: m.expires_at ?? null,
+      })),
+    };
+  } catch (err) {
+    data.ollama = {
+      endpoint,
+      reachable: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  return { status: "success", success: true, message: "system snapshot collected", data };
+};
+
 const writeFileHandler: ToolHandler = async (ctx, args) => {
   const filePath = typeof args.path === "string" ? args.path : "";
   if (!filePath) {
@@ -335,6 +420,7 @@ const ENTRIES: Record<string, ToolEntry> = {
   "project.test": { definition: TEST_DEF, handler: testHandler, metadata: READ_ONLY_META },
   "project.build": { definition: BUILD_DEF, handler: buildHandler, metadata: READ_ONLY_META },
   "project.run": { definition: RUN_DEF, handler: runHandler, metadata: READ_ONLY_META },
+  "system.snapshot": { definition: SYSTEM_SNAPSHOT_DEF, handler: systemSnapshotHandler, metadata: READ_ONLY_META },
   // Shared realtime internet capability — see realtime.ts.
   ...REALTIME_TOOL_ENTRIES,
 };

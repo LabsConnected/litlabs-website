@@ -22,7 +22,7 @@
  * the probed lane status (lib/local-lane.ts) and the session facts.
  */
 
-import type { LocalLaneStatus } from "./local-lane.js";
+import type { LocalLaneStatus, LocalModelKind } from "./local-lane.js";
 import { selectLocalModel } from "./local-lane.js";
 import type { ExecutionTarget } from "./execution-target.js";
 import type { RoutedModel } from "./model-runtime.js";
@@ -231,6 +231,7 @@ export type LocalModelOutcome =
 export function resolveLocalModel(
   lane: LocalLaneStatus,
   requested: string | null,
+  kind: LocalModelKind = "coder",
 ): LocalModelOutcome {
   // Track the configured input and its source so callers (doctor, ask,
   // TUI) can surface route-change decisions instead of silently serving
@@ -279,7 +280,7 @@ export function resolveLocalModel(
     };
   }
 
-  const picked = selectLocalModel(lane.models);
+  const picked = selectLocalModel(lane.models, undefined, kind);
   if (!picked) {
     return {
       ok: false,
@@ -293,7 +294,7 @@ export function resolveLocalModel(
       canonicalId: `${OLLAMA_CANONICAL_PREFIX}${picked}`,
       provider: "ollama",
       endpoint: lane.endpoint,
-      reason: `local lane preference order selected "${picked}"`,
+      reason: `local lane preference order selected "${picked}" (${kind})`,
       configuredInput: null,
       configuredSource: "none",
       isRouteChange: false,
