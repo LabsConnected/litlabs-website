@@ -1057,7 +1057,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // re-fires, and the cockpit repaints ~25x/s forever while idle.
   // Re-run only when an input of the decision actually changes.
   const reconcileRef = useRef(reconcileLocalModel);
-  reconcileRef.current = reconcileLocalModel;
+  useEffect(() => {
+    reconcileRef.current = reconcileLocalModel;
+  });
   useEffect(() => {
     void reconcileRef.current();
   }, [
