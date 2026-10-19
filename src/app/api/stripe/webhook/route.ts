@@ -434,9 +434,11 @@ function subscriptionCreditAllowance(plan: string | null | undefined): number {
  */
 function settledInvoiceCredit(
   inv: Stripe.Invoice,
-  storedPlan: string | null | undefined,
   context: string,
 ): { amount: number; plan: PlanId; kind: "base" | "upgrade" } | null {
+  // A $0 invoice can acknowledge a trial, coupon, or fully discounted period.
+  // It cannot mint a full paid-period allowance.
+  if (inv.amount_paid === 0 || inv.total === 0) return null;
   if (inv.billing_reason === "subscription_update") {
     const lines = invoiceLineCredits(inv);
     const previous = lines.find((line) => line.plan && (line.amount ?? 0) < 0);
@@ -448,7 +450,9 @@ function settledInvoiceCredit(
     return { amount: delta, plan: requireSubscriptionGrantPlan(next.plan, context), kind: "upgrade" };
   }
   const priced = invoiceLineCredits(inv).find((line) => line.plan)?.plan ?? null;
-  const plan = requireSubscriptionGrantPlan(priced ?? storedPlan, context);
+  // Never fall back to the mutable subscription plan. An unpaid upgrade can
+  // already have changed that row before a Creator renewal settles.
+  const plan = requireSubscriptionGrantPlan(priced, context);
   const amount = subscriptionCreditAllowance(plan);
   if (amount <= 0) return null;
   return { amount, plan, kind: "base" };
@@ -1495,7 +1499,7 @@ export async function POST(req: NextRequest) {
         // the delta only when Stripe settled the proration. A plan change
         // that has not been paid grants nothing, and the stored plan cannot
         // change the amount.
-        const settled = settledInvoiceCredit(inv, invMatch.plan, `invoice.paid ${event.id}`);
+        const settled = settledInvoiceCredit(inv, `invoice.paid ${event.id}`);
         let grantMode: "none" | "invoice_full" = "none";
         let grantAmount: number | null = null;
         let grantKey: string | null = null;
