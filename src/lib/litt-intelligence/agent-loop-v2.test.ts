@@ -344,7 +344,8 @@ describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate
       enableBuildFix: false,
     });
 
-    expect(transportWithFile.readFile).toHaveBeenCalledTimes(2);
+    // The third read is the post-write persisted-change verification.
+    expect(transportWithFile.readFile).toHaveBeenCalledTimes(3);
     expect(writeFile).toHaveBeenCalledWith("index.html", "<footer>Ember Roast · Freshly roasted.</footer>");
     expect(result.pendingApproval).toBeUndefined();
     expect(result.finalText).toContain("updated safely");

@@ -207,6 +207,14 @@ function mutationIsVerified(call: ToolCallEvidence, change: WorkspaceChangeEvide
   return declared.some((p) => changedFiles.has(p));
 }
 
+/** The missing deployment evidence for a ship requirement — empty when satisfied. */
+function deploymentGapMissing(deployment: DeploymentEvidence | null): string[] {
+  if (!deployment || !deployment.started) return ["deployment"];
+  if (!deployment.succeeded) return ["successful deployment"];
+  if (!deployment.url || !deployment.urlVerified) return ["verified live URL"];
+  return [];
+}
+
 /** " (2 files)" / " (index.html)" — empty when the diff could not name them. */
 function fileSummary(change: WorkspaceChangeEvidence): string {
   const files = change.files ?? [];
@@ -394,7 +402,13 @@ function evaluateCompletionState(
 
       // The comparison could not be made at all. Absence of evidence is
       // not evidence of absence — but it is never proof of success either,
-      // so the run stays short of "complete" and says why.
+      // so the run stays short of "complete" and says why. Deployment
+      // gaps are reported first — a ship request missing BOTH must name
+      // the deployment the user actually asked for.
+      const deploymentGaps = requirement.deployment
+        ? deploymentGapMissing(evidence.deployment ?? null)
+        : [];
+      missing.push(...deploymentGaps);
       missing.push("verified workspace change matching the reported mutation");
       return {
         ...base,
@@ -411,32 +425,19 @@ function evaluateCompletionState(
 
   // ── Deployment required ──
   if (requirement.deployment) {
-    const deployment = evidence.deployment ?? null;
-    if (!deployment || !deployment.started) {
-      missing.push("deployment");
+    const gaps = deploymentGapMissing(evidence.deployment ?? null);
+    if (gaps.length > 0) {
+      missing.push(...gaps);
       return {
         ...base,
         state: "partial",
         missing,
-        reason: "Files were changed but no deployment was started.",
-      };
-    }
-    if (!deployment.succeeded) {
-      missing.push("successful deployment");
-      return {
-        ...base,
-        state: "partial",
-        missing,
-        reason: "A deployment started but did not succeed.",
-      };
-    }
-    if (!deployment.url || !deployment.urlVerified) {
-      missing.push("verified live URL");
-      return {
-        ...base,
-        state: "partial",
-        missing,
-        reason: "The deployment succeeded but its live URL was not verified.",
+        reason:
+          gaps[0] === "deployment"
+            ? "Files were changed but no deployment was started."
+            : gaps[0] === "successful deployment"
+              ? "A deployment started but did not succeed."
+              : "The deployment succeeded but its live URL was not verified.",
       };
     }
   }

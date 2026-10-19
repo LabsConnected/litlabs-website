@@ -823,43 +823,51 @@ function declaredMutationPaths(
 
 /**
  * After a successful file mutation, re-read the file from the workspace —
- * the persisted-truth check completion evidence relies on. Records INSPECT
- * evidence (targeted-edit verification) into the quality ledger when a
- * session is attached; for writes, the read-back must equal the written
- * content, for search/replace patches every replacement must be present.
- * Always returns the check so the caller can attach it to the run's own
- * tool-call evidence, session or not. Never throws — verification
- * failures are recorded honestly, never as passes.
+ * the persisted-truth check completion evidence relies on. Thin wrapper
+ * over {@link readBackMutation}: for writes the read-back must equal the
+ * written content, for search/replace patches every replacement must be
+ * present. Never throws — verification failures are recorded honestly,
+ * never as passes.
  */
 async function verifyMutationReadBack(
-  session: QualityLoopSession | null,
   transport: WorkspaceTransport,
   toolId: string,
   inputs: Record<string, unknown> | undefined,
   mutated: boolean,
-  isStaticWorkspace?: boolean,
 ): Promise<MutationReadBack | null> {
   if (!mutated || !inputs) return null;
-  const check = await readBackMutation(transport, toolId, inputs);
+  return readBackMutation(transport, toolId, inputs);
+}
+
+/**
+ * Record a computed read-back into the quality ledger (INSPECT evidence,
+ * targeted-edit verification). Must run AFTER the tool result itself was
+ * noted — the ledger binds the read-back to the noted call. File-edit
+ * tools only. Static workspaces cannot run command checks (Gate 1), so
+ * the verified read-back is also recorded as the static artifact check.
+ */
+function noteReadBackToSession(
+  session: QualityLoopSession | null,
+  toolId: string,
+  check: MutationReadBack | null,
+  isStaticWorkspace?: boolean,
+): void {
+  if (!session || !check?.path) return;
   const isFileEdit =
-    check?.path != null &&
-    (toolId === "files.write" ||
-      toolId === "files.patch" ||
-      toolId === "apply_patch" ||
-      toolId === "code.writeFile" ||
-      toolId === "code.refactor");
-  if (!isFileEdit || !session) return check;
+    toolId === "files.write" ||
+    toolId === "files.patch" ||
+    toolId === "apply_patch" ||
+    toolId === "code.writeFile" ||
+    toolId === "code.refactor";
+  if (!isFileEdit) return;
   noteMutationReadBack(session, {
-    path: check!.path!,
-    readable: check!.readable === true,
-    contentMatches: check!.contentMatches ?? null,
+    path: check.path,
+    readable: check.readable === true,
+    contentMatches: check.contentMatches ?? null,
   });
-  // Static workspaces cannot run the command checks (Gate 1): the verified
-  // read-back IS the executed check there, and it is the only one recorded.
   if (isStaticWorkspace) {
-    noteStaticArtifactCheck(session, { path: check!.path!, contentMatches: check!.contentMatches ?? null });
+    noteStaticArtifactCheck(session, { path: check.path, contentMatches: check.contentMatches ?? null });
   }
-  return check;
 }
 
 /**
@@ -1821,12 +1829,10 @@ async function runAgentLoopV2Inner(
       // one that works on gitless (static) workspaces.
       const summary = summarizeToolResult(toolCall.toolId, result.result);
       const mutationCheck = await verifyMutationReadBack(
-        qualitySession,
         transport,
         toolCall.toolId,
         toolCall.inputs,
         result.success && !toolDef.readOnly,
-        cfg.isStaticWorkspace,
       );
       toolCallLog.push({
         toolId: toolCall.toolId,
@@ -1863,6 +1869,7 @@ async function runAgentLoopV2Inner(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
+        noteReadBackToSession(qualitySession, toolCall.toolId, mutationCheck, cfg.isStaticWorkspace);
       }
 
       localProgress.emit({
@@ -2506,12 +2513,10 @@ export async function executeDeferredToolCalls(
 
     const summary = summarizeToolResult(toolCall.toolId, result.result);
     const mutationCheck = await verifyMutationReadBack(
-      ctx.qualitySession,
       ctx.transport,
       toolCall.toolId,
       toolCall.inputs,
       result.success && !toolDef.readOnly,
-      ctx.isStaticWorkspace,
     );
     ctx.toolCallLog.push({
       toolId: toolCall.toolId,
@@ -2529,6 +2534,7 @@ export async function executeDeferredToolCalls(
         { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
         ctx.transport.workspaceId,
       );
+      noteReadBackToSession(ctx.qualitySession, toolCall.toolId, mutationCheck, ctx.isStaticWorkspace);
     }
 
     ctx.localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
@@ -2816,12 +2822,10 @@ async function resumeAgentLoopV2Inner(
     // persisted-truth check as the live loop, and the only channel that
     // proves anything on a gitless (static) workspace.
     const mutationCheck = await verifyMutationReadBack(
-      qualitySession,
       transport,
       resume.toolId,
       resume.inputs,
       result.success && !resumedReadOnly,
-      cfg.isStaticWorkspace,
     );
     toolCallLog.push({
       toolId: resume.toolId,
@@ -2852,6 +2856,7 @@ async function resumeAgentLoopV2Inner(
         { success: result.success, result: result.result, mutating: !resumedReadOnly, summary },
         transport.workspaceId,
       );
+      noteReadBackToSession(qualitySession, resume.toolId, mutationCheck, cfg.isStaticWorkspace);
     }
 
     localProgress.emit({
@@ -3289,12 +3294,10 @@ async function resumeAgentLoopV2Inner(
 
       const summary = summarizeToolResult(toolCall.toolId, result.result);
       const mutationCheck = await verifyMutationReadBack(
-        qualitySession,
         transport,
         toolCall.toolId,
         toolCall.inputs,
         result.success && !toolDef.readOnly,
-        cfg.isStaticWorkspace,
       );
       toolCallLog.push({
         toolId: toolCall.toolId,
@@ -3312,6 +3315,7 @@ async function resumeAgentLoopV2Inner(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
+        noteReadBackToSession(qualitySession, toolCall.toolId, mutationCheck, cfg.isStaticWorkspace);
       }
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
