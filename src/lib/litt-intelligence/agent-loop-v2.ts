@@ -734,6 +734,39 @@ function readFailedBecauseMissing(err: unknown): boolean {
   return /\b404\b|not found|no such file/i.test(msg);
 }
 
+/** What a parent-directory listing says about a workspace path. */
+type WorkspaceListingKind = "file" | "folder" | "absent" | "unknown";
+
+/**
+ * Existence probe that never reads file content — binary-safe for
+ * generated/inserted assets, and the only probe that can verify a
+ * directory (readFile reports a bare "Not a file" for one, which cannot
+ * distinguish absent from present-as-directory). A parent listing that
+ * fails with not-found means the child cannot exist either.
+ */
+async function listingKind(
+  transport: WorkspaceTransport,
+  path: string,
+): Promise<WorkspaceListingKind> {
+  const normalized = path
+    .replace(/\\/g, "/")
+    .replace(/^\.?\//, "")
+    .replace(/\/+/g, "/")
+    .replace(/\/$/, "");
+  if (!normalized) return "unknown";
+  const slash = normalized.lastIndexOf("/");
+  const parent = slash === -1 ? "." : normalized.slice(0, slash) || ".";
+  const base = slash === -1 ? normalized : normalized.slice(slash + 1);
+  try {
+    const { entries } = await transport.listFiles(parent);
+    const hit = entries.find((e) => e.name === base);
+    if (!hit) return "absent";
+    return hit.type === "folder" || hit.type === "directory" ? "folder" : "file";
+  } catch (err) {
+    return readFailedBecauseMissing(err) ? "absent" : "unknown";
+  }
+}
+
 /**
  * Re-read the workspace to confirm whether a mutation the tool reported as
  * successful is really persisted. This is the completion evidence's
@@ -741,11 +774,21 @@ function readFailedBecauseMissing(err: unknown): boolean {
  * workspaces, which can never produce a checkpoint diff.
  *
  *   files.write / files.patch / apply_patch — the file must read back and
- *     contain the claimed content (every replacement for patches).
- *   files.delete — the file must now be unreadable.
- *   files.rename — the new path must now be readable.
- *   everything else (terminal.execute, deploys, mkdir, …) — not
- *     read-back-checkable; the baseline diff is the evidence there.
+ *     contain the claimed content (every replacement for patches; every
+ *     deletion's search string for deletion-only patches).
+ *   files.delete — the path must now be absent (file or directory).
+ *   files.rename — the new path must exist and the old one be gone.
+ *   files.mkdir — the directory must exist. An empty directory produces
+ *     no git-diff lines, so this is the only channel that verifies mkdir
+ *     even on git workspaces.
+ *   image.generate / project.insert_asset — the asset path the tool
+ *     returned must exist in the workspace listing (binary-safe: the
+ *     parent is listed, never the bytes).
+ *   preview.start / preview.stop — the preview service's own status probe
+ *     must confirm the lifecycle state the tool claimed.
+ *   everything else (terminal.execute, deploys, browser.*, …) — not
+ *     read-back-checkable; the baseline diff or the tool boundary is the
+ *     evidence there.
  *
  * Returns null for tools the read-back cannot speak to. Never throws.
  */
@@ -753,11 +796,13 @@ async function readBackMutation(
   transport: WorkspaceTransport,
   toolId: string,
   inputs: Record<string, unknown> | undefined,
+  result?: unknown,
 ): Promise<MutationReadBack | null> {
   if (!inputs) return null;
   if (toolId === "code.writeFile") toolId = "files.write";
   if (toolId === "code.refactor") toolId = "apply_patch";
   const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
+  const r = result && typeof result === "object" ? (result as Record<string, unknown>) : null;
 
   if (toolId === "files.write" || toolId === "files.patch" || toolId === "apply_patch") {
     const path = str(inputs.path);
@@ -765,17 +810,39 @@ async function readBackMutation(
     let content: string;
     try {
       content = (await transport.readFile(path)).content;
-    } catch {
-      return { path, verified: null, readable: false, contentMatches: false };
+    } catch (err) {
+      // A file the tool claims it wrote but that is simply not there is a
+      // contradiction, not an unanswered question.
+      return {
+        path,
+        verified: readFailedBecauseMissing(err) ? false : null,
+        readable: false,
+        contentMatches: false,
+      };
     }
     let contentMatches: boolean | null = null;
     if (toolId === "files.write" && typeof inputs.content === "string") {
       contentMatches = content === inputs.content;
     } else if (toolId === "apply_patch" && Array.isArray(inputs.patches)) {
-      const replaces = (inputs.patches as Array<{ replace?: unknown }>)
-        .map((p) => (typeof p?.replace === "string" ? p.replace : null))
-        .filter((r): r is string => r !== null && r.length > 0);
-      contentMatches = replaces.length > 0 ? replaces.every((r) => content.includes(r)) : null;
+      const checks = (inputs.patches as Array<{ search?: unknown; replace?: unknown }>).map(
+        (p): boolean | null => {
+          const rep = typeof p?.replace === "string" ? p.replace : null;
+          if (rep) return content.includes(rep);
+          const sea = typeof p?.search === "string" ? p.search : null;
+          if (rep === "" && sea) {
+            // Deletion-only patch. The transport replaces the first
+            // occurrence only, so a surviving search string can be
+            // legitimate — absence confirms, presence is unverifiable.
+            return content.includes(sea) ? null : true;
+          }
+          return null;
+        },
+      );
+      contentMatches = checks.some((c) => c === false)
+        ? false
+        : checks.length > 0 && checks.every((c) => c === true)
+          ? true
+          : null;
     }
     return { path, verified: contentMatches, readable: true, contentMatches };
   }
@@ -788,18 +855,76 @@ async function readBackMutation(
       // Still readable — the claimed deletion did not persist.
       return { path, verified: false, readable: true, contentMatches: false };
     } catch (err) {
-      return { path, verified: readFailedBecauseMissing(err) ? true : null };
+      if (readFailedBecauseMissing(err)) return { path, verified: true };
+      // "Not a file" and friends cannot distinguish absent from
+      // present-as-directory — only the parent listing can.
+      const kind = await listingKind(transport, path);
+      if (kind === "unknown") return { path, verified: null };
+      return { path, verified: kind === "absent" };
     }
   }
 
   if (toolId === "files.rename") {
     const path = str(inputs.newPath);
+    const oldPath = str(inputs.path);
     if (!path) return null;
+    // The claim has two halves: the target landed AND the source is gone.
+    // Checking only the target credits a copy as a move.
+    let targetKind: WorkspaceListingKind;
     try {
       await transport.readFile(path);
-      return { path, verified: true };
+      targetKind = "file";
     } catch (err) {
-      return { path, verified: readFailedBecauseMissing(err) ? false : null };
+      targetKind = readFailedBecauseMissing(err) ? "absent" : await listingKind(transport, path);
+    }
+    if (targetKind === "absent") return { path, verified: false };
+    if (targetKind === "unknown") return { path, verified: null };
+    if (!oldPath) return { path, verified: true };
+    const oldKind = await listingKind(transport, oldPath);
+    if (oldKind === "unknown") return { path, verified: null };
+    return { path, verified: oldKind === "absent" };
+  }
+
+  if (toolId === "files.mkdir") {
+    const path = str(inputs.path);
+    if (!path) return null;
+    const kind = await listingKind(transport, path);
+    if (kind === "unknown") return { path, verified: null };
+    return { path, verified: kind === "folder" };
+  }
+
+  if (toolId === "image.generate" || toolId === "project.insert_asset") {
+    const path = str(r?.projectPath) ?? str(r?.path);
+    if (path) {
+      const kind = await listingKind(transport, path);
+      if (kind === "unknown") return { path, verified: null };
+      return { path, verified: kind === "file" };
+    }
+    // The registry's auto-insert reported a failed in-workspace save
+    // (savedToProject:false): the asset the result implies is not there.
+    if (r?.savedToProject === false) return { path: null, verified: false };
+    return null;
+  }
+
+  if (toolId === "preview.start" || toolId === "preview.stop") {
+    try {
+      const status = await transport.getPreviewStatus();
+      if (toolId === "preview.start") {
+        return {
+          path: null,
+          verified: status.status === "ready" ? true : status.status === "failed" ? false : null,
+        };
+      }
+      return {
+        path: null,
+        verified: status.status === "stopped"
+          ? true
+          : status.status === "ready" || status.status === "starting" || status.status === "restarting"
+            ? false
+            : null,
+      };
+    } catch {
+      return null;
     }
   }
 
@@ -813,12 +938,28 @@ async function readBackMutation(
  */
 function declaredMutationPaths(
   inputs: Record<string, unknown> | undefined,
+  result?: unknown,
 ): string[] | undefined {
   if (!inputs) return undefined;
-  const declared = [inputs.path, inputs.newPath]
+  const r = result && typeof result === "object" ? (result as Record<string, unknown>) : null;
+  const declared = [
+    inputs.path,
+    inputs.newPath,
+    inputs.directory,
+    inputs.targetPath,
+    inputs.sitePath,
+    // git.commit takes a `files` allow-list — each is a declared target.
+    ...(Array.isArray(inputs.files) ? inputs.files : []),
+    // The path the tool reports it actually wrote — authoritative for
+    // asset tools whose output name is computed server-side
+    // (project.insert_asset, image.generate's auto-insert).
+    r?.path,
+    r?.projectPath,
+    r?.sitePath,
+  ]
     .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
     .map((p) => p.replace(/\\/g, "/").replace(/^\.?\//, "").replace(/\/+/g, "/").replace(/\/$/, ""));
-  return declared.length > 0 ? declared : undefined;
+  return declared.length > 0 ? [...new Set(declared)] : undefined;
 }
 
 /**
@@ -834,9 +975,10 @@ async function verifyMutationReadBack(
   toolId: string,
   inputs: Record<string, unknown> | undefined,
   mutated: boolean,
+  result?: unknown,
 ): Promise<MutationReadBack | null> {
   if (!mutated || !inputs) return null;
-  return readBackMutation(transport, toolId, inputs);
+  return readBackMutation(transport, toolId, inputs, result);
 }
 
 /**
@@ -1559,7 +1701,7 @@ async function runAgentLoopV2Inner(
             result: prior.result,
             success: true,
           }));
-          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs) });
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result) });
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
@@ -1833,13 +1975,14 @@ async function runAgentLoopV2Inner(
         toolCall.toolId,
         toolCall.inputs,
         result.success && !toolDef.readOnly,
+        result.result,
       );
       toolCallLog.push({
         toolId: toolCall.toolId,
         success: result.success,
         summary,
         mutating: !toolDef.readOnly,
-        paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs) : undefined,
+        paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
         persisted: mutationCheck?.verified ?? undefined,
       });
       // Observability (Part J): record the tool call for the run record.
@@ -2380,7 +2523,7 @@ export async function executeDeferredToolCalls(
           result: prior.result,
           success: true,
         }));
-        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs) });
+        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result) });
         ctx.localProgress.emit({
           type: "tool_result",
           toolId: toolCall.toolId,
@@ -2517,13 +2660,14 @@ export async function executeDeferredToolCalls(
       toolCall.toolId,
       toolCall.inputs,
       result.success && !toolDef.readOnly,
+      result.result,
     );
     ctx.toolCallLog.push({
       toolId: toolCall.toolId,
       success: result.success,
       summary,
       mutating: !toolDef.readOnly,
-      paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs) : undefined,
+      paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
       persisted: mutationCheck?.verified ?? undefined,
     });
     state.completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? state.completedDeployment;
@@ -2826,13 +2970,14 @@ async function resumeAgentLoopV2Inner(
       resume.toolId,
       resume.inputs,
       result.success && !resumedReadOnly,
+      result.result,
     );
     toolCallLog.push({
       toolId: resume.toolId,
       success: result.success,
       summary,
       mutating: !resumedReadOnly,
-      paths: !resumedReadOnly ? declaredMutationPaths(resume.inputs) : undefined,
+      paths: !resumedReadOnly ? declaredMutationPaths(resume.inputs, result.result) : undefined,
       persisted: mutationCheck?.verified ?? undefined,
     });
     // Observability (Part J): record the approved tool execution.
@@ -3160,7 +3305,7 @@ async function resumeAgentLoopV2Inner(
             result: prior.result,
             success: true,
           }));
-          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs) });
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result) });
           localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — already executed", durationMs: 0 });
           continue;
         }
@@ -3298,13 +3443,14 @@ async function resumeAgentLoopV2Inner(
         toolCall.toolId,
         toolCall.inputs,
         result.success && !toolDef.readOnly,
+        result.result,
       );
       toolCallLog.push({
         toolId: toolCall.toolId,
         success: result.success,
         summary,
         mutating: !toolDef.readOnly,
-        paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs) : undefined,
+        paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
         persisted: mutationCheck?.verified ?? undefined,
       });
       completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;

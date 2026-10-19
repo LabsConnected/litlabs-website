@@ -373,4 +373,264 @@ describe("completion verdict vs. actual workspace state", () => {
       expect(verdict.state).toBe("complete");
     });
   });
+
+  // ─── Issue #704: the verified-mutation requirement is per-claim, not
+  // per-run. One verified write must not let a contradicted or
+  // unattributable claim in the same run report "complete".
+  describe("per-claim verification — one verified mutation cannot mask a failed claim", () => {
+    it("a contradicted read-back fails a multi-file build even when the other writes verified (gitless)", () => {
+      // The headline case: files 1–2 verified, file 3's write was
+      // contradicted by read-back. Before per-claim tracking this still
+      // reported "complete".
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [
+            { toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: true },
+            { toolId: "files.write", mutating: true, success: true, paths: ["style.css"], persisted: true },
+            { toolId: "files.write", mutating: true, success: true, paths: ["app.js"], persisted: false },
+          ],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("failed");
+      expect(verdict.reason).toMatch(/did not find the claimed change/i);
+      expect(verdict.reason).toMatch(/app\.js/);
+    });
+
+    it("a claim the diff cannot attribute fails a multi-file build even when the others verified", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [
+            { toolId: "files.write", mutating: true, success: true, paths: ["a.html"] },
+            { toolId: "files.write", mutating: true, success: true, paths: ["b.html"] },
+            { toolId: "files.write", mutating: true, success: true, paths: ["c.html"] },
+          ],
+          changed(["a.html", "b.html"]),
+        ),
+      );
+
+      expect(verdict.state).toBe("failed");
+      expect(verdict.missing).toContain("workspace change in a file the run declared it was writing");
+    });
+
+    it("an unverifiable claim alongside a verified one is partial — never complete (gitless)", () => {
+      // The write verified by read-back; the exec claim can be checked by
+      // neither channel on a static workspace. "Complete" would claim
+      // certainty the evidence does not have.
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [
+            { toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: true },
+            { toolId: "terminal.execute", mutating: true, success: true },
+          ],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("partial");
+      expect(verdict.state).not.toBe("complete");
+      expect(verdict.missing).toContain("verified workspace change matching the reported mutation");
+    });
+
+    it("a boundary-verified mutation cannot mask a contradicted file claim", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [
+            { toolId: "preview.start", mutating: true, success: true },
+            { toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: false },
+          ],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("failed");
+    });
+
+    it("a contradicted claim superseded by a later verified rewrite of the same path completes", () => {
+      // The first write's read-back failed, but a later write landed the
+      // requested end state — what persisted is what was asked for.
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [
+            { toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: false },
+            { toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: true },
+          ],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("complete");
+    });
+
+    it("an earlier verified write does NOT supersede a later contradicted claim on the same path", () => {
+      // Supersede only runs forward: the final persisted state is what
+      // the last read-back saw, and it contradicts the claim.
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [
+            { toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: true },
+            { toolId: "files.write", mutating: true, success: true, paths: ["index.html"], persisted: false },
+          ],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("failed");
+    });
+  });
+
+  // ─── Issue #703: verification coverage beyond the four file tools.
+  // On gitless (static) workspaces the read-back is the only channel —
+  // these used to be unverifiable and reported failed on real success.
+  describe("mutation verification coverage beyond write/delete/rename", () => {
+    it("files.mkdir verified by read-back completes on a gitless workspace", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "files.mkdir", mutating: true, success: true, paths: ["assets"], persisted: true }],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("complete");
+    });
+
+    it("files.mkdir contradicted by read-back fails on a gitless workspace", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "files.mkdir", mutating: true, success: true, paths: ["assets"], persisted: false }],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("failed");
+    });
+
+    it("image.generate persisted via the saved asset path completes with no diff", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "image.generate", mutating: true, success: true, paths: ["assets/images/hero.png"], persisted: true }],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("complete");
+    });
+
+    it("project.insert_asset persisted via the returned asset path completes with no diff", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "project.insert_asset", mutating: true, success: true, paths: ["assets/hero.png"], persisted: true }],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("complete");
+    });
+
+    it("a failed in-workspace asset save vetoes image.generate even with no diff", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "image.generate", mutating: true, success: true, persisted: false }],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("failed");
+    });
+
+    it("preview.start is verified at the tool boundary — an unchanged diff cannot contradict it", () => {
+      // A preview produces no workspace diff by design: before the
+      // capability split, a verified-unchanged diff reported this
+      // legitimate success as failed.
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence([{ toolId: "preview.start", mutating: true, success: true }], unchanged),
+      );
+
+      expect(verdict.state).toBe("complete");
+    });
+
+    it("mutating browser.* claims are verified at the tool boundary on gitless runs", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [
+            { toolId: "browser.click", mutating: true, success: true },
+            { toolId: "browser.type", mutating: true, success: true },
+          ],
+          null,
+        ),
+      );
+
+      expect(verdict.state).toBe("complete");
+    });
+
+    it("a contradicted status probe still vetoes a boundary claim (preview.start)", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence([{ toolId: "preview.start", mutating: true, success: true, persisted: false }], null),
+      );
+
+      expect(verdict.state).toBe("failed");
+    });
+
+    it("terminal.execute keeps file-evidence requirements — the boundary pass must not reopen the hole", () => {
+      // The canonical false completion: an exit-0 command that wrote
+      // nothing. A verified-unchanged diff still contradicts it.
+      const contradicted = evaluateCompletion(
+        BUILD,
+        evidence([{ toolId: "terminal.execute", mutating: true, success: true }], unchanged),
+      );
+      expect(contradicted.state).toBe("failed");
+
+      // And on a gitless workspace it is unverifiable — partial, never
+      // complete (the false negative becomes honesty, not success).
+      const unverifiable = evaluateCompletion(
+        BUILD,
+        evidence([{ toolId: "terminal.execute", mutating: true, success: true }], null),
+      );
+      expect(unverifiable.state).toBe("partial");
+      expect(unverifiable.state).not.toBe("complete");
+    });
+
+    it("git.commit keeps file-evidence requirements too", () => {
+      const contradicted = evaluateCompletion(
+        BUILD,
+        evidence([{ toolId: "git.commit", mutating: true, success: true }], unchanged),
+      );
+      expect(contradicted.state).toBe("failed");
+
+      const unverifiable = evaluateCompletion(
+        BUILD,
+        evidence([{ toolId: "git.commit", mutating: true, success: true }], null),
+      );
+      expect(unverifiable.state).toBe("partial");
+    });
+
+    it("a declared directory is attributed to changed files inside it", () => {
+      // insert_asset declares the directory it wrote into; the diff
+      // names the file inside it.
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [{ toolId: "project.insert_asset", mutating: true, success: true, paths: ["assets", "assets/hero.png"] }],
+          changed(["assets/hero.png"]),
+        ),
+      );
+
+      expect(verdict.state).toBe("complete");
+    });
+  });
 });

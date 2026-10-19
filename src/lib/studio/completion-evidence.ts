@@ -186,6 +186,61 @@ function normalizeEvidencePath(path: string): string {
 }
 
 /**
+ * Mutating tools whose success can never produce workspace-file evidence —
+ * their mutation surface is the tool boundary itself: a preview process,
+ * a remote browser session, a memory record, a generated image, a
+ * deployment pipeline. For these, tool-reported success IS the
+ * verification channel: there is no file claim to read back, and a
+ * legitimately-unchanged workspace diff cannot contradict them (a
+ * preview.start produces no diff by design).
+ *
+ * Deliberately absent: terminal.execute, git.commit, and every file tool.
+ * Their success does NOT prove a workspace change — an exit-0 command
+ * that wrote nothing is the canonical false completion this evidence
+ * exists to catch — so they keep the file-evidence requirement and must
+ * never be added here.
+ */
+const BOUNDARY_VERIFIED_MUTATORS = new Set([
+  "preview.start",
+  "preview.stop",
+  "preview.open",
+  "browser.click",
+  "browser.type",
+  "browser.select",
+  "browser.scroll",
+  "browser.press",
+  "browser.upload",
+  "browser.download",
+  "browser.close",
+  "memory.store",
+  "image.generate",
+  "project.deploy",
+  "deploy.execute",
+  "deploy",
+  "deploy.run",
+  "deployment.create",
+  "deployment.deploy",
+  "vercel.deploy",
+  "railway.deploy",
+  "cloudflare.deploy",
+]);
+
+/**
+ * Do any of the claim's declared paths appear in the diff? A declared
+ * directory also matches a changed file inside it — git diffs enumerate
+ * files, never the directories that contain them.
+ */
+function declaredPathMatched(declared: string[], changedFiles: Set<string>): boolean {
+  for (const p of declared) {
+    if (changedFiles.has(p)) return true;
+    for (const f of changedFiles) {
+      if (f.startsWith(`${p}/`)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Did this claimed successful mutation actually persist in the workspace?
  *
  * A read-back confirmation is the strongest signal — it names the exact
@@ -195,16 +250,46 @@ function normalizeEvidencePath(path: string): string {
  * that declares its target paths is verified only when the diff names at
  * least one of them; a call that declares none (terminal.execute and other
  * tools whose side effects are not enumerable from inputs) is corroborated
- * by any verified workspace change at all.
+ * by any verified workspace change at all. Boundary mutators (preview.*,
+ * browser.*, deploys, …) are verified by their own success — file
+ * evidence is a category error for them.
  */
 function mutationIsVerified(call: ToolCallEvidence, change: WorkspaceChangeEvidence | null): boolean {
   if (call.persisted === false) return false;
   if (call.persisted === true) return true;
+  if (BOUNDARY_VERIFIED_MUTATORS.has(call.toolId)) return true;
   const declared = (call.paths ?? []).map(normalizeEvidencePath);
   if (change?.status !== "changed") return false;
   if (declared.length === 0) return true;
   const changedFiles = new Set((change.files ?? []).map(normalizeEvidencePath));
-  return declared.some((p) => changedFiles.has(p));
+  return declaredPathMatched(declared, changedFiles);
+}
+
+/**
+ * Does the evidence POSITIVELY say this claim did not persist?
+ *
+ *   - a read-back that found the workspace contradicting the claim
+ *   - a verified-unchanged diff under a claim that required file evidence
+ *   - a changed diff naming files — but none the claim declared it wrote
+ *
+ * Anything weaker (no diff, a check that could not run) is merely
+ * unverifiable, not contradicted — absence of evidence is not evidence
+ * of absence. Boundary mutators are never contradicted by the diff:
+ * their success semantics are not file persistence.
+ */
+function mutationIsContradicted(call: ToolCallEvidence, change: WorkspaceChangeEvidence | null): boolean {
+  if (call.persisted === false) return true;
+  if (BOUNDARY_VERIFIED_MUTATORS.has(call.toolId)) return false;
+  if (change?.status === "unchanged") return true;
+  if (change?.status === "changed") {
+    const declared = (call.paths ?? []).map(normalizeEvidencePath);
+    // Undeclared-side-effect tools are corroborated by any real change,
+    // so only a verified-unchanged diff can contradict them.
+    if (declared.length === 0) return false;
+    const changedFiles = new Set((change.files ?? []).map(normalizeEvidencePath));
+    return !declaredPathMatched(declared, changedFiles);
+  }
+  return false;
 }
 
 /** The missing deployment evidence for a ship requirement — empty when satisfied. */
@@ -350,14 +435,40 @@ function evaluateCompletionState(
   //                   provisioning still settling) → partial, never
   //                   "complete": a generation result must not be reported
   //                   successful on an unverifiable workspace.
+  //
+  // The requirement is evaluated PER CLAIM, not per run: one verified
+  // mutation must not mask another claim the workspace contradicts or
+  // cannot confirm. A non-verified claim is excused only when a LATER
+  // verified claim covers the same declared path — a rewrite that landed
+  // after it superseded the earlier attempt, so the persisted end state
+  // is what was asked for. Undeclared claims cannot be superseded.
   if (requirement.mutation && successfulMutations > 0) {
     const change = evidence.workspaceChange ?? null;
     const claimedMutations = toolCalls.filter((c) => c.mutating && c.success === true);
-    const verifiedMutation = claimedMutations.some((c) => mutationIsVerified(c, change));
+    const verified = claimedMutations.map((c) => mutationIsVerified(c, change));
 
-    if (!verifiedMutation) {
-      const contradicted = claimedMutations.find((c) => c.persisted === false);
-      if (contradicted) {
+    const openClaims = claimedMutations.filter(
+      (c, i) =>
+        !verified[i] &&
+        !(c.paths ?? [])
+          .map(normalizeEvidencePath)
+          .some((p) =>
+            claimedMutations.some(
+              (v, j) =>
+                j > i &&
+                verified[j] &&
+                (v.paths ?? [])
+                  .map(normalizeEvidencePath)
+                  .some((vp) => vp === p || vp.startsWith(`${p}/`)),
+            ),
+          ),
+    );
+    const contradictedClaims = openClaims.filter((c) => mutationIsContradicted(c, change));
+    const unverifiableClaims = openClaims.filter((c) => !mutationIsContradicted(c, change));
+
+    if (contradictedClaims.length > 0) {
+      const deniedByReadBack = contradictedClaims.find((c) => c.persisted === false);
+      if (deniedByReadBack) {
         missing.push("the reported mutation to actually persist");
         return {
           ...base,
@@ -366,7 +477,7 @@ function evaluateCompletionState(
           missing,
           reason:
             `A tool reported a successful mutation, but re-reading the workspace did not find the claimed change` +
-            `${contradicted.paths?.length ? ` (${contradicted.paths.map(normalizeEvidencePath).join(", ")})` : ""}. ` +
+            `${deniedByReadBack.paths?.length ? ` (${deniedByReadBack.paths.map(normalizeEvidencePath).join(", ")})` : ""}. ` +
             `The reported success is not supported by the actual workspace state.`,
         };
       }
@@ -383,28 +494,28 @@ function evaluateCompletionState(
         };
       }
 
-      if (change?.status === "changed") {
-        // Reachable only when every claimed mutation declared target paths
-        // and none of them appear in the diff — undeclared-side-effect
-        // tools are verified by any real change above.
-        missing.push("workspace change in a file the run declared it was writing");
-        return {
-          ...base,
-          ...changeFields(change),
-          state: "failed",
-          missing,
-          reason:
-            `A tool reported a successful mutation and the workspace changed${fileSummary(change)}, ` +
-            `but not in any file the run declared it was writing. The reported success is not ` +
-            `corroborated by the actual workspace state.`,
-        };
-      }
+      // Reachable only under a "changed" diff: the claims still open
+      // declared target paths and none of them appear in it.
+      missing.push("workspace change in a file the run declared it was writing");
+      return {
+        ...base,
+        ...changeFields(change),
+        state: "failed",
+        missing,
+        reason:
+          `A tool reported a successful mutation and the workspace changed${fileSummary(change!)}, ` +
+          `but not in any file the run declared it was writing. The reported success is not ` +
+          `corroborated by the actual workspace state.`,
+      };
+    }
 
-      // The comparison could not be made at all. Absence of evidence is
-      // not evidence of absence — but it is never proof of success either,
-      // so the run stays short of "complete" and says why. Deployment
-      // gaps are reported first — a ship request missing BOTH must name
-      // the deployment the user actually asked for.
+    if (unverifiableClaims.length > 0) {
+      // The comparison could not be made at all, or the claim's own
+      // check could not run. Absence of evidence is not evidence of
+      // absence — but it is never proof of success either, so the run
+      // stays short of "complete" and says why. Deployment gaps are
+      // reported first — a ship request missing BOTH must name the
+      // deployment the user actually asked for.
       const deploymentGaps = requirement.deployment
         ? deploymentGapMissing(evidence.deployment ?? null)
         : [];
@@ -448,7 +559,7 @@ function evaluateCompletionState(
     missing,
     reason: requirement.deployment
       ? `${completedSteps} of ${totalSteps} step(s) succeeded and the live URL was verified.`
-      : `${completedSteps} of ${totalSteps} step(s) succeeded, including a file mutation.`,
+      : `${completedSteps} of ${totalSteps} step(s) succeeded, including a verified mutation.`,
   };
 }
 

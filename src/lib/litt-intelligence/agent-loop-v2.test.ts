@@ -1308,3 +1308,243 @@ describe("runAgentLoopV2 — model routing evidence", () => {
     expect(payload).not.toContain("sk-fake-gemini-secret-abc123");
   });
 });
+
+/**
+ * Persisted-truth read-back coverage for the mutators issue #703 named:
+ * files.mkdir, project.insert_asset, image.generate's saved asset, and
+ * preview.* — plus the per-claim evidence multi-file builds need. On a
+ * gitless (static) workspace this read-back is the ONLY channel that can
+ * verify a claimed mutation, so each claim must produce it.
+ */
+describe("runAgentLoopV2 — mutation read-back coverage (gitless/static workspaces)", () => {
+  const PNG_BYTES = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+  ]);
+
+  function toolCallReply(toolCallId: string, toolId: string, inputs: Record<string, unknown>) {
+    return {
+      text: "",
+      toolCalls: [{ toolCallId, toolId, inputs }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    };
+  }
+  const doneReply = { text: "Done.", toolCalls: [], finishReason: "stop", model: "test-model" };
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("files.mkdir records persisted:true when the directory is really there", async () => {
+    const transport = {
+      ...fakeTransport,
+      mkdir: vi.fn(async () => ({ created: true })),
+      listFiles: vi.fn(async (p: string) =>
+        p === "." ? { entries: [{ name: "assets", type: "folder" }] } : { entries: [] }),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-mkdir", "files.mkdir", { path: "assets" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("make an assets folder", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    const call = result.toolCalls.find((t) => t.toolId === "files.mkdir");
+    expect(call?.success).toBe(true);
+    expect(call?.persisted).toBe(true);
+    expect(call?.paths).toContain("assets");
+  });
+
+  it("files.mkdir records persisted:false when the directory is not there", async () => {
+    const transport = {
+      ...fakeTransport,
+      mkdir: vi.fn(async () => ({ created: true })),
+      listFiles: vi.fn(async () => ({ entries: [] })),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-mkdir2", "files.mkdir", { path: "assets" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("make an assets folder", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    expect(result.toolCalls.find((t) => t.toolId === "files.mkdir")?.persisted).toBe(false);
+  });
+
+  // project.insert_asset and preview.start sit outside the AUTO
+  // auto-approve set — they pause at a gate, then the approved resume
+  // executes them (exercising the resume lane's read-back too).
+  async function approveGate(
+    paused: Awaited<ReturnType<typeof runAgentLoopV2>>,
+    transport: WorkspaceTransport,
+  ) {
+    const gate = paused.pendingApproval;
+    expect(gate).toBeDefined();
+    return resumeAgentLoopV2({
+      pausedMessages: gate!.pausedMessages,
+      toolId: gate!.toolId,
+      toolCallId: gate!.toolCallId,
+      inputs: gate!.inputs,
+      decision: "approved",
+      config: {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "auto",
+        enableBuildFix: false,
+      },
+      stepsUsedBeforePause: gate!.stepsUsedAtPause ?? 1,
+      hadInterveningMutation: gate!.hadInterveningMutationAtPause ?? false,
+    }, transport);
+  }
+
+  it("project.insert_asset records persisted:true via the returned asset path — binary-safe", async () => {
+    let written = "";
+    const transport = {
+      ...fakeTransport,
+      writeBinaryFile: vi.fn(async (path: string) => {
+        written = path;
+        return { saved: true };
+      }),
+      listFiles: vi.fn(async (p: string) => {
+        if (p === "assets" && written) {
+          return { entries: [{ name: written.slice("assets/".length), type: "file" }] };
+        }
+        return { entries: [] };
+      }),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-asset", "project.insert_asset", {
+        projectId: "p-test",
+        url: `data:image/png;base64,${PNG_BYTES.toString("base64")}`,
+        name: "hero",
+        directory: "assets",
+      }))
+      .mockResolvedValueOnce(doneReply);
+
+    const paused = await runAgentLoopV2("put this image in the site", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+    const result = await approveGate(paused, transport);
+
+    const call = result.toolCalls.find((t) => t.toolId === "project.insert_asset");
+    expect(call?.success).toBe(true);
+    expect(written).toMatch(/^assets\/hero-.+\.png$/);
+    expect(call?.persisted).toBe(true);
+    // The real output path — not just the declared directory — is what
+    // the diff attribution can corroborate against.
+    expect(call?.paths).toContain(written);
+  });
+
+  it("preview.start records persisted:true when the status probe reports ready", async () => {
+    const transport = {
+      ...fakeTransport,
+      startPreview: vi.fn(async () => ({
+        workspaceId: "ws-test", status: "ready", port: 3000,
+        framework: "static", command: "serve", startedAt: Date.now(),
+      })),
+      getPreviewStatus: vi.fn(async () => ({
+        status: "ready", port: 3000, framework: "static", command: "serve",
+        startedAt: Date.now(), lastHealthCheck: Date.now(),
+        error: null, errorCode: null, logs: [],
+      })),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-prev", "preview.start", { projectId: "p-test" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const paused = await runAgentLoopV2("start the preview", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+    const result = await approveGate(paused, transport);
+
+    const call = result.toolCalls.find((t) => t.toolId === "preview.start");
+    expect(call?.success).toBe(true);
+    expect(call?.persisted).toBe(true);
+  });
+
+  it("preview.start records persisted:false when the status probe reports failed", async () => {
+    const transport = {
+      ...fakeTransport,
+      startPreview: vi.fn(async () => ({
+        workspaceId: "ws-test", status: "starting", port: 3000,
+        framework: "static", command: "serve", startedAt: Date.now(),
+      })),
+      getPreviewStatus: vi.fn(async () => ({
+        status: "failed", port: null, framework: null, command: null,
+        startedAt: null, lastHealthCheck: null,
+        error: "port closed", errorCode: null, logs: [],
+      })),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-prev2", "preview.start", { projectId: "p-test" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const paused = await runAgentLoopV2("start the preview", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+    const result = await approveGate(paused, transport);
+
+    const call = result.toolCalls.find((t) => t.toolId === "preview.start");
+    expect(call?.success).toBe(true);
+    expect(call?.persisted).toBe(false);
+  });
+
+  it("a multi-file build records per-claim persisted evidence — verified and contradicted independently", async () => {
+    const disk = new Map<string, string>([
+      ["index.html", "<html>ok</html>"],
+      ["style.css", "body{}"],
+      // The third write claimed bytes that never landed.
+      ["app.js", "stale();"],
+    ]);
+    const transport = {
+      ...fakeTransport,
+      writeFile: vi.fn(async (path: string, content: string) => {
+        if (path !== "app.js") disk.set(path, content);
+        return { saved: true };
+      }),
+      readFile: vi.fn(async (path: string) => {
+        const content = disk.get(path);
+        if (content === undefined) throw new Error("readFile failed (404): not found");
+        return { content, size: content.length };
+      }),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-a", "files.write", { projectId: "p-test", path: "index.html", content: "<html>ok</html>" }))
+      .mockResolvedValueOnce(toolCallReply("tc-b", "files.write", { projectId: "p-test", path: "style.css", content: "body{}" }))
+      .mockResolvedValueOnce(toolCallReply("tc-c", "files.write", { projectId: "p-test", path: "app.js", content: "fresh();" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("build the three files", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    const writes = result.toolCalls.filter((t) => t.toolId === "files.write");
+    expect(writes).toHaveLength(3);
+    expect(writes.find((t) => t.paths?.includes("index.html"))?.persisted).toBe(true);
+    expect(writes.find((t) => t.paths?.includes("style.css"))?.persisted).toBe(true);
+    // app.js never landed — the claim must be contradicted, not masked.
+    expect(writes.find((t) => t.paths?.includes("app.js"))?.persisted).toBe(false);
+  });
+});
