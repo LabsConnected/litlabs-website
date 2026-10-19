@@ -308,15 +308,15 @@ export function calculateLlmCost(input: CostEngineInput): CostCalculation {
     retailLiTTBits = Math.max(1, Math.round(baseBits));
   } else {
     // Convert provider cost to a bits-equivalent, then apply margin
-    // $1.00 ≈ 1000 BITS at retail (internal, never exposed publicly)
-    const costEquivalentBits = (providerCostUsd * 1000);
+    // Canonical $1.00 = 100 LiTTBits; margin is added after provider-cost conversion
+    const costEquivalentBits = (providerCostUsd * 100);
     retailLiTTBits = Math.max(1, Math.round(
       costEquivalentBits * (1 + MARGIN_TARGET) + baseBits * 0.1,
     ));
   }
 
   // Platform margin = retail value minus provider cost (in bits-equivalent)
-  const providerCostBits = providerCostUsd * 1000;
+  const providerCostBits = providerCostUsd * 100;
   const platformMargin = Math.max(0, retailLiTTBits - providerCostBits);
 
   // Determine billing class from LiTT alias if provided
