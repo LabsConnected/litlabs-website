@@ -63,13 +63,15 @@ function debugInput(msg: string): void {
   } catch { /* ignore — debug only */ }
 }
 
-/** Welcome-screen single-key shortcuts (lowercase only — shift+h/m/s
- *  still types a literal "H"/"M"/"S" into the draft, matching how "V"
- *  does not trigger the failure-view shortcut above). */
+/** Welcome-screen single-key shortcuts. The welcome card advertises
+ *  uppercase keycaps, so both letter cases must dispatch the same action. */
 const WELCOME_SHORTCUT_KEYS: Record<string, "health" | "models" | "settings"> = {
   h: "health",
+  H: "health",
   m: "models",
+  M: "models",
   s: "settings",
+  S: "settings",
 };
 
 export interface ComposerProps {
@@ -98,7 +100,8 @@ export interface ComposerProps {
    */
   welcomeShortcutsEnabled?: boolean;
   /**
-   * Welcome-screen single-key shortcuts — h/m/s on a still-EMPTY draft.
+   * Welcome-screen single-key shortcuts — H/M/S (either case) on a
+   * still-EMPTY draft.
    * Mirrors the existing "v opens the failure view on an empty draft"
    * precedent below: a bare letter is intercepted only when it could not
    * possibly be the first character of a real message in flight (the
@@ -281,7 +284,7 @@ export function Composer({
           return;
         }
 
-        // Welcome-screen shortcuts: h/m/s on an empty draft, same
+        // Welcome-screen shortcuts: H/M/S (either case) on an empty draft, same
         // precedent as "v" above — only while the Welcome screen owns
         // the center and nothing has been typed yet, so a real message
         // typed after the conversation starts is never shadowed.

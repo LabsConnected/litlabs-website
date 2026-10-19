@@ -32,6 +32,7 @@ interface Harness {
   send: (data: string) => Promise<void>;
   value: () => string;
   shortcuts: () => WelcomeAction[];
+  submissions: () => string[];
   setWelcomeEnabled: (v: boolean) => Promise<void>;
   setDisabled: (v: boolean) => Promise<void>;
   cleanup: () => void;
@@ -61,6 +62,7 @@ async function mountComposer(initialWelcomeEnabled: boolean): Promise<Harness> {
 
   let current = "";
   const shortcuts: WelcomeAction[] = [];
+  const submissions: string[] = [];
   let setWelcomeEnabledExternal: ((v: boolean) => void) | null = null;
   let setDisabledExternal: ((v: boolean) => void) | null = null;
 
@@ -73,8 +75,8 @@ async function mountComposer(initialWelcomeEnabled: boolean): Promise<Harness> {
     setDisabledExternal = setDisabled;
 
     const onSubmit = useCallback((text: string) => {
+      submissions.push(text);
       setValue("");
-      void text;
     }, []);
 
     return (
@@ -112,6 +114,7 @@ async function mountComposer(initialWelcomeEnabled: boolean): Promise<Harness> {
     },
     value: () => current,
     shortcuts: () => [...shortcuts],
+    submissions: () => [...submissions],
     async setWelcomeEnabled(v: boolean) {
       setWelcomeEnabledExternal?.(v);
       await sleep(90);
@@ -143,12 +146,26 @@ describe("Welcome-screen h/m/s shortcuts", () => {
     }
   });
 
-  it("uppercase H/M/S are NOT intercepted — they type normally", async () => {
+  it("uppercase H/M/S trigger the advertised shortcuts", async () => {
     const h = await mountComposer(true);
     try {
       await h.send("H");
-      expect(h.value()).toBe("H");
-      expect(h.shortcuts()).toEqual([]);
+      await h.send("M");
+      await h.send("S");
+      expect(h.value()).toBe("");
+      expect(h.shortcuts()).toEqual(["health", "models", "settings"]);
+    } finally {
+      h.cleanup();
+    }
+  });
+
+  it("Enter submits the current draft through the real Ink input path", async () => {
+    const h = await mountComposer(true);
+    try {
+      await h.send("build a release checklist");
+      await h.send("\r");
+      expect(h.submissions()).toEqual(["build a release checklist"]);
+      expect(h.value()).toBe("");
     } finally {
       h.cleanup();
     }

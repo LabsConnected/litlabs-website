@@ -67,7 +67,13 @@ export function Welcome({
 }: WelcomeProps = {}): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
+  const rows = stdout?.rows ?? 24;
   const w = classifyWidth(width);
+  // The shell reserves seven rows for composer + footer chrome. At the
+  // common 80x24 size the full welcome would overflow its 17-row center.
+  // The full composition needs 21 center rows, while shell chrome reserves
+  // seven, so compact through 28 terminal rows.
+  const short = rows <= 28;
   const [revealed, setRevealed] = useState(false);
 
   useEffect(() => {
@@ -76,32 +82,36 @@ export function Welcome({
     return () => clearTimeout(t);
   }, [revealed]);
 
-  const pad = Math.max(2, Math.floor((width - 24) / 2));
+  const pad = w === "narrow" ? 2 : Math.max(0, Math.floor((width - 24) / 2));
+  const welcomeWidth = Math.max(20, width - 4);
 
   return (
-    <Box flexDirection="column" paddingTop={3}>
+    <Box flexDirection="column" paddingTop={short ? 0 : 2}>
       <Box paddingLeft={pad}>
         <LiTTMark state="idle" showWordmark />
       </Box>
 
       {revealed && (
         <>
-          <Box paddingLeft={pad} marginTop={0}>
-            <SectionDivider width={20} />
-          </Box>
+          {!short && (
+            <>
+              <Box paddingLeft={pad} marginTop={0}>
+                <SectionDivider width={20} />
+              </Box>
+              <Box paddingLeft={pad} marginTop={1}>
+                <Text color={COLORS.brand} bold>BUILD · SHIP · CREATE</Text>
+              </Box>
+            </>
+          )}
 
-          <Box paddingLeft={pad} marginTop={1}>
-            <Text color={COLORS.brand} bold>BUILD · SHIP · CREATE</Text>
-          </Box>
-
-          <Box paddingLeft={pad} marginTop={2}>
+          <Box paddingLeft={pad} marginTop={short ? 0 : 2}>
             <Text color={COLORS.textBright} bold>What do you want to build?</Text>
           </Box>
 
           {/* Repo status line — only show if project is known */}
           {project && (
-            <Box paddingLeft={pad} marginTop={2}>
-              <Text>
+            <Box paddingLeft={pad} marginTop={short ? 0 : 2} width={welcomeWidth}>
+              <Text wrap="truncate-end">
                 <Text color={COLORS.secondary}>{project}</Text>
                 {branch && (
                   <>
@@ -116,29 +126,30 @@ export function Welcome({
           )}
 
           {/* Local tools ready indicator */}
-          <Box paddingLeft={pad} marginTop={0}>
-            <Text color={COLORS.success} dimColor>
-              {executionTarget === "local" ? "Local tools ready" : "Remote tools ready"}
+          <Box paddingLeft={pad} marginTop={0} width={welcomeWidth}>
+            <Text wrap="truncate-end">
+              <Text color={COLORS.success} dimColor>
+                {executionTarget === "local" ? "Local tools ready" : "Remote tools ready"}
+              </Text>
+              {brain && short && <Text color={COLORS.secondaryBright} dimColor>{` · ${brain}`}</Text>}
             </Text>
           </Box>
 
           {/* Brain/routing line — same label as the status bar footer. */}
-          {brain && (
-            <Box paddingLeft={pad} marginTop={0}>
-              <Text color={COLORS.secondaryBright} dimColor>{brain}</Text>
+          {brain && !short && (
+            <Box paddingLeft={pad} marginTop={0} width={welcomeWidth}>
+              <Text color={COLORS.secondaryBright} dimColor wrap="truncate-end">{brain}</Text>
             </Box>
           )}
 
           {/* Primary shortcut row — Enter starts; H/M/S are single-key
               jumps to Health/Models/Settings, handled by the Composer
               only while the draft is still empty. */}
-          <Box paddingLeft={pad} marginTop={2}>
-            {w === "narrow" ? (
+          <Box paddingLeft={pad} marginTop={short ? 0 : 2} width={welcomeWidth}>
+            {w !== "wide" ? (
               <Box flexDirection="column">
-                <Text color={COLORS.secondary}>  [Enter] Start</Text>
-                <Text color={COLORS.secondary}>  [H] Health</Text>
-                <Text color={COLORS.secondary}>  [M] Models</Text>
-                <Text color={COLORS.secondary}>  [S] Settings</Text>
+                <Text color={COLORS.secondary}>[Enter] Start  [H] Health</Text>
+                <Text color={COLORS.secondary}>[M] Models     [S] Settings</Text>
               </Box>
             ) : (
               <Text>
@@ -153,7 +164,7 @@ export function Welcome({
             )}
           </Box>
 
-          <Box paddingLeft={pad} marginTop={1}>
+          {!short && <Box paddingLeft={pad} marginTop={1} width={welcomeWidth}>
             {w === "narrow" ? (
               <Box flexDirection="column">
                 <Text color={COLORS.secondaryDim}>  / commands</Text>
@@ -169,7 +180,7 @@ export function Welcome({
                 <Text color={COLORS.secondaryDim}>? help</Text>
               </Text>
             )}
-          </Box>
+          </Box>}
         </>
       )}
     </Box>
