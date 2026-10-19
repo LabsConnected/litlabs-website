@@ -47,6 +47,39 @@ export function applyMissionLifecycle(
   }
 }
 
+export interface ChatWorkstreamTerminalContext {
+  runEpoch: number;
+  currentRunEpoch: number;
+  pendingApproval: boolean;
+}
+
+/** A run terminal event may mutate UI state only for the active run. */
+export function shouldApplyRunTerminal(
+  activeRunId: string | null,
+  terminalRunId: string,
+): boolean {
+  return activeRunId !== null && activeRunId === terminalRunId;
+}
+
+/**
+ * Settle the workstream owned by a CHAT turn.
+ *
+ * Terminal callbacks are asynchronous, so they may arrive after another turn
+ * has started. A workstream blocked on an approval is also not terminal: the
+ * approval must resolve before the agent loop can truthfully finish.
+ */
+export function settleChatWorkstream(
+  ws: WorkstreamStore,
+  outcome: "complete" | "failed",
+  context: ChatWorkstreamTerminalContext,
+): boolean {
+  if (context.runEpoch !== context.currentRunEpoch || context.pendingApproval) return false;
+  if (ws.snapshot().overallStatus !== "running") return false;
+  if (outcome === "complete") ws.setComplete();
+  else ws.setFailed();
+  return true;
+}
+
 /**
  * True while the workstream should own the centre of the shell: work is
  * running, or paused on an approval. Terminal states (complete / failed)

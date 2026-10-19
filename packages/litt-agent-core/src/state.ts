@@ -204,6 +204,9 @@ export class RuntimeStore {
   private heartbeatTimer: ReturnType<typeof setInterval> | null;
   private heartbeatFn: (() => Promise<number>) | null;
   private _persistence: MissionPersistence | null;
+  /** Source-authoritative ordering for mission identities in this runtime session. */
+  private missionGeneration = 0;
+  private generationMissionId: string | null = null;
 
   constructor(
     emitterOrOptions?: RuntimeEventEmitter | RuntimeStoreOptions,
@@ -233,6 +236,14 @@ export class RuntimeStore {
       return createFilesystemMissionPersistence(opts.projectRoot);
     }
     return null;
+  }
+
+  private generationForMission(missionId: string): number {
+    if (this.generationMissionId !== missionId) {
+      this.generationMissionId = missionId;
+      this.missionGeneration++;
+    }
+    return this.missionGeneration;
   }
 
   // ── State access ────────────────────────────────────────────────
@@ -283,6 +294,7 @@ export class RuntimeStore {
 
     const savedMission = await this._persistence.loadActiveMission();
     if (savedMission) {
+      const missionGeneration = this.generationForMission(savedMission.id);
       // Restore the mission state
       this.state.mission = savedMission;
       this.state.lastMissionHeartbeatAt = savedMission.lastHeartbeatAt;
@@ -294,7 +306,7 @@ export class RuntimeStore {
         type: "litt_event",
         subtype: "mission:restored",
         ts: Date.now(),
-        data: { missionId: savedMission.id, status: savedMission.status },
+        data: { missionId: savedMission.id, missionGeneration, status: savedMission.status },
       });
     }
   }
@@ -354,6 +366,7 @@ export class RuntimeStore {
     const result = await this._persistence.loadActiveMissionWithRecovery();
 
     if (result.mission) {
+      const missionGeneration = this.generationForMission(result.mission.id);
       this.state.mission = result.mission;
       this.state.lastMissionHeartbeatAt = result.mission.lastHeartbeatAt;
       this.state.missionStepsCompleted = result.mission.steps.filter(
@@ -364,7 +377,7 @@ export class RuntimeStore {
         type: "litt_event",
         subtype: "mission:restored",
         ts: Date.now(),
-        data: { missionId: result.mission.id, status: result.mission.status },
+        data: { missionId: result.mission.id, missionGeneration, status: result.mission.status },
       });
     }
 
@@ -466,6 +479,7 @@ export class RuntimeStore {
    * mission has been persisted to disk before continuing.
    */
   async setMission(mission: Mission): Promise<void> {
+    const missionGeneration = this.generationForMission(mission.id);
     const hadMission = this.state.mission !== null;
     this.state.mission = mission;
     this.state.lastMissionHeartbeatAt = Date.now();
@@ -475,14 +489,14 @@ export class RuntimeStore {
         type: "litt_event",
         subtype: "mission:created",
         ts: Date.now(),
-        data: { missionId: mission.id, mode: mission.mode },
+        data: { missionId: mission.id, missionGeneration, mode: mission.mode },
       });
     } else if (mission.status !== "planning") {
       this.emit({
         type: "litt_event",
         subtype: "mission:started",
         ts: Date.now(),
-        data: { missionId: mission.id, status: mission.status },
+        data: { missionId: mission.id, missionGeneration, status: mission.status },
       });
     }
     // Persist the mission to disk (awaited so callers can rely on it)
@@ -851,7 +865,11 @@ export class RuntimeStore {
       type: "litt_event",
       subtype: "mission:completed",
       ts: Date.now(),
-      data: { missionId: mission.id, completionReason },
+      data: {
+        missionId: mission.id,
+        missionGeneration: this.generationForMission(mission.id),
+        completionReason,
+      },
     });
     await this.persistMission();
   }
@@ -903,7 +921,11 @@ export class RuntimeStore {
       type: "litt_event",
       subtype: "mission:failed",
       ts: Date.now(),
-      data: { missionId: mission.id, failureReason },
+      data: {
+        missionId: mission.id,
+        missionGeneration: this.generationForMission(mission.id),
+        failureReason,
+      },
     });
     await this.persistMission();
   }

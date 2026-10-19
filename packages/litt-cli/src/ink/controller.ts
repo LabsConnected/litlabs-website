@@ -106,6 +106,7 @@ import {
 } from "../lib/git-workflow.js";
 import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
+import { settleChatWorkstream } from "./workstream-lifecycle.js";
 
 /**
  * Resolve the ModelProvider for a routed model, honoring executionTarget.
@@ -172,6 +173,33 @@ function resolveModelProvider(
  */
 function requestedLocalModel(selectedModel: string | null): string | null {
   return resolveRequestedLocalModel(selectedModel).model;
+}
+
+/**
+ * Monotonic identity shared by every accepted controller submission.
+ * Starting any newer chat, mission, or command invalidates callbacks retained
+ * by the previous asynchronous operation.
+ */
+export class ControllerOperationGeneration {
+  private generation = 0;
+
+  begin(): number {
+    return ++this.generation;
+  }
+
+  get current(): number {
+    return this.generation;
+  }
+
+  isCurrent(token: number): boolean {
+    return token === this.generation;
+  }
+
+  runIfCurrent(token: number, callback: () => void): boolean {
+    if (!this.isCurrent(token)) return false;
+    callback();
+    return true;
+  }
 }
 
 /**
@@ -942,6 +970,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // ends. Lets Escape (app.tsx) cancel the remote model stream, not
   // just the local tool executor (session.cancel()).
   const currentRemoteModelRef = useRef<RemoteModelProvider | null>(null);
+  const operationGenerationRef = useRef(new ControllerOperationGeneration());
   const cancelRemoteModel = useCallback(() => {
     currentRemoteModelRef.current?.cancel();
   }, []);
@@ -1337,6 +1366,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       });
       return;
     }
+
+    // This identity is created at the accepted-submission boundary, before
+    // CHAT/MISSION routing. Therefore a newer mission invalidates an older
+    // chat callback just as reliably as a newer chat does.
+    const operationGeneration = operationGenerationRef.current.begin();
 
     // Clear the composer only AFTER this submission is accepted.
     // A rejected/re-entrant submit must never eat the user's draft.
@@ -2652,6 +2686,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               }
             },
           });
+          if (!operationGenerationRef.current.isCurrent(operationGeneration)) return;
           const chatTail = toolCallFilter.flush();
           if (chatTail && chatAssistantMsgId) {
             store.actions.appendAssistantDelta(chatAssistantMsgId, chatTail);
@@ -2694,8 +2729,30 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // RUNNING mid-run; a successful chat must return it to IDLE
           // (the composer/status reconcile out of Working). Cleanup in finally.
           store.actions.setHoloState("IDLE");
-          persistSession();
+          // CRITICAL: For CHAT paths (non-mission), the agent loop's
+          // run.completed is suppressed by SessionEventBridge (agent_
+          // runId prefix), so no mission:completed event reaches the
+          // workstream. Without this, the workstream stays "running"
+          // and the WorkstreamDock hides the final AI response.
+          // Complete it via the workstreamPush callback so the dock
+          // returns the centre to the transcript.
+          store.actions.workstreamPush((ws) => {
+            settleChatWorkstream(ws, "complete", {
+              runEpoch: operationGeneration,
+              currentRunEpoch: operationGenerationRef.current.current,
+              pendingApproval: approvalBridge.pending !== null,
+            });
+          });
+          // Session persistence is secondary to the completed conversation.
+          // A filesystem failure must not enter the chat error path and
+          // overwrite the already-finalized assistant response.
+          try {
+            persistSession();
+          } catch {
+            // The transcript remains available in the live session.
+          }
         } catch (err) {
+          if (!operationGenerationRef.current.isCurrent(operationGeneration)) return;
           const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
           store.actions.addActivity({
             id: `act_${Date.now()}_err`,
@@ -2714,14 +2771,24 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           }
           store.actions.setHoloState("FAILED");
           store.actions.scheduleIdle(2000);
+          // Also complete the workstream for CHAT error paths (see success path above).
+          store.actions.workstreamPush((ws) => {
+            settleChatWorkstream(ws, "failed", {
+              runEpoch: operationGeneration,
+              currentRunEpoch: operationGenerationRef.current.current,
+              pendingApproval: approvalBridge.pending !== null,
+            });
+          });
         } finally {
-          currentRemoteModelRef.current = null;
-          // ONE canonical transition out of a run: every terminal
-          // outcome (success, failed, provider error, tool error, stall)
-          // re-enables the composer and stops the busy timer. The shell
-          // can never stay visually Working after the run settles.
-          store.actions.setIsProcessing(false);
-          store.actions.stopBusy();
+          operationGenerationRef.current.runIfCurrent(operationGeneration, () => {
+            currentRemoteModelRef.current = null;
+            // ONE canonical transition out of a run: every terminal
+            // outcome (success, failed, provider error, tool error, stall)
+            // re-enables the composer and stops the busy timer. The shell
+            // can never stay visually Working after the run settles.
+            store.actions.setIsProcessing(false);
+            store.actions.stopBusy();
+          });
         }
         perf.end("chat");
         return;

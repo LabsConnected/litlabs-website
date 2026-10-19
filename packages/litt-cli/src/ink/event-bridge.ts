@@ -17,13 +17,13 @@
  *   (idle)            → IDLE
  */
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { RuntimeClient, LifecycleEvent } from "../lib/runtime-client.js";
 import type { RuntimeState } from "@litt/agent-core";
 import type { CockpitStore, ActivityEntry, HoloState } from "./cockpit-store.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import { toolKind, toolPhase, humanizeToolLabel } from "./workstream-normalizer.js";
-import { applyMissionLifecycle } from "./workstream-lifecycle.js";
+import { applyMissionLifecycle, shouldApplyRunTerminal } from "./workstream-lifecycle.js";
 
 let entryCounter = 0;
 
@@ -148,6 +148,20 @@ export function useEventBridge(
   store: CockpitStore,
   sessionBridge: SessionEventBridge | null,
 ): void {
+  const activeRunIdRef = useRef<string | null>(null);
+  const activeMissionIdRef = useRef<string | null>(store.state.canonicalMission?.id || null);
+  // Mission generation is only comparable WITHIN a single RuntimeStore's
+  // lineage — it is an in-memory counter that starts at 0 for every
+  // RuntimeStore instance and is never persisted. The local session and
+  // the remote terminal-server each own an independent RuntimeStore, and
+  // the remote one can be replaced (server restart) without this hook
+  // remounting. Comparing across those lineages with one shared watermark
+  // would let whichever source advances first permanently block the
+  // other's legitimate missions, so each source gets its own watermark.
+  const activeMissionGenerationRef = useRef<{ local: number | null; remote: number | null }>({
+    local: null,
+    remote: null,
+  });
   // ─── Tool progress — drive the structured per-tool view ──────────
   // Maps lifecycle events to ToolProgressStore mutations. This is the
   // canonical wiring: tool.started → startTool, tool.completed →
@@ -205,13 +219,36 @@ export function useEventBridge(
     }
   }, [store]);
 
-  const onLifecycle = useCallback((event: LifecycleEvent) => {
+  const onLifecycle = useCallback((event: LifecycleEvent, source: "local" | "remote") => {
+    // Ignore delayed terminal events from a superseded run. Allowing one
+    // through would clear/complete the newer run's cockpit and workstream.
+    if (event.type === "run.completed"
+      && !shouldApplyRunTerminal(activeRunIdRef.current, event.runId)) return;
+    if (event.type === "mission.created" || event.type === "mission.restored") {
+      const incomingGeneration = event.data.missionGeneration;
+      if (typeof incomingGeneration !== "number" || !Number.isSafeInteger(incomingGeneration)) return;
+      const watermarks = activeMissionGenerationRef.current;
+      const activeGeneration = watermarks[source];
+      if (activeGeneration !== null && incomingGeneration <= activeGeneration) return;
+      watermarks[source] = incomingGeneration;
+    }
+    if (event.type === "mission.completed" || event.type === "mission.failed") {
+      const terminalMissionId = typeof event.data.missionId === "string"
+        ? event.data.missionId
+        : "";
+      if (!terminalMissionId || terminalMissionId !== activeMissionIdRef.current) return;
+      // Consume the identity before applying the terminal event so a delayed
+      // duplicate/opposite terminal event cannot mutate the settled mission.
+      activeMissionIdRef.current = null;
+    }
+
     // Map event to activity entry
     let entry: ActivityEntry | null = null;
 
     switch (event.type) {
       case "run.started":
         entry = makeEntry("run.started", `${event.data.command ?? "command"}`, event, undefined, undefined, "RUN");
+        activeRunIdRef.current = event.runId;
         store.actions.setCurrentRunId(event.runId);
         break;
       case "tool.started":
@@ -251,6 +288,7 @@ export function useEventBridge(
           status === "success" ? "DONE" : "FAIL",
         );
         store.actions.setCurrentRunId(null);
+        activeRunIdRef.current = null;
         break;
       }
 
@@ -259,6 +297,9 @@ export function useEventBridge(
       // The controller also sets holo/missionState directly, but these
       // events ensure the cockpit reflects canonical runtime truth.
       case "mission.created":
+        activeMissionIdRef.current = typeof event.data.missionId === "string"
+          ? event.data.missionId
+          : null;
         // The mission goal is the human-readable identity; the raw
         // mission ID is debug detail (/status, /activity) — never the feed.
         entry = makeEntry("mission.created", event.data.goal
@@ -307,6 +348,9 @@ export function useEventBridge(
         entry = makeEntry("mission.failed", `Mission FAILED: ${event.data.failureReason ?? ""}`, event, undefined, undefined, "FAIL");
         break;
       case "mission.restored":
+        activeMissionIdRef.current = typeof event.data.missionId === "string"
+          ? event.data.missionId
+          : activeMissionIdRef.current;
         entry = makeEntry("mission.restored", "Mission restored", event, undefined, undefined, "MISSION");
         break;
       default:
@@ -451,6 +495,13 @@ export function useEventBridge(
     // Map ConnectionState → RemoteRuntimeState
     switch (state) {
       case "connected":
+        // A (re)connect is the only observable signal that the remote
+        // RuntimeStore may have been replaced (e.g. terminal-server
+        // restart) — its generation counter would restart from 0. Clear
+        // the remote watermark so the next legitimate mission on the
+        // reconnected store isn't rejected as "stale" against a watermark
+        // left over from before the restart.
+        activeMissionGenerationRef.current.remote = null;
         // Socket connected — also check heartbeat freshness
         store.actions.setRemoteRuntime("connected");
         // Update legacy connected flag for backward compat
@@ -490,7 +541,7 @@ export function useEventBridge(
     // Local runtime: the RuntimeSession is always available.
     // This proves LOCAL readiness only — it does NOT fabricate remote connectivity.
     if (sessionBridge) {
-      cleanups.push(sessionBridge.subscribe(onLifecycle));
+      cleanups.push(sessionBridge.subscribe((event) => onLifecycle(event, "local")));
       store.actions.setLocalRuntime("ready");
       // Legacy connected flag: true only because local runtime is ready.
       // Remote connectivity is tracked separately in remoteRuntime.
@@ -500,7 +551,7 @@ export function useEventBridge(
     // Remote runtime: subscribe to terminal-server events if available.
     // This is INDEPENDENT — remote being offline does not affect local readiness.
     if (client) {
-      cleanups.push(client.onLifecycle(onLifecycle));
+      cleanups.push(client.onLifecycle((event) => onLifecycle(event, "remote")));
       cleanups.push(client.onConnectionChange(onConnection as (conn: import("../lib/runtime-client.js").ConnectionState) => void));
       cleanups.push(client.onState(onState));
     } else {

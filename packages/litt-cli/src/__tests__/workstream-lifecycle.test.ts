@@ -12,7 +12,12 @@
 
 import { describe, it, expect } from "vitest";
 import { WorkstreamStore } from "../ink/workstream-store.js";
-import { applyMissionLifecycle, isWorkstreamLive } from "../ink/workstream-lifecycle.js";
+import {
+  applyMissionLifecycle,
+  isWorkstreamLive,
+  settleChatWorkstream,
+  shouldApplyRunTerminal,
+} from "../ink/workstream-lifecycle.js";
 
 function runningMission(goal = "Read package.json"): WorkstreamStore {
   const ws = new WorkstreamStore();
@@ -103,5 +108,61 @@ describe("run.started after a finished mission", () => {
     const ws = runningMission("live");
     applyMissionLifecycle(ws, "run.started", { command: "npm test" });
     expect(ws.snapshot().activities.length).toBeGreaterThan(0);
+  });
+});
+
+describe("chat terminal lifecycle", () => {
+  it("successful chat leaves RUNNING and returns the centre to the final conversation output", () => {
+    const ws = runningMission("chat");
+
+    expect(settleChatWorkstream(ws, "complete", {
+      runEpoch: 3,
+      currentRunEpoch: 3,
+      pendingApproval: false,
+    })).toBe(true);
+    expect(ws.snapshot().overallStatus).toBe("complete");
+    expect(isWorkstreamLive(ws.snapshot())).toBe(false);
+  });
+
+  it("failed chat leaves RUNNING as failed", () => {
+    const ws = runningMission("chat");
+
+    expect(settleChatWorkstream(ws, "failed", {
+      runEpoch: 4,
+      currentRunEpoch: 4,
+      pendingApproval: false,
+    })).toBe(true);
+    expect(ws.snapshot().overallStatus).toBe("failed");
+    expect(isWorkstreamLive(ws.snapshot())).toBe(false);
+  });
+
+  it("does not falsely complete a chat blocked on pending approval", () => {
+    const ws = runningMission("chat");
+    ws.setBlocked();
+
+    expect(settleChatWorkstream(ws, "complete", {
+      runEpoch: 5,
+      currentRunEpoch: 5,
+      pendingApproval: true,
+    })).toBe(false);
+    expect(ws.snapshot().overallStatus).toBe("blocked");
+    expect(isWorkstreamLive(ws.snapshot())).toBe(true);
+  });
+
+  it("ignores a terminal callback from an older chat run", () => {
+    const ws = runningMission("newer chat");
+
+    expect(settleChatWorkstream(ws, "complete", {
+      runEpoch: 6,
+      currentRunEpoch: 7,
+      pendingApproval: false,
+    })).toBe(false);
+    expect(ws.snapshot().overallStatus).toBe("running");
+    expect(isWorkstreamLive(ws.snapshot())).toBe(true);
+  });
+
+  it("rejects a terminal event whose run id does not own the current workstream", () => {
+    expect(shouldApplyRunTerminal("run-new", "run-old")).toBe(false);
+    expect(shouldApplyRunTerminal("run-new", "run-new")).toBe(true);
   });
 });
