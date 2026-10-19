@@ -97,6 +97,7 @@ import {
   estimateCredits,
   computeResumeQuoteBits,
   resumeQuoteDisclosure,
+  RESERVATION_TTL_SECONDS,
   type AgentRunContext,
 } from "@/lib/agent-billing";
 
@@ -620,5 +621,272 @@ describe("PostgREST row shape — hosted array, fail closed", () => {
     expect(out.creditsRefunded).toBe(0);
     expect(recordedCredits()).toEqual({ charged: 0, refunded: 0 });
     expect(fake.writes.some((w) => w.table === "billing_reconciliations" && w.op === "insert")).toBe(true);
+  });
+});
+
+describe("reservation TTL — p_expires_seconds 3600 (Option A)", () => {
+  // Both production callers of reserveCredits — the messages route
+  // fresh send (idempotencyKey = clientRequestId) and the approvals
+  // route resume (idempotencyKey = `resume:{pausedRunId}:{token}`) —
+  // funnel through the SINGLE reserve_bits call site in agent-billing,
+  // so the TTL argument is pinned at this unit level for both caller
+  // shapes. There is no second reserve_bits call site to drift.
+  const RESUME_CTX: AgentRunContext = {
+    ...CTX,
+    idempotencyKey: "resume:paused-1:exec-token-1",
+  };
+
+  it("exports the 3600s constant and passes it to reserve_bits (fresh-send shape)", async () => {
+    expect(RESERVATION_TTL_SECONDS).toBe(3600);
+    const res = await reserveCredits(CTX, 12);
+    expect(res.ok).toBe(true);
+    const calls = fake.callsTo("reserve_bits");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args.p_expires_seconds).toBe(3600);
+  });
+
+  it("passes p_expires_seconds 3600 on the resume caller shape", async () => {
+    const res = await reserveCredits(RESUME_CTX, 12);
+    expect(res.ok).toBe(true);
+    const calls = fake.callsTo("reserve_bits");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toMatchObject({
+      p_idempotency_key: "resume:paused-1:exec-token-1",
+      p_expires_seconds: 3600,
+    });
+  });
+
+  // ─── Stateful fake: hosted semantics from migration 20260814200000 ───
+  // reserve_bits: expires_at = now + p_expires_seconds (DB default 600
+  // when the argument is absent); duplicate key → already_reserved with
+  // the original id. settle_bits: settled → already_settled (success,
+  // original amount); released → reservation_already_released;
+  // expires_at <= now → reservation_expired, no ledger write. A
+  // controllable clock simulates the segment's age at settle time.
+  interface FakeReservation {
+    id: string;
+    amount: number;
+    status: "reserved" | "settled" | "released";
+    expiresAt: number;
+    settledAmount: number;
+  }
+
+  function ttlAwareRpc(clock: { now: number }, opts?: { ignorePassedTtl?: boolean }) {
+    const reservations = new Map<string, FakeReservation>();
+    const byKey = new Map<string, FakeReservation>();
+    let seq = 0;
+    let debitCount = 0;
+    let debitTotal = 0;
+    const handler: RpcHandler = async (fn, args) => {
+      if (fn === "reserve_bits") {
+        const key = String(args.p_idempotency_key);
+        const existing = byKey.get(key);
+        if (existing) {
+          return {
+            data: row({ reservation_id: existing.id, success: true, available_after: 88, reason: "already_reserved" }),
+            error: null,
+          };
+        }
+        // ignorePassedTtl models the pre-fix call shape: the argument
+        // never reached the DB, so the 600s function default applied.
+        const windowSeconds = opts?.ignorePassedTtl
+          ? 600
+          : typeof args.p_expires_seconds === "number"
+            ? args.p_expires_seconds
+            : 600;
+        seq += 1;
+        const reservation: FakeReservation = {
+          id: `res-${seq}`,
+          amount: Number(args.p_amount),
+          status: "reserved",
+          expiresAt: clock.now + windowSeconds,
+          settledAmount: 0,
+        };
+        reservations.set(reservation.id, reservation);
+        byKey.set(key, reservation);
+        return {
+          data: row({ reservation_id: reservation.id, success: true, available_after: 88, reason: "reserved" }),
+          error: null,
+        };
+      }
+      if (fn === "settle_bits") {
+        const reservation = reservations.get(String(args.p_reservation_id));
+        if (!reservation) {
+          return {
+            data: row({ success: false, settled_amount: 0, released_amount: 0, available_after: 88, reason: "reservation_not_found" }),
+            error: null,
+          };
+        }
+        if (reservation.status === "settled") {
+          return {
+            data: row({ success: true, settled_amount: reservation.settledAmount, released_amount: 0, available_after: 88, reason: "already_settled" }),
+            error: null,
+          };
+        }
+        if (reservation.status === "released") {
+          return {
+            data: row({ success: false, settled_amount: 0, released_amount: 0, available_after: 88, reason: "reservation_already_released" }),
+            error: null,
+          };
+        }
+        if (reservation.expiresAt <= clock.now) {
+          return {
+            data: row({ success: false, settled_amount: 0, released_amount: 0, available_after: 88, reason: "reservation_expired" }),
+            error: null,
+          };
+        }
+        const settled = Math.min(Number(args.p_actual_amount), reservation.amount);
+        reservation.status = "settled";
+        reservation.settledAmount = settled;
+        debitCount += 1;
+        debitTotal += settled;
+        return {
+          data: row({
+            success: true,
+            settled_amount: settled,
+            released_amount: reservation.amount - settled,
+            available_after: 88,
+            reason: "settled",
+          }),
+          error: null,
+        };
+      }
+      if (fn === "release_bits") {
+        const reservation = reservations.get(String(args.p_reservation_id));
+        if (!reservation || reservation.status !== "reserved") {
+          return {
+            data: row({ success: false, released_amount: 0, available_after: 88, reason: "reservation_not_active" }),
+            error: null,
+          };
+        }
+        reservation.status = "released";
+        return {
+          data: row({ success: true, released_amount: reservation.amount, available_after: 100, reason: "released" }),
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    };
+    return {
+      handler,
+      reservations,
+      ledger: () => ({ debitCount, debitTotal }),
+    };
+  }
+
+  it("a segment settling at t+900s succeeds under the 3600s window and debits exactly once", async () => {
+    const clock = { now: 1_000_000 };
+    const fakeDb = ttlAwareRpc(clock);
+    fake.setRpcHandler(fakeDb.handler);
+    const res = await reserveCredits(CTX, 12);
+    expect(res.ok).toBe(true);
+    // The segment runs 15 minutes — past the old 600s window, inside 3600s.
+    clock.now += 900;
+    const out = await settleRun(
+      "run-1",
+      { inputTokens: 100, outputTokens: 50, actualCredits: 10, status: "completed" },
+      12,
+      res.reservationId,
+    );
+    expect(out.ok).toBe(true);
+    expect(out.creditsCharged).toBe(10);
+    expect(fakeDb.ledger()).toEqual({ debitCount: 1, debitTotal: 10 });
+    expect(fakeDb.reservations.get(res.reservationId!)?.status).toBe("settled");
+  });
+
+  it("REGRESSION PIN: the same t+900s settle under the old 600s window is reservation_expired and debits zero", async () => {
+    const clock = { now: 1_000_000 };
+    // Pre-fix call shape: p_expires_seconds never sent → DB default 600.
+    const fakeDb = ttlAwareRpc(clock, { ignorePassedTtl: true });
+    fake.setRpcHandler(fakeDb.handler);
+    const res = await reserveCredits(CTX, 12);
+    expect(res.ok).toBe(true);
+    clock.now += 900;
+    const out = await settleRun(
+      "run-1",
+      { inputTokens: 100, outputTokens: 50, actualCredits: 10, status: "completed" },
+      12,
+      res.reservationId,
+    );
+    // The defect this fix removes: completed work, settle refused, the
+    // only trace is a reconciliation record — never a debit.
+    expect(out.ok).toBe(false);
+    expect(out.creditsCharged).toBe(0);
+    expect(fakeDb.ledger()).toEqual({ debitCount: 0, debitTotal: 0 });
+    expect(fake.writes.some((w) => w.table === "billing_reconciliations" && w.op === "insert")).toBe(true);
+  });
+
+  it("duplicate reserve with the same key reuses the hold — same id, one reservation, TTL on both calls", async () => {
+    const clock = { now: 1_000_000 };
+    const fakeDb = ttlAwareRpc(clock);
+    fake.setRpcHandler(fakeDb.handler);
+    const first = await reserveCredits(CTX, 12);
+    const second = await reserveCredits(CTX, 12);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(second.reservationId).toBe(first.reservationId);
+    expect(fakeDb.reservations.size).toBe(1);
+    const calls = fake.callsTo("reserve_bits");
+    expect(calls).toHaveLength(2);
+    expect(calls.every((c) => c.args.p_expires_seconds === 3600)).toBe(true);
+  });
+
+  it("duplicate settle still debits the ledger exactly once", async () => {
+    const clock = { now: 1_000_000 };
+    const fakeDb = ttlAwareRpc(clock);
+    fake.setRpcHandler(fakeDb.handler);
+    const res = await reserveCredits(CTX, 12);
+    const settleArgs = { inputTokens: 1, outputTokens: 1, actualCredits: 10, status: "completed" } as const;
+    const first = await settleRun("run-1", settleArgs, 12, res.reservationId);
+    const second = await settleRun("run-1", settleArgs, 12, res.reservationId);
+    expect(first.creditsCharged).toBe(10);
+    expect(second.creditsCharged).toBe(10);
+    // already_settled replays the original amount in the response, but
+    // the ledger write happens exactly once — that is the guarantee.
+    expect(fakeDb.ledger()).toEqual({ debitCount: 1, debitTotal: 10 });
+    const keys = fake.callsTo("settle_bits").map((c) => c.args.p_idempotency_key);
+    expect(keys).toEqual(["run-1:settle", "run-1:settle"]);
+  });
+
+  it("an insufficient-balance reserve still aborts 402 — and the attempt carried the TTL", async () => {
+    fake.setRpcHandler(async (fn) => {
+      if (fn === "reserve_bits") {
+        return {
+          data: row({ reservation_id: null, success: false, available_after: 0, reason: "insufficient_balance" }),
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    });
+    const res = await reserveCredits(CTX, 12);
+    expect(res.ok).toBe(false);
+    expect(res.status).toBe(402);
+    expect(fake.callsTo("reserve_bits")[0].args.p_expires_seconds).toBe(3600);
+    expect(fake.callsTo("settle_bits")).toHaveLength(0);
+    expect(fake.callsTo("release_bits")).toHaveLength(0);
+  });
+
+  it("release frees the hold and a later settle is refused without a debit", async () => {
+    const clock = { now: 1_000_000 };
+    const fakeDb = ttlAwareRpc(clock);
+    fake.setRpcHandler(fakeDb.handler);
+    const res = await reserveCredits(CTX, 12);
+    const failed = await settleRun(
+      "run-1",
+      { inputTokens: 0, outputTokens: 0, actualCredits: 0, status: "failed", error: "boom" },
+      12,
+      res.reservationId,
+    );
+    expect(failed.creditsRefunded).toBe(12);
+    expect(fakeDb.reservations.get(res.reservationId!)?.status).toBe("released");
+    const late = await settleRun(
+      "run-1",
+      { inputTokens: 1, outputTokens: 1, actualCredits: 10, status: "completed" },
+      12,
+      res.reservationId,
+    );
+    expect(late.ok).toBe(false);
+    expect(late.creditsCharged).toBe(0);
+    expect(fakeDb.ledger()).toEqual({ debitCount: 0, debitTotal: 0 });
   });
 });

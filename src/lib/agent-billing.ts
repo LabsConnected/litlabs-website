@@ -116,6 +116,20 @@ function unwrapBitsRpcRow(data: unknown): BitsRpcParse {
 }
 
 /**
+ * Reservation lifetime passed to reserve_bits as p_expires_seconds.
+ *
+ * Must exceed the longest reachable billable segment: the agent loop's
+ * hard runtime cap is 30 minutes (maxRuntimeMs = 1_800_000 in
+ * agent-loop-v2), so 3,600s gives 2x headroom over that cap. With the
+ * reserve_bits default of 600s, any segment running longer than
+ * 10 minutes outlived its reservation and settle_bits rejected the
+ * settlement as reservation_expired — the completed work was delivered
+ * with zero debit. Do not lower this below the loop cap without also
+ * lowering the cap.
+ */
+export const RESERVATION_TTL_SECONDS = 3600;
+
+/**
  * Reserve BITS BEFORE the model call.
  *
  * Flow:
@@ -199,6 +213,7 @@ export async function reserveCredits(
       p_reference_type: "agent_instance",
       p_reference_id: ctx.agentInstanceId,
       p_description: `Agent run: ${ctx.agentInstanceId}`,
+      p_expires_seconds: RESERVATION_TTL_SECONDS,
     });
 
     if (reserveError) {
