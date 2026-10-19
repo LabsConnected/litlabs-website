@@ -20,6 +20,7 @@ import { randomUUID } from "crypto";
 import type { WorkspaceTransport } from "./workspace-transport";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, type LLMMessage, DEFAULT_LOOP_CONFIG } from "./agent-loop-v2";
+import { createRunRouteBudget } from "./provider-registry";
 import { toolRegistry } from "./tool-registry";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import type { BuildFixLoopResult } from "./build-fix-loop";
@@ -529,6 +530,10 @@ export async function ensureProjectPreviewReady(
 
 export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchFlowResult> {
   const startTime = Date.now();
+  // One route budget for the whole user request: the main build loop,
+  // its bounded reprompt, and every repair phase draw from the same
+  // OpenRouter allowance, so the run-level bound actually binds.
+  const routeBudget = createRunRouteBudget();
   const progress = options.progress ?? new ProgressEmitter();
   const transport = options.transport;
   const signal = options.signal;
@@ -646,6 +651,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
             : undefined,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: options.allowLittPaidProviders,
+          runRouteBudget: routeBudget,
         },
         progress,
       );
@@ -897,6 +903,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           persistEvent: options.persistEvent,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: options.allowLittPaidProviders,
+          runRouteBudget: routeBudget,
         },
         progress,
       );

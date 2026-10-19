@@ -30,7 +30,7 @@ import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
-import { recordModelFailure } from "./provider-registry";
+import { recordModelFailure, createRunRouteBudget, type RunRouteBudget } from "./provider-registry";
 import {
   FILE_WRITE_TOOL_IDS,
   NO_BUILD_CAPABLE_MODEL,
@@ -231,6 +231,13 @@ export interface AgentLoopConfig {
    * OpenAI) are eligible as last-resort fallback in v2 routing.
    */
   allowLittPaidProviders?: boolean;
+  /**
+   * Per-run route budget shared across every LLM call of this run
+   * (main loop, repair callbacks, resume continuation). The launch flow
+   * mints one per user request so the OpenRouter allowance spans the
+   * whole run; direct loop invocations without one mint their own.
+   */
+  runRouteBudget?: RunRouteBudget;
 }
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
@@ -998,6 +1005,11 @@ async function runAgentLoopV2Inner(
 ): Promise<AgentLoopResult> {
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...config };
   const startTime = Date.now();
+  // One route budget per run: bounds the run's total OpenRouter spend
+  // across every step (the planner is re-run per step, so a per-call
+  // bound cannot do this). The launch flow may pass a shared budget so
+  // reprompts and repair phases draw from the same allowance.
+  const routeBudget = cfg.runRouteBudget ?? createRunRouteBudget();
 
   // Canonical metering: stable per-invocation id so per-step events are
   // idempotent across replays. Prefers the ambient metering context's run
@@ -1211,6 +1223,7 @@ async function runAgentLoopV2Inner(
           requireReliableFileWriting: cfg.buildCapabilityGuard != null,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
+          runRouteBudget: routeBudget,
         },
       );
       const llmDurationMs = Date.now() - llmStartTime;
@@ -1869,7 +1882,7 @@ async function runAgentLoopV2Inner(
   if (cfg.enableBuildFix && !cfg.isStaticWorkspace && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders, routeBudget),
     });
   }
 
@@ -2442,6 +2455,8 @@ async function resumeAgentLoopV2Inner(
 ): Promise<AgentLoopResult> {
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...resume.config };
   const startTime = Date.now();
+  // Same per-run route budget contract as the fresh loop.
+  const routeBudget = cfg.runRouteBudget ?? createRunRouteBudget();
 
   // Canonical metering (P0): same per-step emission as the fresh loop —
   // stable per-resume id so resumed steps stay idempotent.
@@ -2828,6 +2843,7 @@ async function resumeAgentLoopV2Inner(
           requireReliableFileWriting: cfg.buildCapabilityGuard != null,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
+          runRouteBudget: routeBudget,
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {
@@ -3184,7 +3200,7 @@ async function resumeAgentLoopV2Inner(
   if (cfg.enableBuildFix && !cfg.isStaticWorkspace && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders, routeBudget),
     });
   }
 
@@ -3308,6 +3324,9 @@ export function createAutonomousRepairCallback(
   actionContext?: ActionExecutionContext,
   // P1: Server-derived paid-provider entitlement (never from client).
   allowLittPaidProviders?: boolean,
+  // Per-run route budget: repair attempts draw from the same OpenRouter
+  // allowance as the run that spawned them.
+  runRouteBudget?: RunRouteBudget,
 ): (attempt: number, errors: string) => Promise<boolean> {
   const permissionEngine = new PermissionEngine();
   return async (attempt: number, errors: string) => {
@@ -3329,6 +3348,7 @@ export function createAutonomousRepairCallback(
           signal,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders,
+          runRouteBudget,
         });
 
         if (response.toolCalls.length === 0) {

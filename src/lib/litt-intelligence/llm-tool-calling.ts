@@ -46,6 +46,7 @@ import {
   type PlannedProvider,
   type ProviderFailure,
   type RouteRequirements,
+  type RunRouteBudget,
 } from "./provider-registry";
 import { recordModelAttemptOutcome } from "./model-registry";
 
@@ -1355,6 +1356,13 @@ export async function callLLMWithTools(
      * OpenAI) are eligible as last-resort fallback.
      */
     allowLittPaidProviders?: boolean;
+    /**
+     * Per-run route budget shared across every LLM call of one agent
+     * run. When the run's OpenRouter allowance is spent, OpenRouter
+     * leaves the plan (recorded in `excluded`) and later calls in the
+     * run stop feeding its long free-model list.
+     */
+    runRouteBudget?: RunRouteBudget;
   },
 ): Promise<LLMToolCallResponse> {
   const requirements: RouteRequirements = {
@@ -1378,6 +1386,23 @@ export async function callLLMWithTools(
       model: plan.droppedModelHint,
       reason: "not_eligible_under_basic_cost_policy",
     });
+  }
+
+  // Per-run OpenRouter budget: once this run has spent its allowance,
+  // the route leaves the plan entirely — diagnosed in `excluded`, never
+  // silent — so subsequent steps go straight to the remaining routes.
+  // If it was the only route, the empty-plan path below fails the run
+  // truthfully instead of retrying OpenRouter forever.
+  if (options?.runRouteBudget?.openRouterExhausted()) {
+    const idx = plan.providers.findIndex((p) => p.provider === "openrouter");
+    if (idx >= 0) {
+      plan.providers.splice(idx, 1);
+      plan.excluded.push({ provider: "openrouter", reason: "run_budget_exhausted" });
+      logRoute("provider_budget_exhausted", {
+        provider: "openrouter",
+        ...options.runRouteBudget.snapshot(),
+      });
+    }
   }
 
   const failures: RouteAttemptFailure[] = [];
@@ -1412,6 +1437,16 @@ export async function callLLMWithTools(
     const nextProvider = plan.providers[r + 1]?.provider;
 
     for (const model of route.models) {
+      // The run budget can exhaust mid-route on this call's own attempts:
+      // stop feeding OpenRouter and move on to the next provider.
+      if (route.provider === "openrouter" && options?.runRouteBudget?.openRouterExhausted()) {
+        logRoute("provider_budget_exhausted", {
+          provider: "openrouter",
+          model,
+          ...options.runRouteBudget.snapshot(),
+        });
+        break;
+      }
       if (isModelCoolingDown(route.provider, model)) {
         logRoute("model_skipped", { provider: route.provider, model, reason: "model_cooldown" });
         continue;
@@ -1480,6 +1515,9 @@ export async function callLLMWithTools(
         // Registry learns too: this exact model just completed a call.
         recordModelAttemptOutcome(route.provider, model, true, "");
         const latencyMs = Date.now() - t0;
+        if (route.provider === "openrouter") {
+          options?.runRouteBudget?.recordOpenRouterAttempt(latencyMs);
+        }
         logRoute("attempt_success", {
           provider: route.provider,
           model: result.model,
@@ -1538,6 +1576,9 @@ export async function callLLMWithTools(
           latencyMs,
           message: failure.message,
         });
+        if (route.provider === "openrouter") {
+          options?.runRouteBudget?.recordOpenRouterAttempt(latencyMs);
+        }
 
         logRoute("attempt_failure", {
           provider: route.provider,
