@@ -21,8 +21,8 @@
 //
 //   - Generation lane (image/video/music/speech): ~100 LiTTBits per USD
 //     (1 bit ≈ $0.01, CENTS_PER_BIT = 1 in generation/cost-engine.ts)
-//   - LLM lane: ~1,000 LiTTBits per USD-equivalent before margin
-//     (providerCostUsd * 1000 in llm-cost-engine.ts)
+//   - LLM lane: 100 LiTTBits per USD before margin
+//     (providerCostUsd * 100 in llm-cost-engine.ts)
 //
 // Unifying these lanes into a single bits/$ rate changes customer economics
 // (roughly 10× in one direction). That is an explicit economics decision
@@ -57,8 +57,8 @@ export const SHADOW_PRICING_VERSION_ID = "littbits-pricing-v2-shadow-unified";
 
 /** LiTTBits per USD for the generation lane (1 bit = $0.01). */
 export const GENERATION_LANE_BITS_PER_USD = 100;
-/** LiTTBits per USD-equivalent for the LLM lane (legacy ~1000 bits/$). */
-export const LLM_LANE_BITS_PER_USD = 1000;
+/** Canonical LiTTBits per USD for all lanes. */
+export const LLM_LANE_BITS_PER_USD = 100;
 /** The candidate unified lane rate for v2 shadow comparison: 100 bits/$. */
 export const UNIFIED_SHADOW_BITS_PER_USD = 100;
 
