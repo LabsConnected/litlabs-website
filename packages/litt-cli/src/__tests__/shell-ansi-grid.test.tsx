@@ -217,7 +217,7 @@ function assertCleanFrame(
 
   // 4. No interleaving — historical collision victims appear contiguous.
   for (const s of opts.body ?? []) {
-    expect(grid.some((l) => l.includes(s)), `"${s}" got shredded/overwritten`).toBe(true);
+    expect(grid.some((l) => l.includes(s)), `"${s}" got shredded/overwritten:\n${grid.join("\n")}`).toBe(true);
   }
 }
 
@@ -306,6 +306,28 @@ describe("shell ANSI-grid regression", () => {
   const SIZES = [
     [100, 24], [100, 30], [120, 30],
   ] as const;
+
+  for (const [cols, rows] of [[48, 14], [58, 18], [80, 18], [80, 24], [58, 25], [80, 25]] as const) {
+    it(`welcome remains within the screen with an intact footer @ ${cols}x${rows}`, async () => {
+      const out = makeStdout(cols, rows);
+      const inst = render(
+        React.createElement(LiTTShell, defaultProps()),
+        { stdout: out, stdin: makeStdin(), exitOnCtrlC: false, patchConsole: false, interactive: true },
+      );
+      try {
+        await waitForBytes(() => out.bytes, "Settings");
+        await new Promise((r) => setTimeout(r, 100));
+        const grid = emulate(out.bytes);
+        expect(grid.length, `frame exceeds ${rows} rows:\n${grid.join("\n")}`).toBeLessThanOrEqual(rows);
+        assertCleanFrame(grid, cols, {
+          footer: ["Plan", "Act"],
+          body: ["[Enter] Send", "[H] Health", "[M] Models", "[S] Settings"],
+        });
+      } finally {
+        inst.unmount();
+      }
+    });
+  }
 
   for (const [cols, rows] of SIZES) {
     it(`overflow (long multiline + tool results + FAILED + dirty footer) @ ${cols}x${rows}`, async () => {

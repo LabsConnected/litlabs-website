@@ -76,6 +76,8 @@ const GENERATED_PATH_PATTERNS: readonly RegExp[] = [
   /(^|\/)\.turbo\//,
   /(^|\/)test-results\//,
   /(^|\/)playwright-report\//,
+  // LiTT's own per-project mission state — runtime output, never an edit.
+  /(^|\/)\.litt\//,
 ];
 
 /** Is this path a build artifact / cache rather than authored source? */

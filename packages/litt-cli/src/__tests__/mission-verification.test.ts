@@ -19,6 +19,7 @@ import {
   createMissionEvidenceTracker,
   isShipCommitAllowed,
   markInspectionStepsComplete,
+  settleProvenMutatingSteps,
   requiresProjectHealth,
   isHealthCheckTool,
   isMutatingToolCall,
@@ -868,5 +869,145 @@ describe("inspection completion evidence isolation", () => {
     // a later test contract.
     expect(steps[2].status).toBe("pending");
     expect(steps[2].requiredEvidence).toEqual(["test_result"]);
+  });
+});
+
+// ─── A failed change attempt is not a change ──────────────────────────
+//
+// Real cockpit run (2026-10-18, litt-coder:latest on local Ollama): asked
+// to add multiply() + a test and run npm test, the model attempted two
+// shell writes through project.run. Both FAILED, two plan steps never ran,
+// and no file changed — yet the mission flipped to "mutating" on the CALL,
+// the full gate ran the untouched baseline suite, it passed, and the
+// cockpit showed ✓ Complete. A mutating mission is only provable when at
+// least one change actually succeeded.
+describe("MissionVerificationGate — attempted changes that all failed", () => {
+  const MUTATION = new Set(["project.edit_file", "project.write_file", "project.run"]);
+  const WRITE = { command: "node", args: ["-e", "require('fs').writeFileSync('src/math.js','x')"] };
+
+  function gateFor(tracker: ReturnType<typeof createMissionEvidenceTracker>, fullGate = makeFullGate()) {
+    return new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+      hasSuccessfulMutation: tracker.hasSuccessfulMutation,
+      failedMutationSummary: tracker.failedMutationSummary,
+    });
+  }
+
+  it("tracker: a failed mutating call is attempted but not successful", () => {
+    const tracker = createMissionEvidenceTracker(MUTATION);
+    tracker.recordToolCall("project.write_file", { path: "src/math.js" });
+    tracker.recordToolResult("project.write_file", false, "EACCES");
+    expect(tracker.isReadOnly()).toBe(false);
+    expect(tracker.hasSuccessfulMutation()).toBe(false);
+    expect(tracker.failedMutationSummary()).toContain("EACCES");
+  });
+
+  it("tracker: a successful mutating call counts", () => {
+    const tracker = createMissionEvidenceTracker(MUTATION);
+    tracker.recordToolCall("project.write_file", { path: "src/math.js" });
+    tracker.recordToolResult("project.write_file", false, "EACCES");
+    tracker.recordToolCall("project.write_file", { path: "src/math.js" });
+    tracker.recordToolResult("project.write_file", true, "wrote 80 bytes");
+    expect(tracker.hasSuccessfulMutation()).toBe(true);
+  });
+
+  it("gate: every change attempt failed → NOT proven, full gate never runs", async () => {
+    const tracker = createMissionEvidenceTracker(MUTATION);
+    tracker.recordToolCall("project.run", WRITE);
+    tracker.recordToolResult("project.run", false, "spawn ENOENT");
+    const full = makeFullGate();
+    const result = await gateFor(tracker, full).verify();
+    expect(result.proven).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.message).toMatch(/no project change was detected/i);
+    expect(result.message).toContain("spawn ENOENT");
+    expect(full.called()).toBe(0);
+  });
+
+  it("gate: at least one change landed → the full gate decides", async () => {
+    const tracker = createMissionEvidenceTracker(MUTATION);
+    tracker.recordToolCall("project.edit_file", { path: "src/math.js" });
+    tracker.recordToolResult("project.edit_file", true, "edited");
+    const full = makeFullGate();
+    const result = await gateFor(tracker, full).verify();
+    expect(full.called()).toBe(1);
+    expect(result.proven).toBe(true);
+  });
+});
+
+// ─── Proven mutating missions must reach a terminal state ─────────────
+//
+// Real cockpit runs (2026-10-18): after a passing full gate the controller
+// showed "✓ Complete", but RuntimeStore.completeMission() refused (plan
+// steps not passed) and the mission sat in "verifying" forever — no
+// mission.completed event, so the dock never released the transcript.
+// One run had a genuinely FAILED edit step (the comment was never added)
+// and was still shown as Complete; another did all the work and only had
+// never-reached trailing plan steps.
+describe("settleProvenMutatingSteps", () => {
+  async function missionWith(statuses: Array<"passed" | "failed" | "pending">): Promise<RuntimeStore> {
+    const store = new RuntimeStore(() => {});
+    await store.createMission({ goal: "Edit and test", mode: "act", projectRoot: process.cwd(), sessionId: null, workspaceId: null, metadata: {} });
+    for (let i = 0; i < statuses.length; i++) await store.addMissionStep({ title: `step ${i}`, requiredEvidence: [] });
+    await store.setCurrentStep(store.getMission()!.steps[0].id); // planning → working
+    const steps = store.getMission()!.steps;
+    for (let i = 0; i < statuses.length; i++) {
+      if (statuses[i] === "pending") continue;
+      await store.updateMissionStepStatus(steps[i].id, "working");
+      await store.updateMissionStepStatus(steps[i].id, statuses[i], statuses[i] === "passed" ? { verificationPassed: true, verificationEvidence: "ok" } : { failureReason: "edit failed" });
+    }
+    return store;
+  }
+
+  it("a failed step with no later successful change BLOCKS completion and is left untouched", async () => {
+    // edit A worked, edit B failed and was never retried
+    const store = await missionWith(["passed", "failed", "pending"]);
+    const result = await settleProvenMutatingSteps(store, "gate proven");
+    expect(result.blockingSteps).toEqual(["step 1 (edit failed)"]);
+    expect(result.supersededSteps).toEqual([]);
+    expect(store.getMission()!.steps.map((s) => s.status)).toEqual(["passed", "failed", "pending"]);
+  });
+
+  it("a failed step followed by a later successful change is superseded — skipped, never passed, disclosed", async () => {
+    const store = await missionWith(["passed", "failed", "passed"]);
+    const later = store.getMission()!.steps[2];
+    await store.recordStepToolCall(later.id, "project.edit_file", { description: "edit_file: Edited src/math.js", status: "success" });
+    const result = await settleProvenMutatingSteps(store, "gate proven");
+    expect(result.blockingSteps).toEqual([]);
+    expect(result.supersededSteps).toEqual(["step 1 (edit failed)"]);
+    expect(store.getMission()!.steps.map((s) => s.status)).toEqual(["passed", "skipped", "passed"]);
+    await store.setMissionVerifying();
+    await store.completeMission("Verified", "gate proven");
+    expect(store.getMission()!.status).toBe("complete");
+  });
+
+  it("a later READ-ONLY success (e.g. running tests) does not supersede a failed edit", async () => {
+    const store = await missionWith(["failed", "passed"]);
+    const later = store.getMission()!.steps[1];
+    await store.recordStepToolCall(later.id, "project.test", { description: "test: pass", status: "success" });
+    const result = await settleProvenMutatingSteps(store, "gate proven");
+    expect(result.blockingSteps).toHaveLength(1);
+  });
+
+  it("marks never-reached steps skipped (not passed) so a proven mission can complete", async () => {
+    const store = await missionWith(["passed", "passed", "pending", "pending"]);
+    const { blockingSteps: failedSteps } = await settleProvenMutatingSteps(store, "gate proven");
+    expect(failedSteps).toEqual([]);
+    expect(store.getMission()!.steps.map((s) => s.status)).toEqual(["passed", "passed", "skipped", "skipped"]);
+    await store.setMissionVerifying();
+    await store.completeMission("Verified", "gate proven");
+    expect(store.getMission()!.status).toBe("complete");
+  });
+
+  it("without settling, completeMission refuses — the stall the cockpit hit", async () => {
+    const store = await missionWith(["passed", "pending"]);
+    await store.setMissionVerifying();
+    await store.completeMission("Verified", "gate proven");
+    expect(store.getMission()!.status).toBe("verifying");
   });
 });

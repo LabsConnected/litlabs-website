@@ -27,6 +27,7 @@
  */
 
 import type { ExecutionTarget } from "./execution-target.js";
+import type { LocalLaneStatus } from "./local-lane.js";
 
 /** Returns true when the requested model path must be blocked. */
 export function shouldBlockModelPath(
@@ -59,6 +60,26 @@ export const CAPABILITY_GATE_MESSAGE =
   "This request requires LiTT cloud/model access. " +
   "Sign in (`litt login`) or switch to remote mode (`/remote`) to continue.\n\n" +
   "Available without auth: /local, machine lane, slash commands, local tools.";
+
+/**
+ * Message for a LOCAL-target request blocked because no local model can
+ * serve it. The gate only blocks signed-out LOCAL requests for that reason,
+ * so the remedy is the local lane (start Ollama, point LiTT at it, pull a
+ * model) — signing in is optional and is mentioned last, not demanded.
+ */
+export function localModelGateMessage(
+  lane: Pick<LocalLaneStatus, "endpoint" | "reason"> | null,
+): string {
+  const reason = lane?.reason ?? "no local model responded";
+  const endpoint = lane?.endpoint ? ` (${lane.endpoint})` : "";
+  return (
+    `Local model unavailable${endpoint}: ${reason}.\n\n` +
+    "Start Ollama (`ollama serve`) and make sure a model is installed (`ollama pull <model>`). " +
+    "If Ollama listens somewhere else, set LITT_OLLAMA_URL to its address.\n\n" +
+    "Available without auth: /local, machine lane, slash commands, local tools. " +
+    "Signing in (`litt login`) or `/remote` is only needed for cloud models."
+  );
+}
 
 /** Message shown when emergency/local-only mode blocks remote/cloud access. */
 export const LOCAL_ONLY_GATE_MESSAGE =

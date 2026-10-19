@@ -65,7 +65,7 @@ import {
   formatMachineResult,
   type MachineCommandResult,
 } from "../lib/machine-lane.js";
-import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE, LOCAL_ONLY_GATE_MESSAGE } from "../lib/capability-gate.js";
+import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE, LOCAL_ONLY_GATE_MESSAGE, localModelGateMessage } from "../lib/capability-gate.js";
 import { probeLocalLane, resetLocalLaneCache, type LocalLaneStatus } from "../lib/local-lane.js";
 import {
   localRoutePolicy,
@@ -94,6 +94,7 @@ import {
   requiresProjectHealth,
   isShipCommitAllowed,
   markInspectionStepsComplete,
+  settleProvenMutatingSteps,
 } from "../lib/mission-verification.js";
 import { buildPromptWithContext } from "../lib/context-resolver.js";
 import { getGitState } from "../lib/git-state.js";
@@ -105,6 +106,7 @@ import {
 } from "../lib/git-workflow.js";
 import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
+import { settleChatWorkstream } from "./workstream-lifecycle.js";
 
 /**
  * Resolve the ModelProvider for a routed model, honoring executionTarget.
@@ -171,6 +173,33 @@ function resolveModelProvider(
  */
 function requestedLocalModel(selectedModel: string | null): string | null {
   return resolveRequestedLocalModel(selectedModel).model;
+}
+
+/**
+ * Monotonic identity shared by every accepted controller submission.
+ * Starting any newer chat, mission, or command invalidates callbacks retained
+ * by the previous asynchronous operation.
+ */
+export class ControllerOperationGeneration {
+  private generation = 0;
+
+  begin(): number {
+    return ++this.generation;
+  }
+
+  get current(): number {
+    return this.generation;
+  }
+
+  isCurrent(token: number): boolean {
+    return token === this.generation;
+  }
+
+  runIfCurrent(token: number, callback: () => void): boolean {
+    if (!this.isCurrent(token)) return false;
+    callback();
+    return true;
+  }
 }
 
 /**
@@ -941,6 +970,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // ends. Lets Escape (app.tsx) cancel the remote model stream, not
   // just the local tool executor (session.cancel()).
   const currentRemoteModelRef = useRef<RemoteModelProvider | null>(null);
+  const operationGenerationRef = useRef(new ControllerOperationGeneration());
   const cancelRemoteModel = useCallback(() => {
     currentRemoteModelRef.current?.cancel();
   }, []);
@@ -979,7 +1009,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // ─── Session persistence (/resume) ──────────────────────────────
   /** Persist the current shell session (transcript + context). */
   const persistSession = useCallback(() => {
-    const messages = store.state.chatTranscript;
+    // The live store, not state.chatTranscript: persistSession runs at the
+    // end of async missions, whose closure holds the render-time transcript
+    // from before the turn began — empty on a first turn, so nothing saved.
+    const messages = store.actions.getChatTranscript();
     if (messages.length === 0) return;
     const firstUser = messages.find((m) => m.role === "user");
     saveSession({
@@ -1392,6 +1425,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       });
       return;
     }
+
+    // This identity is created at the accepted-submission boundary, before
+    // CHAT/MISSION routing. Therefore a newer mission invalidates an older
+    // chat callback just as reliably as a newer chat does.
+    const operationGeneration = operationGenerationRef.current.begin();
 
     // Clear the composer only AFTER this submission is accepted.
     // A rejected/re-entrant submit must never eat the user's draft.
@@ -2224,10 +2262,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           ts: Date.now(),
           status: "complete",
         });
-        const gateMessage = store.state.localOnly ? LOCAL_ONLY_GATE_MESSAGE : CAPABILITY_GATE_MESSAGE;
+        const gateMessage = store.state.localOnly ? LOCAL_ONLY_GATE_MESSAGE
+          : localLane ? localModelGateMessage(localLane) : CAPABILITY_GATE_MESSAGE;
         const gateReason = store.state.localOnly
           ? "Capability gate: model/remote path blocked (local-only emergency mode)"
-          : "Capability gate: model/remote path blocked (signed out + local mode)";
+          : `Capability gate: local model unavailable — ${localLane?.reason ?? "no local model responded"}`;
         store.actions.addChatMessage({
           role: "assistant",
           content: gateMessage,
@@ -2252,10 +2291,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           ts: Date.now(),
           status: "complete",
         });
-        const gateMessage = store.state.localOnly ? LOCAL_ONLY_GATE_MESSAGE : CAPABILITY_GATE_MESSAGE;
+        const gateMessage = store.state.localOnly ? LOCAL_ONLY_GATE_MESSAGE
+          : localLane ? localModelGateMessage(localLane) : CAPABILITY_GATE_MESSAGE;
         const gateReason = store.state.localOnly
           ? "Capability gate: model/remote path blocked (local-only emergency mode)"
-          : "Capability gate: model/remote path blocked (signed out + local mode)";
+          : `Capability gate: local model unavailable — ${localLane?.reason ?? "no local model responded"}`;
         store.actions.addChatMessage({
           role: "assistant",
           content: gateMessage,
@@ -2718,6 +2758,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               }
             },
           });
+          if (!operationGenerationRef.current.isCurrent(operationGeneration)) return;
           const chatTail = toolCallFilter.flush();
           if (chatTail && chatAssistantMsgId) {
             store.actions.appendAssistantDelta(chatAssistantMsgId, chatTail);
@@ -2760,8 +2801,30 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // RUNNING mid-run; a successful chat must return it to IDLE
           // (the composer/status reconcile out of Working). Cleanup in finally.
           store.actions.setHoloState("IDLE");
-          persistSession();
+          // CRITICAL: For CHAT paths (non-mission), the agent loop's
+          // run.completed is suppressed by SessionEventBridge (agent_
+          // runId prefix), so no mission:completed event reaches the
+          // workstream. Without this, the workstream stays "running"
+          // and the WorkstreamDock hides the final AI response.
+          // Complete it via the workstreamPush callback so the dock
+          // returns the centre to the transcript.
+          store.actions.workstreamPush((ws) => {
+            settleChatWorkstream(ws, "complete", {
+              runEpoch: operationGeneration,
+              currentRunEpoch: operationGenerationRef.current.current,
+              pendingApproval: approvalBridge.pending !== null,
+            });
+          });
+          // Session persistence is secondary to the completed conversation.
+          // A filesystem failure must not enter the chat error path and
+          // overwrite the already-finalized assistant response.
+          try {
+            persistSession();
+          } catch {
+            // The transcript remains available in the live session.
+          }
         } catch (err) {
+          if (!operationGenerationRef.current.isCurrent(operationGeneration)) return;
           const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
           store.actions.addActivity({
             id: `act_${Date.now()}_err`,
@@ -2780,14 +2843,24 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           }
           store.actions.setHoloState("FAILED");
           store.actions.scheduleIdle(2000);
+          // Also complete the workstream for CHAT error paths (see success path above).
+          store.actions.workstreamPush((ws) => {
+            settleChatWorkstream(ws, "failed", {
+              runEpoch: operationGeneration,
+              currentRunEpoch: operationGenerationRef.current.current,
+              pendingApproval: approvalBridge.pending !== null,
+            });
+          });
         } finally {
-          currentRemoteModelRef.current = null;
-          // ONE canonical transition out of a run: every terminal
-          // outcome (success, failed, provider error, tool error, stall)
-          // re-enables the composer and stops the busy timer. The shell
-          // can never stay visually Working after the run settles.
-          store.actions.setIsProcessing(false);
-          store.actions.stopBusy();
+          operationGenerationRef.current.runIfCurrent(operationGeneration, () => {
+            currentRemoteModelRef.current = null;
+            // ONE canonical transition out of a run: every terminal
+            // outcome (success, failed, provider error, tool error, stall)
+            // re-enables the composer and stops the busy timer. The shell
+            // can never stay visually Working after the run settles.
+            store.actions.setIsProcessing(false);
+            store.actions.stopBusy();
+          });
         }
         perf.end("chat");
         return;
@@ -3135,6 +3208,16 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             healthRequested: () => healthRequested,
             hasFailedHealthCheck: evidenceTracker.hasFailedHealthCheck,
             healthSummary: evidenceTracker.healthSummary,
+            // A change landed if a classified change tool succeeded OR the
+            // workspace really shows new changes — a successful `node -e`
+            // write through project.run is not classified as mutating.
+            hasSuccessfulMutation: () =>
+              evidenceTracker.hasSuccessfulMutation()
+              || computeMissionDelta(
+                missionBaselineFiles,
+                porcelainPaths(getGitState(projectRoot).porcelain),
+              ).changed.length > 0,
+            failedMutationSummary: evidenceTracker.failedMutationSummary,
           }),
           // ─── Wire the EscalationHook into the agent loop ───
           // The mission id + model id + resolver let the loop track
@@ -3488,6 +3571,34 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const agentLoopMs = result.durationMs;
         const seconds = (missionTotalMs / 1000).toFixed(1);
         const agentSeconds = (agentLoopMs / 1000).toFixed(1);
+        // A proven MUTATING mission (a change landed — the gate rejects the
+        // all-attempts-failed case) settles its unfinished plan steps so the
+        // canonical mission can complete instead of stalling in "verifying".
+        // A failed step with no later successful change means part of the
+        // request did not happen: the mission fails. Superseded failed
+        // attempts are disclosed, never hidden.
+        if (missionComplete && !evidenceTracker.isReadOnly()) {
+          const { supersededSteps, blockingSteps } = await settleProvenMutatingSteps(
+            agentStore,
+            `verification proved the result: ${verificationSummary.slice(0, 120)}`,
+          );
+          if (blockingSteps.length > 0) {
+            missionComplete = false;
+            verificationSummary =
+              `Checks passed, but ${blockingSteps.length} step(s) failed and were not recovered: ` +
+              `${blockingSteps.join("; ")}. The requested change was not fully made.`;
+          } else if (supersededSteps.length > 0) {
+            store.actions.addActivity({
+              id: `act_${Date.now()}_superseded`,
+              ts: Date.now(),
+              type: "info",
+              tag: "WARN",
+              text: `${supersededSteps.length} step(s) had failed attempts that a later change superseded`,
+              fullText: `Failed attempts (superseded by a later successful change):\n${supersededSteps.join("\n")}`,
+            });
+            verificationSummary += ` Note: ${supersededSteps.length} step(s) had failed attempts: ${supersededSteps.join("; ")}.`;
+          }
+        }
         if (missionComplete) {
           // Read-only inspection missions: the plan steps (inspect →
           // verify → report) are satisfied by the collected evidence +
@@ -3510,6 +3621,20 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             `Verified by VerificationGate: ${verificationSummary.slice(0, 200)}`,
             verificationSummary,
           );
+          // completeMission() refuses (silently, via mission:complete_refused)
+          // when steps are unfinished. The UI must never claim a COMPLETE the
+          // canonical store rejected.
+          const settledStatus = agentStore.getMission()?.status;
+          if (settledStatus !== "complete") {
+            const incomplete = (agentStore.getMission()?.steps ?? [])
+              .filter((s) => s.status !== "passed" && s.status !== "skipped")
+              .map((s) => `${s.title} (${s.status})`);
+            verificationSummary =
+              `Checks passed, but the mission could not complete: ${incomplete.join("; ") || "unfinished steps"}.`;
+            missionComplete = false;
+          }
+        }
+        if (missionComplete) {
           store.actions.setHoloState("COMPLETE");
           store.actions.updateMissionState("COMPLETE");
           store.actions.setMissionRuntimeProven(true);

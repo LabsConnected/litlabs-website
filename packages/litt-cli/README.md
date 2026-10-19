@@ -54,6 +54,14 @@ litt deploy verify       # verify the live deployment
 - `litt deploy verify` — verify deployment health
 - `litt studio acceptance` — run studio acceptance checks
 
+## Windows Terminal profile
+
+```bash
+litt terminal-profile install   # adds a persistent "LiTT" profile to Windows Terminal
+```
+
+Opt-in only — never runs automatically. Adds a "LiTT" entry to Windows Terminal's "+" dropdown that launches `litt shell` directly in the current build's CLI (a timestamped backup of your `settings.json` is written first, and re-running is a no-op if already installed).
+
 ## Local-first by default
 
 LiTT starts in local mode. Use `--remote` to connect to the LiTT cloud, or `--local` to force local-only operation.

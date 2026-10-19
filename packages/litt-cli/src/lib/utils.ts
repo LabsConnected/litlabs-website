@@ -298,7 +298,9 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
        tryExecFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], rootDir) ??
        null)
     : null;
-  const gitStatus = hasGit ? tryExecFileSync("git", ["status", "--short"], rootDir) : null;
+  // Machine-stable snapshot reused by cockpit startup. Porcelain v1
+  // ignores user-facing status formatting such as status.branch/colors.
+  const gitStatus = hasGit ? tryExecFileSync("git", ["status", "--porcelain=v1"], rootDir) : null;
   const gitRemote = hasGit ? tryExecFileSync("git", ["remote", "get-url", "origin"], rootDir) : null;
 
   const hasTsConfig = existsSync(join(rootDir, "tsconfig.json"));

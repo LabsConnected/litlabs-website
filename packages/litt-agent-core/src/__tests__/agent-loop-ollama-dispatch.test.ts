@@ -1125,3 +1125,42 @@ describe("Q. Mutation requirement with a configured verification gate", () => {
       "a real successful mutation proven by the gate must still complete");
   });
 });
+
+// ─── Mutating file tools count as mutations ───────────────────────────
+// Independent review 2026-10-18: only project.run set mutationSucceeded /
+// mutationFailed. A successful project.edit_file for "edit src/math.js …"
+// was answered "no mutation was performed … use project.run" and the run
+// ended termination "failed"; a failed edit_file never counted as failed.
+describe("Mutating file tools satisfy the mutation requirement", () => {
+  const editCall = '```tool_call\n{ "tool": "project.edit_file", "inputs": { "path": "src/math.js", "old_string": "a", "new_string": "b" } }\n```';
+
+  it("a successful project.edit_file is a performed mutation", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const tools = makeRegistryWithTool(
+      "project.edit_file",
+      async () => ({ status: "success", success: true, message: "Edited src/math.js (1 replacement)", data: {} }),
+      { readOnly: false, mutating: true },
+    );
+    const result = await runAgentLoop("Edit src/math.js to add a multiply function.", {
+      model: makeMockModel([editCall, "I edited src/math.js."]),
+      tools, shell, store: new RuntimeStore(() => {}), cwd: process.cwd(), maxRounds: 3,
+    });
+    assert.notEqual(result.termination, "failed", result.content);
+    assert.doesNotMatch(result.content, /not performed|No mutation evidence/);
+  });
+
+  it("a failed project.edit_file is a failed mutation, never success", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const tools = makeRegistryWithTool(
+      "project.edit_file",
+      async () => ({ status: "failed", success: false, message: "old_string not found in src/math.js", data: {} }),
+      { readOnly: false, mutating: true },
+    );
+    const result = await runAgentLoop("Edit src/math.js to add a multiply function.", {
+      model: makeMockModel([editCall, "Done, I edited it."]),
+      tools, shell, store: new RuntimeStore(() => {}), cwd: process.cwd(), maxRounds: 2,
+    });
+    assert.equal(result.termination, "failed");
+    assert.match(result.content, /mutation failed/i);
+  });
+});

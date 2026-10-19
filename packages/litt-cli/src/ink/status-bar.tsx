@@ -74,6 +74,7 @@ export function StatusBar({
 }: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
+  const narrow = width < 60;
 
   // ── ONE authoritative runtime state — never a self-derived status ──
   // Approval, working, and terminal states are decided by the shared
@@ -195,14 +196,13 @@ export function StatusBar({
 
   const right1 = <ModeToggle active={mode} />;
 
-  const projectShort = truncateTail(project, Math.max(10, Math.floor(left2Max * 0.42)));
+  const projectShort = truncateTail(project, narrow ? Math.max(8, left2Max - localLabel.length - 5) : Math.max(10, Math.floor(left2Max * 0.42)));
   const branchShort = truncateTail(branch, Math.max(10, Math.floor(left2Max * 0.36)));
 
   const left2 = (
     <Text>
       <Text color={COLORS.secondary}>{projectShort}</Text>
-      <Text dimColor> · </Text>
-      <Text color={COLORS.secondaryBright}>{branchShort}</Text>
+      {!narrow && <><Text dimColor> · </Text><Text color={COLORS.secondaryBright}>{branchShort}</Text></>}
       <Text dimColor> · </Text>
       <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>
     </Text>

@@ -51,6 +51,7 @@ const TOOL_KIND_MAP: Record<string, WorkstreamKind> = {
   createFile: "edit",
 
   // Command execution
+  run: "command",
   run_command: "command",
   runCommand: "command",
   execute: "command",
@@ -87,8 +88,13 @@ const TOOL_KIND_MAP: Record<string, WorkstreamKind> = {
 // ─── Human-readable label generation ───────────────────────────────
 
 /** Maps a tool name + arguments to a human-readable label. */
-export function humanizeToolLabel(toolName: string, args?: Record<string, unknown>): string {
+export function humanizeToolLabel(toolName: string, rawArgs?: Record<string, unknown>): string {
   const kind = TOOL_KIND_MAP[toolName];
+  // Agent-loop tool events nest the real arguments under `inputs`.
+  const nested = rawArgs?.inputs;
+  const args: Record<string, unknown> | undefined = nested && typeof nested === "object"
+    ? { ...rawArgs, ...(nested as Record<string, unknown>) }
+    : rawArgs;
 
   // For inspection tools, try to extract the file path
   if (kind === "inspect") {
@@ -107,7 +113,8 @@ export function humanizeToolLabel(toolName: string, args?: Record<string, unknow
   // For commands
   if (kind === "command") {
     const cmd = args?.command as string ?? args?.cmd as string;
-    if (cmd) return shortenCommand(cmd);
+    const cmdArgs = Array.isArray(args?.args) ? (args!.args as unknown[]).filter((a) => typeof a === "string").join(" ") : "";
+    if (cmd) return shortenCommand(cmdArgs ? `${cmd} ${cmdArgs}` : cmd);
     return "Running command";
   }
 

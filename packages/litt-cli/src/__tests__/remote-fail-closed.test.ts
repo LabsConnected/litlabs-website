@@ -240,4 +240,16 @@ describe("UI transport projection", () => {
     expect(deriveTransport({ localRuntime: "error", remoteRuntime: "connected" }).footerLabel).toBe("TOOLS ERR");
     expect(deriveTransport({ localRuntime: "starting", remoteRuntime: "offline" }).footerLabel).toBe("TOOLS…");
   });
+
+  // Signed out does not switch local tooling off: in LOCAL mode the machine
+  // lane and project tools run without cloud auth. The cockpit showed
+  // "● LOCAL  ✗ TOOLS OFF  ● SIGNED OUT" while the footer said "● TOOLS"
+  // and the tools executed — the header badge was the one lying.
+  it("keeps the TOOLS label truthful about local tooling while signed out", () => {
+    const ready = deriveTransport({ localRuntime: "ready", remoteRuntime: "offline", signedIn: false });
+    expect(ready.footerLabel).toBe("TOOLS");
+    expect(ready.footerSeverity).toBe("ok");
+    expect(deriveTransport({ localRuntime: "error", remoteRuntime: "offline", signedIn: false }).footerLabel).toBe("TOOLS ERR");
+    expect(deriveTransport({ localRuntime: "starting", remoteRuntime: "offline", signedIn: false }).footerLabel).toBe("TOOLS…");
+  });
 });

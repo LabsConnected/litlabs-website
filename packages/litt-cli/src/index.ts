@@ -34,6 +34,7 @@
  *   litt stripe sandbox     — Real Stripe TEST-mode E2E (never live)
  *   litt deploy verify      — Watch deploy + verify production health
  *   litt studio acceptance  — Pre-flight + owner browser acceptance
+ *   litt terminal-profile install — Add a persistent "LiTT" profile to Windows Terminal
  *
  *   (legacy hyphen aliases also work: litt production-doctor, etc.)
  *
@@ -68,6 +69,7 @@ import { stripeSandboxCommand } from "./commands/stripe-sandbox.js";
 import { deployVerifyCommand } from "./commands/deploy-verify.js";
 import { studioAcceptanceCommand } from "./commands/studio-acceptance.js";
 import { productionFinishCommand } from "./commands/production-finish.js";
+import { terminalProfileInstallCommand } from "./commands/terminal-profile.js";
 import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
 import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
 import { executeCommand } from "./lib/command-execution.js";
@@ -151,6 +153,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   "stripe-sandbox": stripeSandboxCommand,
   "deploy-verify": deployVerifyCommand,
   "studio-acceptance": studioAcceptanceCommand,
+  "terminal-profile-install": terminalProfileInstallCommand,
   // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
@@ -183,6 +186,9 @@ const NESTED_COMMANDS: Record<string, Record<string, string>> = {
   studio: {
     acceptance: "studio-acceptance",
   },
+  "terminal-profile": {
+    install: "terminal-profile-install",
+  },
 };
 
 /** All valid nested group names (for help routing). */
@@ -213,7 +219,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * features remain auth-gated at the provider level (resolveModelProvider
  * and awaitRemoteReady enforce this at call time, not at the gate).
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "terminal-profile-install", "terminal-profile"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
@@ -753,6 +759,7 @@ function printNestedHelp(group: string): void {
     "stripe-sandbox": "Real Stripe TEST-mode E2E (never live)",
     "deploy-verify": "Watch deploy + verify production health",
     "studio-acceptance": "Pre-flight + owner browser acceptance",
+    "terminal-profile-install": "Add a persistent \"LiTT\" profile to Windows Terminal",
   };
 
   console.log(`
@@ -818,6 +825,11 @@ Production operator commands:
   litt studio acceptance     Pre-flight + owner browser acceptance
 
   (legacy hyphen aliases also work: litt production-doctor, etc.)
+
+Windows Terminal integration:
+  litt terminal-profile install   Add a persistent "LiTT" profile to Windows
+                                   Terminal (shows up in its "+" dropdown).
+                                   Opt-in only — never runs automatically.
 
 Options:
   -h, --help     Show this help

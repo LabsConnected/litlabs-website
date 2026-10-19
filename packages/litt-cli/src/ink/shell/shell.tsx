@@ -38,6 +38,7 @@ import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 import type { WorkstreamSnapshot } from "../workstream-store.js";
 import type { ExecutionTarget } from "../../lib/execution-target.js";
 import { WorkstreamDock } from "../workstream-dock.js";
+import { isWorkstreamLive } from "../workstream-lifecycle.js";
 
 /** Rows consumed by fixed chrome below the content region:
  *  composer margin(1) + composer(1) + status margin(1) + divider(1) + 2 status lines. */
@@ -75,6 +76,8 @@ export interface LiTTShellProps {
   onClosePalette?: () => void;
   onOpenContext: (query: string) => void;
   onOpenFailureView?: () => void;
+  /** Welcome-screen h/m/s shortcuts — see composer.tsx for the key gating. */
+  onWelcomeShortcut?: (action: "health" | "models" | "settings") => void;
   composerDisabled: boolean;
   /** True while the transcript is scrolled into history (no fake caret). */
   composerScrolled: boolean;
@@ -121,7 +124,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
     gitModified, gitUntracked, toolProgress, toolDetails = false,
     executionTarget, canonicalMission, workstream,
     composerValue, onComposerChange, onSubmit, onNavigateHistory,
-    onOpenPalette, onClosePalette, onOpenContext, onOpenFailureView, composerDisabled,
+    onOpenPalette, onClosePalette, onOpenContext, onOpenFailureView, onWelcomeShortcut, composerDisabled,
     composerScrolled, composerFocusEpoch, onComposerReturnToLive,
     transcriptAnchor, onTranscriptPageChange, onTranscriptAnchorChange,
     project, branch, localRuntime, remoteRuntime = "offline", brain, activeModel, activeProvider, mode,
@@ -135,10 +138,9 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   // ── Workstream dock: when LiTT is actively working, the dock becomes
   //    the primary center view. The transcript still renders below it
   //    (conversation record), but the workstream is the hero.
-  //    When idle, the Welcome or Transcript owns the center.
-  const hasWorkstream = workstream != null
-    && workstream.activities.length > 0
-    && (workstream.hasRunning || workstream.overallStatus !== "idle");
+  //    When idle or finished, the Welcome or Transcript owns the center —
+  //    a finished mission's answer lives in the transcript.
+  const hasWorkstream = isWorkstreamLive(workstream);
 
   // Guard for harnesses/surfaces that don't wire scroll yet.
   const anchor = transcriptAnchor ?? null;
@@ -146,6 +148,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const onAnchorChange = onTranscriptAnchorChange ?? (() => {});
 
   const hasConversation = messages.length > 0 || isProcessing
+    || activityLog.length > 0
     || (missionState !== null && missionState.state !== "IDLE");
 
   // Welcome stays visible while the user types — the composer gains
@@ -315,6 +318,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
             gitModified={gitModified}
             gitUntracked={gitUntracked}
             executionTarget={executionTarget}
+            brain={brain}
           />
         )}
       </Box>
@@ -340,6 +344,8 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
         onClosePalette={onClosePalette}
         onOpenContext={onOpenContext}
         onOpenFailureView={onOpenFailureView}
+        welcomeShortcutsEnabled={!hasConversation && !hasWorkstream}
+        onWelcomeShortcut={onWelcomeShortcut}
         disabled={composerDisabled}
         busy={isProcessing}
         runtimeState={runtimeState}

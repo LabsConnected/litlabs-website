@@ -30,6 +30,7 @@ import { COLORS } from "./colors.js";
 import { clockIntervalMs } from "./motion.js";
 import { riskBadge, formatDuration } from "./runtime-state.js";
 import type { ApprovalPrompt } from "./cockpit-store.js";
+import { allowsSessionGrant } from "./approval-bridge.js";
 
 export type ApprovalDecisionScope = "once" | "session";
 
@@ -58,6 +59,8 @@ export function ApprovalUX({ prompt, onDecision, onCancelMission }: ApprovalUXPr
     return () => clearInterval(timer);
   }, []);
   const waitSeconds = Math.max(0, Math.floor((Date.now() - prompt.since) / 1000));
+  // File writes are reviewed one by one — no "approve similar" for them.
+  const sessionAllowed = allowsSessionGrant(prompt.toolId, prompt.risk);
 
   // Register as keyboard owner — takes ALL keyboard events when active.
   // Priority over the composer: the composer is disabled while blocked,
@@ -66,14 +69,14 @@ export function ApprovalUX({ prompt, onDecision, onCancelMission }: ApprovalUXPr
     if (input === "a") {
       onDecision(true, "once");
     } else if (input === "A") {
-      onDecision(true, "session");
+      onDecision(true, sessionAllowed ? "session" : "once");
     } else if (input === "d" || input === "D") {
       onDecision(false, "once");
     } else if (isEscape(key, input)) {
       // Esc = deny + stop the mission. Fail closed, always.
       onCancelMission?.();
     }
-  }, [onDecision, onCancelMission]));
+  }, [onDecision, onCancelMission, sessionAllowed]));
 
   const badge = riskBadge(prompt.risk);
   const badgeCol = badgeColor(badge);
@@ -102,8 +105,12 @@ export function ApprovalUX({ prompt, onDecision, onCancelMission }: ApprovalUXPr
       <Box>
         <Text color={COLORS.success} bold>[a]</Text>
         <Text> once  </Text>
-        <Text color={COLORS.success} bold>[⇧a]</Text>
-        <Text> similar  </Text>
+        {sessionAllowed && (
+          <>
+            <Text color={COLORS.success} bold>[⇧a]</Text>
+            <Text> similar  </Text>
+          </>
+        )}
         <Text color={COLORS.error} bold>[d]</Text>
         <Text> deny  </Text>
         <Text color={COLORS.gold} bold>[esc]</Text>

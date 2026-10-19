@@ -345,6 +345,33 @@ describe("slash-command UX: Welcome stays visible while typing", () => {
       instance.unmount();
     }
   });
+
+  it("activity output (e.g. /doctor via the H shortcut) replaces the Welcome screen", async () => {
+    const { stdout, text } = makeFakeStdout();
+    const instance = render(
+      <LiTTShell {...shellProps({
+        activityLog: [
+          { id: "act_t1", ts: Date.now(), type: "info", tag: "DOCTOR", text: "LiTT runtime: executionTarget=local" },
+        ],
+      })} />,
+      {
+        stdin: makeFakeStdin() as unknown as NodeJS.ReadStream,
+        stdout: stdout as unknown as NodeJS.WriteStream,
+        exitOnCtrlC: false,
+        patchConsole: false,
+        interactive: true,
+      },
+    );
+    try {
+      await expect.poll(
+        () => stripAnsi(text()).includes("LiTT runtime: executionTarget=local"),
+        { timeout: 10_000, interval: 40 },
+      ).toBe(true);
+      expect(stripAnsi(text())).not.toContain("What do you want to build?");
+    } finally {
+      instance.unmount();
+    }
+  });
 });
 
 // ─── Palette: leading-slash-normalized filtering ─────────────────────

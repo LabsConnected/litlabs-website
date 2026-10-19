@@ -1211,11 +1211,12 @@ export async function runAgentLoop(
     }
 
     // ─── Mutation tracking ──────────────────────────────────────────
-    // Track whether a potentially-mutating tool (project.run) succeeded
-    // or failed. This drives the mutation completion requirement: if
-    // the user asked for an edit and no mutation succeeded, the run
-    // cannot report success.
-    if (entry.definition.id === "project.run") {
+    // Track whether a potentially-mutating tool (project.run, or any tool
+    // whose metadata declares it mutating — project.write_file /
+    // project.edit_file) succeeded or failed. This drives the mutation
+    // completion requirement: if the user asked for an edit and no
+    // mutation succeeded, the run cannot report success.
+    if (entry.definition.id === "project.run" || entry.metadata.mutating === true) {
       if (result.success) {
         mutationSucceeded = true;
       } else {
@@ -1696,7 +1697,8 @@ export async function runAgentLoop(
           content:
             `You were asked to make an edit/mutation, but no mutation was performed. ` +
             `Do not claim success without making the edit. ` +
-            `Use project.run to make the edit, then show the diff with project.diff. ` +
+            `Use project.edit_file (change existing text) or project.write_file (create or replace a file) ` +
+            `to make the edit, then show the diff with project.diff. ` +
             `If the edit cannot be made, state plainly that it failed.`,
         });
         continue;

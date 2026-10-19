@@ -27,7 +27,7 @@ import { ensureConfig } from "../lib/config.js";
 import { detectProject, fail, header, c, resolveProjectCwd } from "../lib/utils.js";
 import { resolveActiveProject, activeProjectDisplay } from "../lib/active-project.js";
 import { buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
-import { getGitState } from "../lib/git-state.js";
+import { countGitChanges } from "../lib/git-state.js";
 import { launchShellWindow, currentCliCommand } from "../lib/window-launcher.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { installTerminalTeardown, restoreTerminal } from "../lib/terminal-teardown.js";
@@ -199,11 +199,12 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     return result.result.success ? 0 : 1;
   }
 
-  // FILES counter — canonical git state (same source as litt doctor,
-  // litt status, and the agent mission's project.status tool).
-  const gitState = getGitState(projectRoot);
-  const gitModified = gitState.changed;
-  const gitUntracked = gitState.untracked;
+  // FILES counter — detectProject already captured porcelain status for
+  // this exact root. Reuse that snapshot instead of spawning a duplicate
+  // `git status` before the first Ink frame.
+  const gitCounts = countGitChanges(project.gitStatus ?? "");
+  const gitModified = gitCounts.changed;
+  const gitUntracked = gitCounts.untracked;
 
   // ─── Auth state for header display ──────────────────────────────
   // The auth gate in index.ts may have allowed this cockpit to launch
