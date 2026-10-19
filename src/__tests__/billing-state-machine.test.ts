@@ -156,6 +156,14 @@ function buildTrackingSupabase(existingEvent = false) {
     from: vi.fn((table: string) => chain(table)),
     rpc: vi.fn(async (fnName: string, params: any) => {
       rpcCalls.push({ fn: fnName, params });
+      if (fnName === "grant_credits") {
+        // Real shape: grant_credits RETURNS TABLE(granted, total_after),
+        // which PostgREST delivers as an array of row objects.
+        return {
+          data: [{ granted: true, total_after: params.p_amount }],
+          error: null,
+        };
+      }
       return { data: { success: true, remaining: 100 }, error: null };
     }),
   };
@@ -529,6 +537,14 @@ describe("Webhook event processing — state mutations", () => {
       }),
       rpc: vi.fn(async (fnName: string, params: any) => {
         rpcCalls.push({ fn: fnName, params });
+        if (fnName === "grant_credits") {
+          // Real shape: grant_credits RETURNS TABLE(granted, total_after),
+          // which PostgREST delivers as an array of row objects.
+          return {
+            data: [{ granted: true, total_after: params.p_amount }],
+            error: null,
+          };
+        }
         return { data: { success: true, remaining: 100 }, error: null };
       }),
     };
