@@ -1,4 +1,5 @@
-// Stripe webhook handler — idempotent event processing, plan-based credit grants
+// Stripe webhook handler — idempotent event processing.
+// Subscription credits are granted only from a settled invoice.paid, once per invoice id.
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import {
@@ -68,28 +69,164 @@ async function creditCreditPack(
   }
 }
 
+/**
+ * Grant subscription credits through the credit_ledger RPC.
+ *
+ * The grant_credits RPC is idempotent on p_idempotency_key and returns
+ * TABLE(granted BOOLEAN, total_after INTEGER) — PostgREST delivers that as
+ * an array of rows. granted=false means the key has already landed (a
+ * concurrent or retried delivery): the credit exists exactly once, which
+ * is success for this caller. An RPC error, or a response with no grant
+ * row, means the grant cannot be confirmed — throw so the webhook returns
+ * 500, the event is NOT marked processed, and Stripe retries the delivery.
+ * A grant failure must never be swallowed and recorded as processed.
+ */
 async function grantSubscriptionCredits(
   sb: NonNullable<ReturnType<typeof getAdminSupabase>>,
   userId: string,
   planId: PlanId,
+  amount: number,
   idempotencyKey: string,
   expiresAt?: string | null,
+  description?: string,
 ): Promise<void> {
   const plan = PLANS[planId];
-  if (!plan || plan.monthlyCredits <= 0) return;
-  try {
-    await sb.rpc("grant_credits", {
-      p_user_id: userId,
-      p_amount: plan.monthlyCredits,
-      p_category: "subscription_grant",
-      p_balance_bucket: "monthly",
-      p_description: `${plan.name} monthly grant — ${plan.monthlyCredits} LiTTBits`,
-      p_idempotency_key: idempotencyKey,
-      p_reference_type: "subscription",
-      p_expires_at: expiresAt ?? undefined,
-    });
-  } catch (_err) {
+  if (!plan || amount <= 0) return;
+  const { data, error } = await sb.rpc("grant_credits", {
+    p_user_id: userId,
+    p_amount: amount,
+    p_category: "subscription_grant",
+    p_balance_bucket: "monthly",
+    p_description:
+      description ?? `${plan.name} monthly grant — ${amount} LiTTBits`,
+    p_idempotency_key: idempotencyKey,
+    p_reference_type: "subscription",
+    p_expires_at: expiresAt ?? undefined,
+  });
+  if (error) {
+    throw new Error(
+      `grant_credits failed for ${idempotencyKey}: ${error.message}`,
+    );
   }
+  const rows = (Array.isArray(data) ? data : data ? [data] : []) as {
+    granted?: unknown;
+  }[];
+  const row = rows[0];
+  if (!row || typeof row.granted !== "boolean") {
+    throw new Error(
+      `grant_credits returned no grant row for ${idempotencyKey}`,
+    );
+  }
+}
+
+function priceIdOf(value: unknown): string | null {
+  if (typeof value === "string" && value.startsWith("price_")) return value;
+  if (
+    value &&
+    typeof value === "object" &&
+    "id" in value &&
+    typeof (value as { id: unknown }).id === "string"
+  ) {
+    const id = (value as { id: string }).id;
+    if (id.startsWith("price_")) return id;
+  }
+  return null;
+}
+
+type PriceCarrier = {
+  price?: unknown;
+  pricing?: { price_details?: { price?: unknown } };
+};
+
+function planIdFromPrice(priceId: string | null): PlanId | null {
+  if (!priceId) return null;
+  for (const plan of Object.values(PLANS)) {
+    if (!plan.stripePriceIdEnv) continue;
+    const configured = process.env[plan.stripePriceIdEnv];
+    if (configured && configured === priceId) return plan.id;
+  }
+  return null;
+}
+
+type InvoiceLineCredit = {
+  plan: PlanId | null;
+  amount: number | null;
+};
+
+/** Every invoice line that names a configured price, with its signed amount. */
+function invoiceLineCredits(inv: Stripe.Invoice): InvoiceLineCredit[] {
+  return (inv.lines?.data ?? []).map((line) => {
+    const carrier = line as Stripe.InvoiceLineItem & PriceCarrier;
+    const priceId =
+      priceIdOf(carrier.price) ||
+      priceIdOf(carrier.pricing?.price_details?.price);
+    return {
+      plan: planIdFromPrice(priceId),
+      amount: typeof line.amount === "number" ? line.amount : null,
+    };
+  });
+}
+
+function subscriptionCreditAllowance(plan: string | null | undefined): number {
+  if (!plan || !(plan in PLANS)) return 0;
+  const def = PLANS[plan as PlanId];
+  if (def.billingType !== "subscription" || def.monthlyCredits <= 0) return 0;
+  return def.monthlyCredits;
+}
+
+function requireSubscriptionGrantPlan(
+  plan: string | null | undefined,
+  context: string,
+): PlanId {
+  if (!plan || !(plan in PLANS) || plan === "owner") {
+    throw new Error(
+      `[stripe] ${context}: subscription plan missing or unknown (${plan || "empty"})`,
+    );
+  }
+  const resolved = plan as PlanId;
+  const def = PLANS[resolved];
+  if (def.billingType !== "subscription" || def.monthlyCredits <= 0) {
+    throw new Error(
+      `[stripe] ${context}: plan ${resolved} is not a monthly credit subscription`,
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Credit amount for one settled subscription invoice.
+ * A base or renewal invoice grants that invoice's plan allowance.
+ * A subscription_update invoice grants the upgrade delta only when its
+ * lines show a negative amount on the old price and a positive amount on
+ * the higher new price. Anything else, including a plan change that has
+ * not settled, grants nothing. The figure does not read the stored plan
+ * when the invoice itself names a price.
+ */
+function settledInvoiceCredit(
+  inv: Stripe.Invoice,
+  storedPlan: string | null | undefined,
+  context: string,
+): { amount: number; plan: PlanId; kind: "base" | "upgrade" } | null {
+  if (inv.billing_reason === "subscription_update") {
+    const lines = invoiceLineCredits(inv);
+    const previous = lines.find((line) => line.plan && (line.amount ?? 0) < 0);
+    const next = lines.find((line) => line.plan && (line.amount ?? 0) > 0);
+    if (!previous?.plan || !next?.plan || previous.plan === next.plan) return null;
+    const delta =
+      subscriptionCreditAllowance(next.plan) -
+      subscriptionCreditAllowance(previous.plan);
+    if (delta <= 0) return null;
+    return {
+      amount: delta,
+      plan: requireSubscriptionGrantPlan(next.plan, context),
+      kind: "upgrade",
+    };
+  }
+  const priced = invoiceLineCredits(inv).find((line) => line.plan)?.plan ?? null;
+  const plan = requireSubscriptionGrantPlan(priced ?? storedPlan, context);
+  const amount = subscriptionCreditAllowance(plan);
+  if (amount <= 0) return null;
+  return { amount, plan, kind: "base" };
 }
 
 export async function POST(req: NextRequest) {
@@ -400,32 +537,95 @@ export async function POST(req: NextRequest) {
         if (!sb) break;
         const inv = event.data.object as Stripe.Invoice;
         const invSubId = inv.parent?.subscription_details?.subscription;
-        if (invSubId && typeof invSubId === "string") {
-          const { data: invMatch } = await sb
+        if (!invSubId || typeof invSubId !== "string") break;
+
+        const { data: invMatch } = await sb
+          .from("subscriptions")
+          .select("user_id, plan")
+          .eq("stripe_subscription_id", invSubId)
+          .single();
+
+        let userId: string | null = invMatch?.user_id ?? null;
+        const storedPlan: string | null = invMatch?.plan ?? null;
+
+        if (invMatch) {
+          await sb
             .from("subscriptions")
-            .select("user_id, plan")
-            .eq("stripe_subscription_id", invSubId)
-            .single();
-          if (invMatch) {
-            await sb
-              .from("subscriptions")
-              .update({
-                status: "active",
-                updated_at: new Date().toISOString(),
-              })
-              .eq("user_id", invMatch.user_id);
-            // Invoice payment is the only source of subscription grants. This
-            // prevents the first billing period from being granted twice.
-            const planId = (invMatch.plan as PlanId) || "creator_beta";
-            const periodEnd = inv.lines.data[0]?.period?.end;
-            await grantSubscriptionCredits(
-              sb,
-              invMatch.user_id,
-              planId,
-              `invoice_grant_${inv.id}`,
-              periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
-            );
+            .update({
+              status: "active",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("user_id", invMatch.user_id);
+        }
+
+        // The credit is a function of this invoice alone: a base or renewal
+        // invoice grants the allowance of the plan the invoice prices; an
+        // upgrade invoice grants only the prorated difference. The stored
+        // plan is a fallback for price-less invoices, never the source of
+        // the amount when the invoice names a price.
+        //
+        // A $0 invoice — trial, 100% coupon, or fully covered by account
+        // balance — grants no monthly credits. Stripe always sends integer
+        // amount_paid/total on invoice.paid; a missing field is not $0.
+        const isZeroInvoice =
+          (typeof inv.amount_paid === "number" && inv.amount_paid === 0) ||
+          (typeof inv.total === "number" && inv.total === 0);
+        const settled = isZeroInvoice
+          ? null
+          : settledInvoiceCredit(inv, storedPlan, `invoice.paid ${event.id}`);
+
+        if (settled) {
+          // Invoice payment is the only source of subscription grants. This
+          // prevents the first billing period from being granted twice.
+          if (!userId) {
+            // invoice.paid arrived before the subscription rows: resolve
+            // the user with the same fallback customer.subscription.created
+            // uses — subscription metadata clerk_id → users, else a Stripe
+            // customer match against existing subscription rows.
+            const subMeta = inv.parent?.subscription_details?.metadata || {};
+            const metaClerkId = subMeta.clerk_id;
+            if (metaClerkId) {
+              const { data: metaUser } = await sb
+                .from("users")
+                .select("id")
+                .eq("clerk_id", metaClerkId)
+                .single();
+              userId = metaUser?.id ?? null;
+            }
+            if (!userId) {
+              const customerId =
+                typeof inv.customer === "string"
+                  ? inv.customer
+                  : (inv.customer?.id ?? null);
+              if (customerId) {
+                const { data: custMatch } = await sb
+                  .from("subscriptions")
+                  .select("user_id")
+                  .eq("stripe_customer_id", customerId)
+                  .single();
+                userId = custMatch?.user_id ?? null;
+              }
+            }
+            if (!userId) {
+              // Never silently discard a grant: fail the delivery so
+              // Stripe retries it instead of marking the event processed.
+              throw new Error(
+                `[stripe] invoice.paid ${event.id}: cannot resolve user for subscription ${invSubId}`,
+              );
+            }
           }
+          const periodEnd = inv.lines?.data?.[0]?.period?.end;
+          await grantSubscriptionCredits(
+            sb,
+            userId,
+            settled.plan,
+            settled.amount,
+            `invoice_grant_${inv.id}`,
+            periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+            settled.kind === "upgrade"
+              ? `Plan upgrade to ${PLANS[settled.plan].name} — ${settled.amount} LiTTBits`
+              : undefined,
+          );
         }
         break;
       }
