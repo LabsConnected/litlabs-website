@@ -148,6 +148,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const onAnchorChange = onTranscriptAnchorChange ?? (() => {});
 
   const hasConversation = messages.length > 0 || isProcessing
+    || activityLog.length > 0
     || (missionState !== null && missionState.state !== "IDLE");
 
   // Welcome stays visible while the user types — the composer gains

@@ -321,7 +321,7 @@ describe("shell ANSI-grid regression", () => {
         expect(grid.length, `frame exceeds ${rows} rows:\n${grid.join("\n")}`).toBeLessThanOrEqual(rows);
         assertCleanFrame(grid, cols, {
           footer: ["Plan", "Act"],
-          body: ["[Enter] Start", "[H] Health", "[M] Models", "[S] Settings"],
+          body: ["[Enter] Send", "[H] Health", "[M] Models", "[S] Settings"],
         });
       } finally {
         inst.unmount();

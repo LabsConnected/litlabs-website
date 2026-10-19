@@ -24,7 +24,7 @@
  *     status bar shows, so the welcome screen never contradicts the
  *     footer. Already resolved synchronously from store state; no extra
  *     network call delays the reveal.
- *   - A single-key shortcut row ([Enter] Start [H] Health [M] Models
+ *   - A single-key shortcut row ([Enter] Send [H] Health [M] Models
  *     [S] Settings) — the keys are handled by the Composer (see
  *     composer.tsx's welcomeShortcutsEnabled/onWelcomeShortcut), which
  *     already owns all printable input. They only intercept h/m/s on a
@@ -142,18 +142,18 @@ export function Welcome({
             </Box>
           )}
 
-          {/* Primary shortcut row — Enter starts; H/M/S are single-key
+          {/* Primary shortcut row — Enter sends; H/M/S are single-key
               jumps to Health/Models/Settings, handled by the Composer
               only while the draft is still empty. */}
           <Box paddingLeft={pad} marginTop={short ? 0 : 2} width={welcomeWidth}>
             {w !== "wide" ? (
               <Box flexDirection="column">
-                <Text color={COLORS.secondary}>[Enter] Start  [H] Health</Text>
+                <Text color={COLORS.secondary}>[Enter] Send   [H] Health</Text>
                 <Text color={COLORS.secondary}>[M] Models     [S] Settings</Text>
               </Box>
             ) : (
               <Text>
-                <Text color={COLORS.secondary}>  [Enter] Start</Text>
+                <Text color={COLORS.secondary}>  [Enter] Send</Text>
                 <Text color={COLORS.secondaryDim}>    </Text>
                 <Text color={COLORS.secondary}>[H] Health</Text>
                 <Text color={COLORS.secondaryDim}>    </Text>

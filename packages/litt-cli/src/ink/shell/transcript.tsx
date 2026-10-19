@@ -161,7 +161,7 @@ export function TranscriptArea({
   gitUntracked,
   toolDetails = false,
 }: TranscriptAreaProps): React.ReactElement | null {
-  if (messages.length === 0 || viewport.start >= viewport.end) return null;
+  if ((messages.length === 0 || viewport.start >= viewport.end) && events.length === 0) return null;
 
   const visible = messages.slice(viewport.start, viewport.end);
   const terminalMission = mission
