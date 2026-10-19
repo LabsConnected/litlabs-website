@@ -33,6 +33,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { createHash } from "crypto";
 import type {
   ChatMessage,
   ModelProvider,
@@ -920,28 +921,72 @@ export const PROJECT_EVIDENCE_TOOL_ID = "project.status";
 
 /** Directory names never worth walking into for an artifact-existence
  *  diff — large, noisy, or not something a build request could plausibly
- *  be asking about. */
+ *  be asking about. Not a depth limit: legitimate project paths of any
+ *  depth are walked in full, this only prunes known-irrelevant subtrees. */
 const PROJECT_SNAPSHOT_IGNORED_DIRS = new Set([
   "node_modules", ".git", ".next", ".turbo", ".litt", "dist", "build",
   "out", "coverage", ".cache", ".vercel",
 ]);
 
-/** Safety cap so a snapshot of an unexpectedly huge/deep tree can't stall
- *  the agent loop — past this many entries, stop walking and work with
- *  whatever was collected so far. */
+/** Safety cap so a snapshot of an unexpectedly huge tree can't stall the
+ *  agent loop — past this many entries, stop walking and work with
+ *  whatever was collected so far. Not a depth limit — see above. */
 const PROJECT_SNAPSHOT_MAX_ENTRIES = 2000;
 
+/** Above this size, a file's content is not read for hashing — its
+ *  size+mtime stands in as a cheap change signature instead. Keeps the
+ *  snapshot fast on projects with large binary/media assets without
+ *  giving up change detection for the text source files a build request
+ *  actually produces. */
+const PROJECT_SNAPSHOT_HASH_MAX_BYTES = 2_000_000;
+
 /**
- * A shallow, bounded listing of every file under `root` (relative paths),
- * skipping common noise directories. Used only to detect whether a bare
- * creation request ("build me a landing page", no filename named)
- * actually produced a new file anywhere in the project — not a general
- * project-inspection utility.
+ * File extensions this codebase already treats as "a plausible build
+ * artifact" — used both to recognize a filename named in the prompt
+ * (ARTIFACT_FILENAME_RE below) and, on disk, to tell a genuinely
+ * relevant created/changed file apart from an unrelated one (e.g. a
+ * stray notes.txt) when no filename was named at all.
  */
-function listProjectFilesShallow(root: string, maxDepth = 4): Set<string> {
-  const files = new Set<string>();
-  const walk = (dir: string, rel: string, depth: number): void => {
-    if (files.size >= PROJECT_SNAPSHOT_MAX_ENTRIES || depth > maxDepth) return;
+const ARTIFACT_EXTENSIONS =
+  "ts|tsx|js|jsx|json|md|css|html?|py|rs|go|java|rb|php|sh|yaml|yml|toml";
+const ARTIFACT_EXTENSION_RE = new RegExp(`\\.(?:${ARTIFACT_EXTENSIONS})$`, "i");
+
+/** True when `relPath`'s extension is one this codebase recognizes as a
+ *  plausible build artifact (see ARTIFACT_EXTENSIONS above). */
+function isArtifactLikeExtension(relPath: string): boolean {
+  return ARTIFACT_EXTENSION_RE.test(relPath);
+}
+
+/**
+ * A cheap change-detection signature for one file: a content hash for
+ * anything reasonably small (covers every text source file a build
+ * request would produce), or size+mtime for anything larger (avoids
+ * reading large binary/media assets just to snapshot them).
+ */
+function fileChangeSignature(fullPath: string): string {
+  try {
+    const stat = fs.statSync(fullPath);
+    if (stat.size > PROJECT_SNAPSHOT_HASH_MAX_BYTES) {
+      return `size:${stat.size}:${stat.mtimeMs}`;
+    }
+    return createHash("sha1").update(fs.readFileSync(fullPath)).digest("hex");
+  } catch {
+    return "unreadable";
+  }
+}
+
+/**
+ * A full (depth-unlimited, but entry-capped) snapshot of every file under
+ * `root` — relative path → change signature — skipping common noise
+ * directories. Used only to detect whether a bare creation request
+ * ("build me a landing page", no filename named) actually
+ * created-or-meaningfully-changed a relevant file anywhere in the
+ * project; not a general project-inspection utility.
+ */
+function snapshotProjectFiles(root: string): Map<string, string> {
+  const files = new Map<string, string>();
+  const walk = (dir: string, rel: string): void => {
+    if (files.size >= PROJECT_SNAPSHOT_MAX_ENTRIES) return;
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -953,14 +998,44 @@ function listProjectFilesShallow(root: string, maxDepth = 4): Set<string> {
       const entryRel = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
         if (PROJECT_SNAPSHOT_IGNORED_DIRS.has(entry.name)) continue;
-        walk(path.join(dir, entry.name), entryRel, depth + 1);
+        walk(path.join(dir, entry.name), entryRel);
       } else if (entry.isFile()) {
-        files.add(entryRel);
+        files.set(entryRel, fileChangeSignature(path.join(dir, entry.name)));
       }
     }
   };
-  walk(root, "", 0);
+  walk(root, "");
   return files;
+}
+
+/**
+ * Compares two snapshots and reports:
+ *   - `relevantPath`: the first path that is new or content-changed AND
+ *     has a recognized build-artifact extension — the strongest signal
+ *     the requested page/file was actually built. null if none.
+ *   - `anyChange`: true if ANYTHING changed at all (new, removed, or
+ *     content-changed path), regardless of extension — used only to
+ *     distinguish "nothing happened" from "something happened, but not
+ *     anything recognizable as the requested artifact" in the feedback
+ *     message; it never counts toward completion by itself.
+ */
+function diffProjectSnapshots(
+  before: Map<string, string>,
+  after: Map<string, string>,
+): { relevantPath: string | null; anyChange: boolean } {
+  let relevantPath: string | null = null;
+  let anyChange = before.size !== after.size;
+  for (const [relPath, sig] of after) {
+    const priorSig = before.get(relPath);
+    const changed = priorSig === undefined || priorSig !== sig;
+    if (changed) {
+      anyChange = true;
+      if (relevantPath === null && isArtifactLikeExtension(relPath)) {
+        relevantPath = relPath;
+      }
+    }
+  }
+  return { relevantPath, anyChange };
 }
 
 /**
@@ -1335,7 +1410,7 @@ export async function runAgentLoop(
   // "complete". `creationRequested` (below) closes that gap, scoped
   // deliberately narrower than general mutation detection — see there
   // for why.
-  const ARTIFACT_FILENAME_RE = /\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|html?|py|rs|go|java|rb|php|sh|yaml|yml|toml)\b/gi;
+  const ARTIFACT_FILENAME_RE = new RegExp(`\\b[\\w.-]+\\.(?:${ARTIFACT_EXTENSIONS})\\b`, "gi");
   const mentionedArtifactFiles = Array.from(
     new Set(Array.from(prompt.matchAll(ARTIFACT_FILENAME_RE), (m) => m[0])),
   );
@@ -1368,15 +1443,20 @@ export async function runAgentLoop(
 
   // A creation request that names no specific file (e.g. "build me a
   // landing page", as opposed to "...with an index.html homepage") still
-  // needs a real-disk existence proof before accepting "complete" — the
+  // needs a real-disk proof before accepting "complete" — the named-file
   // check above only runs when mentionedArtifactFiles is non-empty, so a
   // mutating tool call that reports success without writing anything
   // (e.g. a no-op shell command) would otherwise satisfy mutationSucceeded
-  // alone. Snapshot the project tree before any tool runs so the same
-  // round can later confirm at least one new file actually appeared.
-  const preExistingFiles =
+  // alone. Snapshot the project tree (path → content signature) before
+  // any tool runs, so the same round can later tell a genuinely
+  // created-or-changed, relevant file apart from both "nothing happened"
+  // and "something happened, but not to anything resembling the
+  // requested artifact" (see diffProjectSnapshots). A signature-based
+  // snapshot (not just path presence) is required to recognize a
+  // legitimate overwrite of an already-existing file as real progress.
+  const preExistingSnapshot =
     creationRequested && mentionedArtifactFiles.length === 0
-      ? listProjectFilesShallow(options.cwd)
+      ? snapshotProjectFiles(options.cwd)
       : null;
 
   for (let round = 0; round < maxRounds; round++) {
@@ -1835,21 +1915,35 @@ export async function runAgentLoop(
           });
           continue;
         }
-      } else if (creationRequested && mutationSucceeded && preExistingFiles) {
+      } else if (creationRequested && mutationSucceeded && preExistingSnapshot) {
         // No filename was named in the prompt, so there is nothing to
-        // check by path — instead, require that at least one file
-        // appeared under the project root that wasn't there before any
-        // tool ran. A mutating tool reporting success (e.g. a shell
-        // command that exits 0 without writing anything) is not proof a
-        // website/app/page was actually created.
-        const currentFiles = listProjectFilesShallow(options.cwd);
-        const createdAnyFile = Array.from(currentFiles).some((f) => !preExistingFiles.has(f));
-        if (!createdAnyFile) {
+        // check by path — instead, require that a RELEVANT file (a
+        // recognized build-artifact extension, see ARTIFACT_EXTENSIONS)
+        // was genuinely created or changed since before any tool ran. A
+        // mutating tool reporting success (e.g. a shell command that
+        // exits 0 without writing anything) is not proof a website/app/
+        // page was actually created — and neither is an unrelated file
+        // (e.g. a stray notes.txt) that happens to be new. Comparing
+        // content signatures (not just path presence) also recognizes a
+        // legitimate overwrite of an already-existing file as real
+        // progress, and the walk has no depth limit, so a deeply nested
+        // path is never invisible to this check.
+        const currentSnapshot = snapshotProjectFiles(options.cwd);
+        const { relevantPath, anyChange } = diffProjectSnapshots(preExistingSnapshot, currentSnapshot);
+        if (!relevantPath) {
+          // Scoped, honest failure: when something changed but it wasn't
+          // recognizable as the requested artifact, this is reported as
+          // unverified rather than claimed as success — the message
+          // below says so explicitly rather than guessing either way.
+          const detail = anyChange
+            ? "a file changed, but none of the changes match a recognized build-artifact type " +
+              "(e.g. .html/.css/.js) — this cannot be verified as the requested page/file"
+            : "no file was actually created or changed on disk";
           if (round >= maxRounds - 1) {
             return {
               content:
-                `A mutation tool reported success, but no new file was actually created on ` +
-                `disk. The task was NOT completed. No success is being claimed.\n\n${cleanContent}`,
+                `A mutation tool reported success, but ${detail}. The task was NOT completed. ` +
+                `No success is being claimed.\n\n${cleanContent}`,
               toolCalls,
               rounds,
               durationMs: Date.now() - startTime,
@@ -1862,10 +1956,10 @@ export async function runAgentLoop(
           messages.push({
             role: "user",
             content:
-              `A tool call reported success, but no new file exists on disk yet. A successful ` +
-              `exit code is not proof anything was written. Use project.write_file to actually ` +
-              `create the requested page/file, then verify with project.read_file. Do not claim ` +
-              `success until a real file exists.`,
+              `A tool call reported success, but ${detail}. A successful exit code is not proof ` +
+              `the requested page/file was written. Use project.write_file to actually create or ` +
+              `overwrite it, then verify with project.read_file. Do not claim success until a ` +
+              `real, relevant file exists.`,
           });
           continue;
         }

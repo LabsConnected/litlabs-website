@@ -1411,4 +1411,91 @@ describe("S. False completion when no filename is named in the prompt", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // The three tests below reproduce confirmed findings from independent
+  // review of this fix's first version (a path-presence-only diff):
+  //   1. overwriting an EXISTING file was wrongly reported as failed
+  //      (new-path detection never sees a path that already existed).
+  //   2. creating a file unrelated to the request (e.g. a stray note)
+  //      wrongly satisfied the check and reported complete.
+  //   3. a deeply nested write (past an arbitrary depth cap) was wrongly
+  //      reported as failed even though the file genuinely existed.
+  // Run against the path-presence-only version, all three failed their
+  // assertions exactly as described above — this is reproduction
+  // evidence, not a hypothetical.
+
+  it("overwriting an EXISTING file with real new content reports complete, not failed", async () => {
+    const dir = makeTempProject();
+    try {
+      fs.writeFileSync(path.join(dir, "index.html"), "<html>stale starter page</html>");
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.write_file", "inputs": { "path": "index.html", "content": "<html><body><h1>Brand New Coffee Shop Page</h1></body></html>" } }\n\`\`\``,
+        "Done — I've rebuilt the landing page.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a landing page for my coffee shop",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      assert.equal(
+        fs.readFileSync(path.join(dir, "index.html"), "utf8"),
+        "<html><body><h1>Brand New Coffee Shop Page</h1></body></html>",
+      );
+      assert.equal(result.termination, "complete",
+        "a real content overwrite of an already-existing file must count as the requested " +
+          "artifact being built, not be invisible to a new-path-only check");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("creating a file unrelated to the request must NOT count as proof the website was built", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.write_file", "inputs": { "path": "notes.txt", "content": "todo: build landing page later" } }\n\`\`\``,
+        "Done — I've built the landing page for your coffee shop.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a landing page for my coffee shop",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      assert.deepEqual(fs.readdirSync(dir).sort(), ["notes.txt", "package.json"]);
+      assert.notEqual(result.termination, "complete",
+        "an unrelated file (not a recognized build artifact type) must not let the run claim " +
+          "the requested website/page was actually created");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a deeply nested write (beyond any fixed depth) still reports complete", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.write_file", "inputs": { "path": "a/b/c/d/e/index.html", "content": "<html><body>deep</body></html>" } }\n\`\`\``,
+        "Done — created the deeply nested landing page.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a landing page for my coffee shop",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      assert.equal(fs.existsSync(path.join(dir, "a/b/c/d/e/index.html")), true);
+      assert.equal(result.termination, "complete",
+        "a genuinely created file must be recognized regardless of how deeply it is nested");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
