@@ -1044,11 +1044,26 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     return resolution.tag;
   }, [store, signedIn, modelRuntime]);
 
-  // Reconcile once at startup so the footer is truthful BEFORE the first
+  // Reconcile at startup so the footer is truthful BEFORE the first
   // message, not only after a run has confirmed a served model.
+  //
+  // This must NOT key on reconcileLocalModel's identity: it closes over
+  // `store`, which useCockpitStore() rebuilds every render. When the
+  // requested model is not installed, reconcile logs an error activity
+  // (a state update), the re-render mints a new callback, the effect
+  // re-fires, and the cockpit repaints ~25x/s forever while idle.
+  // Re-run only when an input of the decision actually changes.
+  const reconcileRef = useRef(reconcileLocalModel);
+  reconcileRef.current = reconcileLocalModel;
   useEffect(() => {
-    void reconcileLocalModel();
-  }, [reconcileLocalModel]);
+    void reconcileRef.current();
+  }, [
+    store.state.executionTarget,
+    store.state.localOnly,
+    store.state.selectedModel,
+    signedIn,
+    modelRuntime,
+  ]);
 
   // Subscribe to approval bridge — when the gateway requests approval,
   // the bridge sets a pending approval and notifies us. Any open overlay
