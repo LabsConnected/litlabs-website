@@ -270,6 +270,73 @@ describe("reserveCredits — canonical reserve_bits flow", () => {
   });
 });
 
+describe("PostgREST TABLE results and settlement failure signaling", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("accepts reserve_bits TABLE arrays and leases long builds", async () => {
+    mockUserFound();
+    mockRpc.mockResolvedValue({
+      data: [{ success: true, reservation_id: "res-array-1", reason: "reserved", available_after: 25 }],
+      error: null,
+    });
+    const result = await reserveCredits(baseCtx, 20);
+    expect(result.ok).toBe(true);
+    expect(result.reservationId).toBe("res-array-1");
+    expect(mockRpc).toHaveBeenCalledWith("reserve_bits", expect.objectContaining({
+      p_expires_seconds: 10800,
+    }));
+  });
+
+  it("accepts settle_bits TABLE arrays when ledger was debited", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: [{ success: true, settled_amount: 5, released_amount: 5, reason: "settled" }],
+      error: null,
+    });
+    const result = await settleRun("run-array-1", {
+      inputTokens: 200, outputTokens: 100, actualCredits: 5, status: "completed",
+    }, 10, "res-array-1");
+    expect(result.ok).toBe(true);
+    expect(result.creditsCharged).toBe(5);
+  });
+
+  it("returns ok=false on rejected overage, never successful with zero charge", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: [{ success: false, settled_amount: 0, released_amount: 0, reason: "overage_rejected" }],
+      error: null,
+    });
+    const result = await settleRun("run-overage", {
+      inputTokens: 1000, outputTokens: 100, actualCredits: 15, status: "completed",
+    }, 10, "res-array-1");
+    expect(result.ok).toBe(false);
+    expect(result.creditsCharged).toBe(0);
+    expect(mockFrom).toHaveBeenCalledWith("billing_reconciliations");
+  });
+
+  it("returns ok=false when release_bits reports failure in its TABLE result", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: [{ success: false, released_amount: 0, reason: "reservation_not_found" }],
+      error: null,
+    });
+    const result = await settleRun("run-release-fail", {
+      inputTokens: 0, outputTokens: 0, actualCredits: 0, status: "failed",
+    }, 10, "res-array-1");
+    expect(result.ok).toBe(false);
+    expect(mockFrom).toHaveBeenCalledWith("billing_reconciliations");
+  });
+
+  it("fails when a paid run has a reservation amount but no reservation id", async () => {
+    mockSettleChains();
+    const result = await settleRun("run-lost-reservation", {
+      inputTokens: 100, outputTokens: 100, actualCredits: 5, status: "completed",
+    }, 10, null);
+    expect(result.ok).toBe(false);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+});
+
 describe("settleRun — canonical settle_bits/release_bits flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
