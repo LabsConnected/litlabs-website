@@ -918,6 +918,51 @@ export function sanitizePriorMessages(
  */
 export const PROJECT_EVIDENCE_TOOL_ID = "project.status";
 
+/** Directory names never worth walking into for an artifact-existence
+ *  diff — large, noisy, or not something a build request could plausibly
+ *  be asking about. */
+const PROJECT_SNAPSHOT_IGNORED_DIRS = new Set([
+  "node_modules", ".git", ".next", ".turbo", ".litt", "dist", "build",
+  "out", "coverage", ".cache", ".vercel",
+]);
+
+/** Safety cap so a snapshot of an unexpectedly huge/deep tree can't stall
+ *  the agent loop — past this many entries, stop walking and work with
+ *  whatever was collected so far. */
+const PROJECT_SNAPSHOT_MAX_ENTRIES = 2000;
+
+/**
+ * A shallow, bounded listing of every file under `root` (relative paths),
+ * skipping common noise directories. Used only to detect whether a bare
+ * creation request ("build me a landing page", no filename named)
+ * actually produced a new file anywhere in the project — not a general
+ * project-inspection utility.
+ */
+function listProjectFilesShallow(root: string, maxDepth = 4): Set<string> {
+  const files = new Set<string>();
+  const walk = (dir: string, rel: string, depth: number): void => {
+    if (files.size >= PROJECT_SNAPSHOT_MAX_ENTRIES || depth > maxDepth) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (files.size >= PROJECT_SNAPSHOT_MAX_ENTRIES) return;
+      const entryRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (PROJECT_SNAPSHOT_IGNORED_DIRS.has(entry.name)) continue;
+        walk(path.join(dir, entry.name), entryRel, depth + 1);
+      } else if (entry.isFile()) {
+        files.add(entryRel);
+      }
+    }
+  };
+  walk(root, "", 0);
+  return files;
+}
+
 /**
  * Run the agent loop.
  *
@@ -1320,6 +1365,19 @@ export async function runAgentLoop(
     || creationRequested;
   let mutationSucceeded = false;
   let mutationFailed = false;
+
+  // A creation request that names no specific file (e.g. "build me a
+  // landing page", as opposed to "...with an index.html homepage") still
+  // needs a real-disk existence proof before accepting "complete" — the
+  // check above only runs when mentionedArtifactFiles is non-empty, so a
+  // mutating tool call that reports success without writing anything
+  // (e.g. a no-op shell command) would otherwise satisfy mutationSucceeded
+  // alone. Snapshot the project tree before any tool runs so the same
+  // round can later confirm at least one new file actually appeared.
+  const preExistingFiles =
+    creationRequested && mentionedArtifactFiles.length === 0
+      ? listProjectFilesShallow(options.cwd)
+      : null;
 
   for (let round = 0; round < maxRounds; round++) {
     rounds++;
@@ -1774,6 +1832,40 @@ export async function runAgentLoop(
               `${missingArtifacts.join(", ")}. A successful exit code is not proof the file was ` +
               `written. Use project.write_file to actually create it, then verify with ` +
               `project.read_file. Do not claim success until the file exists.`,
+          });
+          continue;
+        }
+      } else if (creationRequested && mutationSucceeded && preExistingFiles) {
+        // No filename was named in the prompt, so there is nothing to
+        // check by path — instead, require that at least one file
+        // appeared under the project root that wasn't there before any
+        // tool ran. A mutating tool reporting success (e.g. a shell
+        // command that exits 0 without writing anything) is not proof a
+        // website/app/page was actually created.
+        const currentFiles = listProjectFilesShallow(options.cwd);
+        const createdAnyFile = Array.from(currentFiles).some((f) => !preExistingFiles.has(f));
+        if (!createdAnyFile) {
+          if (round >= maxRounds - 1) {
+            return {
+              content:
+                `A mutation tool reported success, but no new file was actually created on ` +
+                `disk. The task was NOT completed. No success is being claimed.\n\n${cleanContent}`,
+              toolCalls,
+              rounds,
+              durationMs: Date.now() - startTime,
+              usage: { total_tokens: totalTokens },
+              termination: "failed",
+              escalations: escalationEvents.length ? escalationEvents : undefined,
+            };
+          }
+          messages.push({ role: "assistant", content: modelContent });
+          messages.push({
+            role: "user",
+            content:
+              `A tool call reported success, but no new file exists on disk yet. A successful ` +
+              `exit code is not proof anything was written. Use project.write_file to actually ` +
+              `create the requested page/file, then verify with project.read_file. Do not claim ` +
+              `success until a real file exists.`,
           });
           continue;
         }
