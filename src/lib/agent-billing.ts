@@ -136,6 +136,8 @@ export async function reserveCredits(
     const { data: reserveData, error: reserveError } = await supabaseAdmin.rpc("reserve_bits", {
       p_user_id: user.id,
       p_amount: estimatedCredits,
+      // Long Studio builds (and plan caps) can exceed the old 10-minute default.
+      p_expires_seconds: 3 * 60 * 60,
       p_idempotency_key: ctx.idempotencyKey,
       p_run_id: ctx.idempotencyKey,
       p_usage_type: "agent_run",
@@ -156,8 +158,11 @@ export async function reserveCredits(
       };
     }
 
-    if (!reserveData?.success) {
-      const reason = reserveData?.reason ?? "unknown";
+    // reserve_bits RETURNS TABLE, so PostgREST supplies an array of rows.
+    // Keep object support for older mocks; a missing/malformed row fails closed.
+    const reservation = Array.isArray(reserveData) ? reserveData[0] : reserveData;
+    if (!reservation?.success) {
+      const reason = reservation?.reason ?? "invalid_reservation_response";
       if (reason === "insufficient_balance") {
         return {
           ok: false,
@@ -170,7 +175,7 @@ export async function reserveCredits(
       }
       // Idempotent retry — reservation already exists
       if (reason === "already_reserved") {
-        reservationId = reserveData.reservation_id;
+        reservationId = reservation.reservation_id;
         // Fall through to create/find the run row
       } else {
         return {
@@ -183,7 +188,7 @@ export async function reserveCredits(
         };
       }
     } else {
-      reservationId = reserveData.reservation_id;
+      reservationId = reservation.reservation_id;
     }
   }
 
@@ -274,6 +279,8 @@ export async function settleRun(
       p_description: `Agent run settled: ${runId}`,
     });
 
+    // settle_bits also RETURNS TABLE, not a JSON object.
+    const settlement = Array.isArray(settleData) ? settleData[0] : settleData;
     if (settleError) {
       console.error(`[agent-billing] CRITICAL: settle_bits failed for run ${runId}. Error: ${settleError.message}`);
       await createReconciliationRecord(
@@ -283,16 +290,16 @@ export async function settleRun(
         settleError.message,
         reservationId,
       );
-    } else if (settleData?.success) {
-      creditsCharged = settleData.settled_amount;
-      creditsRefunded = settleData.released_amount;
+    } else if (settlement?.success) {
+      creditsCharged = settlement.settled_amount;
+      creditsRefunded = settlement.released_amount;
     } else {
-      console.error(`[agent-billing] settle_bits returned failure for run ${runId}: ${settleData?.reason}`);
+      console.error(`[agent-billing] settle_bits returned failure for run ${runId}: ${settlement?.reason}`);
       await createReconciliationRecord(
         { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
         result.actualCredits,
         "settle_rejected",
-        settleData?.reason ?? "unknown",
+        settlement?.reason ?? "unknown",
         reservationId,
       );
     }
