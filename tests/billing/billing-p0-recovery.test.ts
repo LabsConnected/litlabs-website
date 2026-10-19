@@ -22,7 +22,7 @@ const { reserveCredits, settleRun } = await import("@/lib/agent-billing");
 
 const ctx = {
   clerkId: "clerk_u", agentInstanceId: "inst", agentId: null,
-  agentVersionId: null, idempotencyKey: "test-idempotency-key-001",
+  agentVersionId: null, idempotencyKey: "test:idem-key",
 };
 
 function mockUser() {

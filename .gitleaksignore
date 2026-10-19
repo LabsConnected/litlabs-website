@@ -1,0 +1,9 @@
+# Synthetic test-fixture literals in superseded PR #691 commits.
+# tests/billing/billing-p0-recovery.test.ts line 25 held a mock ctx
+# idempotencyKey fixture value (not a credential). The value was rotated
+# out of the tree in the same fix that added this file; these two
+# fingerprints cover the historical commits that still contain it.
+# Scoped to this exact file/rule/line in these two commits only —
+# any new high-entropy literal anywhere still fires the gate.
+990e0bbe160343ad8c6725f2cb79592c8f939442:tests/billing/billing-p0-recovery.test.ts:generic-api-key:25
+904a6c05a7bfe1faaf08587ca66f4c24ee133128:tests/billing/billing-p0-recovery.test.ts:generic-api-key:25
