@@ -1021,14 +1021,17 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
    * is not the required one (or cannot serve).
    */
   const reconcileLocalModel = useCallback(async (
-    opts: { force?: boolean } = {},
+    opts: { force?: boolean; quiet?: boolean } = {},
   ): Promise<string | null> => {
     if (resolveRoutePolicy(store, signedIn).kind !== "local-required") return null;
     if (opts.force) resetLocalLaneCache();
     const lane = await probeLocalLane();
     const outcome = resolveLocalModel(lane, requestedLocalModel(store.state.selectedModel));
     if (!outcome.ok) {
-      act(store, outcome.error, "error", undefined, "LOCAL");
+      // Background retries stay quiet: each error activity is a state
+      // update, and a retry loop that repaints on every miss is the idle
+      // render storm this effect was already fixed for.
+      if (!opts.quiet) act(store, outcome.error, "error", undefined, "LOCAL");
       return null;
     }
     const { resolution } = outcome;
@@ -1064,6 +1067,45 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     signedIn,
     modelRuntime,
   ]);
+
+  // Ollama may come up AFTER LiTT starts (daemon launched late, phone
+  // hopped networks). While the local lane is required but has no served
+  // model, re-probe quietly with backoff (10s -> 60s, max 8 tries) and
+  // announce once on success. Bounded on purpose: no infinite retries,
+  // and a miss writes nothing to the screen. `/refresh` re-arms it.
+  const [lanePollEpoch, setLanePollEpoch] = useState(0);
+  const lanePollRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+    const tick = async () => {
+      if (cancelled || lanePollRef.current) return;
+      lanePollRef.current = true;
+      let tag: string | null = null;
+      try {
+        if (resolveRoutePolicy(store, signedIn).kind !== "local-required") return;
+        if (store.state.activeModel) return; // already served; nothing to refresh
+        tag = await reconcileRef.current({ force: true, quiet: true });
+      } finally {
+        lanePollRef.current = false;
+      }
+      if (cancelled) return;
+      if (tag) {
+        act(store, `Ollama is available - using ${tag}`, "info", undefined, "LOCAL");
+        return;
+      }
+      attempt += 1;
+      if (attempt >= 8) return;
+      timer = setTimeout(tick, Math.min(10_000 * 2 ** (attempt - 1), 60_000));
+    };
+    timer = setTimeout(tick, 10_000);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.state.executionTarget, store.state.localOnly, signedIn, lanePollEpoch]);
 
   // Subscribe to approval bridge — when the gateway requests approval,
   // the bridge sets a pending approval and notifies us. Any open overlay
@@ -1558,6 +1600,19 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
     if (input === "/models") {
       store.actions.setOverlay("model-center");
+      return;
+    }
+    if (input === "/refresh") {
+      // Manual model refresh: re-probe Ollama now, re-arm background retry.
+      void reconcileLocalModel({ force: true }).then((tag) => {
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: "info",
+          text: tag ? `Models refreshed - local model: ${tag}` : "Models refreshed - no local model available.",
+        });
+        setLanePollEpoch((n) => n + 1);
+      });
       return;
     }
     if (input === "/litt") {
