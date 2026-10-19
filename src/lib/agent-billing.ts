@@ -236,7 +236,10 @@ export async function reserveCredits(
           ctx,
         );
       }
-      const reason = parsed.ok ? (parsed.row.reason ?? "unknown") : "unknown";
+      // A malformed payload (empty array, null, non-object, or a row
+      // with no boolean success) is a shape failure, not a DB verdict —
+      // name it explicitly instead of the misleading "unknown".
+      const reason = parsed.ok ? (parsed.row.reason ?? "unknown") : "invalid_reserve_response";
       if (reason === "insufficient_balance") {
         return {
           ok: false,

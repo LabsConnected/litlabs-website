@@ -517,6 +517,10 @@ describe("PostgREST row shape — hosted array, fail closed", () => {
     expect(res.reservedCredits).toBe(0);
     expect(res.reservationId).toBeNull();
     expect(res.error).toContain("Credit reservation failed");
+    // Shape failures are named explicitly — never the shape-confusion
+    // "unknown" that hid this bug in production.
+    expect(res.error).toContain("invalid_reserve_response");
+    expect(res.error).not.toContain("unknown");
     const releases = fake.callsTo("release_bits");
     if (_label === "missing success") {
       expect(releases).toHaveLength(1);
