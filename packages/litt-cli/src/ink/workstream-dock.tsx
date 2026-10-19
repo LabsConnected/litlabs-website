@@ -28,6 +28,7 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
+import { isReducedMotion } from "./motion.js";
 import { LiTTMark, type MarkState } from "./litt-mark.js";
 import {
   type WorkstreamSnapshot,
@@ -110,7 +111,7 @@ const PULSE_MS = 1200;
 function usePulse(active: boolean): string {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
-    if (!active) return;
+    if (!active || isReducedMotion()) return;
     const timer = setInterval(() => {
       setFrame((f) => (f + 1) % PULSE_FRAMES.length);
     }, PULSE_MS / PULSE_FRAMES.length);

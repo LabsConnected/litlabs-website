@@ -40,7 +40,7 @@ import {
 } from "../composer-editor.js";
 import { COLORS } from "../colors.js";
 import { useCursorBlink } from "../use-cursor-blink.js";
-import { isTermux } from "../../lib/auth/browser-launcher.js";
+import { isReducedMotion } from "../motion.js";
 import { deriveFocusState } from "../focus-state.js";
 import { composerCopy, isBusyState, isFailureState, type RuntimeState } from "../runtime-state.js";
 
@@ -130,13 +130,13 @@ export function Composer({
     approvalActive: runtime === "waiting_for_approval",
     scrolled: !!scrolled,
   });
-  // Termux text selection is cancelled by periodic Ink repaints.
-  // Keep the software caret solid on Android/Termux so long-press
-  // Copy/Share selection remains stable while the cockpit is idle.
+  // Android text selection is cancelled by periodic Ink repaints.
+  // Reduced motion (Termux default, or LITT_REDUCED_MOTION=1) keeps the
+  // software caret solid so long-press Copy/Share stays stable.
   const cursor = useCursorBlink(
     550,
     700,
-    focus.blinkEnabled && !isTermux(),
+    focus.blinkEnabled && !isReducedMotion(),
     focusEpoch ?? null,
   );
 

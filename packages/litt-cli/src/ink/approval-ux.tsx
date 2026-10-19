@@ -27,6 +27,7 @@ import { Box, Text } from "ink";
 import { useOverlayKeyboard } from "./overlay-manager.js";
 import { isEscape } from "./keyboard-utils.js";
 import { COLORS } from "./colors.js";
+import { clockIntervalMs } from "./motion.js";
 import { riskBadge, formatDuration } from "./runtime-state.js";
 import type { ApprovalPrompt } from "./cockpit-store.js";
 
@@ -53,7 +54,7 @@ export function ApprovalUX({ prompt, onDecision, onCancelMission }: ApprovalUXPr
   // Approval wait timer — paused, per-second, ONLY while pending.
   const [, setTick] = useState(0);
   useEffect(() => {
-    const timer = setInterval(() => setTick((t) => t + 1), 1000);
+    const timer = setInterval(() => setTick((t) => t + 1), clockIntervalMs(1000));
     return () => clearInterval(timer);
   }, []);
   const waitSeconds = Math.max(0, Math.floor((Date.now() - prompt.since) / 1000));
