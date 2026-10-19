@@ -476,6 +476,67 @@ export function classifyCommand(command: string, args: string[], cwd?: string): 
   };
 }
 
+// ─── Shell-syntax rejection (NOT shell injection filtering) ───────
+//
+// This is a different concern from the capability classification above.
+// A model frequently emits shell-style invocations — `echo 'x' >
+// file.html`, `mkdir a && cd a` — as a single `command` string, or as a
+// `>` token inside `args`. Because execFile/spawn here is never given
+// shell:true (see module docstring), none of that shell syntax is
+// interpreted: `>` is passed as a literal argv byte, not a redirect.
+// The previous behavior let this reach spawn() and fail with a raw,
+// confusing ENOENT (the OS looking for a binary literally named
+// "echo 'x' > file.html"). This detects the SHAPE of a shell
+// invocation — not characters that merely appear inside a legitimate
+// single argument (a commit message with "&", a grep pattern with "|")
+// — and rejects it early with an actionable message, before ever
+// reaching spawn(). It does not loosen approval or risk
+// classification: classifyCommand() above still runs exactly as
+// before on whatever is left.
+//
+// Two narrow, low-false-positive signals, not metacharacter scanning:
+//   1. `command` contains whitespace. A real executable name never
+//      does — spawn()'s `command` is a single binary, not a shell
+//      line. Whitespace in it only happens when a model concatenated
+//      a whole shell invocation into one string.
+//   2. `args` contains a standalone shell-control token (`>`, `>>`,
+//      `<`, `|`, `&&`, `;`, `&`) as one COMPLETE array element — i.e.
+//      the model DID split argv correctly, but one token is itself a
+//      shell operator that spawn() will pass through literally instead
+//      of interpreting.
+const SHELL_CONTROL_TOKENS = new Set([">", ">>", "<", "<<", "|", "&&", "||", ";", "&", "`"]);
+
+/**
+ * Returns a human-actionable rejection message if `command`/`args` has
+ * the shape of a shell invocation that spawn() (no shell) cannot
+ * execute as intended, or null if it looks like ordinary structured
+ * argv. See the section comment above for what this does and does not
+ * check.
+ */
+export function detectUnsupportedShellSyntax(command: string, args: string[]): string | null {
+  if (/\s/.test(command)) {
+    return (
+      `"${command}" looks like a full shell command line, not a single executable. ` +
+      `project.run has no shell — it calls the executable directly, so this would ` +
+      `fail (or silently do nothing useful) rather than run as written. Pass the ` +
+      `executable as "command" and each remaining word as its own entry in "args". ` +
+      `To create or overwrite a file (e.g. the "> file" part of a command like ` +
+      `this), use the project.write_file tool instead — it is not interpreted by a shell.`
+    );
+  }
+  const badToken = args.find((a) => SHELL_CONTROL_TOKENS.has(a));
+  if (badToken !== undefined) {
+    return (
+      `The argument "${badToken}" is a shell operator. project.run has no shell, so ` +
+      `it is passed to the program literally instead of being interpreted — it will ` +
+      `not redirect, pipe, or chain anything. To create or overwrite a file, use the ` +
+      `project.write_file tool instead. To run multiple commands, call project.run ` +
+      `once per command.`
+    );
+  }
+  return null;
+}
+
 // ─── Package script inspection ────────────────────────────────────
 
 /**

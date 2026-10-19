@@ -26,6 +26,9 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   runAgentLoop,
   parseToolCall,
@@ -1123,5 +1126,214 @@ describe("Q. Mutation requirement with a configured verification gate", () => {
     assert.equal(editRan, true, "the mutation tool ran");
     assert.equal(result.termination, "complete",
       "a real successful mutation proven by the gate must still complete");
+  });
+});
+
+// ─── R. Builder execution fixes — real disk, not model narration ────
+//
+// Regression coverage for the PR #690 CLI builder fixes:
+//   - project.run rejecting shell-style redirection BEFORE spawning
+//     (instead of a confusing ENOENT), on a REAL NodeShellExecutor
+//   - project.write_file as the structured replacement, using the REAL
+//     default tool registry (new ToolRegistry() merges in the real
+//     project.* entries — see makeRegistryWithTool's comment above)
+//   - the agent loop refusing to report "complete" for a build-ish
+//     request until the named file genuinely exists on disk
+//   - normal chat (no tool calls) completely unaffected
+//
+// All of these use a real temp directory and real filesystem checks —
+// the thing the original bug report called out missing ("do not treat
+// generated JSON/narration as proof of file creation").
+
+function makeTempProject(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "litt-builder-fix-test-"));
+  fs.writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify({ name: "builder-fix-fixture", version: "0.0.0", private: true }, null, 2),
+  );
+  return dir;
+}
+
+describe("R. Builder execution fixes", () => {
+  it("project.run rejects a shell-redirection command before spawning — no ENOENT, no file", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel([
+        // The exact shape a model previously produced that silently
+        // ENOENT'd: the whole shell line crammed into "command" with
+        // empty args.
+        `\`\`\`tool_call\n{ "tool": "project.run", "inputs": { "command": "echo '<h1>Hello</h1>' > index.html", "args": [] } }\n\`\`\``,
+        "I could not create index.html — project.run rejected the command.",
+      ]);
+
+      const result = await runAgentLoop("Build me a page with index.html", {
+        model, tools, shell, cwd: dir, maxRounds: 3,
+      });
+
+      assert.equal(result.toolCalls.length, 1);
+      assert.equal(result.toolCalls[0].result.success, false);
+      // Actionable rejection, not a raw ENOENT / spawn error.
+      assert.match(result.toolCalls[0].result.message, /no shell|project\.write_file/i);
+      assert.equal(fs.existsSync(path.join(dir, "index.html")), false);
+      assert.equal(result.termination, "failed",
+        "no file was created — this must never report complete");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("project.run rejects a standalone '>' token in args the same way", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.run", "inputs": { "command": "echo", "args": ["hi", ">", "index.html"] } }\n\`\`\``,
+        "I could not create index.html.",
+      ]);
+
+      const result = await runAgentLoop("Build me a page with index.html", {
+        model, tools, shell, cwd: dir, maxRounds: 3,
+      });
+
+      assert.equal(result.toolCalls[0].result.success, false);
+      assert.match(result.toolCalls[0].result.message, /shell operator|project\.write_file/i);
+      assert.equal(fs.existsSync(path.join(dir, "index.html")), false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("project.write_file genuinely creates the file — build request completes only once it exists", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.write_file", "inputs": { "path": "index.html", "content": "<!DOCTYPE html><html><body><h1>Hello World</h1></body></html>" } }\n\`\`\``,
+        "Done — index.html is created.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a simple website with a homepage index.html that says Hello World",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      assert.equal(result.termination, "complete");
+      const written = path.join(dir, "index.html");
+      assert.equal(fs.existsSync(written), true, "index.html must actually exist on disk");
+      const html = fs.readFileSync(written, "utf8");
+      assert.match(html, /<html/i);
+      assert.match(html, /Hello World/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("claiming success without ever touching index.html still reports failed", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      // No tool call at all — the model just claims the build is done.
+      const model = makeMockModel([
+        "Done! I've built the website with index.html.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a simple website with a homepage index.html that says Hello World",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      assert.equal(fs.existsSync(path.join(dir, "index.html")), false);
+      assert.equal(result.termination, "failed",
+        "the model's own claim of success must not override missing filesystem evidence");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a tool reporting success but leaving the named file missing still reports failed (not fooled by exit 0)", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      // project.run "succeeds" (exit 0) without writing anything — e.g.
+      // the file-less-redirect case where the command merely printed to
+      // stdout. This proves the fix checks real disk state, not just
+      // the tool's reported exit status.
+      const tools = makeRegistryWithTool(
+        "project.run",
+        async () => ({ status: "success", success: true, message: "exit 0", data: {} }),
+        { readOnly: true, mutating: false },
+      );
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.run", "inputs": { "command": "echo", "args": ["hello"] } }\n\`\`\``,
+        "Done — index.html is created.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a simple website with a homepage index.html that says Hello World",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      assert.equal(fs.existsSync(path.join(dir, "index.html")), false);
+      assert.equal(result.termination, "failed",
+        "a successful exit code is not proof the requested file was written");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("normal chat is completely unaffected — no tool calls, still completes", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel(["Hello! I'm doing well. How can I help you today?"]);
+
+      const result = await runAgentLoop("Hey, how's it going today?", {
+        model, tools, shell, cwd: dir, maxRounds: 3,
+      });
+
+      assert.equal(result.toolCalls.length, 0);
+      assert.equal(result.termination, "complete");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("editing an existing file (no creation verb) is unaffected by artifact-existence checking", async () => {
+    // Regression guard for the fix's scoping: "edit file.ts" must NOT
+    // require file.ts to exist on THIS process's disk (it never did in
+    // this fixture — the mutation tool is mocked) the way a genuine
+    // "build ... index.html" creation request does.
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      let editRan = false;
+      const tools = makeRegistryWithTool(
+        "project.run",
+        async () => {
+          editRan = true;
+          return { status: "success", success: true, message: "edited", data: {} };
+        },
+        { readOnly: true, mutating: false },
+      );
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.run", "inputs": { "command": "sed", "args": ["-i", "s/old/new/", "file.ts"] } }\n\`\`\``,
+        "Done — file.ts is updated.",
+      ]);
+
+      const result = await runAgentLoop("Edit file.ts to change old to new.", {
+        model, tools, shell, cwd: dir, maxRounds: 3,
+      });
+
+      assert.equal(editRan, true);
+      assert.equal(result.termination, "complete");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

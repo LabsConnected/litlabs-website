@@ -844,7 +844,9 @@ export class ExecutionGateway {
   ): Promise<VerifiedApproval | null> {
     const action = risk
       ? `${request.inputs.command} ${(request.inputs.args as string[] ?? []).join(" ")}`
-      : request.toolId;
+      : request.toolId === "project.write_file"
+        ? `write_file ${typeof request.inputs.path === "string" ? request.inputs.path : "(unknown path)"}`
+        : request.toolId;
 
     const approvalInput: ApprovalRequestInput = {
       tenantId: request.identity.tenantId,

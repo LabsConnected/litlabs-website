@@ -15,6 +15,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ShellExecutor, ProjectContext, ToolResult } from "./types.js";
+import { detectUnsupportedShellSyntax } from "./execution.js";
 
 // ─── Project Detection ────────────────────────────────────────────
 
@@ -418,7 +419,22 @@ export async function listFiles(
   shell: ShellExecutor,
   dirPath: string,
 ): Promise<ToolResult> {
-  const root = path.resolve(shell.cwd, dirPath);
+  // An empty/missing path means "the project root" — it must resolve
+  // there, not fall through to whatever `path.resolve` does with "".
+  // isSafePath() rejects absolute paths (e.g. a model retrying with "/"
+  // after an empty path was rejected elsewhere) and ".." traversal, the
+  // same guard readFile() already applies, so this directory listing
+  // can't escape the project sandbox either.
+  const normalizedDirPath = dirPath.trim() === "" ? "." : dirPath;
+  if (!isSafePath(normalizedDirPath)) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Blocked: ${dirPath || "(empty)"} is outside the project sandbox`,
+      data: {},
+    };
+  }
+  const root = path.resolve(shell.cwd, normalizedDirPath);
 
   if (!fs.existsSync(root)) {
     return {
@@ -502,6 +518,62 @@ export async function readFile(
       status: "failed",
       success: false,
       message: `Failed to read: ${err instanceof Error ? err.message : String(err)}`,
+      data: {},
+    };
+  }
+}
+
+/**
+ * Create a file, or overwrite it if it already exists, with exact
+ * content (with path safety). This is the structured replacement for
+ * the shell-redirection pattern (`echo ... > file`) that project.run
+ * cannot execute — see detectUnsupportedShellSyntax() in execution.ts.
+ *
+ * Mutating. Callers (the ExecutionGateway) are responsible for approval
+ * — this function performs the write unconditionally once called, same
+ * as runCommand() does for project.run.
+ */
+export async function writeFile(
+  shell: ShellExecutor,
+  filePath: string,
+  content: string,
+  maxBytes = 5_000_000,
+): Promise<ToolResult> {
+  if (!isSafePath(filePath)) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Blocked: ${filePath} is outside the project sandbox or matches a sensitive file pattern`,
+      data: {},
+    };
+  }
+
+  const byteLength = Buffer.byteLength(content, "utf8");
+  if (byteLength > maxBytes) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Content too large: ${byteLength} bytes (max ${maxBytes})`,
+      data: { size: byteLength },
+    };
+  }
+
+  const root = path.resolve(shell.cwd, filePath);
+
+  try {
+    fs.mkdirSync(path.dirname(root), { recursive: true });
+    fs.writeFileSync(root, content, "utf8");
+    return {
+      status: "success",
+      success: true,
+      message: `Wrote ${byteLength} bytes to ${filePath}`,
+      data: { path: filePath, size: byteLength },
+    };
+  } catch (err) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Failed to write: ${err instanceof Error ? err.message : String(err)}`,
       data: {},
     };
   }
@@ -658,6 +730,23 @@ export async function runCommand(
   args: string[],
   options?: { cwd?: string; timeoutMs?: number; stdin?: string },
 ): Promise<ToolResult> {
+  // Reject shell-style invocations BEFORE spawning anything. No shell is
+  // ever used here (see execution.ts), so `echo 'x' > file` or a `>`
+  // token in args would previously reach spawn() and fail with a raw
+  // ENOENT (or, for an args-level token, silently do nothing useful).
+  // This does not add or enable shell execution — it only replaces a
+  // confusing low-level failure with an actionable one, pointing at
+  // project.write_file for the file-creation case that caused it most.
+  const shellSyntaxError = detectUnsupportedShellSyntax(command, args);
+  if (shellSyntaxError) {
+    return {
+      status: "failed",
+      success: false,
+      message: shellSyntaxError,
+      data: { code: "UNSUPPORTED_SHELL_SYNTAX", command, args },
+    };
+  }
+
   const cwd = options?.cwd ?? shell.cwd;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
