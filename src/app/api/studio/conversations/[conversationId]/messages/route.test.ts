@@ -325,8 +325,9 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
           stepsUsed: 2,
           toolCalls: [
             { toolId: "files.list", toolCallId: "tc1", inputs: {}, success: true, mutating: false, summary: "5 entries" },
-            { toolId: "files.write", toolCallId: "tc2", inputs: { path: "index.html" }, success: true, mutating: true, summary: "saved" },
+            { toolId: "files.write", toolCallId: "tc2", inputs: { path: "index.html" }, success: true, mutating: true, summary: "saved", paths: ["index.html"] },
           ],
+          workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true },
           cancelled: false,
           pendingApproval: null,
         } as any,
