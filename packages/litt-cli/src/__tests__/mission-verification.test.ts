@@ -964,19 +964,39 @@ describe("settleProvenMutatingSteps", () => {
     return store;
   }
 
-  it("discloses failed steps and settles them as skipped — never passed", async () => {
+  it("a failed step with no later successful change BLOCKS completion and is left untouched", async () => {
+    // edit A worked, edit B failed and was never retried
     const store = await missionWith(["passed", "failed", "pending"]);
-    const { failedSteps } = await settleProvenMutatingSteps(store, "gate proven");
-    expect(failedSteps).toEqual(["step 1 (edit failed)"]);
-    expect(store.getMission()!.steps.map((s) => s.status)).toEqual(["passed", "skipped", "skipped"]);
+    const result = await settleProvenMutatingSteps(store, "gate proven");
+    expect(result.blockingSteps).toEqual(["step 1 (edit failed)"]);
+    expect(result.supersededSteps).toEqual([]);
+    expect(store.getMission()!.steps.map((s) => s.status)).toEqual(["passed", "failed", "pending"]);
+  });
+
+  it("a failed step followed by a later successful change is superseded — skipped, never passed, disclosed", async () => {
+    const store = await missionWith(["passed", "failed", "passed"]);
+    const later = store.getMission()!.steps[2];
+    await store.recordStepToolCall(later.id, "project.edit_file", { description: "edit_file: Edited src/math.js", status: "success" });
+    const result = await settleProvenMutatingSteps(store, "gate proven");
+    expect(result.blockingSteps).toEqual([]);
+    expect(result.supersededSteps).toEqual(["step 1 (edit failed)"]);
+    expect(store.getMission()!.steps.map((s) => s.status)).toEqual(["passed", "skipped", "passed"]);
     await store.setMissionVerifying();
     await store.completeMission("Verified", "gate proven");
     expect(store.getMission()!.status).toBe("complete");
   });
 
+  it("a later READ-ONLY success (e.g. running tests) does not supersede a failed edit", async () => {
+    const store = await missionWith(["failed", "passed"]);
+    const later = store.getMission()!.steps[1];
+    await store.recordStepToolCall(later.id, "project.test", { description: "test: pass", status: "success" });
+    const result = await settleProvenMutatingSteps(store, "gate proven");
+    expect(result.blockingSteps).toHaveLength(1);
+  });
+
   it("marks never-reached steps skipped (not passed) so a proven mission can complete", async () => {
     const store = await missionWith(["passed", "passed", "pending", "pending"]);
-    const { failedSteps } = await settleProvenMutatingSteps(store, "gate proven");
+    const { blockingSteps: failedSteps } = await settleProvenMutatingSteps(store, "gate proven");
     expect(failedSteps).toEqual([]);
     expect(store.getMission()!.steps.map((s) => s.status)).toEqual(["passed", "passed", "skipped", "skipped"]);
     await store.setMissionVerifying();

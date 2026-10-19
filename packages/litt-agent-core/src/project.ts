@@ -514,29 +514,74 @@ function writeFailure(message: string): ToolResult {
   return { status: "failed", success: false, message, data: {} };
 }
 
+/** Windows reserved device names — a write to `nul.txt` or `COM1` is not a file write. */
+const RESERVED_WINDOWS_NAME = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\.|$)/i;
+
+/**
+ * Lexical checks that isSafePath() does not cover. `:` is refused outright:
+ * NTFS stream syntax (`.git::$INDEX_ALLOCATION/hooks/x`, `.env::$DATA`)
+ * otherwise slips past the separator-anchored sensitive-file patterns while
+ * still writing the protected file.
+ */
+function lexicalWriteProblem(filePath: string): string | null {
+  if (filePath.includes(":")) return "contains ':' (drive letters and NTFS streams are not allowed)";
+  if (/[\x00-\x1f<>"|?*]/.test(filePath)) return "contains a character that is not valid in a file name";
+  if (filePath.startsWith("\\\\") || filePath.startsWith("//")) return "is a UNC path";
+  for (const segment of filePath.split(/[\\/]+/)) {
+    if (segment === "" || segment === ".") continue;
+    if (/[. ]$/.test(segment)) return `has a path segment ending in '.' or space ("${segment}")`;
+    if (RESERVED_WINDOWS_NAME.test(segment)) return `uses a reserved device name ("${segment}")`;
+  }
+  return null;
+}
+
 /**
  * Resolve a project-relative path for writing, or explain why it is refused.
  *
- * isSafePath() rejects absolute paths, traversal and sensitive files. On top
- * of that the nearest existing ancestor (and the file itself, if present) is
- * resolved through real paths, so a symlink or junction inside the project
- * cannot redirect a write outside it.
+ *   1. isSafePath() — absolute paths, traversal, sensitive files.
+ *   2. lexicalWriteProblem() — NTFS streams, reserved names, odd segments.
+ *   3. No component that already exists may be a symlink or junction
+ *      (lstat, so a dangling link is caught too): write tools never follow
+ *      links, so a link shipped in a repo cannot redirect a write.
+ *   4. The real (long-name) path of the nearest existing ancestor plus the
+ *      remaining tail must stay inside the project and pass isSafePath()
+ *      again — this catches 8.3 short names such as GIT~1 for .git.
  */
 function resolveWritablePath(projectRoot: string, filePath: string): { ok: true; target: string } | { ok: false; reason: string } {
   if (!filePath) return { ok: false, reason: "Missing required arg: path" };
   if (!isSafePath(filePath)) return { ok: false, reason: `Blocked: ${filePath} is outside the project or matches a sensitive file pattern` };
-  const realRoot = fs.realpathSync(projectRoot);
+  const lexical = lexicalWriteProblem(filePath);
+  if (lexical) return { ok: false, reason: `Blocked: ${filePath} ${lexical}` };
+
+  const realRoot = fs.realpathSync.native(projectRoot);
   const target = path.resolve(projectRoot, filePath);
-  let probe = target;
-  while (!fs.existsSync(probe)) {
-    const parent = path.dirname(probe);
-    if (parent === probe) break;
-    probe = parent;
+  const relParts = path.relative(projectRoot, target).split(path.sep).filter(Boolean);
+
+  let current = projectRoot;
+  let existingDepth = 0;
+  for (const part of relParts) {
+    current = path.join(current, part);
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(current);
+    } catch {
+      break; // first missing component — everything below it will be created
+    }
+    if (stat.isSymbolicLink()) {
+      return { ok: false, reason: `Blocked: ${filePath} goes through a link (${path.relative(projectRoot, current)}); write tools do not follow links` };
+    }
+    existingDepth++;
   }
-  const realProbe = fs.realpathSync(probe);
-  const rel = path.relative(realRoot, realProbe);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+
+  const existing = path.join(projectRoot, ...relParts.slice(0, existingDepth));
+  const realExisting = fs.realpathSync.native(existing);
+  const realRel = path.relative(realRoot, realExisting);
+  if (realRel.startsWith("..") || path.isAbsolute(realRel)) {
     return { ok: false, reason: `Blocked: ${filePath} resolves outside the project` };
+  }
+  const realRelTarget = path.join(realRel, ...relParts.slice(existingDepth));
+  if (realRelTarget && !isSafePath(realRelTarget)) {
+    return { ok: false, reason: `Blocked: ${filePath} resolves to a protected path (${realRelTarget})` };
   }
   return { ok: true, target };
 }
@@ -580,8 +625,10 @@ export async function editProjectFile(
     const resolved = resolveWritablePath(shell.cwd, filePath);
     if (!resolved.ok) return writeFailure(resolved.reason);
     if (!oldString) return writeFailure("Missing required arg: old_string");
+    if (oldString === newString) return writeFailure("old_string and new_string are identical — nothing to change");
     if (!fs.existsSync(resolved.target)) return writeFailure(`File not found: ${filePath}`);
     const original = fs.readFileSync(resolved.target, "utf8");
+    if (original.includes("\0")) return writeFailure(`Refusing to edit ${filePath}: it looks like a binary file`);
     const occurrences = original.split(oldString).length - 1;
     if (occurrences === 0) return writeFailure(`old_string not found in ${filePath}`);
     if (occurrences > 1) {
@@ -918,6 +965,9 @@ export function isSafePath(filePath: string): boolean {
   if (filePath.includes("..")) return false;
   // Block null bytes
   if (filePath.includes("\0")) return false;
+  // Block ':' — NTFS stream syntax (`.env::$DATA`) reads/writes a protected
+  // file while dodging the separator-anchored patterns below.
+  if (filePath.includes(":")) return false;
   // Block sensitive patterns
   return !BLOCKED_PATH_PATTERNS.some((re) => re.test(filePath));
 }

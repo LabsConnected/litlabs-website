@@ -90,6 +90,48 @@ describe("project.write_file", () => {
     assert.equal(fs.existsSync(path.join(outside, "pwned.txt")), false);
   });
 
+  // Independent review 2026-10-18: NTFS stream syntax wrote a real git hook
+  // (.git::$INDEX_ALLOCATION/hooks/post-checkout) and overwrote .env
+  // (.env::$DATA) past the separator-anchored sensitive-file patterns.
+  for (const bad of [
+    ".git::$INDEX_ALLOCATION/hooks/post-checkout",
+    ".env::$DATA",
+    "credentials.json::$DATA",
+    "src/math.js:stream",
+    "C:/Windows/evil.txt",
+    "CON",
+    "nul.txt",
+    "src/COM1.js",
+    "src/trailingdot.",
+    "src/trailing space ",
+    "src/bad|name.txt",
+  ]) {
+    it(`refuses Windows-unsafe path ${JSON.stringify(bad)}`, async () => {
+      const r = await tools.execute("project.write_file", ctx, { path: bad, content: "x" });
+      assert.equal(r.success, false, r.message);
+      assert.equal(fs.existsSync(path.join(root, ".git")), false, "no .git may be created");
+      assert.equal(fs.existsSync(path.join(root, ".env")), false, "no .env may be created");
+    });
+  }
+
+  it("refuses to write through a DANGLING link that points outside", async () => {
+    const dangling = path.join(outside, "evil-target.txt");
+    try {
+      fs.symlinkSync(dangling, path.join(root, "dangling.txt"), "file");
+    } catch {
+      return; // creating file symlinks needs Developer Mode on Windows; the junction test covers links
+    }
+    const r = await tools.execute("project.write_file", ctx, { path: "dangling.txt", content: "x" });
+    assert.equal(r.success, false, "a dangling link must not be followed");
+    assert.equal(fs.existsSync(dangling), false);
+  });
+
+  it("refuses to write through a link even when it points inside the project", async () => {
+    fs.symlinkSync(path.join(root, "src"), path.join(root, "link-in"), "junction");
+    const r = await tools.execute("project.write_file", ctx, { path: "link-in/x.js", content: "x" });
+    assert.equal(r.success, false);
+  });
+
   it("requires path and string content", async () => {
     assert.equal((await tools.execute("project.write_file", ctx, { content: "x" })).success, false);
     assert.equal((await tools.execute("project.write_file", ctx, { path: "a.txt" })).success, false);
@@ -121,6 +163,19 @@ describe("project.edit_file", () => {
     const r = await tools.execute("project.edit_file", ctx, { path: "dup.txt", old_string: "a", new_string: "b" });
     assert.equal(r.success, false);
     assert.match(r.message, /2 times/);
+  });
+
+  it("rejects a no-op edit so it never counts as a change", async () => {
+    const r = await tools.execute("project.edit_file", ctx, { path: "src/math.js", old_string: "return", new_string: "return" });
+    assert.equal(r.success, false);
+    assert.match(r.message, /identical/);
+  });
+
+  it("refuses to edit a binary file", async () => {
+    fs.writeFileSync(path.join(root, "bin.dat"), Buffer.from([0x61, 0x00, 0x62]));
+    const r = await tools.execute("project.edit_file", ctx, { path: "bin.dat", old_string: "a", new_string: "c" });
+    assert.equal(r.success, false);
+    assert.match(r.message, /binary/);
   });
 
   it("fails on a missing file and on unsafe paths", async () => {
@@ -157,5 +212,18 @@ describe("gateway policy applies unchanged", () => {
     assert.equal(r.policyEffect, "require_approval");
     assert.equal(r.result.success, false);
     assert.equal(fs.existsSync(path.join(root, "gated.txt")), false);
+  });
+});
+
+describe("project.read_file — NTFS stream syntax", () => {
+  it("refuses .env::$DATA (reads the protected file on Windows otherwise)", async () => {
+    fs.writeFileSync(path.join(root, ".env"), "SECRET=1");
+    try {
+      const r = await tools.execute("project.read_file", ctx, { path: ".env::$DATA" });
+      assert.equal(r.success, false);
+      assert.doesNotMatch(JSON.stringify(r.data), /SECRET/);
+    } finally {
+      fs.rmSync(path.join(root, ".env"), { force: true });
+    }
   });
 });

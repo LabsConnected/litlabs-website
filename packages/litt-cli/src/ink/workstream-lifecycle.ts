@@ -22,6 +22,13 @@ export function applyMissionLifecycle(
   data: Record<string, unknown>,
 ): boolean {
   switch (type) {
+    case "run.started": {
+      // A new run after a finished one starts clean; the bridge then sets
+      // its objective. Not handled here otherwise (returns false).
+      const status = ws.snapshot().overallStatus;
+      if (status === "complete" || status === "failed") ws.clear();
+      return false;
+    }
     case "mission.created": {
       ws.clear();
       const goal = typeof data.goal === "string" ? data.goal.trim() : "";

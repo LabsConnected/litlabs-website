@@ -1044,6 +1044,14 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
           ...(this.providerId === "openai" && this._tools
             ? { reasoning_effort: "none" }
             : {}),
+          // Local Ollama: thinking models (qwen3) otherwise reason before
+          // every reply — measured 35 s vs 2.6 s on a 3 GB GPU, and a reply
+          // can be all reasoning with empty content. Ollama's OpenAI-
+          // compatible endpoint maps reasoning_effort "none" to think=false;
+          // non-thinking models ignore it. LITT_OLLAMA_THINK=1 opts back in.
+          ...(this.providerId === "ollama" && process.env.LITT_OLLAMA_THINK !== "1"
+            ? { reasoning_effort: "none" }
+            : {}),
         }),
         signal: abort.signal,
       });

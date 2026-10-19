@@ -582,22 +582,36 @@ export async function markInspectionStepsComplete(
  *
  * Only call this when the gate proved the result AND a change actually
  * landed (the gate rejects missions whose every change attempt failed).
- * Steps that are not passed are marked SKIPPED — never "passed":
- *   - failed steps: superseded attempts (an edit retried in a later step,
- *     an optional typecheck in a plain-JS project). They are returned so
- *     the caller discloses them instead of hiding them behind a green tick.
- *   - never-reached steps (pending / blocked): the gate is the proof.
+ *
+ *   - A failed step is SUPERSEDED only when a LATER step contains a
+ *     successful change (write/edit/run). It is marked skipped — never
+ *     "passed" — and returned in `supersededSteps` so the caller discloses it.
+ *   - A failed step with no later successful change is BLOCKING: that part
+ *     of the request did not happen (edit A worked, edit B failed and was
+ *     never retried). Nothing is rewritten; the caller must fail the mission.
+ *   - Never-reached steps (pending / blocked) are marked skipped, but only
+ *     when nothing blocks — the gate is the proof.
  */
+const CHANGE_TOOLS = new Set(["project.edit_file", "project.write_file", "project.run"]);
+
 export async function settleProvenMutatingSteps(
   store: RuntimeStore,
   reason: string,
-): Promise<{ failedSteps: string[] }> {
+): Promise<{ supersededSteps: string[]; blockingSteps: string[] }> {
   const mission = store.getMission();
-  if (!mission) return { failedSteps: [] };
-  const failedSteps = mission.steps
-    .filter((s) => s.status === "failed")
-    .map((s) => (s.failureReason ? `${s.title} (${s.failureReason})` : s.title));
-  for (const step of mission.steps) {
+  if (!mission) return { supersededSteps: [], blockingSteps: [] };
+  const label = (s: (typeof mission.steps)[number]) =>
+    (s.failureReason ? `${s.title} (${s.failureReason})` : s.title);
+  const steps = mission.steps;
+  const changedLater = (index: number) => steps.slice(index + 1).some((later) =>
+    later.actionHistory.some((a) => a.status === "success" && CHANGE_TOOLS.has(a.tool ?? "")));
+
+  const superseded = steps.filter((s, i) => s.status === "failed" && changedLater(i));
+  const blocking = steps.filter((s, i) => s.status === "failed" && !changedLater(i));
+  if (blocking.length > 0) {
+    return { supersededSteps: superseded.map(label), blockingSteps: blocking.map(label) };
+  }
+  for (const step of steps) {
     if (step.status === "failed") {
       await store.updateMissionStepStatus(step.id, "skipped", {
         verificationEvidence: `Superseded failed attempt — ${reason}`,
@@ -608,7 +622,7 @@ export async function settleProvenMutatingSteps(
       }).catch(() => {});
     }
   }
-  return { failedSteps };
+  return { supersededSteps: superseded.map(label), blockingSteps: [] };
 }
 
 /** Bounded history — long missions must not grow memory forever. */

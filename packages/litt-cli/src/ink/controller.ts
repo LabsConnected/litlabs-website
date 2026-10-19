@@ -3433,24 +3433,31 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const seconds = (missionTotalMs / 1000).toFixed(1);
         const agentSeconds = (agentLoopMs / 1000).toFixed(1);
         // A proven MUTATING mission (a change landed — the gate rejects the
-        // all-attempts-failed case) settles its unfinished plan steps as
-        // skipped so the canonical mission can complete instead of stalling
-        // in "verifying". Failed attempts are disclosed, never hidden.
+        // all-attempts-failed case) settles its unfinished plan steps so the
+        // canonical mission can complete instead of stalling in "verifying".
+        // A failed step with no later successful change means part of the
+        // request did not happen: the mission fails. Superseded failed
+        // attempts are disclosed, never hidden.
         if (missionComplete && !evidenceTracker.isReadOnly()) {
-          const { failedSteps } = await settleProvenMutatingSteps(
+          const { supersededSteps, blockingSteps } = await settleProvenMutatingSteps(
             agentStore,
             `verification proved the result: ${verificationSummary.slice(0, 120)}`,
           );
-          if (failedSteps.length > 0) {
+          if (blockingSteps.length > 0) {
+            missionComplete = false;
+            verificationSummary =
+              `Checks passed, but ${blockingSteps.length} step(s) failed and were not recovered: ` +
+              `${blockingSteps.join("; ")}. The requested change was not fully made.`;
+          } else if (supersededSteps.length > 0) {
             store.actions.addActivity({
               id: `act_${Date.now()}_superseded`,
               ts: Date.now(),
               type: "info",
               tag: "WARN",
-              text: `${failedSteps.length} step(s) had failed attempts; checks passed afterwards`,
-              fullText: `Failed attempts (superseded — verification proved the final result):\n${failedSteps.join("\n")}`,
+              text: `${supersededSteps.length} step(s) had failed attempts that a later change superseded`,
+              fullText: `Failed attempts (superseded by a later successful change):\n${supersededSteps.join("\n")}`,
             });
-            verificationSummary += ` Note: ${failedSteps.length} step(s) had failed attempts: ${failedSteps.join("; ")}.`;
+            verificationSummary += ` Note: ${supersededSteps.length} step(s) had failed attempts: ${supersededSteps.join("; ")}.`;
           }
         }
         if (missionComplete) {

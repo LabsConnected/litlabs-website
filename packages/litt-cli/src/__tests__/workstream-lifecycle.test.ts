@@ -87,3 +87,21 @@ describe("isWorkstreamLive — who owns the centre of the shell", () => {
     expect(isWorkstreamLive(new WorkstreamStore().snapshot())).toBe(false);
   });
 });
+
+describe("run.started after a finished mission", () => {
+  it("starts from a clean workstream instead of inheriting the terminal state", () => {
+    const ws = runningMission("first");
+    applyMissionLifecycle(ws, "mission.completed", {});
+    expect(applyMissionLifecycle(ws, "run.started", { command: "npm test" })).toBe(false);
+    expect(ws.snapshot().overallStatus).toBe("idle");
+    expect(ws.snapshot().activities).toHaveLength(0);
+    ws.setObjective("npm test"); // what the bridge does next
+    expect(ws.snapshot().overallStatus).toBe("running");
+  });
+
+  it("does not clear a workstream that is still running", () => {
+    const ws = runningMission("live");
+    applyMissionLifecycle(ws, "run.started", { command: "npm test" });
+    expect(ws.snapshot().activities.length).toBeGreaterThan(0);
+  });
+});
