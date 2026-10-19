@@ -233,6 +233,135 @@ describe("A2 — BUILD route order: Groq ahead of OpenRouter", () => {
   });
 });
 
+describe("A1 — sticky billing/auth blocks", () => {
+  it("a billing block survives interleaved timeout and rate-limit failures until a real success", () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("GEMINI_API_KEY", "x");
+      vi.stubEnv("OPENROUTER_API_KEY", "x");
+      vi.stubEnv("GROQ_API_KEY", "x");
+
+      const buildExclusion = () =>
+        planBasicRoutes(BUILD_REQ).excluded.find((e) => e.provider === "gemini")?.reason;
+
+      recordProviderFailure("gemini", {
+        class: "billing",
+        scope: "provider",
+        httpStatus: 402,
+        message: "credits exhausted",
+      });
+      expect(getProviderHealth("gemini")).toMatchObject({ state: "disabled", reason: "billing" });
+      expect(buildExclusion()).toContain("disabled");
+
+      // The billing disable window lapses: degraded, never healthy.
+      vi.advanceTimersByTime(30 * 60_000 + 1);
+      expect(getProviderHealth("gemini")).toMatchObject({ state: "degraded", reason: "billing" });
+      expect(buildExclusion()).toBe("billing_exhausted");
+
+      // An interleaved failure of another class must not overwrite the block.
+      recordProviderFailure("gemini", {
+        class: "timeout",
+        scope: "provider",
+        message: "timed out",
+      });
+      expect(getProviderHealth("gemini")).toMatchObject({ state: "degraded", reason: "billing" });
+      expect(buildExclusion()).toBe("billing_exhausted");
+
+      // A plain rate-limit failure sets the shorter cooldown...
+      recordProviderFailure("gemini", {
+        class: "rate_limited",
+        scope: "provider",
+        httpStatus: 429,
+        retryAfterMs: 30_000,
+        message: "rate limited",
+      });
+      expect(getProviderHealth("gemini")).toMatchObject({ state: "cooldown", reason: "billing" });
+      expect(buildExclusion()).toContain("cooldown");
+
+      // ...and its lapse still cannot resurrect the billing-blocked route.
+      vi.advanceTimersByTime(31_000);
+      expect(getProviderHealth("gemini")).toMatchObject({ state: "degraded", reason: "billing" });
+      expect(buildExclusion()).toBe("billing_exhausted");
+
+      // Only a genuine success rehabilitates it.
+      recordProviderSuccess("gemini");
+      const h = getProviderHealth("gemini");
+      expect(h.state).toBe("healthy");
+      expect(h.reason).toBeUndefined();
+      expect(planBasicRoutes(BUILD_REQ).providers.map((p) => p.provider)).toContain("gemini");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("an auth_invalid provider stays excluded from BUILD plans after cooldown recovery", () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("GEMINI_API_KEY", "x");
+      vi.stubEnv("GROQ_API_KEY", "x");
+      recordProviderFailure("gemini", {
+        class: "auth_invalid",
+        scope: "provider",
+        httpStatus: 401,
+        message: "invalid key",
+      });
+      vi.advanceTimersByTime(30 * 60_000 + 1);
+
+      expect(getProviderHealth("gemini")).toMatchObject({
+        state: "degraded",
+        reason: "auth_invalid",
+      });
+      const plan = planBasicRoutes(BUILD_REQ);
+      expect(plan.providers.map((p) => p.provider)).not.toContain("gemini");
+      expect(plan.excluded.find((e) => e.provider === "gemini")?.reason).toBe(
+        "auth_invalid_blocked",
+      );
+
+      recordProviderSuccess("gemini");
+      expect(planBasicRoutes(BUILD_REQ).providers.map((p) => p.provider)).toContain("gemini");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("A2 — BUILD ordering sweep", () => {
+  it("keeps Groq before OpenRouter and healthy providers before degraded ones across health assignments", () => {
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("MISTRAL_API_KEY", "x");
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "x");
+    vi.stubEnv("CLOUDFLARE_AI_API_TOKEN", "x");
+
+    const providers = ["gemini", "openrouter", "groq", "mistral", "cloudflare"] as const;
+    for (let mask = 0; mask < 1 << providers.length; mask++) {
+      _resetProviderHealthForTests();
+      const degraded = providers.filter((_, i) => (mask & (1 << i)) !== 0);
+      for (const provider of degraded) {
+        recordProviderFailure(provider, {
+          class: "timeout",
+          scope: "provider",
+          message: "timed out",
+        });
+      }
+
+      const order = planBasicRoutes(BUILD_REQ).providers.map((p) => p.provider);
+      expect(order).toHaveLength(providers.length);
+      expect(order.indexOf("groq")).toBeLessThan(order.indexOf("openrouter"));
+
+      for (const degradedProvider of degraded) {
+        for (const healthyProvider of providers) {
+          if (degraded.includes(healthyProvider)) continue;
+          // Groq-before-OpenRouter is the sole permitted inversion.
+          if (degradedProvider === "groq" && healthyProvider === "openrouter") continue;
+          expect(order.indexOf(healthyProvider)).toBeLessThan(order.indexOf(degradedProvider));
+        }
+      }
+    }
+  });
+});
+
 describe("A3 — RunRouteBudget (unit)", () => {
   it("exhausts on attempt count", () => {
     const b = createRunRouteBudget({ maxOpenRouterAttempts: 2, maxOpenRouterMs: 600_000 });

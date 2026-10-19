@@ -432,6 +432,11 @@ const MODEL_COOLDOWN_MS = 10 * 60_000;
 
 const providerHealth = new Map<string, ProviderHealth>();
 const modelCooldowns = new Map<string, number>(); // "provider:model" → until
+/** Billing/auth blocks are sticky: later failures of other classes may
+ *  change the transient state, but they must not erase the reason that
+ *  keeps the provider out of BUILD routing. Only a genuine success (or
+ *  the test reset seam) clears an entry here. */
+const stickyProviderBlocks = new Map<string, "billing" | "auth_invalid">();
 
 function defaultHealth(): ProviderHealth {
   return { state: "healthy", consecutiveFailures: 0 };
@@ -449,10 +454,13 @@ export function getProviderHealth(provider: string): ProviderHealth {
     // traffic may re-probe it (ranked last), a success restores a clean
     // "healthy" via recordProviderSuccess, and BUILD routing keeps
     // skipping it while the billing flag stands (see planBasicRoutes).
-    const billingBlocked = h.reason === "billing" || h.reason === "auth_invalid";
+    const stickyBlock = stickyProviderBlocks.get(provider);
+    const billingBlocked =
+      stickyBlock !== undefined || h.reason === "billing" || h.reason === "auth_invalid";
     const recovered: ProviderHealth = {
       ...h,
       state: billingBlocked ? "degraded" : "healthy",
+      reason: stickyBlock ?? h.reason,
       cooldownUntil: undefined,
       consecutiveFailures: 0,
     };
@@ -473,6 +481,9 @@ export function isModelCoolingDown(provider: string, model: string): boolean {
 }
 
 export function recordProviderSuccess(provider: string): void {
+  // A genuine success is the rehabilitation path for a sticky
+  // billing/auth block: the route has just proved it can serve again.
+  stickyProviderBlocks.delete(provider);
   providerHealth.set(provider, {
     state: "healthy",
     lastSuccessAt: Date.now(),
@@ -485,11 +496,21 @@ export function recordProviderFailure(provider: string, failure: ProviderFailure
   const now = Date.now();
   const consecutive = prev.consecutiveFailures + 1;
 
+  if (failure.class === "billing" || failure.class === "auth_invalid") {
+    stickyProviderBlocks.set(provider, failure.class);
+  }
+  const stickyBlock = stickyProviderBlocks.get(provider);
+
   const next: ProviderHealth = {
     ...prev,
     lastFailureAt: now,
     consecutiveFailures: consecutive,
-    reason: failure.class,
+    // A sticky billing/auth block survives failures of every other
+    // class. Without this, an interleaved timeout followed by a short
+    // rate-limit cooldown could lapse with "rate_limited" as the latest
+    // reason and the recovery gate would resurrect a provider whose
+    // account is still billing- or auth-blocked.
+    reason: stickyBlock ?? failure.class,
   };
 
   switch (failure.class) {
@@ -533,6 +554,7 @@ export function recordModelFailure(provider: string, model: string): void {
 export function _resetProviderHealthForTests(): void {
   providerHealth.clear();
   modelCooldowns.clear();
+  stickyProviderBlocks.clear();
 }
 
 export interface ProviderDiagnostic {
@@ -766,8 +788,10 @@ export function planBasicRoutes(
   const providers: PlannedProvider[] = [];
   const hint = resolveModelHint(opts.model);
   let droppedModelHint: string | undefined;
+  const baseOrder = new Map<string, number>();
 
   for (const def of providerDefs(requirements)) {
+    baseOrder.set(def.provider, baseOrder.size);
     // Cost policy — LITT_PAID routes require explicit server-derived
     // entitlement (allowLittPaidProviders). Default: deny.
     // USER_FUNDED routes require the user to supply a key this request.
@@ -829,15 +853,21 @@ export function planBasicRoutes(
       continue;
     }
 
-    // BUILD runs never start on a billing-exhausted route. The disable
-    // above covers the active window; this covers the recovered state —
-    // the cooldown lapsed, health now reports degraded, but the reason
-    // is still "billing": the account is out of money until a human tops
-    // it up, and a build must not burn its opening steps (or, across
-    // steps, its whole budget) rediscovering that. Non-build traffic may
-    // still re-probe the route and rehabilitate it with a real success.
+    // BUILD runs never start on a billing-exhausted or auth-invalid
+    // route. The disable above covers the active window; this covers
+    // the recovered state — the cooldown lapsed, health now reports
+    // degraded, but the sticky reason is still "billing" or
+    // "auth_invalid": the account is out of money (or the credential
+    // still dead) until a real success rehabilitates it, and a build
+    // must not burn its opening steps (or, across steps, its whole
+    // budget) rediscovering that. Non-build traffic may still re-probe
+    // the route and rehabilitate it with a real success.
     if (requirements.reliableFileWriting === true && health.reason === "billing") {
       excluded.push({ provider: def.provider, reason: "billing_exhausted" });
+      continue;
+    }
+    if (requirements.reliableFileWriting === true && health.reason === "auth_invalid") {
+      excluded.push({ provider: def.provider, reason: "auth_invalid_blocked" });
       continue;
     }
 
@@ -902,30 +932,67 @@ export function planBasicRoutes(
   }
 
   // Preferred route first: the provider carrying the honoured model hint
-  // moves to the front, then healthy before degraded, preserving base order.
+  // moves to the front, then healthy before degraded, preserving base
+  // order. This is a single composite rank key (compared lexicographically),
+  // not a pair-wise comparator: pair-wise special cases are not a strict
+  // weak ordering and can cycle or strand a degraded provider ahead of a
+  // healthy one.
   const hintedProvider = hint?.kind === "route" ? hint.provider : undefined;
   const buildRun = requirements.reliableFileWriting === true;
-  providers.sort((a, b) => {
-    const aHint = a.provider === hintedProvider ? 0 : 1;
-    const bHint = b.provider === hintedProvider ? 0 : 1;
-    if (aHint !== bHint) return aHint - bHint;
+  const groqPlan = providers.find((p) => p.provider === "groq");
+  const openRouterPlan = providers.find((p) => p.provider === "openrouter");
+  const pairBase =
+    groqPlan && openRouterPlan
+      ? Math.min(
+          baseOrder.get("groq") ?? Number.MAX_SAFE_INTEGER,
+          baseOrder.get("openrouter") ?? Number.MAX_SAFE_INTEGER,
+        )
+      : undefined;
+  // The one health assignment where "Groq before OpenRouter" and
+  // "healthy before degraded" pull in opposite directions. Groq is
+  // placed immediately before OpenRouter, after every other healthy
+  // provider and before every other degraded provider — so the pair
+  // rule is the ONLY healthy/degraded inversion it creates.
+  const degradedGroqHealthyOpenRouter =
+    buildRun && groqPlan?.health === "degraded" && openRouterPlan?.health === "healthy";
+
+  const rankKey = (p: PlannedProvider): number[] => {
+    const hintRank = p.provider === hintedProvider ? 0 : 1;
+    const base = baseOrder.get(p.provider) ?? Number.MAX_SAFE_INTEGER;
+    const healthRank = p.health === "degraded" ? 1 : 0;
+
+    if (!buildRun) return [hintRank, healthRank, base, 0, base];
+
+    if (degradedGroqHealthyOpenRouter) {
+      if (p.provider === "groq") return [hintRank, 1, 0, 0, base];
+      if (p.provider === "openrouter") return [hintRank, 2, 0, 0, base];
+      return [hintRank, p.health === "degraded" ? 3 : 0, base, 0, base];
+    }
+
     // BUILD runs only: Groq ranks ahead of OpenRouter. OpenRouter's free
     // candidate list is long and each attempt can burn its full 60s cap
     // on model-scope failures, so leading with it starved the healthy
     // Groq route (two 30s-capped proven writers) of the run budget —
-    // builds died inside OpenRouter before Groq was ever tried. The
-    // pair-wise rule touches nothing else: every other relative order
-    // (including healthy-before-degraded) is preserved.
-    if (
-      buildRun &&
-      ((a.provider === "groq" && b.provider === "openrouter") ||
-        (a.provider === "openrouter" && b.provider === "groq"))
-    ) {
-      return a.provider === "groq" ? -1 : 1;
+    // builds died inside OpenRouter before Groq was ever tried. Within
+    // a health tier the pair collapses to its earliest base slot, with
+    // Groq first; every other provider keeps its base position.
+    const isPair = p.provider === "groq" || p.provider === "openrouter";
+    return [
+      hintRank,
+      healthRank,
+      isPair && pairBase !== undefined ? pairBase : base,
+      isPair ? (p.provider === "groq" ? 0 : 1) : 0,
+      base,
+    ];
+  };
+
+  providers.sort((a, b) => {
+    const aKey = rankKey(a);
+    const bKey = rankKey(b);
+    for (let i = 0; i < aKey.length; i++) {
+      if (aKey[i] !== bKey[i]) return aKey[i] - bKey[i];
     }
-    const aDeg = a.health === "degraded" ? 1 : 0;
-    const bDeg = b.health === "degraded" ? 1 : 0;
-    return aDeg - bDeg;
+    return 0;
   });
 
   return { providers, excluded, droppedModelHint };
