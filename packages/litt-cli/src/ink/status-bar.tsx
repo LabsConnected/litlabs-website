@@ -28,6 +28,7 @@
  */
 
 import React from "react";
+import { clockIntervalMs } from "./motion.js";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
 import { truncateTail, shortModelName } from "./text-wrap.js";
@@ -93,7 +94,7 @@ export function StatusBar({
     if (!busy) return;
     const timer = setInterval(() => {
       setTick((t) => t + 1);
-    }, 1000);
+    }, clockIntervalMs(1000));
     return () => clearInterval(timer);
   }, [busy]);
 
