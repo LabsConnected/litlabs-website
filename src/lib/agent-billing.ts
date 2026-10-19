@@ -295,6 +295,20 @@ export async function settleRun(
         settleData?.reason ?? "unknown",
         reservationId,
       );
+      // A rejected settle is atomic — nothing was debited, but the
+      // reservation stays 'reserved' until expiry while the run reports
+      // completed with creditsCharged 0. Release it now so the user's BITS
+      // are not locked; a failed release still leaves the reconciliation
+      // record above for manual recovery.
+      const { error: releaseErr } = await supabaseAdmin.rpc("release_bits", {
+        p_reservation_id: reservationId,
+        p_idempotency_key: runId + ":release-after-settle-reject",
+      });
+      if (releaseErr) {
+        console.error(`[agent-billing] release after rejected settle failed for run ${runId}: ${releaseErr.message}`);
+      } else {
+        creditsRefunded = reservedCredits;
+      }
     }
   } else if (result.status !== "completed" && reservationId && reservedCredits > 0) {
     // Release: execution failed, return all reserved BITS
