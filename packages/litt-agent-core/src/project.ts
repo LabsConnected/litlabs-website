@@ -421,20 +421,22 @@ export async function listFiles(
 ): Promise<ToolResult> {
   // An empty/missing path means "the project root" — it must resolve
   // there, not fall through to whatever `path.resolve` does with "".
-  // isSafePath() rejects absolute paths (e.g. a model retrying with "/"
-  // after an empty path was rejected elsewhere) and ".." traversal, the
-  // same guard readFile() already applies, so this directory listing
-  // can't escape the project sandbox either.
+  // resolveSandboxedPath() rejects absolute paths (e.g. a model retrying
+  // with "/" after an empty path was rejected elsewhere), ".."
+  // traversal, and — since this walks the REAL, symlink-resolved path —
+  // an existing symlink inside the project that points outside it, so
+  // this directory listing can't escape the project sandbox either way.
   const normalizedDirPath = dirPath.trim() === "" ? "." : dirPath;
-  if (!isSafePath(normalizedDirPath)) {
+  const resolved = resolveSandboxedPath(shell.cwd, normalizedDirPath);
+  if (!resolved.ok) {
     return {
       status: "failed",
       success: false,
-      message: `Blocked: ${dirPath || "(empty)"} is outside the project sandbox`,
+      message: `Blocked: ${resolved.reason}`,
       data: {},
     };
   }
-  const root = path.resolve(shell.cwd, normalizedDirPath);
+  const root = resolved.resolvedPath;
 
   if (!fs.existsSync(root)) {
     return {
@@ -475,17 +477,18 @@ export async function readFile(
   filePath: string,
   maxBytes = 100_000,
 ): Promise<ToolResult> {
-  const root = path.resolve(shell.cwd, filePath);
-
-  // Path safety — block sensitive files
-  if (!isSafePath(filePath)) {
+  // Path safety — blocks sensitive files AND an existing symlink inside
+  // the project that resolves outside it (see resolveSandboxedPath()).
+  const resolved = resolveSandboxedPath(shell.cwd, filePath);
+  if (!resolved.ok) {
     return {
       status: "failed",
       success: false,
-      message: `Blocked: ${filePath} matches sensitive file pattern`,
+      message: `Blocked: ${resolved.reason}`,
       data: {},
     };
   }
+  const root = resolved.resolvedPath;
 
   if (!fs.existsSync(root)) {
     return {
@@ -539,11 +542,12 @@ export async function writeFile(
   content: string,
   maxBytes = 5_000_000,
 ): Promise<ToolResult> {
-  if (!isSafePath(filePath)) {
+  const resolved = resolveSandboxedPath(shell.cwd, filePath);
+  if (!resolved.ok) {
     return {
       status: "failed",
       success: false,
-      message: `Blocked: ${filePath} is outside the project sandbox or matches a sensitive file pattern`,
+      message: `Blocked: ${resolved.reason}`,
       data: {},
     };
   }
@@ -558,7 +562,7 @@ export async function writeFile(
     };
   }
 
-  const root = path.resolve(shell.cwd, filePath);
+  const root = resolved.resolvedPath;
 
   try {
     fs.mkdirSync(path.dirname(root), { recursive: true });
@@ -915,4 +919,78 @@ export function isSafePath(filePath: string): boolean {
   if (filePath.includes("\0")) return false;
   // Block sensitive patterns
   return !BLOCKED_PATH_PATTERNS.some((re) => re.test(filePath));
+}
+
+/**
+ * Resolve `relativePath` against `cwd` and verify the REAL (symlink-
+ * resolved) location is still inside the REAL project root.
+ *
+ * isSafePath() alone is lexical: it rejects a STRING containing ".." or
+ * a leading "/", but a relative path that merely passes THROUGH an
+ * existing symlink can still land outside the sandbox at actual
+ * read/write time, because the OS resolves symlinks during the real
+ * fs.* syscall regardless of what the pre-resolution string looked
+ * like. A project that already contains a symlink pointing outside its
+ * root (shared-config symlinks, worktree-linked files, etc. — not
+ * exotic) would pass isSafePath() on a path like "shared/config.json"
+ * while actually reading/writing wherever that symlink points.
+ *
+ * This walks up from the target to the deepest EXISTING ancestor before
+ * calling realpathSync — realpathSync throws ENOENT on a path that
+ * doesn't exist yet, which is the common case for a file about to be
+ * created — then rejoins the not-yet-existing remainder onto the
+ * resolved real ancestor and checks containment against the real
+ * (symlink-resolved) project root.
+ *
+ * Fails closed: any resolution error is treated as unsafe.
+ */
+export function resolveSandboxedPath(
+  cwd: string,
+  relativePath: string,
+): { ok: true; resolvedPath: string } | { ok: false; reason: string } {
+  if (!isSafePath(relativePath)) {
+    return {
+      ok: false,
+      reason: `${relativePath} is outside the project sandbox or matches a sensitive file pattern`,
+    };
+  }
+
+  let root: string;
+  try {
+    root = fs.realpathSync(cwd);
+  } catch {
+    return { ok: false, reason: "project root could not be resolved" };
+  }
+
+  const resolvedPath = path.resolve(cwd, relativePath);
+
+  // Walk up to the deepest existing ancestor, collecting the
+  // not-yet-existing tail segments to rejoin afterward.
+  let existing = resolvedPath;
+  const remainder: string[] = [];
+  for (;;) {
+    if (fs.existsSync(existing)) break;
+    const parent = path.dirname(existing);
+    if (parent === existing) break; // filesystem root — cwd should have matched first
+    remainder.unshift(path.basename(existing));
+    existing = parent;
+  }
+
+  let realExisting: string;
+  try {
+    realExisting = fs.realpathSync(existing);
+  } catch {
+    return { ok: false, reason: `${relativePath} could not be resolved` };
+  }
+
+  const realTarget = remainder.length > 0 ? path.join(realExisting, ...remainder) : realExisting;
+
+  if (realTarget !== root && !realTarget.startsWith(root + path.sep)) {
+    return {
+      ok: false,
+      reason: `${relativePath} resolves outside the project sandbox (via a symlink)`,
+    };
+  }
+
+  return { ok: true, resolvedPath };
 }

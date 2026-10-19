@@ -16,6 +16,12 @@
  *   4. listFiles() — empty path resolves to the project root instead of
  *      being rejected or escaping to the OS root; ".." and absolute
  *      paths are rejected instead of escaping the sandbox.
+ *   5. resolveSandboxedPath() — a lexically-safe path (no ".." or
+ *      leading "/") that passes THROUGH an existing symlink pointing
+ *      outside the project root is still rejected, because the check
+ *      resolves the REAL (symlink-followed) location, not just the
+ *      literal string. This is what writeFile/listFiles/readFile all
+ *      use instead of the lexical-only isSafePath() they used before.
  */
 
 import { describe, it } from "node:test";
@@ -24,7 +30,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { detectUnsupportedShellSyntax } from "../execution.js";
-import { runCommand, writeFile, listFiles } from "../project.js";
+import { runCommand, writeFile, listFiles, readFile, resolveSandboxedPath } from "../project.js";
 import { NodeShellExecutor } from "../shell.js";
 
 function makeTempProject(): string {
@@ -257,6 +263,122 @@ describe("listFiles — empty path resolves to project root, sandbox enforced", 
       const shell = new NodeShellExecutor(dir);
       const result = await listFiles(shell, "..");
       assert.equal(result.success, false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── resolveSandboxedPath() / symlink-escape regression ─────────────
+//
+// isSafePath() is purely lexical: a relative path with no ".." and no
+// leading "/" still passes it even when an existing symlink makes the
+// REAL location land outside the project root. These tests create a
+// symlink inside the project pointing at a directory/file OUTSIDE it,
+// then prove writeFile/listFiles/readFile all refuse to follow it —
+// and that an ordinary nested path with no symlinks involved is
+// completely unaffected.
+//
+// Skips gracefully if this platform can't create symlinks (e.g.
+// Windows without Developer Mode / admin, where symlinkSync throws
+// EPERM) rather than failing the suite for an unrelated platform limit.
+function canMakeSymlinks(): boolean {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "litt-symlink-probe-"));
+  try {
+    fs.symlinkSync(base, path.join(base, "self"), "dir");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+}
+const SYMLINKS_SUPPORTED = canMakeSymlinks();
+
+describe("symlink escape — writeFile/listFiles/readFile reject it, resolveSandboxedPath() directly", { skip: !SYMLINKS_SUPPORTED }, () => {
+  it("writeFile refuses to write through a symlink pointing outside the project", async () => {
+    const dir = makeTempProject();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "litt-symlink-outside-"));
+    try {
+      fs.symlinkSync(outside, path.join(dir, "escape"), "dir");
+      const shell = new NodeShellExecutor(dir);
+      const result = await writeFile(shell, "escape/pwned.html", "<html>pwned</html>");
+      assert.equal(result.success, false);
+      assert.equal(fs.existsSync(path.join(outside, "pwned.html")), false,
+        "must not have written outside the project root via the symlink");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("listFiles refuses to list a symlinked directory pointing outside the project", async () => {
+    const dir = makeTempProject();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "litt-symlink-outside-"));
+    try {
+      fs.writeFileSync(path.join(outside, "secret.txt"), "outside-only");
+      fs.symlinkSync(outside, path.join(dir, "escape"), "dir");
+      const shell = new NodeShellExecutor(dir);
+      const result = await listFiles(shell, "escape");
+      assert.equal(result.success, false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("readFile refuses to read a file reached through a symlink pointing outside the project", async () => {
+    const dir = makeTempProject();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "litt-symlink-outside-"));
+    try {
+      fs.writeFileSync(path.join(outside, "secret.txt"), "outside-only-content");
+      fs.symlinkSync(path.join(outside, "secret.txt"), path.join(dir, "escape.txt"), "file");
+      const shell = new NodeShellExecutor(dir);
+      const result = await readFile(shell, "escape.txt");
+      assert.equal(result.success, false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveSandboxedPath rejects a not-yet-existing file reached through an outside-pointing symlink", () => {
+    const dir = makeTempProject();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "litt-symlink-outside-"));
+    try {
+      fs.symlinkSync(outside, path.join(dir, "escape"), "dir");
+      // The leaf file doesn't exist yet — this is the "about to create
+      // it" case writeFile hits, which is why the walk-up-to-existing-
+      // ancestor logic exists at all (realpathSync alone would ENOENT).
+      const result = resolveSandboxedPath(dir, "escape/not-created-yet.html");
+      assert.equal(result.ok, false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("a symlink that points back INSIDE the project is allowed (not an over-broad rejection)", async () => {
+    const dir = makeTempProject();
+    try {
+      fs.mkdirSync(path.join(dir, "real-target"));
+      fs.symlinkSync(path.join(dir, "real-target"), path.join(dir, "alias"), "dir");
+      const shell = new NodeShellExecutor(dir);
+      const result = await writeFile(shell, "alias/ok.html", "<html>fine</html>");
+      assert.equal(result.success, true);
+      assert.equal(fs.existsSync(path.join(dir, "real-target", "ok.html")), true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("an ordinary nested path with no symlinks is unaffected", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const result = await writeFile(shell, "a/b/c/index.html", "<html></html>");
+      assert.equal(result.success, true);
+      assert.equal(fs.existsSync(path.join(dir, "a", "b", "c", "index.html")), true);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
