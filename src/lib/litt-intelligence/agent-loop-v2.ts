@@ -19,7 +19,7 @@ import { randomUUID } from "crypto";
 import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
 import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
-import type { WorkspaceTransport } from "./workspace-transport";
+import type { CheckpointInfo, WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
@@ -30,6 +30,8 @@ import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
+import { studioLog } from "@/lib/studio/logger";
+import { cancelReasonFromAbortSignal } from "@/lib/studio/cancel-attribution";
 import { recordModelFailure, createRunRouteBudget, type RunRouteBudget } from "./provider-registry";
 import {
   FILE_WRITE_TOOL_IDS,
@@ -1155,7 +1157,7 @@ async function runAgentLoopV2Inner(
   let modelFailed: string | undefined;
   let modelFailureText: string | undefined;
   let failedHonestly: string | undefined;
-  let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
+  let checkpoint: CheckpointInfo | undefined;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
   // Bounded recovery when the model announces more work but emits no tool
@@ -1531,9 +1533,11 @@ async function runAgentLoopV2Inner(
       // workspace files. Read-only tools never checkpoint.
       if (!toolDef.readOnly) {
         localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
+        // Gate 1 Fix 1c: a failed re-checkpoint (null) must not erase a
+        // previously valid baseline — keep the prior checkpoint.
         checkpoint = await transport.createCheckpointBeforeMutation(
           `Pre-mutation: ${toolCall.toolId} (step ${stepsUsed})`,
-        ) ?? undefined;
+        ) ?? checkpoint;
         if (checkpoint) {
           localProgress.emit({
             type: "checkpoint",
@@ -1548,13 +1552,18 @@ async function runAgentLoopV2Inner(
       if (permResult.requiresApproval) {
         // Phase 3: browser mutations get an action-and-target description
         // so the in-chat approval card says what is being approved.
+        // Quote consistency (gap map §4.5): do NOT append
+        // cfg.billingEstimateBits here. That figure is the stale
+        // initial-run estimate; the messages route appends the binding
+        // resume quote (resumeQuoteDisclosure over the frozen
+        // pausedMessages — the amount the approvals route reserves) to
+        // this reason at pause persistence. Appending both put two
+        // different prices on one approval card.
         const approvalReason = await pauseReasonFor(
           toolCall.toolId,
           toolCall.inputs,
           permResult.reason ?? "Approval required",
-        ) + (cfg.billingEstimateBits
-          ? ` Estimated cost: ${cfg.billingEstimateBits} LiTTBits (debited on success; failed work debits zero).`
-          : "");
+        );
         localProgress.emit({
           type: "approval_required",
           toolId: toolCall.toolId,
@@ -1581,6 +1590,15 @@ async function runAgentLoopV2Inner(
           // are captured as deferred calls on the pause so resume re-injects
           // them after the approved tool runs — approving one tool must not
           // silently drop the rest of the batch.
+          // Audit (R3 / E2-Q5): the pause itself used to be stdout-silent;
+          // the gate's durable record is created by the caller, this line
+          // is the loop-side trace that a gate was hit. Ids + tool only.
+          studioLog("approval:gate_paused", {
+            conversationId: cfg.conversationId,
+            userId: cfg.userId,
+            actionRunId: cfg.actionRunId,
+            tool: toolCall.toolId,
+          });
           return {
             finalText: `I need your approval to run \`${toolCall.toolId}\`. ${approvalReason}`,
             stepsUsed,
@@ -1631,7 +1649,11 @@ async function runAgentLoopV2Inner(
       // once the caller has aborted.
       if (cfg.signal?.aborted) {
         cancelled = true;
-        cancelReason = "Cancelled by user";
+        // Attribution (R4/E3-S6): the reason names the abort's ORIGIN —
+        // a user Stop reads "Cancelled by user"; a shutdown/watchdog
+        // abort carries its own reason, so downstream settles never
+        // record a server restart as a user cancellation.
+        cancelReason = cancelReasonFromAbortSignal(cfg.signal);
         break;
       }
 
@@ -2100,7 +2122,7 @@ export interface ResumeInput {
   /** Whether a mutation already happened before pause */
   hadInterveningMutation: boolean;
   /** Existing checkpoint (if created before pause) */
-  existingCheckpoint?: { checkpointId: string; label: string; gitSha: string };
+  existingCheckpoint?: CheckpointInfo;
   /**
    * Calls deferred from the batch that hit the approval gate. Executed
    * after the approved tool on resume (in batch order), through the same
@@ -2143,7 +2165,7 @@ export interface DeferredToolBatchState {
   hasInterveningMutation: boolean;
   cancelled: boolean;
   cancelReason?: string;
-  checkpoint?: { checkpointId: string; label: string; gitSha: string };
+  checkpoint?: CheckpointInfo;
   mutationBatchPending: boolean;
   batchHasMutation: boolean;
   completedDeployment: CompletedDeployment | null;
@@ -2218,7 +2240,7 @@ export async function executeDeferredToolCalls(
     // abort prevents every later call from starting.
     if (ctx.signal?.aborted) {
       state.cancelled = true;
-      state.cancelReason = "Cancelled by user";
+      state.cancelReason = cancelReasonFromAbortSignal(ctx.signal);
       break;
     }
 
@@ -2347,20 +2369,27 @@ export async function executeDeferredToolCalls(
     // Checkpoint before EVERY mutation in the deferred batch (the same
     // per-mutation guarantee as the initial loop): the resumed run keeps
     // producing a rollback point for each mutation across the pause
-    // boundary, so the workspace always diffs truthfully. Read-only tools
-    // never checkpoint.
+    // boundary. Read-only tools never checkpoint.
     if (!toolDef.readOnly) {
       ctx.localProgress.emit({ type: "phase", phase: "execute", step: ctx.stepsUsed });
-      state.checkpoint = await ctx.transport.createCheckpointBeforeMutation(
+      const mutationCheckpoint = await ctx.transport.createCheckpointBeforeMutation(
         `Pre-mutation resume (deferred batch): ${toolCall.toolId}`,
-      ) ?? undefined;
-      if (state.checkpoint) {
+      );
+      const effectiveCheckpoint = mutationCheckpoint ?? state.checkpoint;
+      if (effectiveCheckpoint) {
         ctx.localProgress.emit({
           type: "checkpoint",
-          label: state.checkpoint.label,
-          gitSha: state.checkpoint.gitSha,
+          label: effectiveCheckpoint.label,
+          gitSha: effectiveCheckpoint.gitSha,
         });
       }
+      // Baseline continuity (R2/E4-S2): as in the resume main loop, the
+      // per-mutation snapshot is a rollback point only — it never replaces
+      // the baseline threaded into this resume (state.checkpoint, seeded
+      // from ResumeInput.existingCheckpoint). Adopt it as the baseline only
+      // when the segment started with none (Gate 1 Fix 1c: a failed
+      // re-checkpoint, null, likewise preserves the prior baseline).
+      state.checkpoint = state.checkpoint ?? mutationCheckpoint ?? undefined;
     }
 
     ctx.localProgress.emit({ type: "tool_start", toolId: toolCall.toolId, summary: `${toolCall.toolId} (deferred)` });
@@ -2622,7 +2651,7 @@ async function resumeAgentLoopV2Inner(
       // The run was stopped while awaiting approval: the approved tool
       // must not execute. Surface cancelled without running it.
       cancelled = true;
-      cancelReason = "Cancelled by user";
+      cancelReason = cancelReasonFromAbortSignal(cfg.signal);
       result = {
         toolCallId: resume.toolCallId,
         toolId: resume.toolId,
@@ -2820,6 +2849,11 @@ async function resumeAgentLoopV2Inner(
         toolCalls: toolCallLog,
         cancelled: false,
         events,
+        // Baseline continuity (R2/E4-S2): this pause return must carry the
+        // segment baseline like the main loop's pause return does — without
+        // it, the approvals route had no checkpoint to persist on the
+        // nested record and every later resume started baseline-less.
+        checkpoint: checkpoint ?? undefined,
         pendingApproval: deferredResult.nestedApproval,
       };
     }
@@ -3060,26 +3094,36 @@ async function resumeAgentLoopV2Inner(
 
       // Create the pre-mutation checkpoint BEFORE the approval gate, ahead of
       // EVERY mutating tool call (same per-mutation guarantee as the initial
-      // loop): a nested approval pause carries the latest checkpoint so the
-      // next resume diffs truthfully instead of "unknown". Read-only tools
+      // loop): each mutation keeps its own rollback point. Read-only tools
       // never checkpoint.
       if (!toolDef.readOnly) {
-        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-mutation resume: ${toolCall.toolId} (step ${stepsUsed})`) ?? undefined;
-        if (checkpoint) {
-          localProgress.emit({ type: "checkpoint", label: checkpoint.label, gitSha: checkpoint.gitSha });
+        const mutationCheckpoint = await transport.createCheckpointBeforeMutation(`Pre-mutation resume: ${toolCall.toolId} (step ${stepsUsed})`);
+        const effectiveCheckpoint = mutationCheckpoint ?? checkpoint;
+        if (effectiveCheckpoint) {
+          localProgress.emit({ type: "checkpoint", label: effectiveCheckpoint.label, gitSha: effectiveCheckpoint.gitSha });
         }
+        // Baseline continuity (R2/E4-S2): the fresh snapshot above is this
+        // mutation's rollback point — it must NOT replace the baseline this
+        // segment was threaded (resume.existingCheckpoint, the build's
+        // original pre-mutation state). Replacing it made a nested pause
+        // carry a mid-build baseline and the finalize tail diff against it,
+        // so changes from earlier segments vanished from the verdict. Adopt
+        // a fresh snapshot as the baseline only when the segment started
+        // with none (Gate 1 Fix 1c: a failed re-checkpoint, null, likewise
+        // never erases an existing baseline).
+        checkpoint = checkpoint ?? mutationCheckpoint ?? undefined;
       }
 
       if (permResult.requiresApproval) {
         // Phase 3: browser mutations get an action-and-target description
         // on the resumed-run gate too.
+        // Quote consistency (gap map §4.5): no billingEstimateBits
+        // append — the route-appended resume quote is the sole figure.
         const approvalReason = await pauseReasonFor(
           toolCall.toolId,
           toolCall.inputs,
           permResult.reason ?? "Approval required",
-        ) + (cfg.billingEstimateBits
-          ? ` Estimated cost: ${cfg.billingEstimateBits} LiTTBits (debited on success; failed work debits zero).`
-          : "");
+        );
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: approvalReason });
 
         // Pause for approval in AUTO as well as ACT — the same contract as
@@ -3091,6 +3135,14 @@ async function resumeAgentLoopV2Inner(
         // As in the initial loop, the calls after this one were never
         // executed — capture them as deferred calls so the next resume
         // re-injects them after the approved tool.
+        // Audit (R3 / E2-Q5): loop-side trace of the nested pause (the
+        // route logs the persisted gate as approval:nested_gate_created).
+        studioLog("approval:gate_paused", {
+          conversationId: cfg.conversationId,
+          userId: cfg.userId,
+          actionRunId: cfg.actionRunId,
+          tool: toolCall.toolId,
+        });
         return {
           finalText: `I need your approval to run \`${toolCall.toolId}\`. ${approvalReason}`,
           stepsUsed,
@@ -3125,7 +3177,11 @@ async function resumeAgentLoopV2Inner(
       // once the caller has aborted.
       if (cfg.signal?.aborted) {
         cancelled = true;
-        cancelReason = "Cancelled by user";
+        // Attribution (R4/E3-S6): the reason names the abort's ORIGIN —
+        // a user Stop reads "Cancelled by user"; a shutdown/watchdog
+        // abort carries its own reason, so downstream settles never
+        // record a server restart as a user cancellation.
+        cancelReason = cancelReasonFromAbortSignal(cfg.signal);
         break;
       }
 

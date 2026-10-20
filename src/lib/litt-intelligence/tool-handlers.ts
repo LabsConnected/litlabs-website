@@ -24,6 +24,49 @@ import {
   type ImageGenerationInput,
 } from "@/lib/generation/image-service";
 import type { MediaProviderId } from "@/lib/media";
+import {
+  creatorKey,
+  getCreatorParams,
+} from "@/lib/station-control/stations/creator-state";
+import type { StationExecutionContext } from "@/lib/station-control/types";
+
+/**
+ * Resolve the prompt staged for this run by image.setPrompt.
+ *
+ * The station setters stage generation params in creator-state and the
+ * station image.generate consumes them with empty args — but the agent
+ * loop reaches THIS handler for image.generate (on the id collision the
+ * station bridge keeps the original registry tool), so the staged
+ * prompt must resolve here too. Without it, a station-style generate
+ * call carries no prompt and dies before the image service is ever
+ * invoked (staging run 00808832: 5 generate calls, zero service logs).
+ *
+ * Keys mirror creatorKey(): the run's own conversation/project first,
+ * then the conversation-less key — the advertised-handler path builds
+ * its station context without a conversationId, so loop-staged params
+ * live under the "default" conversation segment.
+ */
+function stagedImagePrompt(t: {
+  conversationId?: unknown;
+  projectId?: unknown;
+} | null): string | undefined {
+  if (!t) return undefined;
+  const projectId =
+    typeof t.projectId === "string" && t.projectId ? t.projectId : null;
+  const conversationId =
+    typeof t.conversationId === "string" && t.conversationId
+      ? t.conversationId
+      : null;
+  const keys = new Set<string>([
+    creatorKey({ conversationId, projectId } as StationExecutionContext),
+    creatorKey({ conversationId: null, projectId } as StationExecutionContext),
+  ]);
+  for (const key of keys) {
+    const staged = getCreatorParams(key).prompt;
+    if (staged && staged.length >= 3) return staged;
+  }
+  return undefined;
+}
 
 /**
  * Image Generate handler — calls the shared image generation service
@@ -45,12 +88,7 @@ export async function handleImageGenerate(
   inputs: Record<string, unknown>,
   transport?: unknown,
 ): Promise<unknown> {
-  const prompt = inputs.prompt as string;
   const providerId = inputs.providerId as string | undefined;
-
-  if (!prompt || prompt.length < 3) {
-    return { success: false, error: "Prompt must be at least 3 characters" };
-  }
 
   // Trusted server-side context only. Never read a user ID from the tool
   // inputs — the agent never has a Clerk session, and a client-supplied
@@ -64,6 +102,22 @@ export async function handleImageGenerate(
           operationId?: unknown;
         })
       : null;
+
+  // Prompt resolution: a direct argument wins. With no usable direct
+  // prompt, fall back to the prompt staged for this project by
+  // image.setPrompt — the station flow stages params and then calls
+  // generate with empty args.
+  const directPrompt =
+    typeof inputs.prompt === "string" ? inputs.prompt : undefined;
+  const prompt =
+    directPrompt && directPrompt.length >= 3
+      ? directPrompt
+      : (stagedImagePrompt(t) ?? directPrompt);
+
+  if (!prompt || prompt.length < 3) {
+    return { success: false, error: "Prompt must be at least 3 characters" };
+  }
+
   const userId = typeof t?.userId === "string" && t.userId ? t.userId : null;
   if (!userId) {
     return {

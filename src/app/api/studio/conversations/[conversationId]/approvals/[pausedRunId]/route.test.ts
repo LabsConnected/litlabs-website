@@ -110,6 +110,7 @@ import {
 import { resumeAgentLoopV2 } from "@/lib/litt-intelligence/agent-loop-v2";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getCheckpoint } from "@/lib/missions/mission-repository";
+import { encodeManifestCheckpointDescription } from "@/lib/missions/workspace-manifest";
 import {
   getActionRun,
   transitionActionRunEventActivity,
@@ -572,5 +573,99 @@ describe("POST /approvals/[pausedRunId] — checkpoint SHA threading (#551b1)", 
     expect(getCheckpoint).not.toHaveBeenCalled();
     const resumeInput = vi.mocked(resumeAgentLoopV2).mock.calls[0][0];
     expect(resumeInput.existingCheckpoint).toBeUndefined();
+  });
+});
+
+describe("POST /approvals/[pausedRunId] — manifest checkpoint cross-pause recovery (Gate 1)", () => {
+  // Gate 1 Fix 1 made createWorkspaceCheckpoint fall back to a manifest
+  // checkpoint when git is unavailable (HOST_EXECUTION_DISABLED): the row's
+  // git_sha is empty and the path → sha256 baseline rides the row's
+  // description, encoded. Within a run the loop threads kind/manifest
+  // through CheckpointInfo, but the pause persists only the checkpointId —
+  // so unless THIS route decodes the row on resume, the resumed run gets a
+  // bare empty-SHA checkpoint, computeWorkspaceChange short-circuits to
+  // "unknown", and verification collapses across every approval pause on
+  // staging ("could not verify whether files changed").
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getActionRun).mockResolvedValue({ id: "run-parent-1", status: "waiting_for_user" } as any);
+    vi.mocked(verifyProjectWorkspace).mockResolvedValue({ workspaceId: "ws-123" } as any);
+    vi.mocked(markRunProcessing).mockResolvedValue(true);
+    vi.mocked(getAwaitingApprovalAssistantMessage).mockResolvedValue(awaitingMessage as any);
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "done",
+      stepsUsed: 1,
+      toolCalls: [],
+      cancelled: false,
+      pendingApproval: undefined,
+    } as any);
+  });
+
+  const MANIFEST = { "index.html": "hash-index-v1", "css/styles.css": "hash-css-v1" };
+
+  function mockManifestRow(description: string | null, gitSha = "") {
+    vi.mocked(getPausedRun).mockResolvedValue({ ...pendingRun, checkpointId: "chk-m1" } as any);
+    vi.mocked(resolvePausedRun).mockResolvedValue({
+      ...pendingRun,
+      checkpointId: "chk-m1",
+      status: "approved",
+    } as any);
+    vi.mocked(getCheckpoint).mockResolvedValue({
+      id: "chk-m1",
+      projectId: "proj-123",
+      userId: "user_123",
+      gitSha,
+      label: "pre-mutation",
+      description,
+      missionRunId: null,
+      createdAt: new Date().toISOString(),
+    } as any);
+  }
+
+  it("recovers a manifest checkpoint across the pause: kind + decoded manifest threaded into the resume", async () => {
+    mockManifestRow(encodeManifestCheckpointDescription(MANIFEST));
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    expect(getCheckpoint).toHaveBeenCalledWith("chk-m1", "user_123");
+    const resumeInput = vi.mocked(resumeAgentLoopV2).mock.calls[0][0];
+    expect(resumeInput.existingCheckpoint).toEqual({
+      checkpointId: "chk-m1",
+      label: "pre-approval",
+      gitSha: "",
+      kind: "manifest",
+      manifest: MANIFEST,
+    });
+  });
+
+  it("fails closed on an undecodable manifest description: kind threaded WITHOUT a manifest (producer answers 'unknown', never a downgrade to git)", async () => {
+    mockManifestRow("manifest-checkpoint:v1:{not-json");
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    const resumeInput = vi.mocked(resumeAgentLoopV2).mock.calls[0][0];
+    expect(resumeInput.existingCheckpoint).toEqual({
+      checkpointId: "chk-m1",
+      label: "pre-approval",
+      gitSha: "",
+      kind: "manifest",
+    });
+  });
+
+  it("a real git SHA wins: a decodable description on a git row does not turn it into a manifest checkpoint", async () => {
+    mockManifestRow(encodeManifestCheckpointDescription(MANIFEST), "abc123def456");
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    const resumeInput = vi.mocked(resumeAgentLoopV2).mock.calls[0][0];
+    expect(resumeInput.existingCheckpoint).toEqual({
+      checkpointId: "chk-m1",
+      label: "pre-approval",
+      gitSha: "abc123def456",
+    });
   });
 });

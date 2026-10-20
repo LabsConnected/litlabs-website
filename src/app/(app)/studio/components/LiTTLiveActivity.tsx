@@ -49,8 +49,12 @@ interface LiTTLiveActivityProps {
   onOpenCheck?: (checkId: string, output?: string) => void;
   /** Called when terminal should open. */
   onOpenTerminal?: () => void;
-  /** Called when an approval should be resolved. */
-  onResolveApproval?: (decision: "approved" | "rejected") => void;
+  /**
+   * Called when an approval should be resolved. Receives the decision
+   * AND the card's own pausedRunId (R1b / E1 F2) so the handler can
+   * refuse a click whose gate is no longer current.
+   */
+  onResolveApproval?: (decision: "approved" | "rejected", pausedRunId?: string) => void;
   /** Called when the user clicks Stop while LiTT is running. */
   onStop?: () => void;
   /** Called when the user clicks Rollback to the last checkpoint. */
@@ -91,6 +95,7 @@ export default function LiTTLiveActivity({
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
   const changesSummary = useExecutionStore((s) => s.changesSummary);
   const collapseEvent = useExecutionStore((s) => s.collapseEvent);
@@ -392,6 +397,7 @@ export default function LiTTLiveActivity({
               <ApprovalCard
                 approval={pendingApproval}
                 onResolve={onResolveApproval}
+                disabled={approvalPhase === "submitting" || approvalPhase === "executing"}
               />
             )}
 
@@ -445,10 +451,23 @@ function EmptyState() {
 function ApprovalCard({
   approval,
   onResolve,
+  disabled = false,
 }: {
   approval: { toolId: string; reason: string; pausedRunId?: string };
-  onResolve?: (decision: "approved" | "rejected") => void;
+  onResolve?: (decision: "approved" | "rejected", pausedRunId?: string) => void;
+  /**
+   * R1b (E1 F1): while a decision is submitting/executing, this card
+   * disables exactly like the chat card — previously it stayed clickable
+   * and could fire a duplicate (or contradictory) decision POST.
+   */
+  disabled?: boolean;
 }) {
+  // Bind the decision to THIS card's gate (R1b / E1 F2); approvals with
+  // no pausedRunId keep the original single-argument call.
+  const resolve = (decision: "approved" | "rejected") => {
+    if (approval.pausedRunId) onResolve?.(decision, approval.pausedRunId);
+    else onResolve?.(decision);
+  };
   return (
     <div
       className="rounded-xl border p-2.5"
@@ -471,8 +490,9 @@ function ApprovalCard({
         <div className="flex gap-1.5">
           <button
             type="button"
-            onClick={() => onResolve("approved")}
-            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10"
+            onClick={() => resolve("approved")}
+            disabled={disabled}
+            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
             style={{
               borderColor: "var(--litt-primary)40",
               backgroundColor: "var(--litt-primary)10",
@@ -483,8 +503,9 @@ function ApprovalCard({
           </button>
           <button
             type="button"
-            onClick={() => onResolve("rejected")}
-            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10"
+            onClick={() => resolve("rejected")}
+            disabled={disabled}
+            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
             style={{
               borderColor: "var(--error)40",
               backgroundColor: "var(--error)10",

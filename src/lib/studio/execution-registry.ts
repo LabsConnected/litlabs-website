@@ -16,6 +16,8 @@ import "server-only";
  * most one execution per conversation is expected at a time.
  */
 
+import { USER_CANCEL_REASON } from "./cancel-attribution";
+
 export interface ActiveExecution {
   /** Internal unique key for this registration (assistant message id). */
   key: string;
@@ -115,7 +117,7 @@ export function registerExecution(input: {
       stamps.filter((p) => p !== match),
     );
     if (!input.controller.signal.aborted) {
-      input.controller.abort(new Error("Cancelled by user"));
+      input.controller.abort(new Error(USER_CANCEL_REASON));
     }
   }
 
@@ -212,7 +214,7 @@ export function requestExecutionCancellation(
       return { status: "not_found" };
     }
     if (!entry.controller.signal.aborted) {
-      entry.controller.abort(new Error("Cancelled by user"));
+      entry.controller.abort(new Error(USER_CANCEL_REASON));
     }
     return { status: "aborted", actionRunId: entry.actionRunId };
   }

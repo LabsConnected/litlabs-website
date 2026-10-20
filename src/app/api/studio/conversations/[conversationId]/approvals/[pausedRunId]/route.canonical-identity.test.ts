@@ -565,7 +565,13 @@ describe("resume billing — reservation and settlement", () => {
       stepsUsed: 1,
       toolCalls: [],
       cancelled: true,
-      cancelReason: "user stopped",
+      // R4 fixture correction (disclosed): the loop's only user-stop
+      // reason string is "Cancelled by user" — the previous fixture
+      // invented "user stopped", a string no code path emits, which was
+      // inert while any cancelled=true settled as cancelled. Attribution
+      // now reads the reason, so the double speaks the real vocabulary.
+      // The assertion below is unchanged.
+      cancelReason: "Cancelled by user",
       pendingApproval: undefined,
     } as never);
     const res = await POST(makeRequest("approved"), routeParams);

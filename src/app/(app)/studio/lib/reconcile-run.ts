@@ -1,6 +1,8 @@
 "use client";
 
 import type { ConversationMessage, MessageStatus } from "@/lib/studio/types";
+import { useExecutionStore } from "../stores/useExecutionStore";
+import type { ActionRunDisplayState } from "../components/ActionRunStatusPanel";
 
 /**
  * Reconcile canonical run state after an SSE transport loss.
@@ -172,4 +174,173 @@ export function reconciledAssistantStatus(
     default:
       return "streaming";
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mount-time canonical fold (R4 / E3-S5)
+//
+// The helpers above reconcile a run after an in-session SSE loss. This
+// fold is the LOAD-TIME counterpart: when a conversation loads, the
+// canonical action-run projection is fetched once and folded into the
+// execution store, so the operator bar, mission panel, and tab badges —
+// all store readers — reflect the server's truth instead of the empty
+// post-reload store ("Idle" over a live run; a stale gate residue
+// announcing "Approval needed" over a finished one).
+//
+// Monotonicity (stale-response protection): convergence here is
+// one-directional. A snapshot may only supersede state that is itself
+// snapshot-derived or empty — never a locally recorded outcome, never
+// a live decision flow, and never a locally mounted gate. A stale
+// response arriving after a newer terminal state was applied is
+// dropped wholesale.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The load-time view of the canonical action-run projection. */
+export interface CanonicalRunSnapshot {
+  runId: string | null;
+  runStatus: string | null;
+  displayState: ActionRunDisplayState;
+  currentActivity: string | null;
+  pendingApprovals: Array<{ id: string; toolId: string; reason: string }>;
+}
+
+const TERMINAL_DISPLAY_PHASES: Partial<
+  Record<ActionRunDisplayState, "done" | "failed" | "cancelled">
+> = {
+  completed: "done",
+  failed: "failed",
+  stopped: "cancelled",
+};
+
+const ACTIVE_DISPLAY_STATES: ReadonlySet<ActionRunDisplayState> = new Set([
+  "queued",
+  "starting",
+  "running",
+  "waiting_for_user",
+  "paused",
+  "stopping",
+  "awaiting_approval",
+]);
+
+/** Fetch the canonical action-run projection once. Null = no run / unreadable. */
+export async function fetchCanonicalRunSnapshot(
+  conversationId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CanonicalRunSnapshot | null> {
+  try {
+    const resp = await fetchImpl(
+      `/api/studio/conversations/${conversationId}/action-run`,
+      { credentials: "include" },
+    );
+    if (!resp.ok) return null;
+    const body = (await resp.json().catch(() => null)) as {
+      projection?: {
+        run?: { id?: string; status?: string };
+        displayState?: ActionRunDisplayState;
+        currentActivity?: string | null;
+        pendingApprovals?: Array<{ id: string; toolId: string; reason?: string }>;
+      } | null;
+    } | null;
+    const projection = body?.projection;
+    if (!projection?.displayState) return null;
+    return {
+      runId: projection.run?.id ?? null,
+      runStatus: projection.run?.status ?? null,
+      displayState: projection.displayState,
+      currentActivity: projection.currentActivity ?? null,
+      pendingApprovals: (projection.pendingApprovals ?? []).map((a) => ({
+        id: a.id,
+        toolId: a.toolId,
+        reason: a.reason ?? "",
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fold one canonical snapshot into the execution store. Guard summary
+ * (each guard is a stale-response scenario in the regression suite):
+ *  - a live local decision flow (submitting/executing) owns the state —
+ *    the fold never touches it;
+ *  - a TERMINAL snapshot acts only from an empty (idle) store or a
+ *    gate-waiting store whose gate is itself snapshot-derived
+ *    (`rehydrated`) — a locally mounted gate converges through its own
+ *    watcher/poll, and any other phase is a locally recorded outcome
+ *    the snapshot must not rewrite;
+ *  - a NON-terminal snapshot never applies over a locally recorded
+ *    terminal phase (done/failed/cancelled), never replaces a mounted
+ *    gate, and never resurrects a gate this client already decided
+ *    (resolvedPausedRunIds).
+ */
+export function foldCanonicalRunIntoExecutionStore(
+  conversationId: string,
+  snapshot: CanonicalRunSnapshot,
+): void {
+  const exec = useExecutionStore.getState();
+  if (exec.approvalPhase === "submitting" || exec.approvalPhase === "executing") {
+    return;
+  }
+
+  const terminalPhase = TERMINAL_DISPLAY_PHASES[snapshot.displayState];
+  if (terminalPhase) {
+    if (exec.phase !== "idle" && exec.phase !== "awaiting_approval") return;
+    const gate = exec.pendingApproval;
+    if (gate) {
+      // Only a snapshot-derived gate may be cleared by a snapshot; a
+      // locally mounted gate is newer evidence than any fetch.
+      if (!gate.rehydrated) return;
+      if (gate.conversationId && gate.conversationId !== conversationId) return;
+      exec.setPendingApproval(null);
+    }
+    useExecutionStore.getState().endRun(
+      terminalPhase === "cancelled"
+        ? "cancelled"
+        : terminalPhase === "failed"
+          ? "failed"
+          : undefined,
+    );
+    return;
+  }
+
+  // Non-terminal snapshot: terminal truth already recorded locally wins.
+  if (exec.phase === "done" || exec.phase === "failed" || exec.phase === "cancelled") {
+    return;
+  }
+
+  const liveGate = snapshot.pendingApprovals[0];
+  if (liveGate) {
+    if (exec.pendingApproval || exec.isRunning) return;
+    // A gate this client already decided never re-arms from a snapshot.
+    if (exec.resolvedPausedRunIds.includes(liveGate.id)) return;
+    exec.setPendingApproval({
+      toolId: liveGate.toolId,
+      reason: liveGate.reason,
+      pausedRunId: liveGate.id,
+      conversationId,
+      rehydrated: true,
+    });
+    return;
+  }
+
+  // Active run, no gate: an untouched store must not claim idle while
+  // the server is working (the post-reload operator-bar truth).
+  if (
+    ACTIVE_DISPLAY_STATES.has(snapshot.displayState) &&
+    exec.phase === "idle" &&
+    !exec.isRunning &&
+    !exec.pendingApproval
+  ) {
+    useExecutionStore.setState({ isRunning: true, phase: "running" });
+  }
+}
+
+/** Fetch + fold on conversation load. Never throws. */
+export async function reconcileConversationRunOnLoad(
+  conversationId: string,
+  fetchImpl?: typeof fetch,
+): Promise<void> {
+  const snapshot = await fetchCanonicalRunSnapshot(conversationId, fetchImpl);
+  if (snapshot) foldCanonicalRunIntoExecutionStore(conversationId, snapshot);
 }

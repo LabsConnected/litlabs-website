@@ -26,6 +26,16 @@ export interface ToolExecutionContext {
   actionContext?: ActionExecutionContext;
   /** Authenticated user identity (server-injected, never model-chosen). */
   userId?: string;
+  /**
+   * The approval state the OUTER execute() call genuinely carried
+   * (Repair R1a-2, Diagnosis E2 S4): true only when the caller passed
+   * hasApproval:true into execute() — i.e. a real approval decision (or
+   * the loop's non-gated auto-approval) stood behind this invocation.
+   * Threaded so bridge handlers (the station-control advertisement) can
+   * forward the caller's actual authorization instead of manufacturing
+   * their own. Server execution state, never model input.
+   */
+  hasApproval?: boolean;
 }
 
 type ToolHandler = (
@@ -789,6 +799,11 @@ class ToolRegistry {
                 actionRunId: explicitActionRunId ?? undefined,
                 actionContext,
                 userId: actionContext?.userId ?? inputUserId ?? undefined,
+                // Thread the approval THIS call carried (see
+                // ToolExecutionContext.hasApproval) — handlers that
+                // delegate onward must forward exactly this, never a
+                // hardcoded true.
+                hasApproval: options.hasApproval === true,
               }),
               options.transport,
             ),
@@ -1260,10 +1275,10 @@ export function registerInternalTools(): void {
       tool: {
         id: "image.generate",
         name: "Generate Image",
-        description: "Generate an image using the project's image generation provider",
+        description: "Generate an image using the project's image generation provider. Pass prompt directly, or stage it first with image.setPrompt — the handler resolves a staged prompt for the active project when no direct prompt is given.",
         source: "internal",
         version: "1.0.0",
-        inputSchema: { type: "object", properties: { prompt: { type: "string" }, projectId: { type: "string" } }, required: ["prompt"] },
+        inputSchema: { type: "object", properties: { prompt: { type: "string" }, projectId: { type: "string" } }, required: [] },
         outputSchema: { type: "object" },
         requiredCapabilities: ["image_generation"],
         requiredPermissions: ["image:generate"],

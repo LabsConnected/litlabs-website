@@ -37,6 +37,7 @@ import { mobileDiag } from "../lib/mobileDiagnostics";
 import {
   reconcileRunState,
   reconciledAssistantStatus,
+  reconcileConversationRunOnLoad,
   type ReconcileResult,
 } from "../lib/reconcile-run";
 
@@ -364,6 +365,10 @@ export function useCanonicalConversation({
         && lastAssistant.pendingApproval?.pausedRunId
         && !exec.isRunning
         && !exec.pendingApproval
+        // A gate this client already decided must never re-arm from a
+        // stale message attachment (R4 stale-response protection): the
+        // attachment outlives the decision on the persisted row.
+        && !exec.resolvedPausedRunIds.includes(lastAssistant.pendingApproval.pausedRunId)
       ) {
         exec.setPendingApproval({
           toolId: lastAssistant.pendingApproval.toolId,
@@ -374,8 +379,18 @@ export function useCanonicalConversation({
           // at click time.
           conversationId,
           inputs: lastAssistant.pendingApproval.inputs,
+          // Snapshot-derived (R4): a later canonical fold may supersede
+          // this gate with fresher terminal truth.
+          rehydrated: true,
         });
       }
+      // Mount-time canonical fold (R4 / E3-S5): fetch the action-run
+      // projection once and fold it into the execution store — terminal
+      // runs clear snapshot-derived gate residue and set the phase
+      // truthfully, a live gate the attachment above missed still
+      // rehydrates, and an active run stops the surfaces claiming
+      // "Idle". Fire-and-forget; the fold is guarded and never throws.
+      void reconcileConversationRunOnLoad(conversationId);
     } catch {
       // Non-fatal
     }

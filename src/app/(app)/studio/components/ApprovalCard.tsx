@@ -13,7 +13,13 @@ export interface ApprovalInputs {
 
 export interface ApprovalCardProps {
   approval: ApprovalInputs;
-  onResolve?: (decision: "approved" | "rejected") => void;
+  /**
+   * Decision handler. Receives the decision AND this card's own
+   * pausedRunId (R1b / E1 F2) so the handler can refuse a click whose
+   * gate is no longer the current one — a decision must never bind to a
+   * different gate than the card the user read.
+   */
+  onResolve?: (decision: "approved" | "rejected", pausedRunId?: string) => void;
   onEdit?: () => void;
   autoApproved?: boolean;
   isDeploy?: boolean;
@@ -209,6 +215,13 @@ export function ApprovalCard({
   // failed gate offers Retry (same paused run) instead of a second decision.
   const showButtons = !autoApproved && onResolve != null && phase !== "failed";
   const buttonsDisabled = phase === "submitting" || phase === "executing";
+  // Bind the decision to THIS card's gate (R1b / E1 F2). Approvals with
+  // no pausedRunId (legacy/inert renders) keep the original
+  // single-argument call — there is no gate identity to bind to.
+  const resolve = (decision: "approved" | "rejected") => {
+    if (approval.pausedRunId) onResolve?.(decision, approval.pausedRunId);
+    else onResolve?.(decision);
+  };
 
   const borderColor = isDeploy ? "#ef444480" : "#e3b34140";
   const backgroundColor = isDeploy ? "#ef44440d" : "#e3b34108";
@@ -428,7 +441,7 @@ export function ApprovalCard({
             <button
               type="button"
               data-testid="approval-approve"
-              onClick={() => onResolve?.("approved")}
+              onClick={() => resolve("approved")}
               disabled={buttonsDisabled}
               className="flex-1 rounded-lg border border-accent/40 bg-accent/10 px-2 py-1.5 text-[10px] font-bold text-accent transition hover:bg-accent/20 disabled:opacity-40"
             >
@@ -452,7 +465,7 @@ export function ApprovalCard({
             <button
               type="button"
               data-testid="approval-deny"
-              onClick={() => onResolve?.("rejected")}
+              onClick={() => resolve("rejected")}
               disabled={buttonsDisabled}
               className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
               style={{

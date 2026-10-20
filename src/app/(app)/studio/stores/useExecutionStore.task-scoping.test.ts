@@ -243,24 +243,30 @@ describe("deriveWorktabBadge (F1 slice C)", () => {
   });
 
   it("does not report ready when the projection disagrees", () => {
+    // R4 (E3-S3): a failed projection is a terminal truth, not a
+    // disagreement to hide as "idle" — the badge reports "failed"
+    // (still never "ready").
     expect(
       deriveWorktabBadge(
         "task-1",
         snap({ executionPhase: "done", actionRunDisplayState: "failed" }),
       ),
-    ).toBe("idle");
+    ).toBe("failed");
   });
 
-  it("reports idle for failed/cancelled runs and unknown tasks", () => {
+  it("reports terminal badges for failed/cancelled runs and idle for unknown tasks", () => {
+    // R4 (E3-S3): deriveWorktabBadge gained terminal states — a failed
+    // or cancelled run's tab must say so instead of falling back to
+    // "idle" as if it had never run. Unknown tasks still read "idle".
     expect(
       deriveWorktabBadge(
         "task-1",
         snap({ executionPhase: "failed", actionRunDisplayState: "failed" }),
       ),
-    ).toBe("idle");
+    ).toBe("failed");
     expect(
       deriveWorktabBadge("task-1", snap({ executionPhase: "cancelled" })),
-    ).toBe("idle");
+    ).toBe("cancelled");
     expect(deriveWorktabBadge("task-1", {})).toBe("idle");
     expect(deriveWorktabBadge("unknown-task", snap({ executionPhase: "done", actionRunDisplayState: "completed" }))).toBe("idle");
   });

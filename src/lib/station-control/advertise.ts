@@ -176,10 +176,15 @@ export function syncStationActionsToToolRegistry(): void {
             }
           : undefined,
         userId: execCtx?.userId ?? execCtx?.actionContext?.userId ?? "unknown",
-        // The agent loop pauses for approval BEFORE invoking this handler,
-        // and toolRegistry.execute enforces requireExplicitForMutations —
-        // approval has already been granted on this path.
-        hasApproval: true,
+        // Approval threading (Repair R1a-2, Diagnosis E2 S4): forward
+        // the approval the OUTER toolRegistry.execute call genuinely
+        // carried — a real decision for gated calls, the loop's
+        // hasApproval for non-gated ones. This used to be a hardcoded
+        // true, which manufactured approval for any caller and made the
+        // executor's approval gate dead code for delegated mutations
+        // whenever the mirrored delegate policy was laxer than the
+        // action it stood for.
+        hasApproval: execCtx?.hasApproval === true,
         ...(stationSink ? { emitEvent: (event) => stationSink(event) } : {}),
       });
       return executeStationAction(actionId, inputs, ctx);

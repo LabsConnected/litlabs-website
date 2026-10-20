@@ -26,9 +26,21 @@ export interface ToolHandlerResult {
   [key: string]: unknown;
 }
 
+/**
+ * Optional per-call context a handler may consult. The registry invokes
+ * handlers with (inputs, transport); direct callers (tests, station
+ * adapters) may pass an explicit static-workspace verdict here, which
+ * takes precedence over the transport's own flag.
+ */
+export interface ToolHandlerOptions {
+  isStaticWorkspace?: boolean;
+  projectId?: string;
+}
+
 export type ToolHandler = (
   inputs: Record<string, unknown>,
   transport: WorkspaceTransport,
+  opts?: ToolHandlerOptions,
 ) => Promise<ToolHandlerResult>;
 
 // ─── File Tools ───────────────────────────────────────────────────
@@ -448,7 +460,43 @@ export const handlePackageInfo: ToolHandler = async (_inputs, transport) => {
 
 // ─── Preview Tools ────────────────────────────────────────────────
 
-export const handlePreviewStart: ToolHandler = async (_inputs, transport) => {
+/**
+ * Gate 1 Fix 2 — static workspaces have no dev server to start. They are
+ * served per-request by the static preview route
+ * (/api/preview/<projectId>/, which reads the live files), exactly as the
+ * approvals route and the preview panel's status route already treat
+ * them. On staging, transport.startPreview() can only 503
+ * (HOST_EXECUTION_DISABLED — starting a host process), so calling it for
+ * a static workspace manufactures a failure where the preview is in
+ * fact ready. The static flag travels in from the run config lineage
+ * (canonicalCtx.framework === "static" in the messages route) via the
+ * transport, or explicitly via opts.
+ */
+function staticPreviewContext(
+  transport: WorkspaceTransport,
+  opts?: ToolHandlerOptions,
+): { isStatic: boolean; projectId: string } {
+  return {
+    isStatic: opts?.isStaticWorkspace ?? transport.isStaticWorkspace === true,
+    projectId: opts?.projectId ?? transport.projectId,
+  };
+}
+
+export const handlePreviewStart: ToolHandler = async (_inputs, transport, opts) => {
+  const { isStatic, projectId } = staticPreviewContext(transport, opts);
+  if (isStatic) {
+    return {
+      success: true,
+      workspaceId: transport.workspaceId,
+      status: "ready",
+      framework: "static",
+      previewUrl: `/api/preview/${projectId}/`,
+      staticPreview: true,
+      port: null,
+      command: null,
+      error: null,
+    };
+  }
   try {
     const result = await transport.startPreview();
     return {
@@ -465,7 +513,22 @@ export const handlePreviewStart: ToolHandler = async (_inputs, transport) => {
   }
 };
 
-export const handlePreviewStatus: ToolHandler = async (_inputs, transport) => {
+export const handlePreviewStatus: ToolHandler = async (_inputs, transport, opts) => {
+  const { isStatic, projectId } = staticPreviewContext(transport, opts);
+  if (isStatic) {
+    return {
+      success: true,
+      status: "ready",
+      framework: "static",
+      previewUrl: `/api/preview/${projectId}/`,
+      staticPreview: true,
+      port: null,
+      command: null,
+      error: null,
+      errorCode: null,
+      logs: [],
+    };
+  }
   try {
     const result = await transport.getPreviewStatus();
     return {

@@ -13,6 +13,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/projects/project-repository", () => ({
   verifyProjectWorkspace: vi.fn(async () => ({
+    // The real verifyProjectWorkspace contract always returns the project
+    // row (it throws otherwise); Gate 1 reads project.framework to carry
+    // the static-workspace fact into the transport. A non-static framework
+    // keeps these binary-contract tests on the pre-existing behavior path.
+    project: { framework: "vite" },
     workspaceId: "ws_test",
     workspaceRoot: "/data/ws_test",
   })),

@@ -34,6 +34,17 @@ interface ActionRunProjectionResponse {
   };
   timeline: Array<{ id: string; type: string; createdAt: string; payload: Record<string, unknown> }>;
   failure: { code: string | null; message: string | null } | null;
+  /**
+   * The run's workspace-change verdict (R3 / E4-R5), projected from the
+   * persisted verdict event. Null when the run never produced one.
+   */
+  workspaceChange: {
+    status: string;
+    fileCount: number;
+    files: string[];
+    checkpointSha: string | null;
+    updatedAt: string | null;
+  } | null;
 }
 
 /**
@@ -214,6 +225,15 @@ export function ActionRunStatusPanel({
           })}
         </div>
 
+        {projection.workspaceChange && (
+          <div className="text-[10px] font-bold" style={{ color: "var(--text-secondary)" }}>
+            Workspace: {projection.workspaceChange.status === "changed"
+              ? `changed · ${projection.workspaceChange.fileCount} file${projection.workspaceChange.fileCount === 1 ? "" : "s"}`
+              : projection.workspaceChange.status === "unchanged"
+                ? "unchanged"
+                : "could not verify"}
+          </div>
+        )}
         {projection.pendingApprovals.length > 0 && (
           <div className="text-[10px] font-bold" style={{ color: "#e3b341" }}>
             Approval needed: {projection.pendingApprovals.map((approval) => approval.toolId).join(", ")}
