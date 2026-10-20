@@ -235,7 +235,7 @@ export async function createWorkspaceTransport(
     // (framework "static"); that column is the value the messages route
     // turns into cfg.isStaticWorkspace, carried here so the preview
     // tools see the same fact without a second lookup.
-    verified.project.framework === "static",
+    verified.project?.framework === "static",
   );
 
   // Honest reachability: verifyProjectWorkspace() only checks the DB row —
