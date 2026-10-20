@@ -22,13 +22,13 @@
  *   to the Composer's own useInput.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, useApp, useStdout } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
 import { OverlayKeyboardProvider, type KeyboardHandler } from "./overlay-manager.js";
-import { isCtrl, isRawF2 } from "./keyboard-utils.js";
+import { isCtrl, isRawF2, ctrlDAction } from "./keyboard-utils.js";
 import { useTerminalSize } from "./use-terminal-size.js";
 import { Header } from "./header.js";
 import { LiTTShell } from "./shell/shell.js";
@@ -87,6 +87,11 @@ export function CockpitApp({
   const { exit } = useApp();
   const store = useCockpitStore();
   const { stdout } = useStdout();
+  // Latest committed composer draft for keyboard callbacks — the app
+  // handler ref in overlay-manager is refreshed by a passive effect and
+  // can lag a commit, so a render-time ref always holds the newest value.
+  const composerValueRef = useRef(store.state.composerValue);
+  composerValueRef.current = store.state.composerValue;
   useEventBridge(client, store, sessionBridge);
 
   // ─── Canonical ModelRuntime — ONE instance for the whole app ───
@@ -281,7 +286,17 @@ export function CockpitApp({
       store.actions.clearToolProgress();
       store.actions.stopBusy();
     } else if (isCtrl(input, key, "d")) {
-      controller.openDiffViewer();
+      // Ctrl+D: exit LiTT when composer input is empty; preserve normal text-editing behavior when input has content.
+      if (ctrlDAction(composerValueRef.current) === "exit") {
+        exit();
+      } else {
+        controller.openDiffViewer();
+      }
+    } else if (isCtrl(input, key, "g")) {
+      // Ctrl+G — expand/collapse the most recent activity entry's detail.
+      // (Ctrl+E is the composer's move-to-end and must not be shadowed.)
+      const last = store.state.activityLog[store.state.activityLog.length - 1];
+      if (last) store.actions.toggleActivityExpanded(last.id);
     } else if (isCtrl(input, key, "n")) {
       controller.newSession();
     } else if (isCtrl(input, key, "r")) {
@@ -472,6 +487,7 @@ export function CockpitApp({
             gitUntracked={store.state.gitUntracked}
             toolProgress={store.state.toolProgress}
             toolDetails={store.state.toolDetails}
+            expandedActivityIds={store.state.expandedActivityIds}
             executionTarget={store.state.executionTarget}
             canonicalMission={store.state.canonicalMission}
             workstream={store.state.workstream}

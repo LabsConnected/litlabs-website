@@ -16,6 +16,7 @@ import {
   isCtrl,
   isPrintable,
   isRawF2,
+  ctrlDAction,
   type KeyInfo,
 } from "../ink/keyboard-utils.js";
 
@@ -217,6 +218,19 @@ describe("keyboard-utils", () => {
       expect(isPrintable("\x00", key())).toBe(false);
       expect(isPrintable("\x1f", key())).toBe(false);
       expect(isPrintable("\x7f", key())).toBe(false);
+    });
+  });
+
+  describe("ctrlDAction", () => {
+    it("exits on an empty composer (EOF semantics)", () => {
+      expect(ctrlDAction("")).toBe("exit");
+      expect(ctrlDAction("   ")).toBe("exit");
+      expect(ctrlDAction("\n")).toBe("exit");
+    });
+
+    it("keeps DIFF when a draft exists", () => {
+      expect(ctrlDAction("a")).toBe("diff");
+      expect(ctrlDAction(" build me a site")).toBe("diff");
     });
   });
 });

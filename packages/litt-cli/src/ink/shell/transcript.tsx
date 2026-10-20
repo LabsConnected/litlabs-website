@@ -139,6 +139,8 @@ export interface TranscriptAreaProps {
   toolProgress: ToolProgressSnapshot | null;
   /** Ctrl+O — expand every ActivityStream row that has a fullText payload. */
   toolDetails?: boolean;
+  /** Per-row expansion — ids toggled individually (Ctrl+G on latest). */
+  expandedIds?: ReadonlySet<string>;
   /** Current agent lifecycle phase — retained for call-site compatibility. */
   holoState: string;
   /** Chat-lane processing flag — retained for call-site compatibility. */
@@ -160,6 +162,7 @@ export function TranscriptArea({
   gitModified,
   gitUntracked,
   toolDetails = false,
+  expandedIds,
 }: TranscriptAreaProps): React.ReactElement | null {
   if (messages.length === 0 || viewport.start >= viewport.end) return null;
 
@@ -191,6 +194,7 @@ export function TranscriptArea({
             maxEntries={4}
             width={contentWidth}
             details={toolDetails}
+            expandedIds={expandedIds}
             compact={compact}
           />
         </Box>
