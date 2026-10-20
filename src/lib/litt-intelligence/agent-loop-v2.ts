@@ -1550,13 +1550,18 @@ async function runAgentLoopV2Inner(
       if (permResult.requiresApproval) {
         // Phase 3: browser mutations get an action-and-target description
         // so the in-chat approval card says what is being approved.
+        // Quote consistency (gap map §4.5): do NOT append
+        // cfg.billingEstimateBits here. That figure is the stale
+        // initial-run estimate; the messages route appends the binding
+        // resume quote (resumeQuoteDisclosure over the frozen
+        // pausedMessages — the amount the approvals route reserves) to
+        // this reason at pause persistence. Appending both put two
+        // different prices on one approval card.
         const approvalReason = await pauseReasonFor(
           toolCall.toolId,
           toolCall.inputs,
           permResult.reason ?? "Approval required",
-        ) + (cfg.billingEstimateBits
-          ? ` Estimated cost: ${cfg.billingEstimateBits} LiTTBits (debited on success; failed work debits zero).`
-          : "");
+        );
         localProgress.emit({
           type: "approval_required",
           toolId: toolCall.toolId,
@@ -3076,13 +3081,13 @@ async function resumeAgentLoopV2Inner(
       if (permResult.requiresApproval) {
         // Phase 3: browser mutations get an action-and-target description
         // on the resumed-run gate too.
+        // Quote consistency (gap map §4.5): no billingEstimateBits
+        // append — the route-appended resume quote is the sole figure.
         const approvalReason = await pauseReasonFor(
           toolCall.toolId,
           toolCall.inputs,
           permResult.reason ?? "Approval required",
-        ) + (cfg.billingEstimateBits
-          ? ` Estimated cost: ${cfg.billingEstimateBits} LiTTBits (debited on success; failed work debits zero).`
-          : "");
+        );
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: approvalReason });
 
         // Pause for approval in AUTO as well as ACT — the same contract as
