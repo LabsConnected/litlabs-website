@@ -48,7 +48,7 @@ import {
 import { classifyIntent } from "@/lib/litt-kernel";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
-import { deploymentEvidenceFrom } from "@/lib/studio/completion-evidence";
+import { deploymentEvidenceFrom, evaluateCompletion } from "@/lib/studio/completion-evidence";
 import {
   createActionRun,
   requestActionRunCancellation,
@@ -1289,30 +1289,52 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           && !actionableApproval
           && !assistantText.trim();
 
-        // Honest completion: a mutation-required run that ended with
-        // zero tool calls and zero mutations must never be persisted or
-        // reported as "completed" — that is the silent fake-complete
-        // (e.g. a prose approval-ask settling Complete with nothing
-        // done and no approval card ever created). Fail it honestly.
+        // Honest completion: a mutation-required run must never be
+        // persisted or reported as "completed" unless the EVIDENCE says
+        // so — not the model's own narration, and not a tool's bare
+        // success flag either. evaluateCompletion() is the single
+        // source of truth also used to label the client work log
+        // (StudioTranscript); using it here too means the persisted
+        // status and the displayed label can never disagree, and it
+        // cross-checks a self-reported successful mutation against the
+        // real workspace diff (v2Result.workspaceChange) — a tool can
+        // return success:true/mutating:true having written nothing (an
+        // exit-0 command whose output never reached disk), and that
+        // alone must not establish completion. See
+        // completion-evidence.ts for exactly what counts as proof.
         const mutationRequired = effectiveRequiresExecution === true;
         const v2ToolCalls = v2Result?.toolCalls ?? [];
-        const v2Mutations = v2ToolCalls.filter((c) => c.success && c.mutating).length;
-        const zeroMutationCompletion =
-          mutationRequired &&
+        const completionRequirement = {
+          mutation: mutationRequired,
+          deployment: built.kernelResult.decision.routing.mode === "ship",
+        };
+        const completionVerdict = (completionRequirement.mutation || completionRequirement.deployment)
+          ? evaluateCompletion(completionRequirement, {
+              toolCalls: v2ToolCalls.map((c) => ({ toolId: c.toolId, success: c.success, mutating: c.mutating })),
+              deployment: deploymentEvidenceFrom(v2ToolCalls),
+              workspaceChange: v2Result?.workspaceChange ?? null,
+            })
+          : null;
+        const executionNotVerified =
+          completionVerdict !== null &&
           !actionableApproval &&
           !v2Result?.pendingApproval &&
           !launchFlowResult?.cancelled &&
-          v2ToolCalls.length === 0 &&
-          v2Mutations === 0;
-        if (zeroMutationCompletion) {
+          completionVerdict.state !== "complete";
+        if (executionNotVerified) {
           // Preserve a specific failure message the launch flow already
           // produced (e.g. TOOL_EXECUTION_UNAVAILABLE names the real cause
-          // after two attempts) — it is more honest than the generic text.
-          // Only fall back to the generic wording when the flow named no
-          // specific error (the silent fake-complete case).
+          // after two attempts) — it is more honest than a generic one.
+          // Only fall back to generated wording when the flow named no
+          // specific error. The zero-tool-call case keeps its original,
+          // more actionable phrasing; every other evidence-based failure
+          // (including the new self-report-vs-diff contradiction) uses
+          // evaluateCompletion's own reason, which already names what's
+          // actually missing.
           if (!launchFlowResult?.error) {
-            assistantText =
-              "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.";
+            assistantText = completionVerdict!.state === "not_started"
+              ? "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again."
+              : completionVerdict!.reason;
           }
         }
 
@@ -1320,7 +1342,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           ? "cancelled"
           : actionableApproval
             ? "awaiting_approval"
-            : v2Result?.failedHonestly || zeroMutationCompletion
+            : v2Result?.failedHonestly || executionNotVerified
               ? "failed"
               : launchFlowResult?.success && !v2Empty && !pausedRunPersistFailed
                 ? "completed"
@@ -1622,7 +1644,21 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // payloads, but if a run still resolves with no usable text the
           // outcome is failed — never a completed empty response.
           const v1Empty = !cancelledV1 && !assistantText.trim();
-          const v1Failed = !cancelledV1 && (v1Empty || v1MarkupHit !== null);
+          // V1 is read-only pre-LLM inspection + a text-only completion —
+          // it has no tools attached and cannot execute a mutation at all
+          // (see the "TEMPORARY FALLBACK" docstring above). The guard at
+          // the top of this handler (`requiresExecution && !(useV2 &&
+          // v2Transport)` → 409) is what's SUPPOSED to keep a genuine
+          // build/ship request out of this lane entirely, by rejecting it
+          // before V1 ever runs — this check does not replace that guard,
+          // it backstops it: if a kernel misclassification (a false
+          // negative on `requiresExecution`) or a future refactor ever
+          // lets an execution-required turn reach V1 anyway, V1
+          // structurally cannot satisfy it, so it must never be reported
+          // complete regardless of how confident or detailed the model's
+          // text sounds.
+          const v1MutationRequired = built.kernelResult.decision.routing.requiresExecution === true;
+          const v1Failed = !cancelledV1 && (v1Empty || v1MarkupHit !== null || v1MutationRequired);
           const v1MessageStatus: MessageStatus = cancelledV1 ? "cancelled" : v1Failed ? "failed" : "completed";
           await updateMessageStatus(
             assistantMessage.id,
@@ -1630,10 +1666,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             v1MessageStatus,
             v1MarkupHit
               ? "The model produced a tool call in a format this run cannot execute, so nothing was executed."
-              : assistantText ||
-                  (v1Empty
-                    ? "The model returned an empty response — nothing was produced. Send the request again to retry."
-                    : undefined),
+              : v1MutationRequired
+                ? "This request needs file operations, but no executable workspace was available for this turn, so nothing was created or changed. Please try again."
+                : assistantText ||
+                    (v1Empty
+                      ? "The model returned an empty response — nothing was produced. Send the request again to retry."
+                      : undefined),
           );
           if (agentRunId) {
             const actualCredits = runtimeAgent
