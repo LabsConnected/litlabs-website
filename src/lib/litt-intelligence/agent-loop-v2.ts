@@ -1210,8 +1210,8 @@ async function runAgentLoopV2Inner(
         stepsUsed,
         hadInterveningMutation: hasInterveningMutation,
         deferredToolCalls: null,
-        baselineCheckpointId: baselineCheckpoint?.id ?? null,
-        checkpointId: checkpoint?.id ?? null,
+        baselineCheckpointId: null,
+        checkpointId: checkpoint?.checkpointId ?? null,
         qualityLoopState: qualitySession ?? null,
         phase: "loop",
       }).catch(() => {});
