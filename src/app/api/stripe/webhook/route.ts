@@ -508,15 +508,43 @@ export async function POST(req: NextRequest) {
         // entitlement. Do NOT debit LiTTBits for Founder refunds — Founder
         // has 0 LiTTBits. For subscription plans, the credits were already
         // consumed; revoking access is the correct action.
-        const refundPlanId = refundMeta.plan_id as PlanId | undefined;
-        if (refundPlanId && refundClerkId) {
+        //
+        // Stripe does NOT copy subscription/invoice metadata onto Charge
+        // objects, so plan_id/clerk_id are absent on subscription refunds —
+        // those events used to silently skip both the revocation and the
+        // prorated debit. Fall back to the subscriptions row keyed by the
+        // charge's customer id.
+        let refundPlanId = refundMeta.plan_id as PlanId | undefined;
+        let refundUserId: string | null = null;
+        const chargeCustomerId =
+          typeof charge.customer === "string" ? charge.customer : charge.customer?.id ?? null;
+
+        if (!refundPlanId && chargeCustomerId) {
+          const { data: refundSub } = await sb
+            .from("subscriptions")
+            .select("plan, user_id")
+            .eq("stripe_customer_id", chargeCustomerId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (refundSub?.plan && refundSub.plan in PLANS) {
+            refundPlanId = refundSub.plan as PlanId;
+            refundUserId = refundSub.user_id;
+          }
+        }
+
+        if (refundPlanId && (refundClerkId || refundUserId)) {
           const plan = PLANS[refundPlanId];
           if (plan) {
-            const { data: refundUser } = await sb
-              .from("users")
-              .select("id")
-              .eq("clerk_id", refundClerkId)
-              .single();
+            const refundUser = refundUserId
+              ? { id: refundUserId }
+              : (
+                  await sb
+                    .from("users")
+                    .select("id")
+                    .eq("clerk_id", refundClerkId)
+                    .single()
+                ).data;
             if (refundUser) {
               // Revoke the subscription/entitlement
               await sb
@@ -543,7 +571,10 @@ export async function POST(req: NextRequest) {
                       p_amount: debitBits,
                       p_category: "refund",
                       p_description: `Refund for charge ${charge.id}`,
-                      p_idempotency_key: `refund_${charge.id}`,
+                      // Per-refund key: charge.id is shared across partial
+                      // refunds of one charge, which would replay as a
+                      // no-op and under-debit.
+                      p_idempotency_key: `refund_${charge.refunds?.data?.[0]?.id ?? `${charge.id}_${charge.amount_refunded}`}`,
                     });
                   } catch {
                     // Ledger not available — skip
@@ -581,7 +612,7 @@ export async function POST(req: NextRequest) {
                     p_amount: debitBits,
                     p_category: "refund",
                     p_description: `Refund for charge ${charge.id}`,
-                    p_idempotency_key: `refund_${charge.id}`,
+                    p_idempotency_key: `refund_${charge.refunds?.data?.[0]?.id ?? `${charge.id}_${charge.amount_refunded}`}`,
                   });
                 } catch {
                   // Ledger not available — skip
