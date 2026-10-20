@@ -1404,8 +1404,60 @@ describe("runAgentLoopV2 — mutation read-back coverage (gitless/static workspa
       },
       stepsUsedBeforePause: gate!.stepsUsedAtPause ?? 1,
       hadInterveningMutation: gate!.hadInterveningMutationAtPause ?? false,
+      priorToolCalls: gate!.priorToolCalls,
     }, transport);
   }
+
+  it("an approval pause carries the pre-pause mutation history into the resumed run's evidence", async () => {
+    // files.write auto-approves and runs FIRST; preview.start then pauses.
+    // The pre-pause write's read-back evidence must survive the boundary —
+    // otherwise a contradicted pre-pause claim can be masked post-resume.
+    const disk = new Map<string, string>();
+    const transport = {
+      ...fakeTransport,
+      writeFile: vi.fn(async (path: string, content: string) => {
+        disk.set(path, content);
+        return { saved: true };
+      }),
+      readFile: vi.fn(async (path: string) => {
+        const content = disk.get(path);
+        if (content === undefined) throw new Error("readFile failed (404): not found");
+        return { content, size: content.length };
+      }),
+      startPreview: vi.fn(async () => ({
+        workspaceId: "ws-test", status: "ready", port: 3000,
+        framework: "static", command: "serve", startedAt: Date.now(),
+      })),
+      getPreviewStatus: vi.fn(async () => ({
+        status: "ready", port: 3000, framework: "static", command: "serve",
+        startedAt: Date.now(), lastHealthCheck: Date.now(),
+        error: null, errorCode: null, logs: [],
+      })),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-w", "files.write", { projectId: "p-test", path: "index.html", content: "<html>ok</html>" }))
+      .mockResolvedValueOnce(toolCallReply("tc-p", "preview.start", { projectId: "p-test" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const paused = await runAgentLoopV2("write the file then start preview", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    // The paused run's own log has the pre-pause write; the gate record
+    // must carry it across the boundary for the resumed run.
+    expect(paused.toolCalls.some((t) => t.toolId === "files.write" && t.persisted === true)).toBe(true);
+    expect(paused.pendingApproval?.priorToolCalls?.some((t) => t.toolId === "files.write")).toBe(true);
+
+    const resumed = await approveGate(paused, transport);
+
+    // The resumed run's evidence covers the WHOLE run — the pre-pause
+    // verified write AND the resumed-lane preview claim are both visible.
+    expect(resumed.toolCalls.some((t) => t.toolId === "files.write" && t.persisted === true)).toBe(true);
+    expect(resumed.toolCalls.some((t) => t.toolId === "preview.start" && t.persisted === true)).toBe(true);
+  });
 
   it("project.insert_asset records persisted:true via the returned asset path — binary-safe", async () => {
     let written = "";

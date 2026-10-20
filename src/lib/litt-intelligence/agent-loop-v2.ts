@@ -264,6 +264,13 @@ export interface PendingApproval {
   /** Run counters captured at pause time — resume must not restart them at 0. */
   stepsUsedAtPause?: number;
   hadInterveningMutationAtPause?: boolean;
+  /**
+   * Calls that already executed before this pause — INCLUDING declared
+   * paths and read-back persisted flags. Persisted on the paused-run record
+   * and seeded back into the resumed run's evidence log so completion
+   * verification sees the full mutation history across the boundary.
+   */
+  priorToolCalls?: AgentToolCallLogEntry[];
 }
 
 /**
@@ -1863,6 +1870,7 @@ async function runAgentLoopV2Inner(
               deferredToolCalls: deferredCallsAfterBatchPause(llmResponse.toolCalls, toolCall.toolCallId),
               stepsUsedAtPause: stepsUsed,
               hadInterveningMutationAtPause: hasInterveningMutation,
+              priorToolCalls: [...toolCallLog],
             },
             finalMessages: [...llmMessages],
           };
@@ -2359,6 +2367,14 @@ export interface ResumeInput {
   stepsUsedBeforePause: number;
   /** Whether a mutation already happened before pause */
   hadInterveningMutation: boolean;
+  /**
+   * Calls that executed before the pause, with their declared paths and
+   * read-back persisted flags. Seeded into this run's evidence log so the
+   * resumed run's verdict covers the WHOLE run — without it, a
+   * contradicted pre-pause mutation is invisible here and can be masked
+   * by a post-resume verified call.
+   */
+  priorToolCalls?: AgentToolCallLogEntry[];
   /** Existing checkpoint (if created before pause) */
   existingCheckpoint?: { checkpointId: string; label: string; gitSha: string };
   /**
@@ -2583,6 +2599,7 @@ export async function executeDeferredToolCalls(
             deferredToolCalls: deferredCallsAfterBatchPause(deferred, toolCall.toolCallId),
             stepsUsedAtPause: ctx.stepsUsed,
             hadInterveningMutationAtPause: state.hasInterveningMutation,
+            priorToolCalls: [...ctx.toolCallLog],
           },
         };
       }
@@ -2869,7 +2886,10 @@ async function resumeAgentLoopV2Inner(
   // already committed. Legacy rows stored the latest pre-pause checkpoint
   // instead; seeding from it keeps the pre-change "post-gate only" view.
   let baselineCheckpoint = resume.existingCheckpoint;
-  const toolCallLog: AgentToolCallLogEntry[] = [];
+  // Seed the evidence log with pre-pause calls: a resumed run's
+  // persisted/complete verdict must cover the full mutation history, not
+  // just what ran after the gate.
+  const toolCallLog: AgentToolCallLogEntry[] = [...(resume.priorToolCalls ?? [])];
   let completedDeployment: CompletedDeployment | null = null;
   // NOTE: checkpoints are now created before EVERY mutation, so this flag no
   // longer gates anything. It is retained only because it is part of the
@@ -3378,6 +3398,7 @@ async function resumeAgentLoopV2Inner(
             deferredToolCalls: deferredCallsAfterBatchPause(llmResponse.toolCalls, toolCall.toolCallId),
             stepsUsedAtPause: stepsUsed,
             hadInterveningMutationAtPause: hasInterveningMutation,
+            priorToolCalls: [...toolCallLog],
           },
         };
       }

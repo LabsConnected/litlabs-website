@@ -739,6 +739,10 @@ export async function POST(
       // re-injected after the approved tool runs so approving one tool
       // cannot silently drop the rest of the batch.
       deferredToolCalls: resolved.deferredToolCalls,
+      // Calls that already executed before the pause — including their
+      // read-back evidence — seeded into the resumed run's log so the
+      // verdict covers the whole mutation history.
+      priorToolCalls: resolved.priorToolCalls,
       existingCheckpoint: resumeCheckpoint,
       // Capability set for the resume execution gate. Resolved fresh here
       // from the same source of truth the initial loop used

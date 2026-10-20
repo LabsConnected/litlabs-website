@@ -1221,6 +1221,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               deferredToolCalls: v2Result.pendingApproval.deferredToolCalls,
               stepsUsed: v2Result.pendingApproval.stepsUsedAtPause,
               hadInterveningMutation: v2Result.pendingApproval.hadInterveningMutationAtPause,
+              // Pre-pause call evidence (declared paths + persisted
+              // read-backs) — without it the resumed run's verdict would
+              // only see post-resume claims.
+              priorToolCalls: v2Result.pendingApproval.priorToolCalls,
             });
             pausedRunId = pausedRun.id;
             if (actionContext) {

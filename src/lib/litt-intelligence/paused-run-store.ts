@@ -171,6 +171,15 @@ export interface PausedRunRecord {
   stepsUsed?: number;
   /** Whether any mutation had executed before the pause. */
   hadInterveningMutation?: boolean;
+  /**
+   * Tool calls that already executed BEFORE the pause, including their
+   * declared paths and read-back persisted flags. Resume seeds this back
+   * into the run's evidence log so completion verification sees the whole
+   * mutation history — a contradicted pre-pause claim can never be masked
+   * by a post-resume verified call. Absent on legacy rows (pre-dating the
+   * column) and on rows created before the migration is applied.
+   */
+  priorToolCalls?: RunResult["toolCalls"];
 }
 
 interface PausedRunRow {
@@ -204,6 +213,7 @@ interface PausedRunRow {
   deferred_tool_calls?: DeferredToolCall[] | null;
   steps_used?: number | null;
   had_intervening_mutation?: boolean | null;
+  prior_tool_calls?: RunResult["toolCalls"] | null;
 }
 
 function rowToRecord(row: PausedRunRow): PausedRunRecord {
@@ -238,6 +248,7 @@ function rowToRecord(row: PausedRunRow): PausedRunRecord {
     deferredToolCalls: row.deferred_tool_calls ?? undefined,
     stepsUsed: row.steps_used ?? undefined,
     hadInterveningMutation: row.had_intervening_mutation ?? undefined,
+    priorToolCalls: row.prior_tool_calls ?? undefined,
   };
 }
 
@@ -260,15 +271,15 @@ export async function createPausedRun(input: {
   deferredToolCalls?: DeferredToolCall[];
   stepsUsed?: number;
   hadInterveningMutation?: boolean;
+  /** Pre-pause tool-call evidence — see PausedRunRecord.priorToolCalls. */
+  priorToolCalls?: RunResult["toolCalls"];
 }): Promise<PausedRunRecord> {
   if (!supabaseAdmin) throw new Error("Database not available");
 
   const now = new Date();
   const expiresAt = new Date(now.getTime() + APPROVAL_TTL_MS);
 
-  const { data, error } = await supabaseAdmin
-    .from(TABLE)
-    .insert({
+  const baseRow = {
       user_id: input.userId,
       conversation_id: input.conversationId,
       project_id: input.projectId,
@@ -290,9 +301,23 @@ export async function createPausedRun(input: {
       deferred_tool_calls: input.deferredToolCalls ?? null,
       steps_used: input.stepsUsed ?? null,
       had_intervening_mutation: input.hadInterveningMutation ?? null,
-    })
+  };
+
+  let { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .insert({ ...baseRow, prior_tool_calls: input.priorToolCalls ?? null })
     .select()
     .single();
+
+  if (error && /prior_tool_calls/.test(error.message ?? "")) {
+    // Migration not applied yet — degrade to the pre-column behavior
+    // (resume sees only post-resume evidence) rather than breaking pauses.
+    ({ data, error } = await supabaseAdmin
+      .from(TABLE)
+      .insert(baseRow)
+      .select()
+      .single());
+  }
 
   if (error || !data) {
     throw new Error(`Failed to create paused run: ${error?.message ?? "unknown"}`);
