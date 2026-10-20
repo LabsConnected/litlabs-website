@@ -13,6 +13,7 @@ import {
   createPausedRun,
   renewRunLease,
   RUN_HEARTBEAT_MS,
+  RUN_STALL_MS,
   type PausedRunRecord,
   type RunResult,
 } from "@/lib/litt-intelligence/paused-run-store";
@@ -651,6 +652,32 @@ export async function POST(
     resumeReservationId = reserveResult.reservationId;
   }
 
+  // Billing for this attempt settles exactly once, from whichever path
+  // finishes the attempt first: the executor's .finally below, or the
+  // stall watchdog in the heartbeat when the executor never finishes at
+  // all. The reservation must never strand because a promise wedged.
+  let billingFinalized = false;
+  const finalizeResumeBilling = () => {
+    if (billingFinalized || !resumeRunId) return;
+    billingFinalized = true;
+    const settle = resumeSettle
+      ?? { status: "failed" as const, actualCredits: 0, error: "EXECUTOR_EXITED_WITHOUT_OUTCOME" };
+    settleRun(
+      resumeRunId,
+      {
+        inputTokens: 0,
+        outputTokens: 0,
+        actualCredits: settle.actualCredits,
+        status: settle.status,
+        ...(settle.error ? { error: settle.error } : {}),
+      },
+      resumeReserved,
+      resumeReservationId,
+    ).catch(() => {
+      // Best-effort settlement — must not leak unhandled rejection
+    });
+  };
+
   // 7. Start the resumed execution DETACHED from this HTTP request.
   // Railway's long-running Node process keeps this promise alive after
   // the response is sent. The result is persisted to the DB so the client
@@ -664,16 +691,78 @@ export async function POST(
   // thrown renewal is a transient DB error, not a fence: keep working.
   const abortController = new AbortController();
   let fenced = false;
+  let chainSettled = false;
+  let stallWatchdogFired = false;
   let lastProgressAt = new Date().toISOString();
   const heartbeat = setInterval(() => {
-    void renewRunLease(pausedRunId, userId, executionToken, lastProgressAt)
-      .then((alive) => {
-        if (!alive) {
-          fenced = true;
-          abortController.abort();
+    void (async () => {
+      // Stall watchdog (D1): the heartbeat is the only clock that
+      // watches a claimed run continuously. The executor chain below
+      // contains unbounded awaits (workspace/database calls guarded
+      // against rejection, not against non-settlement); if one never
+      // settles, the promise never settles, this timer keeps the lease
+      // fresh forever, and — the read-triggered reaper aside — nothing
+      // ever terminates the run: no outcome, no transcript writeback, no
+      // log (staging run 00808832 hung exactly this way). Enforce the
+      // store's own stall definition here instead: progress frozen past
+      // RUN_STALL_MS while the chain is unsettled means the continuation
+      // is wedged, so settle the run FAILED with the reaper's recorded
+      // reason, through the same writer every other outcome uses.
+      if (
+        !chainSettled &&
+        !stallWatchdogFired &&
+        typeof RUN_STALL_MS === "number" &&
+        Date.now() - Date.parse(lastProgressAt) > RUN_STALL_MS
+      ) {
+        stallWatchdogFired = true;
+        // Fence FIRST: if the wedged chain ever returns, its .then /
+        // .catch must write nothing — this settle is the record now.
+        fenced = true;
+        abortController.abort();
+        clearInterval(heartbeat);
+        const message = "Execution stalled (no progress)";
+        studioLog("approval:resume_stall_watchdog_fired", {
+          conversationId,
+          userId,
+          pausedRunId,
+          actionRunId: resolved.actionRunId ?? undefined,
+          latencyMs: Date.now() - Date.parse(lastProgressAt),
+        });
+        resumeSettle = { status: "failed", actualCredits: 0, error: "EXECUTION_STALLED" };
+        try {
+          await writeResumedResultToTranscript({
+            conversationId,
+            userId,
+            projectId: resolved.projectId,
+            pausedRunId,
+            status: "failed",
+            content: `The resumed run failed: ${message}`,
+          });
+          await settleResumedRunOutcome({
+            record: resolved,
+            userId,
+            status: "failed",
+            eventType: "run.failed",
+            patch: { currentActivity: message, failureCode: "EXECUTION_STALLED", failureMessage: message },
+            executionToken,
+            logEvent: "approval:action_run_stall_watchdog_settle_failed",
+          });
+        } catch {
+          await releaseRunClaim(pausedRunId, userId, executionToken, "failed").catch(
+            () => undefined,
+          );
+        } finally {
+          finalizeResumeBilling();
         }
-      })
-      .catch(() => undefined);
+        return;
+      }
+      const alive = await renewRunLease(pausedRunId, userId, executionToken, lastProgressAt)
+        .catch(() => undefined);
+      if (alive === false) {
+        fenced = true;
+        abortController.abort();
+      }
+    })();
   }, RUN_HEARTBEAT_MS);
   (heartbeat as NodeJS.Timeout).unref?.();
   // Zero-cost progress signal: every loop event refreshes the timestamp
@@ -1225,29 +1314,16 @@ export async function POST(
     })
     .finally(() => {
       // The executor's work — loop and settlement tail — is done either
-      // way; stop proving liveness. A fenced executor dies here too.
+      // way; stop proving liveness and disarm the stall watchdog. A
+      // fenced executor dies here too.
+      chainSettled = true;
       clearInterval(heartbeat);
-      // Settle this attempt's billing reservation exactly once. A missing
-      // outcome means the executor exited without recording truth —
-      // release the hold rather than stranding reserved bits.
-      if (resumeRunId) {
-        const settle = resumeSettle
-          ?? { status: "failed" as const, actualCredits: 0, error: "EXECUTOR_EXITED_WITHOUT_OUTCOME" };
-        settleRun(
-          resumeRunId,
-          {
-            inputTokens: 0,
-            outputTokens: 0,
-            actualCredits: settle.actualCredits,
-            status: settle.status,
-            ...(settle.error ? { error: settle.error } : {}),
-          },
-          resumeReserved,
-          resumeReservationId,
-        ).catch(() => {
-          // Best-effort settlement — must not leak unhandled rejection
-        });
-      }
+      // Settle this attempt's billing reservation exactly once (shared
+      // with the stall watchdog, which finalizes first if the chain
+      // never settled). A missing outcome means the executor exited
+      // without recording truth — release the hold rather than
+      // stranding reserved bits.
+      finalizeResumeBilling();
     });
 
   // 8. Return 202 Accepted immediately — the execution continues in the background
