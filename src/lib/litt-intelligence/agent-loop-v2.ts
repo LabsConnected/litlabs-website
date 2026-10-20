@@ -2375,7 +2375,17 @@ export async function executeDeferredToolCalls(
       });
 
       if (execResult.ok) {
-        result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true };
+        // Same handler-failure normalization as every other execution
+        // site: a handler payload of { success: false } inside an ok
+        // registry result is a failed mutation, never a success.
+        const handlerError = handlerFailureError(execResult.result);
+        result = {
+          toolCallId: toolCall.toolCallId,
+          toolId: toolCall.toolId,
+          result: execResult.result,
+          success: handlerError === null,
+          ...(handlerError !== null ? { error: handlerError } : {}),
+        };
       } else {
         result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
       }
@@ -2723,6 +2733,10 @@ async function resumeAgentLoopV2Inner(
     // be cached as executed work or weaken loop detection.
     if (toolDef && !toolDef.readOnly && result.success) {
       hasInterveningMutation = true;
+      // Carry the dedupe ledger across the pause: without this, a model
+      // re-issue of the approved call falls through to the approval gate
+      // instead of replaying the execution it already approved.
+      executedMutations.set(`${resume.toolId}:${hashInputs(resume.inputs)}`, result);
     }
   } else {
     // Rejected — inject rejection as tool result
@@ -2810,6 +2824,12 @@ async function resumeAgentLoopV2Inner(
       };
     }
   }
+
+  // The watchdog below counts only continuation batches; credit the
+  // writes this segment already executed (the approved tool and the
+  // deferred batch above) so legitimate finishing steps — verification
+  // reads, asset work — cannot trip it after the writes have landed.
+  const segmentAlreadyWrote = toolCallLog.some((c) => c.success && isFileWritingTool(c.toolId));
 
   // Continue the loop
   let resumeZeroWriteSteps = 0;
@@ -3177,7 +3197,7 @@ async function resumeAgentLoopV2Inner(
     if (cfg.buildCapabilityGuard) {
       const wroteFile = toolCallLog.slice(logBeforeBatch).some((call) => call.success && isFileWritingTool(call.toolId));
       resumeZeroWriteSteps = wroteFile ? 0 : resumeZeroWriteSteps + 1;
-      if ((cfg.buildCapabilityGuard.maxStepsWithoutFileWrite ?? 3) > 0 &&
+      if (!segmentAlreadyWrote && (cfg.buildCapabilityGuard.maxStepsWithoutFileWrite ?? 3) > 0 &&
           resumeZeroWriteSteps >= (cfg.buildCapabilityGuard.maxStepsWithoutFileWrite ?? 3)) {
         failedHonestly = `The resumed build made no successful file writes in ${resumeZeroWriteSteps} steps; stopping to preserve the remaining budget.`;
         finalText = failedHonestly;
