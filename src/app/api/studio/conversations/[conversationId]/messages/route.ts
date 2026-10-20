@@ -994,12 +994,24 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       // still show its quote before execution. `status` events render in
       // the live activity feed; the structured field lets richer
       // surfaces render it without re-parsing the text.
+      //
+      // SCOPING (defect D4, forensics ART-20261020-027): this figure is
+      // the INITIAL segment's reservation only. A resume reserves a
+      // separate amount, disclosed on the approval card itself via
+      // resumeQuoteDisclosure — the binding figure for that decision.
+      // This feed entry persists for the whole run, so presenting the
+      // initial figure as the run's standing "Estimated cost"
+      // contradicts the card on every resume (observed live: feed held
+      // a constant 8 while cards showed 9/10/11). The summary therefore
+      // scopes its figure to the initial segment and defers to the card
+      // for resume amounts. Display only — the reservation itself is
+      // unchanged.
       if (agentRunId) {
         safeEvent({
           type: "status",
           summary: reservedCredits > 0
-            ? `Estimated cost: ${reservedCredits} LiTTBits — debited once on success; failed or cancelled work debits zero.`
-            : "Estimated cost: 0 LiTTBits — billing-exempt run (audit record kept).",
+            ? `Estimated cost: ${reservedCredits} LiTTBits for the initial segment — debited once on success; failed or cancelled work debits zero. Resuming after an approval reserves the amount shown on the approval card.`
+            : "Estimated cost: 0 LiTTBits for the initial segment — billing-exempt run (audit record kept).",
           billingQuote: { estimatedBits: reservedCredits },
         });
       }
