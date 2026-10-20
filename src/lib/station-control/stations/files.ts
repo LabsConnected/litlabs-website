@@ -6,7 +6,12 @@
  * honest failure — never a placeholder success.
  *
  * Delegate map:
- * - files.create (type=file) → files.write ({projectId, path, content:""})
+ * - files.create (type=file) → files.write ({projectId, path, content})
+ *   where content is the caller-supplied file content ("" when omitted —
+ *   an intentionally empty file). Before the Defect-2 repair the schema
+ *   had no content field at all, so any content the agent supplied was
+ *   stripped by arg validation and the delegate wrote "" while the
+ *   result reported success.
  * - files.create (type=dir)  → files.mkdir ({path}) — a real directory tool
  *                               exists, so no terminal fallback is needed
  * - files.move               → files.rename ({path: from, newPath: to})
@@ -52,12 +57,17 @@ defineAction({
   id: "files.create",
   station: "files",
   description:
-    "Create a file (empty) or a directory in the project workspace. " +
+    "Create a file or a directory in the project workspace. " +
+    "When content is provided it is written to the file; omit it to create an empty file. " +
     "Files delegate to files.write; directories delegate to the real files.mkdir tool. " +
     "Path must be workspace-relative.",
   argsSchema: z.object({
     path: z.string().min(1).describe("Workspace-relative path to create"),
-    type: z.enum(["file", "dir"]).describe('Create a "file" (empty) or a "dir"'),
+    type: z.enum(["file", "dir"]).describe('Create a "file" or a "dir"'),
+    content: z
+      .string()
+      .optional()
+      .describe("File content to write (type=file only); omit to create an empty file"),
   }),
   resultType: stationResultSchema,
   mutating: true,
@@ -69,7 +79,7 @@ defineAction({
     if (!projectId) {
       return fail("files.create requires an active project: station context has no projectId.", "not_configured");
     }
-    return writeExecute({ projectId, path: args.path, content: "" }, ctx);
+    return writeExecute({ projectId, path: args.path, content: args.content ?? "" }, ctx);
   },
 });
 // Primary delegate for approval-policy mirroring (both underlying tools are

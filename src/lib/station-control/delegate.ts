@@ -16,6 +16,26 @@ import type { ActionExecutionContext } from "@/lib/action-runtime/types";
 import { toolRegistry } from "../litt-intelligence/tool-registry";
 import type { StationExecutionContext, StationResult } from "./types";
 
+/**
+ * The error string of a structured tool failure, or null when the result
+ * is not one. Mirrors actionToolResultFailed (action-runtime/tool-runtime.ts)
+ * without importing it: delegate.ts is loaded by every station module, and
+ * a value import of the tool runtime would drag the Supabase-backed
+ * run-store into that whole module graph.
+ */
+function structuredToolFailure(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null;
+  const record = result as Record<string, unknown>;
+  if (record.success === false || record.ok === false) {
+    return typeof record.error === "string" && record.error.trim()
+      ? record.error
+      : typeof record.message === "string" && record.message.trim()
+        ? record.message
+        : "tool_result_failed";
+  }
+  return null;
+}
+
 /** Narrow the station ctx actionContext to the trusted ActionExecutionContext shape. */
 function toActionContext(
   ctx: StationExecutionContext,
@@ -52,6 +72,19 @@ export function delegateToTool(
       signal: ctx.signal,
     });
     if (outcome.ok) {
+      // A settled registry outcome is not necessarily a successful tool:
+      // handlers report structured failures as { success: false, error }
+      // VALUES (the canonical classification is actionToolResultFailed in
+      // action-runtime/tool-runtime.ts — a structured { success:false } /
+      // { ok:false } is a failed operation, not a completed one). Mapping
+      // those to station-level success made delegated actions report
+      // success for work that never happened (Defect-2: files.create
+      // "succeeded" while the underlying files.write had failed and
+      // nothing was persisted). Surface the failure honestly instead.
+      const failure = structuredToolFailure(outcome.result);
+      if (failure) {
+        return { success: false, error: failure };
+      }
       return { success: true, result: outcome.result };
     }
     return { success: false, error: outcome.error };
