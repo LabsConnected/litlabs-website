@@ -283,6 +283,24 @@ function openRouterModels(requirements?: RouteRequirements): string[] {
 function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
   return [
     {
+      // OpenAgents gateway — STAGING-ONLY route, env-gated by credential
+      // presence: where OPENAGENTS_API_KEY is unset the planner excludes
+      // this def as credential_missing, so a deployment without the var
+      // never attempts it. FIRST in base order so a configured deployment
+      // leads with it (health ranking can still demote it when degraded).
+      // costClass FREE_MANAGED means "platform-managed credential, no
+      // per-user key, not the paid-OpenAI entitlement gate" — the gateway
+      // itself is metered against the platform OpenAgents account.
+      provider: "openagents",
+      adapter: "openai-compatible",
+      costClass: "FREE_MANAGED",
+      capabilities: TOOL_CAPABLE,
+      timeoutMs: Number(process.env.OPENAGENTS_TIMEOUT_MS) || 60_000,
+      credentialState: () =>
+        envPresent("OPENAGENTS_API_KEY") ? "available" : "missing",
+      models: () => [process.env.OPENAGENTS_MODEL || "deepseek-4-flash"],
+    },
+    {
       provider: "gemini",
       adapter: "gemini",
       costClass: "FREE_MANAGED",

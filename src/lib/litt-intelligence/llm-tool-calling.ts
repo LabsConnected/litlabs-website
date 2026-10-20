@@ -898,6 +898,20 @@ function compatEndpointFor(
   secrets: AttemptContext["secrets"],
 ): { baseUrl: string; headers: Record<string, string> } {
   switch (route.provider) {
+    case "openagents": {
+      const key = (process.env.OPENAGENTS_API_KEY ?? "").trim();
+      if (!key) {
+        throw new ProviderAttemptError("openagents", route.models[0] ?? "unknown", {
+          class: "auth_invalid",
+          scope: "provider",
+          message: "OPENAGENTS_API_KEY not set",
+        });
+      }
+      const baseUrl =
+        (process.env.OPENAGENTS_BASE_URL ?? "").trim().replace(/\/+$/, "") ||
+        "https://api-gateway.openagents.org/v1";
+      return { baseUrl, headers: { Authorization: `Bearer ${key}` } };
+    }
     case "openrouter": {
       const key = (process.env.OPENROUTER_API_KEY ?? "").trim();
       if (!key) {

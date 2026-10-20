@@ -50,6 +50,9 @@ import { _resetModelRegistryForTests } from "./model-registry";
 // ─── Helpers ──────────────────────────────────────────────────────
 
 const PROVIDER_ENVS = [
+  "OPENAGENTS_API_KEY",
+  "OPENAGENTS_BASE_URL",
+  "OPENAGENTS_MODEL",
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
   "OPENROUTER_API_KEY",
@@ -230,6 +233,76 @@ describe("callLLMWithTools — provider selection", () => {
 
     await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
     expect(callsTo("openrouter")).toHaveLength(0);
+  });
+});
+
+describe("callLLMWithTools — OpenAgents gateway route", () => {
+  it("attempts the gateway first when OPENAGENTS_API_KEY is set and parses native tool calls", async () => {
+    vi.stubEnv("OPENAGENTS_API_KEY", "test-oa-key");
+    // Gemini is also configured — the gateway must still lead the plan.
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse("deepseek-4-flash", "", [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "write_file",
+            arguments: '{"path":"index.html","content":"<h1>Harbor Coffee</h1>"}',
+          },
+        },
+      ]),
+    );
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "build the page" }],
+      [WRITE_TOOL],
+    );
+
+    expect(result.provider).toBe("openagents");
+    // The gateway's OpenAI-shaped tool_calls payload parses into a native call.
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolId).toBe("write_file");
+    expect(result.toolCalls[0].inputs).toEqual({
+      path: "index.html",
+      content: "<h1>Harbor Coffee</h1>",
+    });
+    // Exactly one attempt, to the gateway chat/completions endpoint, with
+    // the bearer credential and the configured default model.
+    const gatewayCalls = callsTo("api-gateway.openagents.org");
+    expect(gatewayCalls).toHaveLength(1);
+    expect(String(gatewayCalls[0][0])).toBe(
+      "https://api-gateway.openagents.org/v1/chat/completions",
+    );
+    const init = gatewayCalls[0][1] as { headers: Record<string, string> };
+    expect(init.headers.Authorization).toBe("Bearer test-oa-key");
+    expect(lastBodyFor("api-gateway.openagents.org").model).toBe("deepseek-4-flash");
+    expect(callsTo("generativelanguage")).toHaveLength(0);
+  });
+
+  it("honours the OPENAGENTS_BASE_URL override for the gateway endpoint", async () => {
+    vi.stubEnv("OPENAGENTS_API_KEY", "test-oa-key");
+    vi.stubEnv("OPENAGENTS_BASE_URL", "https://gateway.example.test/v1/");
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("deepseek-4-flash", "Hi."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+
+    expect(result.provider).toBe("openagents");
+    expect(result.text).toBe("Hi.");
+    const calls = callsTo("gateway.example.test");
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0][0])).toBe("https://gateway.example.test/v1/chat/completions");
+  });
+
+  it("never attempts the gateway when OPENAGENTS_API_KEY is unset", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openai/gpt-oss-120b", "Groq only."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+
+    expect(result.provider).toBe("groq");
+    expect(callsTo("openagents.org")).toHaveLength(0);
   });
 });
 
