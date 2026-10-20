@@ -237,6 +237,12 @@ describe("files.create persistence (regression)", () => {
       navigateToStation: () => {},
       reportLiveState: () => {},
       transport,
+      // This suite models the agent loop's approved invocation of
+      // files.create (the D2 defect scenario is a post-approval write).
+      // Since Repair R1a-2 the executor requires a mutating action's
+      // context to carry the approval the call arrived with — the loop
+      // supplies hasApproval:true for its non-gated calls by design.
+      hasApproval: true,
       actionContext: { userId: "user_1", projectId: "proj_1", actionRunId: "run_1" },
     } as StationCtx;
   }

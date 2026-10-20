@@ -50,7 +50,12 @@ export interface StudioOperatorBarProps {
   onOpenActivity?: () => void;
   onRollback?: () => void;
   onStop?: () => void;
-  onResolveApproval?: (decision: "approved" | "rejected") => void;
+  /**
+   * Approval decision handler. Receives the decision AND the gate's own
+   * pausedRunId (R1b / E1 F2) so the handler can refuse a click whose
+   * gate is no longer current.
+   */
+  onResolveApproval?: (decision: "approved" | "rejected", pausedRunId?: string) => void;
   terminalStatus?: string;
   modelLabel?: string;
 }
@@ -67,6 +72,7 @@ export default function StudioOperatorBar({
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
   const changesSummary = useExecutionStore((s) => s.changesSummary);
   const previewPreparing = useExecutionStore((s) => s.previewPreparing);
@@ -170,21 +176,33 @@ export default function StudioOperatorBar({
         </span>
       )}
 
-      {/* Approval actions */}
+      {/* Approval actions — disabled while a decision is in flight
+          (R1b / E1 F1: previously these stayed clickable during
+          submitting/executing and could fire a duplicate or racing
+          decision POST), and bound to the gate's own pausedRunId
+          (R1b / E1 F2). */}
       {pendingApproval && onResolveApproval && (
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => onResolveApproval("approved")}
-            className="rounded border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent transition hover:bg-accent/20"
+            onClick={() => {
+              if (pendingApproval.pausedRunId) onResolveApproval("approved", pendingApproval.pausedRunId);
+              else onResolveApproval("approved");
+            }}
+            disabled={approvalPhase === "submitting" || approvalPhase === "executing"}
+            className="rounded border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent transition hover:bg-accent/20 disabled:opacity-40"
             aria-label="Approve"
           >
             Approve
           </button>
           <button
             type="button"
-            onClick={() => onResolveApproval("rejected")}
-            className="rounded px-2 py-0.5 text-[10px] font-bold transition hover:bg-white/10"
+            onClick={() => {
+              if (pendingApproval.pausedRunId) onResolveApproval("rejected", pendingApproval.pausedRunId);
+              else onResolveApproval("rejected");
+            }}
+            disabled={approvalPhase === "submitting" || approvalPhase === "executing"}
+            className="rounded px-2 py-0.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
             style={{
               backgroundColor: "rgba(239,68,68,0.1)",
               color: "#ef4444",

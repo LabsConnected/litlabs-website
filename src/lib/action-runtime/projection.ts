@@ -78,6 +78,22 @@ export interface ActionRunProjection {
     completed: string[];
     failed: string[];
   };
+  /**
+   * The run's workspace-change verdict (R3 / E4-R5), read from the
+   * persisted agent.status event with payload.kind "workspace_change"
+   * — the same event the Activity panel renders. This is the only
+   * verification a static build ever produces; before this field
+   * existed the projection could not see it at all, so the Verify
+   * stage stayed "—" for exactly the builds whose verification had
+   * actually run. Null when no verdict was persisted for this run.
+   */
+  workspaceChange: {
+    status: "changed" | "unchanged" | "unknown";
+    fileCount: number;
+    files: string[];
+    checkpointSha: string | null;
+    updatedAt: string | null;
+  } | null;
   failure: {
     code: string | null;
     message: string | null;
@@ -244,6 +260,7 @@ export function buildActionRunProjection(input: {
     verification: null as ActionEvent | null,
     approval: null as ActionEvent | null,
     activity: null as ActionEvent | null,
+    workspaceChange: null as ActionEvent | null,
   };
   const started = new Set<string>();
   const running = new Set<string>();
@@ -256,6 +273,12 @@ export function buildActionRunProjection(input: {
 
     if (event.type === "activity.created") latest.activity = event;
     if (event.type.startsWith("agent.")) latest.agent = event;
+    // The persisted workspace-change verdict (written by the loop's
+    // progress-event persistence, and by settle-time verdicts for
+    // interrupted runs) rides agent.status events under this kind.
+    if (event.type === "agent.status" && event.payload.kind === "workspace_change") {
+      latest.workspaceChange = event;
+    }
     if (event.type.startsWith("browser.")) latest.browser = event;
     if (event.type.startsWith("preview.") || id?.startsWith("preview.")) latest.preview = event;
     if (event.type.startsWith("approval.")) latest.approval = event;
@@ -313,6 +336,50 @@ export function buildActionRunProjection(input: {
     || (typeof httpStatus === "number" && httpStatus >= 200 && httpStatus < 400)
     || (latest.verification ? latest.verification.type.endsWith(".completed") : false);
 
+  // The workspace-change verdict, projected verbatim from its persisted
+  // event. An unrecognized status string fails closed to "unknown" —
+  // never to a success-shaped value.
+  const workspaceChangeEvent = latest.workspaceChange;
+  const rawVerdict = workspaceChangeEvent
+    ? stringField(workspaceChangeEvent.payload, "status")
+    : null;
+  const workspaceChange = workspaceChangeEvent
+    ? {
+        status: (rawVerdict === "changed" || rawVerdict === "unchanged"
+          ? rawVerdict
+          : "unknown") as "changed" | "unchanged" | "unknown",
+        fileCount: numberField(workspaceChangeEvent.payload, "fileCount") ?? 0,
+        files: Array.isArray(workspaceChangeEvent.payload.files)
+          ? (workspaceChangeEvent.payload.files as unknown[]).filter(
+              (f): f is string => typeof f === "string",
+            )
+          : [],
+        checkpointSha: stringField(workspaceChangeEvent.payload, "checkpointSha"),
+        updatedAt: workspaceChangeEvent.createdAt,
+      }
+    : null;
+
+  // Verify-stage derivation (R3 / E4-R5): deploy verification (a
+  // verified deployment or a deploy-verification tool event) keeps
+  // precedence, exactly as before. Only when NO deploy-verification
+  // evidence exists does the workspace verdict drive the stage — for a
+  // static build that verdict IS the verification: changed/unchanged
+  // means it ran and answered ("completed"); unknown means it could
+  // not answer, surfaced as "failed", never dressed as success.
+  const verificationStatus: ActionCapabilityStatus = verified
+    ? "completed"
+    : latest.verification
+      ? statusFromPhase(eventPhase(latest.verification.type))
+      : workspaceChange
+        ? workspaceChange.status === "unknown"
+          ? "failed"
+          : "completed"
+        : statusFromPhase(eventPhase(""));
+  const verificationEvent =
+    latest.verification ??
+    (!verified && workspaceChange ? workspaceChangeEvent : null) ??
+    latestDeployment;
+
   const failureMessage = run.failureMessage
     ?? latestFailedMessage(events)
     ?? (latestDeployment?.type === "deployment.failed" ? eventMessage(latestDeployment) : null);
@@ -336,10 +403,7 @@ export function buildActionRunProjection(input: {
       updatedAt: latestDeployment?.createdAt ?? null,
       error: latestDeployment?.type === "deployment.failed" ? eventMessage(latestDeployment) : null,
     },
-    verification: capability(
-      verified ? "completed" : statusFromPhase(eventPhase(latest.verification?.type ?? "")),
-      latest.verification ?? latestDeployment,
-    ),
+    verification: capability(verificationStatus, verificationEvent),
     approval: capability(
       pendingApprovals.length > 0 ? "running" : statusFromPhase(eventPhase(latest.approval?.type ?? "")),
       latest.approval,
@@ -366,6 +430,7 @@ export function buildActionRunProjection(input: {
       completed: [...completed],
       failed: [...failed],
     },
+    workspaceChange,
     failure: run.status === "failed" || run.failureCode || run.failureMessage || failed.size > 0
       ? { code: run.failureCode, message: failureMessage }
       : null,

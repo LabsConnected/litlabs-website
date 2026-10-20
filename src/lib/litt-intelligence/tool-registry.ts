@@ -26,6 +26,16 @@ export interface ToolExecutionContext {
   actionContext?: ActionExecutionContext;
   /** Authenticated user identity (server-injected, never model-chosen). */
   userId?: string;
+  /**
+   * The approval state the OUTER execute() call genuinely carried
+   * (Repair R1a-2, Diagnosis E2 S4): true only when the caller passed
+   * hasApproval:true into execute() — i.e. a real approval decision (or
+   * the loop's non-gated auto-approval) stood behind this invocation.
+   * Threaded so bridge handlers (the station-control advertisement) can
+   * forward the caller's actual authorization instead of manufacturing
+   * their own. Server execution state, never model input.
+   */
+  hasApproval?: boolean;
 }
 
 type ToolHandler = (
@@ -789,6 +799,11 @@ class ToolRegistry {
                 actionRunId: explicitActionRunId ?? undefined,
                 actionContext,
                 userId: actionContext?.userId ?? inputUserId ?? undefined,
+                // Thread the approval THIS call carried (see
+                // ToolExecutionContext.hasApproval) — handlers that
+                // delegate onward must forward exactly this, never a
+                // hardcoded true.
+                hasApproval: options.hasApproval === true,
               }),
               options.transport,
             ),

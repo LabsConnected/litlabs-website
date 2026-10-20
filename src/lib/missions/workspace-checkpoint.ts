@@ -18,6 +18,7 @@ import {
   enumerateWorkspaceManifest,
   type ManifestFileSurface,
 } from "@/lib/missions/workspace-manifest";
+import { studioLog } from "@/lib/studio/logger";
 
 export interface WorkspaceCheckpointInput {
   projectId: string;
@@ -191,6 +192,16 @@ async function createManifestCheckpoint(
     label,
     description: encodeManifestCheckpointDescription(manifest),
   });
+  // Audit (R3 / E4-S7): the git→manifest fallback used to be invisible —
+  // a run's baseline silently became a manifest and stdout said nothing.
+  // Ids and outcomes only; the manifest contents never leave the row.
+  studioLog("workspace:checkpoint_created", {
+    checkpointId: checkpoint.id,
+    kind: "manifest",
+    fileCount: Object.keys(manifest).length,
+    projectId,
+    userId,
+  });
   return {
     checkpointId: checkpoint.id,
     label,
@@ -238,6 +249,13 @@ export async function createWorkspaceCheckpoint(
       gitSha,
       label,
       description: description ?? `Agent checkpoint: ${label}`,
+    });
+
+    studioLog("workspace:checkpoint_created", {
+      checkpointId: checkpoint.id,
+      kind: "git",
+      projectId,
+      userId,
     });
 
     return {

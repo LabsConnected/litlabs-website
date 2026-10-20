@@ -100,7 +100,17 @@ export async function executeStationAction(
     }
 
     // (c) Approval gate — emit and pause; do NOT execute.
-    if (action.requiresApproval && !ctx.hasApproval) {
+    // Repair R1a-2 (Diagnosis E2 S4): the gate covers EVERY mutating
+    // action, not only those flagged requiresApproval. A mutating action
+    // without the flag previously executed on whatever approval state
+    // the context happened to carry — and delegate paths manufactured
+    // that state as a hardcoded true, so an unapproved caller could
+    // reach real mutations (e.g. files.create → files.write) with no
+    // gate anywhere. Mutations now require the context to carry a
+    // genuine approval: a granted gate decision, or the agent loop's
+    // non-gated auto-approval (the loop invokes unapproved non-gated
+    // calls with hasApproval:true by design — see agent-loop-v2).
+    if ((action.requiresApproval || action.mutating) && !ctx.hasApproval) {
       safeEmit(ctx, {
         type: "approval_required",
         actionId: id,

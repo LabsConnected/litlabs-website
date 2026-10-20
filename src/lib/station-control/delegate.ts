@@ -5,11 +5,16 @@
  * real `files.write`, `browser.screenshot`, image pipeline) behind the
  * StationAction interface, per contract §19.1 ("adapt it").
  *
- * Approval note: hasApproval=true is CORRECT here. The toolRegistry.execute
- * path enforces requireExplicitForMutations before any handler runs, and the
- * agent loop pauses for approval BEFORE invoking a station action — by the
- * time delegateToTool runs, approval (if required) has already been granted
- * through the station action's own requiresApproval/hasApproval gate.
+ * Approval note (Repair R1a-2, Diagnosis E2 S4): the inner execute
+ * receives the station context's OWN approval state — the authorization
+ * the outer call genuinely carried, threaded in by the advertisement /
+ * caller. This used to be a hardcoded `hasApproval: true`, which let any
+ * delegated mutation sail through the registry's
+ * requireExplicitForMutations backstop on manufactured approval. With
+ * threading, a mutation executes only when the approval behind the
+ * outer call was real (a granted gate, or the loop's non-gated
+ * auto-approval); the executor's approval gate and the registry
+ * backstop now both see the same truth.
  */
 import "server-only";
 import type { ActionExecutionContext } from "@/lib/action-runtime/types";
@@ -68,7 +73,7 @@ export function delegateToTool(
     const outcome = await toolRegistry.execute(toolId, mapped, {
       transport: ctx.transport,
       actionContext: toActionContext(ctx),
-      hasApproval: true,
+      hasApproval: ctx.hasApproval === true,
       signal: ctx.signal,
     });
     if (outcome.ok) {

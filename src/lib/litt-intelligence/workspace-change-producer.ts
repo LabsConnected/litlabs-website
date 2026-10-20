@@ -34,6 +34,7 @@ import {
   diffManifestPaths,
   enumerateWorkspaceManifest,
 } from "@/lib/missions/workspace-manifest";
+import { studioLog } from "@/lib/studio/logger";
 
 /** The slice of the transport this needs — keeps it trivially testable. */
 export interface WorkspaceChangeProbe {
@@ -117,7 +118,7 @@ async function computeManifestWorkspaceChange(
   return { status: "changed", files, rollbackAvailable: false };
 }
 
-export async function computeWorkspaceChange(
+async function computeWorkspaceChangeInternal(
   probe: WorkspaceChangeProbe | null | undefined,
   checkpoint: CheckpointInfo | null | undefined,
 ): Promise<WorkspaceChangeEvidence> {
@@ -220,4 +221,28 @@ export async function computeWorkspaceChange(
     checkpointSha: checkpoint.gitSha,
     rollbackAvailable: true,
   };
+}
+
+/**
+ * Compute the verdict — and SAY so (R3 / E4-S7).
+ *
+ * This module previously contained zero log calls: a verdict could be
+ * computed, or silently never computed, and deployment stdout could not
+ * tell the difference (the Phase 3 acceptance run produced no verdict
+ * and no line to audit). Every computation now emits exactly one
+ * structured line — checkpoint id, verdict, changed-file count. Ids
+ * and outcomes only: never file contents, never the diff.
+ */
+export async function computeWorkspaceChange(
+  probe: WorkspaceChangeProbe | null | undefined,
+  checkpoint: CheckpointInfo | null | undefined,
+): Promise<WorkspaceChangeEvidence> {
+  const evidence = await computeWorkspaceChangeInternal(probe, checkpoint);
+  studioLog("workspace_change:computed", {
+    checkpointId: checkpoint?.checkpointId,
+    verdict: evidence.status,
+    fileCount: evidence.files?.length ?? 0,
+    ...(checkpoint?.kind ? { kind: checkpoint.kind } : {}),
+  });
+  return evidence;
 }

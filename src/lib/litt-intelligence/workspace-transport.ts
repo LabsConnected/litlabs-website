@@ -19,6 +19,7 @@ import { isCanonicalBase64 } from "@/lib/deployments/user-deployment";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createWorkspaceCheckpoint } from "@/lib/missions/workspace-checkpoint";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
+import { studioLog } from "@/lib/studio/logger";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -718,7 +719,17 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
         workspaceId: this.workspaceId,
         label,
       });
-    } catch {
+    } catch (err) {
+      // A swallowed checkpoint failure degrades every later verdict for
+      // the run to "unknown" (no baseline to diff) — it must not be
+      // silent (R3 / E4-S7). The null contract is unchanged; the WARN
+      // is the trace. Ids and outcome only.
+      studioLog("workspace:checkpoint_unavailable", {
+        level: "warn",
+        projectId: this.projectId,
+        userId: this.userId,
+        errorClass: err instanceof Error ? err.message : "unknown",
+      });
       return null;
     }
   }

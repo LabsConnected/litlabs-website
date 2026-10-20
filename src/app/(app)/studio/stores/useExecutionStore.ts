@@ -128,6 +128,16 @@ export interface PendingApproval {
    */
   conversationId?: string;
   inputs?: Record<string, unknown>;
+  /**
+   * True when this gate was mounted from a server SNAPSHOT (message
+   * rehydration on load, or the mount-time canonical fold) rather than
+   * by a live in-session flow (SSE gate event, poll/watcher handoff).
+   * Snapshot-derived gates are the only ones a later canonical fold may
+   * clear: a locally mounted gate is newer evidence than any snapshot
+   * and converges through its own watcher/poll (R4 stale-response
+   * protection).
+   */
+  rehydrated?: boolean;
 }
 
 /**
@@ -217,7 +227,19 @@ interface ExecutionStore {
   addEvent: (event: Omit<ExecutionEvent, "id" | "seq" | "ts">) => void;
   setPhase: (phase: ExecutionPhase, taskId?: string) => void;
   setPendingApproval: (approval: PendingApproval | null) => void;
-  resolveApproval: (decision: "approved" | "rejected") => void;
+  /**
+   * Settle the pending gate with a decision. When `opts.pausedRunId` is
+   * given (R1b / E1 F4), the settle applies ONLY to that gate: a late
+   * outcome for a superseded gate must not clear the live card, and an
+   * outcome for a gate this client never held is dropped entirely.
+   * "cancelled" (R4 / E3-S2) settles a run that ended stopped — the gate
+   * clears and the phase records the cancellation, never a fake edit
+   * phase or a failure.
+   */
+  resolveApproval: (
+    decision: "approved" | "rejected" | "cancelled",
+    opts?: { pausedRunId?: string },
+  ) => void;
   /** Approval POST submitted — card stays mounted, shows submitting state. */
   beginApprovalSubmit: () => void;
   /** Approval POST accepted (202) — card shows the run executing. */
@@ -239,7 +261,7 @@ interface ExecutionStore {
   failApproval: (
     error: string,
     retryable?: boolean,
-    opts?: { expired?: boolean; decisionRecorded?: boolean },
+    opts?: { expired?: boolean; decisionRecorded?: boolean; pausedRunId?: string },
   ) => void;
   setCheckpoint: (checkpoint: { label: string; gitSha: string } | null) => void;
   setAfterCheckpoint: (checkpoint: { label: string; gitSha: string } | null) => void;
@@ -626,12 +648,33 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     mirrorTaskPhase(get, set);
   },
 
-  resolveApproval: (decision) => {
+  resolveApproval: (decision, opts) => {
     const pending = get().pendingApproval;
+    // R1b (E1 F4): a gate-tagged outcome applies only to its own gate.
+    // Mismatch with the live gate → the outcome is late cross-talk from a
+    // superseded gate; no live gate → only an already-resolved gate's
+    // duplicate outcome may converge — and a duplicate for a gate whose
+    // outcome is ALREADY recorded is a pure no-op (R4 stale-response
+    // protection: re-applying it would rewrite the recorded phase, e.g.
+    // flipping a settled "cancelled" back to "editing").
+    if (opts?.pausedRunId) {
+      if (pending) {
+        if (pending.pausedRunId !== opts.pausedRunId) return;
+      } else {
+        // No live gate: never-held gates are dropped, and an
+        // already-resolved gate's duplicate changes nothing.
+        return;
+      }
+    }
     if (pending) {
       get().addEvent({
         type: "approval_resolved",
-        summary: decision === "approved" ? "Approved" : "Rejected",
+        summary:
+          decision === "approved"
+            ? "Approved"
+            : decision === "cancelled"
+              ? "Cancelled"
+              : "Rejected",
         toolId: pending.toolId,
         success: decision === "approved",
       });
@@ -647,7 +690,10 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     set({
       pendingApproval: null,
       resolvedPausedRunIds,
-      phase: "editing",
+      // A cancelled run lands on the cancelled phase (R4/E3-S2) — the
+      // operator bar, mission panel, and tab badge all read it as the
+      // terminal truth it is, not as an editing session or a failure.
+      phase: decision === "cancelled" ? "cancelled" : "editing",
       approvalPhase: "idle",
       approvalError: null,
       approvalRetryable: true,
@@ -669,6 +715,14 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   },
 
   failApproval: (error, retryable = true, opts) => {
+    // R1b (E1 F4): a gate-tagged failure applies only while that gate is
+    // the pending one — a late failure from gate N must not fail gate
+    // N+1's card, and a duplicate failure for an already-cleared gate
+    // must not re-log or re-fail state that has moved on.
+    if (opts?.pausedRunId) {
+      const pending = get().pendingApproval;
+      if (!pending || pending.pausedRunId !== opts.pausedRunId) return;
+    }
     const expired = opts?.expired === true;
     // A gate whose decision never landed server-side (or that expired into
     // "request again") is still actionable — keep it mounted. A gate whose
@@ -1153,7 +1207,13 @@ export function feedSSEEventToExecutionStore(
  *   never an optimistic state.
  */
 
-export type WorktabBadge = "working" | "ready" | "needs-approval" | "idle";
+export type WorktabBadge =
+  | "working"
+  | "ready"
+  | "needs-approval"
+  | "failed"
+  | "cancelled"
+  | "idle";
 
 export interface WorktabBadgeSnapshot {
   /** Per-task execution phase — useExecutionStore.getState().phaseForTask(taskId). */
@@ -1193,6 +1253,19 @@ export function deriveWorktabBadge(
   const snapshot = snapshots[taskId];
   if (!snapshot) return "idle";
   const { executionPhase, actionRunDisplayState } = snapshot;
+
+  // Terminal outcomes outrank every live signal (R4/E3-S3): a run the
+  // canonical record says failed or stopped must never render as
+  // working, gated, or plain idle — before this, terminal-bad states
+  // didn't exist here and a dead run's tab silently fell back to "idle"
+  // (or froze on a stale spinner). The projection is checked first: it
+  // is the server truth and survives reloads that empty the local phase.
+  if (actionRunDisplayState === "failed" || executionPhase === "failed") {
+    return "failed";
+  }
+  if (actionRunDisplayState === "stopped" || executionPhase === "cancelled") {
+    return "cancelled";
+  }
 
   // An approval gate up in either source means the user must act.
   if (

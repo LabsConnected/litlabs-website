@@ -38,6 +38,11 @@ import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/pro
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { createPausedRun, getLatestPausedRunForConversation, getPendingPausedRunForConversation, pausedRunBelongsToMessage } from "@/lib/litt-intelligence/paused-run-store";
 import { getActiveExecution, registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
+import {
+  cancelReasonFromAbortSignal,
+  isUserCancelAbort,
+  isUserCancelReason,
+} from "@/lib/studio/cancel-attribution";
 import { getOwnerAwareEntitlements } from "@/lib/entitlements";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
@@ -960,8 +965,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       // If Stop raced ahead of stream registration, the pending stamp has
       // already aborted the local controller. Reflect that explicit user
       // cancellation on the durable parent run as soon as its binding is
-      // available.
-      if (executionAbort.signal.aborted && actionContext) {
+      // available. (The stamp is consumed only from an authenticated
+      // user Stop, so its abort carries the user reason by construction;
+      // the origin check keeps a non-user abort — e.g. a shutdown racing
+      // startup — from stamping a user cancellation here.)
+      if (isUserCancelAbort(executionAbort.signal) && actionContext) {
         try {
           await requestActionRunCancellation(actionContext.actionRunId, actionContext.userId);
         } catch (cancelErr) {
@@ -1275,6 +1283,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               hadInterveningMutation: v2Result.pendingApproval.hadInterveningMutationAtPause,
             });
             pausedRunId = pausedRun.id;
+            // Audit (R3 / E2-Q5): gate creation used to log only on
+            // failure — a created gate existed only in the DB. Ids +
+            // the gated tool only.
+            studioLog("approval:gate_created", {
+              conversationId: conversation.id,
+              userId,
+              pausedRunId,
+              actionRunId: actionContext?.actionRunId,
+              tool: v2Result.pendingApproval.toolId,
+            });
             if (actionContext) {
               try {
                 await transitionActionRunEventActivity({
@@ -1377,7 +1395,19 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           }
         }
 
-        const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
+        // Termination attribution (R4/E3-S1): the launch flow's
+        // `cancelled` flag mostly means a NON-user loop stop (max
+        // steps, max output, repeated-call, stall, max runtime) and it
+        // carries the real reason on cancelReason. Only a user-origin
+        // stop settles as "cancelled"; every other loop stop falls
+        // through to the failure branches carrying its real reason.
+        // Billing is identical either way (0 credits).
+        const userCancelled = !!launchFlowResult?.cancelled &&
+          isUserCancelReason(launchFlowResult?.cancelReason);
+        const loopStopped = !!launchFlowResult?.cancelled && !userCancelled;
+        const stopReason = launchFlowResult?.cancelReason ?? "The run stopped before completing.";
+
+        const finalMessageStatus: MessageStatus = userCancelled
           ? "cancelled"
           : actionableApproval
             ? "awaiting_approval"
@@ -1396,10 +1426,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 ? "Task completed"
                 : finalMessageStatus === "cancelled"
                   ? "Task cancelled by user"
-                  : "Task failed",
+                  : loopStopped
+                    ? `Task stopped — ${stopReason}`
+                    : "Task failed",
               approvalReference: null,
               failureCode: finalMessageStatus === "failed" ? "TASK_FAILED" : null,
-              failureMessage: finalMessageStatus === "failed" ? assistantText.slice(0, 500) : null,
+              failureMessage: finalMessageStatus === "failed"
+                ? (loopStopped ? stopReason : assistantText).slice(0, 500)
+                : null,
             });
             // Write the canonical run.completed/run.failed outcome event
             // carrying the quality verdict — publish reads this same
@@ -1580,7 +1614,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // options, stream readers) — an explicit Stop cancels the real
           // underlying HTTP request, not just the local wait. Transport
           // loss never touches this signal.
-          let cancelledV1 = executionAbort.signal.aborted;
+          // Attribution (R4/E3-S6): only a USER-origin abort marks this
+          // a user cancellation. A shutdown abort (server restart) must
+          // settle as a failure carrying its real reason, not as Stop.
+          let cancelledV1 = isUserCancelAbort(executionAbort.signal);
           let r: Awaited<ReturnType<typeof streamText>> | null = null;
           // The V1 text-only lane attaches NO tools to the model call, but
           // the shared runtime-context block teaches tool-invocation tokens
@@ -1634,11 +1671,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 },
               );
             } catch (streamErr) {
-              // A provider abort surfaces here as an AbortError — treat it
-              // as the cancellation it is. Any other failure is a real
-              // provider error handled by the outer catch.
-              if (executionAbort.signal.aborted) {
+              // A provider abort surfaces here as an AbortError. A
+              // user-origin abort is the cancellation it claims to be;
+              // a NON-user abort (graceful shutdown) is rethrown with
+              // its real reason so the outer error settle records a
+              // failure, never a user cancellation (R4/E3-S6). Any other
+              // failure is a real provider error handled by the outer catch.
+              if (isUserCancelAbort(executionAbort.signal)) {
                 cancelledV1 = true;
+              } else if (executionAbort.signal.aborted) {
+                throw new Error(cancelReasonFromAbortSignal(executionAbort.signal));
               } else {
                 throw streamErr;
               }
@@ -1847,10 +1889,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
-        // An explicit execution abort wins over a provider error — a
+        // An explicit USER abort wins over a provider error — a
         // cancelled run is persisted/reported as "cancelled" and must NOT
-        // also emit a generic "error" event for the same Stop.
-        const cancelledBySignal = executionAbort.signal.aborted;
+        // also emit a generic "error" event for the same Stop. The
+        // abort's ORIGIN decides (R4/E3-S6): a graceful-shutdown abort
+        // (server restart) is NOT a user cancellation — it settles as a
+        // failure carrying the shutdown's reason.
+        const cancelledBySignal = isUserCancelAbort(executionAbort.signal);
         if (!cancelledBySignal) {
           console.error(`[messages-route:${rid}] Stream failed:`, errorMsg, err instanceof Error ? err.stack : "");
         }

@@ -10,6 +10,7 @@ import {
   releaseRunClaim,
   updatePausedRunActionRun,
   getRunOutcomeForPausedRun,
+  listPausedRunsForActionRun,
   createPausedRun,
   renewRunLease,
   RUN_HEARTBEAT_MS,
@@ -17,6 +18,7 @@ import {
   type PausedRunRecord,
   type RunResult,
 } from "@/lib/litt-intelligence/paused-run-store";
+import { isUserCancelReason } from "@/lib/studio/cancel-attribution";
 import { ProgressEmitter } from "@/lib/litt-intelligence/progress-events";
 import {
   createWorkspaceTransport,
@@ -27,6 +29,11 @@ import {
   MANIFEST_CHECKPOINT_DESCRIPTION_PREFIX,
 } from "@/lib/missions/workspace-manifest";
 import { resumeAgentLoopV2, isFileWritingTool, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import {
+  computeWorkspaceChange,
+  type WorkspaceChangeProbe,
+} from "@/lib/litt-intelligence/workspace-change-producer";
+import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
 import { ensureProjectPreviewReady } from "@/lib/litt-intelligence/launch-flow";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
@@ -61,6 +68,11 @@ import { makePersistProgressEvent } from "@/lib/action-runtime/progress-event-pe
 import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
 import type { MessageStatus } from "@/lib/studio/types";
 import { attachActionRunToConversationTask, settleConversationTask } from "@/lib/studio/task-service";
+import {
+  getActiveExecution,
+  registerExecution,
+  unregisterExecution,
+} from "@/lib/studio/execution-registry";
 import { reserveCredits, settleRun, estimateCredits, computeResumeQuoteBits, resumeQuoteDisclosure } from "@/lib/agent-billing";
 
 /**
@@ -212,6 +224,9 @@ async function settleResumedRunOutcome(opts: {
     );
   }
   if (written) {
+    // Audit (R3 / E2-Q5): the happy-path settle used to be stdout-silent —
+    // an approval's outcome was auditable only in the DB. Ids + outcome.
+    studioLog("approval:run_settled", { ...ids });
     await settleConversationTask(
       userId, record.conversationId,
       status === "waiting_for_user" ? "waiting_approval" : status === "completed" ? "completed" : status === "cancelled" ? "cancelled" : "failed",
@@ -222,6 +237,162 @@ async function settleResumedRunOutcome(opts: {
     }));
   }
   return true;
+}
+
+/**
+ * Recover the real pre-mutation baseline for a paused run from its
+ * checkpoint row (the durable source of truth). The paused-run record
+ * persists only the checkpointId; without this recovery,
+ * computeWorkspaceChange short-circuits on the empty SHA and always
+ * reports "unknown", which defeated the workspace-change scoping of the
+ * artifact gate on every approval-resume (#551).
+ *
+ * Manifest checkpoints (Gate 1): when git was unavailable at checkpoint
+ * time, the row's git_sha is empty and the path → sha256 baseline rides
+ * the row's description under the manifest prefix. Decode and thread
+ * the whole CheckpointInfo — dropping kind/manifest here would strand
+ * the finale with the same automatic "unknown". A row that carries the
+ * prefix but does not decode is threaded as kind: "manifest" with NO
+ * manifest: the producer fails closed with "unknown" for it, never a
+ * changed/unchanged verdict and never a silent downgrade to a git
+ * baseline. A real git SHA always wins the git path. A missing row
+ * (legacy) keeps the previous empty-SHA behavior, which the producer
+ * also answers "unknown".
+ */
+async function recoverCheckpointInfo(
+  checkpointId: string | null,
+  userId: string,
+): Promise<CheckpointInfo | undefined> {
+  if (!checkpointId) return undefined;
+  const checkpointRow = await getCheckpoint(checkpointId, userId).catch(() => null);
+  const description = checkpointRow?.description ?? null;
+  if (
+    !checkpointRow?.gitSha &&
+    description?.startsWith(MANIFEST_CHECKPOINT_DESCRIPTION_PREFIX)
+  ) {
+    const manifest = decodeManifestCheckpointDescription(description);
+    return {
+      checkpointId,
+      label: "pre-approval",
+      gitSha: "",
+      kind: "manifest",
+      ...(manifest ? { manifest } : {}),
+    };
+  }
+  return {
+    checkpointId,
+    label: "pre-approval",
+    gitSha: checkpointRow?.gitSha ?? "",
+  };
+}
+
+/**
+ * Settle-time workspace verdict (R3 / E4-R4).
+ *
+ * A run that settles WITHOUT reaching a loop finalize tail — rejected
+ * at a gate, an executor that threw, a watchdog settle — never computes
+ * a verdict in the loop, but its lineage may already have mutated
+ * files. Compute the verdict HERE, from the run's stored checkpoint +
+ * a workspace transport, so the settled record states what happened
+ * to the files: changed/unchanged as the evidence says, or "unknown"
+ * when the comparison cannot be made. Fail-closed throughout: a
+ * transport that cannot be created or a comparison that throws yields
+ * an explicit "unknown" evidence object, never an absence dressed as
+ * "unchanged" — and never a thrown error into the settle path.
+ *
+ * Returns null only when the run has no checkpoint at all: with no
+ * baseline there is nothing to diff, and absence is the codebase's
+ * honest state for a run that never reached a mutation.
+ */
+async function computeSettleWorkspaceChange(opts: {
+  record: PausedRunRecord;
+  userId: string;
+  /** The settle site's own transport, when it already has one. */
+  probe?: WorkspaceChangeProbe;
+}): Promise<WorkspaceChangeEvidence | null> {
+  const { record, userId } = opts;
+  if (!record.checkpointId) return null;
+  let checkpoint: CheckpointInfo | undefined;
+  try {
+    checkpoint = await recoverCheckpointInfo(record.checkpointId, userId);
+  } catch {
+    return {
+      status: "unknown",
+      unknownReason: "The run's checkpoint could not be recovered at settle time.",
+    };
+  }
+  if (!checkpoint) return null;
+  let probe = opts.probe;
+  if (!probe) {
+    try {
+      probe = await createWorkspaceTransport(record.projectId, userId, {
+        operationId: record.id,
+      });
+    } catch {
+      return {
+        status: "unknown",
+        unknownReason: "The workspace was not reachable to compare at settle time.",
+      };
+    }
+  }
+  try {
+    return await computeWorkspaceChange(probe, checkpoint);
+  } catch {
+    return {
+      status: "unknown",
+      unknownReason: "The workspace comparison could not be completed at settle time.",
+    };
+  }
+}
+
+/**
+ * Persist a settle-time verdict on the run's Activity surface in the
+ * SAME shape the loop's own persistence writes (progress-event-
+ * persistence's workspace_change mapping), so a run interrupted before
+ * its finalize tail shows its verdict in the panel exactly like a
+ * completed run does. Best-effort: the verdict is durable on the
+ * settle's RunResult regardless — this event is a second surface,
+ * never a reason to fail the settle itself.
+ */
+async function appendWorkspaceChangeEvent(opts: {
+  actionRunId: string | null;
+  userId: string;
+  change: WorkspaceChangeEvidence;
+}): Promise<void> {
+  if (!opts.actionRunId) return;
+  const files = opts.change.files ?? [];
+  const diff = opts.change.diff
+    ? opts.change.diff.length > 6000
+      ? `${opts.change.diff.slice(0, 6000)}…`
+      : opts.change.diff
+    : undefined;
+  try {
+    await appendActionEvent({
+      runId: opts.actionRunId,
+      userId: opts.userId,
+      type: "agent.status",
+      payload: {
+        kind: "workspace_change",
+        status: opts.change.status,
+        fileCount: files.length,
+        files: files.slice(0, 20),
+        filesTruncated: files.length > 20,
+        ...(opts.change.additions !== undefined ? { additions: opts.change.additions } : {}),
+        ...(opts.change.deletions !== undefined ? { deletions: opts.change.deletions } : {}),
+        ...(diff !== undefined ? { diff, diffTruncated: (opts.change.diff?.length ?? 0) > 6000 } : {}),
+        ...(opts.change.checkpointSha ? { checkpointSha: opts.change.checkpointSha } : {}),
+        label:
+          opts.change.status === "changed"
+            ? `Workspace changed: ${files.length} file${files.length === 1 ? "" : "s"}` +
+              (opts.change.additions !== undefined || opts.change.deletions !== undefined
+                ? ` (+${opts.change.additions ?? 0}/−${opts.change.deletions ?? 0})`
+                : "")
+            : `Workspace ${opts.change.status}`,
+      },
+    });
+  } catch {
+    // Best-effort by design — see the doc comment above.
+  }
 }
 
 /**
@@ -377,6 +548,34 @@ export async function POST(
     }
   }
 
+  // Per-conversation executor serialization (Repair R1a-3, Diagnosis E2
+  // S2). Reaching this line with an "approved" decision means this POST
+  // is about to spawn a detached resume executor (a pending gate, or a
+  // controlled retry). Approval executors register in the studio
+  // execution registry at claim time (step 6), so if ANY other
+  // execution is already live for this conversation — another gate's
+  // resume or a messages-route run — this approval must NOT spawn a
+  // second loop on the same lineage. The gate is deliberately NOT
+  // resolved here: it stays pending and can be approved again once the
+  // live executor settles; the response reports the live run's status,
+  // idempotent-style. (This gate's OWN live executor — a duplicate POST
+  // — never reaches here: the already-resolved path above returned its
+  // status. The key check stays as defense in depth.)
+  const approvalExecutionKey = `approval:${pausedRunId}`;
+  if (body.decision === "approved") {
+    const liveExecution = getActiveExecution(conversationId);
+    if (liveExecution && liveExecution.key !== approvalExecutionKey) {
+      return NextResponse.json({
+        resolved: false,
+        decision: "approved",
+        status: "processing",
+        code: "EXECUTION_ALREADY_ACTIVE",
+        pausedRunId,
+        runStatus: "processing",
+      }, { status: 202 });
+    }
+  }
+
   // 2. Resolve the approval (single-use, atomic). A controlled retry
   // reuses the existing record — the approval was already granted.
   let resolved =
@@ -387,6 +586,16 @@ export async function POST(
       { status: 409 },
     );
   }
+
+  // Audit (R3 / E2-Q5): the decision receipt used to be stdout-silent —
+  // an approval was auditable only in the DB. Ids + the decision only.
+  studioLog("approval:decision_recorded", {
+    conversationId,
+    userId,
+    pausedRunId,
+    decision: body.decision,
+    status: resolved.status,
+  });
 
   // 3. For REJECTED: no resumed execution needed — return immediately.
   // Close out the awaiting transcript message so a refresh doesn't show a
@@ -401,6 +610,20 @@ export async function POST(
         `${awaiting.content || "Approval was required."}\n\nDeclined — the gated action was not performed.`,
       ).catch(() => undefined);
     }
+    // Settle-time verdict (R3 / E4-R4): the rejection ends this run with
+    // no finalize tail, but earlier segments of the lineage may already
+    // have mutated files. Compute the verdict from the stored
+    // checkpoint now and record it on the settle — the record must say
+    // what happened to the files even though the gated action itself
+    // never ran. No checkpoint → no verdict field (honest absence).
+    const rejectionChange = await computeSettleWorkspaceChange({ record: resolved, userId });
+    if (rejectionChange) {
+      await appendWorkspaceChangeEvent({
+        actionRunId: resolved.actionRunId,
+        userId,
+        change: rejectionChange,
+      });
+    }
     await settleResumedRunOutcome({
       record: resolved,
       userId,
@@ -410,6 +633,18 @@ export async function POST(
         currentActivity: "Approval declined — task cancelled",
         approvalReference: null,
       },
+      ...(rejectionChange
+        ? {
+            runResult: {
+              finalText: "",
+              stepsUsed: resolved.stepsUsed ?? 0,
+              toolCalls: [],
+              cancelled: true,
+              cancelReason: "Approval rejected by user",
+              workspaceChange: rejectionChange,
+            },
+          }
+        : {}),
       logEvent: "approval:action_run_reject_settle_failed",
     });
     return NextResponse.json({
@@ -508,6 +743,37 @@ export async function POST(
     }, { status: 202 });
   }
 
+  // Per-conversation executor serialization (Repair R1a-3, E2 S2),
+  // continued: from the claim until the executor settles, this attempt
+  // IS the conversation's live execution — register it so the guard
+  // above (and the graceful-shutdown snapshot) can see it. The
+  // registry identity is server-minted from the gate id: approval POSTs
+  // carry no client request id, and the synthetic id can never collide
+  // with a client-minted one in the exact-match cancel path. The
+  // AbortController is created here (it used to be minted at step 7)
+  // because the registration holds it; every later use is unchanged.
+  // Unregistration is key-matched, so this attempt's cleanup can never
+  // remove a newer execution's entry.
+  const abortController = new AbortController();
+  registerExecution({
+    conversationId,
+    userId,
+    clientRequestId: approvalExecutionKey,
+    assistantMessageId: approvalExecutionKey,
+    ...(resolved.actionRunId ? { actionRunId: resolved.actionRunId } : {}),
+    controller: abortController,
+  });
+
+  // Audit (R3 / E2-Q5): claim/resume start used to exist only as a DB
+  // action_event (approval.approved) — never in deployment stdout.
+  studioLog("approval:resume_started", {
+    conversationId,
+    userId,
+    pausedRunId,
+    actionRunId: resolved.actionRunId ?? undefined,
+    tool: resolved.toolId,
+  });
+
   // Controlled retry, continued: the previous attempt's action_run is
   // terminal, and a terminal run cannot run again
   // (ACTION_RUN_TERMINAL_IMMUTABLE — this used to be a hard 503). Mint a
@@ -555,6 +821,7 @@ export async function POST(
       await releaseRunClaim(pausedRunId, userId, executionToken, "failed").catch(
         () => undefined,
       );
+      unregisterExecution(conversationId, approvalExecutionKey);
       return NextResponse.json(
         { error: "Retry could not start", code: "ACTION_RUNTIME_UNAVAILABLE" },
         { status: 503 },
@@ -642,6 +909,7 @@ export async function POST(
           () => undefined,
         );
       }
+      unregisterExecution(conversationId, approvalExecutionKey);
       return NextResponse.json(
         { error: message, resolved: true, status: "failed", pausedRunId, billingQuote: shortfall },
         { status: reserveResult.status || 402 },
@@ -689,7 +957,8 @@ export async function POST(
   // claimed it), this executor is fenced — it aborts the loop at the next
   // step boundary and leaves the outcome to whoever owns the truth. A
   // thrown renewal is a transient DB error, not a fence: keep working.
-  const abortController = new AbortController();
+  // (The AbortController itself was created at registration time, right
+  // after the claim — the execution registry holds it.)
   let fenced = false;
   let chainSettled = false;
   let stallWatchdogFired = false;
@@ -729,6 +998,24 @@ export async function POST(
           latencyMs: Date.now() - Date.parse(lastProgressAt),
         });
         resumeSettle = { status: "failed", actualCredits: 0, error: "EXECUTION_STALLED" };
+        // Settle-time verdict (R3 / E4-R4): the wedged chain never
+        // reached a finalize tail, so no loop verdict exists — but the
+        // approved writes that landed before the wedge are real, and
+        // the settled record must say what happened to the files.
+        // Computed from the run's stored checkpoint + this route's
+        // transport; "unknown" when comparison is impossible.
+        const watchdogChange = await computeSettleWorkspaceChange({
+          record: resolved,
+          userId,
+          probe: transport,
+        });
+        if (watchdogChange) {
+          await appendWorkspaceChangeEvent({
+            actionRunId: resolved.actionRunId,
+            userId,
+            change: watchdogChange,
+          });
+        }
         try {
           await writeResumedResultToTranscript({
             conversationId,
@@ -744,6 +1031,17 @@ export async function POST(
             status: "failed",
             eventType: "run.failed",
             patch: { currentActivity: message, failureCode: "EXECUTION_STALLED", failureMessage: message },
+            ...(watchdogChange
+              ? {
+                  runResult: {
+                    finalText: "",
+                    stepsUsed: resolved.stepsUsed ?? 0,
+                    toolCalls: [],
+                    cancelled: false,
+                    workspaceChange: watchdogChange,
+                  },
+                }
+              : {}),
             executionToken,
             logEvent: "approval:action_run_stall_watchdog_settle_failed",
           });
@@ -753,6 +1051,10 @@ export async function POST(
           );
         } finally {
           finalizeResumeBilling();
+          // The watchdog's settle IS this executor's terminal record —
+          // release the conversation registration here too, since a
+          // wedged chain may never reach its own .finally (R1a-3).
+          unregisterExecution(conversationId, approvalExecutionKey);
         }
         return;
       }
@@ -823,6 +1125,7 @@ export async function POST(
           () => undefined,
         );
       }
+      unregisterExecution(conversationId, approvalExecutionKey);
       return NextResponse.json({ error: message, code: "ACTION_RUNTIME_UNAVAILABLE" }, { status: 503 });
     }
   }
@@ -885,48 +1188,11 @@ export async function POST(
       : undefined,
   };
 
-  // The paused-run record persists only the checkpointId — recover the real
-  // pre-mutation baseline from the checkpoint row (the durable source of
-  // truth) and thread it into the resume. Without it, computeWorkspaceChange
-  // short-circuits on the empty SHA and always reports "unknown", which
-  // defeated the workspace-change scoping of the artifact gate on every
-  // approval-resume (#551): the resumed run could never prove it changed
-  // files. A missing checkpoint row (legacy rows) keeps the previous
-  // empty-SHA behavior.
-  //
-  // Manifest checkpoints (Gate 1): when git was unavailable at checkpoint
-  // time, the row's git_sha is empty and the path → sha256 baseline rides
-  // the row's description under the manifest prefix. Decode and thread the
-  // whole CheckpointInfo — dropping kind/manifest here would strand the
-  // resumed finale with the same automatic "unknown". A row that carries
-  // the prefix but does not decode is threaded as kind: "manifest" with NO
-  // manifest: the producer fails closed with "unknown" for it, never a
-  // changed/unchanged verdict and never a silent downgrade to a git
-  // baseline. A real git SHA always wins the git path, exactly as before.
-  let resumeCheckpoint: CheckpointInfo | undefined;
-  if (resolved.checkpointId) {
-    const checkpointRow = await getCheckpoint(resolved.checkpointId, userId).catch(() => null);
-    const description = checkpointRow?.description ?? null;
-    if (
-      !checkpointRow?.gitSha &&
-      description?.startsWith(MANIFEST_CHECKPOINT_DESCRIPTION_PREFIX)
-    ) {
-      const manifest = decodeManifestCheckpointDescription(description);
-      resumeCheckpoint = {
-        checkpointId: resolved.checkpointId,
-        label: "pre-approval",
-        gitSha: "",
-        kind: "manifest",
-        ...(manifest ? { manifest } : {}),
-      };
-    } else {
-      resumeCheckpoint = {
-        checkpointId: resolved.checkpointId,
-        label: "pre-approval",
-        gitSha: checkpointRow?.gitSha ?? "",
-      };
-    }
-  }
+  // The paused-run record persists only the checkpointId — recover the
+  // real pre-mutation baseline from the checkpoint row (the durable
+  // source of truth) and thread it into the resume. See
+  // recoverCheckpointInfo for the manifest/git recovery semantics.
+  const resumeCheckpoint = await recoverCheckpointInfo(resolved.checkpointId, userId);
 
   // Fire-and-forget with proper error handling — NOT a floating promise.
   // The .then/.catch chain persists the result/error to the DB.
@@ -1037,13 +1303,33 @@ export async function POST(
         });
         // Canonical settle FIRST — the outcome is recorded on the action_run
         // (errors propagate; a silent divergence is worse than a loud
-        // failure). The claim is verified and released inside.
+        // failure). The claim is verified and released inside. The
+        // RunResult rides along (R3): this failure settle used to record
+        // NO result, so the loop's own verdict — computed in its
+        // finalize tail against the original baseline — was dropped
+        // precisely on the runs that failed.
         await settleResumedRunOutcome({
           record: resolved,
           userId,
           status: "failed",
           eventType: "run.failed",
           patch: { currentActivity: "Task failed", failureCode: "TASK_FAILED", failureMessage: resumeFailure },
+          runResult: {
+            finalText: result.finalText,
+            stepsUsed: result.stepsUsed,
+            toolCalls: result.toolCalls,
+            cancelled: result.cancelled,
+            cancelReason: result.cancelReason,
+            qualityLoop: result.qualityLoop
+              ? {
+                  verdict: result.qualityLoop.verdict,
+                  stages: result.qualityLoop.stages,
+                  designPasses: result.qualityLoop.designPasses,
+                }
+              : undefined,
+            qualityLoopState: result.qualityLoopState,
+            workspaceChange: result.workspaceChange ?? null,
+          },
           executionToken,
           logEvent: "approval:action_run_failure_settle_failed",
         });
@@ -1097,6 +1383,19 @@ export async function POST(
           ? "The build did not pass its quality checks; it is not complete."
           : undefined);
 
+      // Termination attribution (R4/E3-S1): the loop's `cancelled` flag
+      // mostly means a NON-user stop — max steps, max output,
+      // repeated-call detection, the zero-call stall, max runtime, or a
+      // shutdown abort. Only a stop whose cancelReason is the user-stop
+      // reason may be recorded as a user cancellation; every other loop
+      // stop settles FAILED carrying its real reason. Billing is
+      // identical either way (0 credits) — only the recorded truth
+      // changes. Before this, any cancelled=true manufactured
+      // "Task cancelled by user" on the canonical record.
+      const userCancelled = result.cancelled && isUserCancelReason(result.cancelReason);
+      const loopStopped = result.cancelled && !userCancelled;
+      const stopReason = result.cancelReason ?? "The run stopped before completing.";
+
       // Reflect the final outcome on the transcript BEFORE marking the run
       // completed — a poller that sees "completed" can then loadMessages
       // and get the real persisted result. An honest loop failure is
@@ -1106,13 +1405,15 @@ export async function POST(
         userId,
         projectId: resolved.projectId,
         pausedRunId,
-        status: result.cancelled
+        status: userCancelled
           ? "cancelled"
-          : result.pendingApproval
-            ? "awaiting_approval"
-            : terminalFailure
-              ? "failed"
-              : "completed",
+          : loopStopped
+            ? "failed"
+            : result.pendingApproval
+              ? "awaiting_approval"
+              : terminalFailure
+                ? "failed"
+                : "completed",
         content: (terminalFailure || finalText) || undefined,
       });
 
@@ -1139,6 +1440,11 @@ export async function POST(
             }
           : undefined,
         qualityLoopState,
+        // The verdict (R3 / E4-S5): the loop computed this in its
+        // finalize tail against the ORIGINAL baseline (R2 continuity).
+        // Before this field existed on RunResult, the value died here —
+        // the settled record carried no workspace truth at all.
+        workspaceChange: result.workspaceChange ?? null,
       };
 
       // Nested-gate handoff: persist the new gate, then record the outer
@@ -1167,7 +1473,15 @@ export async function POST(
             pausedMessages: result.pendingApproval.pausedMessages,
             executionMode: resolved.executionMode,
             systemPrompt: resolved.systemPrompt,
-            checkpointId: null,
+            // Checkpoint continuity (R2/E4-S2): a nested gate must carry the
+            // SAME baseline the chain started with — the resume result's
+            // checkpoint is the baseline this segment was threaded (or the
+            // first baseline it established), mirroring the messages route's
+            // first-pause persistence. Hardcoding null here stranded every
+            // resume from gate ≥2 with no baseline, so its finalize-tail
+            // verdict could only answer "unknown" and no build with two or
+            // more approvals could ever produce a truthful end-to-end verdict.
+            checkpointId: result.checkpoint?.checkpointId ?? null,
             actionRunId: resolved.actionRunId ?? null,
             qualityLoopState: result.pendingApproval.qualityLoopState,
             deferredToolCalls: result.pendingApproval.deferredToolCalls,
@@ -1175,6 +1489,16 @@ export async function POST(
             hadInterveningMutation: result.pendingApproval.hadInterveningMutationAtPause,
           });
           nestedPausedRunId = nested.id;
+          // Audit (R3 / E2-Q5): nested gate creation used to log only
+          // on FAILURE — a successful chain of gates was invisible in
+          // stdout. The line names the NEW gate's id.
+          studioLog("approval:nested_gate_created", {
+            conversationId,
+            userId,
+            pausedRunId: nestedPausedRunId,
+            actionRunId: resolved.actionRunId ?? undefined,
+            tool: result.pendingApproval.toolId,
+          });
         } catch (nestedErr) {
           studioLog("approval:nested_paused_run_persist_failed", {
             conversationId,
@@ -1236,38 +1560,46 @@ export async function POST(
       // carrying the RunResult. An honest loop failure is reported as
       // failed, never completed.
       const honestFailure = terminalFailure;
-      resumeSettle = result.cancelled
+      resumeSettle = userCancelled
         ? { status: "cancelled", actualCredits: 0 }
-        : honestFailure
-          ? { status: "failed", actualCredits: 0, error: honestFailure }
-          : {
-              status: "completed",
-              // Same estimate formula as the initial request — capped by
-              // the reservation so the settle can never exceed the quote.
-              actualCredits: Math.min(
-                estimateCredits(
-                  Math.ceil(JSON.stringify(resolved.pausedMessages ?? []).length / 4),
-                  Math.ceil((finalText ?? "").length / 4),
-                  1,
-                  1,
+        : loopStopped
+          ? { status: "failed", actualCredits: 0, error: stopReason }
+          : honestFailure
+            ? { status: "failed", actualCredits: 0, error: honestFailure }
+            : {
+                status: "completed",
+                // Same estimate formula as the initial request — capped by
+                // the reservation so the settle can never exceed the quote.
+                actualCredits: Math.min(
+                  estimateCredits(
+                    Math.ceil(JSON.stringify(resolved.pausedMessages ?? []).length / 4),
+                    Math.ceil((finalText ?? "").length / 4),
+                    1,
+                    1,
+                  ),
+                  resumeReserved,
                 ),
-                resumeReserved,
-              ),
-            };
+              };
       await settleResumedRunOutcome({
         record: resolved,
         userId,
-        status: result.cancelled ? "cancelled" : honestFailure ? "failed" : "completed",
-        eventType: result.cancelled ? "run.cancelled" : honestFailure ? "run.failed" : "run.completed",
+        status: userCancelled ? "cancelled" : honestFailure || loopStopped ? "failed" : "completed",
+        eventType: userCancelled ? "run.cancelled" : honestFailure || loopStopped ? "run.failed" : "run.completed",
         patch: {
-          currentActivity: result.cancelled
+          currentActivity: userCancelled
             ? "Task cancelled by user"
-            : honestFailure
-              ? "Task failed"
-              : "Task completed",
+            : loopStopped
+              ? `Task stopped — ${stopReason}`
+              : honestFailure
+                ? "Task failed"
+                : "Task completed",
           approvalReference: null,
-          failureCode: honestFailure ? "TASK_FAILED" : null,
-          failureMessage: honestFailure ? honestFailure.slice(0, 500) : null,
+          failureCode: loopStopped ? "EXECUTION_STOPPED" : honestFailure ? "TASK_FAILED" : null,
+          failureMessage: loopStopped
+            ? stopReason.slice(0, 500)
+            : honestFailure
+              ? honestFailure.slice(0, 500)
+              : null,
         },
         runResult,
         executionToken,
@@ -1292,6 +1624,22 @@ export async function POST(
         status: "failed",
         content: `The resumed run failed: ${message}`,
       });
+      // Settle-time verdict (R3 / E4-R4): the loop threw, so its
+      // finalize tail never produced a verdict. Compute it here from
+      // the threaded baseline + transport so the failure record still
+      // states what happened to the files.
+      const exceptionChange = await computeSettleWorkspaceChange({
+        record: resolved,
+        userId,
+        probe: transport,
+      });
+      if (exceptionChange) {
+        await appendWorkspaceChangeEvent({
+          actionRunId: resolved.actionRunId,
+          userId,
+          change: exceptionChange,
+        });
+      }
       // Last-resort settle. Best-effort because we are already handling a
       // failure: if the canonical write fails too, the claim is released
       // so the gate stays retry-eligible, and the stale-run detector
@@ -1303,6 +1651,17 @@ export async function POST(
           status: "failed",
           eventType: "run.failed",
           patch: { currentActivity: "Task failed", failureCode: "TASK_FAILED", failureMessage: message },
+          ...(exceptionChange
+            ? {
+                runResult: {
+                  finalText: "",
+                  stepsUsed: resolved.stepsUsed ?? 0,
+                  toolCalls: [],
+                  cancelled: false,
+                  workspaceChange: exceptionChange,
+                },
+              }
+            : {}),
           executionToken,
           logEvent: "approval:action_run_exception_settle_failed",
         });
@@ -1318,6 +1677,11 @@ export async function POST(
       // fenced executor dies here too.
       chainSettled = true;
       clearInterval(heartbeat);
+      // Release the per-conversation registration (R1a-3): the attempt
+      // is fully settled, so the next gate's approval may spawn. If the
+      // stall watchdog already settled this attempt, it unregistered
+      // there and this key-matched call is a no-op.
+      unregisterExecution(conversationId, approvalExecutionKey);
       // Settle this attempt's billing reservation exactly once (shared
       // with the stall watchdog, which finalizes first if the chain
       // never settled). A missing outcome means the executor exited
@@ -1343,9 +1707,11 @@ export async function POST(
  *
  * Returns:
  *   - status: "pending" | "approved" | "rejected" | "expired"
- *   - runStatus: null | "processing" | "completed" | "failed"
+ *   - runStatus: null | "processing" | "completed" | "failed" | "cancelled"
  *   - runResult: the resumed execution result (when completed)
  *   - runError: error message (when failed)
+ *   - pendingApproval: the run's live nested gate, when the resumed
+ *     segment re-paused at a different paused run (R4/E1-F3)
  */
 export async function GET(
   req: NextRequest,
@@ -1369,6 +1735,39 @@ export async function GET(
   // paused run's own run_* fields are claim bookkeeping, never the truth.
   const outcome = await getRunOutcomeForPausedRun(pausedRun, userId);
 
+  // The run's LIVE nested gate (R4/E1-F3): a resumed segment that paused
+  // again is waiting on the user at a NEW paused run. Pollers keyed to
+  // THIS gate must learn about it from the poll contract itself — the
+  // handoff nested in this gate's RunResult is the primary path, but a
+  // gate whose handoff event falls outside the outcome read window
+  // (or whose outcome still reads "processing") must not leave the
+  // client parked in "executing" until the 15-minute poll timeout
+  // while the server waits on the user. Surface the live sibling gate
+  // at top level whenever this gate's outcome is not settled.
+  let pendingApproval: { toolId: string; pausedRunId: string; reason: string } | null = null;
+  const nested = outcome.runResult?.pendingApproval;
+  if (nested?.pausedRunId && nested.pausedRunId !== pausedRunId) {
+    pendingApproval = {
+      toolId: nested.toolId,
+      pausedRunId: nested.pausedRunId,
+      reason: nested.reason,
+    };
+  } else if (
+    (outcome.runStatus === "processing" || outcome.runStatus === null) &&
+    pausedRun.actionRunId
+  ) {
+    try {
+      const siblings = await listPausedRunsForActionRun(pausedRun.actionRunId, userId);
+      const live = siblings.find((s) => s.status === "pending" && s.id !== pausedRunId);
+      if (live) {
+        pendingApproval = { toolId: live.toolId, pausedRunId: live.id, reason: live.reason };
+      }
+    } catch {
+      // Best-effort handoff surface: the outcome fields above remain the
+      // authority; a sibling lookup failure never fails the poll.
+    }
+  }
+
   return NextResponse.json({
     id: pausedRun.id,
     toolId: pausedRun.toolId,
@@ -1382,5 +1781,6 @@ export async function GET(
     runError: outcome.runError,
     runStartedAt: outcome.runStartedAt,
     runCompletedAt: outcome.runCompletedAt,
+    pendingApproval,
   });
 }
