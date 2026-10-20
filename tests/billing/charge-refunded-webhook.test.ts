@@ -39,6 +39,8 @@ let tableRows: Record<string, TableResult> = {};
 let stripeEventsInsertError: { code?: string; message?: string } | null = null;
 /** Reclaim result for failed/stale events (update().select() rows). */
 let stripeEventsReclaimed: Array<{ id: string }> = [{ id: "e1" }];
+/** Every eq() filter chain seen on a stripe_events update().select() call — one array per attempt. */
+const stripeEventsUpdateFilters: Array<Array<{ col: string; val: unknown }>> = [];
 /** Settable per-test: what fulfill_agent_purchase/refund_agent_purchase "returns". */
 let agentRpcResult: { status: string } = { status: "ok" };
 
@@ -52,10 +54,20 @@ function makeChain(table: string) {
         allUpdates.push({ table, patch: v as Record<string, unknown> });
         // update().eq().eq()[.eq()].select() must resolve rows for the
         // failed- and stale-"processing"-reclaim paths (arbitrary eq depth).
+        // Records the exact filters used so tests can assert the OCC token
+        // (processed_at) was actually part of the WHERE, not just that the
+        // call shape happens to match.
         if (table === "stripe_events") {
+          const filters: Array<{ col: string; val: unknown }> = [];
           const upd: Record<string, unknown> = {};
-          upd.eq = () => upd;
-          upd.select = () => Promise.resolve({ data: stripeEventsReclaimed });
+          upd.eq = (col: string, val: unknown) => {
+            filters.push({ col, val });
+            return upd;
+          };
+          upd.select = () => {
+            stripeEventsUpdateFilters.push(filters);
+            return Promise.resolve({ data: stripeEventsReclaimed });
+          };
           return upd;
         }
         return chain;
@@ -236,6 +248,7 @@ describe("stripe_events atomic claim (concurrent delivery)", () => {
     allUpdates.length = 0;
     stripeEventsInsertError = null;
     stripeEventsReclaimed = [{ id: "e1" }];
+    stripeEventsUpdateFilters.length = 0;
     agentRpcResult = { status: "ok" };
     process.env.STRIPE_SECRET_KEY = "sk_test_x";
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_x";
@@ -269,12 +282,19 @@ describe("stripe_events atomic claim (concurrent delivery)", () => {
     expect(debitCalls).toHaveLength(0);
   });
 
-  it("failed event is reclaimed and reprocessed", async () => {
+  it("failed event is reclaimed, reprocessed, and gets a fresh processed_at", async () => {
     tableRows = { ...baseRows, stripe_events: { data: { id: "e1", result: "failed" }, error: null } };
     currentEvent = refundEvent(charge);
     const res = await POST(req() as never);
     expect(res.status).toBe(200);
     expect(debitCalls).toHaveLength(1); // retried work executed once
+    // The reclaim must refresh processed_at — otherwise this row would
+    // read back as immediately "stale" again, letting an overlapping
+    // delivery win a second concurrent claim while this one is still live.
+    const claimPatch = allUpdates.find(
+      (u) => u.table === "stripe_events" && u.patch.result === "processing",
+    );
+    expect(claimPatch?.patch.processed_at).toBeTruthy();
   });
 
   it("failed event already reclaimed by another delivery → replayed", async () => {
@@ -286,7 +306,7 @@ describe("stripe_events atomic claim (concurrent delivery)", () => {
     expect(debitCalls).toHaveLength(0);
   });
 
-  it("stale 'processing' claim (holder crashed/timed out) is reclaimed and reprocessed", async () => {
+  it("stale 'processing' claim (holder crashed/timed out) is reclaimed via an OCC-token filter, and reprocessed", async () => {
     const staleTimestamp = new Date(Date.now() - 6 * 60 * 1000).toISOString(); // > 5 min stale
     tableRows = {
       ...baseRows,
@@ -296,6 +316,22 @@ describe("stripe_events atomic claim (concurrent delivery)", () => {
     const res = await POST(req() as never);
     expect(res.status).toBe(200);
     expect(debitCalls).toHaveLength(1); // the abandoned work gets done, exactly once
+
+    // The reclaim's WHERE must pin processed_at to the OLD stale value it
+    // observed (the optimistic-concurrency token) — not just match on id
+    // and result, which would let two racers both "win" (see next test).
+    const filters = stripeEventsUpdateFilters.at(-1) ?? [];
+    expect(filters).toContainEqual({ col: "processed_at", val: staleTimestamp });
+    expect(filters).toContainEqual({ col: "result", val: "processing" });
+
+    // And the patch must move processed_at forward, not reuse the old one —
+    // otherwise the very next read would see the same stale value and
+    // consider the row reclaimable all over again.
+    const claimPatch = allUpdates.find(
+      (u) => u.table === "stripe_events" && u.patch.result === "processing",
+    );
+    expect(claimPatch?.patch.processed_at).toBeTruthy();
+    expect(claimPatch?.patch.processed_at).not.toBe(staleTimestamp);
   });
 
   it("fresh 'processing' claim (not stale) is NOT reclaimed → replayed", async () => {
@@ -316,11 +352,22 @@ describe("stripe_events atomic claim (concurrent delivery)", () => {
       ...baseRows,
       stripe_events: { data: { id: "e1", result: "processing", processed_at: staleTimestamp }, error: null },
     };
-    stripeEventsReclaimed = []; // the OCC-token UPDATE matches zero rows — the other racer already won
+    // Models the real race: by the time this delivery's UPDATE actually
+    // commits, the OTHER racer's UPDATE already moved processed_at forward,
+    // so the WHERE (pinned to the OLD stale value this delivery observed)
+    // no longer matches anything — zero rows affected.
+    stripeEventsReclaimed = [];
     currentEvent = refundEvent(charge);
     const res = await POST(req() as never);
     expect(res.status).toBe(200);
     expect(debitCalls).toHaveLength(0); // this delivery lost the race, does no work
+
+    // Confirm it actually attempted the OCC-token reclaim (pinned to the
+    // stale snapshot it saw) rather than losing for some unrelated reason —
+    // without this, deleting the processed_at eq() filter from the source
+    // would still make this test pass.
+    const filters = stripeEventsUpdateFilters.at(-1) ?? [];
+    expect(filters).toContainEqual({ col: "processed_at", val: staleTimestamp });
   });
 });
 
@@ -374,10 +421,19 @@ describe("self-claiming RPC delegation (agent purchase/refund) — no claim coll
     expect(allInserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
   });
 
-  it("checkout.session.completed (agent) with status 'already_processed' skips auto-provisioning", async () => {
+  it("checkout.session.completed (agent) with status 'already_processed' still provisions safely (idempotent)", async () => {
+    // A prior delivery's process could have crashed between
+    // fulfill_agent_purchase committing and provisioning running. This
+    // retry must still provision — the RPC's claim persists, so it will
+    // always report already_processed, and skipping provisioning here
+    // would leave the buyer with a paid entitlement and no accessible
+    // agent instance, forever. Provisioning is itself idempotent
+    // (check-then-create-or-reactivate), so running it unconditionally is
+    // safe.
     tableRows = {
       users: { data: { id: "u1" }, error: null },
       user_agents: { data: null, error: null },
+      agents: { data: { display_name: "Test Agent" }, error: null },
     };
     agentRpcResult = { status: "already_processed" };
     currentEvent = checkoutEvent({
@@ -397,9 +453,7 @@ describe("self-claiming RPC delegation (agent purchase/refund) — no claim coll
     const res = await POST(req() as never);
     expect(res.status).toBe(200);
     expect(rpcCalls.map((c) => c.fn)).toContain("fulfill_agent_purchase");
-    // Nothing new landed — no user_agents insert/update should have run.
-    expect(allInserts.filter((i) => i.table === "user_agents")).toHaveLength(0);
-    expect(allUpdates.filter((u) => u.table === "user_agents")).toHaveLength(0);
+    expect(allInserts.filter((i) => i.table === "user_agents")).toHaveLength(1);
   });
 
   it("charge.refunded matching a marketplace order skips the generic claim and calls refund_agent_purchase", async () => {

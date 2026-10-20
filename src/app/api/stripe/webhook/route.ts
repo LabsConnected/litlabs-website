@@ -69,9 +69,13 @@ async function claimStripeEvent(
 
   if (existing.result === "failed") {
     // Retryable: reclaim only if no other delivery has beaten us to it.
+    // Also refresh processed_at — otherwise this reclaim's row keeps the
+    // ORIGINAL (long-stale) timestamp, so isStaleProcessingClaim would call
+    // it stale again immediately, letting an overlapping delivery win a
+    // second concurrent claim while this one is still actively processing.
     const { data: reclaimed } = await sb
       .from("stripe_events")
-      .update({ result: "processing" })
+      .update({ result: "processing", processed_at: new Date().toISOString() })
       .eq("id", existing.id)
       .eq("result", "failed")
       .select("id");
@@ -284,7 +288,7 @@ export async function POST(req: NextRequest) {
             typeof session.payment_intent === "string"
               ? session.payment_intent
               : session.payment_intent?.id ?? null;
-          const { data: fulfillData, error: rpcError } = await sb.rpc("fulfill_agent_purchase", {
+          const { error: rpcError } = await sb.rpc("fulfill_agent_purchase", {
             p_stripe_event_id: event.id,
             p_stripe_event_type: event.type,
             p_clerk_id: clerkId,
@@ -301,17 +305,18 @@ export async function POST(req: NextRequest) {
             throw new Error(`fulfill_agent_purchase failed: ${rpcError.message}`);
           }
 
-          // A prior delivery already claimed and fulfilled this event —
-          // nothing new landed, so there's nothing to provision.
-          if ((fulfillData as { status?: string } | null)?.status === "already_processed") {
-            break;
-          }
-
           // ── Auto-provision the private agent instance ──
+          // Runs unconditionally — including when the RPC reports
+          // already_processed — because it's idempotent (check-then-
+          // create-or-reactivate) and because the RPC's own claim commits
+          // in its own transaction before this step: if a prior delivery's
+          // process crashed between that commit and provisioning, a retry
+          // would see already_processed and must still provision, or the
+          // buyer would be left with a paid entitlement and no accessible
+          // agent instance, forever.
           // After creating the entitlement, create or activate the
           // user_agents row so the buyer can immediately open the agent
-          // in Studio. This is idempotent — if the instance already
-          // exists (e.g., from a previous install), it's reactivated.
+          // in Studio.
           const { data: agentUser } = await sb
             .from("users")
             .select("id")
