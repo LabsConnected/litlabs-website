@@ -132,6 +132,22 @@ registerAllStationActions();
 
 // ─── Types ────────────────────────────────────────────────────────
 
+/**
+ * Serialized loop state handed to cfg.persistCheckpoint at each step
+ * boundary. Mirrors the fields a pause serializes into agent_paused_runs
+ * so a recovery path can resume the loop after a process death.
+ */
+export interface RunCheckpointSnapshot {
+  messages: LLMMessage[];
+  stepsUsed: number;
+  hadInterveningMutation: boolean;
+  deferredToolCalls: unknown[] | null;
+  baselineCheckpointId: string | null;
+  checkpointId: string | null;
+  qualityLoopState: unknown;
+  phase: string;
+}
+
 export interface AgentLoopConfig {
   maxSteps: number;
   maxRuntimeMs: number;
@@ -164,6 +180,17 @@ export interface AgentLoopConfig {
    */
   initialMessages?: LLMMessage[];
   evalMetadata?: LLMCallMetadata;
+  /**
+   * Optional durable-checkpoint sink. Called once per step boundary —
+   * after the previous step's tool batch fully drained (every tool_call
+   * has a result), before the next LLM call. The payload is the same
+   * state a pause serializes: the full transcript, step counter, and
+   * mutation flag. Implementations MUST be best-effort (the loop catches
+   * and ignores rejections) — checkpointing never blocks a run. When an
+   * approval gate opens, the paused-run row becomes the checkpoint and
+   * this callback is no longer needed for that run.
+   */
+  persistCheckpoint?: (state: RunCheckpointSnapshot) => Promise<void>;
   /** Upstream/client AbortSignal propagated to all provider calls. */
   signal?: AbortSignal;
   /**
@@ -1173,6 +1200,22 @@ async function runAgentLoopV2Inner(
     const stepStartTime = Date.now();
     localProgress.emit({ type: "phase", phase: "call_llm", step: stepsUsed });
     localProgress.emit({ type: "status", summary: `Step ${stepsUsed}: reasoning with ${cfg.model ?? "default model"}` });
+
+    // Durable checkpoint: at a step boundary every prior tool_call has a
+    // result — the same quiesce point an approval pause serializes at.
+    // Best-effort; a failed write must never abort the run.
+    if (cfg.persistCheckpoint) {
+      cfg.persistCheckpoint({
+        messages: [...llmMessages],
+        stepsUsed,
+        hadInterveningMutation: hasInterveningMutation,
+        deferredToolCalls: null,
+        baselineCheckpointId: baselineCheckpoint?.id ?? null,
+        checkpointId: checkpoint?.id ?? null,
+        qualityLoopState: qualitySession ?? null,
+        phase: "loop",
+      }).catch(() => {});
+    }
 
     // Call LLM with tools (with automatic fallback)
     let llmResponse;
