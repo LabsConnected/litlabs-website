@@ -23,6 +23,11 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { isBillingExempt, type SimulatedPlan } from "@/lib/owner";
 import { emitUsageEvent } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
+import {
+  DEFAULT_AGENT_MODE,
+  isValidAgentMode,
+  type AgentMode,
+} from "@/lib/litt-intelligence/agent-identity";
 
 export interface AgentRunContext {
   clerkId: string;
@@ -34,6 +39,14 @@ export interface AgentRunContext {
   idempotencyKey: string;
   model?: string;
   provider?: string;
+  /**
+   * The run's LiTT mode, when the caller carries one. Validated by
+   * resolveAgentRunMode before the agent_runs insert: absent →
+   * 'standard'; an explicitly invalid value fails the run closed
+   * rather than being silently rewritten. Never the model id — the
+   * model lives in `model` (and lands in input.model on the row).
+   */
+  agentMode?: string;
   /** Optional owner simulation override for billing-exempt checks. */
   simulation?: SimulatedPlan | null;
 }
@@ -130,6 +143,46 @@ function unwrapBitsRpcRow(data: unknown): BitsRpcParse {
 export const RESERVATION_TTL_SECONDS = 3600;
 
 /**
+ * Thrown when a caller supplies an agent mode outside the set the
+ * agent_runs.agent_mode check constraint allows ('standard' |
+ * 'builder' | 'research' | 'spark' — migration
+ * 20260805000000_litt_agent_identity.sql). An explicitly invalid mode
+ * is a routing defect: it must fail loudly, never be silently
+ * rewritten to 'standard', which would conceal the defect.
+ */
+export class InvalidAgentModeError extends Error {
+  readonly agentMode: unknown;
+  constructor(agentMode: unknown) {
+    super(
+      `Invalid agent mode ${JSON.stringify(agentMode) ?? String(agentMode)}: ` +
+        "agent_runs.agent_mode must be one of 'standard', 'builder', 'research', 'spark'",
+    );
+    this.name = "InvalidAgentModeError";
+    this.agentMode = agentMode;
+  }
+}
+
+/**
+ * Resolve the agent_mode written to the agent_runs row.
+ *
+ * The column carries the run's MODE — never the model id (the model
+ * id is stored in input.model). A mode that is absent (undefined or
+ * null — no current caller supplies one) resolves to the column
+ * default 'standard'. An explicitly present but unrecognized value
+ * throws InvalidAgentModeError so the run fails closed before any
+ * insert instead of being silently converted.
+ */
+export function resolveAgentRunMode(candidate: unknown): AgentMode {
+  if (candidate === undefined || candidate === null) {
+    return DEFAULT_AGENT_MODE;
+  }
+  if (isValidAgentMode(candidate)) {
+    return candidate;
+  }
+  throw new InvalidAgentModeError(candidate);
+}
+
+/**
  * Reserve BITS BEFORE the model call.
  *
  * Flow:
@@ -152,6 +205,22 @@ export async function reserveCredits(
   // Owner billing exemption: skip reservation entirely.
   // Usage is still recorded by chargeLlmUsage (which also checks exemption).
   if (isBillingExempt(ctx.clerkId, ctx.simulation)) {
+    // Resolve the run mode before any write: an explicitly invalid
+    // mode fails closed here. No reservation exists on this path, so
+    // there is no hold to release.
+    let exemptAgentMode: AgentMode;
+    try {
+      exemptAgentMode = resolveAgentRunMode(ctx.agentMode);
+    } catch (err) {
+      return {
+        ok: false,
+        runId: null,
+        reservationId: null,
+        status: 422,
+        error: err instanceof Error ? err.message : "Invalid agent mode",
+        reservedCredits: 0,
+      };
+    }
     // Still create the agent_runs row for audit, but no reservation.
     const { data: user } = await supabaseAdmin
       .from("users")
@@ -168,7 +237,7 @@ export async function reserveCredits(
         agent_name: ctx.agentInstanceId,
         task: ctx.idempotencyKey,
         status: "running",
-        agent_mode: ctx.model ?? "default",
+        agent_mode: exemptAgentMode,
         input: {
           agent_id: ctx.agentId,
           agent_version_id: ctx.agentVersionId,
@@ -276,6 +345,32 @@ export async function reserveCredits(
     }
   }
 
+  // Resolve the run mode before inserting the run row. An explicitly
+  // invalid mode fails closed: release the hold just taken so it
+  // cannot leak, and never write the row.
+  let agentMode: AgentMode;
+  try {
+    agentMode = resolveAgentRunMode(ctx.agentMode);
+  } catch (err) {
+    if (reservationId && estimatedCredits > 0) {
+      await confirmRelease(
+        reservationId,
+        ctx.idempotencyKey + ":release-on-invalid-mode",
+        estimatedCredits,
+        "release_after_invalid_mode",
+        ctx,
+      );
+    }
+    return {
+      ok: false,
+      runId: null,
+      reservationId: null,
+      status: 422,
+      error: err instanceof Error ? err.message : "Invalid agent mode",
+      reservedCredits: 0,
+    };
+  }
+
   // Create the agent_runs row (using production schema columns)
   const { data: runRow, error: runError } = await supabaseAdmin
     .from("agent_runs")
@@ -284,7 +379,7 @@ export async function reserveCredits(
       agent_name: ctx.agentInstanceId,
       task: ctx.idempotencyKey,
       status: "running",
-      agent_mode: ctx.model ?? "default",
+      agent_mode: agentMode,
       input: {
         agent_id: ctx.agentId,
         agent_version_id: ctx.agentVersionId,
