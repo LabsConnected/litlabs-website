@@ -29,6 +29,11 @@ const subUpdates: Array<Record<string, unknown>> = [];
 interface TableResult { data: unknown; error: unknown }
 let tableRows: Record<string, TableResult> = {};
 
+/** Settable per-test: insert error for stripe_events (e.g. 23505 race). */
+let stripeEventsInsertError: { code?: string; message?: string } | null = null;
+/** Reclaim result for failed events (update().select() rows). */
+let stripeEventsReclaimed: Array<{ id: string }> = [{ id: "e1" }];
+
 function makeChain(table: string) {
   const result = tableRows[table] ?? { data: null, error: null };
   const chain: Record<string, unknown> = {};
@@ -36,7 +41,21 @@ function makeChain(table: string) {
     if (m === "update") {
       chain[m] = (v: unknown) => {
         subUpdates.push(v as Record<string, unknown>);
+        // update().eq().eq().select() must resolve rows for the reclaim path.
+        if (table === "stripe_events") {
+          const upd: Record<string, unknown> = {};
+          upd.eq = () => upd;
+          upd.select = () => Promise.resolve({ data: stripeEventsReclaimed });
+          return upd;
+        }
         return chain;
+      };
+    } else if (m === "select" && table === "stripe_events") {
+      chain[m] = () => {
+        const sel: Record<string, unknown> = {};
+        sel.eq = () => sel;
+        sel.maybeSingle = () => Promise.resolve(result);
+        return sel;
       };
     } else {
       chain[m] = () => chain;
@@ -44,7 +63,12 @@ function makeChain(table: string) {
   }
   chain.single = () => Promise.resolve(result);
   chain.maybeSingle = () => Promise.resolve(result);
-  chain.insert = () => Promise.resolve({ error: null });
+  chain.insert = () =>
+    Promise.resolve(
+      stripeEventsInsertError && table === "stripe_events"
+        ? { error: stripeEventsInsertError }
+        : { error: null },
+    );
   return chain;
 }
 
@@ -83,6 +107,8 @@ describe("charge.refunded", () => {
     debitCalls.length = 0;
     subUpdates.length = 0;
     tableRows = {};
+    stripeEventsInsertError = null;
+    stripeEventsReclaimed = [{ id: "e1" }];
     process.env.STRIPE_SECRET_KEY = "sk_test_x";
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_x";
   });
@@ -166,5 +192,69 @@ describe("charge.refunded", () => {
     expect(debitCalls).toHaveLength(1);
     expect(debitCalls[0].p_amount).toBe(1000);
     expect(debitCalls[0].p_idempotency_key).toBe("refund_re_pack");
+  });
+});
+
+describe("stripe_events atomic claim (concurrent delivery)", () => {
+  const charge = {
+    id: "ch_1", customer: "cus_1", metadata: {}, payment_intent: "pi_1",
+    amount: 1900, amount_refunded: 1900, refunds: { data: [{ id: "re_1" }] },
+  };
+  const baseRows = {
+    subscriptions: { data: { plan: "creator_beta", user_id: "u1" }, error: null },
+    users: { data: { id: "u1" }, error: null },
+    marketplace_orders: { data: null, error: null },
+  };
+  beforeEach(() => {
+    debitCalls.length = 0;
+    stripeEventsInsertError = null;
+    stripeEventsReclaimed = [{ id: "e1" }];
+    process.env.STRIPE_SECRET_KEY = "sk_test_x";
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_x";
+  });
+
+  it("second concurrent delivery loses the claim → replayed, no duplicate side effects", async () => {
+    tableRows = { ...baseRows, stripe_events: { data: null, error: null } };
+    currentEvent = refundEvent(charge);
+    await POST(req() as never); // first delivery claims + processes
+    // Second delivery: select returns the claimed row → claimed-else
+    tableRows.stripe_events = { data: { id: "e1", result: "processing" }, error: null };
+    const res = await POST(req() as never);
+    expect(res.status).toBe(200);
+    expect(debitCalls).toHaveLength(1); // no duplicate debit
+  });
+
+  it("unique-violation on claim → replayed, no duplicate side effects", async () => {
+    tableRows = { ...baseRows, stripe_events: { data: null, error: null } };
+    stripeEventsInsertError = { code: "23505" };
+    currentEvent = refundEvent(charge);
+    const res = await POST(req() as never);
+    expect(res.status).toBe(200);
+    expect(debitCalls).toHaveLength(0);
+  });
+
+  it("processed event → replayed, no re-processing", async () => {
+    tableRows = { ...baseRows, stripe_events: { data: { id: "e1", result: "processed" }, error: null } };
+    currentEvent = refundEvent(charge);
+    const res = await POST(req() as never);
+    expect(res.status).toBe(200);
+    expect(debitCalls).toHaveLength(0);
+  });
+
+  it("failed event is reclaimed and reprocessed", async () => {
+    tableRows = { ...baseRows, stripe_events: { data: { id: "e1", result: "failed" }, error: null } };
+    currentEvent = refundEvent(charge);
+    const res = await POST(req() as never);
+    expect(res.status).toBe(200);
+    expect(debitCalls).toHaveLength(1); // retried work executed once
+  });
+
+  it("failed event already reclaimed by another delivery → replayed", async () => {
+    tableRows = { ...baseRows, stripe_events: { data: { id: "e1", result: "failed" }, error: null } };
+    stripeEventsReclaimed = []; // update matched zero rows — someone else owns it
+    currentEvent = refundEvent(charge);
+    const res = await POST(req() as never);
+    expect(res.status).toBe(200);
+    expect(debitCalls).toHaveLength(0);
   });
 });

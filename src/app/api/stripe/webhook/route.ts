@@ -8,26 +8,72 @@ import {
 import { PLANS, type PlanId } from "@/config/plans";
 import { confirmBookingPayment, recordAudit } from "@/lib/business-operations";
 
-async function isEventProcessed(sb: NonNullable<ReturnType<typeof getAdminSupabase>>, eventId: string): Promise<boolean> {
-  const { data } = await sb
+type SbAdmin = NonNullable<ReturnType<typeof getAdminSupabase>>;
+
+/**
+ * Atomically claim a Stripe event for processing.
+ *
+ * The prior check-then-insert pattern raced: two concurrent deliveries of
+ * the same event both passed the SELECT and both processed, producing
+ * duplicate side effects. stripe_events.stripe_event_id is UNIQUE, so the
+ * INSERT itself is the claim — a duplicate-key error means another
+ * delivery holds or completed it.
+ *
+ * Outcomes:
+ *   "claimed"      — this delivery owns the event; process it.
+ *   "processed"    — a prior delivery finished; acknowledge, do nothing.
+ *   "claimed-else" — another delivery owns or is processing it; ack.
+ *   "unclaimable"  — the claim could not be made; Stripe must retry (500).
+ */
+async function claimStripeEvent(
+  sb: SbAdmin,
+  eventId: string,
+  eventType: string,
+): Promise<"claimed" | "processed" | "claimed-else" | "unclaimable"> {
+  const { data: existing } = await sb
     .from("stripe_events")
-    .select("id")
+    .select("id, result")
     .eq("stripe_event_id", eventId)
-    .single();
-  return !!data;
+    .maybeSingle();
+
+  if (existing?.result === "processed") return "processed";
+
+  if (!existing) {
+    const { error } = await sb.from("stripe_events").insert({
+      stripe_event_id: eventId,
+      event_type: eventType,
+      result: "processing",
+    });
+    if (!error) return "claimed";
+    // 23505 = unique_violation — a concurrent delivery already claimed it.
+    if ((error as { code?: string }).code === "23505") return "claimed-else";
+    return "unclaimable";
+  }
+
+  if (existing.result === "failed") {
+    // Retryable: reclaim only if no other delivery has beaten us to it.
+    const { data: reclaimed } = await sb
+      .from("stripe_events")
+      .update({ result: "processing" })
+      .eq("id", existing.id)
+      .eq("result", "failed")
+      .select("id");
+    return reclaimed && reclaimed.length > 0 ? "claimed" : "claimed-else";
+  }
+
+  // "processing" (or any other live claim) — another delivery owns it.
+  return "claimed-else";
 }
 
 async function markEventProcessed(
-  sb: NonNullable<ReturnType<typeof getAdminSupabase>>,
+  sb: SbAdmin,
   eventId: string,
-  eventType: string,
   result: string,
 ): Promise<void> {
-  await sb.from("stripe_events").insert({
-    stripe_event_id: eventId,
-    event_type: eventType,
-    result,
-  });
+  await sb
+    .from("stripe_events")
+    .update({ result })
+    .eq("stripe_event_id", eventId);
 }
 
 async function creditCreditPack(
@@ -121,9 +167,17 @@ export async function POST(req: NextRequest) {
 
   const sb = isAdminSupabaseConfigured() ? getAdminSupabase() : null;
 
-  // Idempotency: check if event already processed
+  // Idempotency: atomically claim the event before processing. Concurrent
+  // deliveries of the same event cannot produce duplicate side effects.
   if (sb) {
-    if (await isEventProcessed(sb, event.id)) {
+    const claim = await claimStripeEvent(sb, event.id, event.type);
+    if (claim === "unclaimable") {
+      return NextResponse.json(
+        { error: "Webhook processing failed" },
+        { status: 500 },
+      );
+    }
+    if (claim !== "claimed") {
       return NextResponse.json({ received: true, replayed: true });
     }
   }
@@ -625,7 +679,15 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (_err) {
-    // Do not acknowledge or record failed events. Stripe must retry them.
+    // Mark the claimed event failed so a Stripe retry can reclaim and
+    // reprocess it (claimStripeEvent re-claims only rows in "failed").
+    if (sb) {
+      try {
+        await markEventProcessed(sb, event.id, "failed");
+      } catch {
+        // Non-fatal — Stripe still retries the 500.
+      }
+    }
     return NextResponse.json(
       { error: "Webhook processing failed" },
       { status: 500 },
@@ -635,7 +697,7 @@ export async function POST(req: NextRequest) {
   // Mark event as processed (idempotency)
   if (sb) {
     try {
-      await markEventProcessed(sb, event.id, event.type, result);
+      await markEventProcessed(sb, event.id, result);
     } catch {
       // Non-fatal if we can't record the event
     }
