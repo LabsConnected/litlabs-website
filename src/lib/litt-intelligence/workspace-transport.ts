@@ -53,6 +53,16 @@ export interface CheckpointInfo {
   checkpointId: string;
   label: string;
   gitSha: string;
+  /**
+   * How the baseline was captured. "git" (default) = a git commit SHA in
+   * gitSha. "manifest" = git was unavailable (host execution refused), so
+   * the baseline is the path → sha256 manifest below and gitSha is empty;
+   * change comparison re-enumerates the file services instead of running
+   * git status (Gate 1 Fix 1).
+   */
+  kind?: "git" | "manifest";
+  /** Path → sha256 baseline for kind: "manifest" checkpoints. */
+  manifest?: Record<string, string>;
 }
 
 export interface ProjectPackageInfo {
@@ -143,6 +153,14 @@ export interface WorkspaceTransport {
    * instead of claiming writes work.
    */
   readonly fileOpsReachable: boolean;
+  /**
+   * The project's framework is "static" (the same value the Studio
+   * messages route derives as cfg.isStaticWorkspace from
+   * canonicalCtx.framework). Static workspaces are served by the static
+   * preview route and have no dev server to start — the preview tools
+   * must never call startPreview for them (Gate 1 Fix 2).
+   */
+  readonly isStaticWorkspace?: boolean;
 
   // File operations
   listFiles(path: string): Promise<{ entries: Array<{ name: string; type: string }> }>;
@@ -213,6 +231,11 @@ export async function createWorkspaceTransport(
     workspaceId,
     workspaceRoot,
     opts?.operationId,
+    // Fresh Studio projects are created from static templates
+    // (framework "static"); that column is the value the messages route
+    // turns into cfg.isStaticWorkspace, carried here so the preview
+    // tools see the same fact without a second lookup.
+    verified.project.framework === "static",
   );
 
   // Honest reachability: verifyProjectWorkspace() only checks the DB row —
@@ -253,6 +276,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     public readonly workspaceId: string,
     public readonly workspaceRoot: string,
     public readonly operationId?: string,
+    public readonly isStaticWorkspace?: boolean,
   ) {}
 
   /** Set by createWorkspaceTransport() from the reachability probe. */

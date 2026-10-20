@@ -19,15 +19,30 @@
  * untouched because we failed to look is the precise false negative this
  * exists to prevent: a run that wrote bytes and then died would otherwise
  * be labelled "no work completed" while the user's file was rewritten.
+ *
+ * Where git cannot run (host execution refused in production-like
+ * environments), the baseline is a manifest checkpoint instead — a
+ * path → sha256 map captured over the file services — and the comparison
+ * re-enumerates those same services. On staging before Gate 1, "unknown"
+ * was the only verdict this module could produce, for a run that wrote a
+ * complete website and for a run that wrote nothing, identically.
  */
 
 import type { CheckpointInfo, GitStatusResult } from "./workspace-transport";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
+import {
+  diffManifestPaths,
+  enumerateWorkspaceManifest,
+} from "@/lib/missions/workspace-manifest";
 
 /** The slice of the transport this needs — keeps it trivially testable. */
 export interface WorkspaceChangeProbe {
   gitStatus(): Promise<GitStatusResult>;
   gitDiff?(options?: { staged?: boolean; path?: string; untracked?: boolean }): Promise<{ diff: string }>;
+  /** File services — the manifest comparison surface (Gate 1 Fix 1). These
+   *  work where git-over-exec is refused (HOST_EXECUTION_DISABLED). */
+  listFiles?(path: string): Promise<{ entries: Array<{ name: string; type: string }> }>;
+  readFile?(path: string): Promise<{ content: string; size: number }>;
 }
 
 function diffLineCounts(diff: string): { additions: number; deletions: number } {
@@ -59,6 +74,49 @@ export function changedPathsFromStatus(status: GitStatusResult): string[] {
  * between taking the checkpoint and recording it. Absent a checkpoint the
  * honest answer is "unknown".
  */
+/**
+ * Compare against a manifest checkpoint (Gate 1 Fix 1): re-enumerate the
+ * workspace over the file services and diff path → sha256 against the
+ * baseline. Used when the checkpoint was captured without git (host
+ * execution refused) — calling gitStatus() here would 503 and collapse
+ * the verdict to "unknown" even though the evidence exists. A manifest
+ * checkpoint carries no git SHA, so no git rollback is offered.
+ */
+async function computeManifestWorkspaceChange(
+  probe: WorkspaceChangeProbe,
+  checkpoint: CheckpointInfo,
+): Promise<WorkspaceChangeEvidence> {
+  if (!probe.listFiles || !probe.readFile) {
+    return {
+      status: "unknown",
+      unknownReason:
+        "A manifest checkpoint was recorded, but the workspace file services were not reachable to compare against it.",
+    };
+  }
+
+  let current: Record<string, string>;
+  try {
+    current = await enumerateWorkspaceManifest({
+      listFiles: probe.listFiles.bind(probe),
+      readFile: probe.readFile.bind(probe),
+    });
+  } catch (err) {
+    return {
+      status: "unknown",
+      unknownReason:
+        err instanceof Error
+          ? `Could not enumerate the workspace files: ${err.message}`
+          : "Could not enumerate the workspace files.",
+    };
+  }
+
+  const files = diffManifestPaths(checkpoint.manifest ?? {}, current);
+  if (files.length === 0) {
+    return { status: "unchanged", files: [], rollbackAvailable: false };
+  }
+  return { status: "changed", files, rollbackAvailable: false };
+}
+
 export async function computeWorkspaceChange(
   probe: WorkspaceChangeProbe | null | undefined,
   checkpoint: CheckpointInfo | null | undefined,
@@ -68,6 +126,11 @@ export async function computeWorkspaceChange(
       status: "unknown",
       unknownReason: "The workspace was not reachable to compare.",
     };
+  }
+
+  // Manifest checkpoints compare by re-enumeration, never by gitStatus.
+  if (checkpoint?.kind === "manifest" && checkpoint.manifest) {
+    return computeManifestWorkspaceChange(probe, checkpoint);
   }
 
   if (!checkpoint?.gitSha) {

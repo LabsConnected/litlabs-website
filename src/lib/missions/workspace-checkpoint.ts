@@ -12,6 +12,12 @@ import "server-only";
 
 import { createCheckpoint } from "@/lib/missions/mission-repository";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
+import { createTerminalToken } from "@/lib/terminal-auth";
+import {
+  encodeManifestCheckpointDescription,
+  enumerateWorkspaceManifest,
+  type ManifestFileSurface,
+} from "@/lib/missions/workspace-manifest";
 
 export interface WorkspaceCheckpointInput {
   projectId: string;
@@ -25,6 +31,15 @@ export interface WorkspaceCheckpointResult {
   checkpointId: string;
   label: string;
   gitSha: string;
+  /**
+   * "git" = gitSha is a real commit. "manifest" = the git exec path was
+   * unavailable (e.g. 503 HOST_EXECUTION_DISABLED in production-like
+   * environments), so the baseline is the path → sha256 manifest and
+   * gitSha is empty — the row must never be fed to git restore.
+   */
+  kind: "git" | "manifest";
+  /** Path → sha256 baseline; present only for kind: "manifest". */
+  manifest?: Record<string, string>;
 }
 
 function terminalBase(): string {
@@ -111,50 +126,133 @@ export async function restoreWorkspaceCheckpoint(
   return { gitSha: sha };
 }
 
+/**
+ * The workspace file services (/ws-files list/read) as a manifest
+ * surface — the same endpoints and token shape WorkspaceTransport uses.
+ * These work in production-like environments where /exec is refused.
+ */
+function workspaceFileSurface(input: WorkspaceCheckpointInput): ManifestFileSurface {
+  const { workspaceId, userId, projectId } = input;
+  const headers = (): Record<string, string> => {
+    const { token } = createTerminalToken(userId, { workspaceId, projectId });
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      "X-Workspace-Id": workspaceId,
+    };
+  };
+  return {
+    async listFiles(path: string) {
+      const resp = await fetch(
+        `${terminalBase()}/ws-files?path=${encodeURIComponent(path || ".")}`,
+        { headers: headers(), signal: AbortSignal.timeout(30_000) },
+      );
+      if (!resp.ok) {
+        const err = await resp.text().catch(() => "");
+        throw new Error(`listFiles failed (${resp.status}): ${err}`);
+      }
+      return resp.json() as Promise<{ entries: Array<{ name: string; type: string }> }>;
+    },
+    async readFile(path: string) {
+      const resp = await fetch(`${terminalBase()}/ws-files/read`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ path }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!resp.ok) {
+        const err = await resp.text().catch(() => "");
+        throw new Error(`readFile failed (${resp.status}): ${err}`);
+      }
+      const data = (await resp.json()) as { content: string; size: number };
+      return { content: data.content, size: data.size };
+    },
+  };
+}
+
+/**
+ * Manifest fallback (Gate 1 Fix 1): when the git exec path fails — on
+ * staging it always does, by design (503 HOST_EXECUTION_DISABLED) —
+ * capture the baseline as a path → sha256 manifest over the file
+ * services instead of producing no checkpoint at all. The manifest
+ * rides the checkpoint row's description (no schema migration);
+ * git_sha stays empty so the row can never be mistaken for a git
+ * checkpoint by restore or by the change producer.
+ */
+async function createManifestCheckpoint(
+  input: WorkspaceCheckpointInput,
+): Promise<WorkspaceCheckpointResult> {
+  const { projectId, userId, label } = input;
+  const manifest = await enumerateWorkspaceManifest(workspaceFileSurface(input));
+  const checkpoint = await createCheckpoint({
+    projectId,
+    userId,
+    gitSha: "",
+    label,
+    description: encodeManifestCheckpointDescription(manifest),
+  });
+  return {
+    checkpointId: checkpoint.id,
+    label,
+    gitSha: "",
+    kind: "manifest",
+    manifest,
+  };
+}
+
 export async function createWorkspaceCheckpoint(
   input: WorkspaceCheckpointInput,
 ): Promise<WorkspaceCheckpointResult> {
   const { projectId, userId, workspaceId, label, description } = input;
 
-  // Stage all changes
-  await execInWorkspace(workspaceId, userId, "git add -A");
+  try {
+    // Stage all changes
+    await execInWorkspace(workspaceId, userId, "git add -A");
 
-  const commitMessage = description ? `${label}\n\n${description}` : label;
-  const commit = await execInWorkspace(
-    workspaceId,
-    userId,
-    "git commit --file=- --allow-empty",
-    commitMessage,
-  );
-  // The exec endpoint returns 200 even when git fails. A failed commit
-  // followed by rev-parse would record the PREVIOUS commit as this
-  // checkpoint — a silent lie that makes Revert a no-op. Fail loudly.
-  if (commit.exitCode !== 0) {
-    throw new Error(`Checkpoint commit failed (exit ${commit.exitCode}): ${commit.stderr.slice(0, 200)}`);
+    const commitMessage = description ? `${label}\n\n${description}` : label;
+    const commit = await execInWorkspace(
+      workspaceId,
+      userId,
+      "git commit --file=- --allow-empty",
+      commitMessage,
+    );
+    // The exec endpoint returns 200 even when git fails. A failed commit
+    // followed by rev-parse would record the PREVIOUS commit as this
+    // checkpoint — a silent lie that makes Revert a no-op. Fail loudly.
+    if (commit.exitCode !== 0) {
+      throw new Error(`Checkpoint commit failed (exit ${commit.exitCode}): ${commit.stderr.slice(0, 200)}`);
+    }
+
+    // Get the SHA
+    const shaResult = await execInWorkspace(workspaceId, userId, "git rev-parse HEAD");
+    const gitSha = shaResult.stdout.trim();
+
+    if (!gitSha) {
+      throw new Error("Failed to get git SHA after checkpoint commit");
+    }
+
+    // Persist to DB
+    const checkpoint = await createCheckpoint({
+      projectId,
+      userId,
+      gitSha,
+      label,
+      description: description ?? `Agent checkpoint: ${label}`,
+    });
+
+    return {
+      checkpointId: checkpoint.id,
+      label,
+      gitSha,
+      kind: "git",
+    };
+  } catch {
+    // Git unavailable (or its persistence failed): fall back to the
+    // manifest baseline over the file services. If the fallback also
+    // fails, its error propagates — the transport turns any throw into
+    // "no checkpoint", exactly as before.
+    return createManifestCheckpoint(input);
   }
-
-  // Get the SHA
-  const shaResult = await execInWorkspace(workspaceId, userId, "git rev-parse HEAD");
-  const gitSha = shaResult.stdout.trim();
-
-  if (!gitSha) {
-    throw new Error("Failed to get git SHA after checkpoint commit");
-  }
-
-  // Persist to DB
-  const checkpoint = await createCheckpoint({
-    projectId,
-    userId,
-    gitSha,
-    label,
-    description: description ?? `Agent checkpoint: ${label}`,
-  });
-
-  return {
-    checkpointId: checkpoint.id,
-    label,
-    gitSha,
-  };
 }
 
 // ─── Checkpoint diff ─────────────────────────────────────────────

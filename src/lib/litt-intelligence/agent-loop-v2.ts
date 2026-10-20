@@ -19,7 +19,7 @@ import { randomUUID } from "crypto";
 import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
 import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
-import type { WorkspaceTransport } from "./workspace-transport";
+import type { CheckpointInfo, WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
@@ -1155,7 +1155,7 @@ async function runAgentLoopV2Inner(
   let modelFailed: string | undefined;
   let modelFailureText: string | undefined;
   let failedHonestly: string | undefined;
-  let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
+  let checkpoint: CheckpointInfo | undefined;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
   // Bounded recovery when the model announces more work but emits no tool
@@ -1531,9 +1531,11 @@ async function runAgentLoopV2Inner(
       // workspace files. Read-only tools never checkpoint.
       if (!toolDef.readOnly) {
         localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
+        // Gate 1 Fix 1c: a failed re-checkpoint (null) must not erase a
+        // previously valid baseline — keep the prior checkpoint.
         checkpoint = await transport.createCheckpointBeforeMutation(
           `Pre-mutation: ${toolCall.toolId} (step ${stepsUsed})`,
-        ) ?? undefined;
+        ) ?? checkpoint;
         if (checkpoint) {
           localProgress.emit({
             type: "checkpoint",
@@ -2100,7 +2102,7 @@ export interface ResumeInput {
   /** Whether a mutation already happened before pause */
   hadInterveningMutation: boolean;
   /** Existing checkpoint (if created before pause) */
-  existingCheckpoint?: { checkpointId: string; label: string; gitSha: string };
+  existingCheckpoint?: CheckpointInfo;
   /**
    * Calls deferred from the batch that hit the approval gate. Executed
    * after the approved tool on resume (in batch order), through the same
@@ -2143,7 +2145,7 @@ export interface DeferredToolBatchState {
   hasInterveningMutation: boolean;
   cancelled: boolean;
   cancelReason?: string;
-  checkpoint?: { checkpointId: string; label: string; gitSha: string };
+  checkpoint?: CheckpointInfo;
   mutationBatchPending: boolean;
   batchHasMutation: boolean;
   completedDeployment: CompletedDeployment | null;
@@ -2351,9 +2353,10 @@ export async function executeDeferredToolCalls(
     // never checkpoint.
     if (!toolDef.readOnly) {
       ctx.localProgress.emit({ type: "phase", phase: "execute", step: ctx.stepsUsed });
+      // Gate 1 Fix 1c: preserve the prior baseline on a failed re-checkpoint.
       state.checkpoint = await ctx.transport.createCheckpointBeforeMutation(
         `Pre-mutation resume (deferred batch): ${toolCall.toolId}`,
-      ) ?? undefined;
+      ) ?? state.checkpoint;
       if (state.checkpoint) {
         ctx.localProgress.emit({
           type: "checkpoint",
@@ -3064,7 +3067,7 @@ async function resumeAgentLoopV2Inner(
       // next resume diffs truthfully instead of "unknown". Read-only tools
       // never checkpoint.
       if (!toolDef.readOnly) {
-        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-mutation resume: ${toolCall.toolId} (step ${stepsUsed})`) ?? undefined;
+        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-mutation resume: ${toolCall.toolId} (step ${stepsUsed})`) ?? checkpoint;
         if (checkpoint) {
           localProgress.emit({ type: "checkpoint", label: checkpoint.label, gitSha: checkpoint.gitSha });
         }
