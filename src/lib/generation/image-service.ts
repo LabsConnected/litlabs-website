@@ -1184,15 +1184,21 @@ export async function generateImage(
     error: string,
     retryable: boolean,
     providerId: MediaProviderId | null = null,
-  ): ImageGenerationFailure => ({
-    success: false,
-    requestId,
-    providerId,
-    code,
-    error,
-    retryable,
-    durationMs: Date.now() - startTime,
-  });
+  ): ImageGenerationFailure => {
+    // Every failure return funnels through here — log it, so silent
+    // pre-dispatch failures (NO_PROVIDER, BAD_REQUEST, …) stop being
+    // invisible in service logs (Gate 2, diagnosis ART-20261020-005).
+    console.info(`[image-service] FAIL code=${code} provider=${providerId} requestId=${requestId}`);
+    return {
+      success: false,
+      requestId,
+      providerId,
+      code,
+      error,
+      retryable,
+      durationMs: Date.now() - startTime,
+    };
+  };
 
   // ── 0. Trusted identity (never from client input) ──────────────
   const userId = ctx.userId?.trim();
