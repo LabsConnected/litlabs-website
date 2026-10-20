@@ -324,8 +324,8 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         agentLoopResult: {
           stepsUsed: 2,
           toolCalls: [
-            { toolId: "files.list", toolCallId: "tc1", inputs: {} },
-            { toolId: "files.write", toolCallId: "tc2", inputs: { path: "index.html" } },
+            { toolId: "files.list", toolCallId: "tc1", inputs: {}, success: true, mutating: false, summary: "5 entries" },
+            { toolId: "files.write", toolCallId: "tc2", inputs: { path: "index.html" }, success: true, mutating: true, summary: "saved" },
           ],
           cancelled: false,
           pendingApproval: null,
@@ -715,7 +715,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "Done after downstream cancel.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 100,
       } as any;
@@ -1160,6 +1160,103 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     );
   });
 
+  it("hallucinated file creation: the model claims it built index.html with zero tool calls — reported failed, not completed", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      finalText: "Done! I've created index.html with your landing page content.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [],
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.any(String),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("failed");
+  });
+
+  it("tool success without workspace mutations: a mutating tool reports success:true but the checkpoint diff shows nothing changed — reported failed, not completed", async () => {
+    // The CLI-equivalent bug this PR follow-up targets: a tool returns
+    // success:true/mutating:true (e.g. a no-op command that exited 0
+    // having written nothing) — that claim alone must not establish
+    // completion once a real workspace diff contradicts it.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      finalText: "Done! I've created index.html.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+        workspaceChange: { status: "unchanged", files: [], checkpointSha: "abc1234", rollbackAvailable: true },
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.stringContaining("workspace diff shows no changes"),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("failed");
+  });
+
+  it("successful real file creation: a mutating tool reports success AND the checkpoint diff confirms the change — reported completed", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: "https://preview.example.com",
+      finalText: "Done! I've created index.html.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+        workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true },
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "completed",
+      expect.any(String),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("completed");
+  });
+
   it("a failed run releases the conversation — an immediate second send is not rejected", async () => {
     vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
     vi.mocked(runLaunchFlow).mockRejectedValue(new Error("Provider connection refused"));
@@ -1177,7 +1274,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       previewUrl: null,
       productionUrl: null,
       finalText: "Recovered answer.",
-      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }], cancelled: false, pendingApproval: null } as any,
+      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
       cancelled: false,
       totalDurationMs: 50,
     } as any);
