@@ -11,6 +11,23 @@ import { confirmBookingPayment, recordAudit } from "@/lib/business-operations";
 type SbAdmin = NonNullable<ReturnType<typeof getAdminSupabase>>;
 
 /**
+ * A "processing" claim older than this is assumed abandoned — the holder's
+ * function crashed, timed out, or was killed before reaching the catch
+ * block, so the claim was never marked "failed" and would otherwise block
+ * this event forever while telling Stripe (via a 200 "replayed" response on
+ * retry) that nothing further needs to happen. Generous relative to typical
+ * serverless function timeouts; still well inside Stripe's retry window.
+ */
+const STALE_CLAIM_MS = 5 * 60 * 1000;
+
+function isStaleProcessingClaim(existing: { result: string; processed_at: string }): boolean {
+  return (
+    existing.result === "processing" &&
+    Date.now() - new Date(existing.processed_at).getTime() > STALE_CLAIM_MS
+  );
+}
+
+/**
  * Atomically claim a Stripe event for processing.
  *
  * The prior check-then-insert pattern raced: two concurrent deliveries of
@@ -32,7 +49,7 @@ async function claimStripeEvent(
 ): Promise<"claimed" | "processed" | "claimed-else" | "unclaimable"> {
   const { data: existing } = await sb
     .from("stripe_events")
-    .select("id, result")
+    .select("id, result, processed_at")
     .eq("stripe_event_id", eventId)
     .maybeSingle();
 
@@ -61,7 +78,23 @@ async function claimStripeEvent(
     return reclaimed && reclaimed.length > 0 ? "claimed" : "claimed-else";
   }
 
-  // "processing" (or any other live claim) — another delivery owns it.
+  if (isStaleProcessingClaim(existing)) {
+    // Reclaim using the observed processed_at as an optimistic-concurrency
+    // token. If two deliveries race to reclaim the same stale snapshot,
+    // only the first to actually commit wins: its UPDATE moves
+    // processed_at forward, so the second's WHERE (pinned to the OLD
+    // timestamp) no longer matches and it correctly loses the claim.
+    const { data: reclaimed } = await sb
+      .from("stripe_events")
+      .update({ result: "processing", processed_at: new Date().toISOString() })
+      .eq("id", existing.id)
+      .eq("result", "processing")
+      .eq("processed_at", existing.processed_at)
+      .select("id");
+    return reclaimed && reclaimed.length > 0 ? "claimed" : "claimed-else";
+  }
+
+  // "processing" (not yet stale) — another delivery owns it.
   return "claimed-else";
 }
 
@@ -167,9 +200,50 @@ export async function POST(req: NextRequest) {
 
   const sb = isAdminSupabaseConfigured() ? getAdminSupabase() : null;
 
+  // fulfill_agent_purchase / refund_agent_purchase atomically claim this
+  // SAME stripe_events row themselves (INSERT ... ON CONFLICT DO NOTHING)
+  // as their own idempotency gate. If the generic claim below also
+  // inserted a row first, those RPCs would see it as already-claimed and
+  // silently skip all real work (order/entitlement creation, or
+  // revocation on refund) — deterministically, not just under a race. So:
+  // determine up front whether this event will be handled by one of those
+  // self-claiming RPCs, and if so, skip the generic claim entirely and let
+  // the RPC be the sole, atomic source of truth for it.
+  let agentOrderForRefund: { id: string } | null = null;
+  let delegatesToSelfClaimingRpc = false;
+
+  if (sb && event.type === "checkout.session.completed") {
+    const sessionMeta = (event.data.object as Stripe.Checkout.Session).metadata || {};
+    // Mirrors the exact condition the switch below uses to route to
+    // fulfill_agent_purchase — checkout.session.completed has no DB-lookup
+    // fallback, so metadata is authoritative here.
+    delegatesToSelfClaimingRpc = sessionMeta.product_type === "agent" && !!sessionMeta.clerk_id;
+  } else if (sb && event.type === "charge.refunded") {
+    const refundCharge = event.data.object as Stripe.Charge;
+    const refundChargeMeta = refundCharge.metadata || {};
+    const refundPaymentIntentId = refundCharge.payment_intent as string | undefined;
+    if (refundPaymentIntentId) {
+      const { data: agentOrder } = await sb
+        .from("marketplace_orders")
+        .select("id")
+        .eq("stripe_payment_intent_id", refundPaymentIntentId)
+        .maybeSingle();
+      if (agentOrder) {
+        agentOrderForRefund = agentOrder as { id: string };
+        delegatesToSelfClaimingRpc = true;
+      }
+    }
+    // Metadata fallback — same secondary evidence the switch below uses.
+    if (!delegatesToSelfClaimingRpc && refundChargeMeta.product_type === "agent" && refundPaymentIntentId) {
+      delegatesToSelfClaimingRpc = true;
+    }
+  }
+
   // Idempotency: atomically claim the event before processing. Concurrent
   // deliveries of the same event cannot produce duplicate side effects.
-  if (sb) {
+  // Skipped when the event delegates to a self-claiming RPC (see above) —
+  // that RPC's own claim is the sole gate for those events.
+  if (sb && !delegatesToSelfClaimingRpc) {
     const claim = await claimStripeEvent(sb, event.id, event.type);
     if (claim === "unclaimable") {
       return NextResponse.json(
@@ -210,7 +284,7 @@ export async function POST(req: NextRequest) {
             typeof session.payment_intent === "string"
               ? session.payment_intent
               : session.payment_intent?.id ?? null;
-          const { error: rpcError } = await sb.rpc("fulfill_agent_purchase", {
+          const { data: fulfillData, error: rpcError } = await sb.rpc("fulfill_agent_purchase", {
             p_stripe_event_id: event.id,
             p_stripe_event_type: event.type,
             p_clerk_id: clerkId,
@@ -225,6 +299,12 @@ export async function POST(req: NextRequest) {
           });
           if (rpcError) {
             throw new Error(`fulfill_agent_purchase failed: ${rpcError.message}`);
+          }
+
+          // A prior delivery already claimed and fulfilled this event —
+          // nothing new landed, so there's nothing to provision.
+          if ((fulfillData as { status?: string } | null)?.status === "already_processed") {
+            break;
           }
 
           // ── Auto-provision the private agent instance ──
@@ -516,31 +596,24 @@ export async function POST(req: NextRequest) {
         const paymentIntentId = charge.payment_intent as string | undefined;
 
         // ── Agent refund: revoke entitlement, do NOT debit LBC ──
-        // Primary lookup: search marketplace_orders by payment_intent_id.
-        // This works even when Stripe metadata is absent, delayed, or incomplete.
+        // Primary evidence: marketplace_orders matched by payment_intent_id
+        // (reused from the pre-claim lookup above — this works even when
+        // Stripe metadata is absent, delayed, or incomplete).
         // Secondary evidence: metadata product_type === "agent".
-        if (paymentIntentId) {
-          const { data: agentOrder } = await sb
-            .from("marketplace_orders")
-            .select("id, status")
-            .eq("stripe_payment_intent_id", paymentIntentId)
-            .maybeSingle();
-
-          if (agentOrder) {
-            // Found a matching marketplace order — process as agent refund.
-            // The RPC is idempotent (claims the Stripe event atomically).
-            // It does NOT debit LBC — agent purchases are not credit packs.
-            const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
-              p_stripe_event_id: event.id,
-              p_stripe_event_type: event.type,
-              p_stripe_payment_intent_id: paymentIntentId,
-              p_stripe_refund_id: charge.refunds?.data?.[0]?.id ?? null,
-            });
-            if (rpcError) {
-              throw new Error(`refund_agent_purchase failed: ${rpcError.message}`);
-            }
-            break;
+        if (agentOrderForRefund) {
+          // Found a matching marketplace order — process as agent refund.
+          // The RPC is idempotent (claims the Stripe event atomically).
+          // It does NOT debit LBC — agent purchases are not credit packs.
+          const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
+            p_stripe_event_id: event.id,
+            p_stripe_event_type: event.type,
+            p_stripe_payment_intent_id: paymentIntentId,
+            p_stripe_refund_id: charge.refunds?.data?.[0]?.id ?? null,
+          });
+          if (rpcError) {
+            throw new Error(`refund_agent_purchase failed: ${rpcError.message}`);
           }
+          break;
         }
 
         // Fallback: use metadata product_type as secondary evidence
@@ -681,7 +754,11 @@ export async function POST(req: NextRequest) {
   } catch (_err) {
     // Mark the claimed event failed so a Stripe retry can reclaim and
     // reprocess it (claimStripeEvent re-claims only rows in "failed").
-    if (sb) {
+    // Skipped when delegated: we never took the generic claim, and the
+    // RPC's own claim is a single Postgres transaction — if it threw, that
+    // transaction (including its claim INSERT) already rolled back, so
+    // there's no row of ours to mark and nothing to undo.
+    if (sb && !delegatesToSelfClaimingRpc) {
       try {
         await markEventProcessed(sb, event.id, "failed");
       } catch {
@@ -694,8 +771,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Mark event as processed (idempotency)
-  if (sb) {
+  // Mark event as processed (idempotency). Skipped when delegated — the
+  // RPC owns that row and already recorded its own completion.
+  if (sb && !delegatesToSelfClaimingRpc) {
     try {
       await markEventProcessed(sb, event.id, result);
     } catch {
