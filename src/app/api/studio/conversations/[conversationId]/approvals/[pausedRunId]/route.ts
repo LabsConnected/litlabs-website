@@ -17,7 +17,14 @@ import {
   type RunResult,
 } from "@/lib/litt-intelligence/paused-run-store";
 import { ProgressEmitter } from "@/lib/litt-intelligence/progress-events";
-import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
+import {
+  createWorkspaceTransport,
+  type CheckpointInfo,
+} from "@/lib/litt-intelligence/workspace-transport";
+import {
+  decodeManifestCheckpointDescription,
+  MANIFEST_CHECKPOINT_DESCRIPTION_PREFIX,
+} from "@/lib/missions/workspace-manifest";
 import { resumeAgentLoopV2, isFileWritingTool, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
 import { ensureProjectPreviewReady } from "@/lib/litt-intelligence/launch-flow";
@@ -790,21 +797,46 @@ export async function POST(
   };
 
   // The paused-run record persists only the checkpointId — recover the real
-  // pre-mutation git SHA from the checkpoint row (the durable source of
+  // pre-mutation baseline from the checkpoint row (the durable source of
   // truth) and thread it into the resume. Without it, computeWorkspaceChange
   // short-circuits on the empty SHA and always reports "unknown", which
   // defeated the workspace-change scoping of the artifact gate on every
   // approval-resume (#551): the resumed run could never prove it changed
   // files. A missing checkpoint row (legacy rows) keeps the previous
   // empty-SHA behavior.
-  let resumeCheckpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
+  //
+  // Manifest checkpoints (Gate 1): when git was unavailable at checkpoint
+  // time, the row's git_sha is empty and the path → sha256 baseline rides
+  // the row's description under the manifest prefix. Decode and thread the
+  // whole CheckpointInfo — dropping kind/manifest here would strand the
+  // resumed finale with the same automatic "unknown". A row that carries
+  // the prefix but does not decode is threaded as kind: "manifest" with NO
+  // manifest: the producer fails closed with "unknown" for it, never a
+  // changed/unchanged verdict and never a silent downgrade to a git
+  // baseline. A real git SHA always wins the git path, exactly as before.
+  let resumeCheckpoint: CheckpointInfo | undefined;
   if (resolved.checkpointId) {
     const checkpointRow = await getCheckpoint(resolved.checkpointId, userId).catch(() => null);
-    resumeCheckpoint = {
-      checkpointId: resolved.checkpointId,
-      label: "pre-approval",
-      gitSha: checkpointRow?.gitSha ?? "",
-    };
+    const description = checkpointRow?.description ?? null;
+    if (
+      !checkpointRow?.gitSha &&
+      description?.startsWith(MANIFEST_CHECKPOINT_DESCRIPTION_PREFIX)
+    ) {
+      const manifest = decodeManifestCheckpointDescription(description);
+      resumeCheckpoint = {
+        checkpointId: resolved.checkpointId,
+        label: "pre-approval",
+        gitSha: "",
+        kind: "manifest",
+        ...(manifest ? { manifest } : {}),
+      };
+    } else {
+      resumeCheckpoint = {
+        checkpointId: resolved.checkpointId,
+        label: "pre-approval",
+        gitSha: checkpointRow?.gitSha ?? "",
+      };
+    }
   }
 
   // Fire-and-forget with proper error handling — NOT a floating promise.

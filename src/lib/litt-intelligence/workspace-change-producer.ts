@@ -133,6 +133,19 @@ export async function computeWorkspaceChange(
     return computeManifestWorkspaceChange(probe, checkpoint);
   }
 
+  // A manifest checkpoint whose baseline did not survive (missing or
+  // undecodable evidence — e.g. the approvals route recovered the row but
+  // its manifest payload was absent or malformed) fails closed: there is
+  // no baseline to compare against, and falling through to the git path
+  // would dress that absence up as a git verdict.
+  if (checkpoint?.kind === "manifest") {
+    return {
+      status: "unknown",
+      unknownReason:
+        "A manifest checkpoint was recorded, but its baseline manifest could not be recovered to compare against.",
+    };
+  }
+
   if (!checkpoint?.gitSha) {
     return {
       status: "unknown",
