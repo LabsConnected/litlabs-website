@@ -43,8 +43,9 @@ import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { RuntimeClient } from "../lib/runtime-client.js";
 import { RemoteModelProvider, RemoteExecutionError } from "../lib/remote-model-provider.js";
 import { RemoteConnectionTimeoutError } from "../lib/runtime-client.js";
-import type { CockpitStore, ActivitySemantic, RoutingMode, ChatMessage, ExecutionTarget } from "./cockpit-store.js";
+import type { CockpitStore, ActivitySemantic, RoutingMode, ChatMessage, ExecutionTarget, HoloState } from "./cockpit-store.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
+import { renderSlashToolResult } from "../lib/slash-result-render.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import { createEscalationHook, createEscalationTracker, createModelResolver } from "../lib/escalation-adapter.js";
 import { classifyUtilityIntent, executeUtilityLookup } from "../lib/utility-lane.js";
@@ -1171,9 +1172,20 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // the bridge sets a pending approval and notifies us. Any open overlay
   // closes so the ApprovalUX can take the screen (approvals are never
   // hidden behind an overlay).
+  //
+  // The `pending === null` transition MUST also be handled: after the
+  // last queued approval is decided/cancelled, the bridge notifies null.
+  // Ignoring it left holoState pinned at "APPROVAL" with no prompt — the
+  // observed "⚠ APPROVAL · waiting" + "Approval required above" with no
+  // actionable card. On drain we clear any stale prompt and restore the
+  // holo phase the run was in before approval stole the screen.
+  const preApprovalHoloRef = useRef<HoloState | null>(null);
   useEffect(() => {
     return approvalBridge.subscribe((pending) => {
       if (pending) {
+        if (store.state.holoState !== "APPROVAL") {
+          preApprovalHoloRef.current = store.state.holoState;
+        }
         store.actions.setApprovalPrompt({
           runId: pending.runId,
           toolCallId: pending.toolCallId,
@@ -1186,6 +1198,18 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         store.actions.setHoloState("APPROVAL");
         store.actions.setOverlay("none");
+      } else {
+        store.actions.clearApproval();
+        if (store.state.holoState === "APPROVAL") {
+          // Restore the phase the run was in before the approval stole
+          // the screen — the gateway call is still in flight. Fall back
+          // to RUNNING while a run is busy, else IDLE. Subsequent real
+          // events (tool.*, run.completed) keep driving the state.
+          const restore = preApprovalHoloRef.current
+            ?? (store.state.busySince !== null || store.state.isProcessing ? "RUNNING" : "IDLE");
+          store.actions.setHoloState(restore);
+        }
+        preApprovalHoloRef.current = null;
       }
     });
   }, [approvalBridge, store]);
@@ -2069,6 +2093,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
         // At this point, approval (if needed) has already been resolved
         // through the bridge. The result reflects the actual outcome.
+        // Non-shell tools (android.*, dex.*) emit no stream events —
+        // render their result into the transcript or it is invisible.
+        renderSlashToolResult(store.actions, mapping.toolId, result.result);
         if (result.result.success) {
           // Refresh branch after git-changing commands (e.g. /run git switch)
           if (command === "git" || cmd === "/status" || cmd === "/diff") {
@@ -3701,12 +3728,19 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // Reached only in LOCAL mode when the local daemon is unavailable —
     // "remote" is always modelExecutionAvailable (see above), so this
     // branch never fires for a normal signed-in customer session.
+    const unavailableMsg =
+      "LOCAL mode: the local model daemon (Ollama/LM Studio) is not available. Start Ollama with a model installed, or use /remote for cloud execution.";
     store.actions.addActivity({
       id: `act_${Date.now()}`,
       ts: Date.now(),
-      type: "info",
-      text: "LOCAL mode: the local model daemon (Ollama/LM Studio) is not available. Start Ollama with a model installed, or use /remote for cloud execution.",
+      type: "error",
+      text: unavailableMsg,
     });
+    // The submitted text and this failure must stay visible — the
+    // user message was already removed from the composer; silent loss
+    // is not acceptable.
+    store.actions.addChatMessage({ role: "user", content: input, ts: Date.now(), status: "complete" });
+    store.actions.addChatMessage({ role: "assistant", content: unavailableMsg, ts: Date.now(), status: "error", servedModel: "local" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, store, onExit, approvalBridge, persistSession, openDiffViewer, newSession, runShipCommit, toggleMode]);
 
@@ -3715,7 +3749,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     submitRef.current = submit;
   }, [submit]);
 
-  const handleApproval = useCallback(async (approved: boolean) => {
+  const handleApproval = useCallback(async (approved: boolean, scope: "once" | "session" = "once") => {
     const prompt = store.state.approvalPrompt;
     if (!prompt) return;
 
@@ -3744,7 +3778,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // Resolve the gateway's pending approval promise.
     // The gateway will then verifyApproval() → VerifiedApproval → continue.
     // The UI only provides the boolean — never the VerifiedApproval itself.
-    approvalBridge.decide(approved);
+    // `scope` carries the ⇧A "approve similar" grant through — previously
+    // dropped, which silently demoted every decision to "once".
+    approvalBridge.decide(approved, scope);
 
     // Don't set IDLE here — the gateway execution is still in flight.
     // The submit() callback will set the final holo state when

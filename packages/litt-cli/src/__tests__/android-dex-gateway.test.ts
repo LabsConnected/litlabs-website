@@ -181,3 +181,48 @@ describe("project.run adb — hardened classification (no bypass)", () => {
     expect(r.result.success).toBe(true);
   });
 });
+
+describe("placeholder serial through the gateway", () => {
+  // The captured live failure: the model passed the literal string
+  // "ANDROID_SERIAL" as serial. It must fail closed with a clear
+  // placeholder error — never substituted, never allowlist-padded.
+  it("approved android.screenshot with ANDROID_SERIAL fails closed — ZERO mutations", async () => {
+    const shell = withDevices(new FakeShell());
+    shell.onArgv(["mkdir"], shellOk());
+    shell.onArgv(["screencap"], shellOk());
+    let asked = 0;
+    const gw = makeGateway(shell, async () => { asked++; return true; });
+    const r = await exec(gw, "android.screenshot", { serial: "ANDROID_SERIAL" }, "act");
+    expect(asked).toBe(1);               // mandatory approval still ran
+    expect(r.result.success).toBe(false);
+    expect(String(r.result.message)).toContain("placeholder");
+    // Approval was granted but NO adb call ran — not even enumeration.
+    expect(shell.calls).toHaveLength(0);
+  });
+  it("an approved mutation executes EXACTLY once — one mutating adb call", async () => {
+    const shell = withDevices(new FakeShell());
+    shell.onArgv(["input"], shellOk());
+    const gw = makeGateway(shell, async () => true);
+    const r = await exec(gw, "android.key", { name: "home" }, "act");
+    expect(r.result.success).toBe(true);
+    const mutations = shell.calls.filter((c) => c.args?.includes("keyevent"));
+    expect(mutations).toHaveLength(1);
+  });
+});
+
+describe("android.key arg-alias tolerance (model arg naming)", () => {
+  // Models frequently emit key/keyName/keyCode instead of the declared
+  // "name" field. The handler normalizes aliases so a valid keyevent
+  // is not failed on a naming mismatch (observed: × Android Key while
+  // the approval prompt was pending on a sibling call).
+  it.each([{ name: "home" }, { key: "home" }, { keyName: "home" }, { keyCode: "home" }])(
+    "accepts %j after approval",
+    async (inputs) => {
+      const shell = withDevices(new FakeShell());
+      shell.onArgv(["input"], shellOk());
+      const gw = makeGateway(shell, async () => true);
+      const r = await exec(gw, "android.key", inputs as Record<string, unknown>, "act");
+      expect(r.result.success).toBe(true);
+    },
+  );
+});

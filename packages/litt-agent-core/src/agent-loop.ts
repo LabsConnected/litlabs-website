@@ -795,6 +795,10 @@ const PLACEHOLDER_TOKENS = new Set([
   "VALUE", "NAME", "URL", "URI", "ARG", "ARGS", "ARGUMENT", "INPUT",
   "OUTPUT", "EXAMPLE", "TODO", "TBD", "XXX", "TARGET", "SOURCE",
   "DESTINATION", "DEST", "STRING", "PARAM", "PARAMETER", "KEY",
+  // Device-identity vocabulary — a model that copies the adb env-var
+  // convention emits "ANDROID_SERIAL" verbatim as the serial argument.
+  "SERIAL", "SERIAL_NUMBER", "ANDROID_SERIAL", "DEVICE_SERIAL",
+  "ADB_SERIAL", "PHONE_SERIAL", "EMULATOR_SERIAL",
 ]);
 /**
  * Placeholder detection: a value is an unresolved template only when it
@@ -1254,7 +1258,8 @@ export async function runAgentLoop(
           (seen > 1
             ? ` — this exact call already failed ${seen - 1}× identically; supply every required argument with the documented names or stop retrying this tool.`
             : ""),
-        data: {},
+        // Rejected before dispatch — the tool handler never ran.
+        data: { failure: "invalid_arg" },
       };
     } else {
     try {
@@ -1373,6 +1378,11 @@ export async function runAgentLoop(
           success: result.success,
           message: result.message,
           durationMs,
+          // Whether the failure was a rejection BEFORE dispatch (denied /
+          // argument guard) or a real execution that failed. The cockpit
+          // uses this to tell the operator the truth about the failure.
+          ...(result.data?.denied === true ? { denied: true } : {}),
+          ...(typeof result.data?.failure === "string" ? { failure: result.data.failure } : {}),
         },
       });
     }

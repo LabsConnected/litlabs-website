@@ -58,6 +58,30 @@ function grantKey(toolId: string, action: string): string {
   return `${toolId}::${firstToken}`;
 }
 
+/**
+ * Human-readable action summary for device-family tools (android.*,
+ * dex.*). The bare toolId hides everything the operator needs to
+ * decide — the card must name the actual operation AND the device it
+ * targets. When no serial is supplied the op auto-resolves the single
+ * authorized device, so the card says so honestly instead of guessing.
+ */
+function describeDeviceAction(request: ExecutionRequest): string {
+  const inputs = request.inputs ?? {};
+  const parts: string[] = [];
+  // The operation's meaningful arguments, in stable display order.
+  const showKeys = ["name", "key", "keyName", "keyCode", "text", "package", "path", "remoteName", "localPath", "destDir", "x", "y", "x1", "y1", "x2", "y2", "durationMs"];
+  for (const k of showKeys) {
+    const v = inputs[k];
+    if (v === undefined || v === null || v === "") continue;
+    const s = typeof v === "string" ? v : JSON.stringify(v);
+    parts.push(`${k}=${s.length > 40 ? s.slice(0, 39) + "…" : s}`);
+  }
+  const serial = typeof inputs.serial === "string" && inputs.serial.trim() !== ""
+    ? inputs.serial.trim()
+    : "(default device)";
+  return `${request.toolId} · ${parts.length > 0 ? parts.join(" ") + " · " : ""}device: ${serial}`;
+}
+
 export class ApprovalBridge {
   private _queue: QueuedApproval[] = [];
   private _pending: PendingApproval | null = null;
@@ -80,7 +104,9 @@ export class ApprovalBridge {
       ? `${request.inputs.command ?? ""} ${(request.inputs.args as string[] ?? []).join(" ")}`.trim()
       : request.toolId === "project.write_file"
         ? `write_file ${typeof request.inputs.path === "string" ? request.inputs.path : "(unknown path)"}`
-        : request.toolId;
+        : request.toolId.startsWith("android.") || request.toolId.startsWith("dex.")
+          ? describeDeviceAction(request)
+          : request.toolId;
 
     // Session grant — resolve immediately, no human round-trip.
     const key = grantKey(request.toolId, action);

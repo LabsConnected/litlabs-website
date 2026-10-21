@@ -89,6 +89,38 @@ describe("deviceState", () => {
   });
 });
 
+describe("placeholder serial — fail closed before any adb spawn", () => {
+  // The exact live failure: the model passed the literal string
+  // "ANDROID_SERIAL" (copied from the adb env-var convention) as the
+  // serial argument. A placeholder must fail closed with a clear error
+  // and must NEVER spawn an adb process or substitute another device.
+  it.each(["ANDROID_SERIAL", "$ANDROID_SERIAL", "<serial>", "DEVICE_SERIAL"])(
+    "rejects placeholder %j with ZERO adb calls and no substitution",
+    async (ph) => {
+      const shell = inputShell();
+      const r = await opsFor(shell).screenshot(ph);
+      expect(r.ok).toBe(false);
+      expect(r.data.failure).toBe("invalid_serial");
+      expect(r.message).toContain("placeholder");
+      expect(r.message).toContain("auto-select");
+      // Zero adb invocations — not even `devices -l` enumeration.
+      expect(shell.calls.length).toBe(0);
+    },
+  );
+
+  it("an omitted serial auto-selects the single allowlisted device", async () => {
+    const shell = withDevices(new FakeShell());
+    shell.onArgv(["getprop ro.product.model"], shellOk("Celero3 5G+\n"));
+    shell.onArgv(["getprop ro.build.version.release"], shellOk("14\n"));
+    shell.onArgv(["dumpsys power"], shellOk("mWakefulness=Awake\n"));
+    shell.onArgv(["dumpsys window"], shellOk("mCurrentFocus=Window{a1b2 u0 com.termux/.app.TermuxActivity}\n"));
+    shell.onArgv(["dumpsys battery"], shellOk("  level: 83\n"));
+    const r = await opsFor(shell).deviceState(undefined);
+    expect(r.ok).toBe(true);
+    expect(r.data.serial).toBe(TEST_SERIAL);
+  });
+});
+
 function inputShell(): FakeShell {
   const s = withDevices(new FakeShell());
   s.onArgv(["wm size"], shellOk("Physical size: 1080x2460\n"));
@@ -254,6 +286,24 @@ describe("file transfer", () => {
     expect(r.ok).toBe(false);
     expect(r.data.failure).toBe("invalid_arg");
   });
+  it("pull rejects a missing remote file before starting transfer", async () => {
+    const shell = withDevices(new FakeShell());
+    shell.onArgv(["stat", "-c", "%s"], shellFail("stat: No such file or directory"));
+    shell.onArgv(["pull"], shellOk("1 file pulled"));
+    const r = await opsFor(shell).pullFile("screenshot.png");
+    expect(r.ok).toBe(false);
+    expect(r.data.failure).toBe("remote_not_found");
+    expect(r.message).toContain("already exist");
+    expect(r.message).toContain("android.screenshot");
+    expect(shell.calls.some((c) => c.args?.includes("pull"))).toBe(false);
+  });
+  it("pull still transfers an explicitly named existing remote file", async () => {
+    const shell = pushShell();
+    const r = await opsFor(shell, { statFile: () => ({ isFile: true, size: PNG.length }) }).pullFile("existing.png");
+    expect(r.ok).toBe(true);
+    expect(r.verified).toBe(true);
+    expect(shell.calls.some((c) => c.args?.includes("pull"))).toBe(true);
+  });
 });
 
 describe("disconnect + timeout honesty", () => {
@@ -278,5 +328,34 @@ describe("disconnect + timeout honesty", () => {
     const r = await opsFor(shell).tap(1, 1);
     expect(r.ok).toBe(false);
     expect(r.data.failure).toBe("no_device");
+  });
+  it("a transiently empty device list is re-queried once before failing", async () => {
+    // adb server restarts (two adb binaries on PATH can flap port 5037)
+    // can answer `devices -l` empty while the phone is still attached —
+    // the exact captured `× Android Key` / "No usable devices" failure.
+    // One bounded re-query must recover it.
+    let calls = 0;
+    const shell = new FakeShell().onArgv(["devices", "-l"], () => {
+      calls++;
+      return calls === 1
+        ? shellOk("List of devices attached\n\n")
+        : shellOk(DEVICES_L);
+    });
+    shell.onArgv(["input"], shellOk(""));
+    const r = await opsFor(shell).key("home");
+    expect(calls).toBe(2);
+    expect(r.ok).toBe(true);
+  });
+  it("a persistently empty list still fails honestly after one re-query", async () => {
+    let calls = 0;
+    const shell = new FakeShell().onArgv(["devices", "-l"], () => {
+      calls++;
+      return shellOk("List of devices attached\n\n");
+    });
+    const r = await opsFor(shell).key("home");
+    expect(calls).toBe(2);
+    expect(r.ok).toBe(false);
+    expect(r.data.failure).toBe("no_device");
+    expect(r.message).toContain("No devices are attached");
   });
 });

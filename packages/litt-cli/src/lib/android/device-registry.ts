@@ -73,6 +73,37 @@ export interface ResolveSerialResult {
 /** Device serial: adb serials are alnum/ip:port/emulator-NNNN shaped. */
 export const SERIAL_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,63}$/;
 
+/**
+ * Serial values that are templates/placeholders, never device
+ * identities: env-var references ($ANDROID_SERIAL, ${ANDROID_SERIAL},
+ * %ANDROID_SERIAL%), angle-bracket templates (<serial>), and
+ * schema-vocabulary tokens (ANDROID_SERIAL, DEVICE_SERIAL, …).
+ * Real serials like "LBMRAIFEVSNRMFRO" or "emulator-5554" match none
+ * of these. A placeholder must NEVER be resolved as a device — it
+ * fails closed with a clear error instead.
+ */
+const SERIAL_PLACEHOLDER_EXACT = new Set([
+  "serial", "serialno", "serial_number", "device_serial", "android_serial",
+  "adb_serial", "phone_serial", "emulator_serial", "device_id",
+  "your_serial", "my_serial", "target_serial", "the_serial",
+]);
+
+export function isSerialPlaceholder(serial: string): boolean {
+  const t = serial.trim();
+  if (t === "") return false;
+  if (SERIAL_PLACEHOLDER_EXACT.has(t.toLowerCase())) return true;
+  // <serial>, <device serial> — angle-bracket templates.
+  if (/^<[^>]+>$/.test(t)) return true;
+  // $VAR, ${VAR} — POSIX env-var references.
+  if (/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(t)) return true;
+  // %VAR% — Windows env-var references.
+  if (/^%[A-Za-z_][A-Za-z0-9_]*%$/.test(t)) return true;
+  // <FAMILY>_SERIAL / <FAMILY>-SERIAL schema-vocabulary compounds
+  // (e.g. ANDROID_SERIAL shapes a model invents on the fly).
+  if (/^(?:android|adb|device|phone|emulator|usb)[-_]serial(?:s)?$/i.test(t)) return true;
+  return false;
+}
+
 /** Android package id: reverse-domain with at least one dot. */
 export const PACKAGE_RE = /^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/;
 
@@ -192,6 +223,17 @@ export function resolveSerial(
   const usable = connected.filter((d) => d.usable);
 
   if (requested !== undefined && requested !== "") {
+    // A placeholder is never a device identity — fail closed with a
+    // clear error BEFORE the allowlist check so the message names the
+    // real problem (template text, not an unauthorized device). The
+    // caller must NOT silently substitute another device.
+    if (isSerialPlaceholder(requested)) {
+      return fail(
+        "invalid_serial",
+        `Serial "${requested}" is a placeholder, not a device serial. ` +
+          `Omit "serial" to auto-select the authorized device, or pass a real serial from android.devices.`,
+      );
+    }
     if (!SERIAL_RE.test(requested)) {
       return fail("invalid_serial", `Serial "${requested}" is not a valid device serial`);
     }
@@ -225,7 +267,20 @@ export function resolveSerial(
   if (candidates.length === 1) return { ok: true, serial: candidates[0].serial };
   if (candidates.length === 0) {
     if (usable.length === 0) {
-      return fail("no_device", "No usable devices are attached");
+      if (connected.length === 0) {
+        return fail("no_device", "No devices are attached — `adb devices` returned an empty list");
+      }
+      // Devices ARE attached but none is state="device" — report the real
+      // states so the operator can tell unauthorized/offline apart from
+      // a genuinely empty bus. (Observed: "No usable devices" hid an
+      // unauthorized phone behind a misleading message.)
+      const states = connected.map((d) => `${d.serial}=${d.state}`).join(", ");
+      const hint = connected.some((d) => d.state === "unauthorized")
+        ? " — accept the USB debugging prompt on the phone"
+        : connected.every((d) => d.state === "offline")
+          ? " — device offline; reconnect it or restart the adb server"
+          : "";
+      return fail("device_not_ready", `Attached device(s) not ready: ${states}${hint}`);
     }
     return fail(
       "no_device",

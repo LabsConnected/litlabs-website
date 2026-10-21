@@ -9,6 +9,7 @@ import {
   resolveSerial,
   isSerialAllowed,
   isPackageAllowed,
+  isSerialPlaceholder,
   type AndroidPolicy,
 } from "../lib/android/device-registry.js";
 import type { AdbDeviceInfo } from "../lib/android/adb-client.js";
@@ -93,6 +94,57 @@ describe("resolveSerial", () => {
     const r = resolveSerial(basePolicy, undefined, [dev("OTHER")]);
     expect(r.failure?.kind).toBe("no_device");
     expect(r.failure?.message).toContain("allowlisted");
+  });
+  it("attached-but-unusable devices report real state, not a bare 'no devices'", () => {
+    // Captured failure: `× Android Key` traced to "No usable devices are
+    // attached" while a phone WAS attached — the message must say why.
+    const r = resolveSerial(basePolicy, undefined, [dev("LBMRAIFEVSNRMFRO", "unauthorized")]);
+    expect(r.failure?.kind).toBe("device_not_ready");
+    expect(r.failure?.message).toContain("unauthorized");
+    expect(r.failure?.message).toContain("USB debugging");
+  });
+  it("an empty device list is a distinct honest failure", () => {
+    const r = resolveSerial(basePolicy, undefined, []);
+    expect(r.failure?.kind).toBe("no_device");
+    expect(r.failure?.message).toContain("No devices are attached");
+  });
+});
+
+describe("placeholder serials — never device identities", () => {
+  const connected = [dev("LBMRAIFEVSNRMFRO")];
+
+  it.each([
+    "ANDROID_SERIAL",       // the exact captured live failure
+    "DEVICE_SERIAL", "ADB_SERIAL", "PHONE_SERIAL", "EMULATOR_SERIAL",
+    "SERIAL", "SERIAL_NUMBER", "DEVICE_ID", "YOUR_SERIAL",
+    "android_serial",       // case-insensitive
+    "<serial>", "<device serial>",
+    "$ANDROID_SERIAL", "${ANDROID_SERIAL}", "%ANDROID_SERIAL%",
+  ])("rejects placeholder %j as invalid_serial with a clear message", (ph) => {
+    const r = resolveSerial(basePolicy, ph, connected);
+    expect(r.ok).toBe(false);
+    expect(r.failure?.kind).toBe("invalid_serial");
+    expect(r.failure?.message).toContain("placeholder");
+    // The fix path is named: omit serial to auto-select.
+    expect(r.failure?.message).toContain("auto-select");
+    // NEVER silently substituted with the real device.
+    expect(r.serial).toBeUndefined();
+  });
+
+  it("does NOT misclassify real serials as placeholders", () => {
+    for (const real of ["LBMRAIFEVSNRMFRO", "emulator-5554", "127.0.0.1:5555", "SER1", "ZY322JKQPR"]) {
+      expect(isSerialPlaceholder(real)).toBe(false);
+    }
+  });
+
+  it("a placeholder bypasses neither allowlist nor auto-selection", () => {
+    // Placeholder ≠ "not supplied" — it fails closed, it does NOT
+    // resolve to the single authorized device.
+    const r = resolveSerial(basePolicy, "ANDROID_SERIAL", connected);
+    expect(r.ok).toBe(false);
+    // Allowlist is unchanged: ANDROID_SERIAL is not added, real serial stays.
+    expect(isSerialAllowed(basePolicy, "ANDROID_SERIAL")).toBe(false);
+    expect(isSerialAllowed(basePolicy, "LBMRAIFEVSNRMFRO")).toBe(true);
   });
 });
 

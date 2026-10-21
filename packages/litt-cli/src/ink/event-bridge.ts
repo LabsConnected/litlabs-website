@@ -110,6 +110,64 @@ function resultMessage(data: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+/**
+ * Failure kinds that mean the requested action was rejected BEFORE it
+ * could run — a policy/validation/guard rejection, never an execution
+ * that failed mid-flight. Used to tell the operator the truth about
+ * whether anything ran at all.
+ */
+const NOT_EXECUTED_FAILURES = new Set([
+  "invalid_arg",       // schema/argument validation or op-level arg guard
+  "not_allowlisted",   // serial/package outside the Android allowlist
+  "invalid_serial",
+  "no_device", "no_devices",
+  "device_not_found", "device_not_ready",
+  "device_offline", "device_unauthorized",
+  "adb_missing",
+]);
+
+export interface ToolFailureInfo {
+  /** The real error text — `error`, then `message`, then `result`/`output`. */
+  reason: string;
+  /**
+   * False when the failure was a rejection before the action ran
+   * (gateway denial, argument validation, device guard). True when the
+   * action was actually attempted and failed.
+   */
+  executed: boolean;
+  /** reason + an explicit execution marker — the line shown to the operator. */
+  detail: string;
+}
+
+/**
+ * Project a tool.failed event into a readable operator line.
+ *
+ * The canonical agent_tool_result payload carries the failure in
+ * `data.message` (never `data.error`) plus optional `denied`/`failure`
+ * classification markers emitted by the agent loop. Remote tool_result
+ * events may carry `error`. Never expose raw inputs — only the tool's
+ * own result message.
+ */
+export function toolFailureInfo(data: Record<string, unknown>): ToolFailureInfo {
+  let reason = "failed";
+  for (const v of [data.error, data.message, data.result, data.output]) {
+    if (typeof v === "string" && v.trim().length > 0) {
+      reason = v.trim().split("\n")[0].trim();
+      break;
+    }
+  }
+  const failure = typeof data.failure === "string" ? data.failure : null;
+  const executed =
+    data.denied !== true &&
+    !(failure !== null && NOT_EXECUTED_FAILURES.has(failure)) &&
+    !/^tool argument validation failed/i.test(reason);
+  return {
+    reason,
+    executed,
+    detail: executed ? `${reason} · attempted` : `${reason} · not executed`,
+  };
+}
+
 function holoFromEvent(event: LifecycleEvent): HoloState | null {
   switch (event.type) {
     case "run.started": return "RUNNING";
@@ -229,9 +287,13 @@ export function useEventBridge(
       case "tool.completed":
         entry = makeEntry("tool.completed", `${toolLabel(event.data)} · ${event.data.durationMs ?? 0}ms`, event, undefined, resultMessage(event.data), "PASS");
         break;
-      case "tool.failed":
-        entry = makeEntry("tool.failed", `${toolLabel(event.data)} — ${event.data.error ?? "error"}`, event, undefined, resultMessage(event.data), "FAIL");
+      case "tool.failed": {
+        // The real reason lives in data.message (agent path) / data.error
+        // (remote path) — never fall back to a bare "error".
+        const info = toolFailureInfo(event.data);
+        entry = makeEntry("tool.failed", `${toolLabel(event.data)} — ${info.detail}`, event, undefined, info.detail, "FAIL");
         break;
+      }
       case "tool.cancelled":
         entry = makeEntry("tool.cancelled", `${toolLabel(event.data)}`, event, undefined, resultMessage(event.data), "FAIL");
         break;
@@ -355,7 +417,7 @@ export function useEventBridge(
         }
         case "tool.failed": {
           const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
-          if (wsId) ws.fail(wsId, String(event.data.error ?? "error"));
+          if (wsId) ws.fail(wsId, toolFailureInfo(event.data).detail);
           if (event.toolCallId) toolWsIds.delete(event.toolCallId);
           break;
         }

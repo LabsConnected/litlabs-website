@@ -71,7 +71,16 @@ export function buildAndroidToolEntries(deps: AndroidToolDeps = {}): Record<stri
   ): ToolDefinition => ({ id, name, description, inputSchema, readOnly });
 
   const serialProp = {
-    serial: { type: "string", description: "Optional device serial — required only when multiple allowlisted devices are connected" },
+    serial: {
+      type: "string",
+      description:
+        "Optional adb device serial, exactly as reported by android.devices " +
+        "(e.g. 'LBMRAIFEVSNRMFRO' or 'emulator-5554'). Omit it entirely to " +
+        "auto-select the sole authorized device — this is the normal case. " +
+        "Never pass environment-variable or placeholder names such as " +
+        "ANDROID_SERIAL, <serial>, $SERIAL, or %ANDROID_SERIAL% — those " +
+        "are rejected, not resolved.",
+    },
   };
 
   const entries: Array<{ def: ToolDefinition; meta: ToolMetadata; handler: ToolHandler }> = [
@@ -92,7 +101,7 @@ export function buildAndroidToolEntries(deps: AndroidToolDeps = {}): Record<stri
     },
     {
       def: def("android.screenshot", "android_screenshot",
-        "Capture the device screen to a PNG under the LiTT captures directory and verify it is a real image. Privacy-sensitive — requires approval.",
+        "Capture a fresh screenshot of the device screen to a PNG under the LiTT captures directory and verify it is a real image. For any request to take, capture, or create a screenshot, you must use this tool; android.pull only transfers an already-existing device file. Privacy-sensitive — requires approval.",
         { type: "object", properties: { ...serialProp, path: { type: "string", description: "Optional local destination inside captures/ or the project dir" } } }, false),
       meta: MUTATING_META,
       handler: async (ctx, args) => toToolResult(await opsFor(ctx.shell).screenshot(
@@ -102,7 +111,7 @@ export function buildAndroidToolEntries(deps: AndroidToolDeps = {}): Record<stri
     {
       def: def("android.tap", "android_tap",
         "Tap the device screen at pixel coordinates (bounds-checked against the live screen size).",
-        { type: "object", properties: { ...serialProp, x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"] }, false),
+        { type: "object", properties: { ...serialProp, x: { type: "number" }, y: { type: "number" } } }, false),
       meta: MUTATING_META,
       handler: async (ctx, args) => toToolResult(await opsFor(ctx.shell).tap(
         args.x, args.y, typeof args.serial === "string" ? args.serial : undefined)),
@@ -110,7 +119,7 @@ export function buildAndroidToolEntries(deps: AndroidToolDeps = {}): Record<stri
     {
       def: def("android.swipe", "android_swipe",
         "Swipe or scroll on the device screen between two points (bounds-checked, duration 50–5000ms).",
-        { type: "object", properties: { ...serialProp, x1: { type: "number" }, y1: { type: "number" }, x2: { type: "number" }, y2: { type: "number" }, durationMs: { type: "number" } }, required: ["x1", "y1", "x2", "y2"] }, false),
+        { type: "object", properties: { ...serialProp, x1: { type: "number" }, y1: { type: "number" }, x2: { type: "number" }, y2: { type: "number" }, durationMs: { type: "number" } } }, false),
       meta: MUTATING_META,
       handler: async (ctx, args) => toToolResult(await opsFor(ctx.shell).swipe(
         args.x1, args.y1, args.x2, args.y2, args.durationMs,
@@ -119,15 +128,19 @@ export function buildAndroidToolEntries(deps: AndroidToolDeps = {}): Record<stri
     {
       def: def("android.key", "android_key",
         "Send a navigation/system key to the device. Allowed: home, back, recents, enter, tab, del, space, up/down/left/right/center, volume_up/down, power, menu, search.",
-        { type: "object", properties: { ...serialProp, name: { type: "string" } }, required: ["name"] }, false),
+        { type: "object", properties: { ...serialProp, name: { type: "string" } } }, false),
       meta: MUTATING_META,
       handler: async (ctx, args) => toToolResult(await opsFor(ctx.shell).key(
-        args.name, typeof args.serial === "string" ? args.serial : undefined)),
+        // Models commonly emit "key", "keyName", or "keyCode" instead of
+        // the declared "name" field — accept aliases rather than failing
+        // an otherwise-valid keyevent on a naming mismatch.
+        (args.name ?? args.key ?? args.keyName ?? args.keyCode) as string | number | undefined,
+        typeof args.serial === "string" ? args.serial : undefined)),
     },
     {
       def: def("android.text", "android_text",
         "Type a short ASCII string into the focused field (max 200 chars; restricted charset — no quotes or shell metacharacters).",
-        { type: "object", properties: { ...serialProp, text: { type: "string" } }, required: ["text"] }, false),
+        { type: "object", properties: { ...serialProp, text: { type: "string" } } }, false),
       meta: MUTATING_META,
       handler: async (ctx, args) => toToolResult(await opsFor(ctx.shell).typeText(
         args.text, typeof args.serial === "string" ? args.serial : undefined)),
@@ -135,7 +148,7 @@ export function buildAndroidToolEntries(deps: AndroidToolDeps = {}): Record<stri
     {
       def: def("android.open_app", "android_open_app",
         "Launch an allowlisted app by package name (e.g. com.termux) and verify it reaches the foreground.",
-        { type: "object", properties: { ...serialProp, package: { type: "string" } }, required: ["package"] }, false),
+        { type: "object", properties: { ...serialProp, package: { type: "string" } } }, false),
       meta: MUTATING_META,
       handler: async (ctx, args) => toToolResult(await opsFor(ctx.shell).openApp(
         args.package, typeof args.serial === "string" ? args.serial : undefined)),
@@ -143,15 +156,15 @@ export function buildAndroidToolEntries(deps: AndroidToolDeps = {}): Record<stri
     {
       def: def("android.push", "android_push",
         "Push a local file to the device — confined to /sdcard/LiTT/ with a basename-only remote name. Verified by remote size.",
-        { type: "object", properties: { ...serialProp, localPath: { type: "string" }, remoteName: { type: "string" } }, required: ["localPath"] }, false),
+        { type: "object", properties: { ...serialProp, localPath: { type: "string" }, remoteName: { type: "string" } } }, false),
       meta: MUTATING_META,
       handler: async (ctx, args) => toToolResult(await opsFor(ctx.shell).pushFile(
         args.localPath, args.remoteName, typeof args.serial === "string" ? args.serial : undefined)),
     },
     {
       def: def("android.pull", "android_pull",
-        "Pull a file from the device's /sdcard/LiTT/ directory into captures/ or the project dir.",
-        { type: "object", properties: { ...serialProp, remoteName: { type: "string" }, destDir: { type: "string" } }, required: ["remoteName"] }, false),
+        "Transfer an explicitly requested, already-existing file from the device's /sdcard/LiTT/ directory into captures/ or the project dir. This tool never captures a screenshot or creates a remote file: do not invent a remote filename. For a fresh screenshot request, use android.screenshot instead.",
+        { type: "object", properties: { ...serialProp, remoteName: { type: "string" }, destDir: { type: "string" } } }, false),
       meta: MUTATING_META,
       handler: async (ctx, args) => toToolResult(await opsFor(ctx.shell).pullFile(
         args.remoteName, args.destDir, typeof args.serial === "string" ? args.serial : undefined)),

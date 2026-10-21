@@ -22,6 +22,7 @@ import {
   loadAndroidPolicy,
   resolveSerial,
   isPackageAllowed,
+  isSerialPlaceholder,
   PACKAGE_RE,
   type AndroidPolicy,
 } from "./device-registry.js";
@@ -169,17 +170,50 @@ export function createAndroidOps(deps: AndroidOpsDeps) {
   async function resolveTarget(
     requestedSerial?: string,
   ): Promise<{ ok: true; serial: string } | { ok: false; outcome: OpOutcome }> {
-    const listRes = await runAdb(adbDeps(deps.shell), {
+    // A placeholder serial (e.g. the literal "ANDROID_SERIAL" a model
+    // emits when it copies the env-var convention) is rejected BEFORE
+    // any adb process is spawned — zero device contact, and no silent
+    // substitution of a different device.
+    if (requestedSerial !== undefined && isSerialPlaceholder(requestedSerial)) {
+      return {
+        ok: false,
+        outcome: failureOutcome(
+          `Serial "${requestedSerial}" is a placeholder, not a device serial. ` +
+            `Omit "serial" to auto-select the authorized device, or pass a real serial from android.devices.`,
+          "invalid_serial",
+        ),
+      };
+    }
+
+    let listRes = await runAdb(adbDeps(deps.shell), {
       args: ["devices", "-l"],
       timeoutMs: ANDROID_TIMEOUTS.discovery,
     });
+    let connected = listRes.ok ? parseAdbDevices(listRes.stdout) : [];
+
+    // A single bounded re-query rides out transient adb-server flaps:
+    // on hosts with multiple adb binaries (platform-tools + a bundled
+    // scrcpy adb) a server restart can briefly answer `devices -l` with
+    // an empty list while the phone is still attached. Observed live:
+    // `android.key` failed "No usable devices are attached" immediately
+    // after `/devices` showed the authorized phone. One re-query — then
+    // report the real state, never spin.
+    if (listRes.ok && connected.length === 0) {
+      await sleep(350);
+      listRes = await runAdb(adbDeps(deps.shell), {
+        args: ["devices", "-l"],
+        timeoutMs: ANDROID_TIMEOUTS.discovery,
+      });
+      connected = listRes.ok ? parseAdbDevices(listRes.stdout) : [];
+    }
+
     if (!listRes.ok) {
       return {
         ok: false,
         outcome: adbFailureOutcome("Could not enumerate devices", listRes.failure!, listRes.status),
       };
     }
-    const res = resolveSerial(policy(), requestedSerial, parseAdbDevices(listRes.stdout));
+    const res = resolveSerial(policy(), requestedSerial, connected);
     if (!res.ok || !res.serial) {
       return {
         ok: false,
@@ -640,6 +674,22 @@ export function createAndroidOps(deps: AndroidOpsDeps) {
     if (!dest.ok) return dest.outcome;
 
     const adb = adbDeps(deps.shell);
+    // Pull is transfer-only: prove the explicitly named source exists
+    // before starting a transfer. This keeps an invented screenshot name
+    // from being treated as a capture request and failing opaquely inside
+    // `adb pull`; android.screenshot owns fresh capture creation.
+    const remoteStat = await runAdb(adb, {
+      serial: target.serial,
+      args: ["shell", "stat", "-c", "%s", remote],
+      timeoutMs: ANDROID_TIMEOUTS.discovery,
+    });
+    if (!remoteStat.ok) {
+      return outcome(false,
+        `Remote file ${remote} could not be confirmed and must already exist before android.pull runs. ` +
+          `android.pull never creates files; use android.screenshot for a fresh screen capture.`,
+        { failure: "remote_not_found", serial: target.serial, remotePath: remote },
+      );
+    }
     const res = await runAdb(adb, { serial: target.serial, args: ["pull", remote, dest.path], timeoutMs: ANDROID_TIMEOUTS.pull });
     if (!res.ok) return adbFailureOutcome("pull failed", res.failure!, res.status);
     const st = statFile(dest.path);
