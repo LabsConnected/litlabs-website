@@ -961,6 +961,45 @@ export async function runAgentLoop(
 
   let termination: AgentLoopResult["termination"] = "complete";
 
+  const totalTimeoutMs = options.totalTimeoutMs ?? 0;
+  const remainingTotalMs = () =>
+    totalTimeoutMs > 0 ? totalTimeoutMs - (Date.now() - startTime) : 0;
+  const timeoutResult = (stage: string): AgentLoopResult => ({
+    content:
+      `Agent timed out after ${totalTimeoutMs}ms total (${stage}). ` +
+      "The task was NOT completed. No success is being claimed.",
+    toolCalls,
+    rounds,
+    durationMs: Date.now() - startTime,
+    usage: { total_tokens: totalTokens },
+    termination: "error",
+    escalations: escalationEvents.length ? escalationEvents : undefined,
+  });
+  class AgentDeadlineError extends Error {}
+  const withTotalDeadline = async <T>(
+    work: Promise<T>,
+    stage: string,
+    onTimeout?: () => void,
+  ): Promise<T> => {
+    if (totalTimeoutMs <= 0) return work;
+    const remaining = remainingTotalMs();
+    if (remaining <= 0) throw new AgentDeadlineError(`timed out at ${stage}`);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => {
+            onTimeout?.();
+            reject(new AgentDeadlineError(`timed out at ${stage}`));
+          }, remaining);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
   // ─── Escalation setup ──────────────────────────────────────────
   // When an escalation hook + missionId + modelResolver are provided,
   // repeated model failures (tool/reasoning) automatically swap to a
@@ -1258,7 +1297,31 @@ export async function runAgentLoop(
     const entry = options.tools.get(PROJECT_EVIDENCE_TOOL_ID);
     if (!entry) return null;
     const call: ParsedToolCall = { toolId: PROJECT_EVIDENCE_TOOL_ID, inputs: {} };
-    const exec = await dispatchToolCall(call, entry);
+    let exec: Awaited<ReturnType<typeof dispatchToolCall>>;
+    try {
+      exec = await withTotalDeadline(
+        dispatchToolCall(call, entry),
+        "project evidence",
+        () => void options.shell.cancel(),
+      );
+    } catch (err) {
+      if (err instanceof AgentDeadlineError) {
+        return {
+          toolCallId: `tc_${Date.now()}_deadline`,
+          toolId: call.toolId,
+          toolName: entry.definition.name,
+          inputs: call.inputs,
+          result: {
+            status: "timeout",
+            success: false,
+            message: `Agent timed out after ${totalTimeoutMs}ms while acquiring project evidence`,
+            data: {},
+          },
+          durationMs: Date.now() - startTime,
+        };
+      }
+      throw err;
+    }
     return recordToolOutcome(call, entry, exec);
   };
 
@@ -1363,17 +1426,38 @@ export async function runAgentLoop(
       pruneMessages(messages, contextBudget, prompt);
     }
 
+    const modelAbort = new AbortController();
+    const abortFromRun = () => modelAbort.abort();
+    options.abortSignal?.addEventListener("abort", abortFromRun, { once: true });
     try {
-      modelResult = await activeModel.stream(messages, (event) => {
-        modelEvents.push(event);
-        if (options.onModelStream) {
-          try { options.onModelStream(event); } catch { /* listener errors don't crash the loop */ }
-        }
-        if (event.type === "delta") {
-          modelContent += event.text;
-        }
-      });
+      modelResult = await withTotalDeadline(
+        activeModel.stream(messages, (event) => {
+          modelEvents.push(event);
+          if (options.onModelStream) {
+            try { options.onModelStream(event); } catch { /* listener errors don't crash the loop */ }
+          }
+          if (event.type === "delta") {
+            modelContent += event.text;
+          }
+        }, modelAbort.signal),
+        "model stream",
+        () => modelAbort.abort(),
+      );
     } catch (err) {
+      if (options.abortSignal?.aborted) {
+        return {
+          content: "Agent cancelled by user.",
+          toolCalls,
+          rounds,
+          durationMs: Date.now() - startTime,
+          usage: { total_tokens: totalTokens },
+          termination: "cancelled",
+          escalations: escalationEvents.length ? escalationEvents : undefined,
+        };
+      }
+      if (err instanceof AgentDeadlineError) {
+        return timeoutResult("model stream");
+      }
       // Escalation path: record the failure. If the threshold is
       // reached, swap to a stronger model and continue. If below
       // threshold, continue the loop to accumulate more failures
@@ -1977,9 +2061,21 @@ export async function runAgentLoop(
     // ─── Execute tool calls (parallel if all read-only, else single) ───
     // Dispatch goes through the ONE shared path defined above — the same
     // one the runtime's deterministic evidence acquisition uses.
-    const execResults = callsToExecute.length > 1
-      ? await Promise.all(callsToExecute.map(({ call, entry }) => dispatchToolCall(call, entry!)))
-      : [await dispatchToolCall(callsToExecute[0].call, callsToExecute[0].entry!)];
+    let execResults: Awaited<ReturnType<typeof dispatchToolCall>>[];
+    try {
+      execResults = await withTotalDeadline(
+        callsToExecute.length > 1
+          ? Promise.all(callsToExecute.map(({ call, entry }) => dispatchToolCall(call, entry!)))
+          : dispatchToolCall(callsToExecute[0].call, callsToExecute[0].entry!).then((r) => [r]),
+        "tool execution",
+        () => void options.shell.cancel(),
+      );
+    } catch (err) {
+      if (err instanceof AgentDeadlineError) {
+        return timeoutResult("tool execution");
+      }
+      throw err;
+    }
 
     // ─── Normalize results in document order ───────────────────────
     // Process results in the same order as the tool calls appeared in
@@ -2115,6 +2211,10 @@ All tool calls execute in this project. Do not assume a different project.`
       ? "Windows: use node -e or powershell for edits; do not use sed."
       : `Platform: ${platform ?? "linux"}. Use platform-appropriate commands.`;
 
+    const toolSection = toolList
+      ? `Tools:\n${toolList}\n\nCall a tool with:\n\`\`\`tool_call\n{ "tool": "<tool_id>", "inputs": { ... } }\n\`\`\`\nContinue from the returned evidence.`
+      : "Tools: none are available. Answer directly; do not call tools.";
+
     return `You are LiTT, a coding agent. Be concise and evidence-driven.
 
 Rules:
@@ -2126,14 +2226,7 @@ Rules:
 - If a tool fails, report the real failure.
 ${compactProject ? `\n${compactProject}` : ""}
 
-Tools:
-${toolList}
-
-Call a tool with:
-\`\`\`tool_call
-{ "tool": "<tool_id>", "inputs": { ... } }
-\`\`\`
-Continue from the returned evidence.`;
+${toolSection}`;
   }
 
   return `You are LiTT, the AI development agent for LiTTree Lab Studios.

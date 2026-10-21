@@ -28,7 +28,7 @@ import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
 import { OverlayKeyboardProvider, type KeyboardHandler } from "./overlay-manager.js";
-import { isCtrl, isRawF2 } from "./keyboard-utils.js";
+import { isCtrl, isRawF2, ctrlDAction } from "./keyboard-utils.js";
 import { useTerminalSize } from "./use-terminal-size.js";
 import { Header } from "./header.js";
 import { LiTTShell } from "./shell/shell.js";
@@ -126,6 +126,17 @@ export function CockpitApp({
     client, signedIn,
   });
   const { submit, handleApproval } = controller;
+
+  // Wire the idle-SIGINT persist hook (installSigintHandler() itself is
+  // called by the command entrypoint before this component mounts — see
+  // commands/cockpit.ts). Read dynamically by RuntimeSession at signal
+  // time, so install order relative to that call doesn't matter.
+  useEffect(() => {
+    session.onPersistBeforeExit = () => controller.persistSession();
+    return () => {
+      session.onPersistBeforeExit = null;
+    };
+  }, [session, controller]);
 
   // Seed shell context from the launcher (once). After that, /workspace
   // and branch refreshes own these via the store.
@@ -273,9 +284,6 @@ export function CockpitApp({
         store.actions.clearToolProgress();
         store.actions.stopBusy();
       } else {
-        // Idle Ctrl+C exit — save the transcript first; exit() unmounts
-        // with no further chance to persist.
-        controller.persistSession();
         exit();
       }
     } else if (isCtrl(input, key, "k")) {
@@ -289,15 +297,10 @@ export function CockpitApp({
       store.actions.clearToolProgress();
       store.actions.stopBusy();
     } else if (isCtrl(input, key, "d")) {
-      // Ctrl+D: exit LiTT when the composer draft is empty; open the diff
-      // viewer otherwise. `input` here is the raw keystroke ("d"), not the
-      // composer text, so the composer's own state must be checked instead.
-      // Read it through a ref — this handler's closure can outlive the
-      // render that captured `store.state`. persistSession() mirrors the
-      // idle Ctrl+C exit path so Ctrl+D can't lose the transcript either.
-      if (composerValueRef.current.trim().length === 0) {
-        // Save the transcript before leaving — exit() unmounts with no
-        // further chance to persist.
+      // Ctrl+D — DIFF when a draft exists; EOF/exit on an empty composer.
+      // composerValueRef holds the latest committed draft (render-time ref
+      // always current); persist before exit so the session survives.
+      if (ctrlDAction(composerValueRef.current) === "exit") {
         controller.persistSession();
         exit();
       } else {

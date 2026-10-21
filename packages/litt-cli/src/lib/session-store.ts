@@ -13,12 +13,9 @@
  * giant blob per project.
  */
 
-import {
-  closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync,
-  renameSync, statSync, unlinkSync, writeFileSync, writeSync,
-} from "node:fs";
-import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, writeSync, closeSync, unlinkSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { getLittHome } from "./config.js";
 
 export interface SessionMessage {
   role: "user" | "assistant";
@@ -62,11 +59,7 @@ function sessionsFile(): string {
   // LITT_SESSIONS_FILE overrides the location (tests use a temp file).
   const override = process.env.LITT_SESSIONS_FILE;
   if (override) return override;
-  // LITT_HOME overrides the LiTT home directory (see config.ts, desktop.ts,
-  // provider-registry.ts — sessions must resolve the same way or session
-  // storage silently splits from the rest of LiTT's state.
-  const littHome = process.env.LITT_HOME ?? join(homedir(), ".litt");
-  return join(littHome, "sessions.json");
+  return join(getLittHome(), "sessions.json");
 }
 
 export function readAllSessions(): SessionSnapshot[] {
@@ -99,7 +92,6 @@ export function readAllSessions(): SessionSnapshot[] {
 // LOCK_STALE_MS is treated as abandoned and stolen.
 const LOCK_STALE_MS = 5_000;
 const LOCK_WAIT_TIMEOUT_MS = 2_000;
-const LOCK_POLL_MS = 5;
 
 /** Set when a save proceeded WITHOUT the lock after LOCK_WAIT_TIMEOUT_MS.
  *  Fail-open is the upstream contract (do not regress it), but an
@@ -112,7 +104,7 @@ export function consumeUnlockedWrite(): boolean {
   lastWriteUnlocked = false;
   return v;
 }
-
+const LOCK_POLL_MS = 5;
 
 function lockFilePath(): string {
   return `${sessionsFile()}.lock`;
@@ -137,16 +129,20 @@ function testHoldDelay(): void {
  * busy-wait is an acceptable trade for not introducing async into a
  * synchronous API used from React effects and key handlers.
  *
- * Fails open after LOCK_WAIT_TIMEOUT_MS (upstream contract — do not
- * regress): proceeding unlocked is still better than hanging the UI
- * indefinitely, and by that point either the other process is almost
- * certainly gone (stale-lock theft already tried first) or something is
- * seriously wrong that a longer wait won't fix either. The unlocked
- * write is flagged via lastWriteUnlocked so callers can warn — it is
- * never silent.
+ * Fails open after LOCK_WAIT_TIMEOUT_MS: proceeding unlocked is still
+ * better than hanging the UI indefinitely, and by that point either the
+ * other process is almost certainly gone (stale-lock theft already
+ * tried first) or something is seriously wrong that a longer wait won't
+ * fix either.
  */
 function acquireSessionsLock(): () => void {
   const lockPath = lockFilePath();
+  // The lock lives beside sessions.json — on a fresh state home its
+  // parent dir may not exist yet (dir creation otherwise happens inside
+  // writeAllSessions(), which already runs under the lock). Create it
+  // here or the exclusive create fails with ENOENT, not EEXIST.
+  const lockDir = dirname(lockPath);
+  if (!existsSync(lockDir)) mkdirSync(lockDir, { recursive: true });
   const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS;
   while (true) {
     try {
@@ -178,52 +174,26 @@ function withSessionsLock<T>(fn: () => T): T {
   }
 }
 
-let tmpSeq = 0;
-
-
 function writeAllSessions(sessions: SessionSnapshot[]): void {
-  const file = sessionsFile();
-  const dir = dirname(file);
+  const target = sessionsFile();
+  const dir = dirname(target);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  // Write to a per-process, per-call UNIQUE temp file and rename over
-  // the live one — a crash or kill mid-write must never leave
-  // sessions.json truncated. The unique name also means two writers that
-  // somehow reach this point concurrently (the lock should
-  // prevent it — fail-open is bounded — but defence-in-depth
-  // costs nothing here) can't share a
-  // single tmp path and interleave each other's payloads before rename.
-  const tmpFile = `${file}.tmp.${process.pid}.${tmpSeq++}`;
+  // Atomic write: sibling temp file + rename, same rule as
+  // saveModelPrefs — a kill mid-write must not corrupt sessions.json.
+  // The tmp name is per-pid, so a stale leftover is simply overwritten;
+  // on failure the partial tmp is removed before the error propagates.
+  const tmp = `${target}.tmp-${process.pid}`;
   try {
-    writeFileSync(tmpFile, JSON.stringify(sessions, null, 2), "utf8");
-    renameSync(tmpFile, file);
+    writeFileSync(tmp, JSON.stringify(sessions, null, 2), "utf8");
+    renameSync(tmp, target);
   } catch (err) {
-    try { unlinkSync(tmpFile); } catch { /* tmp may not exist yet */ }
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // best-effort cleanup — preserve the original error
+    }
     throw err;
   }
-  sweepStaleTmpFiles(file);
-}
-
-/**
- * Best-effort removal of `*.tmp.*` files left by writers that were
- * killed between writeFileSync and renameSync. Runs inside the sessions
- * lock — cheap and race-free. Only files older than TMP_ORPHAN_MS are
- * touched, so a genuinely in-flight write is never removed.
- */
-const TMP_ORPHAN_MS = 60_000;
-function sweepStaleTmpFiles(file: string): void {
-  try {
-    const prefix = `${basename(file)}.tmp.`;
-    const dir = dirname(file);
-    const cutoff = Date.now() - TMP_ORPHAN_MS;
-    for (const name of readdirSync(dir)) {
-      if (!name.startsWith(prefix)) continue;
-      try {
-        const p = join(dir, name);
-        if (statSync(p).mtimeMs < cutoff) unlinkSync(p);
-      } catch { /* vanished or unreadable — fine */ }
-    }
-  } catch { /* housekeeping must never fail a save */ }
-
 }
 
 /**

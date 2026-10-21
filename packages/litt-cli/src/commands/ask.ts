@@ -31,8 +31,9 @@ import { ModelRuntime } from "../lib/model-runtime.js";
 import { probeLocalLane } from "../lib/local-lane.js";
 import {
   localRoutePolicy,
-  isLocalModelId,
+  resolveRequestedLocalModel,
 } from "../lib/local-model-resolution.js";
+import { getDefaultPrefsPath, loadModelPrefs } from "../lib/provider-registry.js";
 import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import { resolveActiveProject } from "../lib/active-project.js";
@@ -41,6 +42,18 @@ import { getAuthSession } from "../lib/auth/auth-session.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
 import * as readline from "node:readline/promises";
+
+const EXACT_ANSWER_RE = /^\s*(?:reply|respond|answer|say)\s+with\s+exactly\s*(?::\s*|["'])(.+?)["']?\s*$/i;
+const PROJECT_EVIDENCE_RE = /\b(project|repo|repository|file|path|git|build|test|check|code|command|tool|read|write|edit|search|status|diff|log|package)\b/i;
+
+/**
+ * True only for literal echo-style asks such as `Reply with exactly: OK`.
+ * Multi-part or repository-aware requests keep tools enabled.
+ */
+export function isExactAnswerPrompt(question: string): boolean {
+  const match = EXACT_ANSWER_RE.exec(question);
+  return !!match && !PROJECT_EVIDENCE_RE.test(match[1]);
+}
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
   const question = args.join(" ").trim();
@@ -69,7 +82,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // local model are available.
   const providerConfigured = hasAnyProviderKey();
   const localLane = providerConfigured ? null : await probeLocalLane();
-  const selectedModel = process.env.LITT_MODEL?.trim() || process.env.OPENROUTER_MODEL?.trim() || null;
+  const persistedPrefs = loadModelPrefs(getDefaultPrefsPath());
+  const selectedModel = process.env.LITT_MODEL?.trim()
+    || process.env.OPENROUTER_MODEL?.trim()
+    || persistedPrefs.selectedModel
+    || null;
 
   if (!providerConfigured && !localLane?.available) {
     if (selectedModel) {
@@ -108,7 +125,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const store = new RuntimeStore();
   const shell = createShellExecutor(projectRoot);
   const executor = new CommandExecutor(shell, store);
-  const tools = new ToolRegistry();
+  // Exact-answer prompts need no repository evidence. Keeping tools enabled
+  // lets weak local models invoke expensive checks for a prompt that cannot
+  // use their results (observed: `Reply with exactly...` -> project.check).
+  const directAnswerOnly = isExactAnswerPrompt(question);
+  const tools = new ToolRegistry(undefined, { includeDefaults: !directAnswerOnly });
   const gateway = new ExecutionGateway({
     tools,
     shell,
@@ -140,6 +161,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       process.env.OPENAI_API_KEY ||
       process.env.OPENROUTER_API_KEY ||
       process.env.ANTHROPIC_API_KEY ||
+      process.env.OPENAGENTS_API_KEY ||
       process.env.DEEPSEEK_API_KEY ||
       process.env.MISTRAL_API_KEY
     );
@@ -152,8 +174,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     // When executionTarget=local (LITT_LOCAL_MODE=1, --local, or default),
     // the local daemon (Ollama/LM Studio) is the ONLY provider lane.
     // A persisted or env-selected remote model is never used in LOCAL mode.
-    const requestedLocalModel = process.env.LITT_MODEL?.trim()
-      || (isLocalModelId(selectedModel) ? selectedModel : null);
+    const requestedLocalModel = resolveRequestedLocalModel(persistedPrefs.selectedModel).model;
     const policy = localRoutePolicy({
       executionTarget,
       localOnly,

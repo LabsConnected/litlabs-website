@@ -55,7 +55,7 @@ import {
   type ResolvedModelProvider,
 } from "../lib/model-provider.js";
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
-import { TelemetryStore } from "../lib/provider-registry.js";
+import { TelemetryStore, loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
 import {
@@ -71,6 +71,8 @@ import {
   localRoutePolicy,
   resolveLocalModel,
   resolveRequestedLocalModel,
+  resolveModelArg,
+  remoteSelectionOf,
   type LocalRoutePolicy,
 } from "../lib/local-model-resolution.js";
 import {
@@ -103,7 +105,7 @@ import {
   createDraftPR as safeCreateDraftPR,
   isProtectedBranch,
 } from "../lib/git-workflow.js";
-import { saveSession, summarize, markInterrupted, type SessionSnapshot } from "../lib/session-store.js";
+import { saveSession, summarize, markInterrupted, consumeUnlockedWrite, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
 
 /**
@@ -980,35 +982,34 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   /** Persist the current shell session (transcript + context). */
   const lastPersistWarnRef = useRef(0);
   const persistSession = useCallback(() => {
-    // getChatTranscript() reads the pure store directly (updated
-    // synchronously on every mutation) — state.chatTranscript is a
-    // render-time snapshot and would miss a message appended earlier in
-    // the SAME synchronous turn (e.g. the natural-language exit farewell,
-    // added just before this call with no intervening render).
+    // Live transcript from the pure store — store.state.chatTranscript is a
+    // render-time snapshot that misses messages appended this turn (this
+    // closure's defining render predates them), which silently skipped the
+    // save. getChatTranscript() is the canonical accessor for async paths.
     const messages = store.actions.getChatTranscript();
     if (messages.length === 0) return;
     const firstUser = messages.find((m) => m.role === "user");
     try {
       saveSession({
-        project: store.state.project || projectName || "unnamed",
-        cwd: session.getCwd(),
-        branch: store.state.branch,
-        mode: store.state.mode,
-        routingMode: store.state.routingMode,
-        selectedModel: store.state.selectedModel,
-        summary: summarize(firstUser?.content ?? "untitled"),
-        messages: messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-          status: m.status,
-          ts: m.ts,
-        })),
+      project: store.state.project || projectName || "unnamed",
+      cwd: session.getCwd(),
+      branch: store.state.branch,
+      mode: session.getMode() === "plan" ? "plan" : "act",
+      routingMode: store.state.routingMode,
+      selectedModel: store.state.selectedModel,
+      summary: summarize(firstUser?.content ?? "untitled"),
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        status: m.status,
+        ts: m.ts,
+      })),
       });
+      if (consumeUnlockedWrite() && Date.now() - lastPersistWarnRef.current > 60_000) {
+        lastPersistWarnRef.current = Date.now();
+        act(store, "Session save ran without the cross-process lock (contention >2s) — a concurrent save may be lost.", "system", "warning");
+      }
     } catch (err) {
-      // Session storage fails CLOSED (SessionLockTimeoutError): a save
-      // that can't acquire the cross-process lock is a loud failure, not
-      // an unprotected write. Surface it in the activity feed — throttled
-      // so a stuck lock can't spam the feed via the incremental effect.
       if (Date.now() - lastPersistWarnRef.current > 60_000) {
         lastPersistWarnRef.current = Date.now();
         act(store, `Session save failed: ${err instanceof Error ? err.message : String(err)}`, "system", "failed");
@@ -1085,12 +1086,15 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
     const { resolution } = outcome;
     modelRuntime.registerLocalModel(resolution);
-    // FIXED so cliModeToRouteOptions honours the pick — in "auto" mode
-    // the selected id is ignored entirely and the badge would drift back.
+    // Ephemeral only — auto-resolution must NOT write model-prefs.json.
+    // A persisted REMOTE (cloud) selection stays on disk so /remote can
+    // restore it later; the in-memory pick keeps the badge honest and
+    // FIXED so cliModeToRouteOptions honours it — in "auto" mode the
+    // selected id is ignored entirely and the badge would drift back.
     if (store.state.selectedModel !== resolution.canonicalId) {
-      store.actions.updateSelectedModel(resolution.canonicalId);
+      store.actions.applyAutoSelectedModel(resolution.canonicalId);
     }
-    if (store.state.routingMode !== "fixed") store.actions.updateRoutingMode("fixed");
+    if (store.state.routingMode !== "fixed") store.actions.applyAutoRoutingMode("fixed");
     store.actions.setActiveModel(resolution.tag);
     store.actions.setActiveProvider("ollama");
     return resolution.tag;
@@ -1495,8 +1499,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
     if (input === "/exit" || input === "/quit") {
-      // Save the transcript before leaving — onExit() unmounts the UI
-      // with no further chance to persist.
       persistSession();
       onExit?.();
       return;
@@ -1652,8 +1654,26 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       submitRef.current(goal, { forceMission: true });
       return;
     }
-    if (input === "/model") {
-      store.actions.setOverlay("model-picker");
+    if (input === "/model" || input.startsWith("/model ")) {
+      const arg = input.slice("/model".length).trim();
+      if (!arg) {
+        store.actions.setOverlay("model-picker");
+        return;
+      }
+      // Direct selection: resolve against the catalog, then installed
+      // local tags. An explicit pick persists (fixed mode honours it);
+      // a miss is a clear error, never a silent fallback.
+      void (async () => {
+        const lane = await probeLocalLane();
+        const resolved = resolveModelArg(arg, modelRuntime.getAllModels(), lane);
+        if (!resolved.ok) {
+          act(store, resolved.error, "error", undefined, "MODEL");
+          return;
+        }
+        store.actions.updateSelectedModel(resolved.canonicalId);
+        store.actions.updateRoutingMode("fixed");
+        act(store, `Model set: ${resolved.label} (${resolved.canonicalId})`, "info", undefined, "MODEL");
+      })();
       return;
     }
     if (input === "/models") {
@@ -1970,7 +1990,20 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         return;
       }
 
-      // Validation passed: switch to REMOTE
+      // Validation passed: re-resolve the selection for REMOTE before
+      // switching. The in-memory selection may be an ephemeral local
+      // (ollama:) pick the remote catalog can never serve — restore the
+      // persisted selection. When the only stored choice is itself
+      // local-only, drop to AUTO (state only — the disk pin is the
+      // operator's explicit local pick and stays for future /local use).
+      const persistedPrefs = loadModelPrefs(getDefaultPrefsPath());
+      const remoteSelection = remoteSelectionOf(persistedPrefs.selectedModel);
+      if (store.state.selectedModel !== remoteSelection) {
+        store.actions.applyAutoSelectedModel(remoteSelection);
+      }
+      if (!remoteSelection && store.state.routingMode === "fixed") {
+        store.actions.applyAutoRoutingMode("auto");
+      }
       store.actions.setExecutionTarget("remote");
       store.actions.addActivity({
         id: `act_${Date.now()}_remote`,
@@ -2147,8 +2180,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           tag: "LOCAL",
           text: truncateActivity(local.text, 60),
         });
-        // Save the farewell exchange just written above — onExit()
-        // unmounts with no further chance to persist.
+        // Persist AFTER the farewell pair is added — otherwise it's
+        // rendered but never reaches sessions.json before exit.
         persistSession();
         onExit?.();
         return;
@@ -2819,7 +2852,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // RUNNING mid-run; a successful chat must return it to IDLE
           // (the composer/status reconcile out of Working). Cleanup in finally.
           store.actions.setHoloState("IDLE");
-          persistSession();
         } catch (err) {
           const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
           store.actions.addActivity({
@@ -2847,6 +2879,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // can never stay visually Working after the run settles.
           store.actions.setIsProcessing(false);
           store.actions.stopBusy();
+          // Persist on every terminal outcome — success, error, and cancel
+          // all leave a resumable transcript for /resume.
+          persistSession();
         }
         perf.end("chat");
         return;
@@ -3713,8 +3748,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
   return {
     submit,
-    persistSession,
     handleApproval,
+    persistSession,
     toggleMode,
     openPalette,
     openFailureView,

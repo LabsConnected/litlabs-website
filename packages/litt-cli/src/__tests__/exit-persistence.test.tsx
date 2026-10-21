@@ -33,6 +33,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const stripAnsi = (s: string) =>
   s.replace(/\x1B(?:\][^\x07]*\x07|\[[0-9;?]*[ -/]*[@-~])/g, "");
 const CTRL_C = "\x03";
+const CTRL_D = "\x04";
 const ENTER = "\r";
 const MODEL = "litt-fast:2k";
 
@@ -122,7 +123,7 @@ let sessionsFile: string;
 const savedEnv: Record<string, string | undefined> = {};
 const MANAGED_ENV = [
   "LITT_LOCAL_MODE", "LITT_LOCAL_ONLY", "LITT_OLLAMA_URL", "LITT_MODEL",
-  "LITT_HOME", "LITT_SESSIONS_FILE", "LITT_TARGET_OVERRIDE",
+  "LITT_HOME", "LITT_STATE_HOME", "LITT_SESSIONS_FILE", "LITT_TARGET_OVERRIDE",
   "OPENROUTER_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY",
 ];
 
@@ -133,6 +134,10 @@ beforeAll(async () => {
   sessionsFile = join(littHome, "sessions.json");
   for (const k of MANAGED_ENV) delete process.env[k];
   process.env.LITT_HOME = littHome;
+  // Dual isolation: the Android state-home resolver honors only
+  // LITT_STATE_HOME (LITT_HOME means the repo root on Termux); set both
+  // so state is contained regardless of resolver generation.
+  process.env.LITT_STATE_HOME = littHome;
   process.env.LITT_SESSIONS_FILE = sessionsFile;
   process.env.LITT_LOCAL_MODE = "1";
   process.env.LITT_OLLAMA_URL = ollama.url;
@@ -208,4 +213,25 @@ describe("Exit paths persist a nonempty session before exiting", () => {
       expect(messages.some((m) => m.content === "Exiting LiTT."), "the farewell reply must be saved").toBe(true);
     } finally { app.cleanup(); }
   }, 15_000);
+
+  it("Ctrl+D on an empty composer with prior conversation persists before exit", async () => {
+    const app = mount();
+    try {
+      await sleep(600); // kitty-probe settle
+      await app.type("current branch");
+      await app.send(ENTER);
+      await sleep(300); // Local Fast Lane resolves synchronously; settle time for store update
+      // Composer is empty again after the submit above — Ctrl+D takes the
+      // exit branch (not the diff viewer). The session must be saved
+      // BEFORE exit() unmounts the app.
+      await app.send(CTRL_D);
+      const ok = await Promise.race([app.exitedP.then(() => true), sleep(3000).then(() => false)]);
+      expect(ok, "Ctrl+D on an empty composer must exit").toBe(true);
+
+      const sessions = listSessions();
+      expect(sessions.length, "the conversation must be persisted before exit").toBeGreaterThan(0);
+      const persisted = sessions[0].messages.some((m) => m.content.includes("current branch"));
+      expect(persisted, "the pre-exit conversation content must be in the saved session").toBe(true);
+    } finally { app.cleanup(); }
+  }, 30_000);
 });

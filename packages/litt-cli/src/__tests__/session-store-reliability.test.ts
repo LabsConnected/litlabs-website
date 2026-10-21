@@ -94,7 +94,7 @@ describe("session-store — interrupted write (defect 2)", () => {
   });
 });
 
-describe("session-store — LITT_HOME contract (defect 3)", () => {
+describe("session-store — LITT_STATE_HOME contract (defect 3)", () => {
   let littHomeDir: string;
   let decoyOsHomeDir: string;
   const savedEnv: Record<string, string | undefined> = {};
@@ -102,10 +102,14 @@ describe("session-store — LITT_HOME contract (defect 3)", () => {
   beforeEach(() => {
     littHomeDir = mkdtempSync(join(tmpdir(), "litt-home-"));
     decoyOsHomeDir = mkdtempSync(join(tmpdir(), "litt-decoy-home-"));
-    for (const k of ["LITT_SESSIONS_FILE", "LITT_HOME", "USERPROFILE", "HOME"]) {
+    for (const k of ["LITT_SESSIONS_FILE", "LITT_HOME", "LITT_STATE_HOME", "USERPROFILE", "HOME"]) {
       savedEnv[k] = process.env[k];
     }
     delete process.env.LITT_SESSIONS_FILE;
+    // The state-home override was renamed LITT_STATE_HOME (LITT_HOME
+    // means the repo root on Termux) — set both so the contract holds
+    // regardless of resolver generation.
+    process.env.LITT_STATE_HOME = littHomeDir;
     process.env.LITT_HOME = littHomeDir;
     // Redirect the OS-level home directory to a second, disposable temp
     // dir — never the real ~/.litt — so a pre-fix run (which ignores
@@ -123,7 +127,7 @@ describe("session-store — LITT_HOME contract (defect 3)", () => {
     try { rmSync(decoyOsHomeDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  it("saves under LITT_HOME, not the OS home directory, when LITT_SESSIONS_FILE is unset", () => {
+  it("saves under LITT_STATE_HOME, not the OS home directory, when LITT_SESSIONS_FILE is unset", () => {
     saveSession({ ...base, messages: messages(1) });
 
     expect(existsSync(join(littHomeDir, "sessions.json"))).toBe(true);
