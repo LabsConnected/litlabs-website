@@ -268,6 +268,8 @@ export interface CockpitUIState {
    *  shell shows live progress instead of an empty streaming placeholder.
    *  Mirrored from the pure ToolProgressStore (testable without React). */
   toolProgress: ToolProgressSnapshot;
+  /** Per-activity expansion — entry ids toggled individually (Ctrl+G latest). */
+  expandedActivityIds: ReadonlySet<string>;
   /** Execution mode — PLAN (read-only) or ACT (full). Tab toggles. */
   mode: "plan" | "act";
   /** Workspace context — display truth for the shell. Updated by
@@ -432,6 +434,14 @@ export function useCockpitStore() {
   // to show their result summaries; failed/active runs are always expanded.
   const [toolDetails, setToolDetails] = useState(false);
   const toggleToolDetails = useCallback(() => setToolDetails((v) => !v), []);
+  const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
+  const toggleActivityExpanded = useCallback((id: string) => {
+    setExpandedActivityIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
 
   // ─── Live workstream — "watch LiTT work" ───────────────────────────
   // Owned by a pure WorkstreamStore (testable in node env without React).
@@ -996,6 +1006,7 @@ export function useCockpitStore() {
       transcriptPage,
       focusEpoch,
       toolDetails,
+      expandedActivityIds,
       workstream,
     },
     actions: {
@@ -1066,6 +1077,7 @@ export function useCockpitStore() {
       scrollEnd,
       resetTranscriptScroll,
       toggleToolDetails,
+      toggleActivityExpanded,
       workstreamPush,
       workstreamToggleExpand,
       workstreamClear,

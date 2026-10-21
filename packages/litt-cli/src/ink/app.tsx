@@ -22,7 +22,7 @@
  *   to the Composer's own useInput.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, useApp, useStdout } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
@@ -87,6 +87,11 @@ export function CockpitApp({
   const { exit } = useApp();
   const store = useCockpitStore();
   const { stdout } = useStdout();
+  // Latest committed composer draft for keyboard callbacks — the app
+  // handler ref in overlay-manager is refreshed by a passive effect and
+  // can lag a commit, so a render-time ref always holds the newest value.
+  const composerValueRef = useRef(store.state.composerValue);
+  composerValueRef.current = store.state.composerValue;
   useEventBridge(client, store, sessionBridge);
 
   // ─── Canonical ModelRuntime — ONE instance for the whole app ───
@@ -268,6 +273,9 @@ export function CockpitApp({
         store.actions.clearToolProgress();
         store.actions.stopBusy();
       } else {
+        // Idle Ctrl+C exit — save the transcript first; exit() unmounts
+        // with no further chance to persist.
+        controller.persistSession();
         exit();
       }
     } else if (isCtrl(input, key, "k")) {
@@ -281,7 +289,23 @@ export function CockpitApp({
       store.actions.clearToolProgress();
       store.actions.stopBusy();
     } else if (isCtrl(input, key, "d")) {
-      controller.openDiffViewer();
+      // Ctrl+D: exit LiTT when the composer draft is empty; open the diff
+      // viewer otherwise. `input` here is the raw keystroke ("d"), not the
+      // composer text, so the composer's own state must be checked instead.
+      // Read it through a ref — this handler's closure can outlive the
+      // render that captured `store.state`. persistSession() mirrors the
+      // idle Ctrl+C exit path so Ctrl+D can't lose the transcript either.
+      if (composerValueRef.current.trim().length === 0) {
+        controller.persistSession();
+        exit();
+      } else {
+        controller.openDiffViewer();
+      }
+    } else if (isCtrl(input, key, "g")) {
+      // Ctrl+G — expand/collapse the most recent activity entry's detail.
+      // (Ctrl+E is the composer's move-to-end and must not be shadowed.)
+      const last = store.state.activityLog[store.state.activityLog.length - 1];
+      if (last) store.actions.toggleActivityExpanded(last.id);
     } else if (isCtrl(input, key, "n")) {
       controller.newSession();
     } else if (isCtrl(input, key, "r")) {
@@ -472,6 +496,7 @@ export function CockpitApp({
             gitUntracked={store.state.gitUntracked}
             toolProgress={store.state.toolProgress}
             toolDetails={store.state.toolDetails}
+            expandedActivityIds={store.state.expandedActivityIds}
             executionTarget={store.state.executionTarget}
             canonicalMission={store.state.canonicalMission}
             workstream={store.state.workstream}

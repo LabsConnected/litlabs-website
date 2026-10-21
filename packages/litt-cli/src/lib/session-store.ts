@@ -13,9 +13,12 @@
  * giant blob per project.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync,
+  renameSync, statSync, unlinkSync, writeFileSync, writeSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 export interface SessionMessage {
   role: "user" | "assistant";
@@ -59,7 +62,11 @@ function sessionsFile(): string {
   // LITT_SESSIONS_FILE overrides the location (tests use a temp file).
   const override = process.env.LITT_SESSIONS_FILE;
   if (override) return override;
-  return join(homedir(), ".litt", "sessions.json");
+  // LITT_HOME overrides the LiTT home directory (see config.ts, desktop.ts,
+  // provider-registry.ts — sessions must resolve the same way or session
+  // storage silently splits from the rest of LiTT's state.
+  const littHome = process.env.LITT_HOME ?? join(homedir(), ".litt");
+  return join(littHome, "sessions.json");
 }
 
 export function readAllSessions(): SessionSnapshot[] {
@@ -72,10 +79,168 @@ export function readAllSessions(): SessionSnapshot[] {
   }
 }
 
+// ─── Cross-process coordination ───────────────────────────────────
+//
+// saveSession()/deleteSession() are read-modify-write: read the whole
+// file, compute a new array in memory, write it back. Two separate LiTT
+// processes doing this against the SAME sessions.json at nearly the
+// same moment can both read the same old state, then both write — the
+// second write wins and silently discards whatever the first one added
+// (a lost update, not a corruption: writeAllSessions()'s temp+rename
+// still guarantees the file itself is never left truncated).
+//
+// Fixed with a plain exclusive-create lockfile (no new dependency,
+// consistent with this file's existing style): acquire by creating
+// `sessions.json.lock` with the "wx" flag, which fails with EEXIST if
+// another process already holds it. A lock left behind by a process
+// that crashed or was killed WHILE holding it (see acc703cc's SIGTERM/
+// SIGHUP findings — Windows delivers no signal to clean it up) would
+// otherwise block every future save forever, so a lock older than
+// LOCK_STALE_MS is treated as abandoned and stolen.
+const LOCK_STALE_MS = 5_000;
+const LOCK_WAIT_TIMEOUT_MS = 2_000;
+const LOCK_POLL_MS = 5;
+
+/**
+ * Thrown when the sessions lock can't be acquired within
+ * LOCK_WAIT_TIMEOUT_MS. Fail-CLOSED by design: proceeding without the
+ * lock would re-open the read-modify-write race this lock exists to
+ * close — a silently lost update is worse than a loud failed save.
+ * Callers that can't tolerate a throw (UI persist paths) must catch
+ * this and surface the failure, not swallow it.
+ */
+export class SessionLockTimeoutError extends Error {
+  constructor(lockPath: string) {
+    super(`Timed out after ${LOCK_WAIT_TIMEOUT_MS}ms waiting for the sessions lock: ${lockPath}`);
+    this.name = "SessionLockTimeoutError";
+  }
+}
+
+function lockFilePath(): string {
+  return `${sessionsFile()}.lock`;
+}
+
+/** Test-only: widen the critical section deterministically so a real
+ *  concurrent-process test can reproduce the race without relying on
+ *  natural timing. No-op unless LITT_SESSIONS_LOCK_HOLD_MS is set. */
+function testHoldDelay(): void {
+  const ms = Number(process.env.LITT_SESSIONS_LOCK_HOLD_MS ?? "");
+  if (!ms) return;
+  const until = Date.now() + ms;
+  while (Date.now() < until) { /* deliberate synchronous hold */ }
+}
+
+/**
+ * Acquire the cross-process sessions lock. Blocking and synchronous —
+ * matches this module's existing synchronous API (saveSession() has
+ * always been a plain function call, not a Promise, and changing that
+ * would ripple into every caller). Lock hold times here are a JSON
+ * read+write of a small file — microseconds in practice — so a bounded
+ * busy-wait is an acceptable trade for not introducing async into a
+ * synchronous API used from React effects and key handlers.
+ *
+ * Fails CLOSED after LOCK_WAIT_TIMEOUT_MS by throwing
+ * SessionLockTimeoutError: an unprotected write is a silent lost-update
+ * machine, which is worse than a bounded wait followed by a loud error.
+ * By that point either the other process is almost certainly gone
+ * (stale-lock theft already tried first) or something is seriously
+ * wrong that proceeding unlocked would only make worse.
+ */
+function acquireSessionsLock(): () => void {
+  const lockPath = lockFilePath();
+  const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS;
+  while (true) {
+    try {
+      const fd = openSync(lockPath, "wx");
+      writeSync(fd, String(process.pid));
+      closeSync(fd);
+      return () => { try { unlinkSync(lockPath); } catch { /* already released or stolen */ } };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
+          try { unlinkSync(lockPath); } catch { /* another process already stole it */ }
+          continue;
+        }
+      } catch { continue; } // lock vanished between the EEXIST and the stat — retry now
+      if (Date.now() > deadline) throw new SessionLockTimeoutError(lockPath);
+      const until = Date.now() + LOCK_POLL_MS;
+      while (Date.now() < until) { /* bounded poll wait */ }
+    }
+  }
+}
+
+function withSessionsLock<T>(fn: () => T): T {
+  const release = acquireSessionsLock();
+  try {
+    return fn();
+  } finally {
+    release();
+  }
+}
+
+let tmpSeq = 0;
+
 function writeAllSessions(sessions: SessionSnapshot[]): void {
-  const dir = join(homedir(), ".litt");
+  const file = sessionsFile();
+  const dir = dirname(file);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(sessionsFile(), JSON.stringify(sessions, null, 2), "utf8");
+  // Write to a per-process, per-call UNIQUE temp file and rename over
+  // the live one — a crash or kill mid-write must never leave
+  // sessions.json truncated. The unique name also means two writers that
+  // somehow reach this point concurrently (the fail-closed lock should
+  // prevent it, but defence-in-depth costs nothing here) can't share a
+  // single tmp path and interleave each other's payloads before rename.
+  const tmpFile = `${file}.tmp.${process.pid}.${tmpSeq++}`;
+  try {
+    writeFileSync(tmpFile, JSON.stringify(sessions, null, 2), "utf8");
+    renameSync(tmpFile, file);
+  } catch (err) {
+    try { unlinkSync(tmpFile); } catch { /* tmp may not exist yet */ }
+    throw err;
+  }
+  sweepStaleTmpFiles(file);
+}
+
+/**
+ * Best-effort removal of `*.tmp.*` files left by writers that were
+ * killed between writeFileSync and renameSync. Runs inside the sessions
+ * lock — cheap and race-free. Only files older than TMP_ORPHAN_MS are
+ * touched, so a genuinely in-flight write is never removed.
+ */
+const TMP_ORPHAN_MS = 60_000;
+function sweepStaleTmpFiles(file: string): void {
+  try {
+    const prefix = `${basename(file)}.tmp.`;
+    const dir = dirname(file);
+    const cutoff = Date.now() - TMP_ORPHAN_MS;
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith(prefix)) continue;
+      try {
+        const p = join(dir, name);
+        if (statSync(p).mtimeMs < cutoff) unlinkSync(p);
+      } catch { /* vanished or unreadable — fine */ }
+    }
+  } catch { /* housekeeping must never fail a save */ }
+}
+
+/**
+ * Mark any message still `"streaming"` — never finalized before the
+ * process ended (a crash, a forced kill, a closed terminal) — as
+ * interrupted. Restoring it as a normal "complete" turn (the old
+ * behavior) would silently claim the response finished when it never
+ * did. Pure — used by the controller's restore path.
+ */
+export function markInterrupted(messages: SessionMessage[]): SessionMessage[] {
+  return messages.map((m) => {
+    if (m.status !== "streaming") return m;
+    const note = "[Interrupted — LiTT exited before this response finished.]";
+    return {
+      ...m,
+      status: "error",
+      content: m.content.length > 0 ? `${m.content}\n\n${note}` : note,
+    };
+  });
 }
 
 /** Build a compact summary from the first user message. */
@@ -197,27 +362,30 @@ export function buildConversationSave(
  * in place within SAME_CONVERSATION_MS; otherwise a new one is added.
  */
 export function saveSession(input: SaveSessionInput): SessionSnapshot {
-  const all = readAllSessions();
-  const now = Date.now();
-  const recent = all[0] ?? null;
-  const sameConversation = Boolean(
-    recent
-    && recent.project === input.project
-    && recent.summary === input.summary
-    && now - recent.updatedAt < SAME_CONVERSATION_MS,
-  );
+  return withSessionsLock(() => {
+    const all = readAllSessions();
+    testHoldDelay(); // test-only — see acquireSessionsLock() doc comment
+    const now = Date.now();
+    const recent = all[0] ?? null;
+    const sameConversation = Boolean(
+      recent
+      && recent.project === input.project
+      && recent.summary === input.summary
+      && now - recent.updatedAt < SAME_CONVERSATION_MS,
+    );
 
-  const snapshot: SessionSnapshot = {
-    ...input,
-    id: sameConversation && recent ? recent.id : newSessionId(),
-    createdAt: sameConversation && recent ? recent.createdAt : now,
-    updatedAt: now,
-    messages: input.messages.slice(-MAX_SAVED_MESSAGES).map(boundMessage),
-  };
+    const snapshot: SessionSnapshot = {
+      ...input,
+      id: sameConversation && recent ? recent.id : newSessionId(),
+      createdAt: sameConversation && recent ? recent.createdAt : now,
+      updatedAt: now,
+      messages: input.messages.slice(-MAX_SAVED_MESSAGES).map(boundMessage),
+    };
 
-  const rest = sameConversation ? all.slice(1) : all;
-  writeAllSessions([snapshot, ...rest].slice(0, MAX_SESSIONS));
-  return snapshot;
+    const rest = sameConversation ? all.slice(1) : all;
+    writeAllSessions([snapshot, ...rest].slice(0, MAX_SESSIONS));
+    return snapshot;
+  });
 }
 
 /** All sessions, most recent first. */
@@ -230,7 +398,9 @@ export function loadSession(id: string): SessionSnapshot | null {
 }
 
 export function deleteSession(id: string): void {
-  writeAllSessions(readAllSessions().filter((s) => s.id !== id));
+  withSessionsLock(() => {
+    writeAllSessions(readAllSessions().filter((s) => s.id !== id));
+  });
 }
 
 /** Relative "time ago" label for the resume list. */

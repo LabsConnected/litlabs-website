@@ -45,6 +45,15 @@ const ENV_KEYS = [
   "MOONSHOT_API_KEY",
   "MISTRAL_API_KEY",
   "DASHSCOPE_API_KEY",
+  // Ambient provider keys the routing layer reads — without isolating
+  // these, a developer shell (or CI) that happens to export them changes
+  // servedBy and silently breaks the native-vs-OpenRouter assertions.
+  "ANTHROPIC_API_KEY",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "OPENROUTER_MODEL",
+  "LITT_ALLOW_OPENROUTER_FALLBACK",
+  "LITT_MODEL",
   "LITT_MAX_TOKENS",
   "LITT_CREDIT_RETRY",
 ] as const;

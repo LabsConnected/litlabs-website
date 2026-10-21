@@ -103,7 +103,7 @@ import {
   createDraftPR as safeCreateDraftPR,
   isProtectedBranch,
 } from "../lib/git-workflow.js";
-import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
+import { saveSession, summarize, markInterrupted, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
 
 /**
@@ -978,26 +978,75 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
   // ─── Session persistence (/resume) ──────────────────────────────
   /** Persist the current shell session (transcript + context). */
+  const lastPersistWarnRef = useRef(0);
   const persistSession = useCallback(() => {
-    const messages = store.state.chatTranscript;
+    // getChatTranscript() reads the pure store directly (updated
+    // synchronously on every mutation) — state.chatTranscript is a
+    // render-time snapshot and would miss a message appended earlier in
+    // the SAME synchronous turn (e.g. the natural-language exit farewell,
+    // added just before this call with no intervening render).
+    const messages = store.actions.getChatTranscript();
     if (messages.length === 0) return;
     const firstUser = messages.find((m) => m.role === "user");
-    saveSession({
-      project: store.state.project || projectName || "unnamed",
-      cwd: session.getCwd(),
-      branch: store.state.branch,
-      mode: store.state.mode,
-      routingMode: store.state.routingMode,
-      selectedModel: store.state.selectedModel,
-      summary: summarize(firstUser?.content ?? "untitled"),
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-        status: m.status,
-        ts: m.ts,
-      })),
-    });
+    try {
+      saveSession({
+        project: store.state.project || projectName || "unnamed",
+        cwd: session.getCwd(),
+        branch: store.state.branch,
+        mode: store.state.mode,
+        routingMode: store.state.routingMode,
+        selectedModel: store.state.selectedModel,
+        summary: summarize(firstUser?.content ?? "untitled"),
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          status: m.status,
+          ts: m.ts,
+        })),
+      });
+    } catch (err) {
+      // Session storage fails CLOSED (SessionLockTimeoutError): a save
+      // that can't acquire the cross-process lock is a loud failure, not
+      // an unprotected write. Surface it in the activity feed — throttled
+      // so a stuck lock can't spam the feed via the incremental effect.
+      if (Date.now() - lastPersistWarnRef.current > 60_000) {
+        lastPersistWarnRef.current = Date.now();
+        act(store, `Session save failed: ${err instanceof Error ? err.message : String(err)}`, "system", "failed");
+      }
+    }
   }, [store, session, projectName]);
+
+  // ─── Incremental persistence ─────────────────────────────────────
+  // A forced kill (closed terminal, SIGTERM, task-killed process) never
+  // runs any cleanup code — on Windows this is not a hypothetical: a
+  // real child process sending itself SIGTERM/SIGHUP is terminated
+  // immediately with no handler invoked at all (confirmed empirically;
+  // Windows has no POSIX signal delivery). The only way conversation
+  // history survives that is for it to already be on disk before the
+  // kill, not written in response to it. This throttled effect persists
+  // the transcript as it changes — new user messages, streaming deltas,
+  // and finalized assistant replies — independent of any exit path.
+  // saveSession()'s existing same-conversation-merge-in-place logic
+  // (session-store.ts) makes repeated calls for the same turn safe: each
+  // call overwrites that one session record, it never appends a
+  // duplicate.
+  const PERSIST_THROTTLE_MS = Number(process.env.LITT_PERSIST_THROTTLE_MS ?? "") || 1000;
+  const lastIncrementalPersistRef = useRef(0);
+  useEffect(() => {
+    if (store.state.chatTranscript.length === 0) return;
+    const elapsed = Date.now() - lastIncrementalPersistRef.current;
+    if (elapsed >= PERSIST_THROTTLE_MS) {
+      lastIncrementalPersistRef.current = Date.now();
+      persistSession();
+      return;
+    }
+    const timer = setTimeout(() => {
+      lastIncrementalPersistRef.current = Date.now();
+      persistSession();
+    }, PERSIST_THROTTLE_MS - elapsed);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.state.chatTranscript, persistSession]);
 
   // Trigger background discovery on mount — populates model availability
   // from real OpenRouter /models endpoint. Non-blocking. The shared
@@ -1241,8 +1290,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // ─── /resume + /new ─────────────────────────────────────────────
   const restoreSession = useCallback((snapshot: SessionSnapshot) => {
     // Transcript — restore the saved conversation exactly once.
+    // markInterrupted() turns any message still "streaming" (the
+    // process ended before it was finalized) into an explicit error
+    // note — otherwise it would silently restore as a normal completed
+    // turn that the user never actually saw finish.
     store.actions.clearChatTranscript();
-    for (const m of snapshot.messages) {
+    for (const m of markInterrupted(snapshot.messages)) {
       if (m.role !== "user" && m.role !== "assistant") continue;
       store.actions.addChatMessage({
         role: m.role,
@@ -1442,6 +1495,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
     if (input === "/exit" || input === "/quit") {
+      // Save the transcript before leaving — onExit() unmounts the UI
+      // with no further chance to persist.
+      persistSession();
       onExit?.();
       return;
     }
@@ -2091,6 +2147,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           tag: "LOCAL",
           text: truncateActivity(local.text, 60),
         });
+        // Save the farewell exchange just written above — onExit()
+        // unmounts with no further chance to persist.
+        persistSession();
         onExit?.();
         return;
       }
@@ -3654,6 +3713,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
   return {
     submit,
+    persistSession,
     handleApproval,
     toggleMode,
     openPalette,
