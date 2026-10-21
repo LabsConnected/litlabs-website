@@ -789,7 +789,26 @@ export function stripToolCallBlocks(content: string): string {
  * NEVER valid tool inputs — they mean the model copied a schema example
  * verbatim instead of filling it in.
  */
-const PLACEHOLDER_RE = /^[A-Z_][A-Z0-9_]*(\.[A-Z_][A-Z0-9_]*)*$/;
+const PLACEHOLDER_TOKENS = new Set([
+  "FILE_PATH", "FILE_NAME", "FILENAME", "PATH", "PATH_TO_FILE",
+  "DIRECTORY", "DIR", "FOLDER", "COMMAND", "CMD", "TEXT", "CONTENT",
+  "VALUE", "NAME", "URL", "URI", "ARG", "ARGS", "ARGUMENT", "INPUT",
+  "OUTPUT", "EXAMPLE", "TODO", "TBD", "XXX", "TARGET", "SOURCE",
+  "DESTINATION", "DEST", "STRING", "PARAM", "PARAMETER", "KEY",
+]);
+/**
+ * Placeholder detection: a value is an unresolved template only when it
+ * is a placeholder-vocabulary token (FILE_PATH, PATH_TO_FILE, CONTENT_
+ * OF_X). Legitimate user content that merely happens to be uppercase
+ * ("MADE_BY_LITT") is NOT a placeholder — it carries no placeholder
+ * vocabulary. Required-arg presence checks are unaffected.
+ */
+function isPlaceholderValue(trimmed: string): boolean {
+  if (!/^[A-Z_][A-Z0-9_]*(\.[A-Z_][A-Z0-9_]*)*$/.test(trimmed)) return false;
+  if (PLACEHOLDER_TOKENS.has(trimmed)) return true;
+  const head = trimmed.split(/[._]/)[0];
+  return PLACEHOLDER_TOKENS.has(head) && /[_\.]/.test(trimmed);
+}
 
 /**
  * Validate a parsed tool call's arguments before dispatch. Returns an
@@ -826,7 +845,7 @@ export function validateToolCallArgs(
     if (typeof val === "string") {
       const trimmed = val.trim();
       // Placeholder template like URL_OF_DOCUMENTATION, FILE_PATH, etc.
-      if (PLACEHOLDER_RE.test(trimmed)) {
+      if (isPlaceholderValue(trimmed)) {
         return `Argument "${key}" is an unresolved placeholder: "${trimmed}". Provide a real value.`;
       }
       // Angle-bracket template like <path>, <command>
@@ -837,6 +856,93 @@ export function validateToolCallArgs(
   }
 
   return null;
+}
+
+// ─── Bounded argument normalization ────────────────────────────────
+/**
+ * Donor-key aliases per canonical argument name. Small local models
+ * (e.g. 1.7B) regularly emit the RIGHT value under the WRONG key —
+ * "file", "filename", "text" — instead of the schema's "path"/"content".
+ * This table is the ONLY source of renames: explicit, enumerable, and
+ * conservative. A key not listed here is never treated as a donor.
+ */
+const ARG_DONOR_ALIASES: Record<string, string[]> = {
+  path: ["file", "filepath", "file_path", "filePath", "filename", "file_name", "fileName", "target", "dest", "destination", "pathname", "relative_path", "relativePath"],
+  content: ["text", "data", "body", "value", "contents", "file_content", "fileContent", "new_content", "newContent", "replacement", "content_text", "contentText"],
+  command: ["cmd", "shell_command", "shellCommand", "exec", "script", "command_line", "commandLine"],
+};
+
+/**
+ * Bounded recovery for missing required arguments. When a required arg
+ * is absent and EXACTLY ONE unlisted key carries a nonempty string that
+ * is a declared donor alias for that arg, the value is moved to the
+ * canonical name. We never invent values:
+ *   - zero donor candidates  → untouched (validation fails as before)
+ *   - 2+ donor candidates    → ambiguous, untouched
+ *   - non-string donors      → ignored
+ * Returns the (possibly renamed) inputs plus the renames applied, so
+ * the dispatch path can record what was corrected.
+ */
+/**
+ * Unwrap a nested call envelope inside `inputs`. Small local models
+ * (observed: litt-oc-phone:1.7b-8k) sometimes emit the whole call again
+ * as the args value — {"tool":"project_write_file","inputs":{path,…}}
+ * inside {"tool":"project.write_file","inputs":{…}} — so required args
+ * live one level down. Descend at most 2 levels and only while the
+ * object is a pure envelope (every key is tool/name/inputs/arguments/
+ * parameters); anything else is left untouched.
+ */
+const ENVELOPE_KEYS = new Set(["tool", "name", "inputs", "arguments", "parameters"]);
+function unwrapNestedInputs(inputs: Record<string, unknown>): Record<string, unknown> {
+  let cur = inputs;
+  for (let depth = 0; depth < 2; depth++) {
+    const innerArgs =
+      (cur.inputs as Record<string, unknown> | undefined) ??
+      (cur.arguments as Record<string, unknown> | undefined) ??
+      (cur.parameters as Record<string, unknown> | undefined);
+    const innerName = cur.tool ?? cur.name;
+    const isEnvelope =
+      typeof innerName === "string" && innerName.length > 0 &&
+      innerArgs !== null && typeof innerArgs === "object" && !Array.isArray(innerArgs) &&
+      Object.keys(cur).every((k) => ENVELOPE_KEYS.has(k));
+    if (!isEnvelope) break;
+    cur = innerArgs;
+  }
+  return cur;
+}
+
+export function normalizeToolCallArgs(
+  toolId: string,
+  inputs: Record<string, unknown>,
+  toolDefs: ToolDefinition[],
+): { inputs: Record<string, unknown>; renames: Array<[string, string]>; changed: boolean } {
+  const def = toolDefs.find((t) => t.id === toolId);
+  const base = unwrapNestedInputs(inputs);
+  const changed = base !== inputs;
+  if (!def) return { inputs: base, renames: [], changed };
+  const props = (def.inputSchema?.properties ?? {}) as Record<string, unknown>;
+  const required = (def.inputSchema?.required ?? []) as string[];
+  const out: Record<string, unknown> = { ...base };
+  const renames: Array<[string, string]> = [];
+  for (const field of required) {
+    const cur = out[field];
+    if (cur !== undefined && cur !== null && !(typeof cur === "string" && cur.trim() === "")) continue;
+    const aliases = ARG_DONOR_ALIASES[field] ?? [];
+    const donors: string[] = [];
+    for (const [k, v] of Object.entries(out)) {
+      if (k === field || k in props) continue; // schema keys are not donors
+      if (typeof v !== "string" || v.trim() === "") continue;
+      if (aliases.includes(k) || k.replace(/[-_]/g, "").toLowerCase() === field.toLowerCase()) {
+        donors.push(k);
+      }
+    }
+    if (donors.length === 1) {
+      out[field] = out[donors[0]];
+      delete out[donors[0]];
+      renames.push([donors[0], field]);
+    }
+  }
+  return { inputs: out, renames, changed: changed || renames.length > 0 };
 }
 
 /**
@@ -932,6 +1038,11 @@ export async function runAgentLoop(
   const startTime = Date.now();
   const maxRounds = options.maxRounds ?? 10;
   const toolCalls: AgentToolCallRecord[] = [];
+  /** Signature → count of identical INVALID tool calls this run — feeds
+   *  the escalation suffix so a weak model gets an explicit "stop
+   *  retrying this exact call" signal instead of silently burning the
+   *  round limit on one broken signature. */
+  const invalidCallCounts = new Map<string, number>();
   let rounds = 0;
   let totalTokens = 0;
   // Last verification result from the gate (if configured). Returned in
@@ -1107,17 +1218,42 @@ export async function runAgentLoop(
       );
     }
 
+    // ─── Bounded alias recovery ────────────────────────────────────
+    // A required argument emitted under a wrong-but-declared key
+    // ("file" for "path") is renamed — never invented — before the
+    // validation gate. Zero or multiple donors leave inputs untouched.
+    if (process.env.LITT_TOOLCALL_DEBUG) {
+      try {
+        const { appendFileSync } = await import("node:fs");
+        appendFileSync(
+          process.env.LITT_TOOLCALL_DEBUG_FILE ?? "/tmp/litt-toolcall-args.log",
+          JSON.stringify({ toolId: parsed.toolId, inputs: parsed.inputs }) + "\n",
+        );
+      } catch { /* debug only */ }
+    }
+    const normalized = normalizeToolCallArgs(parsed.toolId, parsed.inputs, toolDefs);
+    const inputs = normalized.changed ? normalized.inputs : parsed.inputs;
+
     let res: ToolResult;
     // ─── Pre-dispatch argument validation ──────────────────────────
     // Reject placeholder/template arguments BEFORE the tool runs. No
     // placeholder invocation should ever execute — the model copied a
     // schema example instead of filling it in.
-    const argError = validateToolCallArgs(parsed.toolId, parsed.inputs, toolDefs);
+    const argError = validateToolCallArgs(parsed.toolId, inputs, toolDefs);
     if (argError) {
+      // Identical invalid calls get a progressively louder signal so a
+      // weak model can't silently burn the round limit on one broken
+      // signature. The loop's round limiter still terminates the run.
+      const sig = `${parsed.toolId}::${JSON.stringify(inputs)}::${argError}`;
+      const seen = (invalidCallCounts.get(sig) ?? 0) + 1;
+      invalidCallCounts.set(sig, seen);
       res = {
         status: "failed",
         success: false,
-        message: `Tool argument validation failed: ${argError}`,
+        message: `Tool argument validation failed: ${argError}` +
+          (seen > 1
+            ? ` — this exact call already failed ${seen - 1}× identically; supply every required argument with the documented names or stop retrying this tool.`
+            : ""),
         data: {},
       };
     } else {
@@ -1126,7 +1262,7 @@ export async function runAgentLoop(
         // ─── CANONICAL path: ExecutionGateway ───
         const gwResult = await options.gateway.execute({
           toolId: parsed.toolId,
-          inputs: parsed.inputs,
+          inputs,
           cwd: options.cwd,
           mode: options.mode ?? "act",
           identity: {
@@ -1147,11 +1283,11 @@ export async function runAgentLoop(
         // not the tool name. Pass them correctly so runCommand() executes
         // the real command (e.g. "git") instead of the tool name ("run").
         let execCommand = entry.definition.name;
-        let execArgs = extractArgsFromToolCall(entry.definition.name, parsed.inputs);
+        let execArgs = extractArgsFromToolCall(entry.definition.name, inputs);
         if (entry.definition.id === "project.run") {
-          execCommand = typeof parsed.inputs.command === "string" ? parsed.inputs.command : "";
-          execArgs = Array.isArray(parsed.inputs.args)
-            ? parsed.inputs.args.filter((a): a is string => typeof a === "string")
+          execCommand = typeof inputs.command === "string" ? inputs.command : "";
+          execArgs = Array.isArray(inputs.args)
+            ? inputs.args.filter((a): a is string => typeof a === "string")
             : [];
         }
         const cmdResult = await options.executor.execute(
@@ -1174,7 +1310,7 @@ export async function runAgentLoop(
           projectId: null,
           userId: options.userId ?? null,
           shell: options.shell,
-        }, parsed.inputs);
+        }, inputs);
       }
     } catch (err) {
       res = {
