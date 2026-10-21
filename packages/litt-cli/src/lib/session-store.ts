@@ -101,20 +101,18 @@ const LOCK_STALE_MS = 5_000;
 const LOCK_WAIT_TIMEOUT_MS = 2_000;
 const LOCK_POLL_MS = 5;
 
-/**
- * Thrown when the sessions lock can't be acquired within
- * LOCK_WAIT_TIMEOUT_MS. Fail-CLOSED by design: proceeding without the
- * lock would re-open the read-modify-write race this lock exists to
- * close — a silently lost update is worse than a loud failed save.
- * Callers that can't tolerate a throw (UI persist paths) must catch
- * this and surface the failure, not swallow it.
- */
-export class SessionLockTimeoutError extends Error {
-  constructor(lockPath: string) {
-    super(`Timed out after ${LOCK_WAIT_TIMEOUT_MS}ms waiting for the sessions lock: ${lockPath}`);
-    this.name = "SessionLockTimeoutError";
-  }
+/** Set when a save proceeded WITHOUT the lock after LOCK_WAIT_TIMEOUT_MS.
+ *  Fail-open is the upstream contract (do not regress it), but an
+ *  unprotected write must never be silent: persistSession() consumes
+ *  this flag via consumeUnlockedWrite() and surfaces a throttled
+ *  warning in the activity feed. */
+let lastWriteUnlocked = false;
+export function consumeUnlockedWrite(): boolean {
+  const v = lastWriteUnlocked;
+  lastWriteUnlocked = false;
+  return v;
 }
+
 
 function lockFilePath(): string {
   return `${sessionsFile()}.lock`;
@@ -139,12 +137,13 @@ function testHoldDelay(): void {
  * busy-wait is an acceptable trade for not introducing async into a
  * synchronous API used from React effects and key handlers.
  *
- * Fails CLOSED after LOCK_WAIT_TIMEOUT_MS by throwing
- * SessionLockTimeoutError: an unprotected write is a silent lost-update
- * machine, which is worse than a bounded wait followed by a loud error.
- * By that point either the other process is almost certainly gone
- * (stale-lock theft already tried first) or something is seriously
- * wrong that proceeding unlocked would only make worse.
+ * Fails open after LOCK_WAIT_TIMEOUT_MS (upstream contract — do not
+ * regress): proceeding unlocked is still better than hanging the UI
+ * indefinitely, and by that point either the other process is almost
+ * certainly gone (stale-lock theft already tried first) or something is
+ * seriously wrong that a longer wait won't fix either. The unlocked
+ * write is flagged via lastWriteUnlocked so callers can warn — it is
+ * never silent.
  */
 function acquireSessionsLock(): () => void {
   const lockPath = lockFilePath();
@@ -163,7 +162,7 @@ function acquireSessionsLock(): () => void {
           continue;
         }
       } catch { continue; } // lock vanished between the EEXIST and the stat — retry now
-      if (Date.now() > deadline) throw new SessionLockTimeoutError(lockPath);
+      if (Date.now() > deadline) { lastWriteUnlocked = true; return () => {}; }
       const until = Date.now() + LOCK_POLL_MS;
       while (Date.now() < until) { /* bounded poll wait */ }
     }
@@ -181,6 +180,7 @@ function withSessionsLock<T>(fn: () => T): T {
 
 let tmpSeq = 0;
 
+
 function writeAllSessions(sessions: SessionSnapshot[]): void {
   const file = sessionsFile();
   const dir = dirname(file);
@@ -188,8 +188,9 @@ function writeAllSessions(sessions: SessionSnapshot[]): void {
   // Write to a per-process, per-call UNIQUE temp file and rename over
   // the live one — a crash or kill mid-write must never leave
   // sessions.json truncated. The unique name also means two writers that
-  // somehow reach this point concurrently (the fail-closed lock should
-  // prevent it, but defence-in-depth costs nothing here) can't share a
+  // somehow reach this point concurrently (the lock should
+  // prevent it — fail-open is bounded — but defence-in-depth
+  // costs nothing here) can't share a
   // single tmp path and interleave each other's payloads before rename.
   const tmpFile = `${file}.tmp.${process.pid}.${tmpSeq++}`;
   try {
@@ -222,6 +223,7 @@ function sweepStaleTmpFiles(file: string): void {
       } catch { /* vanished or unreadable — fine */ }
     }
   } catch { /* housekeeping must never fail a save */ }
+
 }
 
 /**

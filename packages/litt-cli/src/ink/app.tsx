@@ -296,6 +296,8 @@ export function CockpitApp({
       // render that captured `store.state`. persistSession() mirrors the
       // idle Ctrl+C exit path so Ctrl+D can't lose the transcript either.
       if (composerValueRef.current.trim().length === 0) {
+        // Save the transcript before leaving — exit() unmounts with no
+        // further chance to persist.
         controller.persistSession();
         exit();
       } else {
