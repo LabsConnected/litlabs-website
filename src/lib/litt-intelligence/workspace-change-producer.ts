@@ -33,6 +33,7 @@ import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import {
   diffManifestPaths,
   enumerateWorkspaceManifest,
+  manifestDigest,
 } from "@/lib/missions/workspace-manifest";
 import { studioLog } from "@/lib/studio/logger";
 
@@ -245,4 +246,46 @@ export async function computeWorkspaceChange(
     ...(checkpoint?.kind ? { kind: checkpoint.kind } : {}),
   });
   return evidence;
+}
+
+/**
+ * Canonical identity of the workspace's CURRENT content (Repair R5-B).
+ *
+ * A verification verdict is only meaningful for the exact content it
+ * verified, so the publish gate needs a revision token that changes when
+ * ANY workspace content changes and is reproducible by any reader of the
+ * same workspace. The manifest digest is that token: sorted path →
+ * sha256(content) pairs over the whole workspace (see
+ * `enumerateWorkspaceManifest`), so editing an already-verified file,
+ * adding a file, or deleting one all yield a different revision.
+ *
+ * Identity schemes:
+ *   - `manifest:<digest>` — preferred; works for git and gitless
+ *     workspaces alike and reflects the live file surface.
+ *   - `git:<sha>` — fallback when the manifest cannot be enumerated but
+ *     the caller knows the workspace's current git HEAD (a checkpoint
+ *     sha). Weaker (it cannot see uncommitted changes), so it is only a
+ *     fallback, and a gate comparing a manifest revision against a git
+ *     revision will (correctly, fail-closed) not match.
+ *
+ * Returns null when neither can be established. Callers must treat null
+ * as "revision unknown" and fail closed — never as "unchanged".
+ */
+export async function computeWorkspaceRevision(
+  probe: WorkspaceChangeProbe | null | undefined,
+  fallbackGitSha?: string | null,
+): Promise<string | null> {
+  if (probe?.listFiles && probe?.readFile) {
+    try {
+      const manifest = await enumerateWorkspaceManifest({
+        listFiles: probe.listFiles.bind(probe),
+        readFile: probe.readFile.bind(probe),
+      });
+      if (manifest) return `manifest:${manifestDigest(manifest)}`;
+    } catch {
+      // fall through to the git fallback
+    }
+  }
+  if (fallbackGitSha) return `git:${fallbackGitSha}`;
+  return null;
 }

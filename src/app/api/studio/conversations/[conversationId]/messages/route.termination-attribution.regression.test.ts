@@ -134,6 +134,9 @@ vi.mock("@/lib/litt-intelligence/agent-loop", () => ({
 
 vi.mock("@/lib/litt-intelligence/agent-loop-v2", () => ({
   runAgentLoopV2: vi.fn(),
+  // Mirrors the real FILE_GENERATION_TOOL_IDS set.
+  isFileWritingTool: (id: string) =>
+    ["files.write", "apply_patch", "edit", "code.writeFile", "code.refactor", "files.patch"].includes(id),
 }));
 
 vi.mock("@/lib/litt-intelligence/progress-events", () => ({

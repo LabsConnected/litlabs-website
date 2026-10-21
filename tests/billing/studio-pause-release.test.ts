@@ -96,7 +96,12 @@ vi.mock("@/lib/entitlements", () => ({
   getOwnerAwareEntitlements: vi.fn(async () => ({ isOwner: false, premiumModels: false })),
 }));
 vi.mock("@/lib/litt-intelligence/agent-loop", () => ({ runAgentLoop: vi.fn() }));
-vi.mock("@/lib/litt-intelligence/agent-loop-v2", () => ({ runAgentLoopV2: vi.fn() }));
+vi.mock("@/lib/litt-intelligence/agent-loop-v2", () => ({
+  runAgentLoopV2: vi.fn(),
+  // Mirrors the real FILE_GENERATION_TOOL_IDS set.
+  isFileWritingTool: (id: string) =>
+    ["files.write", "apply_patch", "edit", "code.writeFile", "code.refactor", "files.patch"].includes(id),
+}));
 vi.mock("@/lib/litt-intelligence/progress-events", () => ({
   ProgressEmitter: class {
     private cb: (e: any) => void;

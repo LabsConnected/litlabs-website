@@ -244,7 +244,13 @@ function scriptLoop(script: Array<"pause" | "complete">) {
     return {
       finalText: "done",
       stepsUsed: 5,
-      toolCalls: [],
+      // Production-faithful (R5-C): a resumed files.write gate EXECUTES
+      // the approved write, and the call is in the segment's tool log.
+      // An empty log on a completed edit resume is the false-completion
+      // shape the resume guard now fails honestly.
+      toolCalls: [
+        { toolId: "files.write", success: true, summary: "wrote styles.css", mutating: true },
+      ],
       cancelled: false,
       checkpoint,
     } as any;

@@ -28,7 +28,7 @@ import {
   HISTORY_LIMIT,
 } from "@/lib/litt-runtime";
 import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
-import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { runAgentLoopV2, isFileWritingTool, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { findToolCallMarkup, stripToolCallMarkupText } from "@/lib/litt-intelligence/tool-call-markup";
 import { withV1NoToolsDirective } from "@/lib/litt-intelligence/text-lane-guard";
 import { sanitizeTextLaneHistory } from "@/lib/litt-intelligence/toolless-lane-guard";
@@ -1369,20 +1369,46 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           && !assistantText.trim();
 
         // Honest completion: a mutation-required run that ended with
-        // zero tool calls and zero mutations must never be persisted or
-        // reported as "completed" — that is the silent fake-complete
-        // (e.g. a prose approval-ask settling Complete with nothing
-        // done and no approval card ever created). Fail it honestly.
+        // zero SUCCESSFUL mutations must never be persisted or reported
+        // as "completed" — that is the silent fake-complete (e.g. a
+        // prose approval-ask settling Complete with nothing done and no
+        // approval card ever created). Fail it honestly.
+        //
+        // Repair R5-C: the guard previously also required ZERO tool
+        // calls, so a single read (or one failed write attempt) defeated
+        // it entirely — the live edit-stage failure, where the agent
+        // made calls, claimed the edit, and changed nothing, settled
+        // "completed". Successful mutations are the only honest success
+        // signal for a mutation-required run; tool-call count is not.
+        // The replacement text is chosen from the run's own workspace
+        // evidence (R3 verdict), so the record says what actually
+        // happened to the files — never that an edit was applied when
+        // none was.
         const mutationRequired = effectiveRequiresExecution === true;
         const v2ToolCalls = v2Result?.toolCalls ?? [];
         const v2Mutations = v2ToolCalls.filter((c) => c.success && c.mutating).length;
+        // Verification strengthening (R5-C): a successful MUTATING call
+        // is not by itself proof an edit landed. The completion is
+        // unproven when any of these holds:
+        //  - no successful mutation at all (the original R5-C arm);
+        //  - the run's own workspace verdict proves NOTHING changed —
+        //    a no-op write that "succeeded" is not an edit;
+        //  - the only successful mutations were non-file operations
+        //    (terminal.execute, checkpoint.create, memory.store are
+        //    mutating but write no project file) AND no workspace
+        //    verdict proves the workspace changed through them.
+        const v2FileMutations = v2ToolCalls.filter((c) => c.success && isFileWritingTool(c.toolId)).length;
+        const v2WorkspaceStatus = v2Result?.workspaceChange?.status;
+        const noProvenMutation =
+          v2Mutations === 0 ||
+          v2WorkspaceStatus === "unchanged" ||
+          (v2FileMutations === 0 && v2WorkspaceStatus !== "changed");
         const zeroMutationCompletion =
           mutationRequired &&
           !actionableApproval &&
           !v2Result?.pendingApproval &&
           !launchFlowResult?.cancelled &&
-          v2ToolCalls.length === 0 &&
-          v2Mutations === 0;
+          noProvenMutation;
         if (zeroMutationCompletion) {
           // Preserve a specific failure message the launch flow already
           // produced (e.g. TOOL_EXECUTION_UNAVAILABLE names the real cause
@@ -1390,8 +1416,22 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // Only fall back to the generic wording when the flow named no
           // specific error (the silent fake-complete case).
           if (!launchFlowResult?.error) {
-            assistantText =
-              "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.";
+            if (v2ToolCalls.length === 0) {
+              assistantText =
+                "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.";
+            } else if (v2Result?.workspaceChange?.status === "changed") {
+              // Files DID change, but not through a successful file
+              // operation this run reported — the requested edit cannot
+              // be confirmed as the change that landed.
+              assistantText =
+                "I couldn't confirm the requested change: the workspace changed, but no file operation completed successfully, so the edit is not verified as applied. Please try again.";
+            } else if (v2Result?.workspaceChange?.status === "unchanged") {
+              assistantText =
+                "I couldn't complete the requested change: no files were modified. Please try again.";
+            } else {
+              assistantText =
+                "I couldn't complete the requested change: no file operation completed successfully, so the edit was not applied. Please try again.";
+            }
           }
         }
 
@@ -1447,6 +1487,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                   result: {
                     finalText: assistantText,
                     qualityLoop: v2Result?.qualityLoop ?? undefined,
+                    // The verified revision (R5-B): an ok verdict is
+                    // bound to the exact workspace revision it covers,
+                    // on the same canonical outcome event the publish
+                    // gate reads. Absent for non-ok verdicts — an
+                    // unverified run records no revision claim.
+                    ...(v2Result?.qualityLoop?.verdict.ok && v2Result?.workspaceRevision
+                      ? { verifiedRevision: v2Result.workspaceRevision }
+                      : {}),
                   },
                 },
               });

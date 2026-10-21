@@ -31,8 +31,17 @@ import {
 import { resumeAgentLoopV2, isFileWritingTool, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import {
   computeWorkspaceChange,
+  computeWorkspaceRevision,
   type WorkspaceChangeProbe,
 } from "@/lib/litt-intelligence/workspace-change-producer";
+import {
+  evaluatePublishGate,
+  isDeployToolId,
+  selectVerifiedRevision,
+  sessionHasVerificationEvidence,
+  type PublishGateDecision,
+  type SettledRunVerification,
+} from "@/lib/studio/verified-revision";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
 import { ensureProjectPreviewReady } from "@/lib/litt-intelligence/launch-flow";
@@ -58,6 +67,8 @@ import {
   createActionRun,
   getActionRun,
   appendActionEvent,
+  listActionEvents,
+  listActionRuns,
   transitionActionRunEventActivity,
   type ActionRunPatch,
   type ActionRunStatus,
@@ -230,7 +241,12 @@ async function settleResumedRunOutcome(opts: {
     await settleConversationTask(
       userId, record.conversationId,
       status === "waiting_for_user" ? "waiting_approval" : status === "completed" ? "completed" : status === "cancelled" ? "cancelled" : "failed",
-      status === "completed" && runResult?.qualityLoop?.verdict.ok === true,
+      status === "completed" &&
+        (runResult?.qualityLoop?.verdict.ok === true ||
+          // A publish settle the verified-revision gate allowed IS a
+          // verified completion (R5-B): the published bytes are the
+          // verified bytes, proven by the gate's own audit record.
+          runResult?.publishGate?.allowed === true),
       record.actionRunId,
     ).catch((error) => studioLog("approval:task_settle_failed", {
       ...ids, errorClass: error instanceof Error ? error.message : "unknown",
@@ -284,6 +300,113 @@ async function recoverCheckpointInfo(
     label: "pre-approval",
     gitSha: checkpointRow?.gitSha ?? "",
   };
+}
+
+/**
+ * The project's canonical verified-revision record (Repair R5-B): scan
+ * the project's recent settled runs (newest first, EXCLUDING the run
+ * being resumed) and select the newest whose terminal outcome event
+ * carries an ok quality verdict bound to a recorded workspace revision.
+ * This is the durable record the publish gate reads — never a run's
+ * cached status and never the publish run's own empty session. Any read
+ * failure yields null (no record), and the gate fails closed on null.
+ */
+function normalizeWorkspacePath(path: string): string {
+  return path.replace(/^\.\//, "").replace(/^\//, "");
+}
+
+/** The approved target file of a gated call, when its frozen inputs name one. */
+function approvedTargetPath(inputs: Record<string, unknown> | null | undefined): string | null {
+  if (!inputs) return null;
+  for (const key of ["path", "filePath", "file", "targetPath"]) {
+    const value = inputs[key];
+    if (typeof value === "string" && value.trim()) return normalizeWorkspacePath(value);
+  }
+  return null;
+}
+
+/**
+ * Whether the resumed segment proves the APPROVED file edit landed
+ * (Repair R5-C, strengthened in verification): the approved tool
+ * itself ran successfully; the run's workspace verdict does not prove
+ * nothing changed (a no-op write "succeeding" is not an edit); and —
+ * when the verdict enumerates the changed files and the approved
+ * target is known — the target is among them. "Some mutation happened
+ * somewhere in the segment" is not proof: the approved call can be
+ * dropped while a deferred call succeeds, and a successful write to
+ * the WRONG file leaves the approved change unapplied.
+ */
+function approvedEditLanded(
+  result: {
+    toolCalls: Array<{ toolId: string; success: boolean }>;
+    workspaceChange?: WorkspaceChangeEvidence | null;
+  },
+  resolved: { toolId: string; inputs?: Record<string, unknown> | null },
+): boolean {
+  if (!result.toolCalls.some((call) => call.toolId === resolved.toolId && call.success)) {
+    return false;
+  }
+  const change = result.workspaceChange;
+  if (change?.status === "unchanged") return false;
+  if (change?.status === "changed" && Array.isArray(change.files) && change.files.length > 0) {
+    const target = approvedTargetPath(resolved.inputs);
+    if (target) return change.files.some((file) => normalizeWorkspacePath(file) === target);
+  }
+  return true;
+}
+
+async function loadProjectVerifiedRevision(opts: {
+  userId: string;
+  projectId: string;
+  excludeRunId: string | null;
+}): Promise<{ revision: string; runId: string } | null> {
+  try {
+    const runs = await listActionRuns(opts.userId, {
+      projectId: opts.projectId,
+      limit: 10,
+    });
+    const settled: SettledRunVerification[] = [];
+    for (const run of runs) {
+      if (opts.excludeRunId && run.id === opts.excludeRunId) continue;
+      if (
+        run.status !== "completed" &&
+        run.status !== "failed" &&
+        run.status !== "cancelled"
+      ) {
+        continue;
+      }
+      const events = await listActionEvents(run.id, opts.userId);
+      let outcome: { verdictOk: boolean; verifiedRevision: string | null } | null = null;
+      for (const event of events) {
+        if (
+          event.type !== "run.completed" &&
+          event.type !== "run.failed" &&
+          event.type !== "run.cancelled"
+        ) {
+          continue;
+        }
+        const result = (
+          event.payload as {
+            result?: {
+              qualityLoop?: { verdict?: { ok?: boolean } };
+              verifiedRevision?: string | null;
+            };
+          } | null
+        )?.result;
+        outcome = {
+          verdictOk: result?.qualityLoop?.verdict?.ok === true,
+          verifiedRevision:
+            typeof result?.verifiedRevision === "string" ? result.verifiedRevision : null,
+        };
+      }
+      if (outcome) {
+        settled.push({ runId: run.id, ...outcome });
+      }
+    }
+    return selectVerifiedRevision(settled);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -723,6 +846,97 @@ export async function POST(
       { error: "Workspace verification failed on resume", resolved: true, status: "failed" },
       { status: 500 },
     );
+  }
+
+  // 5.5. Publish gate (Repair R5-B): an approved DEPLOY may only publish
+  // the exact workspace revision that passed verification. Decided HERE
+  // — before the claim, before any billing reservation, before any
+  // execution — so a denied publish performs no deployment and no
+  // charge, structurally. Two ways through:
+  //   (a) the run's OWN session carries build evidence (a single run
+  //       that built and then paused at its deploy gate): its verdict
+  //       is evaluated by the resumed finalize, as before;
+  //   (b) the project's canonical record holds a verified revision AND
+  //       the live workspace still IS that revision.
+  // Otherwise the publish is denied with the truthful reason. This is
+  // the gate the post-edit publish needed: the build run verified, the
+  // edit run re-verified, and the publish run — whose own fresh session
+  // could never contain that evidence — previously had nothing to read
+  // but its own empty session, so it failed a publish that should have
+  // been allowed; and symmetrically, nothing stopped a publish of
+  // content that had changed since verification.
+  let publishGateDecision: PublishGateDecision | null = null;
+  let publishGateInRun = false;
+  if (isDeployToolId(resolved.toolId)) {
+    if (sessionHasVerificationEvidence(resolved.qualityLoopState)) {
+      publishGateInRun = true;
+    } else {
+      const record = resolved.projectId
+        ? await loadProjectVerifiedRevision({
+            userId,
+            projectId: resolved.projectId,
+            excludeRunId: resolved.actionRunId ?? null,
+          })
+        : null;
+      const currentRevision = await computeWorkspaceRevision(transport);
+      const decision = evaluatePublishGate({ record, currentRevision });
+      publishGateDecision = decision;
+      if (!decision.allowed) {
+        studioLog("approval:publish_gate_denied", {
+          conversationId,
+          userId,
+          pausedRunId,
+          tool: resolved.toolId,
+          // The denial code itself is durable on the settled run
+          // record (runResult.publishGate) — the log line names the gate.
+          eventType: decision.code,
+        });
+        await writeResumedResultToTranscript({
+          conversationId,
+          userId,
+          projectId: resolved.projectId,
+          pausedRunId,
+          status: "failed",
+          content: decision.reason,
+        });
+        await settleResumedRunOutcome({
+          record: resolved,
+          userId,
+          status: "failed",
+          eventType: "run.failed",
+          patch: {
+            currentActivity: decision.reason,
+            failureCode: "PUBLISH_NOT_VERIFIED",
+            failureMessage: decision.reason,
+          },
+          runResult: {
+            finalText: "",
+            stepsUsed: resolved.stepsUsed ?? 0,
+            toolCalls: [],
+            cancelled: false,
+            publishGate: {
+              allowed: false,
+              code: decision.code,
+              verifiedRevision: decision.verifiedRevision,
+              currentRevision: decision.currentRevision,
+              verifiedByRunId: decision.verifiedByRunId,
+            },
+          },
+          logEvent: "approval:publish_gate_denied_settle_failed",
+        });
+        return NextResponse.json(
+          {
+            error: decision.reason,
+            code: "PUBLISH_NOT_VERIFIED",
+            denial: decision.code,
+            resolved: true,
+            status: "failed",
+            pausedRunId,
+          },
+          { status: 409 },
+        );
+      }
+    }
   }
 
   // 6. Mark the run as "processing" (atomic — prevents duplicate executions)
@@ -1259,6 +1473,16 @@ export async function POST(
             `The resumed run could not complete: ${result.modelFailed}`;
         } else if (failedMutation && !successfulMutation) {
           resumeFailure = "The approved workspace operation failed, so the project was not completed.";
+        } else if (isFileWritingTool(resolved.toolId) && !approvedEditLanded(result, resolved)) {
+          // Repair R5-C (resume side): the approved action was a file
+          // edit, yet the resumed segment does not prove THAT edit
+          // landed — the gated call never executed successfully
+          // (dropped, filtered, or the model talked instead), it wrote
+          // to a different file than the approved target, or the
+          // workspace verdict proves nothing changed (no-op). The
+          // segment must not settle as a completed edit: an unlanded
+          // change was not applied.
+          resumeFailure = "The approved edit did not change any files, so the change was not applied.";
         } else if (successfulMutation) {
           // Scope the artifact gate with the resumed run's own workspace
           // evidence: a "changed" diff proves the approved mutation landed,
@@ -1378,9 +1602,88 @@ export async function POST(
         }
       }
 
-      const terminalFailure = result.failedHonestly ||
+      // Publish-gate settle revalidation (R5-B): the pre-execution gate
+      // allowed this deploy because the workspace WAS the verified
+      // revision. Recompute the revision at settle: the settle is
+      // covered only if the workspace is still exactly a revision some
+      // ok verdict covers — the gate's verified revision, or the
+      // revision this segment's own finalize computed under its ok
+      // verdict (the publish run's own session verdict is structurally
+      // unable to contain the earlier runs' build/test evidence, and
+      // must not by itself fail a publish of verified bytes — that
+      // asymmetry WAS Defect 2). An ok verdict alone is NOT coverage:
+      // if the workspace at settle matches neither revision — it moved
+      // under the publish, or can no longer be read — what shipped is
+      // not proven to be the verified content, and the settle fails
+      // truthfully instead of recording an allowed audit over
+      // mismatched revisions (verification gap G1).
+      let publishGateAudit: RunResult["publishGate"] = null;
+      let publishGateCoversSettle = false;
+      const segmentIsDeploy =
+        isDeployToolId(resolved.toolId) ||
+        result.toolCalls.some((call) => isDeployToolId(call.toolId));
+      if (publishGateDecision?.allowed) {
+        const settleRevision = await computeWorkspaceRevision(transport);
+        const segmentVerifiedRevision =
+          qualityLoop?.verdict.ok === true ? (result.workspaceRevision ?? null) : null;
+        if (
+          settleRevision !== null &&
+          settleRevision === segmentVerifiedRevision &&
+          settleRevision !== publishGateDecision.currentRevision
+        ) {
+          publishGateCoversSettle = true;
+          publishGateAudit = {
+            allowed: true,
+            code: "in_run_verification",
+            verifiedRevision: segmentVerifiedRevision,
+            currentRevision: settleRevision,
+            verifiedByRunId: publishGateDecision.verifiedByRunId,
+          };
+        } else if (settleRevision !== null && settleRevision === publishGateDecision.currentRevision) {
+          publishGateCoversSettle = true;
+          publishGateAudit = {
+            allowed: true,
+            code: publishGateDecision.code,
+            verifiedRevision: publishGateDecision.verifiedRevision,
+            currentRevision: settleRevision,
+            verifiedByRunId: publishGateDecision.verifiedByRunId,
+          };
+        } else {
+          publishGateAudit = {
+            allowed: false,
+            code: settleRevision === null ? "current_revision_unknown" : "stale_revision",
+            verifiedRevision: publishGateDecision.verifiedRevision,
+            currentRevision: settleRevision,
+            verifiedByRunId: publishGateDecision.verifiedByRunId,
+          };
+        }
+      } else if (publishGateInRun) {
+        publishGateAudit = {
+          allowed: qualityLoop?.verdict.ok === true,
+          code: "in_run_verification",
+          verifiedRevision:
+            qualityLoop?.verdict.ok === true ? (result.workspaceRevision ?? null) : null,
+          currentRevision: null,
+          verifiedByRunId: null,
+        };
+      }
+
+      // A stale settle audit (the gate allowed the publish, then the
+      // workspace moved or became unreadable before settle) fails the
+      // run regardless of the segment's own verdict state — including
+      // when the segment produced no verdict at all (verification gap
+      // G1). The in-run audit is exempt: its not-allowed state simply
+      // mirrors the segment's own not-ok verdict, which the quality
+      // branch below reports with the quality wording.
+      const gateStaleFailure =
+        publishGateAudit && !publishGateAudit.allowed && publishGateAudit.code !== "in_run_verification" && segmentIsDeploy
+          ? "The workspace changed while publishing, so what would be published is no longer the verified revision. Re-run verification, then publish again."
+          : undefined;
+      const terminalFailure = result.failedHonestly || gateStaleFailure ||
         (!result.pendingApproval && qualityLoop && !qualityLoop.verdict.ok
-          ? "The build did not pass its quality checks; it is not complete."
+          ? publishGateCoversSettle && segmentIsDeploy
+            ? undefined
+            : "The build did not pass its quality checks; it is not complete."
           : undefined);
 
       // Termination attribution (R4/E3-S1): the loop's `cancelled` flag
@@ -1445,6 +1748,13 @@ export async function POST(
         // Before this field existed on RunResult, the value died here —
         // the settled record carried no workspace truth at all.
         workspaceChange: result.workspaceChange ?? null,
+        // The verified revision (R5-B): bind an ok verdict to the exact
+        // workspace revision it covers, so a later publish can prove
+        // the bytes it ships are the bytes that were verified. A
+        // non-ok verdict records null — never a dressed-up claim.
+        verifiedRevision:
+          qualityLoop?.verdict.ok === true ? (result.workspaceRevision ?? null) : null,
+        publishGate: publishGateAudit,
       };
 
       // Nested-gate handoff: persist the new gate, then record the outer

@@ -28,7 +28,7 @@ export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
-import { computeWorkspaceChange } from "./workspace-change-producer";
+import { computeWorkspaceChange, computeWorkspaceRevision } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { studioLog } from "@/lib/studio/logger";
 import { cancelReasonFromAbortSignal } from "@/lib/studio/cancel-attribution";
@@ -302,6 +302,15 @@ export interface AgentLoopResult {
    * workspace is untouched.
    */
   workspaceChange?: WorkspaceChangeEvidence;
+  /**
+   * Canonical identity of the workspace content as this run left it
+   * (Repair R5-B, `computeWorkspaceRevision`). Recorded by the settle
+   * paths as the run's verified revision when — and only when — its
+   * quality verdict was ok, so a later publish can prove the bytes it
+   * ships are the bytes that were verified. Null when the revision
+   * could not be established.
+   */
+  workspaceRevision?: string | null;
   cancelled: boolean;
   cancelReason?: string;
   events: ProgressEvent[];
@@ -1966,6 +1975,13 @@ async function runAgentLoopV2Inner(
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
   const afterCheckpoint = await createAfterRunCheckpoint(transport, workspaceChange, userMessage, localProgress);
+  // The revision this run's verdict covers (R5-B): the workspace content
+  // as the run leaves it. Computed for every run — cheap, read-only —
+  // so the settle path can bind an ok verdict to the exact content.
+  const workspaceRevision = await computeWorkspaceRevision(
+    transport,
+    afterCheckpoint?.gitSha ?? checkpoint?.gitSha ?? null,
+  );
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled
@@ -1986,6 +2002,7 @@ async function runAgentLoopV2Inner(
     checkpoint,
     afterCheckpoint,
     workspaceChange,
+    workspaceRevision,
     cancelled,
     cancelReason,
     events,
@@ -3336,6 +3353,12 @@ async function resumeAgentLoopV2Inner(
     cfg.qualityLoop?.userRequest ?? null,
     localProgress,
   );
+  // The revision this resumed segment's verdict covers (R5-B) — same
+  // contract as the fresh loop's finalize.
+  const workspaceRevision = await computeWorkspaceRevision(
+    transport,
+    afterCheckpoint?.gitSha ?? checkpoint?.gitSha ?? null,
+  );
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled
@@ -3356,6 +3379,7 @@ async function resumeAgentLoopV2Inner(
     checkpoint,
     afterCheckpoint,
     workspaceChange,
+    workspaceRevision,
     cancelled,
     cancelReason,
     events,

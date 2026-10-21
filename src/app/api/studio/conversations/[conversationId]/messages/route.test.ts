@@ -136,6 +136,10 @@ vi.mock("@/lib/litt-intelligence/agent-loop", () => ({
 
 vi.mock("@/lib/litt-intelligence/agent-loop-v2", () => ({
   runAgentLoopV2: vi.fn(),
+  // Mirrors the real FILE_GENERATION_TOOL_IDS set (model-registry
+  // FILE_WRITE_TOOL_IDS + code.writeFile/code.refactor/files.patch).
+  isFileWritingTool: (id: string) =>
+    ["files.write", "apply_patch", "edit", "code.writeFile", "code.refactor", "files.patch"].includes(id),
 }));
 
 vi.mock("@/lib/litt-intelligence/progress-events", () => ({
@@ -328,9 +332,12 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         finalText: "I built your landing page and started a preview.",
         agentLoopResult: {
           stepsUsed: 2,
+          // Production-typed records: the real loop's toolCallLog always
+          // carries success + mutating (R5-C fixture fidelity — the old
+          // zero-tool-call guard masked their absence here).
           toolCalls: [
-            { toolId: "files.list", toolCallId: "tc1", inputs: {} },
-            { toolId: "files.write", toolCallId: "tc2", inputs: { path: "index.html" } },
+            { toolId: "files.list", toolCallId: "tc1", inputs: {}, success: true, summary: "5 entries", mutating: false },
+            { toolId: "files.write", toolCallId: "tc2", inputs: { path: "index.html" }, success: true, summary: "saved", mutating: true },
           ],
           cancelled: false,
           pendingApproval: null,
@@ -724,7 +731,10 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "Done after downstream cancel.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }], cancelled: false, pendingApproval: null } as any,
+        // Production-typed records (R5-C fixture fidelity): a completed
+        // build carries a successful mutation — a read alone cannot
+        // complete a mutation-required request.
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }, { toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 100,
       } as any;
@@ -1186,7 +1196,10 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       previewUrl: null,
       productionUrl: null,
       finalText: "Recovered answer.",
-      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }], cancelled: false, pendingApproval: null } as any,
+      // Production-typed records (R5-C fixture fidelity): a completed
+      // build carries a successful mutation — a read alone cannot
+      // complete a mutation-required request.
+      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }, { toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
       cancelled: false,
       totalDurationMs: 50,
     } as any);
@@ -1738,6 +1751,318 @@ describe("POST /api/studio/conversations/[conversationId]/messages — project r
     if (res.status === 409) {
       const body = await res.json().catch(() => null);
       expect(body?.code).not.toBe("PROJECT_MISMATCH");
+    }
+  });
+});
+
+describe("POST /api/studio/conversations/[conversationId]/messages — false completion guard (R5-C)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetExecutionRegistryForTests();
+
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv-123",
+      projectId: "proj-123",
+      revision: 1,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    } as any);
+    vi.mocked(buildStudioContext).mockResolvedValue({} as any);
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: true,
+      workspaceId: "ws-123",
+      executionMode: "auto",
+    } as any);
+    vi.mocked(insertMessage).mockImplementation(async (args: any) => ({
+      message: { id: `msg-${args.role}`, ...args },
+      duplicate: false,
+      error: null,
+    }) as any);
+    vi.mocked(updateMessageStatus).mockResolvedValue(true as any);
+    actionRuntimeMocks.createActionRun.mockResolvedValue({
+      id: "action-run-123",
+      userId: "user_123",
+      projectId: "proj-123",
+      conversationId: "conv-123",
+      kind: "composite",
+      status: "queued",
+    } as any);
+    actionRuntimeMocks.transitionActionRunEventActivity.mockResolvedValue({} as any);
+    actionRuntimeMocks.transitionActionRun.mockResolvedValue({} as any);
+    actionRuntimeMocks.requestActionRunCancellation.mockResolvedValue({} as any);
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+  });
+
+  function stageFlow(result: Record<string, unknown>) {
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: "https://preview.example.com",
+      productionUrl: null,
+      cancelled: false,
+      totalDurationMs: 50,
+      ...result,
+    } as any);
+  }
+
+  it("(a) an edit run that made only READ calls and claims success settles FAILED — the live Harbor Coffee shape", async () => {
+    stageFlow({
+      finalText: "Done — the new headline will be applied to the live site right away.",
+      agentLoopResult: {
+        stepsUsed: 2,
+        toolCalls: [
+          { toolId: "files.read", success: true, summary: "read index.html", mutating: false },
+          { toolId: "files.list", success: true, summary: "listed files", mutating: false },
+        ],
+        cancelled: false,
+        pendingApproval: null,
+        workspaceChange: { status: "unchanged", files: [] },
+      } as any,
+    });
+
+    const res = await POST(makeRequest({ message: "Change the headline to Harbor Roast" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const { events } = await readSSE(res);
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents.length).toBe(1);
+    // Pre-fix: the zero-mutation guard required ZERO tool calls, so the
+    // two reads defeated it and this settled "completed" with the
+    // agent's false claim intact.
+    expect(doneEvents[0].assistantMessage.status).toBe("failed");
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      "I couldn't complete the requested change: no files were modified. Please try again.",
+    );
+    expect(getActiveExecution("conv-123")).toBeNull();
+  });
+
+  it("(a2) an edit run whose only mutation FAILED settles FAILED with the not-applied text", async () => {
+    stageFlow({
+      finalText: "Done — headline updated.",
+      agentLoopResult: {
+        stepsUsed: 2,
+        toolCalls: [
+          { toolId: "files.write", success: false, summary: "write failed: disk error", mutating: true },
+        ],
+        cancelled: false,
+        pendingApproval: null,
+        // No verdict attached — the unknown-evidence wording applies.
+      } as any,
+    });
+
+    const res = await POST(makeRequest({ message: "Change the headline to Harbor Roast" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const { events } = await readSSE(res);
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0].assistantMessage.status).toBe("failed");
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      "I couldn't complete the requested change: no file operation completed successfully, so the edit was not applied. Please try again.",
+    );
+  });
+
+  it("(a3) workspace changed but no successful mutation reported — the edit is not confirmed as applied", async () => {
+    stageFlow({
+      finalText: "Done — headline updated.",
+      agentLoopResult: {
+        stepsUsed: 3,
+        toolCalls: [
+          { toolId: "terminal.execute", success: true, summary: "ran sed", mutating: false },
+        ],
+        cancelled: false,
+        pendingApproval: null,
+        workspaceChange: { status: "changed", files: ["index.html"] },
+      } as any,
+    });
+
+    const res = await POST(makeRequest({ message: "Change the headline to Harbor Roast" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const { events } = await readSSE(res);
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0].assistantMessage.status).toBe("failed");
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.stringContaining("not verified as applied"),
+    );
+  });
+
+  it("(b) an edit run with a real successful mutation completes, with the verdict + verified revision on the outcome event", async () => {
+    stageFlow({
+      finalText: "Done — the headline now reads Harbor Roast.",
+      agentLoopResult: {
+        stepsUsed: 2,
+        toolCalls: [
+          { toolId: "files.write", success: true, summary: "wrote index.html", mutating: true },
+        ],
+        cancelled: false,
+        pendingApproval: null,
+        workspaceChange: { status: "changed", files: ["index.html"] },
+        qualityLoop: { verdict: { ok: true } },
+        workspaceRevision: "manifest:rev-after-edit",
+      } as any,
+    });
+
+    const res = await POST(makeRequest({ message: "Change the headline to Harbor Roast" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const { events } = await readSSE(res);
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0].assistantMessage.status).toBe("completed");
+    // The canonical outcome event binds the ok verdict to the exact
+    // revision it verified — the record the publish gate reads (R5-B).
+    expect(actionRuntimeMocks.appendActionEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "run.completed",
+        payload: {
+          result: expect.objectContaining({
+            verifiedRevision: "manifest:rev-after-edit",
+          }),
+        },
+      }),
+    );
+  });
+
+  it("(a4) a successful NON-FILE mutation (terminal) with no workspace verdict does not satisfy the guard", async () => {
+    stageFlow({
+      finalText: "Done — headline updated.",
+      agentLoopResult: {
+        stepsUsed: 2,
+        toolCalls: [
+          { toolId: "files.read", success: true, summary: "read index.html", mutating: false },
+          // Production-typed record: terminal.execute is readOnly:false
+          // in the registry, so the real loop logs it mutating:true. A
+          // successful shell command is not a file operation and proves
+          // no edit landed.
+          { toolId: "terminal.execute", success: true, summary: "ran ls", mutating: true },
+        ],
+        cancelled: false,
+        pendingApproval: null,
+        // No workspace verdict attached — nothing proves a change.
+      } as any,
+    });
+
+    const res = await POST(makeRequest({ message: "Change the headline to Harbor Roast" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const { events } = await readSSE(res);
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0].assistantMessage.status).toBe("failed");
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      "I couldn't complete the requested change: no file operation completed successfully, so the edit was not applied. Please try again.",
+    );
+  });
+
+  it("(a5) a no-op edit — the write succeeds but the workspace verdict proves NOTHING changed — settles FAILED", async () => {
+    stageFlow({
+      finalText: "Done — headline updated.",
+      agentLoopResult: {
+        stepsUsed: 2,
+        toolCalls: [
+          // Identical content written back: the tool reports success,
+          // but the R3 workspace verdict proves no file changed.
+          { toolId: "files.write", success: true, summary: "wrote index.html", mutating: true },
+        ],
+        cancelled: false,
+        pendingApproval: null,
+        workspaceChange: { status: "unchanged", files: [] },
+      } as any,
+    });
+
+    const res = await POST(makeRequest({ message: "Change the headline to Harbor Roast" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const { events } = await readSSE(res);
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0].assistantMessage.status).toBe("failed");
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      "I couldn't complete the requested change: no files were modified. Please try again.",
+    );
+  });
+
+  it("(a6) retry after an HONEST no-mutation failure: the same request with a real mutation completes", async () => {
+    // First attempt: reads only + a false claim → honest failure, and
+    // the execution registry is released so a retry can run.
+    stageFlow({
+      finalText: "Done — the new headline will be applied right away.",
+      agentLoopResult: {
+        stepsUsed: 2,
+        toolCalls: [
+          { toolId: "files.read", success: true, summary: "read index.html", mutating: false },
+        ],
+        cancelled: false,
+        pendingApproval: null,
+        workspaceChange: { status: "unchanged", files: [] },
+      } as any,
+    });
+    const first = await POST(makeRequest({ message: "Change the headline to Harbor Roast" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const firstEvents = (await readSSE(first)).events.filter((e) => e.type === "done");
+    expect(firstEvents[0].assistantMessage.status).toBe("failed");
+    expect(getActiveExecution("conv-123")).toBeNull();
+
+    // Retry: this time the agent actually writes the file.
+    stageFlow({
+      finalText: "Done — the headline now reads Harbor Roast.",
+      agentLoopResult: {
+        stepsUsed: 2,
+        toolCalls: [
+          { toolId: "files.write", success: true, summary: "wrote index.html", mutating: true },
+        ],
+        cancelled: false,
+        pendingApproval: null,
+        workspaceChange: { status: "changed", files: ["index.html"] },
+      } as any,
+    });
+    const second = await POST(makeRequest({ message: "Change the headline to Harbor Roast" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const secondEvents = (await readSSE(second)).events.filter((e) => e.type === "done");
+    expect(secondEvents[0].assistantMessage.status).toBe("completed");
+  });
+
+  it("(b2) a non-ok verdict records NO verified revision on the outcome event", async () => {
+    stageFlow({
+      finalText: "Built, but verification failed.",
+      agentLoopResult: {
+        stepsUsed: 2,
+        toolCalls: [
+          { toolId: "files.write", success: true, summary: "wrote index.html", mutating: true },
+        ],
+        cancelled: false,
+        pendingApproval: null,
+        workspaceChange: { status: "changed", files: ["index.html"] },
+        qualityLoop: { verdict: { ok: false } },
+        workspaceRevision: "manifest:rev-unverified",
+      } as any,
+    });
+
+    const res = await POST(makeRequest({ message: "Build the site" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    await readSSE(res);
+    const outcomeCalls = actionRuntimeMocks.appendActionEvent.mock.calls.filter(
+      (c: any[]) => (c[0] as { type?: string })?.type === "run.completed" || (c[0] as { type?: string })?.type === "run.failed",
+    );
+    expect(outcomeCalls.length).toBeGreaterThan(0);
+    for (const call of outcomeCalls) {
+      expect((call[0] as any).payload.result.verifiedRevision).toBeUndefined();
     }
   });
 });

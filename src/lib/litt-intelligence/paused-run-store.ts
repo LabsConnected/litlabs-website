@@ -123,6 +123,29 @@ export interface RunResult {
    * settle (legacy records, or a settle with no checkpoint to diff).
    */
   workspaceChange?: WorkspaceChangeEvidence | null;
+  /**
+   * The verified revision (Repair R5-B): the canonical workspace
+   * revision (see `computeWorkspaceRevision`) whose content this run's
+   * quality verdict covers. Recorded ONLY when the settled verdict was
+   * ok — a failed or absent verdict records null, so the field can never
+   * dress an unverified state as verified. The publish gate reads the
+   * newest such record for the project and requires the live workspace
+   * to still BE this revision before anything is published.
+   */
+  verifiedRevision?: string | null;
+  /**
+   * Publish-gate audit (Repair R5-B): the gate decision taken for a
+   * deploy settle — which verified revision was presented, which
+   * revision the workspace actually was, and whether the publish was
+   * allowed (and on what basis). Null/absent for non-deploy settles.
+   */
+  publishGate?: {
+    allowed: boolean;
+    code: string;
+    verifiedRevision: string | null;
+    currentRevision: string | null;
+    verifiedByRunId: string | null;
+  } | null;
 }
 
 export interface PausedRunRecord {

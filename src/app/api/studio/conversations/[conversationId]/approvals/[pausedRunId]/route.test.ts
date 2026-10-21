@@ -208,7 +208,10 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
   });
 
   it("ignores client replacements for the frozen operation", async () => {
-    vi.mocked(resumeAgentLoopV2).mockResolvedValue({ finalText: "Done", stepsUsed: 1, toolCalls: [], cancelled: false } as never);
+    // Production-faithful tool log (R5-C): the resumed segment executed
+    // the approved files.write — an empty log would be a false
+    // completion and now settles failed by design.
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({ finalText: "Done", stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false } as never);
     const request = new NextRequest(`http://localhost/api/studio/conversations/${CONV_ID}/approvals/${PAUSED_ID}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decision: "approved", toolId: "terminal.execute", inputs: { command: "unapproved" }, operationId: "forged" }),
@@ -470,7 +473,9 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     vi.mocked(resumeAgentLoopV2).mockResolvedValue({
       finalText: "Finished the resumed work.",
       stepsUsed: 2,
-      toolCalls: [],
+      // Production-faithful tool log (R5-C): the approved files.write
+      // executed in the resumed segment.
+      toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
       cancelled: false,
     } as any);
 
