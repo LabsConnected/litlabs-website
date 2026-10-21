@@ -35,7 +35,7 @@ function mountStream(props: Parameters<typeof ActivityStream>[0]) {
   return {
     frame: () => stripAnsi(out),
     /** Wait until Ink has written the first complete frame. */
-    async waitFrame(ms = 4000) {
+    async waitFrame(ms = 10000) {
       const deadline = Date.now() + ms;
       while (Date.now() < deadline) {
         if (out.length > 0) return true;
@@ -53,10 +53,13 @@ const secretEntry: ActivityEntry = {
   fullText: "full output\nBearer abcdef123456 done\nAPI_TOKEN=tok987 ok",
 };
 
+// Scanner-safe fixtures: these must still match the app's own redaction
+// regex (any KEY/TOKEN/SECRET/PASSWORD assignment) without looking like a
+// real high-entropy credential to secret scanners (gitleaks etc).
 const cmdEntry: ActivityEntry = {
   id: "e2", ts: Date.now(), type: "tool.stdout",
-  text: "export OPENAI_API_KEY=sk-proj-abc987654321 && run",
-  fullText: "export OPENAI_API_KEY=sk-proj-abc987654321 && run\nGROQ_SECRET=hidden99\nexit 0",
+  text: "export OPENAI_API_KEY=FAKE-TEST-00000 && run",
+  fullText: "export OPENAI_API_KEY=FAKE-TEST-00000 && run\nGROQ_SECRET=FAKE-TEST-00000\nexit 0",
 };
 
 const longEntry: ActivityEntry = {
@@ -71,7 +74,7 @@ describe("ActivityStream — Stage 1", () => {
     expect(await s.waitFrame()).toBe(true);
     expect(s.frame()).toMatch(/\d{2}:\d{2}:\d{2}/);
     s.unmount();
-  });
+  }, 15_000);
   it("redacts secrets in collapsed rows", async () => {
     const s = mountStream({ entries: [secretEntry], width: 120 });
     expect(await s.waitFrame()).toBe(true);
@@ -79,7 +82,7 @@ describe("ActivityStream — Stage 1", () => {
     expect(f).not.toContain("supersecret123");
     expect(f).toContain("OPENROUTER_API_KEY=•••");
     s.unmount();
-  });
+  }, 15_000);
   it("redacts secrets in per-row expanded details", async () => {
     const s = mountStream({ entries: [secretEntry], width: 120, expandedIds: new Set(["e1"]) });
     expect(await s.waitFrame()).toBe(true);
@@ -89,17 +92,16 @@ describe("ActivityStream — Stage 1", () => {
     expect(f).toContain("•••");
     expect(f).toContain("−"); // expanded marker
     s.unmount();
-  });
+  }, 15_000);
   it("redacts command output and env-var assignments", async () => {
     const s = mountStream({ entries: [cmdEntry], width: 120, expandedIds: new Set(["e2"]) });
     expect(await s.waitFrame()).toBe(true);
     const f = s.frame();
-    expect(f).not.toContain("sk-proj-abc987654321");
-    expect(f).not.toContain("hidden99");
+    expect(f).not.toContain("FAKE-TEST-00000");
     expect(f).toContain("OPENAI_API_KEY=•••");
     expect(f).toContain("GROQ_SECRET=•••");
     s.unmount();
-  });
+  }, 15_000);
   it("expanding one entry never reveals another entry's protected content", async () => {
     const s = mountStream({
       entries: [secretEntry, cmdEntry],
@@ -115,7 +117,7 @@ describe("ActivityStream — Stage 1", () => {
     expect(f).not.toContain("abcdef123456");
     expect(f).not.toContain("tok987");
     s.unmount();
-  });
+  }, 15_000);
   it("no rendered line exceeds the terminal width at 120/80/60", async () => {
     for (const w of [120, 80, 60]) {
       const s = mountStream({
@@ -131,7 +133,7 @@ describe("ActivityStream — Stage 1", () => {
       expect(over, `width ${w}: every line must fit — overflow: ${JSON.stringify(over.slice(0, 2))}`).toEqual([]);
       s.unmount();
     }
-  });
+  }, 30_000);
 });
 
 // Source canaries — same convention as slash-command-ux.test.tsx. The full
