@@ -72,6 +72,8 @@ export interface RiskAssessment {
 
 export type ExecutionErrorCode =
   | "COMMAND_NOT_ALLOWED"
+  | "DEVICE_TARGET_UNVALIDATED"
+  | "DEVICE_TARGET_REJECTED"
   | "PLAN_MODE_REJECTED"
   | "APPROVAL_REQUIRED"
   | "PATH_ESCAPE"
@@ -309,6 +311,13 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
       check: "read_only",
     },
   },
+
+  // adb — device-facing command. defaultCapability is the floor for
+  // unrecognized subcommands; the special-case refinement below maps
+  // the real per-subcommand surface (including -s/-t/-H/-P flag forms
+  // and `adb shell <device-cmd>` granularity) so raw project.run adb
+  // cannot bypass the validated Android operation allowlist.
+  adb: { defaultCapability: "arbitrary_code" },
 };
 
 /**
@@ -328,6 +337,190 @@ const DESTRUCTIVE_COMMANDS = new Set([
   "killall",
   "taskkill",
 ]);
+
+// ─── adb capability refinement ──────────────────────────────────
+//
+// adb global flags that consume the NEXT arg as a value. When the
+// subcommand position is computed these flag+value pairs are skipped
+// so `adb -s SERIAL shell getprop` resolves "shell", not "SERIAL".
+const ADB_VALUE_FLAGS = new Set(["-s", "-t", "-H", "-P", "-L"]);
+
+// Host-side subcommands (first non-flag token).
+const ADB_READONLY_SUBS = new Set([
+  "devices", "get-state", "get-serialno", "get-devpath", "version",
+  "help", "jdwp", "keygen", "show-features", "logcat",
+]);
+const ADB_EXTERNAL_SUBS = new Set(["push", "pull"]);
+const ADB_WORKSPACE_SUBS = new Set([
+  "forward", "reverse", "connect", "disconnect", "pair",
+  "start-server", "kill-server", "reconnect", "wait-for-device",
+]);
+const ADB_DESTRUCTIVE_SUBS = new Set([
+  "shell", "install", "uninstall", "root", "unroot", "reboot",
+  "reboot-bootloader", "reboot-recovery", "remount", "disable-verity",
+  "usb", "tcpip", "emu", "sideload", "sync",
+]);
+
+// On-device commands inside `adb shell <cmd>` — read-only diagnostics
+// only; anything that writes device state or runs unrecognized
+// programs stays at the strict tier.
+const ADB_SHELL_READONLY = new Set([
+  "getprop", "dumpsys", "ls", "stat", "cat", "ps", "echo", "id",
+  "uname", "whoami", "date", "uptime", "df", "printenv", "env",
+]);
+const ADB_SHELL_ELEVATED = new Set([
+  "input", "monkey", "am", "screencap", "screenrecord", "mkdir",
+  "touch", "cp", "mv", "wm", "logcat",
+]);
+
+/**
+ * Refine the capability tier for `adb` based on its real subcommand
+ * and (for `adb shell`) the on-device command being run. Only ever
+ * returns an existing CapabilityTier — the mapping tightens or keeps
+ * the spec default, so it cannot weaken classification.
+ */
+export function classifyAdbCapability(args: string[], current: CapabilityTier): CapabilityTier {
+  // Locate the subcommand: first non-flag token, skipping value-flags.
+  let subIdx = -1;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (ADB_VALUE_FLAGS.has(a)) { i++; continue; }
+    if (a.startsWith("-")) continue;
+    subIdx = i;
+    break;
+  }
+  const sub = subIdx >= 0 ? args[subIdx].toLowerCase() : "";
+
+  if (sub === "shell") {
+    const devCmd = (args[subIdx + 1] ?? "").toLowerCase();
+    if (devCmd === "pm") {
+      // `pm list …` is inspection; everything else (uninstall, clear,
+      // disable, grant, revoke) mutates device state destructively.
+      return (args[subIdx + 2] ?? "").toLowerCase() === "list" ? "read_only" : "destructive";
+    }
+    if (ADB_SHELL_READONLY.has(devCmd)) return "read_only";
+    if (ADB_SHELL_ELEVATED.has(devCmd)) return "arbitrary_code";
+    // Bare `adb shell` (interactive) or any unrecognized on-device
+    // command = unrestricted device execution → strictest tier.
+    return "destructive";
+  }
+  if (ADB_READONLY_SUBS.has(sub)) return "read_only";
+  if (ADB_EXTERNAL_SUBS.has(sub)) return "external_action";
+  if (ADB_DESTRUCTIVE_SUBS.has(sub)) return "destructive";
+  if (ADB_WORKSPACE_SUBS.has(sub)) return "workspace_edit";
+  return current;
+}
+
+// ─── adb device-identity boundary ───────────────────────────────
+//
+// Operation-risk classification (above) decides WHAT an adb command
+// may do. This boundary decides WHICH device it may do it to. Raw
+// `project.run adb …`, `/local`, and `litt run` all funnel through
+// runCommand() — validating the target serial here means no routing
+// path can bypass the Android device allowlist.
+//
+// Host-level adb subcommands that never touch a device.
+const ADB_HOST_ONLY_SUBS = new Set([
+  "devices", "version", "help", "start-server", "kill-server",
+  "reconnect", "connect", "disconnect", "pair", "forward", "reverse",
+  "keygen", "show-features", "mdns", "nodaemon", "features", "doc",
+]);
+
+export interface AdbInvocationParts {
+  /** First non-flag token (the subcommand), lowercased. "" when absent. */
+  sub: string;
+  /** Value of -s, when present. */
+  serial?: string;
+  /** Value of -t (transport id — NOT a serial), when present. */
+  transportId?: string;
+}
+
+/** Parse adb argv into subcommand + device selectors. */
+export function extractAdbInvocation(args: string[]): AdbInvocationParts {
+  let serial: string | undefined;
+  let transportId: string | undefined;
+  let sub = "";
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "-s") { serial = args[++i]; continue; }
+    if (a === "-t") { transportId = args[++i]; continue; }
+    if (ADB_VALUE_FLAGS.has(a)) { i++; continue; }
+    if (a.startsWith("-")) continue;
+    if (sub === "") sub = a.toLowerCase();
+  }
+  return { sub, serial, transportId };
+}
+
+/** True when the adb invocation acts on a device (vs. host-only ops). */
+export function adbTargetsDevice(args: string[]): boolean {
+  const { sub } = extractAdbInvocation(args);
+  return sub !== "" && !ADB_HOST_ONLY_SUBS.has(sub);
+}
+
+export interface AdbTargetValidation {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * The device-identity validator. Registered once by the surface that
+ * owns the Android policy (litt-cli registers its allowlist-backed
+ * validator). runCommand() consults it for every device-targeting adb
+ * invocation — before classification completes, before approval, and
+ * always before the shell executor is invoked.
+ */
+export type AdbTargetValidator = (
+  args: string[],
+  shell: ShellExecutor,
+) => Promise<AdbTargetValidation>;
+
+let _adbTargetValidator: AdbTargetValidator | null = null;
+
+/** Register (or clear with null) the shared adb target validator. */
+export function setAdbTargetValidator(v: AdbTargetValidator | null): void {
+  _adbTargetValidator = v;
+}
+
+/** Current validator, for tests/introspection. */
+export function getAdbTargetValidator(): AdbTargetValidator | null {
+  return _adbTargetValidator;
+}
+
+/**
+ * Shared device-identity check for EVERY adb spawn leg — the secure
+ * runCommand() below AND the thin project.ts runCommand() used by the
+ * script helpers. Returns a failed ToolResult when the invocation
+ * targets a device that fails validation; null when it may proceed.
+ *
+ * Fail-closed: a device-targeting adb command with no registered
+ * validator is rejected outright. Compare on basename+normalize so a
+ * path-qualified adb.exe is validated like bare `adb` (tightening
+ * only — other commands keep normalizeCommand() semantics).
+ */
+export async function assertAdbTargetAllowed(
+  command: string,
+  args: string[],
+  shell: ShellExecutor,
+): Promise<ToolResult | null> {
+  const base = command.split(/[\/]/).pop() ?? command;
+  if (normalizeCommand(base) !== "adb" || !adbTargetsDevice(args)) return null;
+  if (!_adbTargetValidator) {
+    return executionError(
+      new ExecutionError(
+        "adb device-targeting command blocked: no Android device-identity validator is configured",
+        "DEVICE_TARGET_UNVALIDATED",
+      ),
+    );
+  }
+  const verdict = await _adbTargetValidator(args, shell);
+  if (verdict.ok) return null;
+  return executionError(
+    new ExecutionError(
+      `adb device target rejected: ${verdict.reason ?? "not authorized"}`,
+      "DEVICE_TARGET_REJECTED",
+    ),
+  );
+}
 
 // ─── Capability → risk mapping ────────────────────────────────────
 
@@ -433,6 +626,16 @@ export function classifyCommand(command: string, args: string[], cwd?: string): 
   // Special case: git branch -D (destructive)
   if (cmd === "git" && args[0] === "branch" && (args.includes("-D") || args.includes("-d"))) {
     capability = "destructive";
+  }
+
+  // Special case: adb — per-subcommand + on-device-command tiers.
+  // The validated android.* tool family is the governed path; raw
+  // `project.run adb …` must be AT LEAST as strict. Unrestricted
+  // on-device shell, install, root, reboot, and remount are
+  // destructive. Read-only discovery is read_only. Input injection and
+  // app launches map to the same elevated tier the tools carry.
+  if (cmd === "adb") {
+    capability = classifyAdbCapability(args, capability);
   }
 
   // Special case: litt --remote <subcommand> or litt <subcommand>
@@ -806,6 +1009,11 @@ export async function runCommand(
       ),
     );
   }
+
+  // 3b. Device-identity boundary (adb) — shared check, see
+  // assertAdbTargetAllowed().
+  const adbDenied = await assertAdbTargetAllowed(command, args, shell);
+  if (adbDenied) return adbDenied;
 
   // 4. Approval gate
   const needsApproval =

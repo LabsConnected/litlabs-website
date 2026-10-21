@@ -203,6 +203,12 @@ export interface ActivityGroup {
   status: "running" | "complete" | "failed";
   /** The underlying activity ids in this group. */
   ids: string[];
+  /**
+   * Failure reason for failed groups — the real error text carried
+   * through from the activity so the dock can show WHY it failed
+   * beneath the `× label` row.
+   */
+  reason?: string;
 }
 
 /** Labels that carry no specific information for a given kind. These are
@@ -271,7 +277,7 @@ function kindGroupLabel(kind: WorkstreamKind): { base: string; noun: string } {
  *      "Status" rows merge without hiding distinct commands/tools.
  *    - Failed and complete activities are never mixed in one group. */
 export function groupConsecutive(
-  activities: Array<{ id: string; kind: WorkstreamKind; label: string; subject?: string; status: "running" | "complete" | "failed" }>,
+  activities: Array<{ id: string; kind: WorkstreamKind; label: string; subject?: string; status: "running" | "complete" | "failed"; reason?: string }>,
 ): ActivityGroup[] {
   const GROUPABLE: WorkstreamKind[] = ["inspect", "edit", "test"];
   const groups: ActivityGroup[] = [];
@@ -309,6 +315,7 @@ export function groupConsecutive(
         subjects,
         status: act.status,
         ids: batch.map((b) => b.id),
+        reason: batch.map((b) => b.reason).filter((r): r is string => !!r).pop(),
       });
       i = j;
       continue;
@@ -346,6 +353,7 @@ export function groupConsecutive(
         subjects,
         status: anyFailed ? "failed" : anyRunning ? "running" : "complete",
         ids: batch.map((b) => b.id),
+        reason: batch.map((b) => b.reason).filter((r): r is string => !!r).pop(),
       });
     } else {
       // 1–2 activities with distinct subjects: emit individually.
@@ -358,6 +366,7 @@ export function groupConsecutive(
           subjects,
           status: b.status,
           ids: [b.id],
+          reason: b.reason,
         });
       }
     }

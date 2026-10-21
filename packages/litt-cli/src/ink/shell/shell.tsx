@@ -112,6 +112,8 @@ export interface LiTTShellProps {
   approvalPrompt: ApprovalPrompt | null;
   /** Approve once / approve similar (session) / deny. */
   onApprovalDecision: (approved: boolean, scope: "once" | "session") => void;
+  /** Esc — deny the approval AND cancel the active mission. */
+  onApprovalCancelMission?: () => void;
   /** Approval-wait clock (see cockpit-store pause/resumeBusyForApproval). */
   approvalSince: number | null;
   approvalAccumMs: number;
@@ -128,7 +130,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
     composerScrolled, composerFocusEpoch, onComposerReturnToLive,
     transcriptAnchor, onTranscriptPageChange, onTranscriptAnchorChange,
     project, branch, localRuntime, remoteRuntime = "offline", brain, activeModel, activeProvider, mode,
-    approvalPrompt, onApprovalDecision, approvalSince, approvalAccumMs,
+    approvalPrompt, onApprovalDecision, onApprovalCancelMission, approvalSince, approvalAccumMs,
   } = props;
 
   const { stdout } = useStdout();
@@ -331,6 +333,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
         <ApprovalUX
           prompt={approvalPrompt}
           onDecision={onApprovalDecision}
+          onCancelMission={onApprovalCancelMission}
         />
       )}
 

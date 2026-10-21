@@ -183,8 +183,18 @@ export class SessionEventBridge {
           const success = (data.success as boolean) ?? true;
           const tool = (data.tool as string) ?? "unknown";
           const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
+          // A cancelled/timed-out result is not a failure — map it to its
+          // own lifecycle type so the UI never shows a cancel as `×`.
+          const status = data.status as string;
+          const type = success
+            ? "tool.completed"
+            : status === "cancelled"
+              ? "tool.cancelled"
+              : status === "timeout"
+                ? "tool.timeout"
+                : "tool.failed";
           return {
-            type: success ? "tool.completed" : "tool.failed",
+            type,
             runId,
             toolCallId: toolCallIdFromData,
             ts,

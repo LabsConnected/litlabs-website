@@ -41,6 +41,7 @@ import type { RuntimeSession } from "../lib/runtime-session.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
+import { buildDeviceToolEntries } from "../lib/device-tools.js";
 import * as readline from "node:readline/promises";
 
 const EXACT_ANSWER_RE = /^\s*(?:reply|respond|answer|say)\s+with\s+exactly\s*(?::\s*|["'])(.+?)["']?\s*$/i;
@@ -53,6 +54,18 @@ const PROJECT_EVIDENCE_RE = /\b(project|repo|repository|file|path|git|build|test
 export function isExactAnswerPrompt(question: string): boolean {
   const match = EXACT_ANSWER_RE.exec(question);
   return !!match && !PROJECT_EVIDENCE_RE.test(match[1]);
+}
+
+/**
+ * Tool registry for `litt ask` — includes the device tool family
+ * (android.*, dex.*) registered by RuntimeSession's gateway so the
+ * model can route phone-control requests. Exact-answer prompts get an
+ * empty registry: they cannot use tool results anyway.
+ */
+export function buildAskToolRegistry(includeTools: boolean): ToolRegistry {
+  return includeTools
+    ? new ToolRegistry(buildDeviceToolEntries())
+    : new ToolRegistry(undefined, { includeDefaults: false });
 }
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
@@ -129,7 +142,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // lets weak local models invoke expensive checks for a prompt that cannot
   // use their results (observed: `Reply with exactly...` -> project.check).
   const directAnswerOnly = isExactAnswerPrompt(question);
-  const tools = new ToolRegistry(undefined, { includeDefaults: !directAnswerOnly });
+  const tools = buildAskToolRegistry(!directAnswerOnly);
   const gateway = new ExecutionGateway({
     tools,
     shell,

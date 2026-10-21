@@ -124,6 +124,11 @@ __pycache__/
 *.pyc
 .backup/
 android/
+# Exception: the LiTT ADB device-control adapter source lives here —
+# the blanket android/ rule targets build artifact dirs (e.g. Expo),
+# not this package source tree.
+!packages/litt-cli/src/lib/android/
+!packages/litt-cli/src/lib/android/**
 src/mobile/
 
 # Git worktrees (local only, never commit)

@@ -22,6 +22,7 @@
  */
 
 import { restoreTerminal } from "./terminal-teardown.js";
+import { buildDeviceToolEntries } from "./device-tools.js";
 import {
   createShellExecutor,
   CommandExecutor,
@@ -279,7 +280,9 @@ export class RuntimeSession {
   getGateway(): ExecutionGateway {
     if (this._gateway) return this._gateway;
     this._gateway = new ExecutionGateway({
-      tools: new ToolRegistry(),
+      // Device tool entries (android.*, dex.*) merge with the default
+      // project.* tools — additive, never replacing existing entries.
+      tools: new ToolRegistry(buildDeviceToolEntries()),
       shell: this._shell,
       executor: this._executor,
       store: this._store,

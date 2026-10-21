@@ -28,6 +28,7 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
+import { redactSecrets } from "./activity-redact.js";
 import { isReducedMotion } from "./motion.js";
 import { LiTTMark, type MarkState } from "./litt-mark.js";
 import {
@@ -199,6 +200,15 @@ function ActivityRow({
         <Box paddingLeft={2}>
           <Text dimColor>
             {truncateTail(visibleSubjects.join(", "), Math.max(10, width - 8))}
+          </Text>
+        </Box>
+      )}
+      {/* Failed rows must show WHY — the real reason beneath the × label.
+          Without this the operator saw only `× Android Key` with no error. */}
+      {group.status === "failed" && group.reason && (
+        <Box paddingLeft={2}>
+          <Text color={COLORS.error}>
+            {truncateTail(redactSecrets(group.reason), Math.max(10, width - 8))}
           </Text>
         </Box>
       )}
@@ -445,6 +455,9 @@ export function estimateWorkstreamDockRows(
   for (const g of visibleGroups) {
     const visible = g.subjects.filter((s) => s && subjectAddsInformation(s, g.label, g.kind));
     if (visible.length > 0) rows += 1;
+    // Failed groups render one reason line beneath the row (same rule as
+    // ActivityRow) — reserve it or the fixed region overflows.
+    if (g.status === "failed" && g.reason) rows += 1;
   }
   if (allActivities.length > visibleSlice.length) rows += 1; // "↑ N earlier"
 

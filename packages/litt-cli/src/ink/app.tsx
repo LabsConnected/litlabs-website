@@ -32,7 +32,6 @@ import { isCtrl, isRawF2, ctrlDAction } from "./keyboard-utils.js";
 import { useTerminalSize } from "./use-terminal-size.js";
 import { Header } from "./header.js";
 import { LiTTShell } from "./shell/shell.js";
-import { ApprovalUX } from "./approval-ux.js";
 import { HelpOverlay } from "./help-overlay.js";
 import { ModelPicker } from "./model-picker.js";
 import { ModelCenter } from "./model-center.js";
@@ -361,6 +360,22 @@ export function CockpitApp({
 
   const overlayOpen = overlay !== "none";
 
+  // Esc on the approval card — deny ALL pending approvals AND stop the
+  // active run (fail closed). This must do real work: previously
+  // onCancelMission was never wired, so Esc was swallowed by the
+  // approval keyboard owner and did nothing at all.
+  const cancelApprovalMission = useCallback(() => {
+    approvalBridge.cancel();
+    session.cancel().catch(() => {});
+    store.actions.clearApproval();
+    store.actions.setIsProcessing(false);
+    store.actions.clearMission();
+    store.actions.clearToolProgress();
+    store.actions.stopBusy();
+    store.actions.setHoloState("CANCELLED");
+    store.actions.scheduleIdle(2000);
+  }, [approvalBridge, session, store]);
+
   return (
     <OverlayKeyboardProvider appShortcutHandler={appShortcutHandler}>
     <Box flexDirection="column">
@@ -484,12 +499,10 @@ export function CockpitApp({
         </>
       ) : (
         <>
-          {/* Approval UX (when needed) — registers as keyboard owner */}
-          {store.state.approvalPrompt && (
-            <ApprovalUX prompt={store.state.approvalPrompt} onDecision={handleApproval} />
-          )}
-
-          {/* The minimal shell — welcome/transcript, composer, status bar */}
+          {/* The minimal shell — welcome/transcript, composer, status bar.
+              The approval card is rendered ONCE inside LiTTShell, pinned
+              directly above the composer (it also registers the keyboard
+              owner). Rendering a second copy here duplicated the card. */}
           <LiTTShell
             messages={store.state.chatTranscript}
             activityLog={store.state.activityLog}
@@ -551,6 +564,7 @@ export function CockpitApp({
             mode={store.state.mode}
             approvalPrompt={store.state.approvalPrompt}
             onApprovalDecision={handleApproval}
+            onApprovalCancelMission={cancelApprovalMission}
             approvalSince={store.state.approvalSince}
             approvalAccumMs={store.state.approvalAccumMs}
           />
