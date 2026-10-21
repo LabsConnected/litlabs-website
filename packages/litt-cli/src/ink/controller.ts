@@ -817,6 +817,11 @@ const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { c
   "/test": { toolId: "project.test", args: () => ({ command: "pnpm", args: ["test"] }) },
   "/status": { toolId: "project.status", args: () => ({ command: "git", args: ["status"] }) },
   "/run": { toolId: "project.run", args: (input) => ({ command: input[0] ?? "", args: input.slice(1) }) },
+  // Read-only device inspection — mutating android ops go through the
+  // agent/approval path, not bare slash commands.
+  "/devices": { toolId: "android.devices", args: () => ({ command: "", args: [] }) },
+  "/phone": { toolId: "android.device_state", args: () => ({ command: "", args: [] }) },
+  "/dex": { toolId: "dex.status", args: () => ({ command: "", args: [] }) },
 };
 
 // classifyIntent is imported from ../lib/intent.js (extracted for testability)

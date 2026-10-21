@@ -15,6 +15,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ShellExecutor, ProjectContext, ToolResult } from "./types.js";
+import { assertAdbTargetAllowed } from "./execution.js";
 import { detectUnsupportedShellSyntax } from "./execution.js";
 
 // ─── Project Detection ────────────────────────────────────────────
@@ -750,6 +751,11 @@ export async function runCommand(
       data: { code: "UNSUPPORTED_SHELL_SYNTAX", command, args },
     };
   }
+
+  // Device-identity boundary — adb device targets must pass the
+  // allowlist before spawning (shared with runCommandSecure).
+  const adbDenied = await assertAdbTargetAllowed(command, args, shell);
+  if (adbDenied) return adbDenied;
 
   const cwd = options?.cwd ?? shell.cwd;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;

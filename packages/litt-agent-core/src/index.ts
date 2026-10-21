@@ -147,6 +147,13 @@ export {
   redactSecrets,
   ExecutionError,
 } from "./execution.js";
+export {
+  extractAdbInvocation,
+  adbTargetsDevice,
+  setAdbTargetValidator,
+  getAdbTargetValidator,
+} from "./execution.js";
+export type { AdbInvocationParts, AdbTargetValidation, AdbTargetValidator } from "./execution.js";
 export type {
   MissionMode,
   RiskLevel,
