@@ -31,11 +31,19 @@ function mountStream(props: Parameters<typeof ActivityStream>[0]) {
     stdin: new PassThrough() as unknown as NodeJS.ReadStream,
     stdout: stdout as unknown as NodeJS.WriteStream,
     exitOnCtrlC: false, patchConsole: false,
+    // Without this, Ink's CI auto-detection (isInCi) forces interactive=false,
+    // and in that mode onRender() never writes the main frame to stdout at
+    // all — it only buffers it for a final flush on unmount. That made this
+    // suite fail 100% of the time in CI (not a timing race): waitFrame()
+    // polled its full budget and still saw 0 bytes, because the bytes were
+    // never coming regardless of how long it waited. Explicit `true` here
+    // bypasses the isInCi check, matching ctrl-d-exit.test.tsx's working setup.
+    interactive: true,
   });
   return {
     frame: () => stripAnsi(out),
     /** Wait until Ink has written the first complete frame. */
-    async waitFrame(ms = 10000) {
+    async waitFrame(ms = 4000) {
       const deadline = Date.now() + ms;
       while (Date.now() < deadline) {
         if (out.length > 0) return true;
@@ -74,7 +82,7 @@ describe("ActivityStream — Stage 1", () => {
     expect(await s.waitFrame()).toBe(true);
     expect(s.frame()).toMatch(/\d{2}:\d{2}:\d{2}/);
     s.unmount();
-  }, 15_000);
+  });
   it("redacts secrets in collapsed rows", async () => {
     const s = mountStream({ entries: [secretEntry], width: 120 });
     expect(await s.waitFrame()).toBe(true);
@@ -82,7 +90,7 @@ describe("ActivityStream — Stage 1", () => {
     expect(f).not.toContain("supersecret123");
     expect(f).toContain("OPENROUTER_API_KEY=•••");
     s.unmount();
-  }, 15_000);
+  });
   it("redacts secrets in per-row expanded details", async () => {
     const s = mountStream({ entries: [secretEntry], width: 120, expandedIds: new Set(["e1"]) });
     expect(await s.waitFrame()).toBe(true);
@@ -92,7 +100,7 @@ describe("ActivityStream — Stage 1", () => {
     expect(f).toContain("•••");
     expect(f).toContain("−"); // expanded marker
     s.unmount();
-  }, 15_000);
+  });
   it("redacts command output and env-var assignments", async () => {
     const s = mountStream({ entries: [cmdEntry], width: 120, expandedIds: new Set(["e2"]) });
     expect(await s.waitFrame()).toBe(true);
@@ -101,7 +109,7 @@ describe("ActivityStream — Stage 1", () => {
     expect(f).toContain("OPENAI_API_KEY=•••");
     expect(f).toContain("GROQ_SECRET=•••");
     s.unmount();
-  }, 15_000);
+  });
   it("expanding one entry never reveals another entry's protected content", async () => {
     const s = mountStream({
       entries: [secretEntry, cmdEntry],
@@ -117,7 +125,7 @@ describe("ActivityStream — Stage 1", () => {
     expect(f).not.toContain("abcdef123456");
     expect(f).not.toContain("tok987");
     s.unmount();
-  }, 15_000);
+  });
   it("no rendered line exceeds the terminal width at 120/80/60", async () => {
     for (const w of [120, 80, 60]) {
       const s = mountStream({
@@ -133,7 +141,7 @@ describe("ActivityStream — Stage 1", () => {
       expect(over, `width ${w}: every line must fit — overflow: ${JSON.stringify(over.slice(0, 2))}`).toEqual([]);
       s.unmount();
     }
-  }, 30_000);
+  });
 });
 
 // Source canaries — same convention as slash-command-ux.test.tsx. The full

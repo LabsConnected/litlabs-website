@@ -37,6 +37,13 @@ function mount(msg: ChatMessage) {
   const instance = render(React.createElement(ChatMessageView, { msg }), {
     stdout: stdout as unknown as NodeJS.WriteStream,
     patchConsole: false,
+    // Without this, Ink's CI auto-detection (isInCi) forces interactive=false,
+    // and in that mode onRender() never writes the main frame to stdout at
+    // all — it only buffers it for a final flush on unmount. That made this
+    // suite fail 100% of the time in CI (not a timing race): no amount of
+    // waiting produces output that's never written. Explicit `true` here
+    // bypasses the isInCi check, matching ctrl-d-exit.test.tsx's working setup.
+    interactive: true,
   });
 
   return {
