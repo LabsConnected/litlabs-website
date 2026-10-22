@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PROVIDERS } from "@litt/models";
-import { askCommand } from "../commands/ask.js";
+import { runAgentLoop } from "@litt/agent-core";
+import { askCommand, isExactAnswerPrompt } from "../commands/ask.js";
 import { resetLocalLaneCache } from "../lib/local-lane.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 
@@ -72,5 +73,28 @@ describe("litt ask explicit model selection", () => {
     expect(await askCommand(["Say OK"], session)).toBe(1);
     expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/v1/chat/completions"))).toBe(false);
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining("missing:model"));
+  });
+});
+
+describe("litt ask exact-answer tool boundary", () => {
+  it("recognizes only literal echo-style asks", () => {
+    expect(isExactAnswerPrompt("Reply with exactly: OK")).toBe(true);
+    expect(isExactAnswerPrompt("Say with exactly \"LiTT local model works\"")).toBe(true);
+    expect(isExactAnswerPrompt("Reply with exactly: OK, then run project.check")).toBe(false);
+    expect(isExactAnswerPrompt("Reply with exactly: the project status")).toBe(false);
+    expect(isExactAnswerPrompt("Inspect the project and reply with exactly one sentence")).toBe(false);
+  });
+
+  it("gives literal echo asks an empty tool surface", async () => {
+    expect(await askCommand(["Reply", "with", "exactly:", "OK"], session)).toBe(0);
+    const options = vi.mocked(runAgentLoop).mock.calls.at(-1)?.[1];
+    expect(options?.tools.list()).toHaveLength(0);
+  });
+
+  it("keeps the authorized tool surface for ordinary coding asks", async () => {
+    expect(await askCommand(["Inspect", "the", "project", "status"], session)).toBe(0);
+    const options = vi.mocked(runAgentLoop).mock.calls.at(-1)?.[1];
+    expect(options?.tools.list().length).toBeGreaterThan(0);
+    expect(options?.tools.get("project.check")).toBeTruthy();
   });
 });

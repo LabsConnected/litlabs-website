@@ -96,6 +96,14 @@ export function isCtrl(input: string, key: KeyInfo, ch: string): boolean {
   return key.ctrl === true && input === ch;
 }
 
+/**
+ * Ctrl+D resolution: terminal-EOF semantics — exit when the composer is
+ * empty; keep the DIFF shortcut while a draft exists.
+ */
+export function ctrlDAction(composerValue: string): "exit" | "diff" {
+  return composerValue.trim().length === 0 ? "exit" : "diff";
+}
+
 // ─── Function key detection (raw escape sequences) ───
 // Ink's useInput strips function-key input to '' because F-keys are in
 // nonAlphanumericKeys. The key object has no f1/f2/... fields. So we must

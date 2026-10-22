@@ -35,6 +35,7 @@ import {
   parseToolCalls,
   stripToolCallBlocks,
   validateToolCallArgs,
+  buildDefaultSystemPrompt,
   type ParsedToolCall,
 } from "../agent-loop.js";
 import { ToolRegistry, createDefaultRegistry } from "../tools.js";
@@ -928,6 +929,40 @@ describe("O. Total timeout prevents hang", () => {
 
     assert.equal(result.termination, "error", "must terminate as error (timeout)");
     assert.ok(result.content.includes("timed out"), "must mention timeout");
+  });
+
+  it("total timeout interrupts an in-flight model stream", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = createDefaultRegistry();
+    const neverSettles: ModelProvider = {
+      stream: () => new Promise<ModelResult>(() => {}),
+      async health() { return 100; },
+    };
+
+    const started = Date.now();
+    const result = await runAgentLoop("Answer briefly.", {
+      model: neverSettles, tools, shell, store, cwd: process.cwd(),
+      maxRounds: 1,
+      totalTimeoutMs: 25,
+    });
+
+    assert.equal(result.termination, "error", "must terminate as error (timeout)");
+    assert.ok(result.content.includes("model stream"), "must identify the timed-out stage");
+    assert.ok(Date.now() - started < 2000, "must return at the deadline instead of waiting forever");
+  });
+
+  it("ToolRegistry can suppress defaults only when explicitly requested", () => {
+    const normal = new ToolRegistry();
+    assert.ok(normal.get("project.check"), "normal registry keeps authorized project tools");
+
+    const empty = new ToolRegistry(undefined, { includeDefaults: false });
+    assert.equal(empty.list().length, 0, "exact-answer lane must not expose tools");
+    assert.equal(empty.get("project.check"), null);
+    assert.ok(!buildDefaultSystemPrompt(empty.list(), null, "linux", true).includes("Call a tool"),
+      "tool-free prompts must not instruct the model to call tools");
+    assert.ok(buildDefaultSystemPrompt(normal.list(), null, "linux", true).includes("Call a tool"),
+      "normal coding prompts keep tool-call instructions");
   });
 });
 

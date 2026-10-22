@@ -414,6 +414,29 @@ const DEEPSEEK_MODELS: ModelDefinition[] = [
   },
 ];
 
+// ─── OpenAgents gateway ────────────────────────────────────────────
+const OPENAGENTS_MODELS: ModelDefinition[] = [
+  {
+    canonicalId: "openagents-deepseek-4-flash",
+    displayName: "DeepSeek 4 Flash (OpenAgents)",
+    provider: "openagents",
+    providerModelId: "deepseek-4-flash",
+    capabilities: { ...TEXT_CHAT, longContext: true },
+    speed: "fast",
+    intelligence: "balanced",
+    contextWindow: 1_048_576,
+    availability: "unverified",
+    verified: false,
+    verifiedAt: null,
+    source: "unverified",
+    description: "OpenAgents gateway model verified by the operator's live gateway check.",
+    recommendedFor: ["agent", "fast", "cheap"],
+    littRecommended: true,
+    littTier: "agent",
+    domain: "text",
+  },
+];
+
 // ─── Kimi — K3 + K2.7 Code family ──────────────────────────────────
 const KIMI_MODELS: ModelDefinition[] = [
   {
@@ -752,6 +775,7 @@ export const MODEL_CATALOG: ModelDefinition[] = [
   ...GOOGLE_MODELS,
   ...XAI_MODELS,
   ...DEEPSEEK_MODELS,
+  ...OPENAGENTS_MODELS,
   ...KIMI_MODELS,
   ...MISTRAL_MODELS,
   ...QWEN_MODELS,

@@ -36,7 +36,8 @@ import {
 const PROBE_CACHE_MS = 10_000;
 
 /** Per-candidate timeout — the probe may try up to three hosts. */
-const PROBE_TIMEOUT_MS = 1_500;
+/** Override the Ollama probe timeout via LITT_OLLAMA_TIMEOUT env var (ms). Default 1_500 when unset. */
+const PROBE_TIMEOUT_MS = Number(process.env.LITT_OLLAMA_TIMEOUT ?? "") || 1_500;
 
 export interface LocalLaneStatus {
   /** True only when the daemon answered AND has at least one model. */
@@ -212,6 +213,7 @@ const LOCAL_MODEL_PREFERENCE = [
   "qwen2.5-coder:3b",
   "qwen3:4b",
   "qwen3:4b-instruct",
+  "litt-oc-phone:1.7b-8k",
 ];
 
 /** Drop the cached probe result (tests, and after an explicit /local). */
