@@ -399,7 +399,16 @@ export function useCockpitStore() {
   const [cwd, setCwd] = useState<string>("");
   const [gitModified, setGitModified] = useState<number>(0);
   const [gitUntracked, setGitUntracked] = useState<number>(0);
-  const [composerValue, setComposerValue] = useState("");
+  const [composerValue, setComposerValueState] = useState("");
+  // Live mirror of the composer draft: the app keyboard handler can run
+  // from a handler ref that lags a commit (overlay-manager refreshes it
+  // in a passive effect), so the freshest draft must be reachable without
+  // a render. Written inside the action — event time, never render time.
+  const composerValueRef = useRef("");
+  const setComposerValue = useCallback((v: string) => {
+    composerValueRef.current = v;
+    setComposerValueState(v);
+  }, []);
   const [overlayQuery, setOverlayQuery] = useState("");
   const [busySince, setBusySince] = useState<number | null>(null);
   // ─── Approval-wait clock — blocked-on-human time is NOT work time ──
@@ -1098,6 +1107,7 @@ export function useCockpitStore() {
       workstreamToggleExpand,
       workstreamClear,
     },
+    composerValueRef,
   };
 }
 

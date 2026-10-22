@@ -22,7 +22,7 @@
  *   to the Composer's own useInput.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Box, useApp, useStdout } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
@@ -87,11 +87,6 @@ export function CockpitApp({
   const { exit } = useApp();
   const store = useCockpitStore();
   const { stdout } = useStdout();
-  // Latest committed composer draft for keyboard callbacks — the app
-  // handler ref in overlay-manager is refreshed by a passive effect and
-  // can lag a commit, so a render-time ref always holds the newest value.
-  const composerValueRef = useRef(store.state.composerValue);
-  composerValueRef.current = store.state.composerValue;
   useEventBridge(client, store, sessionBridge);
 
   // ─── Canonical ModelRuntime — ONE instance for the whole app ───
@@ -132,9 +127,9 @@ export function CockpitApp({
   // commands/cockpit.ts). Read dynamically by RuntimeSession at signal
   // time, so install order relative to that call doesn't matter.
   useEffect(() => {
-    session.onPersistBeforeExit = () => controller.persistSession();
+    session.setOnPersistBeforeExit(() => controller.persistSession());
     return () => {
-      session.onPersistBeforeExit = null;
+      session.setOnPersistBeforeExit(null);
     };
   }, [session, controller]);
 
@@ -298,9 +293,11 @@ export function CockpitApp({
       store.actions.stopBusy();
     } else if (isCtrl(input, key, "d")) {
       // Ctrl+D — DIFF when a draft exists; EOF/exit on an empty composer.
-      // composerValueRef holds the latest committed draft (render-time ref
-      // always current); persist before exit so the session survives.
-      if (ctrlDAction(composerValueRef.current) === "exit") {
+      // store.composerValueRef is mirrored by setComposerValue at event
+      // time, so the draft stays current even if this callback ran from a
+      // handler ref that lagged a commit; persist before exit so the
+      // session survives.
+      if (ctrlDAction(store.composerValueRef.current) === "exit") {
         controller.persistSession();
         exit();
       } else {
