@@ -35,8 +35,9 @@
  *     Postgres treats NULL as never equal to NULL in that comparison,
  *     so a NULL project_id would make the upsert silently re-insert
  *     instead of deduping. A fixed nil-UUID sentinel is used when the
- *     caller doesn't supply a real project — the same sentinel pattern
- *     src/lib/studio/memory-service.ts already uses for "no conversation".
+ *     caller doesn't supply a real project. (conversation_id differs:
+ *     it is FK-referenced and NOT part of the dedupe index, so it must
+ *     be NULL — see the row literal below.)
  *   - scope has NOT NULL DEFAULT 'profile' CHECK (... IN (...)); 'agent'
  *     is used here since this is an automation-sourced memory, not a
  *     user-stated preference.
@@ -165,7 +166,11 @@ async function postHandler(req: NextRequest): Promise<NextResponse> {
   const row = {
     owner_id: payload.userId,
     project_id: payload.projectId ?? NIL_UUID,
-    conversation_id: NIL_UUID,
+    // No FK-safe sentinel exists for conversation — the column references
+    // studio_conversations(id), so "none" must be NULL (same value
+    // memory-service.ts writes). conversation_id is NOT part of the dedupe
+    // index, so NULL cannot weaken dedupe.
+    conversation_id: null,
     agent_slug: "litt",
     memory_type: "n8n_event",
     dedupe_key: payload.idempotencyKey,
