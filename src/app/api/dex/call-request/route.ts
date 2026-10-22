@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { authorizeOutboundCall, type CallAuthorizationRepo } from "@/lib/voice/call-authorization";
 import { MockTwilioProvider } from "@/lib/voice/providers/mock-twilio-provider";
+import { DEX_TOLL_FREE_CALLER_ID } from "@/lib/voice/dex-call-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
 
   const result = await __test__mockProvider.placeCall({
     to: parsed.phone,
-    from: "+10000000000",
+    from: DEX_TOLL_FREE_CALLER_ID,
     agentInstructions: "Phase 1 mock call — no real dial performed.",
   });
 
