@@ -64,14 +64,16 @@ export const SHADOW_PRICING_VERSION_ID = "littbits-pricing-v2-shadow-unified";
 /** LiTTBits per USD for the generation lane (1 bit = $0.01). Unchanged. */
 export const GENERATION_LANE_BITS_PER_USD = GENERATION_BITS_PER_USD;
 /**
- * LiTTBits per USD for the LLM lane.
- * #684 candidate: 100 LiTTBits = $1. UNAPPROVED pending owner economics
- * review. The legacy 1,000 bits/$ policy remains littbits-exchange-v1.
- * llm-cost-engine.ts reads this constant. This is not an approval to
- * change customer-facing prices, plan allowances, balances, or Stripe.
+ * LiTTBits per USD for the LLM lane — the APPROVED legacy rate of
+ * 1,000 bits/$ (littbits-exchange-v1), read from the ACTIVE pricing
+ * policy. Owner decision (2026-10-22): PR #726 stays economics-neutral.
+ * The 100 bits/$ candidate (littbits-exchange-v2-100-unapproved) is
+ * preserved INACTIVE in pricing-policy.ts and must not become active
+ * without a separate owner economics approval. llm-cost-engine.ts
+ * reads this constant.
  */
 export const LLM_LANE_BITS_PER_USD = PRICING_POLICIES[ACTIVE_LLM_POLICY_ID].llmBitsPerUsd;
-/** Identity of the unapproved 100/$ policy the LLM lane is computing with. */
+/** Exchange-rate version stamped on LLM-lane charges: the active (legacy) policy id. */
 export const LLM_EXCHANGE_RATE_VERSION_ID = ACTIVE_LLM_POLICY_ID;
 /** The candidate unified lane rate for v2 shadow comparison: 100 bits/$. */
 export const UNIFIED_SHADOW_BITS_PER_USD = 100;

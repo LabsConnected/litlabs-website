@@ -19,7 +19,8 @@ export const LEGACY_LLM_BITS_PER_USD = 1000;
 
 /**
  * Candidate LLM lane. UNAPPROVED — pending owner economics review.
- * The cost engine reads this number. Shipping it is not an approval.
+ * INACTIVE: the cost engine does not read this number while the legacy
+ * policy is active. Shipping it is not an approval.
  */
 export const UNAPPROVED_LLM_BITS_PER_USD = 100;
 
@@ -57,7 +58,12 @@ export const PRICING_POLICIES: Record<
 };
 
 /**
- * Policy id the cost engine is computing with. UNAPPROVED.
- * Not the id to stamp as an approved production rate.
+ * Policy id the cost engine computes with: the APPROVED legacy policy.
+ *
+ * Owner decision (2026-10-22): PR #726 stays economics-neutral — the
+ * active LLM-lane rate remains the legacy 1,000 LiTTBits per USD. The
+ * v2-100 candidate above stays INACTIVE and marked UNAPPROVED until the
+ * owner approves it in a separate economics decision. Regression tests
+ * pin this constant: changing it is a pricing change, not a refactor.
  */
-export const ACTIVE_LLM_POLICY_ID = UNAPPROVED_EXCHANGE_POLICY_ID;
+export const ACTIVE_LLM_POLICY_ID = LEGACY_EXCHANGE_POLICY_ID;

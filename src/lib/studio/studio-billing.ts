@@ -1,8 +1,7 @@
 /**
  * #684 — Studio LiTTBits billing policy.
  *
- * Rules (LiTree B, 2026-10-22). The 100 LiTTBits = $1 rate in rule 5 is
- * UNAPPROVED pending owner economics review:
+ * Rules (LiTree B, 2026-10-22):
  *  1. Cancelled builds charge only verifiably completed billable work; the
  *     unused part of the reservation is released.
  *  2. Approval waits keep the reservation, bounded by a defined TTL; an
@@ -10,8 +9,10 @@
  *     bits stop counting against the balance once expires_at passes).
  *  3. Plain Studio chat is FREE, behind an abuse guard.
  *  4. A minimum of 1 LiTTBit applies only to successful billable operations.
- *  5. Pricing candidate: 100 LiTTBits = $1 (see LLM_LANE_BITS_PER_USD).
- *     UNAPPROVED — pending owner economics review. Not a customer-price change.
+ *  5. Pricing: the LLM lane stays at the APPROVED legacy rate of
+ *     1,000 LiTTBits = $1 (LLM_LANE_BITS_PER_USD, littbits-exchange-v1).
+ *     The 100 bits/$ candidate is UNAPPROVED and INACTIVE — owner
+ *     decision 2026-10-22. This PR changes no customer prices.
  *
  * Reservation mechanics reuse PR #714's agent-billing (row-shape unwrap,
  * bare-run-id settle key, explicit TTL) — nothing here re-implements RPC
@@ -42,15 +43,18 @@ export const STUDIO_BUILD_RESERVATION_TTL_SECONDS =
   STUDIO_LOOP_MAX_RUNTIME_SECONDS * 2 + STUDIO_APPROVAL_TTL_SECONDS;
 
 /**
- * Hold placed before a builtin Studio build runs. At 100 bits/$ this caps
- * one build (including approval resume) at $2.00 of LiTTBits. Settle is
- * capped at the hold; overflow is logged for reconciliation, never charged
- * beyond what was reserved.
+ * Hold placed before a builtin Studio build runs. The 200-bit hold is a
+ * $2.00 face-value hold at the customer-facing generation rate of
+ * 100 bits/$ (owner record, 2026-10-22) — face value, not provider cost
+ * or a final charge. Settle is capped at the hold; overflow is logged
+ * for reconciliation, never charged beyond what was reserved.
  *
- * ECONOMICS REVIEW (#684 rule 5): plan allowances are left at ~5x face
- * value (Creator 7,500 / Pro 18,000 bits). With the UNAPPROVED 100 bits/$
- * candidate, a Creator allowance covers 37 max-cost (200-bit) builds.
- * Allowances are not changed here. The 100/$ rate is not approved.
+ * ECONOMICS (owner decision 2026-10-22): plan allowances are unchanged
+ * (Creator 7,500 / Pro 18,000 bits), so a Creator allowance covers 37
+ * max-cost (200-bit) builds. At the active legacy LLM rate
+ * (1,000 bits/$) those allowances are ~0.5x face value; the UNAPPROVED
+ * 100 bits/$ candidate would make them ~5x. That candidate stays
+ * inactive pending a separate owner economics decision.
  */
 export const STUDIO_BUILD_RESERVE_BITS = 200;
 

@@ -15,8 +15,10 @@ import {
 import { runReservationSweep } from "@/lib/billing/reservation-sweep";
 import {
   ACTIVE_LLM_POLICY_ID,
+  LEGACY_EXCHANGE_POLICY_ID,
   LEGACY_LLM_BITS_PER_USD,
   PRICING_POLICIES,
+  UNAPPROVED_EXCHANGE_POLICY_ID,
   UNAPPROVED_LLM_BITS_PER_USD,
 } from "@/lib/billing/pricing-policy";
 import { calculateLlmCost, getEstimatedBitsRange } from "@/lib/llm-cost-engine";
@@ -249,9 +251,19 @@ describe("pricing policy versions", () => {
   it("keeps 1000/$ identifiable and marks 100/$ UNAPPROVED", () => {
     expect(PRICING_POLICIES["littbits-exchange-v1"].llmBitsPerUsd).toBe(LEGACY_LLM_BITS_PER_USD);
     expect(PRICING_POLICIES["littbits-exchange-v1"].llmBitsPerUsd).toBe(1000);
-    expect(PRICING_POLICIES[ACTIVE_LLM_POLICY_ID].llmBitsPerUsd).toBe(UNAPPROVED_LLM_BITS_PER_USD);
-    expect(PRICING_POLICIES[ACTIVE_LLM_POLICY_ID].approval).toBe("UNAPPROVED");
-    expect(PRICING_POLICIES[ACTIVE_LLM_POLICY_ID].note).toMatch(/UNAPPROVED/);
+    expect(PRICING_POLICIES[UNAPPROVED_EXCHANGE_POLICY_ID].llmBitsPerUsd).toBe(UNAPPROVED_LLM_BITS_PER_USD);
+    expect(PRICING_POLICIES[UNAPPROVED_EXCHANGE_POLICY_ID].llmBitsPerUsd).toBe(100);
+    expect(PRICING_POLICIES[UNAPPROVED_EXCHANGE_POLICY_ID].approval).toBe("UNAPPROVED");
+    expect(PRICING_POLICIES[UNAPPROVED_EXCHANGE_POLICY_ID].note).toMatch(/UNAPPROVED/);
+  });
+
+  it("active policy is the approved legacy policy (owner decision 2026-10-22, economics-neutral)", () => {
+    // Regression guard: PR #726 must not silently activate the
+    // unapproved 100/$ candidate. Flipping ACTIVE fails this test.
+    expect(ACTIVE_LLM_POLICY_ID).toBe(LEGACY_EXCHANGE_POLICY_ID);
+    expect(ACTIVE_LLM_POLICY_ID).not.toBe(UNAPPROVED_EXCHANGE_POLICY_ID);
+    expect(PRICING_POLICIES[ACTIVE_LLM_POLICY_ID].llmBitsPerUsd).toBe(1000);
+    expect(PRICING_POLICIES[ACTIVE_LLM_POLICY_ID].approval).toBe("legacy");
   });
 
   it("does not label a 1-bit paid estimate as Included", () => {
@@ -284,8 +296,9 @@ describe("economics figures used in docs/billing/684-economics.md", () => {
       completionTokens: 500,
       isByok: false,
     });
-    expect(groqChat.retailLiTTBits).toBe(1);
-    expect(gptStep.retailLiTTBits).toBe(3);
+    // Active legacy rate (1,000 bits/$) — the doc's 1,000/$ column.
+    expect(groqChat.retailLiTTBits).toBe(2);
+    expect(gptStep.retailLiTTBits).toBe(21);
     expect(geminiChat.retailLiTTBits).toBe(1);
     expect(groqChat.providerCostMicros).toBe(985);
     const doc = src("docs/billing/684-economics.md");

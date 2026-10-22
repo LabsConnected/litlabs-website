@@ -197,17 +197,18 @@ describe("chat free", () => {
   });
 });
 
-describe("100 LiTTBits = $1", () => {
-  it("LLM lane exchange rate is 100/$", () => {
-    expect(LLM_LANE_BITS_PER_USD).toBe(100);
+describe("LLM lane pricing — active legacy rate (owner decision 2026-10-22)", () => {
+  it("LLM lane exchange rate is the approved legacy 1,000/$", () => {
+    expect(LLM_LANE_BITS_PER_USD).toBe(1000);
     expect(src("src/lib/llm-cost-engine.ts")).not.toMatch(/providerCostUsd \* 1000/);
   });
-  it("$1 of provider cost is ~100 bits before margin, not 1000", () => {
-    // 1M prompt tokens on the generic fallback = $0.50 → 50 bits pre-margin.
+  it("$1 of provider cost is ~1,000 bits before margin, not 100", () => {
+    // 1M prompt tokens on the generic fallback = $0.50 → 500 bits
+    // pre-margin at the legacy rate; retail = round(500 * 1.5 +
+    // 2000 * 0.1) = 950. The unapproved 100/$ candidate would give 275.
     const c = calculateLlmCost({ provider: "unknown-prov", model: "x", promptTokens: 1_000_000, completionTokens: 0, isByok: false });
     expect(c.providerCostMicros).toBe(500_000);
-    expect(c.retailLiTTBits).toBeGreaterThan(50);
-    expect(c.retailLiTTBits).toBeLessThan(500);
+    expect(c.retailLiTTBits).toBe(950);
   });
   it("calculateLlmCost bills >= 1 bit for a successful call", () => {
     const c = calculateLlmCost({ provider: "openai", model: "gpt-4o-mini", promptTokens: 10, completionTokens: 10, isByok: false });

@@ -10,6 +10,11 @@ review (`littbits-exchange-v2-100-unapproved`). The legacy policy
 `littbits-exchange-v1` stays identifiable at **1,000 LiTTBits = $1** on
 the LLM lane. Generation stays 100 LiTTBits = $1 in both policies.
 
+**Owner decision (2026-10-22): the ACTIVE policy is the legacy
+`littbits-exchange-v1` — the cost engine computes at 1,000 bits/$ on the
+LLM lane. PR #726 is economics-neutral. The v2-100 candidate is preserved
+inactive for a future owner economics decision; nothing here activates it.**
+
 Retail bits for a paid model, from `calculateLlmCost` (margin target 0.50,
 the code default):
 
@@ -19,7 +24,8 @@ retailBits  = max(1, round(providerUsd * bitsPerUsd * 1.50 + baseBitsPer1K * tot
 ```
 
 `bitsPerUsd` is 100 in the unapproved candidate and 1,000 in the legacy
-LLM policy. The 1-bit floor applies only to a successful billable call.
+LLM policy — the engine uses the legacy 1,000 (the active policy). The
+1-bit floor applies only to a successful billable call.
 Plain Studio chat is free (0 bits) behind the shared limiter.
 
 ## Assumptions (labeled)
@@ -47,9 +53,11 @@ Catalog rates used (USD per 1M tokens, `baseBitsPer1K`):
 
 ## Hold
 
-200 bits at the unapproved 100/$ rate is **$2.00** of LiTTBits reserved
-before a builtin Studio build. At the legacy 1,000/$ LLM rate the same
-200 bits are **$0.20**. The hold size was not changed. Settle charges
+The 200-bit hold is a **$2.00 face-value hold** at the customer-facing
+generation rate of 100 bits/$ (owner record, 2026-10-22) — face value,
+not provider cost or a final charge. At the legacy 1,000/$ LLM rate the
+same 200 bits are **$0.20** of model-cost equivalence. The hold size was
+not changed. Settle charges
 the accrued bits, capped at 200, and releases the rest. Cancel or abandon
 with no completed steps releases all 200. The 1-bit minimum applies only
 when the build completes successfully.
@@ -97,7 +105,7 @@ spends the whole 200-bit hold.
 ## Expected model cost
 
 Computed with the formula above. Figures below were checked against
-`calculateLlmCost` for the 100/$ column.
+`calculateLlmCost` for the 1,000/$ column (the active legacy rate).
 
 ### One chat (1,000 + 500 tokens)
 
@@ -127,12 +135,16 @@ are 168 bits and 10 steps would meet the 200-bit hold. The hold is much
 tighter if bits are worth 10x less in dollars of model.
 
 Provider cost for an 8-step Groq build is about 8 * $0.001812 = $0.0145.
-Customer retail at the unapproved rate is 8 bits = $0.08. That margin is
+Customer retail at the unapproved candidate rate would be 8 bits = $0.08
+(at the active legacy rate the same build retails at the 1,000/$ column
+above). That margin is
 the 1.50 multiplier plus the `baseBitsPer1K * 0.1` term and the 1-bit
 floor, not a measured contribution margin.
 
 ## What this does not decide
 
+- Owner decision (2026-10-22): the active policy stays the legacy
+  `littbits-exchange-v1`; this PR is economics-neutral.
 - It does not approve 100 LiTTBits = $1.
 - It does not change Creator 7,500, Pro 18,000, or Starter 1,500.
 - It does not schedule the expired-reservation sweep or apply its migration.
