@@ -1,6 +1,7 @@
 "use client";
 
 import type { PendingApproval } from "../stores/useExecutionStore";
+import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 
 /**
  * Polling interval for approval run status (ms).
@@ -25,13 +26,38 @@ export interface ApprovalRunResult {
     pausedRunId?: string;
     reason: string;
   };
+  /**
+   * The settled run's workspace-change verdict (R3 / E4-S5), carried
+   * verbatim from the server record (RunResult.workspaceChange) so the
+   * outcome a user sees can state what actually happened to the files —
+   * including for runs interrupted before their finalize tail, whose
+   * verdicts are computed at settle time server-side. Mirrors the
+   * fresh-run shape (MessageExecution.workspaceChange); not a new form.
+   */
+  workspaceChange?: WorkspaceChangeEvidence | null;
 }
 
 export interface ApprovalRunStatus {
   status: string;
-  runStatus: "processing" | "completed" | "failed" | null;
+  /**
+   * The run's derived outcome. "cancelled" is distinct from "failed"
+   * (R4/E3-S2): a stopped run must settle as a cancellation on every
+   * surface, never as a failure and never as silence.
+   */
+  runStatus: "processing" | "completed" | "failed" | "cancelled" | null;
   runResult: ApprovalRunResult | null;
   runError: string | null;
+  /**
+   * The run's LIVE nested gate, named at top level by the approvals GET
+   * (R4/E1-F3): the resumed segment re-paused at a DIFFERENT paused run.
+   * Either poll loop hands off to it promptly instead of parking in
+   * "executing" until the poll timeout while the server waits.
+   */
+  pendingApproval?: {
+    toolId: string;
+    pausedRunId?: string;
+    reason: string;
+  } | null;
 }
 
 export interface ApprovalWatchOutcome {
@@ -40,11 +66,15 @@ export interface ApprovalWatchOutcome {
    * - approved/rejected: a decision was recorded (by any session)
    * - expired: the pause outlived its server-side TTL with no decision
    * - gone: the paused run no longer exists (404) — the card is stale
+   * - timeout: the watch window elapsed with the run unsettled
+   *   (R4/E3-S2 — a delivered outcome, never a silent exit)
    */
-  status: "approved" | "rejected" | "expired" | "gone";
+  status: "approved" | "rejected" | "expired" | "gone" | "timeout";
   runStatus: ApprovalRunStatus["runStatus"];
   runResult: ApprovalRunResult | null;
   runError: string | null;
+  /** Set when the watch settled because the run re-paused at a new gate. */
+  pendingApproval?: ApprovalRunResult["pendingApproval"];
 }
 
 /**
@@ -76,6 +106,15 @@ export function submitApprovalAndPoll(opts: {
    * executed and failed, so the gate is dead.
    */
   onFailed?: (error: string, info?: { retryable: boolean; expired?: boolean; decisionRecorded?: boolean }) => void;
+  /**
+   * The run settled CANCELLED (R4/E3-S2) — a terminal outcome distinct
+   * from failure: the gate is dead, the mission hint clears, and no
+   * failure/retry card is fabricated for a run the record says stopped.
+   * When omitted, a cancellation degrades to onFailed with
+   * decisionRecorded: true (the gate still clears; the phase records
+   * "failed" — callers should wire onCancelled).
+   */
+  onCancelled?: (result: ApprovalRunResult | null, reason?: string) => void;
   onPolling?: () => void;
   /** Test hooks — production callers use the real fetch/timers. */
   fetchImpl?: typeof fetch;
@@ -92,6 +131,7 @@ export function submitApprovalAndPoll(opts: {
     onAccepted,
     onCompleted,
     onFailed,
+    onCancelled,
     onPolling,
     pollIntervalMs = POLL_INTERVAL_MS,
   } = opts;
@@ -99,6 +139,32 @@ export function submitApprovalAndPoll(opts: {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => {
     timeoutHandle = setTimeout(() => resolve(), ms);
   }));
+
+  /**
+   * A NEW gate for a DIFFERENT paused run, named by a poll response —
+   * either nested in the RunResult (the settled segment's handoff) or at
+   * top level on the GET body (the run's live sibling gate, R4/E1-F3).
+   * The gate THIS poll is bound to is never a re-pause.
+   */
+  function rePauseGateFrom(status: ApprovalRunStatus): ApprovalRunResult["pendingApproval"] | null {
+    const nested = status.runResult?.pendingApproval;
+    if (nested?.pausedRunId && nested.pausedRunId !== pausedRunId) return nested;
+    const top = status.pendingApproval;
+    if (top?.pausedRunId && top.pausedRunId !== pausedRunId) return top;
+    return null;
+  }
+
+  /** Settle a cancelled run through the distinct cancelled outcome. */
+  function settleCancelled(result: ApprovalRunResult | null, reason?: string) {
+    if (onCancelled) {
+      onCancelled(result, reason ?? result?.cancelReason);
+    } else {
+      onFailed?.(reason ?? result?.cancelReason ?? "The run was cancelled.", {
+        retryable: false,
+        decisionRecorded: true,
+      });
+    }
+  }
 
   async function run() {
     try {
@@ -155,6 +221,13 @@ export function submitApprovalAndPoll(opts: {
         return;
       }
 
+      // A cancellation already recorded on the paused run is terminal
+      // too — and it is a CANCELLATION (R4/E3-S2), never a failure.
+      if (postBody?.runStatus === "cancelled") {
+        settleCancelled(postBody.runResult ?? null, postBody.runError ?? undefined);
+        return;
+      }
+
       // 2. Poll GET for run status
       onPolling?.();
       const deadline = Date.now() + POLL_TIMEOUT_MS;
@@ -172,8 +245,35 @@ export function submitApprovalAndPoll(opts: {
         const status = await getResp.json().catch(() => null) as ApprovalRunStatus | null;
         if (!status) continue;
 
+        // Nested re-pause handoff FIRST (R4/E1-F3): the resumed segment
+        // paused again at a NEW gate — the server is waiting on the user
+        // NOW. Hand the UI the new gate promptly; never keep polling
+        // this gate into the 15-minute timeout. (A re-gate whose own
+        // segment already settled reads runStatus "completed" with the
+        // handoff nested in its RunResult — the same check catches it,
+        // before the plain-completed branch below can drop the gate.)
+        const rePause = rePauseGateFrom(status);
+        if (rePause) {
+          onCompleted?.(status.runResult ?? {
+            finalText: "",
+            stepsUsed: 0,
+            toolCalls: [],
+            cancelled: false,
+            pendingApproval: rePause,
+          });
+          return;
+        }
+
         if (status.runStatus === "completed" && status.runResult) {
           onCompleted?.(status.runResult);
+          return;
+        }
+
+        if (status.runStatus === "cancelled") {
+          // A stopped run settles as a CANCELLATION (R4/E3-S2) — not a
+          // failure, not a timeout. The gate is dead; the record's own
+          // reason rides along.
+          settleCancelled(status.runResult, status.runError ?? undefined);
           return;
         }
 
@@ -237,9 +337,13 @@ export function submitApprovalAndPoll(opts: {
  * Settles (stops polling and calls onSettled) when:
  *   - status is "rejected" | "expired" → the decision is final, nothing is running
  *   - runStatus is "completed" | "failed" → the resumed execution finished
+ *   - runStatus is "cancelled" → the run stopped (R4/E3-S2: a distinct outcome)
+ *   - the run re-paused at a NEW gate → hand the UI the new gate (R4/E1-F3)
  *   - the paused run is gone (404) → the local card is stale
- * Transient fetch/other failures keep polling until the timeout; a timeout
- * simply stops watching — unknown server state is never reported as settled.
+ * Transient fetch/other failures keep polling until the timeout. A timeout
+ * now DELIVERS a "timeout" outcome (R4/E3-S2): the UI must be told the
+ * run's state could not be confirmed — exiting silently made "unknown"
+ * indistinguishable from "still running" and stranded the gate forever.
  *
  * @returns A cancel function to stop watching (for component teardown).
  */
@@ -297,7 +401,41 @@ export function watchApprovalResolution(opts: {
           });
           return;
         }
-        if (status.runStatus === "completed" || status.runStatus === "failed") {
+        // Nested re-pause (R4/E1-F3): the resumed segment paused again
+        // at a NEW gate — settle now and hand the UI the new gate,
+        // instead of watching this gate while the server waits on the
+        // user at the next one.
+        const nested = status.runResult?.pendingApproval;
+        const topLevel = status.pendingApproval;
+        const rePause =
+          nested?.pausedRunId && nested.pausedRunId !== pausedRunId
+            ? nested
+            : topLevel?.pausedRunId && topLevel.pausedRunId !== pausedRunId
+              ? topLevel
+              : null;
+        if (rePause) {
+          onSettled?.({
+            status: "approved",
+            runStatus: "completed",
+            runResult: status.runResult ?? {
+              finalText: "",
+              stepsUsed: 0,
+              toolCalls: [],
+              cancelled: false,
+              pendingApproval: rePause,
+            },
+            runError: status.runError,
+            pendingApproval: rePause,
+          });
+          return;
+        }
+        if (
+          status.runStatus === "completed" ||
+          status.runStatus === "failed" ||
+          status.runStatus === "cancelled"
+        ) {
+          // A cancelled run settles as "cancelled" (R4/E3-S2) — the
+          // caller converges the gate as a stop, never as a failure.
           onSettled?.({
             status: "approved",
             runStatus: status.runStatus,
@@ -309,6 +447,11 @@ export function watchApprovalResolution(opts: {
         // "pending" (no decision yet) or "approved" + "processing" — keep watching
       }
       await sleep(pollIntervalMs);
+    }
+    // Watch window elapsed with the run unsettled: deliver the timeout
+    // outcome instead of exiting silently (R4/E3-S2).
+    if (!cancelled) {
+      onSettled?.({ status: "timeout", runStatus: null, runResult: null, runError: null });
     }
   }
 

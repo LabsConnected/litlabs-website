@@ -68,6 +68,30 @@ function Badge({ badge, tabId }: { badge: WorktabBadge; tabId: string }) {
       </span>
     );
   }
+  if (badge === "failed") {
+    return (
+      <span
+        className="shrink-0 text-[11px] font-bold leading-none"
+        style={{ color: "#ef4444" }}
+        aria-label="Run failed"
+        data-testid={`worktab-badge-${tabId}`}
+      >
+        ✕
+      </span>
+    );
+  }
+  if (badge === "cancelled") {
+    return (
+      <span
+        className="shrink-0 text-[11px] font-bold leading-none"
+        style={{ color: "var(--litt-text-muted, #8a8f98)" }}
+        aria-label="Run cancelled"
+        data-testid={`worktab-badge-${tabId}`}
+      >
+        ⊘
+      </span>
+    );
+  }
   return null;
 }
 

@@ -15,6 +15,10 @@ import {
 import { validateEnvOverride, _resetModelRegistryForTests } from "./model-registry";
 
 const PROVIDER_ENVS = [
+  "OPENAGENTS_API_KEY",
+  "OPENAGENTS_BASE_URL",
+  "OPENAGENTS_MODEL",
+  "OPENAGENTS_TIMEOUT_MS",
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
   "OPENROUTER_API_KEY",
@@ -140,6 +144,66 @@ describe("provider registry — Basic cost policy", () => {
       "cloudflare",
       "ollama",
     ]);
+  });
+});
+
+describe("provider registry — OpenAgents staging route (env-gated)", () => {
+  const BUILD_REQ = { tools: true, coding: true, reliableFileWriting: true };
+
+  it("leads BUILD routing when OPENAGENTS_API_KEY is set", () => {
+    vi.stubEnv("OPENAGENTS_API_KEY", "test-oa-key");
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(BUILD_REQ);
+    const first = plan.providers[0];
+    expect(first.provider).toBe("openagents");
+    expect(first.adapter).toBe("openai-compatible");
+    expect(first.costClass).toBe("FREE_MANAGED");
+    expect(first.models).toEqual(["deepseek-4-flash"]);
+    expect(first.credentialState).toBe("available");
+    expect(first.capabilities.tools).toBe(true);
+    expect(first.timeoutMs).toBe(60_000);
+  });
+
+  it("leads plain chat routing when OPENAGENTS_API_KEY is set", () => {
+    vi.stubEnv("OPENAGENTS_API_KEY", "test-oa-key");
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes({ tools: false });
+    expect(plan.providers[0].provider).toBe("openagents");
+    expect(plan.providers.map((p) => p.provider)).toContain("gemini");
+  });
+
+  it("is excluded as credential_missing when OPENAGENTS_API_KEY is unset", () => {
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    expect(plan.providers.map((p) => p.provider)).not.toContain("openagents");
+    expect(plan.excluded.find((e) => e.provider === "openagents")?.reason).toBe(
+      "credential_missing",
+    );
+    // Diagnostics expose the same gating without leaking values.
+    expect(providerDiagnostics().openagents.credential).toBe("missing");
+  });
+
+  it("honours the OPENAGENTS_MODEL override", () => {
+    vi.stubEnv("OPENAGENTS_API_KEY", "test-oa-key");
+    vi.stubEnv("OPENAGENTS_MODEL", "deepseek-v4-pro");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const oa = plan.providers.find((p) => p.provider === "openagents");
+    expect(oa!.models).toEqual(["deepseek-v4-pro"]);
+  });
+
+  it("honours the OPENAGENTS_TIMEOUT_MS override", () => {
+    vi.stubEnv("OPENAGENTS_API_KEY", "test-oa-key");
+    vi.stubEnv("OPENAGENTS_TIMEOUT_MS", "45000");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const oa = plan.providers.find((p) => p.provider === "openagents");
+    expect(oa!.timeoutMs).toBe(45_000);
   });
 });
 

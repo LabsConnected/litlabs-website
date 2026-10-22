@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   deriveWorktabBadge,
   useExecutionStore,
@@ -17,9 +17,20 @@ import type { Worktab } from "../hooks/useServerWorktabs";
    action-run projection "completed"; anything unknown is "idle".
 
    Polling is bounded: projections fetch once per conversation and
-   re-poll on a 20s interval ONLY while at least one tab has live work
-   (a working phase, an approval gate, or done-but-unconfirmed).
+   re-poll on a 20s interval ONLY while at least one tab has live work.
+   Liveness keys off the CANONICAL PROJECTION as well as the local phase
+   (R4/E3-S3): after a reload the in-memory store is empty (phase
+   "idle"), and keying liveness to it alone cleared the interval at its
+   first tick — the tab froze on the mount fetch's state while the
+   server run settled terminal a minute later.
 */
+
+/** Projection states in which the run is over — polling may stop. */
+const TERMINAL_DISPLAY_STATES: ReadonlySet<ActionRunDisplayState> = new Set([
+  "completed",
+  "failed",
+  "stopped",
+]);
 
 const LIVE_PHASES: ReadonlySet<ExecutionPhase> = new Set([
   "planning",
@@ -60,6 +71,13 @@ export function useWorktabBadges(tabs: Worktab[]): Record<string, WorktabBadge> 
   const [projections, setProjections] = useState<
     Record<string, ActionRunDisplayState | null>
   >({});
+  // The interval reads the LATEST projections through a ref — the state
+  // variable captured by the effect closure goes stale after the first
+  // load (R4).
+  const projectionsRef = useRef<Record<string, ActionRunDisplayState | null>>({});
+  useEffect(() => {
+    projectionsRef.current = projections;
+  }, [projections]);
 
   const convIds = tabs.map((t) => t.conversationId).filter(Boolean).join(",");
 
@@ -86,16 +104,20 @@ export function useWorktabBadges(tabs: Worktab[]): Record<string, WorktabBadge> 
     };
     void load();
 
-    // Keep polling only while some tab has live or unconfirmed work.
+    // Keep polling while some tab has live or unconfirmed work — where
+    // "live" includes a NON-TERMINAL canonical projection, so a tab
+    // whose local store was emptied by a reload still follows its run
+    // to its terminal badge (R4/E3-S3).
     const interval = setInterval(() => {
       const st = useExecutionStore.getState();
       const live = tabs.some((t) => {
         const phase = st.phaseForTask(t.id);
         if (LIVE_PHASES.has(phase)) return true;
-        if (phase === "done") {
-          const proj = projections[t.conversationId ?? ""];
-          return proj !== "completed";
-        }
+        const proj = t.conversationId
+          ? (projectionsRef.current[t.conversationId] ?? null)
+          : null;
+        if (proj !== null && !TERMINAL_DISPLAY_STATES.has(proj)) return true;
+        if (phase === "done") return proj !== "completed";
         return false;
       });
       if (live) void load();

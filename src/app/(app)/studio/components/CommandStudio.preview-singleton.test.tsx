@@ -633,6 +633,12 @@ describe("CommandStudio — approval gate convergence", () => {
     convState.loadMessages.mockClear();
     convState.reportSendError.mockClear();
     execState.state.pendingApproval = null;
+    // R1b harness hygiene: the real store's setPendingApproval resets
+    // approvalPhase to "idle" whenever a gate mounts; this harness
+    // assigns pendingApproval directly, so reset the phase explicitly —
+    // otherwise a prior test's "submitting" leaks in and the handler's
+    // re-entry guard (correctly) swallows the next test's click.
+    execState.state.approvalPhase = "idle";
     execState.state.isRunning = false;
     execState.state.events = [];
     approvalWatch.onSettled = null;
@@ -676,7 +682,9 @@ describe("CommandStudio — approval gate convergence", () => {
     });
     await settle();
 
-    expect(execState.state.resolveApproval).toHaveBeenCalledWith("approved");
+    // R1b: outcomes are settled by gate identity — resolveApproval now
+    // receives the pausedRunId the outcome belongs to (E1 F4 matching).
+    expect(execState.state.resolveApproval).toHaveBeenCalledWith("approved", { pausedRunId: "paused-1" });
     expect(convState.loadMessages).toHaveBeenCalledWith("conv-1");
     expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
     expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");

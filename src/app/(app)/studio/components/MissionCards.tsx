@@ -242,6 +242,7 @@ export default function MissionCards({
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
   const afterCheckpoint = useExecutionStore((s) => s.afterCheckpoint);
   // Persisted run checkpoints survive a refresh: hydrate the store from
@@ -279,8 +280,16 @@ export default function MissionCards({
   }
 
   /* ── Contextual hints derived from real store state ───────────── */
+  // "Approval waiting" is a claim about the gate's STATE, not its mere
+  // presence in the store (R4/E3-S2): while a decision is in flight
+  // (submitting/executing) the approval is not waiting on anyone, and a
+  // terminal run's residue must not announce a live gate forever. The
+  // hint/pill show only while the gate is genuinely undecided (idle) or
+  // held for an actionable retry (failed).
+  const approvalWaiting =
+    !!pendingApproval && (approvalPhase === "idle" || approvalPhase === "failed");
   const hints: string[] = [];
-  if (pendingApproval) hints.push("Approval waiting — review the request before work continues.");
+  if (approvalWaiting) hints.push("Approval waiting — review the request before work continues.");
   if (isRunning) hints.push(`Run in progress — step ${toolCalls.length + 1}.`);
   if (hasCheckpoint && hasChanges && !isRunning) hints.push("Checkpoint recorded — restore if you need to undo changes.");
   const terminalHealth = terminalHealthOf(capabilities);
@@ -344,7 +353,7 @@ export default function MissionCards({
             </span>
           }
         />
-        {pendingApproval && (
+        {approvalWaiting && (
           <div
             style={{
               display: "inline-flex",

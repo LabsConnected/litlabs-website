@@ -45,6 +45,7 @@ import {
 import type { LLMMessage } from "./llm-tool-calling";
 import type { DeferredToolCall } from "./agent-loop-v2";
 import type { QualityFinale, QualityLoopSnapshot } from "./quality-loop-flow";
+import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 
 /**
  * How long a human has to decide on an approval gate.
@@ -110,6 +111,41 @@ export interface RunResult {
   qualityLoop?: Pick<QualityFinale, "verdict" | "stages" | "designPasses">;
   /** Evidence ledger captured before a pause, including pending observations. */
   qualityLoopState?: QualityLoopSnapshot;
+  /**
+   * The workspace-change verdict (R3 / E4-S5): what the workspace itself
+   * says this run did, diffed against the run's original pre-mutation
+   * checkpoint. Carried on the settled record so the verdict survives the
+   * run — before this field existed, a resume-path verdict computed in
+   * the loop's finalize tail was dropped at the route and the settled
+   * record was silent about the files. A comparison that could not be
+   * made records status "unknown" on the evidence itself — never a
+   * silent absence; null/absent means no verdict was computed for this
+   * settle (legacy records, or a settle with no checkpoint to diff).
+   */
+  workspaceChange?: WorkspaceChangeEvidence | null;
+  /**
+   * The verified revision (Repair R5-B): the canonical workspace
+   * revision (see `computeWorkspaceRevision`) whose content this run's
+   * quality verdict covers. Recorded ONLY when the settled verdict was
+   * ok — a failed or absent verdict records null, so the field can never
+   * dress an unverified state as verified. The publish gate reads the
+   * newest such record for the project and requires the live workspace
+   * to still BE this revision before anything is published.
+   */
+  verifiedRevision?: string | null;
+  /**
+   * Publish-gate audit (Repair R5-B): the gate decision taken for a
+   * deploy settle — which verified revision was presented, which
+   * revision the workspace actually was, and whether the publish was
+   * allowed (and on what basis). Null/absent for non-deploy settles.
+   */
+  publishGate?: {
+    allowed: boolean;
+    code: string;
+    verifiedRevision: string | null;
+    currentRevision: string | null;
+    verifiedByRunId: string | null;
+  } | null;
 }
 
 export interface PausedRunRecord {
@@ -700,7 +736,13 @@ export async function updatePausedRunActionRun(
 
 /** Execution outcome derived from the canonical action_run. */
 export interface DerivedRunOutcome {
-  runStatus: "processing" | "completed" | "failed" | null;
+  /**
+   * "cancelled" is a first-class outcome (R4/E3-S2): a cancelled run
+   * must never be folded into "failed" — the client contract settles
+   * cancellations distinctly (the gate clears, the mission hint drops,
+   * no failure card is fabricated for a run the record says stopped).
+   */
+  runStatus: "processing" | "completed" | "failed" | "cancelled" | null;
   runResult: RunResult | null;
   runError: string | null;
   runStartedAt: string | null;
@@ -746,11 +788,14 @@ export async function getRunOutcomeForPausedRun(
     if (!run) {
       return { ...EMPTY_OUTCOME, runStatus: record.runStatus };
     }
-    const events = await listActionEvents(record.actionRunId, userId, { limit: 200 });
-    // Latest outcome-bearing event wins. Terminal transition events carry
-    // the RunResult in payload.result (written atomically with the status
-    // change by action_runtime_transition_event_activity).
-    for (let i = events.length - 1; i >= 0; i--) {
+    const events = await listActionEvents(record.actionRunId, userId, { limit: 200, descending: true });
+    // Latest outcome-bearing event wins. Events arrive newest-first, so
+    // scan forward from index 0 — the first outcome event is the latest.
+    // Terminal transition events carry the RunResult in payload.result
+    // (written atomically with the status change by
+    // action_runtime_transition_event_activity). Descending order keeps
+    // terminal events inside the window even for >200-event runs.
+    for (let i = 0; i < events.length; i++) {
       const payload = (events[i].payload ?? {}) as { result?: RunResult; pausedRunId?: string };
       // Gates share a parent run. An outcome for a later gate is never the
       // outcome of this one. Legacy terminal events without a gate ID still
@@ -768,7 +813,29 @@ export async function getRunOutcomeForPausedRun(
       }
       if (events[i].type === "run.failed" || events[i].type === "run.cancelled") {
         return {
-          runStatus: "failed",
+          // A cancelled run derives as "cancelled" (R4/E3-S2) — folding
+          // it into "failed" made every client surface treat a stopped
+          // run as a failure and stranded the mission "Approval needed"
+          // hint on a gate whose run was already over.
+          runStatus: events[i].type === "run.cancelled" ? "cancelled" : "failed",
+          runResult: result,
+          runError: run.failureMessage,
+          runStartedAt: run.startedAt,
+          runCompletedAt: run.completedAt,
+        };
+      }
+      if (events[i].type === "approval.rejected" && result) {
+        // A rejected gate settles via its approval.rejected event (R3):
+        // when that settle carries a RunResult — the settle-time
+        // workspace verdict — surface it, so the record a poll/GET reads
+        // is the record the settle wrote. Historical rejection events
+        // carry no result and keep deriving through the terminal fold
+        // below, exactly as before. The settle's action_run status is
+        // "cancelled" (the run ended because the gate was declined), so
+        // the derived runStatus is "cancelled" too (R4/E3-S2) — the
+        // watcher's gate-status check still settles rejections first.
+        return {
+          runStatus: "cancelled",
           runResult: result,
           runError: run.failureMessage,
           runStartedAt: run.startedAt,
@@ -788,7 +855,12 @@ export async function getRunOutcomeForPausedRun(
     }
     if (isTerminalActionRunStatus(run.status)) {
       return {
-        runStatus: run.status === "completed" ? "completed" : "failed",
+        runStatus:
+          run.status === "completed"
+            ? "completed"
+            : run.status === "cancelled"
+              ? "cancelled"
+              : "failed",
         runResult: null,
         runError: run.failureMessage,
         runStartedAt: run.startedAt,

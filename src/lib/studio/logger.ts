@@ -28,6 +28,19 @@ export interface LogContext {
   failover?: string[];
   claimLost?: boolean;
   alreadyTerminal?: boolean;
+  /** Approval lifecycle audit fields (R3): the recorded decision and the
+   *  settle event type — ids and outcomes only, never inputs. */
+  decision?: string;
+  eventType?: string;
+  /** Workspace-verdict audit fields (R3): the verdict a computation
+   *  produced and the baseline it was computed against. */
+  verdict?: string;
+  checkpointId?: string;
+  fileCount?: number;
+  kind?: string;
+  /** Severity marker for lines that must stand out in stdout (e.g. the
+   *  checkpoint-unavailable WARN). Absent = informational. */
+  level?: string;
 }
 
 export function studioLog(message: string, ctx: LogContext = {}): void {

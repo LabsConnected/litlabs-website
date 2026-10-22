@@ -15,13 +15,16 @@
  * itself is real (tool-handlers-v2.ts handleTerminalExecute →
  * transport.exec).
  *
- * SECURITY ORDERING NOTE: this action delegates with hasApproval: true (see
- * delegate.ts), so the registry's requireExplicitForMutations backstop cannot
- * catch deny-classified commands — it only checks the flag, not the command
- * text. Therefore the adapter classifies FIRST and fails honestly on deny
- * before delegating. Risky commands are NOT re-gated here: this action is
- * `mutating: true`, so the station runtime's own approval gate already covers
- * them, and inventing a second gate would just fork the approval UX.
+ * SECURITY ORDERING NOTE: this action delegates with the station
+ * context's approval state (see delegate.ts — threaded from the outer
+ * call since Repair R1a-2, formerly a hardcoded true). When approval IS
+ * present, the registry's requireExplicitForMutations backstop passes on
+ * the flag alone — it cannot catch deny-classified commands, because it
+ * never sees the command text. Therefore the adapter classifies FIRST
+ * and fails honestly on deny before delegating. Risky commands are NOT
+ * re-gated here: this action is `mutating: true`, so the station
+ * runtime's own approval gate already covers them, and inventing a
+ * second gate would just fork the approval UX.
  *
  * SHAPE DIFFERENCE (reported): the contract lists {command, cwd?}, but the
  * backend takes no cwd (handleTerminalExecute ignores it; commands run in
@@ -90,9 +93,11 @@ defineAction({
     if (!projectId) {
       return fail("terminal.execute requires an active project: station context has no projectId.", "not_configured");
     }
-    // Deny check FIRST: this delegate passes hasApproval: true, so the
-    // registry backstop cannot refuse destructive commands. Deny-classified
-    // commands never reach the real handler, even with approval.
+    // Deny check FIRST: when the context carries approval, the delegate
+    // passes it through and the registry backstop cannot refuse
+    // destructive commands (it checks the flag, not the command text).
+    // Deny-classified commands never reach the real handler, even with
+    // approval.
     const risk = classifyTerminalCommand(args.command);
     if (risk === "deny") {
       return fail(

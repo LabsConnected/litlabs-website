@@ -168,7 +168,7 @@ describe("Billing — reserve → settle flow", () => {
     mockMaybeSingle.mockResolvedValueOnce({ data: { id: "user-uuid-1" }, error: null });
     // 2. rpc("reserve_bits") — insufficient balance (B2 contract)
     mockRpc.mockResolvedValueOnce({
-      data: { success: false, reason: "insufficient_balance" } as never,
+      data: [{ reservation_id: null, success: false, available_after: 0, reason: "insufficient_balance" }] as never,
       error: null,
     });
 

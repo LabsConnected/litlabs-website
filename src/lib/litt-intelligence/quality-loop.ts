@@ -243,6 +243,9 @@ export interface StageState {
   skipReason?: string;
   /** Set when status is "failed" — what went wrong. */
   failureReason?: string;
+  /** ISO timestamp of when the stage first became active. Evidence recorded
+   *  before this moment is stale and cannot authorize a pass. */
+  startedAt?: string;
 }
 
 export interface QualityLoopState {
@@ -334,34 +337,53 @@ export function beginStage(state: QualityLoopState, stage: QualityStage): void {
     );
   }
   state.stages[stage].status = "active";
+  state.stages[stage].startedAt ??= new Date().toISOString();
   touch(state);
 }
 
-/** Record evidence for a stage. Evidence may be recorded for the current
- *  stage or any earlier stage (late evidence is allowed); never for a
- *  future stage. */
+/** Record evidence for a stage. Evidence is a verified fact about work
+ *  the run actually did, so it may be filed for the current stage, an
+ *  earlier stage (late evidence), OR a later stage (out-of-order
+ *  registration): a machine observation of build/run/test is real even
+ *  when an earlier cognitive stage has not yet produced its evidence.
+ *  Recording is not passing — begin/pass/skip transitions still enforce
+ *  strict stage order, so out-of-order filing can never weaken the gate.
+ *  Blocking later-stage evidence behind an unfinished earlier stage
+ *  produced the recurring "N required stage(s) lack evidence (pending)"
+ *  defect: real observations sat buffered in the session queue while the
+ *  ledger reported every stage pending. */
 export function recordEvidence(
   state: QualityLoopState,
   stage: QualityStage,
   evidence: Omit<StageEvidence, "at"> & { at?: string },
 ): void {
+  const s = state.stages[stage];
   const stageIndex = QUALITY_STAGES.indexOf(stage);
   const current = currentStage(state);
   const currentIndex = current ? QUALITY_STAGES.indexOf(current) : QUALITY_STAGES.length;
-  if (stageIndex > currentIndex) {
+  // Filing on the current pending stage activates it — the activation
+  // timestamp is decided BEFORE the evidence is accepted so the stale
+  // check below can run without first mutating the ledger.
+  const activates = s.status === "pending" && stageIndex <= currentIndex;
+  const startedAt = s.startedAt ?? (activates ? new Date().toISOString() : undefined);
+  // Stale-evidence guard: an explicit timestamp earlier than the stage's
+  // activation cannot describe work the stage actually did. Rejected
+  // before any state mutation — a stale write must not flip the stage to
+  // active or stamp startedAt.
+  if (evidence.at && startedAt && evidence.at < startedAt) {
     throw new StageGateError(
       stage,
-      `Cannot record evidence for future stage "${stage}" (current: "${current ?? "none"}").`,
+      `Evidence for stage "${stage}" is stale: recorded at ${evidence.at} before the stage began at ${startedAt}.`,
     );
   }
-  const record: StageEvidence = {
+  if (activates) {
+    s.status = "active";
+    s.startedAt = startedAt;
+  }
+  s.evidence.push({
     ...evidence,
     at: evidence.at ?? new Date().toISOString(),
-  };
-  state.stages[stage].evidence.push(record);
-  if (state.stages[stage].status === "pending") {
-    state.stages[stage].status = "active";
-  }
+  });
   touch(state);
 }
 

@@ -12,7 +12,7 @@ import type {
   StationResult,
 } from "./types";
 import { getStationAction } from "./registry";
-import { canMutateAction } from "./permissions";
+import { evaluateMutationAuthorization } from "./permissions";
 
 type StationEvent = Omit<ExecutionEvent, "id" | "seq" | "ts">;
 
@@ -82,6 +82,18 @@ export async function executeStationAction(
     }
 
     // (b) Permission gate — PLAN mode denies every mutation.
+    //
+    // Repair R5-A: the permission decision is evaluated WITH the
+    // context's approval state, not before it. The previous check ran
+    // first and treated "ask" (the deploy station's default) as a hard
+    // denial, so an explicitly approved publish could never execute —
+    // the approval gate below was unreachable for every "ask" station.
+    // Now: "deny" (or an unmapped station) is a hard permission_denied
+    // even with an approval; "ask" without an approval defers to the
+    // approval gate below, which answers approval_required; "ask" WITH
+    // a genuine approval satisfies the permission. The approval gate
+    // still runs afterwards for requiresApproval actions, so nothing
+    // executes unapproved that was gated before.
     if (action.mutating) {
       if (ctx.missionMode === "plan") {
         return {
@@ -90,17 +102,33 @@ export async function executeStationAction(
           errorCode: "permission_denied",
         };
       }
-      if (!canMutateAction(action, ctx.permissions)) {
+      const authorization = evaluateMutationAuthorization(
+        action,
+        ctx.permissions,
+        ctx.hasApproval === true,
+      );
+      if (!authorization.allowed && authorization.reason === "denied") {
         return {
           success: false,
           error: `Permission denied: "${id}" mutates the ${action.station} station and the permission is not "allow"`,
           errorCode: "permission_denied",
         };
       }
+      // reason "approval_required": fall through to the approval gate.
     }
 
     // (c) Approval gate — emit and pause; do NOT execute.
-    if (action.requiresApproval && !ctx.hasApproval) {
+    // Repair R1a-2 (Diagnosis E2 S4): the gate covers EVERY mutating
+    // action, not only those flagged requiresApproval. A mutating action
+    // without the flag previously executed on whatever approval state
+    // the context happened to carry — and delegate paths manufactured
+    // that state as a hardcoded true, so an unapproved caller could
+    // reach real mutations (e.g. files.create → files.write) with no
+    // gate anywhere. Mutations now require the context to carry a
+    // genuine approval: a granted gate decision, or the agent loop's
+    // non-gated auto-approval (the loop invokes unapproved non-gated
+    // calls with hasApproval:true by design — see agent-loop-v2).
+    if ((action.requiresApproval || action.mutating) && !ctx.hasApproval) {
       safeEmit(ctx, {
         type: "approval_required",
         actionId: id,

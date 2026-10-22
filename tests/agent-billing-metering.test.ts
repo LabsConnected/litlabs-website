@@ -100,7 +100,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   emitUsageEventMock.mockResolvedValue({ status: "ok", usageEventId: "ue-settle-1" });
   mockRpc.mockResolvedValue({
-    data: { success: true, settled_amount: 42, released_amount: 58 },
+    data: [{ success: true, settled_amount: 42, released_amount: 58, available_after: 0, reason: "settled" }],
     error: null,
   });
 });
@@ -163,7 +163,10 @@ describe("settleRun canonical metering (P0)", () => {
 
   it("emits a non-billable event for a failed run with no prior billable event", async () => {
     mockChains({ existingUsageEvent: null });
-    mockRpc.mockResolvedValue({ error: null });
+    mockRpc.mockResolvedValue({
+      data: [{ success: true, released_amount: 100, available_after: 100, reason: "released" }],
+      error: null,
+    });
 
     const result = await settleRun(
       RUN_ID,

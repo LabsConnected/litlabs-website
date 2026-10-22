@@ -341,9 +341,14 @@ describe("image station", () => {
     setCreatorParams(key, {
       lastResults: [{ id: "img_1", url: "https://cdn.example/a.png", kind: "image" }],
     });
-    const res = await runAction("image.saveAsset", 
+    const res = await runAction("image.saveAsset",
       { resultId: "img_1", name: "hero" },
-      makeCtx({ transport: makeTransport() }),
+      // image.saveAsset is requiresApproval:true — in production its
+      // execute runs only after a granted gate, with the context
+      // carrying that approval. Since Repair R1a-2 the delegate forwards
+      // the context's approval state instead of a hardcoded true, so
+      // the granted state is modeled explicitly here.
+      makeCtx({ transport: makeTransport(), hasApproval: true }),
     );
     expect(res.success).toBe(true);
     expect(mocks.toolExecute).toHaveBeenCalledWith(
