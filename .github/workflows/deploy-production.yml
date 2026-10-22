@@ -177,12 +177,31 @@ jobs:
           fail=0
           IFS='|' read -ra NAMES <<< "$REQUIRED_CHECKS"
           for n in "${NAMES[@]}"; do
-            concl=$(echo "$runs" | jq -r --arg n "$n" '[.[] | select(.name==$n)] | sort_by(.completed_at) | last | .conclusion // "missing"')
-            echo "$n: $concl"
-            if [ "$concl" != "success" ]; then fail=1; fi
+            # Pick the truly latest run by started_at, not completed_at. A rerun
+            # that is still queued/in_progress has no completed_at, so sorting on
+            # that field would hide it behind an older, already-completed success
+            # for the same check name — accepting a stale PASS while a fresh run
+            # is in flight (or has since failed). started_at is set the moment a
+            # run is created, so it always orders the newest attempt last.
+            latest=$(echo "$runs" | jq -c --arg n "$n" '[.[] | select(.name==$n)] | sort_by(.started_at) | last')
+            if [ -z "$latest" ] || [ "$latest" = "null" ]; then
+              echo "::error::Required check '$n' has no run on $SHA. Refusing to deploy."
+              fail=1
+              continue
+            fi
+            status=$(echo "$latest" | jq -r '.status')
+            concl=$(echo "$latest" | jq -r '.conclusion // "missing"')
+            echo "$n: status=$status conclusion=$concl"
+            if [ "$status" != "completed" ]; then
+              echo "::error::Required check '$n' latest run on $SHA is '$status', not completed. Refusing to deploy on a stale or in-progress result."
+              fail=1
+            elif [ "$concl" != "success" ]; then
+              echo "::error::Required check '$n' concluded '$concl' on $SHA. Refusing to deploy."
+              fail=1
+            fi
           done
           if [ "$fail" -ne 0 ]; then
-            echo "::error::A required CI check is not green on $SHA. Refusing to deploy."
+            echo "::error::A required CI check is not a green, completed run on $SHA. Refusing to deploy."
             exit 1
           fi
 
@@ -253,7 +272,11 @@ jobs:
           SHA: ${{ needs.verify.outputs.sha }}
         run: |
           if [ -z "$HEALTH_URL" ]; then
-            echo "No health URL for $SERVICE: SHA verification skipped (verify manually in Railway)."
+            echo "::warning::$SERVICE has no public health URL — this deployment is UNVERIFIED, not confirmed-healthy. Verify the live commit manually in Railway."
+            {
+              echo "### :warning: UNVERIFIED — $SERVICE has no health endpoint"
+              echo "This run did **not** confirm $SERVICE is actually running $SHA. Check the Railway dashboard before treating this release as complete."
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           WANT="${SHA:0:8}"
