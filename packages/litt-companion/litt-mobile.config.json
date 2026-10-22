@@ -12,6 +12,7 @@
   "doctorCommand": "pnpm mobile:doctor",
   "envVars": [
     "EXPO_PUBLIC_API_URL",
-    "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY"
+    "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    "EXPO_PUBLIC_ENABLE_CLERK_AUTH"
   ]
 }
