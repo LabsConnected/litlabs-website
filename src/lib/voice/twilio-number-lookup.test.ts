@@ -40,6 +40,19 @@ describe("verifyNumberOwnership", () => {
     expect(result).toEqual({ owned: false, reason: "lookup_failed" });
   });
 
+  it("finds the toll-free number among several numbers on the account (realistic multi-number response)", async () => {
+    // Shaped like Twilio's real IncomingPhoneNumberInstance list response:
+    // an account typically has more than one number, and the target may not
+    // be first in the list.
+    const client = makeFakeClient([
+      { phoneNumber: "+15555550100", voice: true, sms: true, mms: true },
+      { phoneNumber: "+18772838063", sid: "PNrealtollfree", voice: true, sms: false, mms: false },
+      { phoneNumber: "+15555550199", voice: false, sms: true, mms: false },
+    ]);
+    const result = await verifyNumberOwnership(client, "+18772838063");
+    expect(result).toEqual({ owned: true, capabilities: { voice: true, sms: false, mms: false } });
+  });
+
   it("never calls anything beyond the injected client (no real network/SDK import)", async () => {
     const spy = vi.fn().mockResolvedValue([{ sid: "PN1", phoneNumber: "+18772838063", capabilities: { voice: true, sms: false, mms: false } }]);
     const client: TwilioNumberLookupClient = { listIncomingPhoneNumbers: spy };

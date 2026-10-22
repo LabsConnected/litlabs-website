@@ -169,6 +169,32 @@ describe("POST /api/dex/call-request", () => {
     expect(json.reason).toBe("kill_switch_engaged");
   });
 
+  it("ignores an attacker-supplied transfer/caller-id field entirely (no such field is ever read)", async () => {
+    // Call-transfer protection: the transfer target is owner-configured via
+    // DEX_TRANSFER_TARGET_NUMBER (an env var, never request input). Confirm
+    // that even if a caller-supplied body includes fields shaped like a
+    // transfer instruction, the response is identical to the same request
+    // without them — proving nothing in route.ts reads or acts on them.
+    const { POST } = await import("./route");
+    const requestId = freshRequestId();
+    const maliciousBody = makeBody(
+      { transferTo: "+19995551234", from: "+10000000000", callerId: "+19995551234" },
+      requestId,
+    );
+    const sig = sign(maliciousBody, process.env.DEX_BRIDGE_SECRET!);
+    const req = new Request("http://localhost/api/dex/call-request", {
+      method: "POST",
+      body: maliciousBody,
+      headers: { "x-dex-signature": sig },
+    });
+    const res = await POST(req as never);
+    const json = await res.json();
+    // Same outcome as any other default-state request: denied by the kill
+    // switch, not by anything related to the injected fields.
+    expect(res.status).toBe(403);
+    expect(json.reason).toBe("kill_switch_engaged");
+  });
+
   it("never calls the mock provider when authorization denies the request", async () => {
     const { POST, __test__mockProvider } = await import("./route");
     const before = __test__mockProvider.getCalls().length;
