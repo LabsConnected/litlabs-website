@@ -12,6 +12,10 @@
  */
 
 import { createHmac, randomUUID } from "crypto";
+import {
+  buildCanonicalSigningStringV2,
+  SIGNING_VERSION_V2,
+} from "./n8n-webhook";
 
 /** Webhook paths the bridge is authorized to forward to. Anything else: 403. */
 export const ALLOWED_WEBHOOK_PATHS: ReadonlySet<string> = new Set([
@@ -39,6 +43,7 @@ export interface ForwardSigningHeaders {
   "x-litt-signature": string;
   "x-litt-timestamp": string;
   "x-litt-request-id": string;
+  "x-litt-signature-version": string;
 }
 
 /**
@@ -56,18 +61,63 @@ export interface ForwardSigningHeaders {
 export function buildForwardSigningHeaders(
   secret: string | undefined,
   rawBody: string,
+  path: string,
   nowSeconds: number = Math.floor(Date.now() / 1000),
   requestId: string = randomUUID(),
 ): ForwardSigningHeaders {
   if (!secret) {
     throw new Error("buildForwardSigningHeaders: bridge secret is not configured");
   }
-  const hmac = createHmac("sha256", secret);
-  hmac.update(rawBody);
+  // v2: the signature binds timestamp, request ID, authorized path and the
+  // exact body (see buildCanonicalSigningStringV2 in src/lib/n8n-webhook.ts).
+  const signature = createHmac("sha256", secret)
+    .update(
+      buildCanonicalSigningStringV2({
+        timestamp: nowSeconds,
+        requestId,
+        path,
+        body: rawBody,
+      }),
+    )
+    .digest("hex");
   return {
-    "x-litt-signature": hmac.digest("hex"),
+    "x-litt-signature": signature,
     "x-litt-timestamp": String(nowSeconds),
     "x-litt-request-id": requestId,
+    "x-litt-signature-version": SIGNING_VERSION_V2,
+  };
+}
+
+/**
+ * Atomic one-time claim for a verified request ID — the replay gate.
+ * Returns true exactly once per key inside the TTL window.
+ *
+ * The in-process implementation below is correct for a single bridge
+ * instance and exists so the protocol is testable today. PRODUCTION must
+ * back this with the shared atomic store (Supabase
+ * `claim_n8n_bridge_request`, migration in ART-20261022-016 d5-prep) so the
+ * claim holds across litt-shell replicas; the route awaits the claim, so an
+ * async implementation drops in without protocol changes.
+ */
+export type ReplayClaim = (
+  claimKey: string,
+  nowSeconds?: number,
+) => boolean | Promise<boolean>;
+
+/** Replay-claim TTL: matches the 300s signature window. */
+export const REPLAY_CLAIM_TTL_SECONDS = 300;
+
+export function createInMemoryReplayClaim(
+  ttlSeconds: number = REPLAY_CLAIM_TTL_SECONDS,
+): ReplayClaim {
+  const seen = new Map<string, number>();
+  return (claimKey, nowSeconds = Math.floor(Date.now() / 1000)) => {
+    for (const [k, exp] of seen) {
+      if (exp <= nowSeconds) seen.delete(k);
+    }
+    if (seen.has(claimKey)) return false;
+    seen.set(claimKey, nowSeconds + ttlSeconds);
+    return true;
   };
 }
 
@@ -80,6 +130,7 @@ export const NEVER_FORWARD_HEADERS: readonly string[] = [
   "x-litt-signature",
   "x-litt-timestamp",
   "x-litt-request-id",
+  "x-litt-signature-version",
   "x-n8n-bridge-secret",
   "authorization",
   "cookie",
