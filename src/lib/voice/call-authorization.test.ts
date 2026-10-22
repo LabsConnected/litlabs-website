@@ -80,6 +80,35 @@ describe("authorizeOutboundCall", () => {
     expect(repo.recordAttempt).toHaveBeenCalledWith("+15551234567");
   });
 
+  it("a negative estimatedCostCents does not bypass the other gates (kill switch still denies)", async () => {
+    const repo = makeRepo({ isKillSwitchEngaged: vi.fn().mockResolvedValue(true) });
+    const result = await authorizeOutboundCall(
+      { phone: "+15551234567", requestedBy: "dex", estimatedCostCents: -999999 },
+      repo,
+    );
+    expect(result).toEqual({ allowed: false, reason: "kill_switch_engaged" });
+  });
+
+  it("allows exactly at the spend cap boundary (cost === cap), denies one cent over", async () => {
+    const repoAtCap = makeRepo({
+      isKillSwitchEngaged: vi.fn().mockResolvedValue(false),
+      hasConsent: vi.fn().mockResolvedValue(true),
+      getSpendCapCents: vi.fn().mockResolvedValue(500),
+    });
+    expect(
+      await authorizeOutboundCall({ phone: "+1", requestedBy: "dex", estimatedCostCents: 500 }, repoAtCap),
+    ).toEqual({ allowed: true });
+
+    const repoOverCap = makeRepo({
+      isKillSwitchEngaged: vi.fn().mockResolvedValue(false),
+      hasConsent: vi.fn().mockResolvedValue(true),
+      getSpendCapCents: vi.fn().mockResolvedValue(500),
+    });
+    expect(
+      await authorizeOutboundCall({ phone: "+1", requestedBy: "dex", estimatedCostCents: 501 }, repoOverCap),
+    ).toEqual({ allowed: false, reason: "spend_cap_exceeded" });
+  });
+
   it("checks the kill switch before any other check (fails closed on first gate)", async () => {
     const repo = makeRepo({ isKillSwitchEngaged: vi.fn().mockResolvedValue(true) });
     await authorizeOutboundCall({ phone: "+15551234567", requestedBy: "dex", estimatedCostCents: 0 }, repo);
