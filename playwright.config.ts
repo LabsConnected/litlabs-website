@@ -260,7 +260,7 @@ export default defineConfig({
     // Studio isolation needs terminal-server + DB — only run when explicitly enabled
     ...(process.env.PLAYWRIGHT_INTEGRATION === "true" ? [{
       name: "self-contained-auth",
-      testMatch: /isolation/,
+      testMatch: /isolation|shared-brain/,
       use: {
         ...devices["Desktop Chrome"],
       },
