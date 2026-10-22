@@ -129,6 +129,12 @@ src/mobile/
 # Git worktrees (local only, never commit)
 .worktrees/
 
+# Phase 7: Narrow Diagnostic & Temp Exclusions
+/LITT-Freeze-Diag-Temp/
+.playwright-mcp/*.log
+.scratch-*.diff
+/tmp_ledger.txt
+
 # Clerk configuration (can include secrets)
 /.clerk/
 
