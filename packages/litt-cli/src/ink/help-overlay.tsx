@@ -44,6 +44,7 @@ const COMMANDS: Array<[string, string]> = [
   ["/files", "Find project files"],
   ["/model", "Quick model switch"],
   ["/models", "Model center"],
+  ["/refresh", "Re-probe Ollama + refresh models"],
   ["/status", "Runtime details"],
   ["/doctor", "Diagnose LiTT"],
   ["/run", "Run arbitrary command"],

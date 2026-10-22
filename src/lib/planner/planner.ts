@@ -66,7 +66,17 @@ export function buildPlan(prompt: string, result: IntentRouterResult): Execution
   const needsProject = result.requirements.needsProject;
   let tail: string[] = [];
 
-  if (needsProject && !result.target?.projectId) {
+  // create_project is emitted only for an explicit, unambiguous
+  // new-project request — needsProject alone means the work needs a
+  // project context, not that one should be minted. A chat turn or
+  // file-scope edit must never plan a silent creation step.
+  if (
+    needsProject &&
+    result.requestsNewProject === true &&
+    result.actionMatched === true &&
+    (result.action === "create" || result.action === "generate") &&
+    !result.target?.projectId
+  ) {
     steps.push(step(planId, "create_project", "create_project", "project_action", [], { approval: "before_external_write" }));
     tail = ["create_project"];
   }

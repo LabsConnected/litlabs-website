@@ -53,6 +53,8 @@ export interface CanonicalProject {
   workspaceRoot: string | null;
   workspaceError: string | null;
   workspacePreparedAt: string | null;
+  /** Opaque fencing token held by the current provisioning attempt. */
+  workspaceProvisioningToken: string | null;
 
   // Runtime fields
   runtimeStatus: RuntimeStatus;
@@ -100,6 +102,7 @@ export interface StudioProjectRow {
   workspace_root: string | null;
   workspace_error: string | null;
   workspace_prepared_at: string | null;
+  workspace_provisioning_token?: string | null;
   runtime_status: RuntimeStatus;
   preview_url: string | null;
   runtime_error: string | null;
@@ -111,6 +114,8 @@ export interface StudioProjectRow {
   test_command: string | null;
   install_command: string | null;
   workspace_type: string | null;
+  /** Added by 20261018000000. Optional: a pre-migration DB omits it. */
+  idempotency_key?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -164,6 +169,7 @@ export function rowToCanonical(row: StudioProjectRow): CanonicalProject {
     workspaceRoot: row.workspace_root,
     workspaceError: row.workspace_error,
     workspacePreparedAt: row.workspace_prepared_at,
+    workspaceProvisioningToken: row.workspace_provisioning_token ?? null,
     runtimeStatus: row.runtime_status,
     previewUrl: row.preview_url,
     runtimeError: row.runtime_error,
@@ -204,6 +210,7 @@ export function legacyRowToCanonical(row: LegacyProjectRow): CanonicalProject {
     workspaceRoot: null,
     workspaceError: null,
     workspacePreparedAt: null,
+    workspaceProvisioningToken: null,
     runtimeStatus: "stopped",
     previewUrl: null,
     runtimeError: null,
@@ -226,6 +233,16 @@ export interface CreateBlankProjectInput {
   name: string;
   templateId: ProjectTemplateId;
   accessMode?: ProjectAccessMode;
+  /**
+   * Idempotent-create key for this one submission. Generated once per
+   * user submission and reused only by retries of the SAME submission.
+   * Uniqueness is enforced by the `studio_projects_idempotency_key_uq`
+   * index on (user_id, idempotency_key): a repeat returns the project it
+   * already made instead of inserting a second row. Different
+   * submissions carry different keys and can never coalesce — unrelated
+   * projects with the same name or slug stay distinct.
+   */
+  idempotencyKey?: string;
 }
 
 /** Input for creating a GitHub-backed project. */

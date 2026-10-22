@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Text } from "ink";
+import { useReducedMotion } from "./motion.js";
 
 const FRAMES: Record<string, string[]> = {
   dots: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
@@ -24,13 +25,15 @@ export interface SpinnerProps {
 export function Spinner({ type = "dots", color = "cyan", interval = 80 }: SpinnerProps): React.ReactElement {
   const frames = FRAMES[type] ?? FRAMES.dots;
   const [frame, setFrame] = useState(0);
+  const reduced = useReducedMotion();
 
   useEffect(() => {
+    if (reduced) return;
     const timer = setInterval(() => {
       setFrame(prev => (prev + 1) % frames.length);
     }, interval);
     return () => clearInterval(timer);
-  }, [frames.length, interval]);
+  }, [frames.length, interval, reduced]);
 
   return <Text color={color}>{frames[frame]}</Text>;
 }

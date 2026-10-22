@@ -53,6 +53,12 @@ export interface TerminalHealthContext {
   isTerminalOwner?: boolean;
   /** Whether the terminal server was reachable on last check. */
   terminalServerReachable?: boolean;
+  /**
+   * Whether the workspace is static (gitless).
+   * Static workspaces have file access but NO host execution (Gate 1).
+   * When true, terminal.execute must report unavailable.
+   */
+  isStaticWorkspace?: boolean;
 }
 
 /**
@@ -66,6 +72,18 @@ export function resolveTerminalHealth(ctx: TerminalHealthContext): ToolHealthRep
       health: "unavailable",
       reason: "no_authenticated_user",
       detail: "Terminal requires an authenticated user.",
+    };
+  }
+  // Gate 1: static (gitless) workspaces never have host execution.
+  // Report unavailable truthfully so the agent selects file tools instead.
+  if (ctx.isStaticWorkspace === true) {
+    return {
+      toolId: "terminal.execute",
+      health: "unavailable",
+      reason: "static_workspace_no_exec",
+      detail:
+        "This is a static (gitless) workspace. Host execution is disabled by Gate 1. " +
+        "Use files.write, files.read, and files.list instead of terminal.execute.",
     };
   }
   if (ctx.isTerminalOwner === false) {
@@ -134,6 +152,50 @@ const APPROVAL_GATED_TOOLS = new Set([
 ]);
 
 /**
+ * Preview dev-server tools. preview.start spawns a dev-server process on
+ * the terminal server — host execution. Static (gitless) workspaces have
+ * no host execution (Gate 1) and no dev server: the Studio preview is
+ * served directly from the static files. Advertising these tools in a
+ * static workspace guarantees a failed call — and because they are
+ * mutating, every model retry re-enters the approval gate, which looped
+ * a Gate B run across seven approval pauses (2026-10-13). Report
+ * UNAVAILABLE truthfully, exactly like terminal.execute. The station
+ * delegates preview.launch / preview.reload wrap preview.start, so they
+ * share its health.
+ */
+const PREVIEW_DEV_SERVER_TOOLS = new Set([
+  "preview.start",
+  "preview.launch",
+  "preview.reload",
+]);
+
+// These handlers also use workspace.exec, including package discovery and
+// ripgrep/Git probes. Static workspaces use file-list/read-back evidence.
+const STATIC_EXEC_TOOLS = new Set([
+  "project.scan", "project.health", "package.info", "search_code", "code.search",
+  "build.run", "test.run", "typecheck.run", "lint.run",
+]);
+
+export function resolvePreviewDevServerHealth(
+  toolId: string,
+  ctx: TerminalHealthContext,
+): ToolHealthReport | null {
+  if (!PREVIEW_DEV_SERVER_TOOLS.has(toolId)) return null;
+  if (ctx.isStaticWorkspace === true) {
+    return {
+      toolId,
+      health: "unavailable",
+      reason: "static_workspace_no_dev_server",
+      detail:
+        "This is a static (gitless) workspace: there is no dev server to launch. " +
+        "The Studio preview renders the static files directly. " +
+        "Write the files with files.write; do not attempt preview launch tools.",
+    };
+  }
+  return null;
+}
+
+/**
  * Resolve health for a set of tool IDs.
  */
 export function resolveToolHealth(
@@ -147,8 +209,21 @@ export function resolveToolHealth(
       out.set(toolId, override);
       continue;
     }
+    if (ctx.terminal?.isStaticWorkspace &&
+        (STATIC_EXEC_TOOLS.has(toolId) || toolId.startsWith("checks.") || toolId.startsWith("git."))) {
+      out.set(toolId, {
+        toolId, health: "unavailable", reason: "static_workspace_no_exec",
+        detail: "This tool requires host execution. Inspect static files with files.list and files.read; verify writes by read-back.",
+      });
+      continue;
+    }
     if (toolId === "terminal.execute") {
       out.set(toolId, resolveTerminalHealth(ctx.terminal ?? {}));
+      continue;
+    }
+    const previewReport = resolvePreviewDevServerHealth(toolId, ctx.terminal ?? {});
+    if (previewReport) {
+      out.set(toolId, previewReport);
       continue;
     }
     if (APPROVAL_GATED_TOOLS.has(toolId)) {

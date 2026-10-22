@@ -1,6 +1,9 @@
 import { test, expect, type Browser, type BrowserContext, type APIResponse } from "@playwright/test";
 
-const DEPLOYMENT_URL = process.env.SMOKE_TEST_URL || "http://localhost:3000";
+const DEPLOYMENT_URL =
+  process.env.PLAYWRIGHT_BASE_URL ||
+  process.env.SMOKE_TEST_URL ||
+  "http://localhost:3000";
 
 // LiTLabs no longer uses Vercel deployment protection. Keep these helpers as
 // no-op compatibility shims for the shared preview/production smoke tests.

@@ -29,16 +29,67 @@ vi.mock("@clerk/backend", () => ({
 
 describe("/api/health — Clerk backend auth check", () => {
   const originalSecretKey = process.env.CLERK_SECRET_KEY;
+  const originalRailwaySha = process.env.RAILWAY_GIT_COMMIT_SHA;
+  const originalVercelSha = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
 
   beforeEach(() => {
     vi.resetModules();
     mockGetCount.mockReset();
     delete process.env.CLERK_SECRET_KEY;
+    delete process.env.RAILWAY_GIT_COMMIT_SHA;
+    delete process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
   });
 
   afterEach(() => {
     if (originalSecretKey === undefined) delete process.env.CLERK_SECRET_KEY;
     else process.env.CLERK_SECRET_KEY = originalSecretKey;
+    if (originalRailwaySha === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA;
+    else process.env.RAILWAY_GIT_COMMIT_SHA = originalRailwaySha;
+    if (originalVercelSha === undefined) delete process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
+    else process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA = originalVercelSha;
+  });
+
+  it("reports the full Railway SHA in build detail while keeping commit abbreviated", async () => {
+    const railwaySha = "a".repeat(40);
+    process.env.RAILWAY_GIT_COMMIT_SHA = railwaySha;
+    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA = "b".repeat(40);
+    const { GET } = await import("@/app/api/health/route");
+    const res = await GET();
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.checks.build).toEqual({ status: "ok", detail: railwaySha });
+    expect(body.commit).toBe(railwaySha.slice(0, 8));
+    expect(body).toEqual(expect.objectContaining({ service: "web", status: expect.any(String), checks: expect.any(Object) }));
+  });
+
+  it("rejects an invalid Railway SHA and preserves the provider fallback", async () => {
+    process.env.RAILWAY_GIT_COMMIT_SHA = "not-a-commit-sha";
+    const vercelSha = "b".repeat(40);
+    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA = vercelSha;
+    const { GET } = await import("@/app/api/health/route");
+    const res = await GET();
+    const body = await res.json();
+    expect(body.checks.build.detail).toBe(vercelSha.slice(0, 8));
+    expect(body.checks.build.detail).not.toMatch(/^[0-9a-f]{40}$/i);
+    expect(body.commit).toBe("not-a-co");
+  });
+
+  it("preserves the existing dev fallback when Railway and provider SHAs are absent", async () => {
+    const { GET } = await import("@/app/api/health/route");
+    const res = await GET();
+    const body = await res.json();
+    expect(body.checks.build.detail).toBe("dev");
+    expect(body.commit).toBe("dev");
+  });
+
+  it("keeps the health response status and top-level shape unchanged", async () => {
+    process.env.RAILWAY_GIT_COMMIT_SHA = "c".repeat(40);
+    const { GET } = await import("@/app/api/health/route");
+    const res = await GET();
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(Object.keys(body).sort()).toEqual(["checks", "commit", "service", "status", "timestamp", "version"].sort());
+    expect(Object.keys(body.checks).sort()).toEqual(["auth", "build", "database", "env", "storage", "terminal"].sort());
   });
 
   it("reports degraded (not ok) when CLERK_SECRET_KEY is unset", async () => {

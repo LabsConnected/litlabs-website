@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Code2,
@@ -12,6 +12,14 @@ import {
   Play,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
+import {
+  createManagedStudioProject,
+  deriveProjectNameFromPrompt,
+  takeSubmissionKey,
+  type CreateSubmission,
+} from "@/lib/projects/create-project-request";
+import { resolveBuildRoute } from "./build-routing";
 
 /**
  * BuildConsole — the dashboard's one universal composer.
@@ -37,9 +45,13 @@ const SUGGESTIONS = [
 
 export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string }) {
   const router = useRouter();
+  const { getToken } = useClerkAuth();
   const [prompt, setPrompt] = useState(initialPrompt);
   const [isRouting, setIsRouting] = useState(false);
   const [routingMessage, setRoutingMessage] = useState<string | null>(null);
+  // Submission key bound to the prompt fingerprint: an identical retry
+  // reuses it; an edited prompt mints a fresh key.
+  const createSubmissionRef = useRef<CreateSubmission | null>(null);
 
   // Deep links (e.g. the legacy /create redirect) can pre-fill the composer.
   useEffect(() => {
@@ -52,38 +64,118 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
     if (!text || isRouting) return;
     setIsRouting(true);
     setRoutingMessage(null);
+    let payload: {
+      type?: "intent" | "clarification";
+      request?: { question?: string };
+      result?: {
+        primaryIntent?: string;
+        secondaryIntents?: string[];
+        intents?: string[];
+        action?: string;
+        actionMatched?: boolean;
+        requestsNewProject?: boolean;
+        requestsMediaGeneration?: boolean;
+      };
+      plan?: { id?: string };
+      error?: string;
+    };
     try {
       const response = await fetch("/api/litt/intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: text }),
       });
-      const payload = (await response.json()) as {
-        type?: "intent" | "clarification";
-        request?: { question?: string };
-        result?: { primaryIntent?: string };
-        plan?: { id?: string };
-        error?: string;
-      };
-      if (!response.ok) throw new Error(payload.error || "LiTT could not route that request.");
+      payload = (await response.json()) as typeof payload;
+      if (!response.ok) {
+        setRoutingMessage(payload.error || "LiTT could not route that request — try again.");
+        setIsRouting(false);
+        return;
+      }
       if (payload.type === "clarification") {
         setRoutingMessage(
           payload.request?.question || "Tell LiTT what you want to work on.",
         );
+        setIsRouting(false);
         return;
       }
-      const params = new URLSearchParams({ tool: "chat", prompt: text });
-      if (payload.result?.primaryIntent)
-        params.set("intent", payload.result.primaryIntent);
-      if (payload.plan?.id) params.set("planId", payload.plan.id);
-      router.push(`/studio?${params.toString()}`);
     } catch {
-      // Intent router unreachable — hand the raw prompt to Studio instead
-      // of leaving the user on a dead button.
-      router.push(`/studio?tool=chat&prompt=${encodeURIComponent(text)}`);
-    } finally {
+      // The router could not tell a build request from a chat request —
+      // creating a project or redirecting into an existing one would be a
+      // silent misroute, so surface a retryable error instead of guessing.
+      setRoutingMessage("LiTT could not route that request — try again.");
       setIsRouting(false);
+      return;
     }
+
+    const primaryIntent = payload.result?.primaryIntent;
+    const planId = payload.plan?.id;
+    // The routing decision lives in build-routing.resolveBuildRoute so
+    // tests exercise the exact same logic against real routeIntent
+    // output. "create" requires the router's explicit new-project signal
+    // — the defaulted "create" action, missing metadata, questions,
+    // file-scope work, and edits to an existing project all fall through
+    // to the non-creating Studio chat route. Only an explicit build
+    // mints and pins ?project=<new id> — ?prompt= alone resolves to the
+    // most-recently-touched project and runs inside it.
+    const decision = resolveBuildRoute(payload.result);
+    if (decision.kind === "create") {
+      createSubmissionRef.current = takeSubmissionKey(createSubmissionRef.current, text);
+      try {
+        const project = await createManagedStudioProject({
+          name: deriveProjectNameFromPrompt(text),
+          templateId: "blank-static",
+          getToken,
+          idempotencyKey: createSubmissionRef.current.key,
+        });
+        const params = new URLSearchParams({
+          tool: "chat",
+          prompt: text,
+          project: project.id,
+        });
+        if (primaryIntent) params.set("intent", primaryIntent);
+        // planId is carried for traceability only — Studio does not read
+        // it and the plan is never executed as-is. The prompt lands in
+        // the LiTT composer and a run re-plans against the pinned
+        // project, where the planner's pinned-target guard suppresses a
+        // second create_project. If plan execution is ever wired to
+        // ?planId=, it MUST resolve against the pinned project id, not
+        // the plan's create_project step — otherwise this chain mints a
+        // second project.
+        if (planId) params.set("planId", planId);
+        router.push(`/studio?${params.toString()}`);
+        createSubmissionRef.current = null;
+      } catch (err) {
+        setRoutingMessage(
+          err instanceof Error ? err.message : "Couldn't create your project. Try again.",
+        );
+        setIsRouting(false);
+      }
+      // On success isRouting intentionally stays true: the button must
+      // not accept a second submission while the navigation is pending.
+      return;
+    }
+
+    // Media/design generation requests route to the Studio surface that
+    // produces them — never a blank project. resolveBuildRoute restricts
+    // this to single media/design classifications and mixed
+    // classifications made exclusively of media/design intents; a mixed
+    // result containing code, website, debug, deploy or research is
+    // project work and falls through to chat.
+    if (decision.kind === "surface") {
+      const params = new URLSearchParams({ prompt: text });
+      if (decision.surface.creator) params.set("creator", decision.surface.creator);
+      if (decision.surface.tool) params.set("tool", decision.surface.tool);
+      if (primaryIntent) params.set("intent", primaryIntent);
+      if (planId) params.set("planId", planId);
+      router.push(`/studio?${params.toString()}`);
+      return;
+    }
+
+    const params = new URLSearchParams({ tool: "chat", prompt: text });
+    if (primaryIntent) params.set("intent", primaryIntent);
+    if (planId) params.set("planId", planId);
+    router.push(`/studio?${params.toString()}`);
+    // Same here: isRouting stays true until the page unmounts.
   };
 
   return (

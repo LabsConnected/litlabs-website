@@ -29,6 +29,20 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/projects",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock("@/hooks/useClerkAuth", () => ({
+  useClerkAuth: () => ({
+    isLoaded: true,
+    isSignedIn: true,
+    getToken: vi.fn().mockResolvedValue("test-token"),
+  }),
+}));
+
 vi.mock("@/components/PageShell", () => ({
   default: ({ children }: any) => <div data-testid="page-shell">{children}</div>,
 }));

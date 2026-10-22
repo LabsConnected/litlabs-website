@@ -181,12 +181,12 @@ export interface LLMResult {
 /*  Env + provider config                                              */
 /* ------------------------------------------------------------------ */
 const GEMINI_KEY =
-  process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+  (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+const OPENROUTER_KEY = (process.env.OPENROUTER_API_KEY || "").trim();
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-const GROQ_KEY = process.env.GROQ_API_KEY || "";
+const GROQ_KEY = (process.env.GROQ_API_KEY || "").trim();
 const GROQ_BASE = "https://api.groq.com/openai/v1";
-const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_KEY = (process.env.OPENAI_API_KEY || "").trim();
 const OPENAI_BASE = "https://api.openai.com/v1";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 
@@ -200,10 +200,10 @@ export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   groq: "openai/gpt-oss-120b",
   "groq-whisper": "whisper-large-v3",
   openai: OPENAI_MODEL,
-  "openrouter-free": "openrouter/free",
+  "openrouter-free": "google/gemma-4-31b-it:free",
   "openrouter-qwen": "nvidia/nemotron-3-super-120b-a12b:free",
   "openrouter-deepseek": "nvidia/nemotron-3-ultra-550b-a55b:free",
-  "openrouter-mistral": "nex-agi/nex-n2.5-pro:free",
+  "openrouter-mistral": "google/gemma-4-26b-a4b-it:free",
   "openrouter-llama": "google/gemma-4-31b-it:free",
   "openrouter-trinity": "nvidia/nemotron-3.5-lightning:free",
   "openrouter-vision": "google/gemma-4-31b-it:free",

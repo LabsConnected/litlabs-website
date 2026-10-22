@@ -72,7 +72,9 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   });
 
   it("flips the badge when a Tailwind-intended preview renders unstyled", async () => {
-    renderReadyPreview();
+    await act(async () => {
+      renderReadyPreview();
+    });
     await screen.findByText("Preview ready");
     postStyleProbe({ tailwindDetected: true, styled: false });
     await screen.findByText("Preview styling failed to apply");
@@ -80,7 +82,9 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   });
 
   it("keeps 'Preview ready' when Tailwind applied", async () => {
-    renderReadyPreview();
+    await act(async () => {
+      renderReadyPreview();
+    });
     await screen.findByText("Preview ready");
     postStyleProbe({ tailwindDetected: true, styled: true });
     await act(async () => {
@@ -91,7 +95,9 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   });
 
   it("keeps 'Preview ready' for pages without Tailwind intent", async () => {
-    renderReadyPreview();
+    await act(async () => {
+      renderReadyPreview();
+    });
     await screen.findByText("Preview ready");
     postStyleProbe({ tailwindDetected: false, styled: true });
     await act(async () => {
@@ -101,7 +107,9 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   });
 
   it("ignores style-probe messages from other origins", async () => {
-    renderReadyPreview();
+    await act(async () => {
+      renderReadyPreview();
+    });
     await screen.findByText("Preview ready");
     act(() => {
       window.dispatchEvent(

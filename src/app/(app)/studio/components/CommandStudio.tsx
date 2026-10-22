@@ -30,6 +30,7 @@ import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
 import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_OPEN_FILE, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
 import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
+import { createManagedStudioProject, takeSubmissionKey, type CreateSubmission } from "@/lib/projects/create-project-request";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 import {
   isOnboardingComplete,
@@ -1415,6 +1416,10 @@ function CommandStudioContent() {
   }, []);
 
   const [creatingProject, setCreatingProject] = useState(false);
+  // Submission key bound to the name fingerprint: an identical retry
+  // (lost response, transient failure) reuses it; an edit, cancel or
+  // reopened dialog mints a fresh one.
+  const createSubmissionRef = useRef<CreateSubmission | null>(null);
 
   // Auto-reveal the dock Activity tab when LiTT starts executing,
   // without stealing focus. This does NOT call .focus() on any
@@ -1819,30 +1824,14 @@ function CommandStudioContent() {
     if (creatingProject) return;
     setCreatingProject(true);
     setProjectCreateError(null);
+    createSubmissionRef.current = takeSubmissionKey(createSubmissionRef.current, name.trim());
     try {
-      const token = await getToken?.();
-      const res = await fetch("/api/studio-projects", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          sourceType: "blank",
-          name,
-          templateId: "blank-static",
-        }),
+      const project = await createManagedStudioProject({
+        name,
+        templateId: "blank-static",
+        getToken,
+        idempotencyKey: createSubmissionRef.current.key,
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const msg = (err as { error?: string }).error || `Failed to create project (${res.status})`;
-        setProjectCreateError(msg);
-        console.error("[handleStartBlank] Failed to create project:", err);
-        if (isMobileLitt) mobileDiag("project", "create_failed", { status: res.status });
-        return;
-      }
-      const { project } = await res.json();
       // Persist the new project ID to localStorage immediately so that
       // the conversation controller can find it via getActiveProjectId's
       // localStorage fallback. The key is scoped by user.
@@ -1873,6 +1862,7 @@ function CommandStudioContent() {
       setStudioMode("work");
       setWorkSurface("conversation");
       setProjectNameDialogOpen(false);
+      createSubmissionRef.current = null;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Network error while creating project.";
       setProjectCreateError(msg);
@@ -3753,7 +3743,7 @@ function CommandStudioContent() {
         open={projectNameDialogOpen}
         busy={creatingProject}
         error={projectCreateError}
-        onCancel={() => { if (!creatingProject) setProjectNameDialogOpen(false); }}
+        onCancel={() => { if (!creatingProject) { createSubmissionRef.current = null; setProjectNameDialogOpen(false); } }}
         onSubmit={(name) => { void handleStartBlank(name); }}
       />
 
