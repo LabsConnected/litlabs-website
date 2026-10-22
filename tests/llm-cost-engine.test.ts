@@ -156,14 +156,17 @@ describe("LLM Cost Engine", () => {
     const free = getEstimatedBitsRange("openrouter-free", "openrouter/free", false);
     expect(free.label).toBe("Included");
 
-    // At 100 bits/$ a paid model whose 2K-token estimate is 1 bit ($0.01)
-    // is a real charge. It must not be labeled Included.
+    // Active LLM rate is 1,000 bits/$. Included is only a free class or
+    // zero bits. Low is ≤ $0.05 (≤ 50 bits). These 2,000-token samples
+    // stay in Low: a 1-bit paid estimate would be $0.001, not Included.
     const paid = getEstimatedBitsRange("groq", "llama-3.3-70b-versatile", false);
     expect(paid.max).toBeGreaterThanOrEqual(1);
+    expect(paid.max / 1000).toBeLessThanOrEqual(0.05);
     expect(paid.label).toBe("Low LiTTBits");
     expect(paid.label).not.toBe("Included");
     const premium = getEstimatedBitsRange("openai", "gpt-4o", false);
-    expect(premium.label).toMatch(/LiTTBits/);
+    expect(premium.max / 1000).toBeLessThanOrEqual(0.05);
+    expect(premium.label).toBe("Low LiTTBits");
     expect(premium.label).not.toBe("Included");
   });
 });

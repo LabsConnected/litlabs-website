@@ -263,12 +263,15 @@ describe("pricing policy versions", () => {
     expect(ACTIVE_LLM_POLICY_ID).toBe(LEGACY_EXCHANGE_POLICY_ID);
     expect(ACTIVE_LLM_POLICY_ID).not.toBe(UNAPPROVED_EXCHANGE_POLICY_ID);
     expect(PRICING_POLICIES[ACTIVE_LLM_POLICY_ID].llmBitsPerUsd).toBe(1000);
+    expect(PRICING_POLICIES[ACTIVE_LLM_POLICY_ID].generationBitsPerUsd).toBe(100);
     expect(PRICING_POLICIES[ACTIVE_LLM_POLICY_ID].approval).toBe("legacy");
   });
 
-  it("does not label a 1-bit paid estimate as Included", () => {
+  it("does not label a paid estimate as Included at 1,000 bits/$", () => {
     const paid = getEstimatedBitsRange("groq", "openai/gpt-oss-120b", false);
     expect(paid.max).toBeGreaterThanOrEqual(1);
+    expect(paid.max / 1000).toBeLessThanOrEqual(0.05);
+    expect(paid.label).toBe("Low LiTTBits");
     expect(paid.label).not.toBe("Included");
   });
 });
@@ -303,6 +306,8 @@ describe("economics figures used in docs/billing/684-economics.md", () => {
     expect(groqChat.providerCostMicros).toBe(985);
     const doc = src("docs/billing/684-economics.md");
     expect(doc).toMatch(/UNAPPROVED/);
+    expect(doc).toMatch(/\$0\.20/);
+    expect(doc).toMatch(/txsalzljvglbrnldikco/);
     expect(doc).toMatch(/7,500/);
     expect(doc).toMatch(/18,000/);
     expect(doc).toMatch(/1,500/);

@@ -53,14 +53,13 @@ Catalog rates used (USD per 1M tokens, `baseBitsPer1K`):
 
 ## Hold
 
-The 200-bit hold is a **$2.00 face-value hold** at the customer-facing
-generation rate of 100 bits/$ (owner record, 2026-10-22) — face value,
-not provider cost or a final charge. At the legacy 1,000/$ LLM rate the
-same 200 bits are **$0.20** of model-cost equivalence. The hold size was
-not changed. Settle charges
-the accrued bits, capped at 200, and releases the rest. Cancel or abandon
-with no completed steps releases all 200. The 1-bit minimum applies only
-when the build completes successfully.
+Studio builds settle on the **LLM lane**. At the active 1,000 bits/$ rate
+the 200-bit hold is **$0.20**. That is the hold value used below. The same
+integer is **$2.00** only if it is priced on the generation lane (100
+bits/$). Studio LLM builds do not settle on that lane. The hold size was
+not changed. Settle charges the accrued bits, capped at 200, and releases
+the rest. Cancel or abandon with no completed steps releases all 200. The
+1-bit minimum applies only when the build completes successfully.
 
 ## Plan allowances
 
@@ -130,16 +129,26 @@ Computed with the formula above. Figures below were checked against
 | 8 steps (assumption) | 8 ($0.08) | 24 ($0.24) | Both under the hold. The other 192 or 176 bits are released on settle. |
 | 50 steps (loop cap, same token assumption) | 50 ($0.50) | 150 ($1.50) | Both still under 200. A more expensive step size would hit the cap and the overflow would be logged, not charged past 200. |
 
-At the legacy 1,000/$ rate the same gpt-4o step is 21 bits, so 8 steps
-are 168 bits and 10 steps would meet the 200-bit hold. The hold is much
-tighter if bits are worth 10x less in dollars of model.
+Active 1,000/$ LLM rate (what the engine charges). These are assumptions,
+not measured sessions:
+
+| Build | Groq bits | gpt-4o bits | Versus the 200 hold ($0.20) |
+| --- | --- | --- | --- |
+| 8 steps (assumption) | 24 ($0.024) | 168 ($0.168) | Both under the hold. Settle releases the unused 176 or 32 bits. |
+| 10 gpt-4o steps (same token assumption) | — | 210 | Meets the hold. Overflow would be logged, not charged past 200. |
+| 50 steps (loop cap, same token assumption) | 150 ($0.150) | 1,050 raw, charged 200 | Groq stays under the hold. gpt-4o is capped at 200 ($0.20). |
 
 Provider cost for an 8-step Groq build is about 8 * $0.001812 = $0.0145.
-Customer retail at the unapproved candidate rate would be 8 bits = $0.08
-(at the active legacy rate the same build retails at the 1,000/$ column
-above). That margin is
-the 1.50 multiplier plus the `baseBitsPer1K * 0.1` term and the 1-bit
-floor, not a measured contribution margin.
+Customer retail at the active 1,000/$ rate is 24 bits = $0.024. Retail at
+the inactive 100/$ proposal would be 8 bits = $0.08. That gap is the 1.50
+multiplier plus the `baseBitsPer1K * 0.1` term and the 1-bit floor, not a
+measured contribution margin.
+
+## Staging
+
+Staging Supabase project `txsalzljvglbrnldikco` exists and is isolated.
+Its migration ledger needs reconciliation before acceptance testing. This
+change does not connect to that project and does not write to it.
 
 ## What this does not decide
 
