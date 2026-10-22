@@ -121,7 +121,7 @@ describe.skipIf(!ENABLED)("concurrent subscription conflict (real Postgres)", ()
     },
   });
 
-  const paid = (id: string, invId: string, subId: string) => ({
+  const paid = (id: string, invId: string, subId: string, price: string) => ({
     id,
     type: "invoice.paid",
     data: {
@@ -129,7 +129,7 @@ describe.skipIf(!ENABLED)("concurrent subscription conflict (real Postgres)", ()
         id: invId,
         customer: `cus_${subId}`,
         parent: { subscription_details: { subscription: subId } },
-        lines: { data: [{ period: { end: 1702678400 }, pricing: { price_details: { price: "" } } }] },
+        lines: { data: [{ period: { end: 1702678400 }, pricing: { price_details: { price } } }] },
       },
     },
   });
@@ -204,8 +204,8 @@ describe.skipIf(!ENABLED)("concurrent subscription conflict (real Postgres)", ()
 
       // Credits: pay both subscriptions' first invoices at the same instant.
       await Promise.all([
-        deliver(paid(`evt_${TAG}_pa_${i}`, `in_${TAG}_a_${i}`, a)),
-        deliver(paid(`evt_${TAG}_pb_${i}`, `in_${TAG}_b_${i}`, b)),
+        deliver(paid(`evt_${TAG}_pa_${i}`, `in_${TAG}_a_${i}`, a, "price_creator_local")),
+        deliver(paid(`evt_${TAG}_pb_${i}`, `in_${TAG}_b_${i}`, b, "price_pro_local")),
       ]);
       const ledger = await grants(uid);
       const allowance = subs[0]?.plan === "pro_builder_beta" ? 18000 : 7500;
@@ -227,7 +227,7 @@ describe.skipIf(!ENABLED)("concurrent subscription conflict (real Postgres)", ()
     const s = `sub_${TAG}_idem`;
     expect(await deliver(created(`evt_${TAG}_idem_c`, s, clerk, "creator_beta", "price_creator_local"))).toBe(200);
     await Promise.all(
-      Array.from({ length: 6 }, () => deliver(paid(`evt_${TAG}_idem_p`, `in_${TAG}_idem`, s))),
+      Array.from({ length: 6 }, () => deliver(paid(`evt_${TAG}_idem_p`, `in_${TAG}_idem`, s, "price_creator_local"))),
     );
     const ledger = await grants(uid);
     expect({ total: ledger.total, n: ledger.n }).toEqual({ total: 7500, n: 1 });
