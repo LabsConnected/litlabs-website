@@ -33,13 +33,19 @@ export function createReplayGuard(opts?: { now?: () => number; windowMs?: number
       const current = now();
       prune(current);
 
+      if (!Number.isFinite(timestampMs)) return { ok: false, reason: "stale_timestamp" };
+
       const age = current - timestampMs;
       if (age > windowMs) return { ok: false, reason: "stale_timestamp" };
       if (age < -windowMs) return { ok: false, reason: "future_timestamp" };
 
       if (seen.has(requestId)) return { ok: false, reason: "replayed_request_id" };
 
-      seen.set(requestId, current + windowMs);
+      // Expire relative to whichever is later — current time or the claimed
+      // timestamp — so a request near the edge of the window can't be
+      // pruned out of the dedupe set before its own freshness window would
+      // have elapsed.
+      seen.set(requestId, Math.max(current, timestampMs) + windowMs);
       return { ok: true };
     },
   };
