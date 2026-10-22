@@ -12,7 +12,13 @@ if (!secret || secret.length < 32) {
 }
 
 const port = process.env.DEX_TEST_PORT || "3000";
-const body = JSON.stringify({ phone: "+15551234567", requestedBy: "dex-mock-test", estimatedCostCents: 0 });
+const body = JSON.stringify({
+  phone: "+15551234567",
+  requestedBy: "dex-mock-test",
+  estimatedCostCents: 0,
+  requestId: `mock-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  timestamp: Date.now(),
+});
 const sig = createHmac("sha256", secret).update(body).digest("hex");
 
 const res = await fetch(`http://localhost:${port}/api/dex/call-request`, {
