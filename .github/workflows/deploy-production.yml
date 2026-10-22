@@ -4,14 +4,25 @@ name: Deploy to Production (manual, CI-gated, approval-required)
 #
 # This workflow NEVER runs automatically. A push to main does not deploy.
 # A person starts it from the Actions tab, picks a service and a commit
-# that is already on main, and (via the `production` environment's required
-# reviewers) approval is needed before anything is deployed.
+# that is already on main, TYPES AN EXPLICIT AUTHORIZATION PHRASE, and (via the
+# `production` environment's required reviewers) a second approval is needed
+# before anything is deployed.
 #
 # Gates, in order:
 #   1. The service must be in the allowed production service list.
-#   2. The commit must be an ancestor of main.
-#   3. Required CI check runs must have concluded "success" on that exact commit.
-#   4. The `production` GitHub environment must approve the run.
+#   2. The authorization phrase must match exactly: "DEPLOY <service> <sha8>".
+#   3. The commit must be an ancestor of main.
+#   4. Every check in REQUIRED_CHECKS must have concluded "success" on that exact commit.
+#   5. The `production` GitHub environment must approve the run.
+#   6. After deploy, the live health endpoint must report the deployed commit.
+#
+# Production targets (verified in Railway, Oct 21 2026):
+#   litt-shell           website project  www.litlabs.net                  (public site + /metrics)
+#   terminal-server      website project  terminal-server-production-68ac  (server-side TERMINAL_SERVER_URL)
+#   web-app              terminal project app.litlabs.net
+#   terminal-server-prod terminal project terminal.litlabs.net             (browser terminal WS/HTTP)
+#   cli, litt-models, voice-proxy, voice-worker: no public health URL (no SHA verification)
+# A release of the web app normally needs litt-shell, web-app AND BOTH terminal servers at the same SHA.
 #
 # NOTE: this does not control Railway's own GitHub integration. Keep Autodeploy
 # OFF on every Railway production service. See docs/DEPLOYMENT_CONTROLS.md.
@@ -24,16 +35,20 @@ on:
         required: true
         type: choice
         options:
-          - terminal-server
           - litt-shell
+          - terminal-server
+          - web-app
+          - terminal-server-prod
           - cli
           - litt-models
           - voice-proxy
-          - web
-          - terminal-server-prod
           - voice-worker
       sha:
         description: "Full commit SHA on main to deploy (40 characters)"
+        required: true
+        type: string
+      authorization:
+        description: 'Type exactly: DEPLOY <service> <first 8 chars of sha>'
         required: true
         type: string
 
@@ -46,11 +61,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REQUIRED_CHECKS: "Build and Type Check"
+  # Pipe-separated check-run names that must be green on the exact commit.
+  REQUIRED_CHECKS: "Build and Type Check|gitleaks"
 
 jobs:
   verify:
-    name: Verify service, commit and CI
+    name: Verify service, authorization, commit and CI
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.val.outputs.sha }}
@@ -58,60 +74,66 @@ jobs:
       project_id: ${{ steps.val.outputs.project_id }}
       env_id: ${{ steps.val.outputs.env_id }}
       service_id: ${{ steps.val.outputs.service_id }}
+      health_url: ${{ steps.val.outputs.health_url }}
     steps:
       - name: Validate inputs
         id: val
         env:
           INPUT_SHA: ${{ inputs.sha }}
           INPUT_SERVICE: ${{ inputs.service }}
+          INPUT_AUTH: ${{ inputs.authorization }}
         run: |
           set +x
-          # Validate SHA format
           if ! printf '%s' "$INPUT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "::error::sha must be a full 40-character lowercase commit SHA"
             exit 1
           fi
-          # Validate service against Larry's verified Railway IDs (2026-10-10)
+          EXPECTED_AUTH="DEPLOY ${INPUT_SERVICE} ${INPUT_SHA:0:8}"
+          if [ "$INPUT_AUTH" != "$EXPECTED_AUTH" ]; then
+            echo "::error::Authorization phrase does not match. Type exactly: $EXPECTED_AUTH"
+            exit 1
+          fi
+          WEBSITE_PROJECT="3d5b8abe-088c-4a6c-9b34-7054829247c9"
+          WEBSITE_PROD_ENV="56de816e-3904-4b35-9dde-031303a6d5cb"
+          TERMINAL_PROJECT="69a241af-cd1b-4cf1-baff-f5a6a5a5d7d5"
+          TERMINAL_PROD_ENV="41f9b3f4-c783-4288-a6d3-077b4e55858f"
+          HEALTH_URL=""
           case "$INPUT_SERVICE" in
-            terminal-server)
-              PROJECT_ID="3d5b8abe-088c-4a6c-9b34-7054829247c9"
-              ENV_ID="56de816e-3904-4b35-9dde-031303a6d5cb"
-              SERVICE_ID="3c06dd64"
-              ;;
             litt-shell)
-              PROJECT_ID="3d5b8abe-088c-4a6c-9b34-7054829247c9"
-              ENV_ID="56de816e-3904-4b35-9dde-031303a6d5cb"
-              SERVICE_ID="0fbedda0"
+              PROJECT_ID="$WEBSITE_PROJECT"; ENV_ID="$WEBSITE_PROD_ENV"
+              SERVICE_ID="0fbedda0-0053-481c-9e4f-a3ea8100eb16"
+              HEALTH_URL="https://www.litlabs.net/api/health"
+              ;;
+            terminal-server)
+              PROJECT_ID="$WEBSITE_PROJECT"; ENV_ID="$WEBSITE_PROD_ENV"
+              SERVICE_ID="3c06dd64-e82f-4bb5-8c47-d65dede36af9"
+              HEALTH_URL="https://terminal-server-production-68ac.up.railway.app/health"
               ;;
             cli)
-              PROJECT_ID="3d5b8abe-088c-4a6c-9b34-7054829247c9"
-              ENV_ID="56de816e-3904-4b35-9dde-031303a6d5cb"
-              SERVICE_ID="f71b9a86"
+              PROJECT_ID="$WEBSITE_PROJECT"; ENV_ID="$WEBSITE_PROD_ENV"
+              SERVICE_ID="f71b9a86-cd1e-4c5a-ba00-b4efc0b6e119"
               ;;
             litt-models)
-              PROJECT_ID="3d5b8abe-088c-4a6c-9b34-7054829247c9"
-              ENV_ID="56de816e-3904-4b35-9dde-031303a6d5cb"
-              SERVICE_ID="f9a906df"
+              PROJECT_ID="$WEBSITE_PROJECT"; ENV_ID="$WEBSITE_PROD_ENV"
+              SERVICE_ID="f9a906df-27df-433f-957d-c38862ba92ef"
               ;;
             voice-proxy)
-              PROJECT_ID="3d5b8abe-088c-4a6c-9b34-7054829247c9"
-              ENV_ID="56de816e-3904-4b35-9dde-031303a6d5cb"
-              SERVICE_ID="879b842f"
+              PROJECT_ID="$WEBSITE_PROJECT"; ENV_ID="$WEBSITE_PROD_ENV"
+              SERVICE_ID="879b842f-ed36-4b37-97cf-cbb9fd504b46"
               ;;
-            web)
-              PROJECT_ID="69a241af-cd1b-4cf1-baff-f5a6a5a5d7d5"
-              ENV_ID="41f9b3f4-c783-4288-a6d3-077b4e55858f"
-              SERVICE_ID="a8a05220"
+            web-app)
+              PROJECT_ID="$TERMINAL_PROJECT"; ENV_ID="$TERMINAL_PROD_ENV"
+              SERVICE_ID="a8a05220-e5ed-48f6-969d-1f82957341de"
+              HEALTH_URL="https://app.litlabs.net/api/health"
               ;;
             terminal-server-prod)
-              PROJECT_ID="69a241af-cd1b-4cf1-baff-f5a6a5a5d7d5"
-              ENV_ID="41f9b3f4-c783-4288-a6d3-077b4e55858f"
-              SERVICE_ID="12f99b0a"
+              PROJECT_ID="$TERMINAL_PROJECT"; ENV_ID="$TERMINAL_PROD_ENV"
+              SERVICE_ID="12f99b0a-e514-4c7c-99fe-651106b35e82"
+              HEALTH_URL="https://terminal.litlabs.net/health"
               ;;
             voice-worker)
-              PROJECT_ID="69a241af-cd1b-4cf1-baff-f5a6a5a5d7d5"
-              ENV_ID="41f9b3f4-c783-4288-a6d3-077b4e55858f"
-              SERVICE_ID="763fe22d"
+              PROJECT_ID="$TERMINAL_PROJECT"; ENV_ID="$TERMINAL_PROD_ENV"
+              SERVICE_ID="763fe22d-f50e-4387-b26a-3f6918290b7a"
               ;;
             *)
               echo "::error::Unknown service: $INPUT_SERVICE"
@@ -122,11 +144,14 @@ jobs:
             echo "::error::Missing Railway ID. Refusing to deploy."
             exit 1
           fi
-          echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
-          echo "env_id=$ENV_ID" >> "$GITHUB_OUTPUT"
-          echo "service_id=$SERVICE_ID" >> "$GITHUB_OUTPUT"
-          echo "sha=$INPUT_SHA" >> "$GITHUB_OUTPUT"
-          echo "service=$INPUT_SERVICE" >> "$GITHUB_OUTPUT"
+          {
+            echo "project_id=$PROJECT_ID"
+            echo "env_id=$ENV_ID"
+            echo "service_id=$SERVICE_ID"
+            echo "sha=$INPUT_SHA"
+            echo "service=$INPUT_SERVICE"
+            echo "health_url=$HEALTH_URL"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Checkout (full history)
         uses: actions/checkout@v4
@@ -144,7 +169,7 @@ jobs:
 
       - name: Required CI checks must have passed on this commit
         env:
-          GH_TOKEN: <redacted>
+          GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.val.outputs.sha }}
         run: |
           set +x
@@ -165,7 +190,7 @@ jobs:
     name: Deploy to production (needs approval)
     needs: verify
     runs-on: ubuntu-latest
-    # Configure required reviewers on this environment in GitHub:
+    # Required reviewers are configured on this environment in GitHub:
     # Settings -> Environments -> production
     environment:
       name: production
@@ -177,7 +202,7 @@ jobs:
 
       - name: Check RAILWAY_TOKEN
         env:
-          RAILWAY_TOKEN: <redacted>
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           set +x
           if [ -z "$RAILWAY_TOKEN" ]; then
@@ -191,66 +216,56 @@ jobs:
 
       - name: Validate Railway target
         env:
-          RAILWAY_TOKEN: <redacted>
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           SERVICE: ${{ needs.verify.outputs.service }}
           PROJECT_ID: ${{ needs.verify.outputs.project_id }}
           ENV_ID: ${{ needs.verify.outputs.env_id }}
           SERVICE_ID: ${{ needs.verify.outputs.service_id }}
         run: |
           set +x
-          echo "Target (verified by Larry 2026-10-10):"
+          echo "Target:"
           echo "  Service alias: $SERVICE"
-          echo "  Project ID: $PROJECT_ID"
-          echo "  Environment ID: $ENV_ID"
-          echo "  Service ID prefix: $SERVICE_ID"
-          # Link to the exact project/environment using IDs.
-          # After linking, --service <name> resolves within this project only,
-          # eliminating cross-project name collisions.
+          echo "  Project ID:    $PROJECT_ID"
+          echo "  Environment:   $ENV_ID"
+          echo "  Service ID:    $SERVICE_ID"
           railway link --project "$PROJECT_ID" --environment "$ENV_ID"
-          echo "Linked. Service '$SERVICE' will resolve within project $PROJECT_ID."
-          # Note: railway service list output format is unversioned;
-          # we rely on explicit project linking + the verified ID mapping above
-          # rather than parsing list output.
 
       - name: Deploy to Railway
         env:
-          RAILWAY_TOKEN: <redacted>
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           SERVICE: ${{ needs.verify.outputs.service }}
+          SERVICE_ID: ${{ needs.verify.outputs.service_id }}
           SHA: ${{ needs.verify.outputs.sha }}
         run: |
           set +x
-          echo "Deploying $SERVICE at $SHA"
-          echo "Build context: repository root (monorepo)"
-          echo "Railway will use the service's configured Dockerfile and build settings."
-          # Set commit metadata without triggering deploy
-          railway variable set RAILWAY_GIT_COMMIT_SHA=$SHA \
-            --service "$SERVICE" \
+          echo "Deploying $SERVICE ($SERVICE_ID) at $SHA"
+          # Service IDs are used (not names) so same-named services in the two
+          # Railway projects can never be confused.
+          railway variable set "RAILWAY_GIT_COMMIT_SHA=$SHA" \
+            --service "$SERVICE_ID" \
             --skip-deploys
-          # Trigger the deployment (uploads current directory as build context)
-          railway up --service "$SERVICE"
-          echo ""
-          echo "Deployed SHA: $SHA"
-          echo "Verify with: railway deployment list --service $SERVICE"
+          railway up --ci --service "$SERVICE_ID"
 
-      - name: Health check
+      - name: Health check (live commit must equal deployed commit)
         env:
           SERVICE: ${{ needs.verify.outputs.service }}
+          HEALTH_URL: ${{ needs.verify.outputs.health_url }}
+          SHA: ${{ needs.verify.outputs.sha }}
         run: |
-          sleep 30
-          case "$SERVICE" in
-            terminal-server|terminal-server-prod)
-              URL="https://litlabs-terminal-server-production-0be1.up.railway.app/health/ready"
-              ;;
-            web)
-              URL="https://app.litlabs.net/api/health"
-              ;;
-            litt-shell)
-              URL="https://www.litlabs.net/api/health"
-              ;;
-            *)
-              echo "No health check URL for $SERVICE, skipping"
+          if [ -z "$HEALTH_URL" ]; then
+            echo "No health URL for $SERVICE: SHA verification skipped (verify manually in Railway)."
+            exit 0
+          fi
+          WANT="${SHA:0:8}"
+          for i in $(seq 1 12); do
+            RESP=$(curl -sS --max-time 15 "$HEALTH_URL" || echo '{}')
+            LIVE=$(echo "$RESP" | jq -r '.commit // .checks.build.detail // "unknown"')
+            echo "attempt $i: live=${LIVE:0:8} want=$WANT"
+            if [ "${LIVE:0:8}" = "$WANT" ]; then
+              echo "Health check PASSED: $HEALTH_URL reports $WANT"
               exit 0
-              ;;
-          esac
-          echo "Checking $URL"
-          curl -sSf --retry 3 --retry-delay 10 "$URL" | head -c 500
+            fi
+            sleep 30
+          done
+          echo "::error::$HEALTH_URL did not report $WANT within 6 minutes. Roll back (see docs/DEPLOYMENT_CONTROLS.md)."
+          exit 1
