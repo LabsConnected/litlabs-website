@@ -21,6 +21,7 @@
 // before enabling enforcement.
 
 import "server-only";
+import { LLM_LANE_BITS_PER_USD } from "@/lib/billing/canonical-pricing";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -242,7 +243,11 @@ function lookupCostEntry(provider: string, model: string, isByok: boolean = fals
   if (anyExact) return anyExact;
 
   // Provider-level fallback (first entry for that provider)
-  const providerFallback = COST_CATALOG.find((e) => e.provider === provider);
+  // #684: a managed (non-BYOK) call must never fall back onto a BYOK row —
+  // that silently priced unknown managed models at 0 LiTTBits.
+  const providerFallback =
+    COST_CATALOG.find((e) => e.provider === provider && (isByok ? e.billingClass === "byok" : e.billingClass !== "byok")) ??
+    (isByok ? COST_CATALOG.find((e) => e.provider === provider) : undefined);
   if (providerFallback) return providerFallback;
 
   // Generic fallback — conservative standard pricing
@@ -308,15 +313,15 @@ export function calculateLlmCost(input: CostEngineInput): CostCalculation {
     retailLiTTBits = Math.max(1, Math.round(baseBits));
   } else {
     // Convert provider cost to a bits-equivalent, then apply margin
-    // $1.00 ≈ 1000 BITS at retail (internal, never exposed publicly)
-    const costEquivalentBits = (providerCostUsd * 1000);
+    // #684: locked pricing — 100 LiTTBits = $1 (LLM_LANE_BITS_PER_USD).
+    const costEquivalentBits = (providerCostUsd * LLM_LANE_BITS_PER_USD);
     retailLiTTBits = Math.max(1, Math.round(
       costEquivalentBits * (1 + MARGIN_TARGET) + baseBits * 0.1,
     ));
   }
 
   // Platform margin = retail value minus provider cost (in bits-equivalent)
-  const providerCostBits = providerCostUsd * 1000;
+  const providerCostBits = providerCostUsd * LLM_LANE_BITS_PER_USD;
   const platformMargin = Math.max(0, retailLiTTBits - providerCostBits);
 
   // Determine billing class from LiTT alias if provided

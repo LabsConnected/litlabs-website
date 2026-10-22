@@ -57,8 +57,13 @@ export const SHADOW_PRICING_VERSION_ID = "littbits-pricing-v2-shadow-unified";
 
 /** LiTTBits per USD for the generation lane (1 bit = $0.01). */
 export const GENERATION_LANE_BITS_PER_USD = 100;
-/** LiTTBits per USD-equivalent for the LLM lane (legacy ~1000 bits/$). */
-export const LLM_LANE_BITS_PER_USD = 1000;
+/**
+ * LiTTBits per USD-equivalent for the LLM lane.
+ * #684: pricing is locked at 100 LiTTBits = $1 across every lane (approved
+ * decision). The legacy LLM lane was ~1,000 bits/$; it now equals the
+ * generation lane. llm-cost-engine.ts reads this constant.
+ */
+export const LLM_LANE_BITS_PER_USD = 100;
 /** The candidate unified lane rate for v2 shadow comparison: 100 bits/$. */
 export const UNIFIED_SHADOW_BITS_PER_USD = 100;
 

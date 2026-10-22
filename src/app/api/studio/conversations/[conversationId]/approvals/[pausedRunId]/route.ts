@@ -19,6 +19,14 @@ import {
 import { ProgressEmitter } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { getSupabaseAdmin } from "@/lib/supabase";
+import { settleRun } from "@/lib/agent-billing";
+import { runWithMeteringContext, createBilledBitsAccumulator } from "@/lib/metering";
+import {
+  finalizeStudioBuildBilling,
+  loadStudioAwaitingApproval,
+  type StudioRunOutcome,
+} from "@/lib/studio/studio-billing";
 import { FILE_WRITE_TOOL_IDS } from "@/lib/litt-intelligence/model-registry";
 import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
 import { ensureProjectPreviewReady } from "@/lib/litt-intelligence/launch-flow";
@@ -372,7 +380,25 @@ export async function POST(
   // 3. For REJECTED: no resumed execution needed — return immediately.
   // Close out the awaiting transcript message so a refresh doesn't show a
   // gate that was already decided.
+  // #684: the Studio build reservation held across this approval wait.
+  const studioHold = await loadStudioAwaitingApproval(getSupabaseAdmin(), pausedRunId).catch(() => null);
   if (body.decision === "rejected") {
+    // Rule 1: charge only the work completed before the gate; release the rest.
+    if (studioHold) {
+      await finalizeStudioBuildBilling(
+        { db: getSupabaseAdmin(), settleRun },
+        studioHold,
+        "cancelled",
+        studioHold.accruedBits,
+        studioHold.billableSteps,
+      ).catch((billErr) => {
+        studioLog("approval:studio_billing_reject_settle_failed", {
+          conversationId,
+          pausedRunId,
+          errorClass: billErr instanceof Error ? billErr.message : "unknown",
+        });
+      });
+    }
     const awaiting = await getAwaitingApprovalAssistantMessage(conversationId, userId);
     if (awaiting) {
       await updateMessageStatus(
@@ -690,9 +716,34 @@ export async function POST(
     };
   }
 
+  // #684: resumed steps accrue onto the pre-pause total; the chain's
+  // terminal handler settles the same reservation exactly once.
+  const resumeBilling = createBilledBitsAccumulator(studioHold?.accruedBits ?? 0, studioHold?.billableSteps ?? 0);
+  let studioOutcome: StudioRunOutcome = "failed";
+  let studioNestedPausedRunId: string | null = null;
+  const finalizeResumeBilling = async () => {
+    if (!studioHold) return;
+    await finalizeStudioBuildBilling(
+      { db: getSupabaseAdmin(), settleRun },
+      studioHold,
+      studioOutcome,
+      resumeBilling.billedBits,
+      resumeBilling.billableSteps,
+      studioNestedPausedRunId,
+    ).catch((billErr) => {
+      studioLog("approval:studio_billing_settle_failed", {
+        conversationId,
+        pausedRunId,
+        errorClass: billErr instanceof Error ? billErr.message : "unknown",
+      });
+    });
+  };
+
   // Fire-and-forget with proper error handling — NOT a floating promise.
   // The .then/.catch chain persists the result/error to the DB.
-  void resumeAgentLoopV2(
+  void runWithMeteringContext(
+    { userId, projectId: resolved.projectId || undefined, feature: "studio-chat", billing: studioHold ? resumeBilling : undefined },
+    () => resumeAgentLoopV2(
     {
       pausedMessages: resolved.pausedMessages,
       toolId: resolved.toolId,
@@ -719,8 +770,15 @@ export async function POST(
     },
     transport,
     runProgress,
-  )
+  ))
     .then(async (result) => {
+      studioOutcome = result.cancelled
+        ? "cancelled"
+        : result.pendingApproval
+          ? "awaiting_approval"
+          : result.modelFailed || result.failedHonestly
+            ? "failed"
+            : "completed";
       if (fenced) {
         // Another owner marked the truth (stale/stall detector, or a
         // superseding claim). Whatever this loop produced is not the
@@ -786,6 +844,7 @@ export async function POST(
       }
 
       if (resumeFailure) {
+        studioOutcome = "failed";
         await writeResumedResultToTranscript({
           conversationId,
           userId,
@@ -921,6 +980,7 @@ export async function POST(
             hadInterveningMutation: result.pendingApproval.hadInterveningMutationAtPause,
           });
           nestedPausedRunId = nested.id;
+          studioNestedPausedRunId = nested.id;
         } catch (nestedErr) {
           studioLog("approval:nested_paused_run_persist_failed", {
             conversationId,
@@ -1002,6 +1062,7 @@ export async function POST(
       return true;
     })
     .catch(async (err) => {
+      studioOutcome = "failed";
       if (fenced) return;
       const message = err instanceof Error ? err.message : "Resume failed";
       await writeResumedResultToTranscript({
@@ -1036,6 +1097,7 @@ export async function POST(
       // The executor's work — loop and settlement tail — is done either
       // way; stop proving liveness. A fenced executor dies here too.
       clearInterval(heartbeat);
+      void finalizeResumeBilling();
     });
 
   // 8. Return 202 Accepted immediately — the execution continues in the background

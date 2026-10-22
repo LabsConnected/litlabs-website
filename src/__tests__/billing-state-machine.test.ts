@@ -616,6 +616,9 @@ function buildTrackingSupabase(
 
 // ─── Setup/teardown ──────────────────────────────────────────────────
 
+// #684: invoice fixtures carry the Creator price so they settle as Creator.
+const SETTLED_CREATOR_PRICE = "price_test_creator";
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isAdminSupabaseConfigured).mockReturnValue(false);
@@ -624,6 +627,8 @@ beforeEach(() => {
   mockSubscriptionsRetrieve.mockResolvedValue({ status: "active" });
   mockRefundsList.mockReset();
   mockRefundsList.mockResolvedValue({ data: [], has_more: false });
+  // #684: only the settled invoice's own mapped price grants credits.
+  process.env.STRIPE_PRICE_CREATOR_BETA = SETTLED_CREATOR_PRICE;
 });
 
 afterEach(() => {
@@ -1429,7 +1434,7 @@ describe("Webhook event processing — state mutations", () => {
       object: {
         id: "in_parallel",
         parent: { subscription_details: { subscription: "sub_test_123" } },
-        lines: { data: [{ period: { end: 1702678400 } }] },
+        lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1702678400 } }] },
       },
     });
     mockConstructEvent.mockReturnValue(event);
@@ -1577,7 +1582,7 @@ describe("Webhook event processing — state mutations", () => {
     const paid = await deliver("invoice.paid", {
       id: "in_cover",
       parent: { subscription_details: { subscription: "sub_cover" } },
-      lines: { data: [{ period: { end: 1702678400 } }] },
+      lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1702678400 } }] },
     });
     expect(paid.res.status).toBe(200);
     expect(paid.rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(1);
@@ -2304,7 +2309,7 @@ describe("Webhook event processing — state mutations", () => {
       object: {
         id: "in_chain",
         parent: { subscription_details: { subscription: "sub_chain" } },
-        lines: { data: [{ period: { end: 1702678400 } }] },
+        lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1702678400 } }] },
       },
     }));
     const req3 = makeWebhookRequest("body", "sig");
@@ -2330,7 +2335,7 @@ describe("Webhook event processing — state mutations", () => {
     mockConstructEvent.mockReturnValue({
       id: "evt_test_invoice.paid_" + "replay", // different event ID → will NOT be detected as dup
       type: "invoice.paid",
-      data: { object: { id: "in_chain", parent: { subscription_details: { subscription: "sub_chain" } }, lines: { data: [{ period: { end: 1702678400 } }] } } },
+      data: { object: { id: "in_chain", parent: { subscription_details: { subscription: "sub_chain" } }, lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1702678400 } }] } } },
     });
     const req4 = makeWebhookRequest("body", "sig");
     const res4 = await webhookPOST(req4);
@@ -2357,7 +2362,7 @@ describe("Webhook event processing — state mutations", () => {
       object: {
         id: "in_test_123",
         parent: { subscription_details: { subscription: "sub_test_123" } },
-        lines: { data: [{ period: { end: 1702678400 } }] },
+        lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1702678400 } }] },
       },
     }));
 
@@ -2424,7 +2429,7 @@ describe("Webhook event processing — state mutations", () => {
     mockConstructEvent.mockReturnValue({
       id: "evt_existing",
       type: "invoice.paid",
-      data: { object: { id: "in_test_dup", parent: { subscription_details: { subscription: "sub_test_123" } }, lines: { data: [{ period: { end: 1702678400 } }] } } },
+      data: { object: { id: "in_test_dup", parent: { subscription_details: { subscription: "sub_test_123" } }, lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1702678400 } }] } } },
     });
 
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
@@ -2469,7 +2474,7 @@ describe("Webhook event processing — state mutations", () => {
       object: {
         id: "in_test_fail_event",
         parent: { subscription_details: { subscription: "sub_test_123" } },
-        lines: { data: [{ period: { end: 1702678400 } }] },
+        lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1702678400 } }] },
       },
     }));
 
@@ -2891,7 +2896,7 @@ describe("Webhook event processing — state mutations", () => {
       object: {
         id: "in_late_paid",
         parent: { subscription_details: { subscription: "sub_test_123" } },
-        lines: { data: [{ period: { end: 1702678400 } }] },
+        lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1702678400 } }] },
       },
     }));
 
@@ -2910,7 +2915,7 @@ describe("Webhook event processing — state mutations", () => {
       object: {
         id: "in_late_paid_live",
         parent: { subscription_details: { subscription: "sub_test_123" } },
-        lines: { data: [{ period: { end: 1802678400 } }] },
+        lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1802678400 } }] },
       },
     }));
     const live = await webhookPOST(makeWebhookRequest("body", "sig"));
@@ -2932,7 +2937,7 @@ describe("Webhook event processing — state mutations", () => {
       object: {
         id: "in_recovered",
         parent: { subscription_details: { subscription: "sub_test_123" } },
-        lines: { data: [{ period: { end: 1802678400 } }] },
+        lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1802678400 } }] },
       },
     }));
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
@@ -2948,7 +2953,7 @@ describe("Webhook event processing — state mutations", () => {
       object: {
         id: "in_no_db",
         parent: { subscription_details: { subscription: "sub_test_123" } },
-        lines: { data: [{ period: { end: 1702678400 } }] },
+        lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1702678400 } }] },
       },
     }));
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
@@ -3192,7 +3197,7 @@ describe("invoice.paid race condition — subscription row not yet written", () 
       object: {
         id: "in_test_race",
         parent: { subscription_details: { subscription: "sub_test_123" } },
-        lines: { data: [{ period: { end: 1702678400 } }] },
+        lines: { data: [{ price: SETTLED_CREATOR_PRICE, period: { end: 1702678400 } }] },
       },
     });
   }
@@ -3435,7 +3440,10 @@ describe("invoice.paid race condition — subscription row not yet written", () 
     expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
   });
 
-  it("invoice.paid grants the stored Pro allowance, not the Creator default", async () => {
+  // #684: the settled invoice's price — not the stored plan — decides the
+  // grant. A stored Pro plan (written by subscription.updated before the
+  // upgrade was paid) must not inflate a Creator-priced settled invoice.
+  it("invoice.paid grants the settled invoice's Creator price, not the stored (unpaid) Pro plan", async () => {
     const { sb, rpcCalls } = buildTrackingSupabase(false, {
       subscriptionPlan: "pro_builder_beta",
       stripeSubscriptionId: "sub_test_123",
@@ -3449,10 +3457,32 @@ describe("invoice.paid race condition — subscription row not yet written", () 
     expect(res.status).toBe(200);
     const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
     expect(grants).toHaveLength(1);
-    expect(grants[0].params.p_amount).toBe(18000);
+    expect(grants[0].params.p_amount).toBe(7500);
   });
 
-  it("invoice.paid with an empty stored plan → 500 instead of granting Creator credits", async () => {
+  it("#684: unpaid upgrade — stored Pro plan, unmapped invoice price → grants nothing", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase(false, {
+      subscriptionPlan: "pro_builder_beta",
+      stripeSubscriptionId: "sub_test_123",
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(
+      makeStripeEvent("invoice.paid", {
+        id: "evt_unmapped_price",
+        object: {
+          id: "in_unmapped_price",
+          parent: { subscription_details: { subscription: "sub_test_123" } },
+          lines: { data: [{ price: "price_unmapped", period: { end: 1702678400 } }] },
+        },
+      }),
+    );
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
+  });
+
+  it("invoice.paid with an empty stored plan and no priced line grants no Creator credits", async () => {
     const { sb, rpcCalls } = buildTrackingSupabase();
     sb.from = vi.fn((table: string) => {
       const chainObj: any = {
@@ -3493,8 +3523,7 @@ describe("invoice.paid race condition — subscription row not yet written", () 
     );
 
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
-    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
-    expect(res.status).toBe(500);
+    await webhookPOST(makeWebhookRequest("body", "sig"));
     expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
   });
 });

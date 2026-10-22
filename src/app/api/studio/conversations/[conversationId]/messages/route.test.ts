@@ -87,7 +87,11 @@ vi.mock("@/lib/agent-runtime", () => ({
 }));
 
 vi.mock("@/lib/agent-billing", () => ({
-  reserveCredits: vi.fn(),
+  // #684: builtin Studio V2 builds now reserve a LiTTBits hold, so the
+  // default mock reserves successfully (tests may override per case).
+  reserveCredits: vi.fn(() =>
+    Promise.resolve({ ok: true, runId: "run-builtin", reservedCredits: 200, reservationId: "res-builtin" }),
+  ),
   // The route calls settleRun(...).catch(...) — must return a promise.
   settleRun: vi.fn(() => Promise.resolve({ ok: true })),
   estimateCredits: vi.fn(() => 0),

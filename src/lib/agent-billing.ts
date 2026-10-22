@@ -36,6 +36,15 @@ export interface AgentRunContext {
   provider?: string;
   /** Optional owner simulation override for billing-exempt checks. */
   simulation?: SimulatedPlan | null;
+  /**
+   * #684: reservation lifetime override (seconds). Defaults to
+   * RESERVATION_TTL_SECONDS (#714). Studio builds that can pause for
+   * approval pass a longer, explicitly bounded TTL.
+   */
+  expiresSeconds?: number;
+  /** #684: ledger usage_type / reference_type overrides (defaults keep marketplace semantics). */
+  usageType?: string;
+  referenceType?: string;
 }
 
 export interface ReserveResult {
@@ -170,11 +179,11 @@ export async function reserveCredits(
       p_amount: estimatedCredits,
       p_idempotency_key: ctx.idempotencyKey,
       p_run_id: ctx.idempotencyKey,
-      p_usage_type: "agent_run",
-      p_reference_type: "agent_instance",
+      p_usage_type: ctx.usageType ?? "agent_run",
+      p_reference_type: ctx.referenceType ?? "agent_instance",
       p_reference_id: ctx.agentInstanceId,
       p_description: `Agent run: ${ctx.agentInstanceId}`,
-      p_expires_seconds: RESERVATION_TTL_SECONDS,
+      p_expires_seconds: ctx.expiresSeconds ?? RESERVATION_TTL_SECONDS,
     });
 
     if (reserveError) {
@@ -349,18 +358,22 @@ export async function settleRun(
     }
   } else if (result.status !== "completed" && reservationId && reservedCredits > 0) {
     // Release: execution failed, return all reserved BITS
-    const { error: releaseError } = await supabaseAdmin.rpc("release_bits", {
+    const { data: releaseData, error: releaseError } = await supabaseAdmin.rpc("release_bits", {
       p_reservation_id: reservationId,
       p_idempotency_key: runId + ":release",
     });
+    // #684: release_bits also RETURNS TABLE — unwrap and fail closed.
+    const releaseRow = unwrapRpcRow<{ success?: boolean; reason?: string }>(releaseData);
+    const releaseFailure = releaseError?.message
+      ?? (releaseRow?.success === true ? null : `release_rejected:${releaseRow?.reason ?? "invalid_release_response"}`);
 
-    if (releaseError) {
-      console.error(`[agent-billing] CRITICAL: release_bits failed for run ${runId}. Error: ${releaseError.message}`);
+    if (releaseFailure) {
+      console.error(`[agent-billing] CRITICAL: release_bits failed for run ${runId}. Error: ${releaseFailure}`);
       await createReconciliationRecord(
         { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
         reservedCredits,
         "release_failed",
-        releaseError.message,
+        releaseFailure,
         reservationId,
       );
     } else {
@@ -369,12 +382,22 @@ export async function settleRun(
   } else if (result.status === "completed" && result.actualCredits === 0) {
     // Free run — nothing to settle, but release the reservation if one was made
     if (reservationId && reservedCredits > 0) {
-      const { error: releaseError } = await supabaseAdmin.rpc("release_bits", {
+      const { data: releaseData, error: releaseError } = await supabaseAdmin.rpc("release_bits", {
         p_reservation_id: reservationId,
         p_idempotency_key: runId + ":release-free",
       });
-      if (releaseError) {
-        console.error(`[agent-billing] release_bits failed for free run ${runId}. Error: ${releaseError.message}`);
+      const releaseRow = unwrapRpcRow<{ success?: boolean; reason?: string }>(releaseData);
+      const releaseFailure = releaseError?.message
+        ?? (releaseRow?.success === true ? null : `release_rejected:${releaseRow?.reason ?? "invalid_release_response"}`);
+      if (releaseFailure) {
+        console.error(`[agent-billing] release_bits failed for free run ${runId}. Error: ${releaseFailure}`);
+        await createReconciliationRecord(
+          { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
+          reservedCredits,
+          "release_failed",
+          releaseFailure,
+          reservationId,
+        );
       } else {
         creditsRefunded = reservedCredits;
       }

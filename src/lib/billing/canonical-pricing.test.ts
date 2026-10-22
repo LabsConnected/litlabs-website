@@ -34,7 +34,7 @@ describe("canonical-pricing", () => {
     });
     expect(gen.marginBits).toBe(4);
 
-    // LLM lane: $0.10 cost → 100 cost-bits at 1000 bits/$; 160 charged → 60 margin.
+    // #684: LLM lane locked at 100 bits/$: $0.10 cost → 10 cost-bits; 160 charged → 150 margin.
     const llm = buildChargeRating({
       capability: "llm",
       provider: "gemini",
@@ -43,7 +43,7 @@ describe("canonical-pricing", () => {
       bitsCharged: 160,
       lane: "llm",
     });
-    expect(llm.marginBits).toBe(60);
+    expect(llm.marginBits).toBe(150);
   });
 
   it("never reports negative margin", () => {

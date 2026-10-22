@@ -434,7 +434,6 @@ function subscriptionCreditAllowance(plan: string | null | undefined): number {
  */
 function settledInvoiceCredit(
   inv: Stripe.Invoice,
-  storedPlan: string | null | undefined,
   context: string,
 ): { amount: number; plan: PlanId; kind: "base" | "upgrade" } | null {
   if (inv.billing_reason === "subscription_update") {
@@ -447,8 +446,20 @@ function settledInvoiceCredit(
     if (delta <= 0) return null;
     return { amount: delta, plan: requireSubscriptionGrantPlan(next.plan, context), kind: "upgrade" };
   }
+  // #684: grant ONLY from the plan the settled invoice actually priced.
+  // The former `priced ?? storedPlan` fallback let an unpaid upgrade
+  // (stored plan written by customer.subscription.updated before payment)
+  // grant the higher allowance on a later lower-priced invoice whose price
+  // did not map. An unmapped / line-less invoice now grants nothing and is
+  // logged loudly for reconciliation instead.
   const priced = invoiceLineCredits(inv).find((line) => line.plan)?.plan ?? null;
-  const plan = requireSubscriptionGrantPlan(priced ?? storedPlan, context);
+  if (!priced) {
+    console.error(
+      `[stripe] ${context}: settled invoice ${inv.id} has no mapped plan price — granting no subscription credits`,
+    );
+    return null;
+  }
+  const plan = requireSubscriptionGrantPlan(priced, context);
   const amount = subscriptionCreditAllowance(plan);
   if (amount <= 0) return null;
   return { amount, plan, kind: "base" };
@@ -1495,7 +1506,7 @@ export async function POST(req: NextRequest) {
         // the delta only when Stripe settled the proration. A plan change
         // that has not been paid grants nothing, and the stored plan cannot
         // change the amount.
-        const settled = settledInvoiceCredit(inv, invMatch.plan, `invoice.paid ${event.id}`);
+        const settled = settledInvoiceCredit(inv, `invoice.paid ${event.id}`);
         let grantMode: "none" | "invoice_full" = "none";
         let grantAmount: number | null = null;
         let grantKey: string | null = null;
