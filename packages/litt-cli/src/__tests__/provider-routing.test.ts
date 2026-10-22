@@ -45,8 +45,18 @@ const ENV_KEYS = [
   "MOONSHOT_API_KEY",
   "MISTRAL_API_KEY",
   "DASHSCOPE_API_KEY",
+  // Ambient provider keys the routing layer reads — without isolating
+  // these, a developer shell (or CI) that happens to export them changes
+  // servedBy and silently breaks the native-vs-OpenRouter assertions.
+  "ANTHROPIC_API_KEY",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "OPENROUTER_MODEL",
+  "LITT_ALLOW_OPENROUTER_FALLBACK",
+  "LITT_MODEL",
   "LITT_MAX_TOKENS",
   "LITT_CREDIT_RETRY",
+  "LITT_OLLAMA_REASONING_EFFORT",
 ] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
@@ -111,9 +121,9 @@ function errorSseFetch(message: string): typeof fetch {
 /** Capture the URL + Authorization header a fetch call used. */
 function capturingFetch(): { fetch: typeof fetch; calls: { url: string; auth: string }[] } {
   const calls: { url: string; auth: string }[] = [];
-  const stub = (async (url: unknown, init?: { headers?: Record<string, string> }) => {
+  const stub = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
-    const auth = init?.headers?.Authorization ?? "";
+    const auth = new Headers(init?.headers).get("authorization") ?? "";
     calls.push({ url: u, auth });
     return healthySseFetch()(url, init);
   }) as typeof fetch;
@@ -229,6 +239,7 @@ describe("provider routing: fallback behavior works only when intended", () => {
       id: "gpt-5.6-luna",
       label: "GPT-5.6 Luna",
       servedBy: "openai",
+      provider: "openai",
       reason: "test",
       fallbackReason: null,
       appliedPolicy: "auto",
@@ -496,8 +507,8 @@ describe("OpenRouterModelProvider: insufficient-credits graceful retry", () => {
    */
   function creditGatedFetch(affordable: number, content = "ok") {
     const requested: number[] = [];
-    const stub = (async (_url: unknown, init?: { body?: string }) => {
-      const body = init?.body ? JSON.parse(init.body) : {};
+    const stub = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
       requested.push(body.max_tokens);
       if (body.max_tokens > affordable) {
         return new Response(
@@ -613,5 +624,40 @@ describe("OpenRouterModelProvider: insufficient-credits graceful retry", () => {
     ).rejects.toThrow(/402/);
     // The full ladder was attempted before giving up.
     expect(requested).toEqual([4096, 3072, 2048]);
+  });
+});
+
+describe("Ollama local provider request policy", () => {
+  const requestBodies: Record<string, unknown>[] = [];
+
+  beforeEach(() => {
+    requestBodies.length = 0;
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body === "string") requestBodies.push(JSON.parse(init.body) as Record<string, unknown>);
+      return healthySseFetch()(_url, init);
+    }) as typeof fetch;
+  });
+
+  it("sends reasoning_effort=none to Ollama by default", async () => {
+    const provider = new OpenAICompatibleModelProvider({
+      providerId: "ollama",
+      endpoint: "http://127.0.0.1:11434/v1/chat/completions",
+      credentialless: true,
+      model: "litt-oc-phone:1.7b-8k",
+    });
+    await provider.stream([{ role: "user", content: "hi" }], () => {});
+    expect(requestBodies[0]?.reasoning_effort).toBe("none");
+  });
+
+  it("omits reasoning_effort when LITT_OLLAMA_REASONING_EFFORT=auto", async () => {
+    process.env.LITT_OLLAMA_REASONING_EFFORT = "auto";
+    const provider = new OpenAICompatibleModelProvider({
+      providerId: "ollama",
+      endpoint: "http://127.0.0.1:11434/v1/chat/completions",
+      credentialless: true,
+      model: "litt-oc-phone:1.7b-8k",
+    });
+    await provider.stream([{ role: "user", content: "hi" }], () => {});
+    expect("reasoning_effort" in (requestBodies[0] ?? {})).toBe(false);
   });
 });

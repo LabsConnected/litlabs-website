@@ -28,7 +28,7 @@ import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
 import { OverlayKeyboardProvider, type KeyboardHandler } from "./overlay-manager.js";
-import { isCtrl, isRawF2 } from "./keyboard-utils.js";
+import { isCtrl, isRawF2, ctrlDAction } from "./keyboard-utils.js";
 import { useTerminalSize } from "./use-terminal-size.js";
 import { Header } from "./header.js";
 import { LiTTShell } from "./shell/shell.js";
@@ -121,6 +121,17 @@ export function CockpitApp({
     client, signedIn,
   });
   const { submit, handleApproval } = controller;
+
+  // Wire the idle-SIGINT persist hook (installSigintHandler() itself is
+  // called by the command entrypoint before this component mounts — see
+  // commands/cockpit.ts). Read dynamically by RuntimeSession at signal
+  // time, so install order relative to that call doesn't matter.
+  useEffect(() => {
+    session.setOnPersistBeforeExit(() => controller.persistSession());
+    return () => {
+      session.setOnPersistBeforeExit(null);
+    };
+  }, [session, controller]);
 
   // Seed shell context from the launcher (once). After that, /workspace
   // and branch refreshes own these via the store.
@@ -281,7 +292,22 @@ export function CockpitApp({
       store.actions.clearToolProgress();
       store.actions.stopBusy();
     } else if (isCtrl(input, key, "d")) {
-      controller.openDiffViewer();
+      // Ctrl+D — DIFF when a draft exists; EOF/exit on an empty composer.
+      // store.composerValueRef is mirrored by setComposerValue at event
+      // time, so the draft stays current even if this callback ran from a
+      // handler ref that lagged a commit; persist before exit so the
+      // session survives.
+      if (ctrlDAction(store.composerValueRef.current) === "exit") {
+        controller.persistSession();
+        exit();
+      } else {
+        controller.openDiffViewer();
+      }
+    } else if (isCtrl(input, key, "g")) {
+      // Ctrl+G — expand/collapse the most recent activity entry's detail.
+      // (Ctrl+E is the composer's move-to-end and must not be shadowed.)
+      const last = store.state.activityLog[store.state.activityLog.length - 1];
+      if (last) store.actions.toggleActivityExpanded(last.id);
     } else if (isCtrl(input, key, "n")) {
       controller.newSession();
     } else if (isCtrl(input, key, "r")) {
@@ -472,6 +498,7 @@ export function CockpitApp({
             gitUntracked={store.state.gitUntracked}
             toolProgress={store.state.toolProgress}
             toolDetails={store.state.toolDetails}
+            expandedActivityIds={store.state.expandedActivityIds}
             executionTarget={store.state.executionTarget}
             canonicalMission={store.state.canonicalMission}
             workstream={store.state.workstream}

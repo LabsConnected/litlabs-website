@@ -22,7 +22,7 @@ const CONTROLS: Array<[string, string]> = [
   ["Ctrl+N", "New session"],
   ["Ctrl+R", "Resume session"],
   ["Ctrl+O", "Toggle execution details"],
-  ["Ctrl+D", "Diff view"],
+  ["Ctrl+D", "Diff view · exit when composer empty"],
   ["Esc", "Close overlay / stop working"],
   ["Ctrl+C", "Cancel run (exit when idle)"],
   ["↑ / ↓", "Input history (or picker navigation)"],

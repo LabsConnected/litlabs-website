@@ -3,13 +3,13 @@
  * Uses LITT_SESSIONS_FILE → temp file, never touches ~/.litt.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   saveSession, listSessions, loadSession, deleteSession,
-  summarize, timeAgo, newSessionId,
+  summarize, timeAgo, newSessionId, markInterrupted,
 } from "../lib/session-store.js";
 
 let tempFile: string;
@@ -129,5 +129,36 @@ describe("session-store", () => {
     // Corrupt the file, then verify reads fall back cleanly.
     writeFileSync(tempFile, "{not json", "utf8");
     expect(listSessions()).toEqual([]);
+  });
+});
+
+describe("markInterrupted — restoring a session interrupted mid-turn", () => {
+  it("marks a still-streaming message as an explicit interruption, not a silent completion", () => {
+    const messages = markInterrupted([
+      { role: "user", content: "hello", status: "complete", ts: 1 },
+      { role: "assistant", content: "partial thinking…", status: "streaming", ts: 2 },
+    ]);
+    expect(messages[0]).toEqual({ role: "user", content: "hello", status: "complete", ts: 1 });
+    expect(messages[1].status).toBe("error");
+    expect(messages[1].content).toContain("partial thinking…");
+    expect(messages[1].content).toContain("Interrupted");
+  });
+
+  it("gives a clear note even when the interrupted message had no content yet", () => {
+    const messages = markInterrupted([
+      { role: "assistant", content: "", status: "streaming", ts: 1 },
+    ]);
+    expect(messages[0].status).toBe("error");
+    expect(messages[0].content).toContain("Interrupted");
+    expect(messages[0].content.length).toBeGreaterThan(0);
+  });
+
+  it("leaves complete and error messages unchanged", () => {
+    const input = [
+      { role: "user" as const, content: "hi", status: "complete", ts: 1 },
+      { role: "assistant" as const, content: "already done", status: "complete", ts: 2 },
+      { role: "assistant" as const, content: "already failed", status: "error", ts: 3 },
+    ];
+    expect(markInterrupted(input)).toEqual(input);
   });
 });

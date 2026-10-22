@@ -45,6 +45,7 @@ import {
 import {
   resolveLocalModel,
   localRoutedModel,
+  isLocalModelId,
   type LocalModelResolution,
 } from "./local-model-resolution.js";
 
@@ -145,9 +146,14 @@ export class ModelRuntime {
     try {
       result = modelsRouteModel(this.registry, routingInput, options);
     } catch (err) {
-      // Re-throw strict FIXED errors with a clear message
-      if (mode === "fixed" && err instanceof Error) {
-        throw err;
+      // Re-throw strict FIXED errors with a clear message — and when the
+      // pinned id is a local-only (ollama:) model, say so: the remote
+      // catalog can never serve a daemon tag, so "not in the catalog"
+      // alone sends operators hunting for the wrong problem.
+      if (mode === "fixed" && err instanceof Error && selectedModel && isLocalModelId(selectedModel)) {
+        throw new Error(
+          `${err.message} — "${selectedModel}" is a local-only model; switch to LOCAL or pick a remote model with /model.`,
+        );
       }
       throw err;
     }
