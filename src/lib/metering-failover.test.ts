@@ -61,6 +61,20 @@ import { generateText } from "./llm";
 
 const USER_UUID = "11111111-2222-3333-4444-555555555555";
 
+/**
+ * Metering emission is fire-and-forget: emitLlmMetering resolves a dynamic
+ * import before writing. Poll for the expected writes instead of sleeping a
+ * fixed duration — a cold module graph needs more than 50ms, a warm one
+ * finishes far sooner. Bounded so a real regression still fails fast.
+ */
+async function waitForWrites(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 beforeEach(() => {
   writes.length = 0;
   vi.clearAllMocks();
@@ -100,7 +114,11 @@ describe("P0: failover metering invariant", () => {
     expect(res.text).toBe("fallback answer");
 
     // Allow fire-and-forget metering promises to settle.
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForWrites(
+      () =>
+        writes.filter((w) => w.table === "usage_events").length >= 2 &&
+        writes.filter((w) => w.table === "cost_events").length >= 2,
+    );
 
     const usageWrites = writes.filter((w) => w.table === "usage_events");
     const costWrites = writes.filter((w) => w.table === "cost_events");
@@ -147,7 +165,11 @@ describe("P0: failover metering invariant", () => {
       new RegExp(`^metering:llm:${res.metering.requestId}$`),
     );
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForWrites(() =>
+      writes.some(
+        (w) => w.table === "usage_events" && w.row.idempotency_key === res.metering.billableIdempotencyKey,
+      ),
+    );
     const usageWrites = writes.filter((w) => w.table === "usage_events");
     const keys = usageWrites.map((w) => w.row.idempotency_key as string);
     expect(keys).toContain(res.metering.billableIdempotencyKey);
