@@ -78,7 +78,9 @@ export class ApprovalBridge {
   request(request: ExecutionRequest, risk: RiskAssessment | null): Promise<boolean> {
     const action = risk
       ? `${request.inputs.command ?? ""} ${(request.inputs.args as string[] ?? []).join(" ")}`.trim()
-      : request.toolId;
+      : request.toolId === "project.write_file"
+        ? `write_file ${typeof request.inputs.path === "string" ? request.inputs.path : "(unknown path)"}`
+        : request.toolId;
 
     // Session grant — resolve immediately, no human round-trip.
     const key = grantKey(request.toolId, action);

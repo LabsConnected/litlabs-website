@@ -31,6 +31,8 @@
  *   5. Respect maxRounds to prevent infinite loops
  */
 
+import * as fs from "fs";
+import * as path from "path";
 import type {
   ChatMessage,
   ModelProvider,
@@ -787,7 +789,26 @@ export function stripToolCallBlocks(content: string): string {
  * NEVER valid tool inputs — they mean the model copied a schema example
  * verbatim instead of filling it in.
  */
-const PLACEHOLDER_RE = /^[A-Z_][A-Z0-9_]*(\.[A-Z_][A-Z0-9_]*)*$/;
+const PLACEHOLDER_TOKENS = new Set([
+  "FILE_PATH", "FILE_NAME", "FILENAME", "PATH", "PATH_TO_FILE",
+  "DIRECTORY", "DIR", "FOLDER", "COMMAND", "CMD", "TEXT", "CONTENT",
+  "VALUE", "NAME", "URL", "URI", "ARG", "ARGS", "ARGUMENT", "INPUT",
+  "OUTPUT", "EXAMPLE", "TODO", "TBD", "XXX", "TARGET", "SOURCE",
+  "DESTINATION", "DEST", "STRING", "PARAM", "PARAMETER", "KEY",
+]);
+/**
+ * Placeholder detection: a value is an unresolved template only when it
+ * is a placeholder-vocabulary token (FILE_PATH, PATH_TO_FILE, CONTENT_
+ * OF_X). Legitimate user content that merely happens to be uppercase
+ * ("MADE_BY_LITT") is NOT a placeholder — it carries no placeholder
+ * vocabulary. Required-arg presence checks are unaffected.
+ */
+function isPlaceholderValue(trimmed: string): boolean {
+  if (!/^[A-Z_][A-Z0-9_]*(\.[A-Z_][A-Z0-9_]*)*$/.test(trimmed)) return false;
+  if (PLACEHOLDER_TOKENS.has(trimmed)) return true;
+  const head = trimmed.split(/[._]/)[0];
+  return PLACEHOLDER_TOKENS.has(head) && /[_\.]/.test(trimmed);
+}
 
 /**
  * Validate a parsed tool call's arguments before dispatch. Returns an
@@ -824,7 +845,7 @@ export function validateToolCallArgs(
     if (typeof val === "string") {
       const trimmed = val.trim();
       // Placeholder template like URL_OF_DOCUMENTATION, FILE_PATH, etc.
-      if (PLACEHOLDER_RE.test(trimmed)) {
+      if (isPlaceholderValue(trimmed)) {
         return `Argument "${key}" is an unresolved placeholder: "${trimmed}". Provide a real value.`;
       }
       // Angle-bracket template like <path>, <command>
@@ -835,6 +856,93 @@ export function validateToolCallArgs(
   }
 
   return null;
+}
+
+// ─── Bounded argument normalization ────────────────────────────────
+/**
+ * Donor-key aliases per canonical argument name. Small local models
+ * (e.g. 1.7B) regularly emit the RIGHT value under the WRONG key —
+ * "file", "filename", "text" — instead of the schema's "path"/"content".
+ * This table is the ONLY source of renames: explicit, enumerable, and
+ * conservative. A key not listed here is never treated as a donor.
+ */
+const ARG_DONOR_ALIASES: Record<string, string[]> = {
+  path: ["file", "filepath", "file_path", "filePath", "filename", "file_name", "fileName", "target", "dest", "destination", "pathname", "relative_path", "relativePath"],
+  content: ["text", "data", "body", "value", "contents", "file_content", "fileContent", "new_content", "newContent", "replacement", "content_text", "contentText"],
+  command: ["cmd", "shell_command", "shellCommand", "exec", "script", "command_line", "commandLine"],
+};
+
+/**
+ * Bounded recovery for missing required arguments. When a required arg
+ * is absent and EXACTLY ONE unlisted key carries a nonempty string that
+ * is a declared donor alias for that arg, the value is moved to the
+ * canonical name. We never invent values:
+ *   - zero donor candidates  → untouched (validation fails as before)
+ *   - 2+ donor candidates    → ambiguous, untouched
+ *   - non-string donors      → ignored
+ * Returns the (possibly renamed) inputs plus the renames applied, so
+ * the dispatch path can record what was corrected.
+ */
+/**
+ * Unwrap a nested call envelope inside `inputs`. Small local models
+ * (observed: litt-oc-phone:1.7b-8k) sometimes emit the whole call again
+ * as the args value — {"tool":"project_write_file","inputs":{path,…}}
+ * inside {"tool":"project.write_file","inputs":{…}} — so required args
+ * live one level down. Descend at most 2 levels and only while the
+ * object is a pure envelope (every key is tool/name/inputs/arguments/
+ * parameters); anything else is left untouched.
+ */
+const ENVELOPE_KEYS = new Set(["tool", "name", "inputs", "arguments", "parameters"]);
+function unwrapNestedInputs(inputs: Record<string, unknown>): Record<string, unknown> {
+  let cur = inputs;
+  for (let depth = 0; depth < 2; depth++) {
+    const innerArgs =
+      (cur.inputs as Record<string, unknown> | undefined) ??
+      (cur.arguments as Record<string, unknown> | undefined) ??
+      (cur.parameters as Record<string, unknown> | undefined);
+    const innerName = cur.tool ?? cur.name;
+    const isEnvelope =
+      typeof innerName === "string" && innerName.length > 0 &&
+      innerArgs !== null && typeof innerArgs === "object" && !Array.isArray(innerArgs) &&
+      Object.keys(cur).every((k) => ENVELOPE_KEYS.has(k));
+    if (!isEnvelope) break;
+    cur = innerArgs;
+  }
+  return cur;
+}
+
+export function normalizeToolCallArgs(
+  toolId: string,
+  inputs: Record<string, unknown>,
+  toolDefs: ToolDefinition[],
+): { inputs: Record<string, unknown>; renames: Array<[string, string]>; changed: boolean } {
+  const def = toolDefs.find((t) => t.id === toolId);
+  const base = unwrapNestedInputs(inputs);
+  const changed = base !== inputs;
+  if (!def) return { inputs: base, renames: [], changed };
+  const props = (def.inputSchema?.properties ?? {}) as Record<string, unknown>;
+  const required = (def.inputSchema?.required ?? []) as string[];
+  const out: Record<string, unknown> = { ...base };
+  const renames: Array<[string, string]> = [];
+  for (const field of required) {
+    const cur = out[field];
+    if (cur !== undefined && cur !== null && !(typeof cur === "string" && cur.trim() === "")) continue;
+    const aliases = ARG_DONOR_ALIASES[field] ?? [];
+    const donors: string[] = [];
+    for (const [k, v] of Object.entries(out)) {
+      if (k === field || k in props) continue; // schema keys are not donors
+      if (typeof v !== "string" || v.trim() === "") continue;
+      if (aliases.includes(k) || k.replace(/[-_]/g, "").toLowerCase() === field.toLowerCase()) {
+        donors.push(k);
+      }
+    }
+    if (donors.length === 1) {
+      out[field] = out[donors[0]];
+      delete out[donors[0]];
+      renames.push([donors[0], field]);
+    }
+  }
+  return { inputs: out, renames, changed: changed || renames.length > 0 };
 }
 
 /**
@@ -930,6 +1038,11 @@ export async function runAgentLoop(
   const startTime = Date.now();
   const maxRounds = options.maxRounds ?? 10;
   const toolCalls: AgentToolCallRecord[] = [];
+  /** Signature → count of identical INVALID tool calls this run — feeds
+   *  the escalation suffix so a weak model gets an explicit "stop
+   *  retrying this exact call" signal instead of silently burning the
+   *  round limit on one broken signature. */
+  const invalidCallCounts = new Map<string, number>();
   let rounds = 0;
   let totalTokens = 0;
   // Last verification result from the gate (if configured). Returned in
@@ -958,6 +1071,45 @@ export async function runAgentLoop(
   ];
 
   let termination: AgentLoopResult["termination"] = "complete";
+
+  const totalTimeoutMs = options.totalTimeoutMs ?? 0;
+  const remainingTotalMs = () =>
+    totalTimeoutMs > 0 ? totalTimeoutMs - (Date.now() - startTime) : 0;
+  const timeoutResult = (stage: string): AgentLoopResult => ({
+    content:
+      `Agent timed out after ${totalTimeoutMs}ms total (${stage}). ` +
+      "The task was NOT completed. No success is being claimed.",
+    toolCalls,
+    rounds,
+    durationMs: Date.now() - startTime,
+    usage: { total_tokens: totalTokens },
+    termination: "error",
+    escalations: escalationEvents.length ? escalationEvents : undefined,
+  });
+  class AgentDeadlineError extends Error {}
+  const withTotalDeadline = async <T>(
+    work: Promise<T>,
+    stage: string,
+    onTimeout?: () => void,
+  ): Promise<T> => {
+    if (totalTimeoutMs <= 0) return work;
+    const remaining = remainingTotalMs();
+    if (remaining <= 0) throw new AgentDeadlineError(`timed out at ${stage}`);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => {
+            onTimeout?.();
+            reject(new AgentDeadlineError(`timed out at ${stage}`));
+          }, remaining);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
 
   // ─── Escalation setup ──────────────────────────────────────────
   // When an escalation hook + missionId + modelResolver are provided,
@@ -1066,17 +1218,42 @@ export async function runAgentLoop(
       );
     }
 
+    // ─── Bounded alias recovery ────────────────────────────────────
+    // A required argument emitted under a wrong-but-declared key
+    // ("file" for "path") is renamed — never invented — before the
+    // validation gate. Zero or multiple donors leave inputs untouched.
+    if (process.env.LITT_TOOLCALL_DEBUG) {
+      try {
+        const { appendFileSync } = await import("node:fs");
+        appendFileSync(
+          process.env.LITT_TOOLCALL_DEBUG_FILE ?? "/tmp/litt-toolcall-args.log",
+          JSON.stringify({ toolId: parsed.toolId, inputs: parsed.inputs }) + "\n",
+        );
+      } catch { /* debug only */ }
+    }
+    const normalized = normalizeToolCallArgs(parsed.toolId, parsed.inputs, toolDefs);
+    const inputs = normalized.changed ? normalized.inputs : parsed.inputs;
+
     let res: ToolResult;
     // ─── Pre-dispatch argument validation ──────────────────────────
     // Reject placeholder/template arguments BEFORE the tool runs. No
     // placeholder invocation should ever execute — the model copied a
     // schema example instead of filling it in.
-    const argError = validateToolCallArgs(parsed.toolId, parsed.inputs, toolDefs);
+    const argError = validateToolCallArgs(parsed.toolId, inputs, toolDefs);
     if (argError) {
+      // Identical invalid calls get a progressively louder signal so a
+      // weak model can't silently burn the round limit on one broken
+      // signature. The loop's round limiter still terminates the run.
+      const sig = `${parsed.toolId}::${JSON.stringify(inputs)}::${argError}`;
+      const seen = (invalidCallCounts.get(sig) ?? 0) + 1;
+      invalidCallCounts.set(sig, seen);
       res = {
         status: "failed",
         success: false,
-        message: `Tool argument validation failed: ${argError}`,
+        message: `Tool argument validation failed: ${argError}` +
+          (seen > 1
+            ? ` — this exact call already failed ${seen - 1}× identically; supply every required argument with the documented names or stop retrying this tool.`
+            : ""),
         data: {},
       };
     } else {
@@ -1085,7 +1262,7 @@ export async function runAgentLoop(
         // ─── CANONICAL path: ExecutionGateway ───
         const gwResult = await options.gateway.execute({
           toolId: parsed.toolId,
-          inputs: parsed.inputs,
+          inputs,
           cwd: options.cwd,
           mode: options.mode ?? "act",
           identity: {
@@ -1106,11 +1283,11 @@ export async function runAgentLoop(
         // not the tool name. Pass them correctly so runCommand() executes
         // the real command (e.g. "git") instead of the tool name ("run").
         let execCommand = entry.definition.name;
-        let execArgs = extractArgsFromToolCall(entry.definition.name, parsed.inputs);
+        let execArgs = extractArgsFromToolCall(entry.definition.name, inputs);
         if (entry.definition.id === "project.run") {
-          execCommand = typeof parsed.inputs.command === "string" ? parsed.inputs.command : "";
-          execArgs = Array.isArray(parsed.inputs.args)
-            ? parsed.inputs.args.filter((a): a is string => typeof a === "string")
+          execCommand = typeof inputs.command === "string" ? inputs.command : "";
+          execArgs = Array.isArray(inputs.args)
+            ? inputs.args.filter((a): a is string => typeof a === "string")
             : [];
         }
         const cmdResult = await options.executor.execute(
@@ -1133,7 +1310,7 @@ export async function runAgentLoop(
           projectId: null,
           userId: options.userId ?? null,
           shell: options.shell,
-        }, parsed.inputs);
+        }, inputs);
       }
     } catch (err) {
       res = {
@@ -1211,11 +1388,11 @@ export async function runAgentLoop(
     }
 
     // ─── Mutation tracking ──────────────────────────────────────────
-    // Track whether a potentially-mutating tool (project.run) succeeded
-    // or failed. This drives the mutation completion requirement: if
-    // the user asked for an edit and no mutation succeeded, the run
-    // cannot report success.
-    if (entry.definition.id === "project.run") {
+    // Track whether a potentially-mutating tool (project.run,
+    // project.write_file) succeeded or failed. This drives the mutation
+    // completion requirement: if the user asked for an edit and no
+    // mutation succeeded, the run cannot report success.
+    if (entry.definition.id === "project.run" || entry.definition.id === "project.write_file") {
       if (result.success) {
         mutationSucceeded = true;
       } else {
@@ -1256,7 +1433,31 @@ export async function runAgentLoop(
     const entry = options.tools.get(PROJECT_EVIDENCE_TOOL_ID);
     if (!entry) return null;
     const call: ParsedToolCall = { toolId: PROJECT_EVIDENCE_TOOL_ID, inputs: {} };
-    const exec = await dispatchToolCall(call, entry);
+    let exec: Awaited<ReturnType<typeof dispatchToolCall>>;
+    try {
+      exec = await withTotalDeadline(
+        dispatchToolCall(call, entry),
+        "project evidence",
+        () => void options.shell.cancel(),
+      );
+    } catch (err) {
+      if (err instanceof AgentDeadlineError) {
+        return {
+          toolCallId: `tc_${Date.now()}_deadline`,
+          toolId: call.toolId,
+          toolName: entry.definition.name,
+          inputs: call.inputs,
+          result: {
+            status: "timeout",
+            success: false,
+            message: `Agent timed out after ${totalTimeoutMs}ms while acquiring project evidence`,
+            data: {},
+          },
+          durationMs: Date.now() - startTime,
+        };
+      }
+      throw err;
+    }
     return recordToolOutcome(call, entry, exec);
   };
 
@@ -1278,6 +1479,34 @@ export async function runAgentLoop(
   // is a verification request, not a file edit request) do NOT trigger
   // the mutation requirement. Only prompts that clearly ask for a file
   // to be changed/created/edited match.
+  //
+  // "build"/"scaffold"/"generate" a website/app/project are just as much
+  // a mutation request as "create a file" — a prompt like "build me a
+  // website with an index.html homepage" previously matched NONE of
+  // these patterns (no recognized verb, and the filename wasn't
+  // immediately adjacent to a verb), so a failed build silently fell
+  // through to the weaker generic check below and could be reported
+  // "complete". `creationRequested` (below) closes that gap, scoped
+  // deliberately narrower than general mutation detection — see there
+  // for why.
+  const ARTIFACT_FILENAME_RE = /\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|html?|py|rs|go|java|rb|php|sh|yaml|yml|toml)\b/gi;
+  const mentionedArtifactFiles = Array.from(
+    new Set(Array.from(prompt.matchAll(ARTIFACT_FILENAME_RE), (m) => m[0])),
+  );
+  // Verbs that imply a NEW artifact should come into existence, as
+  // opposed to edit/change/modify/update/... which imply a file that
+  // already exists. This distinction matters only for the artifact
+  // existence check below: requiring a freshly-touched file to exist on
+  // disk is right for "build me a website with index.html" (nothing
+  // existed before) but wrong for "edit file.ts" (the file was already
+  // there, and in a mocked/remote tool environment checking THIS
+  // process's disk for it is meaningless — only whether the mutation
+  // ran matters, which mutationSucceeded/mutationFailed already track).
+  const CREATION_VERB_RE = /\b(?:create|write|build|scaffold|generate|construct|set\s*up|make)\b/i;
+  const creationRequested =
+    (mentionedArtifactFiles.length > 0 && CREATION_VERB_RE.test(prompt))
+    // "build/scaffold/generate/set up/create/make me a website/app/project/page/server"
+    || /\b(?:build|scaffold|generate|set\s*up|create|make)\s+(?:me\s+|us\s+)?(?:a\s+|the\s+|this\s+|an\s+)?(?:\w+\s+){0,3}(?:website|web\s*site|web\s*app|webpage|web\s*page|homepage|home\s*page|landing\s*page|app|application|project|server|api)\b/i.test(prompt);
   const mutationRequested =
     // "edit/change/modify ... file/component/function/module/code/UI"
     /\b(?:edit|change|modify|update|create|write|add|delete|remove|refactor|patch|insert|replace|rename|move)\s+(?:a\s+|the\s+|this\s+|one\s+)?(?:file|component|function|module|code|line|class|interface|type|variable|constant|export|import|UI)\b/i.test(prompt)
@@ -1286,7 +1515,8 @@ export async function runAgentLoop(
     // "edit/change/modify <filename>" — verb followed by a file path
     || /\b(?:edit|change|modify|update|create|write|patch|refactor)\s+\S+\.(?:ts|tsx|js|jsx|json|md|css|html|py|rs|go|java|rb|php|sh|yaml|yml|toml)\b/i.test(prompt)
     // "make a tiny safe visible UI change" — the acceptance test phrasing
-    || /\bmake\s+one\s+tiny\s+safe\s+visible\s+UI\s+change\b/i.test(prompt);
+    || /\bmake\s+one\s+tiny\s+safe\s+visible\s+UI\s+change\b/i.test(prompt)
+    || creationRequested;
   let mutationSucceeded = false;
   let mutationFailed = false;
 
@@ -1332,17 +1562,38 @@ export async function runAgentLoop(
       pruneMessages(messages, contextBudget, prompt);
     }
 
+    const modelAbort = new AbortController();
+    const abortFromRun = () => modelAbort.abort();
+    options.abortSignal?.addEventListener("abort", abortFromRun, { once: true });
     try {
-      modelResult = await activeModel.stream(messages, (event) => {
-        modelEvents.push(event);
-        if (options.onModelStream) {
-          try { options.onModelStream(event); } catch { /* listener errors don't crash the loop */ }
-        }
-        if (event.type === "delta") {
-          modelContent += event.text;
-        }
-      });
+      modelResult = await withTotalDeadline(
+        activeModel.stream(messages, (event) => {
+          modelEvents.push(event);
+          if (options.onModelStream) {
+            try { options.onModelStream(event); } catch { /* listener errors don't crash the loop */ }
+          }
+          if (event.type === "delta") {
+            modelContent += event.text;
+          }
+        }, modelAbort.signal),
+        "model stream",
+        () => modelAbort.abort(),
+      );
     } catch (err) {
+      if (options.abortSignal?.aborted) {
+        return {
+          content: "Agent cancelled by user.",
+          toolCalls,
+          rounds,
+          durationMs: Date.now() - startTime,
+          usage: { total_tokens: totalTokens },
+          termination: "cancelled",
+          escalations: escalationEvents.length ? escalationEvents : undefined,
+        };
+      }
+      if (err instanceof AgentDeadlineError) {
+        return timeoutResult("model stream");
+      }
       // Escalation path: record the failure. If the threshold is
       // reached, swap to a stronger model and continue. If below
       // threshold, continue the loop to accumulate more failures
@@ -1696,10 +1947,56 @@ export async function runAgentLoop(
           content:
             `You were asked to make an edit/mutation, but no mutation was performed. ` +
             `Do not claim success without making the edit. ` +
-            `Use project.run to make the edit, then show the diff with project.diff. ` +
+            `Use project.write_file to create or overwrite a file (project.run has no ` +
+            `shell and cannot do this via redirection), or project.run for other edits, ` +
+            `then verify with project.read_file or project.diff. ` +
             `If the edit cannot be made, state plainly that it failed.`,
         });
         continue;
+      }
+
+      // ─── Required output artifact verification ───────────────────────
+      // A mutation tool reporting success (exit 0) is not proof the
+      // requested artifact exists — "echo hello > index.html" can exit 0
+      // having printed to stdout and written nothing, and a model can
+      // mark itself done after that. When the prompt asks to CREATE a
+      // new, specifically-named file, verify it actually exists on disk
+      // before accepting "complete" — this is the runtime check, not
+      // model self-report, that the file-creation case actually needs.
+      // Scoped to creationRequested, not general mutationRequested: an
+      // "edit file.ts" request doesn't need (or get, in a mocked/remote
+      // tool environment) a real-disk existence proof — only whether
+      // the edit tool itself succeeded, which is tracked separately.
+      if (creationRequested && mutationSucceeded && mentionedArtifactFiles.length > 0) {
+        const missingArtifacts = mentionedArtifactFiles.filter(
+          (f) => !fs.existsSync(path.resolve(options.cwd, f)),
+        );
+        if (missingArtifacts.length > 0) {
+          if (round >= maxRounds - 1) {
+            return {
+              content:
+                `A mutation tool reported success, but the requested file(s) still do not ` +
+                `exist on disk: ${missingArtifacts.join(", ")}. The task was NOT completed. ` +
+                `No success is being claimed.\n\n${cleanContent}`,
+              toolCalls,
+              rounds,
+              durationMs: Date.now() - startTime,
+              usage: { total_tokens: totalTokens },
+              termination: "failed",
+              escalations: escalationEvents.length ? escalationEvents : undefined,
+            };
+          }
+          messages.push({ role: "assistant", content: modelContent });
+          messages.push({
+            role: "user",
+            content:
+              `A tool call reported success, but the requested file(s) still do not exist: ` +
+              `${missingArtifacts.join(", ")}. A successful exit code is not proof the file was ` +
+              `written. Use project.write_file to actually create it, then verify with ` +
+              `project.read_file. Do not claim success until the file exists.`,
+          });
+          continue;
+        }
       }
 
       // ─── General failure propagation ────────────────────────────────
@@ -1900,9 +2197,21 @@ export async function runAgentLoop(
     // ─── Execute tool calls (parallel if all read-only, else single) ───
     // Dispatch goes through the ONE shared path defined above — the same
     // one the runtime's deterministic evidence acquisition uses.
-    const execResults = callsToExecute.length > 1
-      ? await Promise.all(callsToExecute.map(({ call, entry }) => dispatchToolCall(call, entry!)))
-      : [await dispatchToolCall(callsToExecute[0].call, callsToExecute[0].entry!)];
+    let execResults: Awaited<ReturnType<typeof dispatchToolCall>>[];
+    try {
+      execResults = await withTotalDeadline(
+        callsToExecute.length > 1
+          ? Promise.all(callsToExecute.map(({ call, entry }) => dispatchToolCall(call, entry!)))
+          : dispatchToolCall(callsToExecute[0].call, callsToExecute[0].entry!).then((r) => [r]),
+        "tool execution",
+        () => void options.shell.cancel(),
+      );
+    } catch (err) {
+      if (err instanceof AgentDeadlineError) {
+        return timeoutResult("tool execution");
+      }
+      throw err;
+    }
 
     // ─── Normalize results in document order ───────────────────────
     // Process results in the same order as the tool calls appeared in
@@ -2038,6 +2347,10 @@ All tool calls execute in this project. Do not assume a different project.`
       ? "Windows: use node -e or powershell for edits; do not use sed."
       : `Platform: ${platform ?? "linux"}. Use platform-appropriate commands.`;
 
+    const toolSection = toolList
+      ? `Tools:\n${toolList}\n\nCall a tool with:\n\`\`\`tool_call\n{ "tool": "<tool_id>", "inputs": { ... } }\n\`\`\`\nContinue from the returned evidence.`
+      : "Tools: none are available. Answer directly; do not call tools.";
+
     return `You are LiTT, a coding agent. Be concise and evidence-driven.
 
 Rules:
@@ -2049,14 +2362,7 @@ Rules:
 - If a tool fails, report the real failure.
 ${compactProject ? `\n${compactProject}` : ""}
 
-Tools:
-${toolList}
-
-Call a tool with:
-\`\`\`tool_call
-{ "tool": "<tool_id>", "inputs": { ... } }
-\`\`\`
-Continue from the returned evidence.`;
+${toolSection}`;
   }
 
   return `You are LiTT, the AI development agent for LiTTree Lab Studios.

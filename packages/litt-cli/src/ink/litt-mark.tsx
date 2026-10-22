@@ -26,6 +26,7 @@
 import React, { useEffect, useState } from "react";
 import { Text } from "ink";
 import { COLORS } from "./colors.js";
+import { isReducedMotion } from "./motion.js";
 
 // ─── Mark states ───────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ export function LiTTMark({
   state = "idle",
   showWordmark = true,
   boldWordmark = true,
-  reducedMotion = false,
+  reducedMotion = isReducedMotion(),
   size = "normal",
 }: LiTTMarkProps): React.ReactElement {
   const color = STATE_COLORS[state];

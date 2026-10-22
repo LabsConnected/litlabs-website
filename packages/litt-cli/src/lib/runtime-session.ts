@@ -111,6 +111,14 @@ export class RuntimeSession {
   private _onApprovalRequired: ApprovalCallback | null;
   private _sigintInstalled: boolean = false;
   private _originalSigint: ((signal: "SIGINT") => void) | null = null;
+  /**
+   * Set by the UI layer (once it has a live persistSession()) so the
+   * idle-exit branch of the SIGINT handler can save the current chat
+   * session before process.exit(). Read dynamically at signal time,
+   * not captured at install time, so it can be wired up after the
+   * handler is installed (UI mounts after the session is created).
+   */
+  private _onPersistBeforeExit: (() => void) | null = null;
 
   constructor(options: RuntimeSessionOptions) {
     this._cwd = options.cwd;
@@ -239,6 +247,15 @@ export class RuntimeSession {
    */
   setMode(mode: "plan" | "act" | "auto"): void {
     this._mode = mode;
+  }
+
+  /**
+   * Wire (or clear, with null) the idle-exit persist callback. The UI
+   * layer calls this once it has a live persistSession() — the SIGINT
+   * handler reads _onPersistBeforeExit dynamically at signal time.
+   */
+  setOnPersistBeforeExit(fn: (() => void) | null): void {
+    this._onPersistBeforeExit = fn;
   }
 
   /**
@@ -390,6 +407,9 @@ export class RuntimeSession {
         });
       } else {
         // No active run — exit
+        // Persist the current chat session before exiting — an idle
+        // SIGINT otherwise exits with no persist call at all.
+        this._onPersistBeforeExit?.();
         // process.exit() skips React/Ink effect cleanup, so raw mode and
         // bracketed paste would otherwise leak into the parent shell.
         // Restore synchronously BEFORE exiting rather than relying on an

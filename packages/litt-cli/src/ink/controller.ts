@@ -55,7 +55,7 @@ import {
   type ResolvedModelProvider,
 } from "../lib/model-provider.js";
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
-import { TelemetryStore } from "../lib/provider-registry.js";
+import { TelemetryStore, loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
 import {
@@ -71,6 +71,8 @@ import {
   localRoutePolicy,
   resolveLocalModel,
   resolveRequestedLocalModel,
+  resolveModelArg,
+  remoteSelectionOf,
   type LocalRoutePolicy,
 } from "../lib/local-model-resolution.js";
 import {
@@ -103,7 +105,7 @@ import {
   createDraftPR as safeCreateDraftPR,
   isProtectedBranch,
 } from "../lib/git-workflow.js";
-import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
+import { saveSession, summarize, markInterrupted, consumeUnlockedWrite, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
 
 /**
@@ -978,15 +980,21 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
   // ─── Session persistence (/resume) ──────────────────────────────
   /** Persist the current shell session (transcript + context). */
+  const lastPersistWarnRef = useRef(0);
   const persistSession = useCallback(() => {
-    const messages = store.state.chatTranscript;
+    // Live transcript from the pure store — store.state.chatTranscript is a
+    // render-time snapshot that misses messages appended this turn (this
+    // closure's defining render predates them), which silently skipped the
+    // save. getChatTranscript() is the canonical accessor for async paths.
+    const messages = store.actions.getChatTranscript();
     if (messages.length === 0) return;
     const firstUser = messages.find((m) => m.role === "user");
-    saveSession({
+    try {
+      saveSession({
       project: store.state.project || projectName || "unnamed",
       cwd: session.getCwd(),
       branch: store.state.branch,
-      mode: store.state.mode,
+      mode: session.getMode() === "plan" ? "plan" : "act",
       routingMode: store.state.routingMode,
       selectedModel: store.state.selectedModel,
       summary: summarize(firstUser?.content ?? "untitled"),
@@ -996,8 +1004,50 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         status: m.status,
         ts: m.ts,
       })),
-    });
+      });
+      if (consumeUnlockedWrite() && Date.now() - lastPersistWarnRef.current > 60_000) {
+        lastPersistWarnRef.current = Date.now();
+        act(store, "Session save ran without the cross-process lock (contention >2s) — a concurrent save may be lost.", "system", "warning");
+      }
+    } catch (err) {
+      if (Date.now() - lastPersistWarnRef.current > 60_000) {
+        lastPersistWarnRef.current = Date.now();
+        act(store, `Session save failed: ${err instanceof Error ? err.message : String(err)}`, "system", "failed");
+      }
+    }
   }, [store, session, projectName]);
+
+  // ─── Incremental persistence ─────────────────────────────────────
+  // A forced kill (closed terminal, SIGTERM, task-killed process) never
+  // runs any cleanup code — on Windows this is not a hypothetical: a
+  // real child process sending itself SIGTERM/SIGHUP is terminated
+  // immediately with no handler invoked at all (confirmed empirically;
+  // Windows has no POSIX signal delivery). The only way conversation
+  // history survives that is for it to already be on disk before the
+  // kill, not written in response to it. This throttled effect persists
+  // the transcript as it changes — new user messages, streaming deltas,
+  // and finalized assistant replies — independent of any exit path.
+  // saveSession()'s existing same-conversation-merge-in-place logic
+  // (session-store.ts) makes repeated calls for the same turn safe: each
+  // call overwrites that one session record, it never appends a
+  // duplicate.
+  const PERSIST_THROTTLE_MS = Number(process.env.LITT_PERSIST_THROTTLE_MS ?? "") || 1000;
+  const lastIncrementalPersistRef = useRef(0);
+  useEffect(() => {
+    if (store.state.chatTranscript.length === 0) return;
+    const elapsed = Date.now() - lastIncrementalPersistRef.current;
+    if (elapsed >= PERSIST_THROTTLE_MS) {
+      lastIncrementalPersistRef.current = Date.now();
+      persistSession();
+      return;
+    }
+    const timer = setTimeout(() => {
+      lastIncrementalPersistRef.current = Date.now();
+      persistSession();
+    }, PERSIST_THROTTLE_MS - elapsed);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.state.chatTranscript, persistSession]);
 
   // Trigger background discovery on mount — populates model availability
   // from real OpenRouter /models endpoint. Non-blocking. The shared
@@ -1021,34 +1071,96 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
    * is not the required one (or cannot serve).
    */
   const reconcileLocalModel = useCallback(async (
-    opts: { force?: boolean } = {},
+    opts: { force?: boolean; quiet?: boolean } = {},
   ): Promise<string | null> => {
     if (resolveRoutePolicy(store, signedIn).kind !== "local-required") return null;
     if (opts.force) resetLocalLaneCache();
     const lane = await probeLocalLane();
     const outcome = resolveLocalModel(lane, requestedLocalModel(store.state.selectedModel));
     if (!outcome.ok) {
-      act(store, outcome.error, "error", undefined, "LOCAL");
+      // Background retries stay quiet: each error activity is a state
+      // update, and a retry loop that repaints on every miss is the idle
+      // render storm this effect was already fixed for.
+      if (!opts.quiet) act(store, outcome.error, "error", undefined, "LOCAL");
       return null;
     }
     const { resolution } = outcome;
     modelRuntime.registerLocalModel(resolution);
-    // FIXED so cliModeToRouteOptions honours the pick — in "auto" mode
-    // the selected id is ignored entirely and the badge would drift back.
+    // Ephemeral only — auto-resolution must NOT write model-prefs.json.
+    // A persisted REMOTE (cloud) selection stays on disk so /remote can
+    // restore it later; the in-memory pick keeps the badge honest and
+    // FIXED so cliModeToRouteOptions honours it — in "auto" mode the
+    // selected id is ignored entirely and the badge would drift back.
     if (store.state.selectedModel !== resolution.canonicalId) {
-      store.actions.updateSelectedModel(resolution.canonicalId);
+      store.actions.applyAutoSelectedModel(resolution.canonicalId);
     }
-    if (store.state.routingMode !== "fixed") store.actions.updateRoutingMode("fixed");
+    if (store.state.routingMode !== "fixed") store.actions.applyAutoRoutingMode("fixed");
     store.actions.setActiveModel(resolution.tag);
     store.actions.setActiveProvider("ollama");
     return resolution.tag;
   }, [store, signedIn, modelRuntime]);
 
-  // Reconcile once at startup so the footer is truthful BEFORE the first
+  // Reconcile at startup so the footer is truthful BEFORE the first
   // message, not only after a run has confirmed a served model.
+  //
+  // This must NOT key on reconcileLocalModel's identity: it closes over
+  // `store`, which useCockpitStore() rebuilds every render. When the
+  // requested model is not installed, reconcile logs an error activity
+  // (a state update), the re-render mints a new callback, the effect
+  // re-fires, and the cockpit repaints ~25x/s forever while idle.
+  // Re-run only when an input of the decision actually changes.
+  const reconcileRef = useRef(reconcileLocalModel);
   useEffect(() => {
-    void reconcileLocalModel();
-  }, [reconcileLocalModel]);
+    reconcileRef.current = reconcileLocalModel;
+  });
+  useEffect(() => {
+    void reconcileRef.current();
+  }, [
+    store.state.executionTarget,
+    store.state.localOnly,
+    store.state.selectedModel,
+    signedIn,
+    modelRuntime,
+  ]);
+
+  // Ollama may come up AFTER LiTT starts (daemon launched late, phone
+  // hopped networks). While the local lane is required but has no served
+  // model, re-probe quietly with backoff (10s -> 60s, max 8 tries) and
+  // announce once on success. Bounded on purpose: no infinite retries,
+  // and a miss writes nothing to the screen. `/refresh` re-arms it.
+  const [lanePollEpoch, setLanePollEpoch] = useState(0);
+  const lanePollRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+    const tick = async () => {
+      if (cancelled || lanePollRef.current) return;
+      lanePollRef.current = true;
+      let tag: string | null = null;
+      try {
+        if (resolveRoutePolicy(store, signedIn).kind !== "local-required") return;
+        if (store.state.activeModel) return; // already served; nothing to refresh
+        tag = await reconcileRef.current({ force: true, quiet: true });
+      } finally {
+        lanePollRef.current = false;
+      }
+      if (cancelled) return;
+      if (tag) {
+        act(store, `Ollama is available - using ${tag}`, "info", undefined, "LOCAL");
+        return;
+      }
+      attempt += 1;
+      if (attempt >= 8) return;
+      timer = setTimeout(tick, Math.min(10_000 * 2 ** (attempt - 1), 60_000));
+    };
+    timer = setTimeout(tick, 10_000);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.state.executionTarget, store.state.localOnly, signedIn, lanePollEpoch]);
 
   // Subscribe to approval bridge — when the gateway requests approval,
   // the bridge sets a pending approval and notifies us. Any open overlay
@@ -1182,8 +1294,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // ─── /resume + /new ─────────────────────────────────────────────
   const restoreSession = useCallback((snapshot: SessionSnapshot) => {
     // Transcript — restore the saved conversation exactly once.
+    // markInterrupted() turns any message still "streaming" (the
+    // process ended before it was finalized) into an explicit error
+    // note — otherwise it would silently restore as a normal completed
+    // turn that the user never actually saw finish.
     store.actions.clearChatTranscript();
-    for (const m of snapshot.messages) {
+    for (const m of markInterrupted(snapshot.messages)) {
       if (m.role !== "user" && m.role !== "assistant") continue;
       store.actions.addChatMessage({
         role: m.role,
@@ -1383,6 +1499,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
     if (input === "/exit" || input === "/quit") {
+      persistSession();
       onExit?.();
       return;
     }
@@ -1537,12 +1654,43 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       submitRef.current(goal, { forceMission: true });
       return;
     }
-    if (input === "/model") {
-      store.actions.setOverlay("model-picker");
+    if (input === "/model" || input.startsWith("/model ")) {
+      const arg = input.slice("/model".length).trim();
+      if (!arg) {
+        store.actions.setOverlay("model-picker");
+        return;
+      }
+      // Direct selection: resolve against the catalog, then installed
+      // local tags. An explicit pick persists (fixed mode honours it);
+      // a miss is a clear error, never a silent fallback.
+      void (async () => {
+        const lane = await probeLocalLane();
+        const resolved = resolveModelArg(arg, modelRuntime.getAllModels(), lane);
+        if (!resolved.ok) {
+          act(store, resolved.error, "error", undefined, "MODEL");
+          return;
+        }
+        store.actions.updateSelectedModel(resolved.canonicalId);
+        store.actions.updateRoutingMode("fixed");
+        act(store, `Model set: ${resolved.label} (${resolved.canonicalId})`, "info", undefined, "MODEL");
+      })();
       return;
     }
     if (input === "/models") {
       store.actions.setOverlay("model-center");
+      return;
+    }
+    if (input === "/refresh") {
+      // Manual model refresh: re-probe Ollama now, re-arm background retry.
+      void reconcileLocalModel({ force: true }).then((tag) => {
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: "info",
+          text: tag ? `Models refreshed - local model: ${tag}` : "Models refreshed - no local model available.",
+        });
+        setLanePollEpoch((n) => n + 1);
+      });
       return;
     }
     if (input === "/litt") {
@@ -1842,7 +1990,20 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         return;
       }
 
-      // Validation passed: switch to REMOTE
+      // Validation passed: re-resolve the selection for REMOTE before
+      // switching. The in-memory selection may be an ephemeral local
+      // (ollama:) pick the remote catalog can never serve — restore the
+      // persisted selection. When the only stored choice is itself
+      // local-only, drop to AUTO (state only — the disk pin is the
+      // operator's explicit local pick and stays for future /local use).
+      const persistedPrefs = loadModelPrefs(getDefaultPrefsPath());
+      const remoteSelection = remoteSelectionOf(persistedPrefs.selectedModel);
+      if (store.state.selectedModel !== remoteSelection) {
+        store.actions.applyAutoSelectedModel(remoteSelection);
+      }
+      if (!remoteSelection && store.state.routingMode === "fixed") {
+        store.actions.applyAutoRoutingMode("auto");
+      }
       store.actions.setExecutionTarget("remote");
       store.actions.addActivity({
         id: `act_${Date.now()}_remote`,
@@ -2019,6 +2180,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           tag: "LOCAL",
           text: truncateActivity(local.text, 60),
         });
+        // Persist AFTER the farewell pair is added — otherwise it's
+        // rendered but never reaches sessions.json before exit.
+        persistSession();
         onExit?.();
         return;
       }
@@ -2688,7 +2852,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // RUNNING mid-run; a successful chat must return it to IDLE
           // (the composer/status reconcile out of Working). Cleanup in finally.
           store.actions.setHoloState("IDLE");
-          persistSession();
         } catch (err) {
           const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
           store.actions.addActivity({
@@ -2716,6 +2879,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // can never stay visually Working after the run settles.
           store.actions.setIsProcessing(false);
           store.actions.stopBusy();
+          // Persist on every terminal outcome — success, error, and cancel
+          // all leave a resumable transcript for /resume.
+          persistSession();
         }
         perf.end("chat");
         return;
@@ -3583,6 +3749,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   return {
     submit,
     handleApproval,
+    persistSession,
     toggleMode,
     openPalette,
     openFailureView,

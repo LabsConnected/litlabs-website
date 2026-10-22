@@ -27,6 +27,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import { Spinner } from "./spinner.js";
+import { clockIntervalMs, isReducedMotion } from "./motion.js";
 import { COLORS, stateColor } from "./colors.js";
 import type { HoloState } from "./cockpit-store.js";
 
@@ -199,7 +200,7 @@ function ProgressBar({ progress, color }: { progress: number; color: string }): 
 function useBreathing(active: boolean): number {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
-    if (!active) return;
+    if (!active || isReducedMotion()) return;
     const timer = setInterval(() => setFrame(f => (f + 1) % 4), 800);
     return () => clearInterval(timer);
   }, [active]);
@@ -233,7 +234,7 @@ export function LiTTHoloPanel({ state, activeModel, missionStartedAt }: LiTTHolo
       if (startRef.current) {
         setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
       }
-    }, 1000);
+    }, clockIntervalMs(1000));
     return () => clearInterval(timer);
   }, [isWorking]);
 

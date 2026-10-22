@@ -25,13 +25,15 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
+import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
 import { hasAnyProviderKey, resolveProviderAdapter, providerLabel, resolveIdleStallMs } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { probeLocalLane } from "../lib/local-lane.js";
 import {
   localRoutePolicy,
-  isLocalModelId,
+  resolveRequestedLocalModel,
 } from "../lib/local-model-resolution.js";
+import { getDefaultPrefsPath, loadModelPrefs } from "../lib/provider-registry.js";
 import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import { resolveActiveProject } from "../lib/active-project.js";
@@ -40,6 +42,18 @@ import { getAuthSession } from "../lib/auth/auth-session.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
 import * as readline from "node:readline/promises";
+
+const EXACT_ANSWER_RE = /^\s*(?:reply|respond|answer|say)\s+with\s+exactly\s*(?::\s*|["'])(.+?)["']?\s*$/i;
+const PROJECT_EVIDENCE_RE = /\b(project|repo|repository|file|path|git|build|test|check|code|command|tool|read|write|edit|search|status|diff|log|package)\b/i;
+
+/**
+ * True only for literal echo-style asks such as `Reply with exactly: OK`.
+ * Multi-part or repository-aware requests keep tools enabled.
+ */
+export function isExactAnswerPrompt(question: string): boolean {
+  const match = EXACT_ANSWER_RE.exec(question);
+  return !!match && !PROJECT_EVIDENCE_RE.test(match[1]);
+}
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
   const question = args.join(" ").trim();
@@ -68,7 +82,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // local model are available.
   const providerConfigured = hasAnyProviderKey();
   const localLane = providerConfigured ? null : await probeLocalLane();
-  const selectedModel = process.env.LITT_MODEL?.trim() || process.env.OPENROUTER_MODEL?.trim() || null;
+  const persistedPrefs = loadModelPrefs(getDefaultPrefsPath());
+  const selectedModel = process.env.LITT_MODEL?.trim()
+    || process.env.OPENROUTER_MODEL?.trim()
+    || persistedPrefs.selectedModel
+    || null;
 
   if (!providerConfigured && !localLane?.available) {
     if (selectedModel) {
@@ -107,7 +125,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const store = new RuntimeStore();
   const shell = createShellExecutor(projectRoot);
   const executor = new CommandExecutor(shell, store);
-  const tools = new ToolRegistry();
+  // Exact-answer prompts need no repository evidence. Keeping tools enabled
+  // lets weak local models invoke expensive checks for a prompt that cannot
+  // use their results (observed: `Reply with exactly...` -> project.check).
+  const directAnswerOnly = isExactAnswerPrompt(question);
+  const tools = new ToolRegistry(undefined, { includeDefaults: !directAnswerOnly });
   const gateway = new ExecutionGateway({
     tools,
     shell,
@@ -139,6 +161,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       process.env.OPENAI_API_KEY ||
       process.env.OPENROUTER_API_KEY ||
       process.env.ANTHROPIC_API_KEY ||
+      process.env.OPENAGENTS_API_KEY ||
       process.env.DEEPSEEK_API_KEY ||
       process.env.MISTRAL_API_KEY
     );
@@ -151,8 +174,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     // When executionTarget=local (LITT_LOCAL_MODE=1, --local, or default),
     // the local daemon (Ollama/LM Studio) is the ONLY provider lane.
     // A persisted or env-selected remote model is never used in LOCAL mode.
-    const requestedLocalModel = process.env.LITT_MODEL?.trim()
-      || (isLocalModelId(selectedModel) ? selectedModel : null);
+    const requestedLocalModel = resolveRequestedLocalModel(persistedPrefs.selectedModel).model;
     const policy = localRoutePolicy({
       executionTarget,
       localOnly,
@@ -188,6 +210,8 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
     console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
 
+    const toolCallFilter = createToolCallStreamFilter();
+
     const result = await runAgentLoop(question, {
       model,
       tools,
@@ -215,7 +239,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       store,
       onModelStream: (event) => {
         if (event.type === "delta") {
-          process.stdout.write(event.text);
+          // Suppress tool_call/json protocol markup — never dump model
+          // protocol internals to the user-facing transcript.
+          const visible = toolCallFilter.next(event.text);
+          if (visible) process.stdout.write(visible);
         }
       },
       onToolStream: (chunk: StreamChunk) => {
@@ -231,12 +258,21 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
           const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
           console.log(`\n${c.blue}○${c.reset} Tool call: ${c.bold}${toolId}${c.reset}`);
         } else if (event.subtype === "agent_tool_result") {
-          const success = (event.data as { success?: boolean }).success;
-          const icon = success ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
-          console.log(`${icon} Tool result`);
+          const data = event.data as {
+            toolId?: string;
+            status?: string;
+            success?: boolean;
+            message?: string;
+          };
+          const icon = data.success ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
+          console.log(
+            `${icon} ${data.toolId ?? "Tool"}: ${data.message ?? data.status ?? "No details"}`,
+          );
         }
       },
     });
+    const streamTail = toolCallFilter.flush();
+    if (streamTail) process.stdout.write(streamTail);
 
     const completionLabel = result.termination === "complete"
       ? `${c.green}■${c.reset} Agent completed`

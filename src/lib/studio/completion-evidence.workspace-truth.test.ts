@@ -207,4 +207,67 @@ describe("completion verdict vs. actual workspace state", () => {
     expect(verdict.state).toBe("not_started");
     expect(verdict.reason).toContain("nothing was changed");
   });
+
+  // ─── A claimed success is not proof either — PR follow-up to the Studio
+  // false-completion remediation. Every test above exercises successfulMutations
+  // === 0 (every mutating call has success: false/undefined); none of them
+  // reach the branch below, which is what actually changes here.
+
+  describe("a tool reports success:true/mutating:true — that claim alone is not proof", () => {
+    it("is contradicted by a VERIFIED-unchanged diff → failed, not complete", () => {
+      // The canonical case: a command exits 0 having printed to stdout and
+      // written nothing (no shell to interpret `>` — the exact shape of the
+      // bug just fixed in the LiTT CLI's project.run, on a different
+      // transport here).
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence([{ toolId: "files.write", mutating: true, success: true }], unchanged),
+      );
+
+      expect(verdict.state).toBe("failed");
+      expect(verdict.workspaceChange).toBe("unchanged");
+      expect(verdict.reason).toMatch(/reported a successful mutation/i);
+      expect(verdict.reason).toMatch(/no changes/i);
+    });
+
+    it("is corroborated by a changed diff → complete (the honest-success path still works)", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence([{ toolId: "files.write", mutating: true, success: true }], changed(["index.html"])),
+      );
+
+      expect(verdict.state).toBe("complete");
+      expect(verdict.workspaceChange).toBe("changed");
+    });
+
+    it("is neither confirmed nor denied by an UNKNOWN diff → still complete (never penalize an unverifiable diff)", () => {
+      // Absence of evidence is not evidence of absence, symmetrically: an
+      // unreachable/unknown diff must not turn a reported success into a
+      // false failure, the same way it must not turn a reported failure
+      // into a false "nothing changed" (tested above).
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence([{ toolId: "files.write", mutating: true, success: true }], null),
+      );
+
+      expect(verdict.state).toBe("complete");
+      expect(verdict.workspaceChange).toBe("unknown");
+    });
+
+    it("one of several mutating calls succeeded, diff verified unchanged → still failed", () => {
+      const verdict = evaluateCompletion(
+        BUILD,
+        evidence(
+          [
+            { toolId: "files.write", mutating: true, success: false },
+            { toolId: "files.write", mutating: true, success: true },
+          ],
+          unchanged,
+        ),
+      );
+
+      expect(verdict.state).toBe("failed");
+      expect(verdict.missing).toContain("workspace change matching the reported mutation");
+    });
+  });
 });

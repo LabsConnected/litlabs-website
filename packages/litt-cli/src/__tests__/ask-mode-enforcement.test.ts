@@ -21,6 +21,8 @@
 
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import {
   ExecutionGateway,
@@ -35,7 +37,7 @@ import { createRuntimeSession } from "../lib/runtime-session.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
 import { driveApprovalBridgeFromTty } from "../commands/ask.js";
 
-const SCRATCH = "/tmp/litt-m1-scratch";
+const SCRATCH = join(tmpdir(), "litt-m1-scratch");
 
 interface Harness {
   gateway: ExecutionGateway;

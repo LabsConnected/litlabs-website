@@ -46,6 +46,8 @@ const CHROME_ROWS = 6;
 export interface LiTTShellProps {
   messages: ChatMessage[];
   activityLog: ActivityEntry[];
+  /** Per-activity expansion — entry ids toggled individually (Ctrl+G latest). */
+  expandedActivityIds?: ReadonlySet<string>;
   holoState: HoloState;
   isProcessing: boolean;
   busySince: number | null;
@@ -119,6 +121,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const {
     messages, activityLog, holoState, isProcessing, busySince, missionState,
     gitModified, gitUntracked, toolProgress, toolDetails = false,
+    expandedActivityIds,
     executionTarget, canonicalMission, workstream,
     composerValue, onComposerChange, onSubmit, onNavigateHistory,
     onOpenPalette, onClosePalette, onOpenContext, onOpenFailureView, composerDisabled,
@@ -302,6 +305,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
             gitUntracked={gitUntracked}
             toolProgress={toolProgress}
             toolDetails={toolDetails}
+            expandedIds={expandedActivityIds}
             holoState={holoState}
             isProcessing={isProcessing}
             executionTarget={executionTarget}
