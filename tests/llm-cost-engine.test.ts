@@ -156,13 +156,15 @@ describe("LLM Cost Engine", () => {
     const free = getEstimatedBitsRange("openrouter-free", "openrouter/free", false);
     expect(free.label).toBe("Included");
 
-    // #684: at the locked 100 LiTTBits = $1 rate a cheap groq call costs
-    // <=1 bit for 2K tokens, so it reads "Included"; a premium model still
-    // shows a LiTTBits label. (Label thresholds flagged for review.)
+    // At 100 bits/$ a paid model whose 2K-token estimate is 1 bit ($0.01)
+    // is a real charge. It must not be labeled Included.
     const paid = getEstimatedBitsRange("groq", "llama-3.3-70b-versatile", false);
     expect(paid.max).toBeGreaterThanOrEqual(1);
-    const premium = getEstimatedBitsRange("anthropic", "claude-opus-4", false);
-    expect(premium.label).toMatch(/LiTTBits|Included/);
+    expect(paid.label).toBe("Low LiTTBits");
+    expect(paid.label).not.toBe("Included");
+    const premium = getEstimatedBitsRange("openai", "gpt-4o", false);
+    expect(premium.label).toMatch(/LiTTBits/);
+    expect(premium.label).not.toBe("Included");
   });
 });
 

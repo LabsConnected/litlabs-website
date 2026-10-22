@@ -44,6 +44,7 @@ describe("canonical-pricing", () => {
       lane: "llm",
     });
     expect(llm.marginBits).toBe(150);
+    expect(llm.exchangeRateVersionId).toBe("littbits-exchange-v2-100-unapproved");
   });
 
   it("never reports negative margin", () => {

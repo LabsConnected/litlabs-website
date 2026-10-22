@@ -313,7 +313,7 @@ export function calculateLlmCost(input: CostEngineInput): CostCalculation {
     retailLiTTBits = Math.max(1, Math.round(baseBits));
   } else {
     // Convert provider cost to a bits-equivalent, then apply margin
-    // #684: locked pricing — 100 LiTTBits = $1 (LLM_LANE_BITS_PER_USD).
+    // #684: UNAPPROVED candidate — 100 LiTTBits = $1 (LLM_LANE_BITS_PER_USD).
     const costEquivalentBits = (providerCostUsd * LLM_LANE_BITS_PER_USD);
     retailLiTTBits = Math.max(1, Math.round(
       costEquivalentBits * (1 + MARGIN_TARGET) + baseBits * 0.1,
@@ -377,10 +377,15 @@ export function getEstimatedBitsRange(
   const minBits = minCalc.retailLiTTBits;
   const maxBits = maxCalc.retailLiTTBits;
 
+  // Thresholds are dollars at the active bits/$ rate, not the legacy
+  // "<= 1 bit means Included" cut that was calibrated when the LLM lane
+  // was ~1,000 bits/$. At 100 bits/$, 1 bit is $0.01 and is a real charge.
+  // "Included" is only a free-class model or a zero-bit estimate.
+  const maxUsd = LLM_LANE_BITS_PER_USD > 0 ? maxBits / LLM_LANE_BITS_PER_USD : maxBits;
   let label: string;
-  if (maxBits <= 1) label = "Included";
-  else if (maxBits <= 5) label = "Low LiTTBits";
-  else if (maxBits <= 15) label = "Standard LiTTBits";
+  if (entry.billingClass === "free" || maxBits <= 0) label = "Included";
+  else if (maxUsd <= 0.05) label = "Low LiTTBits";
+  else if (maxUsd <= 0.25) label = "Standard LiTTBits";
   else label = "Premium LiTTBits";
 
   return { min: minBits, max: maxBits, label };

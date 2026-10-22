@@ -812,7 +812,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     }
   } else if (isBuiltinStudio && !useV2) {
     // Rule 3: plain Studio chat is free — guard it against abuse.
-    const guard = checkFreeChatGuard(clerkId ?? userId);
+    const guard = await checkFreeChatGuard(clerkId ?? userId);
     if (!guard.ok) {
       const msg = "You're sending messages too quickly. Please wait a moment and try again.";
       await updateMessageStatus(assistantMessage.id, userId, "failed", msg);

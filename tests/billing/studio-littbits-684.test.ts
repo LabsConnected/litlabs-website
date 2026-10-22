@@ -184,12 +184,16 @@ describe("chat free", () => {
     expect(route).toMatch(/isBuiltinStudio && !useV2\)[\s\S]{0,200}checkFreeChatGuard/);
     expect(route).toMatch(/agentRunId && isBuiltinStudio\)[\s\S]{0,400}studioSettleBits\(outcome, studioBilling\.billedBits/);
   });
-  it("free chat guard: 20/min burst then 429", () => {
+  it("free chat guard: 20/min burst then 429", async () => {
+    const { createMemoryFreeChatStore } = await import("@/lib/billing/free-chat-limit");
+    const store = createMemoryFreeChatStore();
     const t = 1_000_000;
-    for (let i = 0; i < sb.FREE_CHAT_PER_MINUTE; i++) expect(sb.checkFreeChatGuard("u", t + i).ok).toBe(true);
-    const r = sb.checkFreeChatGuard("u", t + 100);
+    for (let i = 0; i < sb.FREE_CHAT_PER_MINUTE; i++) {
+      expect((await sb.checkFreeChatGuard("u", t + i, store)).ok).toBe(true);
+    }
+    const r = await sb.checkFreeChatGuard("u", t + 100, store);
     expect(r.ok).toBe(false);
-    expect(sb.checkFreeChatGuard("u", t + 61_000).ok).toBe(true);
+    expect((await sb.checkFreeChatGuard("u", t + 61_000, store)).ok).toBe(true);
   });
 });
 

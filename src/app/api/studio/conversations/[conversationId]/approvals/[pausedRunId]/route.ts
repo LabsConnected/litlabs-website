@@ -25,6 +25,7 @@ import { runWithMeteringContext, createBilledBitsAccumulator } from "@/lib/meter
 import {
   finalizeStudioBuildBilling,
   loadStudioAwaitingApproval,
+  settleAbandonedStudioHold,
   type StudioRunOutcome,
 } from "@/lib/studio/studio-billing";
 import { FILE_WRITE_TOOL_IDS } from "@/lib/litt-intelligence/model-registry";
@@ -371,6 +372,10 @@ export async function POST(
   let resolved =
     retriedApproval ?? (await resolvePausedRun(pausedRunId, userId, body.decision));
   if (!resolved) {
+    // The gate is expired or already decided. Settle pre-pause work once.
+    // A racing approve/reject that already settled gets already_settled
+    // from settle_bits and is not charged again.
+    await settleAbandonedStudioHold(getSupabaseAdmin(), pausedRunId).catch(() => undefined);
     return NextResponse.json(
       { error: "Approval could not be resolved (expired or already resolved)" },
       { status: 409 },

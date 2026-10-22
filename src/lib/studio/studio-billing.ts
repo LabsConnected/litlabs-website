@@ -1,7 +1,8 @@
 /**
  * #684 — Studio LiTTBits billing policy.
  *
- * Approved rules (LiTree B, 2026-10-22):
+ * Rules (LiTree B, 2026-10-22). The 100 LiTTBits = $1 rate in rule 5 is
+ * UNAPPROVED pending owner economics review:
  *  1. Cancelled builds charge only verifiably completed billable work; the
  *     unused part of the reservation is released.
  *  2. Approval waits keep the reservation, bounded by a defined TTL; an
@@ -9,12 +10,22 @@
  *     bits stop counting against the balance once expires_at passes).
  *  3. Plain Studio chat is FREE, behind an abuse guard.
  *  4. A minimum of 1 LiTTBit applies only to successful billable operations.
- *  5. Pricing: 100 LiTTBits = $1 (see LLM_LANE_BITS_PER_USD).
+ *  5. Pricing candidate: 100 LiTTBits = $1 (see LLM_LANE_BITS_PER_USD).
+ *     UNAPPROVED — pending owner economics review. Not a customer-price change.
  *
  * Reservation mechanics reuse PR #714's agent-billing (row-shape unwrap,
  * bare-run-id settle key, explicit TTL) — nothing here re-implements RPC
  * handling.
  */
+
+import {
+  consumeFreeChat,
+  type FreeChatLimitStore,
+  FREE_CHAT_PER_DAY,
+  FREE_CHAT_PER_MINUTE,
+} from "@/lib/billing/free-chat-limit";
+
+export { FREE_CHAT_PER_MINUTE, FREE_CHAT_PER_DAY };
 
 /** Agent-loop hard runtime cap (agent-loop-v2 DEFAULT_LOOP_CONFIG.maxRuntimeMs). */
 export const STUDIO_LOOP_MAX_RUNTIME_SECONDS = 30 * 60;
@@ -37,9 +48,9 @@ export const STUDIO_BUILD_RESERVATION_TTL_SECONDS =
  * beyond what was reserved.
  *
  * ECONOMICS REVIEW (#684 rule 5): plan allowances are left at ~5x face
- * value (Creator 7,500 / Pro 18,000 bits). With LLM pricing moved to
- * 100 bits/$ a Creator allowance covers ~37 max-cost builds. Flagged for
- * product/economics review — not changed here.
+ * value (Creator 7,500 / Pro 18,000 bits). With the UNAPPROVED 100 bits/$
+ * candidate, a Creator allowance covers 37 max-cost (200-bit) builds.
+ * Allowances are not changed here. The 100/$ rate is not approved.
  */
 export const STUDIO_BUILD_RESERVE_BITS = 200;
 
@@ -77,36 +88,51 @@ export function studioSettleStatus(outcome: Exclude<StudioRunOutcome, "awaiting_
 }
 
 // ─── Free-chat abuse guard (rule 3) ─────────────────────────────────
+// Shared atomic limiter on rate_limit_store (consume_free_chat_limit).
+// Fails closed when the store is missing or errors. The per-process map
+// is gone: two instances must not each grant their own 20/minute.
 
-export const FREE_CHAT_PER_MINUTE = 20;
-export const FREE_CHAT_PER_DAY = 500;
-
-const chatWindows = new Map<string, number[]>();
-
-/**
- * Per-user sliding-window guard for free (unbilled) Studio chat. In-process:
- * on multi-instance deploys each instance enforces its own window (the
- * route-level withRateLimit store-backed limit still applies globally).
- */
-export function checkFreeChatGuard(userKey: string, now: number = Date.now()): { ok: true } | { ok: false; retryAfterSeconds: number } {
-  const dayMs = 24 * 60 * 60 * 1000;
-  const hits = (chatWindows.get(userKey) ?? []).filter((t) => now - t < dayMs);
-  const lastMinute = hits.filter((t) => now - t < 60_000);
-  if (lastMinute.length >= FREE_CHAT_PER_MINUTE) {
-    chatWindows.set(userKey, hits);
-    return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((60_000 - (now - lastMinute[0])) / 1000)) };
-  }
-  if (hits.length >= FREE_CHAT_PER_DAY) {
-    chatWindows.set(userKey, hits);
-    return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((dayMs - (now - hits[0])) / 1000)) };
-  }
-  hits.push(now);
-  chatWindows.set(userKey, hits);
-  return { ok: true };
+async function sharedFreeChatStore(): Promise<FreeChatLimitStore> {
+  const { getSupabaseAdmin } = await import("@/lib/supabase");
+  const db = getSupabaseAdmin();
+  return {
+    async consume(userKey: string, nowMs: number) {
+      if (!db || typeof db.rpc !== "function") throw new Error("free-chat store unavailable");
+      const { data, error } = await db.rpc("consume_free_chat_limit", {
+        p_user_key: userKey,
+        p_per_minute: FREE_CHAT_PER_MINUTE,
+        p_per_day: FREE_CHAT_PER_DAY,
+        p_now: new Date(nowMs).toISOString(),
+      });
+      if (error) throw error;
+      const row = (Array.isArray(data) ? data[0] : data) as { allowed?: boolean; retry_after_seconds?: number } | null;
+      if (!row?.allowed) {
+        return { ok: false, retryAfterSeconds: Math.max(1, Number(row?.retry_after_seconds) || 60) };
+      }
+      return { ok: true, retryAfterSeconds: 0 };
+    },
+  };
 }
 
+/**
+ * Free (unbilled) Studio chat. `store` is the shared limiter. Omit it to
+ * use consume_free_chat_limit. Denial is fail-closed.
+ */
+export async function checkFreeChatGuard(
+  userKey: string,
+  now: number = Date.now(),
+  store?: FreeChatLimitStore | null,
+): Promise<{ ok: true; retryAfterSeconds: number } | { ok: false; retryAfterSeconds: number }> {
+  const limiter = store === undefined ? await sharedFreeChatStore() : store;
+  const decision = await consumeFreeChat(limiter, userKey, now);
+  return decision.ok
+    ? { ok: true, retryAfterSeconds: 0 }
+    : { ok: false, retryAfterSeconds: decision.retryAfterSeconds };
+}
+
+/** Test hook kept so older suites can call it. The shared store is not process-local. */
 export function _resetFreeChatGuard(): void {
-  chatWindows.clear();
+  /* no process-local window */
 }
 
 // ─── Approval-wait persistence (rule 2) ─────────────────────────────
@@ -130,6 +156,14 @@ export interface StudioAwaitingBilling {
 type SupabaseLike = {
   from: (table: string) => any; // eslint-disable-line @typescript-eslint/no-explicit-any
 };
+
+type RpcResult = { data: unknown; error: { message: string } | null };
+type RpcFn = (fn: string, args: Record<string, unknown>) => PromiseLike<RpcResult>;
+
+function rpcOf(db: SupabaseLike): RpcFn | null {
+  const candidate = (db as { rpc?: unknown }).rpc;
+  return typeof candidate === "function" ? (candidate as RpcFn) : null;
+}
 
 export async function recordStudioAwaitingApproval(
   db: SupabaseLike | null | undefined,
@@ -176,6 +210,101 @@ export async function loadStudioAwaitingApproval(
     accruedBits: Number(sb.accrued_bits) || 0,
     billableSteps: Number(sb.billable_steps) || 0,
   };
+}
+
+function studioBillingOutput(state: StudioAwaitingBilling, phase: string) {
+  return {
+    studio_billing: {
+      phase,
+      paused_run_id: state.pausedRunId,
+      reservation_id: state.reservationId,
+      reserved_credits: state.reservedCredits,
+      accrued_bits: state.accruedBits,
+      billable_steps: state.billableSteps,
+    },
+  };
+}
+
+async function compareAndSetStudioPhase(
+  db: SupabaseLike,
+  state: StudioAwaitingBilling,
+  fromPhase: string,
+  toPhase: string,
+): Promise<boolean> {
+  const { data, error } = await db
+    .from("agent_runs")
+    .update(studioBillingOutput(state, toPhase))
+    .eq("id", state.runId)
+    .eq("output->studio_billing->>phase", fromPhase)
+    .select("id")
+    .maybeSingle();
+  return !error && !!data;
+}
+
+/**
+ * Settle completed pre-pause work exactly once when an approval wait is
+ * abandoned or a late decision loses the race. The phase compare-and-set
+ * is the claim. settle_bits / release_bits are the debit (status guard:
+ * a reservation already settled or released is not charged again).
+ *
+ * Does not pass p_allow_past_expiry. That flag exists only on the unrun
+ * sweep migration. If the reservation has already expired, the phase is
+ * put back to awaiting_approval so the sweep can settle it after the
+ * migration is applied.
+ */
+export async function settleAbandonedStudioHold(
+  db: SupabaseLike | null | undefined,
+  pausedRunId: string,
+): Promise<{ action: "settled" | "released" | "lost" | "unavailable"; bits: number }> {
+  const rpc = db ? rpcOf(db) : null;
+  if (!db || !rpc) return { action: "unavailable", bits: 0 };
+  const hold = await loadStudioAwaitingApproval(db, pausedRunId);
+  if (!hold) return { action: "lost", bits: 0 };
+  const claimed = await compareAndSetStudioPhase(db, hold, "awaiting_approval", "settlement_claimed");
+  if (!claimed) return { action: "lost", bits: 0 };
+
+  const bits = studioSettleBits("cancelled", hold.accruedBits, hold.reservedCredits);
+  try {
+    if (!hold.reservationId || bits <= 0) {
+      if (hold.reservationId) {
+        const { error } = await rpc("release_bits", {
+          p_reservation_id: hold.reservationId,
+          p_idempotency_key: `${hold.runId}:abandon-release`,
+        });
+        if (error) throw error;
+      }
+      await compareAndSetStudioPhase(db, hold, "settlement_claimed", "expired_released");
+      return { action: "released", bits: 0 };
+    }
+
+    const { data, error } = await rpc("settle_bits", {
+      p_reservation_id: hold.reservationId,
+      p_actual_amount: bits,
+      p_idempotency_key: hold.runId,
+      p_overage_policy: "reject",
+      p_description: `Abandoned Studio approval: settle completed work ${hold.runId}`,
+    });
+    if (error) throw error;
+    const row = (Array.isArray(data) ? data[0] : data) as {
+      success?: boolean;
+      reason?: string;
+      settled_amount?: number;
+    } | null;
+    if (!row?.success && row?.reason === "reservation_expired") {
+      await compareAndSetStudioPhase(db, hold, "settlement_claimed", "awaiting_approval");
+      return { action: "unavailable", bits: 0 };
+    }
+    if (!row?.success && row?.reason !== "already_settled") {
+      await compareAndSetStudioPhase(db, hold, "settlement_claimed", "awaiting_approval");
+      return { action: "unavailable", bits: 0 };
+    }
+    await compareAndSetStudioPhase(db, hold, "settlement_claimed", "expired_settled");
+    const charged = row?.reason === "already_settled" ? 0 : (row?.settled_amount ?? bits);
+    return { action: "settled", bits: charged };
+  } catch {
+    await compareAndSetStudioPhase(db, hold, "settlement_claimed", "awaiting_approval");
+    return { action: "unavailable", bits: 0 };
+  }
 }
 
 /**

@@ -35,7 +35,12 @@ vi.mock("@/lib/rate-limiter", () => ({
 
 vi.mock("@/lib/supabase", () => ({
   getSupabaseAdmin: vi.fn(() => ({
-    rpc: vi.fn().mockResolvedValue({ data: 2, error: null }),
+    rpc: vi.fn(async (fn: string) => {
+      if (fn === "consume_free_chat_limit") {
+        return { data: [{ allowed: true, retry_after_seconds: 0 }], error: null };
+      }
+      return { data: 2, error: null };
+    }),
     from: vi.fn(() => ({
       update: vi.fn(() => ({
         eq: vi.fn(() => ({
