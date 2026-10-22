@@ -31,10 +31,23 @@
  *   POST https://litlabs.ai/api/n8n/webhook/{path}
  *   Headers: { "x-n8n-bridge-secret": "<LITT_N8N_BRIDGE_SECRET>" }
  *   Body: any JSON
+ *
+ * D4 (ART-20261022-013, prepared 2026-10-22, NOT deployed):
+ * After authenticating the caller, this bridge authorizes the operation
+ * (single-segment path allowlist, byte payload limit) and forwards the
+ * request with FRESH server-generated signing headers — a new HMAC over
+ * the exact forwarded body, a new timestamp, and a unique request ID for
+ * n8n-side replay protection (see src/lib/n8n-bridge-signing.ts).
+ * Caller-supplied signing headers are never forwarded.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyWebhookSignature } from "@/lib/n8n-webhook";
+import {
+  buildForwardSigningHeaders,
+  exceedsPayloadLimit,
+  isAuthorizedWebhookPath,
+} from "@/lib/n8n-bridge-signing";
 import { timingSafeEqual } from "crypto";
 
 const BRIDGE_SECRET = process.env.LITT_N8N_BRIDGE_SECRET;
@@ -168,15 +181,42 @@ async function handleBridge(
       { status: 400 },
     );
   }
-  const webhookPath = pathSegments.join("/");
+
+  // ── D4: Authorize the operation ──
+  // Only known, single-segment n8n webhook paths may be forwarded. An
+  // authenticated caller is not authorized for arbitrary paths.
+  if (!isAuthorizedWebhookPath(pathSegments)) {
+    return NextResponse.json(
+      { error: "Webhook path not authorized" },
+      { status: 403 },
+    );
+  }
+  const webhookPath = pathSegments[0];
   const targetUrl = `${N8N_WEBHOOK_URL.replace(/\/$/, "")}/webhook/${webhookPath}`;
+
+  // ── D4: Payload limit (byte-accurate) ──
+  if (exceedsPayloadLimit(rawBody)) {
+    return NextResponse.json(
+      { error: "Payload too large" },
+      { status: 413 },
+    );
+  }
 
   // ── Forward the request to n8n ──
   try {
+    // ── D4: Fresh server-generated signing headers ──
+    // NEVER forward caller-supplied x-litt-signature / x-litt-timestamp /
+    // x-litt-request-id / x-n8n-bridge-secret (or authorization/cookie).
+    // The forwarded request is built from an allowlist: Content-Type plus
+    // a signature the bridge generates itself, over the exact body it
+    // forwards, with a fresh timestamp and a unique request ID that n8n
+    // uses for replay protection.
+    const signingHeaders = buildForwardSigningHeaders(BRIDGE_SECRET, rawBody);
     const n8nResponse = await fetch(targetUrl, {
       method,
       headers: {
         "Content-Type": req.headers.get("content-type") ?? "application/json",
+        ...signingHeaders,
       },
       body: rawBody || undefined,
       // n8n webhook nodes typically respond within 30s
