@@ -3,7 +3,9 @@ name: Release Gate
 on:
   workflow_dispatch:
   schedule:
-    # Hourly — verify deployed SHAs match source and Clerk auth is healthy.
+    # Hourly — verify EVERY production web + terminal deployment reports the source SHA and Clerk auth is healthy.
+    # Targets: www.litlabs.net (litt-shell), app.litlabs.net (web-app), terminal.litlabs.net (litlabs-terminal-server),
+    # terminal-server-production-68ac (website-project terminal-server, used server-side by litt-shell).
     # (Was every 30 minutes; production-only monitor, never runs per-PR.)
     - cron: "17 * * * *"
 
@@ -43,32 +45,48 @@ jobs:
           echo "auth_detail=$AUTH_DETAIL" >> $GITHUB_OUTPUT
           echo "Web Clerk auth check: $AUTH_STATUS ${AUTH_DETAIL:+($AUTH_DETAIL)}"
 
-      - name: Check terminal-server health endpoint
+      - name: Check app.litlabs.net (web-app) health endpoint
+        id: app
+        run: |
+          RESPONSE=$(curl -sSf --max-time 10 "https://app.litlabs.net/api/health" || echo '{"status":"unreachable"}')
+          DEPLOYED_SHA=$(echo "$RESPONSE" | jq -r '.checks.build.detail // "unknown"')
+          echo "deployed_sha=$DEPLOYED_SHA" >> $GITHUB_OUTPUT
+          echo "App deployed SHA: $DEPLOYED_SHA"
+
+      - name: Check terminal-server health endpoints (both production deployments)
         id: terminal
         env:
-          # Optional repo variable; defaults to the production terminal service.
+          # terminal project: litlabs-terminal-server (browser WS/HTTP, terminal.litlabs.net)
           TERMINAL_BASE_URL: ${{ vars.TERMINAL_BASE_URL || 'https://litlabs-terminal-server-production-0be1.up.railway.app' }}
+          # website project: terminal-server (server-side TERMINAL_SERVER_URL used by litt-shell)
+          TERMINAL_INTERNAL_BASE_URL: ${{ vars.TERMINAL_INTERNAL_BASE_URL || 'https://terminal-server-production-68ac.up.railway.app' }}
         run: |
-          RESPONSE=$(curl -sSf --max-time 10 \
-            "${TERMINAL_BASE_URL%/}/health" \
-            || echo '{"status":"unreachable"}')
+          RESPONSE=$(curl -sSf --max-time 10 "${TERMINAL_BASE_URL%/}/health" || echo '{"status":"unreachable"}')
           DEPLOYED_SHA=$(echo "$RESPONSE" | jq -r '.commit // "unknown"')
           echo "deployed_sha=$DEPLOYED_SHA" >> $GITHUB_OUTPUT
-          echo "Terminal deployed SHA: $DEPLOYED_SHA"
+          echo "Terminal (terminal project) deployed SHA: $DEPLOYED_SHA"
+          RESPONSE2=$(curl -sSf --max-time 10 "${TERMINAL_INTERNAL_BASE_URL%/}/health" || echo '{"status":"unreachable"}')
+          DEPLOYED_SHA2=$(echo "$RESPONSE2" | jq -r '.commit // "unknown"')
+          echo "deployed_sha_internal=$DEPLOYED_SHA2" >> $GITHUB_OUTPUT
+          echo "Terminal (website project) deployed SHA: $DEPLOYED_SHA2"
 
       - name: Compare SHAs
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          WEB_SHA: ${{ steps.web.outputs.deployed_sha }}
+          APP_SHA: ${{ steps.app.outputs.deployed_sha }}
+          TERMINAL_SHA: ${{ steps.terminal.outputs.deployed_sha }}
+          TERMINAL_INTERNAL_SHA: ${{ steps.terminal.outputs.deployed_sha_internal }}
+          AUTH_STATUS: ${{ steps.web.outputs.auth_status }}
+          AUTH_DETAIL: ${{ steps.web.outputs.auth_detail }}
         run: |
-          SOURCE_SHA="${{ steps.source.outputs.sha }}"
           SOURCE_SHORT="${SOURCE_SHA:0:8}"
-          WEB_SHA="${{ steps.web.outputs.deployed_sha }}"
-          TERMINAL_SHA="${{ steps.terminal.outputs.deployed_sha }}"
-          AUTH_STATUS="${{ steps.web.outputs.auth_status }}"
-          AUTH_DETAIL="${{ steps.web.outputs.auth_detail }}"
-
-          echo "Source:  $SOURCE_SHORT"
-          echo "Web:     $WEB_SHA"
-          echo "Terminal: $TERMINAL_SHA"
-          echo "Auth:    $AUTH_STATUS"
+          echo "Source:            $SOURCE_SHORT"
+          echo "Web (www):         ${WEB_SHA:0:8}"
+          echo "Web (app):         ${APP_SHA:0:8}"
+          echo "Terminal (term.):  ${TERMINAL_SHA:0:8}"
+          echo "Terminal (site):   ${TERMINAL_INTERNAL_SHA:0:8}"
+          echo "Auth:              $AUTH_STATUS"
 
           FAIL=0
 
@@ -81,25 +99,25 @@ jobs:
             echo "✅ Clerk backend accepted the production secret key"
           fi
 
-          if [ "$WEB_SHA" = "unknown" ] || [ "$WEB_SHA" = "dev" ]; then
-            echo "⚠️  Web health endpoint did not report a real SHA (got: $WEB_SHA)"
-            FAIL=1
-          elif [ "$WEB_SHA" != "$SOURCE_SHORT" ]; then
-            echo "❌ Web SHA mismatch: source=$SOURCE_SHORT deployed=$WEB_SHA"
-            FAIL=1
-          else
-            echo "✅ Web SHA matches source"
-          fi
-
-          if [ "$TERMINAL_SHA" = "unknown" ] || [ "$TERMINAL_SHA" = "dev" ]; then
-            echo "⚠️  Terminal health endpoint did not report a real SHA (got: $TERMINAL_SHA)"
-            FAIL=1
-          elif [ "$TERMINAL_SHA" != "$SOURCE_SHORT" ]; then
-            echo "❌ Terminal SHA mismatch: source=$SOURCE_SHORT deployed=$TERMINAL_SHA"
-            FAIL=1
-          else
-            echo "✅ Terminal SHA matches source"
-          fi
+          # Health endpoints may report the 8-char short SHA or (since #670) the full
+          # 40-char Railway SHA. Compare the first 8 characters of both so a correct
+          # deployment can never fail purely on format.
+          check_sha() {
+            label="$1"; deployed="$2"
+            if [ -z "$deployed" ] || [ "$deployed" = "unknown" ] || [ "$deployed" = "dev" ]; then
+              echo "❌ $label did not report a real SHA (got: ${deployed:-empty})"
+              FAIL=1
+            elif [ "${deployed:0:8}" != "$SOURCE_SHORT" ]; then
+              echo "❌ $label SHA mismatch: source=$SOURCE_SHORT deployed=${deployed:0:8}"
+              FAIL=1
+            else
+              echo "✅ $label SHA matches source"
+            fi
+          }
+          check_sha "Web (www.litlabs.net)" "$WEB_SHA"
+          check_sha "Web (app.litlabs.net)" "$APP_SHA"
+          check_sha "Terminal (terminal.litlabs.net)" "$TERMINAL_SHA"
+          check_sha "Terminal (website-project terminal-server)" "$TERMINAL_INTERNAL_SHA"
 
           if [ "$FAIL" = "1" ]; then
             echo ""

@@ -222,6 +222,20 @@ it("confines the bearer to the minted asset manifest (the Codex 9da01ed0 P1)", a
   // Same-workspace linked documents must navigate through the same bearer
   // prefix; otherwise the opaque iframe loses its session and receives 401.
   await frame.locator("#to-page2").click();
+  await frame.waitForFunction(
+    () => {
+      try {
+        const h1 = document.querySelector("h1");
+        if (!h1) return false;
+        if (h1.textContent !== "Page 2") return false;
+        if (h1.getAttribute("data-p2") !== "yes") return false;
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { timeout: 8000 },
+  );
   expect(await frame.locator("h1").textContent()).toBe("Page 2");
   expect(await frame.locator("h1").getAttribute("data-p2")).toBe("yes");
   expect(frame.url()).toContain("/api/preview/owned-project/t/");

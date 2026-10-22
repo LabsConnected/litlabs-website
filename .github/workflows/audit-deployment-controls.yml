@@ -1,0 +1,36 @@
+name: Audit Deployment Controls
+
+# Runs on schedule and on PR to detect unauthorized production deployment paths.
+# This is a DETECTION workflow, not a prevention workflow — it alerts if
+# someone adds an auto-deploying workflow or modifies the controlled ones.
+# The audit logic lives in scripts/ci/audit_deploy_paths.py so it carries its
+# own regression tests (--self-test) — a "clean" result that a bypass can
+# produce is itself a false success.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6am UTC
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'scripts/ci/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Check for unauthorized deploy paths
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Regression-test the audit itself
+        run: |
+          python3 scripts/ci/audit_deploy_paths.py --self-test
+          python3 scripts/ci/verify_required_checks.py --self-test
+
+      - name: Check for unauthorized deploy paths
+        run: python3 scripts/ci/audit_deploy_paths.py --repo .
