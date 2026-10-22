@@ -152,7 +152,7 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
 
   const requestedCommand = cleanArgs[0];
 
-  const isHelp = requestedCommand === "--help" || requestedCommand === "-h";
+  const isHelp = requestedCommand === "--help" || requestedCommand === "-h" || requestedCommand === "help";
   const isVersion = requestedCommand === "--version" || requestedCommand === "-v";
 
   if (isHelp || isVersion) {

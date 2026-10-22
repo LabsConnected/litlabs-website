@@ -78,9 +78,17 @@ export function ModelPicker({
     return () => { cancelled = true; };
   }, [runtime]);
 
-  const availableModels = allModels.filter((m) => m.availability === "online" || m.availability === "unverified");
+  // The rows the cursor can land on — must be the SAME set the render
+  // loop marks selectable, in the same order. Previously selection
+  // indexed into an "online|unverified" filter while rendering numbered
+  // every row (including offline), so Enter picked a different model
+  // than the highlighted one whenever an offline model sat above it.
+  const selectableModels = allModels.filter(
+    (m) => m.availability === "online"
+      || (m.availability !== "offline" && runtime.isRoutable(m.canonicalId)),
+  );
   const [selectedIdx, setSelectedIdx] = useState(() => {
-    const activeIdx = availableModels.findIndex((m) => m.canonicalId === selectedModelId);
+    const activeIdx = selectableModels.findIndex((m) => m.canonicalId === selectedModelId);
     return activeIdx >= 0 ? activeIdx : 0;
   });
   const [routingIdx, setRoutingIdx] = useState(() => {
@@ -116,9 +124,9 @@ export function ModelPicker({
       if (isUpArrow(key)) {
         setSelectedIdx((prev) => Math.max(0, prev - 1));
       } else if (isDownArrow(key)) {
-        setSelectedIdx((prev) => Math.min(availableModels.length - 1, prev + 1));
+        setSelectedIdx((prev) => Math.min(selectableModels.length - 1, prev + 1));
       } else if (isEnter(key, input)) {
-        const model = availableModels[selectedIdx];
+        const model = selectableModels[selectedIdx];
         if (model) {
           // Adapt to the ModelChoice shape the controller expects
           onSelectModel({
@@ -134,7 +142,7 @@ export function ModelPicker({
         }
       }
     }
-  }, [KEY_DEBUG, tab, onCancel, onSelectRoutingMode, routingIdx, loading, availableModels, selectedIdx, onSelectModel]));
+  }, [KEY_DEBUG, tab, onCancel, onSelectRoutingMode, routingIdx, loading, selectableModels, selectedIdx, onSelectModel]));
 
   // Build the active model display
   const activeLabel = activeModel ?? (selectedModelId
@@ -208,8 +216,6 @@ export function ModelPicker({
               {allModels
                 .filter((m) => m.provider === provider)
                 .map((model) => {
-                  const idx = flatIdx++;
-                  const isSelected = idx === selectedIdx;
                   const isActive = model.canonicalId === selectedModelId;
                   const isOnline = model.availability === "online";
                   const isOffline = model.availability === "offline";
@@ -218,6 +224,10 @@ export function ModelPicker({
                   const statusLabel = isOnline ? "READY" : isOffline ? "OFFLINE" : "UNVERIFIED";
                   const statusColor = isOnline ? COLORS.success : isOffline ? COLORS.error : COLORS.warning;
                   const isSelectable = isOnline || (!isOffline && isRoutable);
+                  // Only selectable rows consume a cursor index — this is
+                  // what keeps the highlight aligned with Enter's pick.
+                  const idx = isSelectable ? flatIdx++ : -1;
+                  const isSelected = idx === selectedIdx;
 
                   return (
                     <Box key={model.canonicalId}>
