@@ -22,6 +22,7 @@
 
 import React from "react";
 import { Box, Text, useStdout } from "ink";
+import { redactSecrets } from "./activity-redact.js";
 import { COLORS, activityColor } from "./colors.js";
 import { classifyWidth } from "./ui-primitives.js";
 import type { ActivityEntry } from "./cockpit-store.js";
@@ -180,6 +181,8 @@ export interface ActivityStreamProps {
   width?: number;
   /** Expand every row that has a `fullText` payload. */
   details?: boolean;
+  /** Per-row expansion — ids toggled individually (Ctrl+G on latest). */
+  expandedIds?: ReadonlySet<string>;
   /** Compact mode: drop the border/header for narrow terminals. */
   compact?: boolean;
 }
@@ -189,6 +192,7 @@ export function ActivityStream({
   maxEntries = 4,
   width: widthProp,
   details = false,
+  expandedIds,
   compact: compactProp,
 }: ActivityStreamProps): React.ReactElement {
   const { stdout } = useStdout();
@@ -214,8 +218,8 @@ export function ActivityStream({
           const time = formatTime(entry.ts);
           const hasDetails = !!entry.fullText && entry.fullText !== entry.text && entry.fullText.length > entry.text.length;
           const isStream = isStreamEntry(entry);
-          const msg = truncate(entry.text, msgMax);
-          const expanded = details && hasDetails;
+          const msg = truncate(redactSecrets(entry.text), msgMax);
+          const expanded = (details || expandedIds?.has(entry.id) === true) && hasDetails;
 
           return (
             <Box key={entry.id} flexDirection="column">
@@ -231,12 +235,12 @@ export function ActivityStream({
               </Box>
               {expanded && (
                 <Box flexDirection="column" marginLeft={prefixWidth}>
-                  {wrapText(entry.fullText!, msgMax)
+                  {wrapText(redactSecrets(entry.fullText!), msgMax)
                     .slice(0, DETAIL_MAX_LINES)
                     .map((line, i) => (
                       <Text key={i} color={COLORS.secondary} dimColor>{line}</Text>
                     ))}
-                  {wrapText(entry.fullText!, msgMax).length > DETAIL_MAX_LINES && (
+                  {wrapText(redactSecrets(entry.fullText!), msgMax).length > DETAIL_MAX_LINES && (
                     <Text color={COLORS.secondary} dimColor>…</Text>
                   )}
                 </Box>
