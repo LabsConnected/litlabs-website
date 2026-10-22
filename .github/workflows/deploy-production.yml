@@ -173,37 +173,14 @@ jobs:
           SHA: ${{ steps.val.outputs.sha }}
         run: |
           set +x
-          runs=$(gh api "repos/${{ github.repository }}/commits/$SHA/check-runs?per_page=100" --jq '.check_runs')
-          fail=0
-          IFS='|' read -ra NAMES <<< "$REQUIRED_CHECKS"
-          for n in "${NAMES[@]}"; do
-            # Pick the truly latest run by started_at, not completed_at. A rerun
-            # that is still queued/in_progress has no completed_at, so sorting on
-            # that field would hide it behind an older, already-completed success
-            # for the same check name — accepting a stale PASS while a fresh run
-            # is in flight (or has since failed). started_at is set the moment a
-            # run is created, so it always orders the newest attempt last.
-            latest=$(echo "$runs" | jq -c --arg n "$n" '[.[] | select(.name==$n)] | sort_by(.started_at) | last')
-            if [ -z "$latest" ] || [ "$latest" = "null" ]; then
-              echo "::error::Required check '$n' has no run on $SHA. Refusing to deploy."
-              fail=1
-              continue
-            fi
-            status=$(echo "$latest" | jq -r '.status')
-            concl=$(echo "$latest" | jq -r '.conclusion // "missing"')
-            echo "$n: status=$status conclusion=$concl"
-            if [ "$status" != "completed" ]; then
-              echo "::error::Required check '$n' latest run on $SHA is '$status', not completed. Refusing to deploy on a stale or in-progress result."
-              fail=1
-            elif [ "$concl" != "success" ]; then
-              echo "::error::Required check '$n' concluded '$concl' on $SHA. Refusing to deploy."
-              fail=1
-            fi
-          done
-          if [ "$fail" -ne 0 ]; then
-            echo "::error::A required CI check is not a green, completed run on $SHA. Refusing to deploy."
-            exit 1
-          fi
+          gh api "repos/${{ github.repository }}/commits/$SHA/check-runs?per_page=100" \
+            --jq '.check_runs' > "$RUNNER_TEMP/check-runs.json"
+          # The gate itself lives in a self-tested script so the started_at
+          # ordering and completed-status requirement can't be silently
+          # reverted (see scripts/ci/verify_required_checks.py --self-test).
+          python3 scripts/ci/verify_required_checks.py \
+            --runs "$RUNNER_TEMP/check-runs.json" \
+            --required "$REQUIRED_CHECKS"
 
   deploy:
     name: Deploy to production (needs approval)
