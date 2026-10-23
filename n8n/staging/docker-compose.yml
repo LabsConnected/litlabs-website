@@ -1,0 +1,44 @@
+# STAGING-ONLY n8n harness — isolated from production.
+# Engine DB is a throwaway local Postgres container; app-data target is
+# litlabs-preview ONLY (bound via the n8n Supabase credential inside the editor).
+# Nothing here touches Railway, production n8n, or prod Supabase.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: n8n-staging-local
+      POSTGRES_DB: n8n
+    volumes:
+      - n8n-staging-pg:/var/lib/postgresql/data
+    # no published ports — engine DB reachable only inside the compose network
+
+  n8n:
+    image: n8nio/n8n:2.10.0
+    depends_on:
+      - postgres
+    ports:
+      - "127.0.0.1:5678:5678"   # localhost only — no LAN exposure
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: n8n-staging-local
+      N8N_HOST: 0.0.0.0
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      N8N_ENCRYPTION_KEY: ${N8N_STAGING_ENCRYPTION_KEY:?generate: openssl rand -hex 32}
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: admin
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_STAGING_BASIC_AUTH_PASSWORD:?generate a local-only password}
+      GENERIC_TIMEZONE: America/New_York
+      NODE_ENV: production
+    volumes:
+      - n8n-staging-data:/home/node/.n8n
+
+volumes:
+  n8n-staging-pg:
+  n8n-staging-data:

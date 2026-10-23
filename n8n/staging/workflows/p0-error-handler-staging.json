@@ -1,0 +1,667 @@
+{
+  "name": "LiTTree — P0 Error Handler v3.4 (STAGING)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "48932825-3cc6-4808-9c36-85a5f1bccfad",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2208,
+        224
+      ],
+      "notes": "Fires on any failure of a workflow that names this workflow as its errorWorkflow."
+    },
+    {
+      "parameters": {
+        "jsCode": "// LiTTree P0 Error Handler v3.4 — Normalize Error (runOnceForAllItems)\n// Produces ONE normalized alert record. No external calls; never requires.\n// CONFIG: re-alert interval. The same (workflow, error) alerts at most once\n// per UTC bucket of RE_ALERT_MINUTES. Change with care: shorter = noisier.\n//\n// v3.4: field mappings corrected against the ACTUAL n8n Error Trigger schema\n// (n8n docs): {execution: {id, url, error: {message, stack}, lastNodeExecuted,\n// mode}, workflow: {id, name}}. Also handles the trigger-node-error variant\n// ({trigger: {error, mode}, workflow: {id, name}}), which carries less info.\nvar RE_ALERT_MINUTES = 60;\n\nfunction sigOf(msg, nodeName, wfName) {\n  var parts = [msg || '', nodeName || '', wfName || ''];\n  return parts.filter(Boolean).join(' | ').slice(0, 500) || 'empty-error';\n}\nfunction hash53(str, seed) {\n  var h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;\n  for (var i = 0, ch; i < str.length; i++) {\n    ch = str.charCodeAt(i);\n    h1 = Math.imul(h1 ^ ch, 2654435761);\n    h2 = Math.imul(h2 ^ ch, 1597334677);\n  }\n  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);\n  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);\n  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);\n}\n// Bucketed re-alert key: identical failures in the same UTC bucket share a\n// key (suppressed); the next bucket yields a new key (re-alert allowed).\nfunction alertKeyFor(workflowId, signature, nowMs) {\n  var bucket = Math.floor(nowMs / (RE_ALERT_MINUTES * 60 * 1000));\n  return hash53(workflowId + '|' + signature + '|' + bucket, 0);\n}\n\nvar items = $input.all();\nvar trigger = items.length ? items[0].json : {};\nvar ex = trigger.execution || {};\nvar wf = trigger.workflow || {};\n// Error object: execution.error normally; trigger.error when the failed\n// workflow's own trigger node errored (different schema, less info).\nvar errObj = ex.error || ((trigger.trigger || {}).error) || {};\nvar errMsg = errObj.message || '';\nif (typeof errMsg !== 'string') errMsg = String(errMsg);\nvar workflowId = String(wf.id || wf.name || 'unknown');\nvar signature = sigOf(errMsg, ex.lastNodeExecuted, wf.name || wf.id);\n\nreturn [{\n  json: {\n    alert_key: alertKeyFor(workflowId, signature, Date.now()),\n    workflow_id: workflowId,\n    workflow_name: String(wf.name || workflowId),\n    error_message: (errMsg || signature).slice(0, 2000),\n    error_signature: signature,\n    failed_node: String(ex.lastNodeExecuted || ''),\n    execution_id: String(ex.id || ''),\n    execution_url: String(ex.url || ''),\n    occurred_at: new Date().toISOString(),\n    realert_minutes: RE_ALERT_MINUTES,\n  }\n}];"
+      },
+      "id": "c2939dd2-1158-4300-895a-33d0bd316093",
+      "name": "Normalize Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1984,
+        224
+      ],
+      "notes": "v3.4: field mappings corrected to the actual n8n Error Trigger schema {execution:{id,url,error,lastNodeExecuted}, workflow:{id,name}}."
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "n8n_alert_claims",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "alert_key",
+              "fieldValue": "={{ $json.alert_key }}"
+            },
+            {
+              "fieldId": "workflow_id",
+              "fieldValue": "={{ $json.workflow_id }}"
+            },
+            {
+              "fieldId": "workflow_name",
+              "fieldValue": "={{ $json.workflow_name }}"
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": "={{ $json.execution_id }}"
+            },
+            {
+              "fieldId": "occurred_at",
+              "fieldValue": "={{ $json.occurred_at }}"
+            },
+            {
+              "fieldId": "failed_node",
+              "fieldValue": "={{ $json.failed_node }}"
+            },
+            {
+              "fieldId": "error_signature",
+              "fieldValue": "={{ $json.error_signature }}"
+            }
+          ]
+        }
+      },
+      "id": "7abff183-2c89-4edf-9899-47ab192d89f8",
+      "name": "Claim Alert Slot",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1760,
+        224
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": null,
+          "name": "Supabase API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "ATOMIC CLAIM: single INSERT; PK on alert_key. (unchanged from v3.1)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// LiTTree P0 Error Handler v3.1 — Classify Claim Error (runOnceForAllItems)\n// Reads the failed Claim Alert Slot insert (paired item) and decides:\n//   - PK conflict (23505 / duplicate key) => duplicate, stop.\n//   - anything else (DB down, RLS, timeout, response lost) => fail OPEN:\n//     send the alert anyway. A duplicate alert is acceptable; a lost P0\n//     alert is not.\nvar items = $input.all();\nvar errJson = items.length ? items[0].json : {};\nvar msg = JSON.stringify(errJson).toLowerCase();\nvar dup = /duplicate key|23505|unique constraint|conflict/i.test(msg)\n       || /already exists/i.test(msg);\nreturn [{\n  json: {\n    alert_key: $('Normalize Error').first().json.alert_key,\n    workflow_id: $('Normalize Error').first().json.workflow_id,\n    error_message: $('Normalize Error').first().json.error_message,\n    error_signature: $('Normalize Error').first().json.error_signature,\n    failed_node: $('Normalize Error').first().json.failed_node,\n    execution_id: $('Normalize Error').first().json.execution_id,\n    execution_url: $('Normalize Error').first().json.execution_url,\n    occurred_at: $('Normalize Error').first().json.occurred_at,\n    is_duplicate: !!dup,\n    dedup_degraded: !dup,   // true when we could not reach the claims table\n    claim_error: String(errJson.message || errJson.error || 'unknown').slice(0, 500),\n  }\n}];"
+      },
+      "id": "48659051-8e7a-4064-b657-262f37fcf2e3",
+      "name": "Classify Claim Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1760,
+        448
+      ],
+      "notes": "Conflict => duplicate-stop. Any other error => FAIL OPEN. (unchanged)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_duplicate }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "8004a242-65dd-446d-9380-1d2ab7cb0581",
+      "name": "Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -1536,
+        352
+      ],
+      "notes": "TRUE => already alerted this hour => stop. FALSE => send. (unchanged)"
+    },
+    {
+      "parameters": {},
+      "id": "6f8d17c8-c552-45fc-9c02-8cf84b6fd43c",
+      "name": "Duplicate — Stop",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -1328,
+        224
+      ],
+      "notes": "Terminal: duplicate suppressed for this hour-bucket. (unchanged)"
+    },
+    {
+      "parameters": {
+        "sendTo": "laidbacknostress4life@gmail.com",
+        "subject": "=🚨 LiTT P0 FAILURE [{{ $('Normalize Error').first().json.workflow_id }}]",
+        "emailType": "text",
+        "message": "=P0 FAILURE\n\nWorkflow: {{ $('Normalize Error').first().json.workflow_name }} ({{ $('Normalize Error').first().json.workflow_id }})\nError: {{ $('Normalize Error').first().json.error_message }}\nNode: {{ $('Normalize Error').first().json.failed_node }}\nExecution: {{ $('Normalize Error').first().json.execution_id }}\nURL: {{ $('Normalize Error').first().json.execution_url }}\nAt: {{ $('Normalize Error').first().json.occurred_at }}",
+        "options": {}
+      },
+      "id": "a86e12d2-cae2-4d0b-ab11-5dbc2ae272c2",
+      "name": "Send Alert Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        448
+      ],
+      "webhookId": "c4b372d9-9ce3-4ba8-ae9b-316c4c6f0403",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": null,
+          "name": "Gmail OAuth2"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "DISABLED FOR STAGING — would send owner alert email",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// LiTTree P0 Error Handler v3.1 — Confirm Fallback (runOnceForAllItems)\n// The Gmail v2 send operation returns the Gmail message resource, which\n// always carries an `id` on success. Empty/missing id => NOT confirmed.\nvar items = $input.all();\nvar j = items.length ? items[0].json : {};\nvar norm = $('Normalize Error').first().json;\nvar id = j && j.id;\nreturn [{\n  json: {\n    alert_key: norm.alert_key,\n    workflow_id: norm.workflow_id,\n    error_message: norm.error_message,\n    error_signature: norm.error_signature,\n    failed_node: norm.failed_node,\n    execution_id: norm.execution_id,\n    execution_url: norm.execution_url,\n    occurred_at: norm.occurred_at,\n    fallback_confirmed: typeof id === 'string' && id.length > 0,\n    channel: 'email',\n  }\n}];"
+      },
+      "id": "1129f13a-0e15-4c85-aefb-34ea611b434e",
+      "name": "Confirm Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        448
+      ],
+      "notes": "fallback_confirmed = non-empty Gmail message id. (unchanged)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.fallback_confirmed }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "c2a999aa-bd99-49ef-9da8-4c7545099ca1",
+      "name": "Email Delivered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        352
+      ],
+      "notes": "TRUE => backfill claim then record. FALSE => Fail Loudly. (unchanged)"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "n8n_alert_claims",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "alert_key",
+              "fieldValue": "={{ $json.alert_key }}"
+            },
+            {
+              "fieldId": "workflow_id",
+              "fieldValue": "={{ $json.workflow_id }}"
+            },
+            {
+              "fieldId": "workflow_name",
+              "fieldValue": "={{ $('Normalize Error').first().json.workflow_name }}"
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": "={{ $json.execution_id }}"
+            },
+            {
+              "fieldId": "occurred_at",
+              "fieldValue": "={{ $json.occurred_at }}"
+            },
+            {
+              "fieldId": "failed_node",
+              "fieldValue": "={{ $json.failed_node }}"
+            },
+            {
+              "fieldId": "error_signature",
+              "fieldValue": "={{ $json.error_signature }}"
+            }
+          ]
+        }
+      },
+      "id": "35b5a542-3267-4f6c-b80a-d35330db80e0",
+      "name": "Backfill Claim",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -656,
+        224
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": null,
+          "name": "Supabase API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "NEW v3.2: best-effort claim insert before recording. 23505 => row exists => fine. Shared by Discord + Email paths. Both outputs go to Resolve Delivery Record."
+    },
+    {
+      "parameters": {
+        "jsCode": "// LiTTree P0 Error Handler v3.4 — Resolve Delivery Record (runOnceForAllItems)\n// Runs on BOTH outputs of Backfill Claim (shared by the Discord and Email\n// delivery paths). Decides whether the delivery can be RECORDED:\n//   - backfill ok, or 23505/conflict (claim row already exists) => recordable\n//   - backfill failed otherwise (Supabase unavailable)           => NOT recordable\n// A non-recordable delivery ends at the explicit \"Delivered — Unrecorded\"\n// terminal. A successfully delivered alert is NEVER reported as a failure.\n//\n// v3.4: channel attribution fixed — prefer the Confirm node whose delivery\n// actually CONFIRMED. v3.3 checked Confirm Delivery first, which always ran,\n// misrecording Gmail deliveries as Discord.\nfunction confirmJson() {\n  var fb = null, dc = null;\n  try { fb = $('Confirm Fallback').first().json; } catch (e) {}\n  try { dc = $('Confirm Delivery').first().json; } catch (e) {}\n  if (fb && fb.fallback_confirmed && fb.alert_key) return fb;\n  if (dc && dc.delivery_confirmed && dc.alert_key) return dc;\n  if (fb && fb.alert_key) return fb;\n  if (dc && dc.alert_key) return dc;\n  return {};\n}\nvar items = $input.all();\nvar raw = items.length ? items[0].json : {};\nvar src = confirmJson();\nvar isErr = !!(raw && raw.error);\nvar msg = isErr ? JSON.stringify(raw).toLowerCase() : '';\nvar conflict = /duplicate key|23505|unique constraint|conflict/i.test(msg)\n            || /already exists/i.test(msg);\nvar recordable = !isErr || conflict;\nreturn [{\n  json: {\n    alert_key: src.alert_key || raw.alert_key || '',\n    channel: src.channel || 'unknown',\n    error_signature: src.error_signature || '',\n    recordable: recordable,\n    backfill_error: (isErr && !conflict)\n      ? String((raw.error && raw.error.message) || raw.message || 'unknown').slice(0, 500)\n      : '',\n  }\n}];"
+      },
+      "id": "3fb846ca-761d-4191-b994-c3468f8cb293",
+      "name": "Resolve Delivery Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        224
+      ],
+      "notes": "v3.4: channel attribution fixed — prefers the Confirm node whose delivery actually confirmed."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.recordable }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "4ead8e70-4919-4fd0-82cf-411394a4bb81",
+      "name": "Delivery Recordable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        128
+      ],
+      "notes": "NEW v3.2: TRUE => Mark Delivered. FALSE => Delivered — Unrecorded."
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "n8n_alert_deliveries",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "alert_key",
+              "fieldValue": "={{ $json.alert_key }}"
+            },
+            {
+              "fieldId": "channel",
+              "fieldValue": "={{ $json.channel }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "sent"
+            },
+            {
+              "fieldId": "detail",
+              "fieldValue": "={{ $json.error_signature }}"
+            }
+          ]
+        }
+      },
+      "id": "ac793baa-3575-46f8-b5c4-fe4a2372718a",
+      "name": "Delivered — Recorded",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        0,
+        128
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": null,
+          "name": "Supabase API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "v3.3: success terminal (was \"Mark Delivered\"). Error output -> Capture Record Error -> Delivered — Unrecorded. A delivered alert is never reported as failed."
+    },
+    {
+      "parameters": {},
+      "id": "7c67426d-907b-47fe-a3de-cafb8888013f",
+      "name": "Delivered — Unrecorded",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "NEW v3.2 terminal: the alert WAS delivered, but Supabase was unavailable so the outcome could not be recorded. Explicit terminal state — NOT an execution failure."
+    },
+    {
+      "parameters": {
+        "jsCode": "// LiTTree P0 Error Handler v3.1 — Fail Loudly (runOnceForAllItems)\n// Reached ONLY when Discord failed AND the Gmail fallback failed.\n// Throwing marks the error-workflow execution FAILED (visible, paging-worthy)\n// instead of silently swallowing a P0 alert.\nvar norm = $('Normalize Error').first().json;\nthrow new Error(\n  '[LiTT-P0] ALERT DELIVERY FAILED for key=' + norm.alert_key +\n  ' workflow=' + norm.workflow_id +\n  ' error=' + String(norm.error_message).slice(0, 200)\n);"
+      },
+      "id": "fd53cc2d-bdfb-4c23-ae7a-c9003cd5bbaf",
+      "name": "Fail Loudly",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        448
+      ],
+      "notes": "Terminal: BOTH channels failed => throw. (unchanged)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// LiTTree P0 Error Handler v3.3 — Capture Record Error (runOnceForAllItems)\n// \"Delivered — Recorded\" threw AFTER a confirmed delivery (e.g. transient DB\n// failure on the deliveries insert). The alert WAS delivered; only the\n// outcome record is missing. Preserve the DB error details + delivery\n// context for diagnostics, then terminate at Delivered — Unrecorded.\n// Explicit success outcome — never a misleading execution failure, and the\n// database error is never silently discarded.\nvar errItem = ($input.first() || {}).json || {};\nvar rec = {};\ntry { rec = ($('Resolve Delivery Record').first() || {}).json || {}; } catch (e) {}\nvar errObj = errItem.error || {};\nvar detail = errObj.message || errItem.error || errItem.message || 'unknown';\nreturn [{\n  json: {\n    alert_key: rec.alert_key || '',\n    channel: rec.channel || 'unknown',\n    error_signature: rec.error_signature || '',\n    outcome: 'delivered-unrecorded',\n    record_error: String(detail).slice(0, 1000),\n    recorded_at: new Date().toISOString(),\n  }\n}];"
+      },
+      "id": "51e1e050-95fd-40da-868b-ce5977b6b046",
+      "name": "Capture Record Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        128
+      ],
+      "notes": "v3.3: preserves DB error details + delivery context when the delivery record insert fails after a confirmed delivery."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ !!$json.error }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "aaaaaaa1-1111-4111-8111-111111111111",
+      "name": "Claim Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -1500,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ !!$json.error }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "aaaaaaa2-2222-4222-8222-222222222222",
+      "name": "Record Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "n8n_alert_deliveries",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "alert_key",
+              "fieldValue": "={{ $json.alert_key }}"
+            },
+            {
+              "fieldId": "channel",
+              "fieldValue": "={{ $json.channel }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "failed"
+            },
+            {
+              "fieldId": "detail",
+              "fieldValue": "={{ $json.error_signature }}"
+            }
+          ]
+        }
+      },
+      "id": "bbbbbbb1-1111-4111-8111-111111111111",
+      "name": "Record Failed Delivery",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        900,
+        560
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": null,
+          "name": "Supabase API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Records a 'failed' delivery row when Gmail rejects the alert, before the claim is released for a future retry."
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Error": {
+      "main": [
+        [
+          {
+            "node": "Claim Alert Slot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Alert Slot": {
+      "main": [
+        [
+          {
+            "node": "Claim Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Claim Error": {
+      "main": [
+        [
+          {
+            "node": "Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Duplicate — Stop",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm Fallback": {
+      "main": [
+        [
+          {
+            "node": "Email Delivered?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backfill Claim": {
+      "main": [
+        [
+          {
+            "node": "Resolve Delivery Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Delivery Record": {
+      "main": [
+        [
+          {
+            "node": "Delivery Recordable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delivery Recordable?": {
+      "main": [
+        [
+          {
+            "node": "Delivered — Recorded",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Delivered — Unrecorded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capture Record Error": {
+      "main": [
+        [
+          {
+            "node": "Delivered — Unrecorded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delivered — Recorded": {
+      "main": [
+        [
+          {
+            "node": "Record Error?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Failed?": {
+      "main": [
+        [
+          {
+            "node": "Classify Claim Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Error?": {
+      "main": [
+        [
+          {
+            "node": "Capture Record Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Send Alert Email": {
+      "main": [
+        [
+          {
+            "node": "Confirm Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Delivered?": {
+      "main": [
+        [
+          {
+            "node": "Backfill Claim",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Failed Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Failed Delivery": {
+      "main": [
+        [
+          {
+            "node": "Fail Loudly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}
