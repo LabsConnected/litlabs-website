@@ -48,8 +48,13 @@ this workflow. All credential bindings were stripped at export
 
 1. `cd n8n/staging && docker compose up -d` → open http://localhost:5678
    → create the local owner account (one-time, machine-local).
-2. Run `ddl.sql` on **litlabs-preview** (Supabase SQL editor) — creates
-   `n8n_alert_claims` + `n8n_alert_deliveries` with deny-RLS.
+2. **Pre-flight:** on litlabs-preview, check for existing tables first —
+   `SELECT column_name FROM information_schema.columns WHERE table_name IN
+   ('n8n_alert_claims','n8n_alert_deliveries')`. If rows return, compare the
+   column set to `ddl.sql` before applying (IF NOT EXISTS will NOT reconcile
+   a divergent schema). Then run `ddl.sql` on **litlabs-preview** (Supabase
+   SQL editor) — creates `n8n_alert_claims` + `n8n_alert_deliveries` with
+   deny-RLS.
 3. In staging n8n: create a **Supabase API** credential pointed at
    `litlabs-preview` (URL + service-role key). Do NOT create Gmail/Discord/
    Slack/Stripe credentials — outbound is intentionally unconfigured.
@@ -94,11 +99,25 @@ second injection until the read path is confirmed.
 | 3 | Reused P0 handler + ledger | exported unmodified except: email node disabled, creds scrubbed |
 | 4 | Outbound disabled | no Gmail/Discord/Slack/Stripe creds; email node disabled; no httpRequest/webhook-out nodes in the handler (audit table above) |
 | 5 | Synthetic failure injected | probe `Boom` node throws `litt-staging-probe synthetic failure litt-staging-probe-001` on the webhook POST |
-| 6 | Exactly-once + explanation | `n8n_alert_claims` → exactly 1 row for the probe after BOTH POSTs; `n8n_alert_deliveries` → 1 row for that alert_key; Normalize Error output = normalized explanation |
-| 7 | Logs + verdict | staging Executions list: probe=error (×2), P0 handler=success; export for review |
+| 6 | Exactly-once + explanation | `n8n_alert_claims` → exactly 1 row for the probe after BOTH POSTs; `n8n_alert_deliveries` → 1 row (`status='failed'` — truthful, no channel configured); Normalize Error output = normalized explanation |
+| 7 | Logs + verdict | Expected executions: probe = error ×2; P0 handler run 1 = **error** (`Fail Loudly` throws by design — a stubbed channel is an undelivered alert, and the handler deliberately refuses to record that as success); run 2 = **success** via `Duplicate — Stop` |
 
-**FAIL conditions:** >1 claim row per alert_key, any write to prod tables,
-any outbound send attempt, probe returns success, or P0 handler errors.
+**Traced behavior with Gmail disabled:** the disabled node passes input
+through unchanged → `Confirm Fallback` sees no message `id` →
+`fallback_confirmed=false` → `Email Delivered?` false → `Record Failed
+Delivery` writes `status='failed'` → `Fail Loudly` throws. The ledger is
+exactly-once and honest; the handler's error status on run 1 is the
+*designed* signal, not a test failure.
+
+**Known benign quirk:** `Resolve Delivery Record` references
+`$('Confirm Delivery')` — a removed Discord confirm node. Guarded by
+try/catch; resolves to null and falls back to the email path. Harmless in
+staging; flag for prod cleanup.
+
+**FAIL conditions:** >1 claim row per alert_key, missing `status='failed'`
+delivery row, any write to prod tables, any outbound send attempt, probe
+returns success, or P0 handler errors *outside* the expected run-1
+`Fail Loudly` (undelivered-alert) path.
 
 ## Teardown
 
