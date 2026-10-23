@@ -314,3 +314,50 @@ describe("project.deploy is the deployment tool", () => {
     expect(verdict.missing).toContain("successful deployment");
   });
 });
+
+/* ── Preview evidence: a build can never claim a working site while its
+   required preview failed or never became ready ── */
+
+describe("preview evidence gates the complete verdict", () => {
+  const req = requirementForMode("build");
+  const mutatingOk = { toolId: "edit_file", success: true, mutating: true };
+
+  it("completes when the preview verified itself ready", () => {
+    const verdict = evaluateCompletion(req, {
+      toolCalls: [mutatingOk],
+      preview: { started: true, ready: true },
+    });
+    expect(verdict.state).toBe("complete");
+  });
+
+  it("fails when the preview demonstrably failed", () => {
+    const verdict = evaluateCompletion(req, {
+      toolCalls: [mutatingOk],
+      preview: { started: true, ready: false, failed: true },
+    });
+    expect(verdict.state).toBe("failed");
+    expect(verdict.missing).toContain("working preview");
+  });
+
+  it("is partial when the preview started but never became ready (timeout)", () => {
+    const verdict = evaluateCompletion(req, {
+      toolCalls: [mutatingOk],
+      preview: { started: true, ready: false },
+    });
+    expect(verdict.state).toBe("partial");
+    expect(verdict.missing).toContain("working preview");
+  });
+
+  it("is partial when the preview was attempted but never started", () => {
+    const verdict = evaluateCompletion(req, {
+      toolCalls: [mutatingOk],
+      preview: { started: false, ready: false },
+    });
+    expect(verdict.state).toBe("partial");
+  });
+
+  it("leaves file-only and non-preview workflows unaffected (absent evidence)", () => {
+    const verdict = evaluateCompletion(req, { toolCalls: [mutatingOk] });
+    expect(verdict.state).toBe("complete");
+  });
+});
