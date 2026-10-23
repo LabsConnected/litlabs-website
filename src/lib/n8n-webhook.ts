@@ -112,8 +112,9 @@ export function verifyWebhookSignature(
   signature: string,
   timestamp: number,
   now: number = Math.floor(Date.now() / 1000),
+  secretOverride?: string,
 ): boolean {
-  const secret = BRIDGE_SECRET();
+  const secret = secretOverride ?? BRIDGE_SECRET();
   if (!secret) return false;
 
   // ── Replay protection: reject timestamps older than the max age ──

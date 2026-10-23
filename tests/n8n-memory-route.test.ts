@@ -5,11 +5,16 @@ import { createHmac } from "crypto";
 
 const BRIDGE_SECRET = "test-bridge-secret-not-real";
 
+const BOUND_OWNER = "user_synthetic_1";
+const BOUND_AGENT_ID = "22222222-2222-2222-2222-222222222222";
+
 const mocks = vi.hoisted(() => ({
   supabaseFrom: vi.fn(),
   upsert: vi.fn(),
   select: vi.fn(),
   single: vi.fn(),
+  auditInsert: vi.fn(),
+  agentMaybeSingle: vi.fn(),
   singleResult: {
     data: {
       id: "11111111-1111-1111-1111-111111111111",
@@ -53,11 +58,37 @@ function buildRequest(bodyObj: unknown, opts: { signed?: boolean; secret?: strin
 describe("POST /api/n8n/memory", () => {
   beforeEach(() => {
     vi.stubEnv("LITT_N8N_BRIDGE_SECRET", BRIDGE_SECRET);
+    // The route now requires a credential binding (owner + agent);
+    // the default binding is synthesized from these three envs.
+    vi.stubEnv("LITT_BRIDGE_OWNER_ID", BOUND_OWNER);
+    vi.stubEnv("LITT_BRIDGE_AGENT_ID", BOUND_AGENT_ID);
+    vi.stubEnv("LITT_BRIDGE_BINDINGS", "");
     mocks.supabaseFrom.mockReset();
     mocks.upsert.mockReset();
     mocks.select.mockReset();
     mocks.single.mockReset();
-    mocks.supabaseFrom.mockReturnValue({ upsert: mocks.upsert });
+    mocks.auditInsert.mockReset();
+    mocks.agentMaybeSingle.mockReset();
+    // supabaseAdmin.from dispatches per table: memories upserts,
+    // user_agents lookups (bound agent is registered by default), and
+    // bridge_audit_log inserts (which always succeed by default).
+    mocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "user_agents") {
+        return {
+          select: () => ({
+            eq: () => ({ eq: () => ({ maybeSingle: mocks.agentMaybeSingle }) }),
+          }),
+        };
+      }
+      if (table === "bridge_audit_log") {
+        return { insert: mocks.auditInsert };
+      }
+      return { upsert: mocks.upsert };
+    });
+    mocks.agentMaybeSingle.mockImplementation(() =>
+      Promise.resolve({ data: { id: BOUND_AGENT_ID }, error: null }),
+    );
+    mocks.auditInsert.mockImplementation(() => Promise.resolve({ error: null }));
     mocks.upsert.mockReturnValue({ select: mocks.select });
     mocks.select.mockReturnValue({ single: mocks.single });
     mocks.single.mockImplementation(() => Promise.resolve(mocks.singleResult));
@@ -80,6 +111,7 @@ describe("POST /api/n8n/memory", () => {
     expect(mocks.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         owner_id: "user_synthetic_1",
+        agent_id: BOUND_AGENT_ID,
         dedupe_key: "evt-abc-123",
         agent_slug: "litt",
         memory_type: "n8n_event",
@@ -97,7 +129,7 @@ describe("POST /api/n8n/memory", () => {
     );
     const res = await POST(req);
     expect(res.status).toBe(401);
-    expect(mocks.supabaseFrom).not.toHaveBeenCalled();
+    expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects a request signed with the wrong secret", async () => {
@@ -108,7 +140,7 @@ describe("POST /api/n8n/memory", () => {
     );
     const res = await POST(req);
     expect(res.status).toBe(401);
-    expect(mocks.supabaseFrom).not.toHaveBeenCalled();
+    expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects a stale timestamp (replay protection)", async () => {
@@ -120,7 +152,7 @@ describe("POST /api/n8n/memory", () => {
     );
     const res = await POST(req);
     expect(res.status).toBe(401);
-    expect(mocks.supabaseFrom).not.toHaveBeenCalled();
+    expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects a payload missing userId", async () => {
@@ -128,7 +160,7 @@ describe("POST /api/n8n/memory", () => {
     const req = buildRequest({ idempotencyKey: "evt-1", content: "x" });
     const res = await POST(req);
     expect(res.status).toBe(400);
-    expect(mocks.supabaseFrom).not.toHaveBeenCalled();
+    expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects a payload missing idempotencyKey", async () => {
@@ -136,7 +168,7 @@ describe("POST /api/n8n/memory", () => {
     const req = buildRequest({ userId: "user_synthetic_1", content: "x" });
     const res = await POST(req);
     expect(res.status).toBe(400);
-    expect(mocks.supabaseFrom).not.toHaveBeenCalled();
+    expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
   it("blocks content shaped like a secret and never calls the DB", async () => {
@@ -148,7 +180,7 @@ describe("POST /api/n8n/memory", () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(400);
-    expect(mocks.supabaseFrom).not.toHaveBeenCalled();
+    expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
   it("returns 503 when the bridge secret is not configured", async () => {
@@ -179,16 +211,22 @@ describe("POST /api/n8n/memory", () => {
     expect(firstRow.owner_id).toBe(secondRow.owner_id);
   });
 
-  it("rejects cross-user access by scoping strictly to the payload's own userId", async () => {
+  it("rejects a payload naming a different user than the credential's bound owner", async () => {
     const { POST } = await import("@/app/api/n8n/memory/route");
     const req = buildRequest({
       userId: "user_synthetic_2",
       idempotencyKey: "evt-cross-user",
       content: "belongs to user 2 only",
     });
-    await POST(req);
-    const [row] = mocks.upsert.mock.calls[0];
-    expect(row.owner_id).toBe("user_synthetic_2");
-    expect(row.owner_id).not.toBe("user_synthetic_1");
+    const res = await POST(req);
+    expect(res.status).toBe(403);
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "rejected_binding",
+        supplied_user_id: "user_synthetic_2",
+        bound_owner_id: BOUND_OWNER,
+      }),
+    );
   });
 });
