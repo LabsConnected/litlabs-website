@@ -9,6 +9,16 @@ on:
 
 jobs:
   deploy:
+    # PRODUCTION APPROVAL GATE (prepared 2026-10-22, NOT pushed/applied):
+    # Route this job through the GitHub "Production" environment so a
+    # dispatch alone cannot deploy: the run pauses until the environment's
+    # required reviewer (Litree-Ceo) approves, and the environment's
+    # deployment branch policy (main only) is enforced. Admins cannot
+    # bypass (can_admins_bypass=false, verified 2026-10-22).
+    # NOTE: this gates the job; it does not by itself relocate the
+    # repo-level RAILWAY_TOKEN secret — see the relocation plan. Any other
+    # workflow can still read the repo-level secret until relocation lands.
+    environment: Production
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
