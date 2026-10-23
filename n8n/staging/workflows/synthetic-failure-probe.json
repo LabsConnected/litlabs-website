@@ -2,12 +2,18 @@
   "name": "LiTTree — STAGING Synthetic Failure Probe",
   "nodes": [
     {
-      "parameters": {},
-      "id": "probe-manual-trigger",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "litt-staging-probe",
+        "options": {}
+      },
+      "id": "probe-webhook-trigger",
       "name": "Run Probe",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [0, 0]
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "notes": "n8n error workflows only fire for production-mode executions (webhook/schedule/etc.), NOT manual 'Execute workflow' runs. Activate this workflow, then POST to /webhook/litt-staging-probe.",
+      "notesInFlow": true
     },
     {
       "parameters": {

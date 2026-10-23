@@ -31,9 +31,9 @@ services:
       N8N_PORT: "5678"
       N8N_PROTOCOL: http
       N8N_ENCRYPTION_KEY: ${N8N_STAGING_ENCRYPTION_KEY:?generate: openssl rand -hex 32}
-      N8N_BASIC_AUTH_ACTIVE: "true"
-      N8N_BASIC_AUTH_USER: admin
-      N8N_BASIC_AUTH_PASSWORD: ${N8N_STAGING_BASIC_AUTH_PASSWORD:?generate a local-only password}
+      # n8n 2.x auth: N8N_BASIC_AUTH_* is unsupported — on first launch the
+      # editor prompts to create a local owner account (email + password).
+      # Editor is bound to 127.0.0.1 only, so this account is machine-local.
       GENERIC_TIMEZONE: America/New_York
       NODE_ENV: production
     volumes:
