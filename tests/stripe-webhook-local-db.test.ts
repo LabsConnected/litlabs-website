@@ -223,7 +223,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
     };
   }
 
-  function invoicePaid(id: string, invoiceId: string, subId: string, clerkId?: string) {
+  function invoicePaid(id: string, invoiceId: string, subId: string, priceId: string, clerkId?: string) {
     return {
       id,
       type: "invoice.paid",
@@ -237,7 +237,18 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
               ...(clerkId ? { metadata: { clerk_id: clerkId, product_type: "plan" } } : {}),
             },
           },
-          lines: { data: [{ period: { end: 1702678400 }, pricing: { price_details: { price: "" } } }] },
+          // Real Stripe invoice lines carry the price on both the line item
+          // and pricing.price_details; settledInvoiceCredit requires the
+          // invoice's own priced plan (no storedPlan fallback).
+          lines: {
+            data: [
+              {
+                period: { end: 1702678400 },
+                price: { id: priceId },
+                pricing: { price_details: { price: priceId } },
+              },
+            ],
+          },
         },
       },
     };
@@ -283,7 +294,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
         subscriptionCreated("evt_local658_creator_sub", "sub_local658_creator", clerk, "creator_beta", "price_creator_local"),
       );
       const paid = await deliver(
-        invoicePaid("evt_local658_creator_inv", "in_local658_creator", "sub_local658_creator"),
+        invoicePaid("evt_local658_creator_inv", "in_local658_creator", "sub_local658_creator", "price_creator_local"),
       );
       const dbRows = await snapshot(clerk, ["evt_local658_creator_sub", "evt_local658_creator_inv"]);
       const amount = dbRows.ledger.reduce((sum, row) => sum + Number(row.amount), 0);
@@ -304,7 +315,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
         subscriptionCreated("evt_local658_pro_sub", "sub_local658_pro", clerk, "pro_builder_beta", "price_pro_local"),
       );
       const paid = await deliver(
-        invoicePaid("evt_local658_pro_inv", "in_local658_pro", "sub_local658_pro"),
+        invoicePaid("evt_local658_pro_inv", "in_local658_pro", "sub_local658_pro", "price_pro_local"),
       );
       const dbRows = await snapshot(clerk, ["evt_local658_pro_sub", "evt_local658_pro_inv"]);
       const amount = dbRows.ledger.reduce((sum, row) => sum + Number(row.amount), 0);
@@ -321,9 +332,9 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
       const clerk = "local658_dup";
       await userId(clerk);
       await deliver(subscriptionCreated("evt_local658_dup_sub", "sub_local658_dup", clerk, "creator_beta", "price_creator_local"));
-      const first = await deliver(invoicePaid("evt_local658_dup_inv", "in_local658_dup", "sub_local658_dup"));
-      const replay = await deliver(invoicePaid("evt_local658_dup_inv", "in_local658_dup", "sub_local658_dup"));
-      const otherEvent = await deliver(invoicePaid("evt_local658_dup_inv_b", "in_local658_dup", "sub_local658_dup"));
+      const first = await deliver(invoicePaid("evt_local658_dup_inv", "in_local658_dup", "sub_local658_dup", "price_creator_local"));
+      const replay = await deliver(invoicePaid("evt_local658_dup_inv", "in_local658_dup", "sub_local658_dup", "price_creator_local"));
+      const otherEvent = await deliver(invoicePaid("evt_local658_dup_inv_b", "in_local658_dup", "sub_local658_dup", "price_creator_local"));
       const dbRows = await snapshot(clerk, ["evt_local658_dup_inv", "evt_local658_dup_inv_b"]);
       const amount = dbRows.ledger.reduce((sum, row) => sum + Number(row.amount), 0);
       const replayed = (replay.body as { replayed?: boolean } | null)?.replayed === true;
@@ -409,7 +420,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
         `SELECT count(*)::int AS n FROM public.subscriptions WHERE stripe_subscription_id = 'sub_local658_race'`,
       );
       const started = Date.now();
-      const pending = deliver(invoicePaid("evt_local658_race_inv", "in_local658_race", "sub_local658_race"));
+      const pending = deliver(invoicePaid("evt_local658_race_inv", "in_local658_race", "sub_local658_race", "price_pro_local"));
       await new Promise((resolve) => setTimeout(resolve, 1500));
       await db.query(
         `INSERT INTO public.subscriptions (user_id, stripe_customer_id, stripe_subscription_id, plan, status)
@@ -473,7 +484,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
             RAISE EXCEPTION 'forced grant failure for local scenario 8';
           END $$;
         `);
-        subPaid = await deliver(invoicePaid("evt_local658_subfail_inv", "in_local658_subfail", "sub_local658_subfail"));
+        subPaid = await deliver(invoicePaid("evt_local658_subfail_inv", "in_local658_subfail", "sub_local658_subfail", "price_creator_local"));
       } finally {
         await db.query(original.rows[0].def as string);
       }
@@ -732,6 +743,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
           "evt_local658_conflict_invoice_b",
           "in_local658_conflict_invoice_b",
           "sub_local658_conflict_invoice_b",
+          "price_pro_local",
           clerk,
         ),
       );

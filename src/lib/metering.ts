@@ -104,6 +104,37 @@ export interface MeteringContext {
   runId?: string;
   /** Feature label for reporting. */
   feature: MeteringFeature | string;
+  /**
+   * #684: mutable per-request billing accumulator. When a route opens a
+   * LiTTBits reservation for a billable Studio build it threads this in;
+   * the agent loop adds the retail LiTTBits of every SUCCESSFUL LLM step
+   * (main loop, resume, and build-fix repair). Failed attempts never accrue.
+   * The route settles the total against the reservation.
+   */
+  billing?: BilledBitsAccumulator;
+}
+
+export interface BilledBitsAccumulator {
+  /** Sum of retail LiTTBits across successful billable steps. */
+  billedBits: number;
+  /** Number of successful billable steps that accrued. */
+  billableSteps: number;
+}
+
+export function createBilledBitsAccumulator(initialBits = 0, initialSteps = 0): BilledBitsAccumulator {
+  return { billedBits: Math.max(0, Math.round(initialBits)), billableSteps: Math.max(0, initialSteps) };
+}
+
+/**
+ * Add one successful step's retail LiTTBits to the ambient accumulator.
+ * No-op when no billing accumulator is threaded (unbilled paths).
+ */
+export function accrueBilledBits(bits: number): void {
+  const acc = meteringAls.getStore()?.billing;
+  if (!acc) return;
+  if (!Number.isFinite(bits) || bits <= 0) return;
+  acc.billedBits += Math.round(bits);
+  acc.billableSteps += 1;
 }
 
 const meteringAls = new AsyncLocalStorage<MeteringContext>();

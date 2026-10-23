@@ -20,7 +20,16 @@ import type { AgentSlug, MessageStatus } from "@/lib/studio/types";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
 import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
-import { runWithMeteringContext } from "@/lib/metering";
+import { runWithMeteringContext, createBilledBitsAccumulator } from "@/lib/metering";
+import {
+  STUDIO_BUILD_RESERVE_BITS,
+  STUDIO_BUILD_RESERVATION_TTL_SECONDS,
+  STUDIO_BUILTIN_AGENT_REF,
+  checkFreeChatGuard,
+  recordStudioAwaitingApproval,
+  studioSettleBits,
+  studioSettleStatus,
+} from "@/lib/studio/studio-billing";
 import {
   buildPrompt,
   buildRunContextFromStudio,
@@ -746,12 +755,79 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Failed to create assistant message" }, { status: 500 });
   }
 
-  // 11.5. Reserve credits BEFORE the model call (marketplace agents only)
+  // 11.5. Reserve credits BEFORE the model call.
+  // Marketplace agents reserve their agent policy; builtin Studio builds
+  // (#684) reserve a bounded build hold and settle the LiTTBits accrued
+  // across the whole agent loop. Plain builtin chat stays free (guarded).
   let agentRunId: string | null = null;
   let reservedCredits = 0;
   let reservationId: string | null = null;
   let actionRun: ActionRun | null = null;
   let actionContext: ActionExecutionContext | null = null;
+  const isBuiltinStudio = !runtimeAgent;
+  const studioBilling = createBilledBitsAccumulator();
+  /**
+   * #684: open the builtin Studio build reservation. Idempotent per
+   * clientRequestId (reserve_bits returns already_reserved on replay).
+   */
+  const reserveStudioBuild = async (): Promise<{ ok: true } | { ok: false; status: number; error: string }> => {
+    if (agentRunId || !clerkId) return { ok: true };
+    const res = await reserveCredits(
+      {
+        clerkId,
+        agentInstanceId: STUDIO_BUILTIN_AGENT_REF,
+        agentId: null,
+        agentVersionId: null,
+        conversationId: conversation.id,
+        messageId: assistantMessage.id,
+        idempotencyKey: `studio-build:${clientRequestId}`,
+        usageType: "studio_build",
+        referenceType: "studio_conversation",
+        expiresSeconds: STUDIO_BUILD_RESERVATION_TTL_SECONDS,
+      },
+      STUDIO_BUILD_RESERVE_BITS,
+    );
+    if (!res.ok) {
+      return { ok: false, status: res.status || 402, error: res.error || "Insufficient LiTTBits balance" };
+    }
+    agentRunId = res.runId;
+    reservedCredits = res.reservedCredits;
+    reservationId = res.reservationId;
+    return { ok: true };
+  };
+  if (isBuiltinStudio && clerkId && useV2) {
+    const r = await reserveStudioBuild();
+    if (!r.ok) {
+      await updateMessageStatus(assistantMessage.id, userId, "failed", r.error);
+      return NextResponse.json(
+        {
+          error: r.error,
+          detail: "Studio builds use LiTTBits. Purchase credits in your wallet.",
+          userMessage,
+          assistantMessage: { ...assistantMessage, status: "failed" as const },
+          revision: conversation.revision,
+        },
+        { status: r.status },
+      );
+    }
+  } else if (isBuiltinStudio && !useV2) {
+    // Rule 3: plain Studio chat is free — guard it against abuse.
+    const guard = await checkFreeChatGuard(clerkId ?? userId);
+    if (!guard.ok) {
+      const msg = "You're sending messages too quickly. Please wait a moment and try again.";
+      await updateMessageStatus(assistantMessage.id, userId, "failed", msg);
+      return NextResponse.json(
+        {
+          error: "Rate limit exceeded",
+          retryAfter: guard.retryAfterSeconds,
+          userMessage,
+          assistantMessage: { ...assistantMessage, status: "failed" as const },
+          revision: conversation.revision,
+        },
+        { status: 429, headers: { "Retry-After": String(guard.retryAfterSeconds) } },
+      );
+    }
+  }
   if (runtimeAgent?.agentInstanceId && clerkId) {
     // Estimate the maximum cost: per-run fee + estimated tokens
     const estimatedTokens = Math.ceil(finalPrompt.length / 4) + 2048; // prompt + max output
@@ -1014,6 +1090,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         const effectiveRequiresExecution = rerouted
           ? true
           : built.kernelResult.decision.routing.requiresExecution;
+        // #684: a V1 turn re-routed into a V2 build is billable work too.
+        if (isBuiltinStudio && !agentRunId) {
+          const r = await reserveStudioBuild();
+          if (!r.ok) throw new Error(r.error);
+        }
         // ── V2 path: run agent loop INSIDE the stream with real-time events ──
         // The ProgressEmitter streams events to the SSE controller as they
         // happen, so the user can watch LiTT work in real-time.
@@ -1149,6 +1230,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             projectId: conversation.projectId ?? undefined,
             runId: agentRunId ?? undefined,
             feature: "studio-chat",
+            // #684: accrue retail LiTTBits across every successful loop step.
+            billing: agentRunId ? studioBilling : undefined,
           },
           () => runLaunchFlow({
           userMessage: resolvedMessage,
@@ -1379,7 +1462,31 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             status: finalMessageStatus,
           });
         }
-        if (agentRunId) {
+        if (agentRunId && isBuiltinStudio && finalMessageStatus === "awaiting_approval" && pausedRunId) {
+          // #684 rule 2: keep the reservation across the approval wait.
+          // The approvals route settles/releases it; an abandoned wait
+          // expires with the reservation TTL.
+          await recordStudioAwaitingApproval(getSupabaseAdmin(), {
+            runId: agentRunId,
+            reservationId,
+            reservedCredits,
+            accruedBits: studioBilling.billedBits,
+            billableSteps: studioBilling.billableSteps,
+            pausedRunId,
+          }).catch(() => false);
+        } else if (agentRunId && isBuiltinStudio) {
+          // #684: builtin build — settle the bits accrued across the loop.
+          const outcome = finalMessageStatus === "completed"
+            ? "completed" as const
+            : finalMessageStatus === "cancelled" ? "cancelled" as const : "failed" as const;
+          const bits = studioSettleBits(outcome, studioBilling.billedBits, reservedCredits);
+          settleRun(agentRunId, {
+            inputTokens: Math.ceil(finalPrompt.length / 4),
+            outputTokens: Math.ceil(assistantText.length / 4),
+            actualCredits: bits,
+            status: studioSettleStatus(outcome, bits),
+          }, reservedCredits, reservationId).catch(() => {});
+        } else if (agentRunId) {
           const actualCredits = runtimeAgent
             ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
             : 0;
@@ -1797,11 +1904,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           }
         }
         if (agentRunId) {
+          // #684 rule 1: a cancelled/failed builtin build still pays for
+          // verifiably completed billable steps; the rest is released.
+          const partialBits = isBuiltinStudio
+            ? studioSettleBits(cancelledBySignal ? "cancelled" : "failed", studioBilling.billedBits, reservedCredits)
+            : 0;
           settleRun(agentRunId, {
             inputTokens: 0,
             outputTokens: 0,
-            actualCredits: 0,
-            status: cancelledBySignal ? "cancelled" : "failed",
+            actualCredits: partialBits,
+            status: partialBits > 0 ? "completed" : cancelledBySignal ? "cancelled" : "failed",
             ...(cancelledBySignal ? {} : { error: errorMsg }),
           }, reservedCredits, reservationId).catch(() => {
             // Best-effort settlement on failure — must not leak unhandled rejection

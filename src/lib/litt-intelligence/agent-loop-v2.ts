@@ -17,7 +17,7 @@ import "server-only";
 
 import { randomUUID } from "crypto";
 import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
-import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
+import { emitUsageEvent, getMeteringContext, accrueBilledBits } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
@@ -820,7 +820,31 @@ interface LoopStepMetering {
  * at the request boundary); falls back to the loop config's userId (a
  * Clerk id in the standard auth path). No-ops when no identity resolves.
  */
+/**
+ * #684: accrue the retail LiTTBits of one SUCCESSFUL LLM call into the
+ * ambient billing accumulator (no-op when the route opened no reservation).
+ * Token counts are chars/4 estimates, the same basis as the metering event.
+ */
+function accrueStepBits(provider: string, model: string, inputChars: number, outputChars: number): void {
+  try {
+    const { retailLiTTBits, shouldDebit } = calculateLlmCost({
+      provider,
+      model,
+      promptTokens: estimateTokensForChars(inputChars),
+      completionTokens: estimateTokensForChars(outputChars),
+      isByok: false,
+    });
+    if (shouldDebit === false && retailLiTTBits === 0) return;
+    accrueBilledBits(retailLiTTBits);
+  } catch {
+    // Billing accrual must never break the run.
+  }
+}
+
 function emitLoopStepMetering(input: LoopStepMetering): void {
+  if (input.status === "success") {
+    accrueStepBits(input.provider, input.model, input.inputChars, input.outputChars);
+  }
   try {
     const ctx = getMeteringContext();
     const userId = ctx?.userId ?? null;
@@ -3126,6 +3150,13 @@ export function createAutonomousRepairCallback(
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders,
         });
+        // #684: build-fix repair LLM calls are billable work too.
+        accrueStepBits(
+          response.provider ?? "unknown",
+          response.model ?? "unknown",
+          systemPrompt.length + repairMessages.reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : JSON.stringify(m.content ?? "").length), 0),
+          response.text?.length ?? 0,
+        );
 
         if (response.toolCalls.length === 0) {
           // LLM finished without more tool calls

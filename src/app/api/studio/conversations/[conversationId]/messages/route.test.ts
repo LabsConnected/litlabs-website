@@ -35,7 +35,12 @@ vi.mock("@/lib/rate-limiter", () => ({
 
 vi.mock("@/lib/supabase", () => ({
   getSupabaseAdmin: vi.fn(() => ({
-    rpc: vi.fn().mockResolvedValue({ data: 2, error: null }),
+    rpc: vi.fn(async (fn: string) => {
+      if (fn === "consume_free_chat_limit") {
+        return { data: [{ allowed: true, retry_after_seconds: 0 }], error: null };
+      }
+      return { data: 2, error: null };
+    }),
     from: vi.fn(() => ({
       update: vi.fn(() => ({
         eq: vi.fn(() => ({
@@ -87,7 +92,11 @@ vi.mock("@/lib/agent-runtime", () => ({
 }));
 
 vi.mock("@/lib/agent-billing", () => ({
-  reserveCredits: vi.fn(),
+  // #684: builtin Studio V2 builds now reserve a LiTTBits hold, so the
+  // default mock reserves successfully (tests may override per case).
+  reserveCredits: vi.fn(() =>
+    Promise.resolve({ ok: true, runId: "run-builtin", reservedCredits: 200, reservationId: "res-builtin" }),
+  ),
   // The route calls settleRun(...).catch(...) — must return a promise.
   settleRun: vi.fn(() => Promise.resolve({ ok: true })),
   estimateCredits: vi.fn(() => 0),

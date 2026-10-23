@@ -165,7 +165,11 @@ function fakeDb(opts: { subRowAfter?: number; grantError?: boolean; plan?: strin
   vi.mocked(getAdminSupabase).mockReturnValue(sb);
   return { db, sb };
 }
-const invoicePaid = (id = "evt_1", inv = "in_1") => ({
+// #684: only a settled invoice's own mapped price grants credits, so the
+// fixture invoice carries a plan price (Creator by default).
+const CREATOR_PRICE = "price_creator_fixture";
+const PRO_PRICE = "price_pro_fixture";
+const invoicePaid = (id = "evt_1", inv = "in_1", price: string | null = CREATOR_PRICE) => ({
   id,
   type: "invoice.paid",
   data: {
@@ -173,7 +177,7 @@ const invoicePaid = (id = "evt_1", inv = "in_1") => ({
       id: inv,
       customer: "cus_1",
       parent: { subscription_details: { subscription: "sub_1" } },
-      lines: { data: [{ period: { end: 1900000000 } }] },
+      lines: { data: [{ ...(price ? { price } : {}), period: { end: 1900000000 } }] },
     },
   },
 });
@@ -183,6 +187,8 @@ beforeEach(() => {
   vi.useRealTimers();
   process.env.STRIPE_SECRET_KEY = "sk_test_dummy_not_real";
   process.env.STRIPE_WEBHOOK_SECRET = SECRET;
+  process.env.STRIPE_PRICE_CREATOR_BETA = CREATOR_PRICE;
+  process.env.STRIPE_PRICE_PRO_BUILDER_BETA = PRO_PRICE;
   retrieveMock.mockReset();
   retrieveMock.mockResolvedValue({ status: "active" });
   vi.mocked(isAdminSupabaseConfigured).mockReset();
@@ -210,8 +216,21 @@ describe("plan amounts", () => {
   it("pro_builder_beta grants 18000", async () => {
     const { db, sb } = fakeDb({ subRowAfter: 1 });
     sb._plan = "pro_builder_beta";
-    await POST(signed(invoicePaid()));
+    await POST(signed(invoicePaid("evt_1", "in_1", PRO_PRICE)));
     expect(total(db.ledger)).toBe(18000);
+  });
+  it("#684: unpaid upgrade — stored Pro plan but invoice priced at an unmapped price grants nothing", async () => {
+    const { db, sb } = fakeDb({ subRowAfter: 1 });
+    sb._plan = "pro_builder_beta";
+    const r = await POST(signed(invoicePaid("evt_unmapped", "in_unmapped", "price_not_in_catalog")));
+    expect(r.status).toBe(200);
+    expect(total(db.ledger)).toBe(0);
+  });
+  it("#684: a line-less invoice grants nothing even with a stored plan", async () => {
+    const { db, sb } = fakeDb({ subRowAfter: 1 });
+    sb._plan = "pro_builder_beta";
+    await POST(signed(invoicePaid("evt_noline", "in_noline", null)));
+    expect(total(db.ledger)).toBe(0);
   });
   it("missing plan metadata resolves Pro from the price and does not grant 7500", async () => {
     process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_pro_local";
@@ -328,7 +347,7 @@ describe("race retry budget", () => {
       items: { data: [{ price: { id: "price_pro_fallback" }, current_period_start: 1700000000, current_period_end: 1702678400 }] },
     });
     const { db } = fakeDb({});
-    const p = POST(signed(invoicePaid("evt_fallback", "in_fallback")));
+    const p = POST(signed(invoicePaid("evt_fallback", "in_fallback", "price_pro_fallback")));
     await vi.runAllTimersAsync();
     const r = await p;
     expect(r.status).toBe(200);

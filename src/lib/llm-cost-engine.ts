@@ -21,6 +21,7 @@
 // before enabling enforcement.
 
 import "server-only";
+import { LLM_LANE_BITS_PER_USD } from "@/lib/billing/canonical-pricing";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -242,7 +243,11 @@ function lookupCostEntry(provider: string, model: string, isByok: boolean = fals
   if (anyExact) return anyExact;
 
   // Provider-level fallback (first entry for that provider)
-  const providerFallback = COST_CATALOG.find((e) => e.provider === provider);
+  // #684: a managed (non-BYOK) call must never fall back onto a BYOK row —
+  // that silently priced unknown managed models at 0 LiTTBits.
+  const providerFallback =
+    COST_CATALOG.find((e) => e.provider === provider && (isByok ? e.billingClass === "byok" : e.billingClass !== "byok")) ??
+    (isByok ? COST_CATALOG.find((e) => e.provider === provider) : undefined);
   if (providerFallback) return providerFallback;
 
   // Generic fallback — conservative standard pricing
@@ -307,16 +312,16 @@ export function calculateLlmCost(input: CostEngineInput): CostCalculation {
   if (providerCostMicros === 0) {
     retailLiTTBits = Math.max(1, Math.round(baseBits));
   } else {
-    // Convert provider cost to a bits-equivalent, then apply margin
-    // $1.00 ≈ 1000 BITS at retail (internal, never exposed publicly)
-    const costEquivalentBits = (providerCostUsd * 1000);
+    // Convert provider cost to a bits-equivalent, then apply margin.
+    // Rates at the ACTIVE policy (legacy 1,000 bits/$ — pricing-policy.ts).
+    const costEquivalentBits = (providerCostUsd * LLM_LANE_BITS_PER_USD);
     retailLiTTBits = Math.max(1, Math.round(
       costEquivalentBits * (1 + MARGIN_TARGET) + baseBits * 0.1,
     ));
   }
 
   // Platform margin = retail value minus provider cost (in bits-equivalent)
-  const providerCostBits = providerCostUsd * 1000;
+  const providerCostBits = providerCostUsd * LLM_LANE_BITS_PER_USD;
   const platformMargin = Math.max(0, retailLiTTBits - providerCostBits);
 
   // Determine billing class from LiTT alias if provided
@@ -372,10 +377,15 @@ export function getEstimatedBitsRange(
   const minBits = minCalc.retailLiTTBits;
   const maxBits = maxCalc.retailLiTTBits;
 
+  // Thresholds are dollars at the active bits/$ rate, not the old
+  // "<= 1 bit means Included" cut. A paid estimate is a real charge at
+  // any positive bit count, so "Included" is only a free-class model
+  // or a zero-bit estimate.
+  const maxUsd = LLM_LANE_BITS_PER_USD > 0 ? maxBits / LLM_LANE_BITS_PER_USD : maxBits;
   let label: string;
-  if (maxBits <= 1) label = "Included";
-  else if (maxBits <= 5) label = "Low LiTTBits";
-  else if (maxBits <= 15) label = "Standard LiTTBits";
+  if (entry.billingClass === "free" || maxBits <= 0) label = "Included";
+  else if (maxUsd <= 0.05) label = "Low LiTTBits";
+  else if (maxUsd <= 0.25) label = "Standard LiTTBits";
   else label = "Premium LiTTBits";
 
   return { min: minBits, max: maxBits, label };

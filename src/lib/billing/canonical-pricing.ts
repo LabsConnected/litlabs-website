@@ -50,15 +50,31 @@
 
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  ACTIVE_LLM_POLICY_ID,
+  GENERATION_BITS_PER_USD,
+  PRICING_POLICIES,
+} from "@/lib/billing/pricing-policy";
 
 export const CANONICAL_PRICING_VERSION_ID = "littbits-pricing-v1";
+/** Legacy exchange policy: LLM lane 1,000 bits/$, generation lane 100 bits/$. */
 export const CANONICAL_EXCHANGE_RATE_VERSION_ID = "littbits-exchange-v1";
 export const SHADOW_PRICING_VERSION_ID = "littbits-pricing-v2-shadow-unified";
 
-/** LiTTBits per USD for the generation lane (1 bit = $0.01). */
-export const GENERATION_LANE_BITS_PER_USD = 100;
-/** LiTTBits per USD-equivalent for the LLM lane (legacy ~1000 bits/$). */
-export const LLM_LANE_BITS_PER_USD = 1000;
+/** LiTTBits per USD for the generation lane (1 bit = $0.01). Unchanged. */
+export const GENERATION_LANE_BITS_PER_USD = GENERATION_BITS_PER_USD;
+/**
+ * LiTTBits per USD for the LLM lane — the APPROVED legacy rate of
+ * 1,000 bits/$ (littbits-exchange-v1), read from the ACTIVE pricing
+ * policy. Owner decision (2026-10-22): PR #726 stays economics-neutral.
+ * The 100 bits/$ candidate (littbits-exchange-v2-100-unapproved) is
+ * preserved INACTIVE in pricing-policy.ts and must not become active
+ * without a separate owner economics approval. llm-cost-engine.ts
+ * reads this constant.
+ */
+export const LLM_LANE_BITS_PER_USD = PRICING_POLICIES[ACTIVE_LLM_POLICY_ID].llmBitsPerUsd;
+/** Exchange-rate version stamped on LLM-lane charges: the active (legacy) policy id. */
+export const LLM_EXCHANGE_RATE_VERSION_ID = ACTIVE_LLM_POLICY_ID;
 /** The candidate unified lane rate for v2 shadow comparison: 100 bits/$. */
 export const UNIFIED_SHADOW_BITS_PER_USD = 100;
 
@@ -126,7 +142,8 @@ export function buildChargeRating(input: {
     billingClass: input.billingClass ?? "standard",
     lane: input.lane,
     pricingVersionId: CANONICAL_PRICING_VERSION_ID,
-    exchangeRateVersionId: CANONICAL_EXCHANGE_RATE_VERSION_ID,
+    exchangeRateVersionId:
+      input.lane === "llm" ? LLM_EXCHANGE_RATE_VERSION_ID : CANONICAL_EXCHANGE_RATE_VERSION_ID,
   };
 }
 
