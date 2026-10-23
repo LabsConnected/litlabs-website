@@ -3,14 +3,24 @@
  *
  * The ONLY way n8n may write to the `memories` table. n8n has no Clerk
  * session (it's a server, not a browser), so it cannot use `/api/memory`
- * directly — that route requires a Clerk session/bearer token. Instead
+ * directly — that route requires a Clerk session/bearer <redacted> Instead
  * this route reuses the EXISTING signed-webhook trust boundary from
  * `/api/n8n/[...path]` (HMAC-SHA256 over the raw body, 5-minute replay
- * window, timing-safe compare — see src/lib/n8n-webhook.ts) and treats
- * a valid signature as proof "this request genuinely came from our n8n
- * integration." The payload's own `userId` field says which user the
- * memory belongs to — exactly the identity field n8n payloads already
- * carry (see N8nWebhookPayload in n8n-webhook.ts).
+ * window, timing-safe compare — see src/lib/n8n-webhook.ts).
+ *
+ * AUTHORIZATION (added 2026-10-22, ART-20261022-045): a valid signature
+ * proves only that the caller holds *a* bridge credential. It does not
+ * prove the caller may write for the user named in the payload. Every
+ * credential is therefore BOUND to one owner + one permitted agent
+ * (see src/lib/bridge-authz.ts):
+ *   - payload.userId must equal the binding's ownerId (else 403);
+ *   - the binding's agent must be a registered `user_agents` row that
+ *     belongs to that owner (else 403);
+ *   - the written memory is attributed to that agent (`agent_id`).
+ * Every outcome — accepted or rejected — is recorded in
+ * `bridge_audit_log` (fingerprints only, never content or secrets).
+ * An accepted write whose audit row cannot be written is reported as a
+ * failure (500); the idempotent upsert makes the caller's retry safe.
  *
  * This does NOT bypass anything the rest of the app doesn't already
  * rely on: every memories query in this codebase is isolated by an
@@ -30,7 +40,8 @@
  * against supabase/migrations, not assumed):
  *   - agent_slug has CHECK (agent_slug IS NULL OR agent_slug IN ('litt','spark'))
  *     → n8n-sourced memories are recorded as LiTT's own ('litt'), the
- *       only value that both satisfies the CHECK and reads correctly.
+ *     only value that both satisfies the CHECK and reads correctly.
+ *     The specific registered agent is carried by `agent_id` instead.
  *   - project_id/agent_slug/dedupe_key participate in a UNIQUE index —
  *     Postgres treats NULL as never equal to NULL in that comparison,
  *     so a NULL project_id would make the upsert silently re-insert
@@ -45,8 +56,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyWebhookSignature } from "@/lib/n8n-webhook";
+import {
+  recordBridgeAudit,
+  resolveBridgeBinding,
+  verifyBoundAgent,
+} from "@/lib/bridge-authz";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
+
+const ENDPOINT = "POST /api/n8n/memory";
 
 /** Sentinel for "no specific project" — mirrors memory-service.ts's convention. */
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
@@ -117,7 +135,11 @@ function validatePayload(body: unknown): { ok: true; payload: N8nMemoryWritePayl
 }
 
 async function postHandler(req: NextRequest): Promise<NextResponse> {
-  if (!process.env.LITT_N8N_BRIDGE_SECRET) {
+  // ── Resolve the credential binding. No binding = bridge not
+  // configured for this credential → fail closed. ──
+  const credentialHeader = req.headers.get("x-litt-credential");
+  const binding = resolveBridgeBinding(credentialHeader);
+  if (!binding) {
     return NextResponse.json({ error: "Bridge not configured" }, { status: 503 });
   }
 
@@ -126,18 +148,32 @@ async function postHandler(req: NextRequest): Promise<NextResponse> {
   // ── Authenticate: signed webhook ONLY (no legacy shared-secret
   // fallback for this endpoint — it writes data, unlike the generic
   // forwarding bridge, so it gets the strictest of the two existing
-  // auth modes rather than both). ──
+  // auth modes rather than both). The signature is verified against
+  // the BOUND credential's secret. ──
   const signature = req.headers.get("x-litt-signature");
   const timestampHeader = req.headers.get("x-litt-timestamp");
-  if (!signature || !timestampHeader) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const timestamp = Number(timestampHeader);
-  if (!Number.isFinite(timestamp)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const validSignature = verifyWebhookSignature(rawBody, signature, timestamp);
-  if (!validSignature) {
+  const timestamp = timestampHeader ? Number(timestampHeader) : NaN;
+  const signatureOk =
+    !!signature &&
+    Number.isFinite(timestamp) &&
+    verifyWebhookSignature(
+      rawBody,
+      signature,
+      timestamp,
+      Math.floor(Date.now() / 1000),
+      binding.secret,
+    );
+  if (!signatureOk) {
+    await recordBridgeAudit(supabaseAdmin, {
+      credentialId: binding.credentialId,
+      boundOwnerId: binding.ownerId,
+      suppliedUserId: null,
+      agentId: binding.agentId,
+      outcome: "rejected_auth",
+      reason: "invalid signature or expired timestamp",
+      content: rawBody,
+      endpoint: ENDPOINT,
+    });
     console.warn("[n8n-memory] rejected: invalid signature or expired timestamp");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -147,16 +183,79 @@ async function postHandler(req: NextRequest): Promise<NextResponse> {
   try {
     parsedBody = rawBody ? JSON.parse(rawBody) : null;
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    parsedBody = null;
   }
   const validation = validatePayload(parsedBody);
   if (!validation.ok) {
+    const b =
+      parsedBody && typeof parsedBody === "object"
+        ? (parsedBody as Record<string, unknown>)
+        : {};
+    await recordBridgeAudit(supabaseAdmin, {
+      credentialId: binding.credentialId,
+      boundOwnerId: binding.ownerId,
+      suppliedUserId: typeof b.userId === "string" ? b.userId : null,
+      agentId: binding.agentId,
+      outcome: "rejected_validation",
+      reason: validation.error,
+      content: typeof b.content === "string" ? b.content : null,
+      idempotencyKey: typeof b.idempotencyKey === "string" ? b.idempotencyKey : null,
+      endpoint: ENDPOINT,
+    });
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }
   const { payload } = validation;
 
+  // ── Authorize: the payload may only write for the owner this
+  // credential is bound to. A different userId is a forged-ID attempt
+  // from a credential holder — reject and leave durable evidence. ──
+  if (payload.userId !== binding.ownerId) {
+    await recordBridgeAudit(supabaseAdmin, {
+      credentialId: binding.credentialId,
+      boundOwnerId: binding.ownerId,
+      suppliedUserId: payload.userId,
+      agentId: binding.agentId,
+      outcome: "rejected_binding",
+      reason: "payload userId does not match the credential's bound owner",
+      content: payload.content,
+      idempotencyKey: payload.idempotencyKey,
+      endpoint: ENDPOINT,
+    });
+    console.warn("[n8n-memory] rejected: userId does not match credential binding");
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // ── Authorize: the bound agent must be registered to that owner. ──
+  const agentOk = await verifyBoundAgent(supabaseAdmin, binding);
+  if (!agentOk) {
+    await recordBridgeAudit(supabaseAdmin, {
+      credentialId: binding.credentialId,
+      boundOwnerId: binding.ownerId,
+      suppliedUserId: payload.userId,
+      agentId: binding.agentId,
+      outcome: "rejected_agent",
+      reason: "bound agent is not a registered user_agents row for the bound owner",
+      content: payload.content,
+      idempotencyKey: payload.idempotencyKey,
+      endpoint: ENDPOINT,
+    });
+    console.warn("[n8n-memory] rejected: bound agent not registered for owner");
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   // ── Block secrets — never persist credential-shaped content ──
   if (containsSecrets(payload.content)) {
+    await recordBridgeAudit(supabaseAdmin, {
+      credentialId: binding.credentialId,
+      boundOwnerId: binding.ownerId,
+      suppliedUserId: payload.userId,
+      agentId: binding.agentId,
+      outcome: "rejected_secret_content",
+      reason: "content matched the secret-shape screen",
+      content: payload.content,
+      idempotencyKey: payload.idempotencyKey,
+      endpoint: ENDPOINT,
+    });
     console.warn("[n8n-memory] blocked write containing secret-shaped content", {
       userId: payload.userId,
     });
@@ -165,6 +264,8 @@ async function postHandler(req: NextRequest): Promise<NextResponse> {
 
   const row = {
     owner_id: payload.userId,
+    // The registered agent this write is attributed to (verified above).
+    agent_id: binding.agentId,
     project_id: payload.projectId ?? NIL_UUID,
     // No FK-safe sentinel exists for conversation — the column references
     // studio_conversations(id), so "none" must be NULL (same value
@@ -190,8 +291,37 @@ async function postHandler(req: NextRequest): Promise<NextResponse> {
     .single();
 
   if (error || !data) {
+    await recordBridgeAudit(supabaseAdmin, {
+      credentialId: binding.credentialId,
+      boundOwnerId: binding.ownerId,
+      suppliedUserId: payload.userId,
+      agentId: binding.agentId,
+      outcome: "error",
+      reason: `memory upsert failed: ${error?.message ?? "no data returned"}`,
+      content: payload.content,
+      idempotencyKey: payload.idempotencyKey,
+      endpoint: ENDPOINT,
+    });
     console.error("[n8n-memory] upsert failed:", error?.message ?? "no data returned");
     return NextResponse.json({ error: error?.message ?? "Failed to persist memory" }, { status: 500 });
+  }
+
+  // The audit trail is part of the security control: a write we cannot
+  // audit is reported as failed. The upsert is idempotent, so the
+  // caller's retry re-attempts both the write and its audit row safely.
+  const audited = await recordBridgeAudit(supabaseAdmin, {
+    credentialId: binding.credentialId,
+    boundOwnerId: binding.ownerId,
+    suppliedUserId: payload.userId,
+    agentId: binding.agentId,
+    outcome: "accepted",
+    reason: "signature, binding, and agent registration verified",
+    content: payload.content,
+    idempotencyKey: payload.idempotencyKey,
+    endpoint: ENDPOINT,
+  });
+  if (!audited) {
+    return NextResponse.json({ error: "Audit write failed" }, { status: 500 });
   }
 
   return NextResponse.json({ memory: data });
