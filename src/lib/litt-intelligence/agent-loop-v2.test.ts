@@ -1655,6 +1655,11 @@ describe("runAgentLoopV2 — replay carries the original persisted verdict", () 
     // The replay must carry the original read-back verdict — this was
     // undefined before the fix, leaving a successful mutation unverifiable.
     expect(writes[1].persisted).toBe(true);
+    // The replayed message must carry the RESULT PAYLOAD, not the
+    // ToolCallResult wrapper (would contain toolCallId/success fields).
+    const thirdCallMessages = JSON.stringify(vi.mocked(callLLMWithTools).mock.calls[2][2] ?? []);
+    expect(thirdCallMessages).toContain("saved");
+    expect(thirdCallMessages).not.toContain("tc-2");
   });
 });
 

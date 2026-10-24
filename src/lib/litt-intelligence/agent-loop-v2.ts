@@ -1734,10 +1734,10 @@ async function runAgentLoopV2Inner(
           llmMessages.push(buildToolResultMessage({
             toolCallId: toolCall.toolCallId,
             toolId: toolCall.toolId,
-            result: prior.result,
+            result: prior.result.result,
             success: true,
           }));
-          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result), persisted: prior.persisted });
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
@@ -2567,10 +2567,10 @@ export async function executeDeferredToolCalls(
         ctx.llmMessages.push(buildToolResultMessage({
           toolCallId: toolCall.toolCallId,
           toolId: toolCall.toolId,
-          result: prior.result,
+          result: prior.result.result,
           success: true,
         }));
-        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result), persisted: prior.persisted });
+        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
         ctx.localProgress.emit({
           type: "tool_result",
           toolId: toolCall.toolId,
@@ -3355,10 +3355,10 @@ async function resumeAgentLoopV2Inner(
           llmMessages.push(buildToolResultMessage({
             toolCallId: toolCall.toolCallId,
             toolId: toolCall.toolId,
-            result: prior.result,
+            result: prior.result.result,
             success: true,
           }));
-          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result), persisted: prior.persisted });
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
           localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — already executed", durationMs: 0 });
           continue;
         }

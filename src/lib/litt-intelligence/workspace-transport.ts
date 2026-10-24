@@ -463,11 +463,14 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       const workDir = line[1] || " ";
       // Porcelain quotes paths with non-ASCII/special bytes the same way
       // diff headers do — decode so downstream path comparisons see the
-      // real name. Rename entries carry "orig -> new"; the post-image
-      // name is the changed path.
+      // real name. Only RENAME entries carry "orig -> new" (the last one
+      // is the separator — either side may itself be quoted or contain
+      // " -> "); the post-image name is the changed path.
       let filePath = line.slice(3);
-      const arrow = filePath.indexOf(" -> ");
-      if (arrow >= 0) filePath = filePath.slice(arrow + 4);
+      if (index === "R" || workDir === "R") {
+        const arrow = filePath.lastIndexOf(" -> ");
+        if (arrow >= 0) filePath = filePath.slice(arrow + 4);
+      }
       filePath = unquoteGitPath(filePath);
 
       if (index === "?" && workDir === "?") {
