@@ -962,6 +962,10 @@ export async function POST(
             deferredToolCalls: result.pendingApproval.deferredToolCalls,
             stepsUsed: result.pendingApproval.stepsUsedAtPause,
             hadInterveningMutation: result.pendingApproval.hadInterveningMutationAtPause,
+            // Carry the first gate's verified/contradicted call history —
+            // omitting it writes prior_tool_calls: null, so the next
+            // resume would lose every mutation proven across THIS gate.
+            priorToolCalls: result.pendingApproval.priorToolCalls,
           });
           nestedPausedRunId = nested.id;
         } catch (nestedErr) {

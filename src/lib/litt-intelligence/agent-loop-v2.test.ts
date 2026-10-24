@@ -1600,3 +1600,141 @@ describe("runAgentLoopV2 — mutation read-back coverage (gitless/static workspa
     expect(writes.find((t) => t.paths?.includes("app.js"))?.persisted).toBe(false);
   });
 });
+
+// ─── Read-back regression: replay + sequential patches ─────────────
+
+describe("runAgentLoopV2 — replay carries the original persisted verdict", () => {
+  function reply(toolCallId: string, toolId: string, inputs: Record<string, unknown>) {
+    return { text: "", toolCalls: [{ toolCallId, toolId, inputs }], finishReason: "tool_calls", model: "test-model" };
+  }
+  const doneReply = { text: "Done.", toolCalls: [], finishReason: "stop", model: "test-model" };
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("a failover replay logs persisted:true, not an unverifiable claim", async () => {
+    // Gitless (static) workspace: the ONLY evidence a mutation persisted
+    // is the post-call read-back — the replayed entry used to carry no
+    // persisted flag at all, so the run was saved as failed despite the
+    // verified write.
+    const disk = new Map<string, string>();
+    const transport = {
+      ...fakeTransport,
+      writeFile: vi.fn(async (path: string, content: string) => {
+        disk.set(path, content);
+        return { saved: true };
+      }),
+      readFile: vi.fn(async (path: string) => {
+        const content = disk.get(path);
+        if (content === undefined) throw new Error("readFile failed (404): not found");
+        return { content, size: content.length };
+      }),
+    } as unknown as WorkspaceTransport;
+
+    const inputs = { projectId: "p-test", path: "index.html", content: "<html>ok</html>" };
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(reply("tc-1", "files.write", inputs))
+      // A replacement provider re-emits the identical call after failover.
+      .mockResolvedValueOnce(reply("tc-2", "files.write", inputs))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("write index.html", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    const writes = result.toolCalls.filter((t) => t.toolId === "files.write");
+    expect(writes).toHaveLength(2);
+    // The mutation really executed once — the second was a replay.
+    expect(transport.writeFile).toHaveBeenCalledTimes(1);
+    expect(writes[0].persisted).toBe(true);
+    expect(writes[1].summary).toContain("skipped");
+    // The replay must carry the original read-back verdict — this was
+    // undefined before the fix, leaving a successful mutation unverifiable.
+    expect(writes[1].persisted).toBe(true);
+  });
+});
+
+describe("runAgentLoopV2 — sequential apply_patch read-back", () => {
+  function reply(toolCallId: string, toolId: string, inputs: Record<string, unknown>) {
+    return { text: "", toolCalls: [{ toolCallId, toolId, inputs }], finishReason: "tool_calls", model: "test-model" };
+  }
+  const doneReply = { text: "Done.", toolCalls: [], finishReason: "stop", model: "test-model" };
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  function patchTransport(finalContent: string) {
+    return {
+      ...fakeTransport,
+      applyPatch: vi.fn(async (path: string) => {
+        // The call reports success; finalContent is what ACTUALLY landed.
+        disk.set(path, finalContent);
+        return { applied: true };
+      }),
+      readFile: vi.fn(async (path: string) => {
+        const content = disk.get(path);
+        if (content === undefined) throw new Error("readFile failed (404): not found");
+        return { content, size: content.length };
+      }),
+    } as unknown as WorkspaceTransport;
+  }
+
+  let disk: Map<string, string>;
+  beforeEach(() => { disk = new Map([["f.txt", "A B"]]); });
+
+  it("verifies A→B, B→C, B→D as persisted when the terminal strings landed", async () => {
+    const transport = patchTransport("C D");
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(reply("tc-1", "apply_patch", {
+        path: "f.txt",
+        patches: [
+          { search: "A", replace: "B" },
+          { search: "B", replace: "C" },
+          { search: "B", replace: "D" },
+        ],
+      }))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("patch f.txt", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    const patch = result.toolCalls.find((t) => t.toolId === "apply_patch");
+    expect(patch?.success).toBe(true);
+    // Before the fix every intermediate replacement had to survive —
+    // "B" is gone from "C D", so a correct patch read back as failed.
+    expect(patch?.persisted).toBe(true);
+  });
+
+  it("still contradicts a patch whose terminal replacement never landed", async () => {
+    const transport = patchTransport("C B"); // the B→D step never persisted
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(reply("tc-1", "apply_patch", {
+        path: "f.txt",
+        patches: [
+          { search: "A", replace: "B" },
+          { search: "B", replace: "C" },
+          { search: "B", replace: "D" },
+        ],
+      }))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("patch f.txt", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    const patch = result.toolCalls.find((t) => t.toolId === "apply_patch");
+    expect(patch?.persisted).toBe(false);
+  });
+});

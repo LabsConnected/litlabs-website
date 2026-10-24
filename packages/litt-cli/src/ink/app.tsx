@@ -56,7 +56,7 @@ import { applyBranchRefresh } from "../lib/project-state.js";
 import { getDiffData, suggestCommitMessage } from "../lib/diff-view.js";
 import { discoverWorkspaces } from "../lib/workspace-store.js";
 import { listSessions } from "../lib/session-store.js";
-import { ExecutionWatchdog } from "../lib/execution-watchdog.js";
+import { useRunWatchdog } from "./use-run-watchdog.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
@@ -231,6 +231,11 @@ export function CockpitApp({
   // teardown as Esc (session cancel + remote model abort + UI reset)
   // and records a WATCHDOG activity so the operator sees why the run
   // was terminated instead of it hanging silently forever.
+  //
+  // `store`/`controller` are fresh objects every render — useRunWatchdog
+  // keys the arm/disarm effect on runActive ONLY and reads the latest
+  // teardown callbacks through a ref, so streamed updates can never
+  // reset the countdown.
   const runActive = store.state.isProcessing
     || store.state.holoState === "RUNNING"
     || store.state.holoState === "UNDERSTANDING"
@@ -239,32 +244,27 @@ export function CockpitApp({
     || store.state.holoState === "EDITING"
     || store.state.holoState === "TESTING"
     || store.state.holoState === "VERIFYING";
-  useEffect(() => {
-    if (!runActive) return;
-    const watchdog = new ExecutionWatchdog({
-      cancelSession: () => session.cancel().then(() => undefined).catch(() => {}),
-      cancelRemoteModel: () => controller.cancelRemoteModel(),
-      resetUi: () => {
-        store.actions.setIsProcessing(false);
-        store.actions.setHoloState("IDLE");
-        store.actions.clearMission();
-        store.actions.clearToolProgress();
-        store.actions.stopBusy();
-      },
-      recordFailure: (text) => {
-        store.actions.addActivity({
-          id: `act_${Date.now()}_watchdog`,
-          ts: Date.now(),
-          type: "error",
-          tag: "WATCHDOG",
-          semantic: "failed",
-          text,
-        });
-      },
-    });
-    watchdog.start();
-    return () => watchdog.stop();
-  }, [runActive, controller, session, store]);
+  useRunWatchdog(runActive, {
+    cancelSession: () => session.cancel().then(() => undefined).catch(() => {}),
+    cancelRemoteModel: () => controller.cancelRemoteModel(),
+    resetUi: () => {
+      store.actions.setIsProcessing(false);
+      store.actions.setHoloState("IDLE");
+      store.actions.clearMission();
+      store.actions.clearToolProgress();
+      store.actions.stopBusy();
+    },
+    recordFailure: (text) => {
+      store.actions.addActivity({
+        id: `act_${Date.now()}_watchdog`,
+        ts: Date.now(),
+        type: "error",
+        tag: "WATCHDOG",
+        semantic: "failed",
+        text,
+      });
+    },
+  });
 
   // ─── App shortcuts (only when no overlay owns the keyboard) ─────
   const appShortcutHandler = useCallback<KeyboardHandler>((input, key) => {

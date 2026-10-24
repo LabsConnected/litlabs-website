@@ -19,6 +19,7 @@ import { isCanonicalBase64 } from "@/lib/deployments/user-deployment";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createWorkspaceCheckpoint } from "@/lib/missions/workspace-checkpoint";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
+import { unquoteGitPath } from "./workspace-change-producer";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -460,7 +461,14 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       const line = lines[i];
       const index = line[0] || " ";
       const workDir = line[1] || " ";
-      const filePath = line.slice(3);
+      // Porcelain quotes paths with non-ASCII/special bytes the same way
+      // diff headers do — decode so downstream path comparisons see the
+      // real name. Rename entries carry "orig -> new"; the post-image
+      // name is the changed path.
+      let filePath = line.slice(3);
+      const arrow = filePath.indexOf(" -> ");
+      if (arrow >= 0) filePath = filePath.slice(arrow + 4);
+      filePath = unquoteGitPath(filePath);
 
       if (index === "?" && workDir === "?") {
         untracked.push(filePath);

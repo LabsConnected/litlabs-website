@@ -447,22 +447,28 @@ function evaluateCompletionState(
     const claimedMutations = toolCalls.filter((c) => c.mutating && c.success === true);
     const verified = claimedMutations.map((c) => mutationIsVerified(c, change));
 
-    const openClaims = claimedMutations.filter(
-      (c, i) =>
-        !verified[i] &&
-        !(c.paths ?? [])
-          .map(normalizeEvidencePath)
-          .some((p) =>
-            claimedMutations.some(
-              (v, j) =>
-                j > i &&
-                verified[j] &&
-                (v.paths ?? [])
-                  .map(normalizeEvidencePath)
-                  .some((vp) => vp === p || vp.startsWith(`${p}/`)),
-            ),
-          ),
-    );
+    // A non-verified claim is superseded only when EVERY path it
+    // declared is covered by a later verified claim. A multi-path claim
+    // (e.g. a rename declaring old and new) cannot be excused by a later
+    // write that covers just one side — the uncovered half may have
+    // silently not landed. Claims that declared no paths can never be
+    // superseded (there is nothing to cover).
+    const openClaims = claimedMutations.filter((c, i) => {
+      if (verified[i]) return false;
+      const declared = (c.paths ?? []).map(normalizeEvidencePath);
+      if (declared.length === 0) return true;
+      const superseded = declared.every((p) =>
+        claimedMutations.some(
+          (v, j) =>
+            j > i &&
+            verified[j] &&
+            (v.paths ?? [])
+              .map(normalizeEvidencePath)
+              .some((vp) => vp === p || vp.startsWith(`${p}/`)),
+        ),
+      );
+      return !superseded;
+    });
     const contradictedClaims = openClaims.filter((c) => mutationIsContradicted(c, change));
     const unverifiableClaims = openClaims.filter((c) => !mutationIsContradicted(c, change));
 

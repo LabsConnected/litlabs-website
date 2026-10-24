@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import {
   computeWorkspaceChange,
   changedPathsFromStatus,
+  pathsFromDiff,
+  unquoteGitPath,
 } from "./workspace-change-producer";
 import { evaluateCompletion, requirementForMode } from "@/lib/studio/completion-evidence";
 import type { GitStatusResult, CheckpointInfo } from "./workspace-transport";
@@ -353,5 +355,36 @@ describe("producer → completion evidence", () => {
     expect(verdict.reason).not.toContain("nothing was changed");
     expect(verdict.reason).not.toContain("before making changes");
     expect(verdict.reason).not.toContain("after making changes");
+  });
+});
+
+// ─── Quoted/escaped paths (core.quotePath) ──────────────────────────
+
+describe("pathsFromDiff with core.quotePath headers", () => {
+  // With default git settings a tracked non-ASCII filename is emitted
+  // fully quoted: diff --git "a/caf\303\251.txt" "b/caf\303\251.txt".
+  // The old header regex could not match it, so a real change produced
+  // an empty baseFiles and reported "unchanged" (Greptile P1 #3).
+  it("decodes octal-escaped UTF-8 filenames", () => {
+    const diff = [
+      'diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"',
+      '--- "a/caf\\303\\251.txt"',
+      '+++ "b/caf\\303\\251.txt"',
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+    ].join("\n");
+    expect(pathsFromDiff(diff)).toEqual(["café.txt"]);
+  });
+
+  it("keeps plain headers working", () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-x\n+y";
+    expect(pathsFromDiff(diff)).toEqual(["src/a.ts"]);
+  });
+
+  it("unescapes simple C escapes and backslashes", () => {
+    expect(unquoteGitPath('"a\\\\b.txt"')).toBe("a\\b.txt");
+    expect(unquoteGitPath('"say \\"hi\\".txt"')).toBe('say "hi".txt');
+    expect(unquoteGitPath("plain.txt")).toBe("plain.txt");
   });
 });

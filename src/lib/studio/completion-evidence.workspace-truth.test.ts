@@ -634,3 +634,76 @@ describe("completion verdict vs. actual workspace state", () => {
     });
   });
 });
+
+describe("supersede: multi-path claims need full coverage", () => {
+  // A non-verified claim is excused only when a LATER verified claim
+  // covers its declared paths — a rewrite that landed after it. For a
+  // multi-path claim (rename declares old AND new) covering just one
+  // side must NOT excuse the whole claim: the other half may have
+  // silently not landed (Greptile P1 #2).
+  it("a verified write to one path does not excuse a two-path claim", () => {
+    const verdict = evaluateCompletion(
+      BUILD,
+      evidence(
+        [
+          // files.rename old→new declared both paths; its read-back could
+          // not confirm (persisted undefined) and the diff is unavailable
+          // (gitless workspace → unverifiable).
+          {
+            toolId: "files.rename",
+            mutating: true,
+            success: true,
+            paths: ["old.txt", "new.txt"],
+          },
+          // A LATER verified write covers only old.txt.
+          {
+            toolId: "files.write",
+            mutating: true,
+            success: true,
+            paths: ["old.txt"],
+            persisted: true,
+          },
+        ],
+        null,
+      ),
+    );
+
+    // new.txt's half of the rename was never confirmed — the claim must
+    // stay open, not be superseded by the old.txt write.
+    expect(verdict.state).not.toBe("complete");
+    expect(verdict.state).toBe("partial");
+  });
+
+  it("later verified writes covering BOTH paths still supersede", () => {
+    const verdict = evaluateCompletion(
+      BUILD,
+      evidence(
+        [
+          {
+            toolId: "files.rename",
+            mutating: true,
+            success: true,
+            paths: ["old.txt", "new.txt"],
+          },
+          {
+            toolId: "files.write",
+            mutating: true,
+            success: true,
+            paths: ["old.txt"],
+            persisted: true,
+          },
+          {
+            toolId: "files.write",
+            mutating: true,
+            success: true,
+            paths: ["new.txt"],
+            persisted: true,
+          },
+        ],
+        null,
+      ),
+    );
+
+    expect(verdict.state).toBe("complete");
+  });
+});

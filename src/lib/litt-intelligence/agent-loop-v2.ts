@@ -295,6 +295,18 @@ export interface AgentToolCallLogEntry {
   persisted?: boolean;
 }
 
+/**
+ * A successfully executed mutation plus its read-back verdict, keyed by
+ * toolId+inputs for duplicate-mutation protection. A failover replay
+ * must re-emit BOTH: the result the model sees and the persisted truth
+ * the completion check relies on — replaying only the result would log
+ * a successful mutation with no evidence on gitless workspaces.
+ */
+interface ExecutedMutation {
+  result: ToolCallResult;
+  persisted?: boolean;
+}
+
 export interface AgentLoopResult {
   finalText: string;
   stepsUsed: number;
@@ -831,25 +843,41 @@ async function readBackMutation(
     if (toolId === "files.write" && typeof inputs.content === "string") {
       contentMatches = content === inputs.content;
     } else if (toolId === "apply_patch" && Array.isArray(inputs.patches)) {
-      const checks = (inputs.patches as Array<{ search?: unknown; replace?: unknown }>).map(
-        (p): boolean | null => {
-          const rep = typeof p?.replace === "string" ? p.replace : null;
-          if (rep) return content.includes(rep);
-          const sea = typeof p?.search === "string" ? p.search : null;
-          if (rep === "" && sea) {
-            // Deletion-only patch. The transport replaces the first
-            // occurrence only, so a surviving search string can be
-            // legitimate — absence confirms, presence is unverifiable.
-            return content.includes(sea) ? null : true;
+      // Sequential patches can rewrite earlier replacements (A→B then
+      // B→C correctly leaves C, not B). Requiring every intermediate
+      // replacement to survive marks good patches contradicted. Simulate
+      // the produced strings instead: a later search that matches a
+      // produced string consumes it (first occurrence, matching the
+      // transport), and only the terminal strings must appear on disk.
+      const produced: string[] = [];
+      let sawConfirmed = false;
+      let sawUnverifiable = false;
+      for (const p of inputs.patches as Array<{ search?: unknown; replace?: unknown }>) {
+        const sea = typeof p?.search === "string" ? p.search : null;
+        const rep = typeof p?.replace === "string" ? p.replace : null;
+        if (sea && rep !== null) {
+          const idx = produced.findIndex((s) => s.includes(sea));
+          if (idx >= 0) {
+            produced[idx] = produced[idx].replace(sea, () => rep);
           }
-          return null;
-        },
-      );
-      contentMatches = checks.some((c) => c === false)
+        }
+        if (rep) {
+          produced.push(rep);
+        } else if (rep === "" && sea) {
+          // Deletion-only patch. The transport replaces the first
+          // occurrence only, so a surviving search string can be
+          // legitimate — absence confirms, presence is unverifiable.
+          if (content.includes(sea)) sawUnverifiable = true;
+          else sawConfirmed = true;
+        } else {
+          sawUnverifiable = true;
+        }
+      }
+      contentMatches = produced.some((s) => !content.includes(s))
         ? false
-        : checks.length > 0 && checks.every((c) => c === true)
-          ? true
-          : null;
+        : produced.length > 0
+          ? sawUnverifiable ? null : true
+          : sawUnverifiable ? null : sawConfirmed ? true : null;
     }
     return { path, verified: contentMatches, readable: true, contentMatches };
   }
@@ -1332,8 +1360,9 @@ async function runAgentLoopV2Inner(
   // Mutating tool calls that already executed successfully this run —
   // keyed by toolId+inputs. A replacement provider that re-emits an
   // identical mutation after failover replays the recorded result instead
-  // of executing it again.
-  const executedMutations = new Map<string, ToolCallResult>();
+  // of executing it again. The recorded value carries the read-back
+  // verdict too, so a replayed claim keeps the original persisted truth.
+  const executedMutations = new Map<string, ExecutedMutation>();
   const patchRecoveryAttempts = new Map<string, number>();
 
   // Collect progress events
@@ -1708,7 +1737,7 @@ async function runAgentLoopV2Inner(
             result: prior.result,
             success: true,
           }));
-          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result) });
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result), persisted: prior.persisted });
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
@@ -1968,7 +1997,6 @@ async function runAgentLoopV2Inner(
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
         batchHasMutation = true;
-        if (result.success) executedMutations.set(dedupeKey, result);
       }
 
       // Log the call — enriched with the persisted-truth evidence the
@@ -1985,6 +2013,9 @@ async function runAgentLoopV2Inner(
         result.success && !toolDef.readOnly,
         result.result,
       );
+      if (result.success && !toolDef.readOnly) {
+        executedMutations.set(dedupeKey, { result, persisted: mutationCheck?.verified ?? undefined });
+      }
       toolCallLog.push({
         toolId: toolCall.toolId,
         success: result.success,
@@ -2434,7 +2465,7 @@ export interface DeferredToolBatchContext {
   llmMessages: LLMMessage[];
   toolCallLog: AgentToolCallLogEntry[];
   toolCallRecords: ToolCallRecord[];
-  executedMutations: Map<string, ToolCallResult>;
+  executedMutations: Map<string, ExecutedMutation>;
   localProgress: ProgressEmitter;
   qualitySession: QualityLoopSession | null;
   startTime: number;
@@ -2539,7 +2570,7 @@ export async function executeDeferredToolCalls(
           result: prior.result,
           success: true,
         }));
-        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result) });
+        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result), persisted: prior.persisted });
         ctx.localProgress.emit({
           type: "tool_result",
           toolId: toolCall.toolId,
@@ -2668,7 +2699,6 @@ export async function executeDeferredToolCalls(
     if (!toolDef.readOnly) {
       state.hasInterveningMutation = true;
       state.batchHasMutation = true;
-      if (result.success) ctx.executedMutations.set(dedupeKey, result);
     }
 
     const summary = summarizeToolResult(toolCall.toolId, result.result);
@@ -2679,6 +2709,9 @@ export async function executeDeferredToolCalls(
       result.success && !toolDef.readOnly,
       result.result,
     );
+    if (result.success && !toolDef.readOnly) {
+      ctx.executedMutations.set(dedupeKey, { result, persisted: mutationCheck?.verified ?? undefined });
+    }
     ctx.toolCallLog.push({
       toolId: toolCall.toolId,
       success: result.success,
@@ -2802,7 +2835,7 @@ async function resumeAgentLoopV2Inner(
     resume.pausedMessages,
   );
   let hasInterveningMutation = resume.hadInterveningMutation;
-  const executedMutations = new Map<string, ToolCallResult>();
+  const executedMutations = new Map<string, ExecutedMutation>();
 
   const localProgress = new ProgressEmitter((event) => {
     events.push(event);
@@ -3325,7 +3358,7 @@ async function resumeAgentLoopV2Inner(
             result: prior.result,
             success: true,
           }));
-          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result) });
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result), persisted: prior.persisted });
           localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — already executed", durationMs: 0 });
           continue;
         }
@@ -3455,7 +3488,6 @@ async function resumeAgentLoopV2Inner(
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
         batchHasMutation = true;
-        if (result.success) executedMutations.set(dedupeKey, result);
       }
 
       const summary = summarizeToolResult(toolCall.toolId, result.result);
@@ -3466,6 +3498,9 @@ async function resumeAgentLoopV2Inner(
         result.success && !toolDef.readOnly,
         result.result,
       );
+      if (result.success && !toolDef.readOnly) {
+        executedMutations.set(dedupeKey, { result, persisted: mutationCheck?.verified ?? undefined });
+      }
       toolCallLog.push({
         toolId: toolCall.toolId,
         success: result.success,

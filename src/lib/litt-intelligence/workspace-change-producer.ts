@@ -30,15 +30,66 @@ export interface WorkspaceChangeProbe {
   gitDiff?(options?: { staged?: boolean; path?: string; untracked?: boolean; base?: string }): Promise<{ diff: string }>;
 }
 
+/**
+ * Decode a git C-style quoted path (core.quotePath, the default).
+ *
+ * A tracked filename with non-ASCII or special bytes is emitted as a
+ * double-quoted string with escapes: octal `\NNN` for raw UTF-8 bytes
+ * (`caf\303\251.txt`) plus the C escapes `\\`, `\"`, `\n`, `\t`, `\r`,
+ * `\a`, `\b`, `\f`, `\v`. Octal runs are bytes, so they must be decoded
+ * as UTF-8 — treating each octal as a charCode mangles multibyte names.
+ */
+export function unquoteGitPath(path: string): string {
+  if (path.length < 2 || !path.startsWith('"') || !path.endsWith('"')) {
+    return path;
+  }
+  const inner = path.slice(1, -1);
+  let out = "";
+  let bytes: number[] = [];
+  const flush = () => {
+    if (bytes.length === 0) return;
+    out += Buffer.from(bytes).toString("utf8");
+    bytes = [];
+  };
+  const SIMPLE: Record<string, string> = {
+    '"': '"', "\\": "\\", n: "\n", t: "\t", r: "\r",
+    a: "\x07", b: "\b", f: "\f", v: "\v",
+  };
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (ch !== "\\") {
+      flush();
+      out += ch;
+      continue;
+    }
+    const next = inner[++i];
+    if (next >= "0" && next <= "7") {
+      bytes.push(parseInt(inner.slice(i, i + 3), 8));
+      i += 2;
+      continue;
+    }
+    flush();
+    out += SIMPLE[next] ?? next;
+  }
+  flush();
+  return out;
+}
+
 /** Paths from a unified diff's `diff --git a/x b/y` headers (the b/ side). */
 export function pathsFromDiff(diff: string): string[] {
   const paths = new Set<string>();
   for (const line of diff.split("\n")) {
+    if (!line.startsWith("diff --git ")) continue;
+    // core.quotePath quotes the WHOLE "a/<path>" spec, so a quoted header
+    // looks like: diff --git "a/caf\303\251.txt" "b/caf\303\251.txt"
+    const quoted = line.match(/^diff --git "a\/((?:[^"\\]|\\.)*)" "b\/((?:[^"\\]|\\.)*)"$/);
+    if (quoted) {
+      paths.add(unquoteGitPath(`"${quoted[2]}"`));
+      continue;
+    }
     const match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
     if (!match) continue;
-    const unquote = (p: string) =>
-      p.startsWith('"') && p.endsWith('"') ? p.slice(1, -1) : p;
-    paths.add(unquote(match[2]));
+    paths.add(unquoteGitPath(match[2]));
   }
   return [...paths];
 }
