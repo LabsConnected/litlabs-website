@@ -13,25 +13,19 @@
 
 import React, { useEffect, useState } from "react";
 import { render } from "ink";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { useRunWatchdog } from "../ink/use-run-watchdog.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-interface Fired {
-  cancelSession: number;
-  cancelRemoteModel: number;
-  resetUi: number;
-  recordFailure: string[];
-}
-
-const freshFired = (): Fired => ({
-  cancelSession: 0,
-  cancelRemoteModel: 0,
-  resetUi: 0,
-  recordFailure: [],
+const freshCalls = () => ({
+  cancelSession: vi.fn(),
+  cancelRemoteModel: vi.fn(),
+  resetUi: vi.fn(),
+  recordFailure: vi.fn(),
 });
+type Calls = ReturnType<typeof freshCalls>;
 
 /**
  * Mirrors production: re-renders continuously (like streamed output)
@@ -39,12 +33,12 @@ const freshFired = (): Fired => ({
  */
 function Probe({
   runActive,
-  fired,
+  calls,
   maxMs,
   tickMs = 40,
 }: {
   runActive: boolean;
-  fired: Fired;
+  calls: Calls;
   maxMs: number;
   tickMs?: number;
 }) {
@@ -54,28 +48,29 @@ function Probe({
     return () => clearInterval(id);
   }, [tickMs]);
   useRunWatchdog(runActive, {
-    cancelSession: () => { fired.cancelSession += 1; },
-    cancelRemoteModel: () => { fired.cancelRemoteModel += 1; },
-    resetUi: () => { fired.resetUi += 1; },
-    recordFailure: (t) => { fired.recordFailure.push(`${t}@tick=${tick}`); },
+    cancelSession: calls.cancelSession,
+    cancelRemoteModel: calls.cancelRemoteModel,
+    resetUi: calls.resetUi,
+    recordFailure: (t) => calls.recordFailure(`${t}@tick=${tick}`),
   }, maxMs);
   return null;
 }
 
 describe("useRunWatchdog", () => {
   it("fires once at the cap even while the run keeps re-rendering", async () => {
-    const fired = freshFired();
-    const app = render(<Probe runActive={true} fired={fired} maxMs={300} />);
+    const calls = freshCalls();
+    const app = render(<Probe runActive={true} calls={calls} maxMs={300} />);
     try {
       // ~15 re-renders inside the window, then well past the cap.
       await sleep(800);
-      expect(fired.cancelSession).toBe(1);
-      expect(fired.cancelRemoteModel).toBe(1);
-      expect(fired.resetUi).toBe(1);
-      expect(fired.recordFailure).toHaveLength(1);
+      expect(calls.cancelSession).toHaveBeenCalledTimes(1);
+      expect(calls.cancelRemoteModel).toHaveBeenCalledTimes(1);
+      expect(calls.resetUi).toHaveBeenCalledTimes(1);
+      expect(calls.recordFailure).toHaveBeenCalledTimes(1);
       // The LATEST callback ran — the tick baked into the message came
       // from a render after arming, not a stale first-render closure.
-      const m = fired.recordFailure[0].match(/@tick=(\d+)$/);
+      const text = calls.recordFailure.mock.calls[0][0] as string;
+      const m = text.match(/@tick=(\d+)$/);
       expect(m).not.toBeNull();
       expect(Number(m![1])).toBeGreaterThan(0);
     } finally {
@@ -84,20 +79,20 @@ describe("useRunWatchdog", () => {
   }, 15000);
 
   it("disarms when the run settles — no fire after runActive flips", async () => {
-    const fired = freshFired();
+    const calls = freshCalls();
     function Toggle() {
       const [active, setActive] = useState(true);
       useEffect(() => {
         const id = setTimeout(() => setActive(false), 100);
         return () => clearTimeout(id);
       }, []);
-      return <Probe runActive={active} fired={fired} maxMs={250} />;
+      return <Probe runActive={active} calls={calls} maxMs={250} />;
     }
     const app = render(<Toggle />);
     try {
       await sleep(600);
-      expect(fired.cancelSession).toBe(0);
-      expect(fired.recordFailure).toHaveLength(0);
+      expect(calls.cancelSession).not.toHaveBeenCalled();
+      expect(calls.recordFailure).not.toHaveBeenCalled();
     } finally {
       app.unmount();
     }
