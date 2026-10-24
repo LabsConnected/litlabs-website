@@ -188,6 +188,12 @@ export interface AgentLoopConfig {
   /** Parent ActionRun owning this work; injected server-side. */
   actionRunId?: string;
   /**
+   * Canonical LiTTBits estimate for this run (same number the reservation
+   * held). Appended to approval reasons so the card discloses the expected
+   * debit BEFORE the user approves — no hidden metering.
+   */
+  billingEstimateBits?: number;
+  /**
    * Item 5a — optional durable event sink for the Activity truth.
    * When set, every ProgressEvent emitted through this run's
    * `localProgress` is also offered to the hook. The loop invokes it in
@@ -1160,6 +1166,12 @@ async function runAgentLoopV2Inner(
   // Check if any mutations have been requested (for checkpoint logic)
   let mutationBatchPending = false;
 
+  // Provider-fallback disclosure (truthful-states rule): when the actual
+  // serving model differs from the requested one, the substitution is
+  // recorded here and disclosed in the run's final text — never hidden
+  // behind "LiTT Auto". First substitution wins; later steps may repeat it.
+  let modelFallbackNotice: { requested: string; actual: string } | null = null;
+
   while (stepsUsed < cfg.maxSteps) {
     // Check runtime limit
     const elapsed = Date.now() - startTime;
@@ -1220,6 +1232,17 @@ async function runAgentLoopV2Inner(
         canonicalId: routedRecord?.canonicalId,
         configSource: routedRecord ? getModelConfigSource(routedRecord.canonicalId) : undefined,
       });
+      // Provider substitution must be visible in the run record: emit a
+      // plain-language status event and remember it for the final answer.
+      if (requestedModel && llmResponse.model !== requestedModel) {
+        if (!modelFallbackNotice) {
+          modelFallbackNotice = { requested: requestedModel, actual: llmResponse.model };
+        }
+        localProgress.emit({
+          type: "status",
+          summary: `Switched to ${llmResponse.model} (fallback from ${requestedModel})`,
+        });
+      }
       // Canonical metering (P0): one usage+cost event per step's LLM call.
       // provider/model are from the ACTUAL call; token counts are chars/4
       // estimates (callLLMWithTools exposes no usage) — see helper.
@@ -1516,7 +1539,9 @@ async function runAgentLoopV2Inner(
           toolCall.toolId,
           toolCall.inputs,
           permResult.reason ?? "Approval required",
-        );
+        ) + (cfg.billingEstimateBits
+          ? ` Estimated cost: ${cfg.billingEstimateBits} LiTTBits (debited on success; failed work debits zero).`
+          : "");
         localProgress.emit({
           type: "approval_required",
           toolId: toolCall.toolId,
@@ -1822,6 +1847,23 @@ async function runAgentLoopV2Inner(
     finalText = failedHonestly;
   }
 
+  // Truthful completion: an execution run that ends having changed zero
+  // files is a NO-OP, never a success. The golden-journey revision printed
+  // "Done. No files changed" — a false completion state. When the request
+  // was execution-bound (the loop demanded a tool call on step one) and
+  // nothing mutated, report the no-op plainly instead of the model's
+  // "Done" claim.
+  if (
+    !cancelled && !modelFailed && !failedHonestly &&
+    cfg.requireToolCallOnFirstStep === true &&
+    !toolCallLog.some((call) => call.success && call.mutating) &&
+    !hasSuccessfulFileWriteInHistory(cfg.initialMessages ?? [])
+  ) {
+    failedHonestly =
+      "No files were changed — nothing was applied, so this request did not complete. Try again or rephrase the change.";
+    finalText = failedHonestly;
+  }
+
   // Run build-fix loop if mutations were made and enabled
   let buildFixResult: BuildFixLoopResult | undefined;
   if (cfg.enableBuildFix && !cfg.isStaticWorkspace && hasInterveningMutation && !cancelled) {
@@ -1862,6 +1904,13 @@ async function runAgentLoopV2Inner(
       ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
       : effectiveFinalText;
 
+  // Disclose any provider substitution in the closing text. The UI shows
+  // "LiTT Auto" for the selected route; the provider that actually ran is
+  // part of the honest run record — silent substitution is a fake state.
+  const disclosedFinalText = modelFallbackNotice
+    ? `${gatedFinalText}\n\n_Model note: ${modelFallbackNotice.requested} was unavailable, so this run was completed by ${modelFallbackNotice.actual}._`
+    : gatedFinalText;
+
   // What did this run actually do to the files?
   //
   // Tool success flags cannot answer that: a tool can write bytes and then
@@ -1894,7 +1943,7 @@ async function runAgentLoopV2Inner(
   } as ProgressEvent);
 
   return {
-    finalText: gatedFinalText,
+    finalText: disclosedFinalText,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -2533,6 +2582,9 @@ async function resumeAgentLoopV2Inner(
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
+  // Provider-fallback disclosure for the resumed run (same rule as the
+  // main loop — the provider that actually ran is disclosed, never hidden).
+  let modelFallbackNotice: { requested: string; actual: string } | null = null;
 
   // Execute the approved/rejected tool FIRST, then continue the loop
   localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
@@ -2781,6 +2833,16 @@ async function resumeAgentLoopV2Inner(
       if (llmResponse.responseShape && llmResponse.provider) {
         localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
       }
+      // Provider substitution must be visible in the run record.
+      if (cfg.model && llmResponse.model !== cfg.model) {
+        if (!modelFallbackNotice) {
+          modelFallbackNotice = { requested: cfg.model, actual: llmResponse.model };
+        }
+        localProgress.emit({
+          type: "status",
+          summary: `Switched to ${llmResponse.model} (fallback from ${cfg.model})`,
+        });
+      }
       // Canonical metering (P0): one usage+cost event per resumed step's
       // LLM call. provider/model are from the ACTUAL call; token counts
       // are chars/4 estimates — see emitLoopStepMetering.
@@ -2979,7 +3041,9 @@ async function resumeAgentLoopV2Inner(
           toolCall.toolId,
           toolCall.inputs,
           permResult.reason ?? "Approval required",
-        );
+        ) + (cfg.billingEstimateBits
+          ? ` Estimated cost: ${cfg.billingEstimateBits} LiTTBits (debited on success; failed work debits zero).`
+          : "");
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: approvalReason });
 
         // Pause for approval in AUTO as well as ACT — the same contract as
@@ -3148,6 +3212,13 @@ async function resumeAgentLoopV2Inner(
       ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
       : effectiveFinalText;
 
+  // Disclose any provider substitution in the closing text. The UI shows
+  // "LiTT Auto" for the selected route; the provider that actually ran is
+  // part of the honest run record — silent substitution is a fake state.
+  const disclosedFinalText = modelFallbackNotice
+    ? `${gatedFinalText}\n\n_Model note: ${modelFallbackNotice.requested} was unavailable, so this run was completed by ${modelFallbackNotice.actual}._`
+    : gatedFinalText;
+
   // What did this run actually do to the files?
   //
   // Tool success flags cannot answer that: a tool can write bytes and then
@@ -3185,7 +3256,7 @@ async function resumeAgentLoopV2Inner(
   } as ProgressEvent);
 
   return {
-    finalText: gatedFinalText,
+    finalText: disclosedFinalText,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,

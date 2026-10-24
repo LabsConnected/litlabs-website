@@ -53,6 +53,7 @@ import { makePersistProgressEvent } from "@/lib/action-runtime/progress-event-pe
 import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
 import type { MessageStatus } from "@/lib/studio/types";
 import { attachActionRunToConversationTask, settleConversationTask } from "@/lib/studio/task-service";
+import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
 
 /**
  * Write a resumed run's outcome back onto the conversation transcript.
@@ -245,7 +246,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ conversationId: string; pausedRunId: string }> },
 ) {
-  const { userId } = await auth(req);
+  const { userId, clerkId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -561,6 +562,89 @@ export async function POST(
       }));
   }
 
+  // 6.5. Billing reservation for the approved execution.
+  //
+  // The original request's reservation is released when the run pauses —
+  // no durable reservation can cross the approval boundary without a
+  // schema change, and an approval can outlive any request. So the
+  // APPROVED execution reserves again here, under a per-attempt
+  // idempotency key (`executionToken` is minted once per claim, so a
+  // controlled retry gets a fresh key while duplicate approval POSTs can
+  // never reach this line — markRunProcessing claims atomically above).
+  // The reservation is settled exactly once in the executor's .finally:
+  // completed work debits its estimate, failed/cancelled/re-paused work
+  // releases the hold. An approved run that debits zero on success is the
+  // same defect class as a builtin build that debits zero.
+  let resumeRunId: string | null = null;
+  let resumeReserved = 0;
+  let resumeReservationId: string | null = null;
+  let resumeSettle:
+    | { status: "completed" | "failed" | "cancelled"; actualCredits: number; error?: string }
+    | null = null;
+  const resumeEstimatedBits = estimateCredits(
+    Math.ceil(JSON.stringify(resolved.pausedMessages ?? []).length / 4) + 2048,
+    0,
+    1,
+    1,
+  );
+  if (clerkId) {
+    const reserveResult = await reserveCredits(
+      {
+        clerkId,
+        agentInstanceId: "studio-build",
+        agentId: null,
+        agentVersionId: null,
+        conversationId,
+        idempotencyKey: `resume:${pausedRunId}:${executionToken}`,
+      },
+      resumeEstimatedBits,
+    );
+    if (!reserveResult.ok) {
+      const message = reserveResult.error
+        || "Insufficient LiTTBits balance — purchase credits to continue.";
+      // Surface the shortfall in the response so the client can render the
+      // estimated cost, current balance, and gap — same disclosure the
+      // initial-run 402 path provides.
+      let shortfall: { estimatedBits: number; balanceBits: number; shortfallBits: number } | null = null;
+      try {
+        const { getCreditBalances } = await import("@/lib/wallet-ledger");
+        const balances = await getCreditBalances(clerkId);
+        const balanceBits = Math.round(balances?.total ?? 0);
+        shortfall = {
+          estimatedBits: resumeEstimatedBits,
+          balanceBits,
+          shortfallBits: Math.max(0, resumeEstimatedBits - balanceBits),
+        };
+      } catch { /* disclosure is best-effort */ }
+      try {
+        await settleResumedRunOutcome({
+          record: resolved,
+          userId,
+          status: "failed",
+          eventType: "run.failed",
+          patch: {
+            currentActivity: message,
+            failureCode: "INSUFFICIENT_BALANCE",
+            failureMessage: message,
+          },
+          executionToken,
+          logEvent: "approval:action_run_reserve_failed",
+        });
+      } catch {
+        await releaseRunClaim(pausedRunId, userId, executionToken, "failed").catch(
+          () => undefined,
+        );
+      }
+      return NextResponse.json(
+        { error: message, resolved: true, status: "failed", pausedRunId, billingQuote: shortfall },
+        { status: reserveResult.status || 402 },
+      );
+    }
+    resumeRunId = reserveResult.runId;
+    resumeReserved = reserveResult.reservedCredits;
+    resumeReservationId = reserveResult.reservationId;
+  }
+
   // 7. Start the resumed execution DETACHED from this HTTP request.
   // Railway's long-running Node process keeps this promise alive after
   // the response is sent. The result is persisted to the DB so the client
@@ -664,6 +748,11 @@ export async function POST(
     enableBuildFix: true,
     signal: abortController.signal,
     userId,
+    // Disclose the same estimate the approval authorized: the reservation
+    // above holds exactly this amount and the settlement is capped at it,
+    // so the approval card's quote, the held amount, and the maximum
+    // possible debit are the same number.
+    billingEstimateBits: resumeEstimatedBits,
     isStaticWorkspace: resumeProject?.framework === "static" ? true : undefined,
     // Item 5a — persist the resumed loop's ProgressEvents to the parent
     // run's action_events log, the same Activity truth as the initial run.
@@ -753,7 +842,9 @@ export async function POST(
       if (fenced) {
         // Another owner marked the truth (stale/stall detector, or a
         // superseding claim). Whatever this loop produced is not the
-        // record — write nothing, let the recorded outcome stand.
+        // record — write nothing, let the recorded outcome stand. Our
+        // reservation is released: an aborted executor never debits.
+        resumeSettle = { status: "cancelled", actualCredits: 0, error: "FENCED" };
         return;
       }
       // The loop produced a result — that is progress. Reset the stall
@@ -815,6 +906,7 @@ export async function POST(
       }
 
       if (resumeFailure) {
+        resumeSettle = { status: "failed", actualCredits: 0, error: resumeFailure };
         await writeResumedResultToTranscript({
           conversationId,
           userId,
@@ -970,6 +1062,7 @@ export async function POST(
           // a broken gate.
           const nestedPersistError =
             `The follow-up approval for \`${result.pendingApproval.toolId}\` could not be saved — send the request again to retry.`;
+          resumeSettle = { status: "failed", actualCredits: 0, error: nestedPersistError };
           await writeResumedResultToTranscript({
             conversationId,
             userId,
@@ -994,6 +1087,9 @@ export async function POST(
           pausedRunId: nestedPausedRunId,
           reason: result.pendingApproval.reason,
         };
+        // Re-paused on a nested gate — release this attempt's reservation;
+        // approving the nested gate reserves again under its own key.
+        resumeSettle = { status: "cancelled", actualCredits: 0, error: "PAUSED_FOR_NESTED_APPROVAL" };
         await settleResumedRunOutcome({
           record: resolved,
           userId,
@@ -1014,6 +1110,24 @@ export async function POST(
       // carrying the RunResult. An honest loop failure is reported as
       // failed, never completed.
       const honestFailure = terminalFailure;
+      resumeSettle = result.cancelled
+        ? { status: "cancelled", actualCredits: 0 }
+        : honestFailure
+          ? { status: "failed", actualCredits: 0, error: honestFailure }
+          : {
+              status: "completed",
+              // Same estimate formula as the initial request — capped by
+              // the reservation so the settle can never exceed the quote.
+              actualCredits: Math.min(
+                estimateCredits(
+                  Math.ceil(JSON.stringify(resolved.pausedMessages ?? []).length / 4),
+                  Math.ceil((finalText ?? "").length / 4),
+                  1,
+                  1,
+                ),
+                resumeReserved,
+              ),
+            };
       await settleResumedRunOutcome({
         record: resolved,
         userId,
@@ -1038,8 +1152,12 @@ export async function POST(
       return true;
     })
     .catch(async (err) => {
-      if (fenced) return;
+      if (fenced) {
+        resumeSettle = { status: "cancelled", actualCredits: 0, error: "FENCED" };
+        return;
+      }
       const message = err instanceof Error ? err.message : "Resume failed";
+      resumeSettle = { status: "failed", actualCredits: 0, error: message };
       await writeResumedResultToTranscript({
         conversationId,
         userId,
@@ -1072,6 +1190,27 @@ export async function POST(
       // The executor's work — loop and settlement tail — is done either
       // way; stop proving liveness. A fenced executor dies here too.
       clearInterval(heartbeat);
+      // Settle this attempt's billing reservation exactly once. A missing
+      // outcome means the executor exited without recording truth —
+      // release the hold rather than stranding reserved bits.
+      if (resumeRunId) {
+        const settle = resumeSettle
+          ?? { status: "failed" as const, actualCredits: 0, error: "EXECUTOR_EXITED_WITHOUT_OUTCOME" };
+        settleRun(
+          resumeRunId,
+          {
+            inputTokens: 0,
+            outputTokens: 0,
+            actualCredits: settle.actualCredits,
+            status: settle.status,
+            ...(settle.error ? { error: settle.error } : {}),
+          },
+          resumeReserved,
+          resumeReservationId,
+        ).catch(() => {
+          // Best-effort settlement — must not leak unhandled rejection
+        });
+      }
     });
 
   // 8. Return 202 Accepted immediately — the execution continues in the background
@@ -1081,6 +1220,7 @@ export async function POST(
     status: "processing",
     pausedRunId,
     runStatus: "processing",
+    billingQuote: clerkId ? { estimatedBits: resumeReserved } : null,
   }, { status: 202 });
 }
 
