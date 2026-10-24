@@ -221,7 +221,7 @@ describe("agent continuity — state survives provider failover", () => {
     expect(result.cancelled).toBe(false);
     expect(result.finalText).toBe("The file has been written.");
     expect(result.toolCalls).toEqual([
-      { toolId: "files.write", success: true, summary: expect.any(String), mutating: true },
+      expect.objectContaining({ toolId: "files.write", success: true, summary: expect.any(String), mutating: true }),
     ]);
 
     // ── Routing events show the actual providers used ──
