@@ -1,0 +1,17 @@
+# Synthetic test-fixture literals in historical commits on unmerged branches.
+# The push/scheduled gitleaks scan runs repository-wide (--log-opts=--all),
+# so fixtures on feature branches fail main's gate even though they never
+# shipped. Every entry below was reviewed and confirmed to be a non-credential
+# test fixture. Scoped to the exact commit/file/rule/line — any new
+# high-entropy literal anywhere still fires the gate.
+#
+# tests/billing/billing-p0-recovery.test.ts:25 — mock ctx idempotencyKey
+# (fixture value, rotated out of the tree on the billing branch in 785f0654).
+904a6c05a7bfe1faaf08587ca66f4c24ee133128:tests/billing/billing-p0-recovery.test.ts:generic-api-key:25
+990e0bbe160343ad8c6725f2cb79592c8f939442:tests/billing/billing-p0-recovery.test.ts:generic-api-key:25
+#
+# tests/stripe-webhook-local-db.test.ts:54,56 — public Supabase CLI local-demo
+# ANON_KEY/SERVICE_ROLE_KEY JWTs (they verify only against the CLI's demo
+# secret; the file also uses the literal sk_test_local_fixture_not_a_live_key).
+dd8ce36dfe4b3487df7ec33e00d7dcee81d655e3:tests/stripe-webhook-local-db.test.ts:jwt:54
+dd8ce36dfe4b3487df7ec33e00d7dcee81d655e3:tests/stripe-webhook-local-db.test.ts:jwt:56
