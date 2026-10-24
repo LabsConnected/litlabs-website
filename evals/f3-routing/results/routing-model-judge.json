@@ -1,0 +1,536 @@
+{
+  "evalId": "eval-gdX-2026-10-19T08:31:16",
+  "results": {
+    "version": 3,
+    "timestamp": "2026-10-19T08:31:16.434Z",
+    "prompts": [
+      {
+        "raw": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: {{prompt}}\n",
+        "label": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: {{prompt}}\n",
+        "id": "5a36d08b0491585bf5fd55912d7de8cd96dbfaf9ec99e5cf0886e7f4763b2fe3",
+        "provider": "ollama-judge",
+        "metrics": {
+          "score": 6,
+          "testPassCount": 6,
+          "testFailCount": 0,
+          "testErrorCount": 0,
+          "assertPassCount": 6,
+          "assertFailCount": 0,
+          "totalLatencyMs": 14276,
+          "tokenUsage": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 6
+          },
+          "namedScores": {},
+          "namedScoresCount": {},
+          "cost": 0
+        }
+      }
+    ],
+    "results": [
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "be01f22c-5d78-4c27-98e5-697c3387d613",
+        "latencyMs": 1335,
+        "namedScores": {},
+        "prompt": {
+          "raw": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: Create a new project here and scaffold a basic Express API server.\n",
+          "label": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: {{prompt}}\n"
+        },
+        "promptId": "5a36d08b0491585bf5fd55912d7de8cd96dbfaf9ec99e5cf0886e7f4763b2fe3",
+        "promptIdx": 0,
+        "provider": {
+          "id": "ollama:chat:qwen3:4b-instruct-fast",
+          "label": "ollama-judge"
+        },
+        "response": {
+          "output": "BUILD"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "explicit-build-2",
+            "prompt": "Create a new project here and scaffold a basic Express API server.",
+            "expected": "BUILD"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 1,
+        "vars": {
+          "id": "explicit-build-2",
+          "prompt": "Create a new project here and scaffold a basic Express API server.",
+          "expected": "BUILD"
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "4fcb21ef-b85e-4e64-83c1-84abc24edb9a",
+        "latencyMs": 2092,
+        "namedScores": {},
+        "prompt": {
+          "raw": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: Build me a simple personal portfolio website with an index.html homepage.\n",
+          "label": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: {{prompt}}\n"
+        },
+        "promptId": "5a36d08b0491585bf5fd55912d7de8cd96dbfaf9ec99e5cf0886e7f4763b2fe3",
+        "promptIdx": 0,
+        "provider": {
+          "id": "ollama:chat:qwen3:4b-instruct-fast",
+          "label": "ollama-judge"
+        },
+        "response": {
+          "output": "BUILD"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "explicit-build-1",
+            "prompt": "Build me a simple personal portfolio website with an index.html homepage.",
+            "expected": "BUILD"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 0,
+        "vars": {
+          "id": "explicit-build-1",
+          "prompt": "Build me a simple personal portfolio website with an index.html homepage.",
+          "expected": "BUILD"
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "3327f1b6-388e-40fe-8fdb-b9be6461596e",
+        "latencyMs": 2607,
+        "namedScores": {},
+        "prompt": {
+          "raw": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: Hey, how's it going today?\n",
+          "label": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: {{prompt}}\n"
+        },
+        "promptId": "5a36d08b0491585bf5fd55912d7de8cd96dbfaf9ec99e5cf0886e7f4763b2fe3",
+        "promptIdx": 0,
+        "provider": {
+          "id": "ollama:chat:qwen3:4b-instruct-fast",
+          "label": "ollama-judge"
+        },
+        "response": {
+          "output": "CHAT"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "normal-chat-1",
+            "prompt": "Hey, how's it going today?",
+            "expected": "CHAT"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 2,
+        "vars": {
+          "id": "normal-chat-1",
+          "prompt": "Hey, how's it going today?",
+          "expected": "CHAT"
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "0e890dc2-1b06-43c4-8be2-f543be8f9b07",
+        "latencyMs": 3164,
+        "namedScores": {},
+        "prompt": {
+          "raw": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: What's the difference between let and const in JavaScript?\n",
+          "label": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: {{prompt}}\n"
+        },
+        "promptId": "5a36d08b0491585bf5fd55912d7de8cd96dbfaf9ec99e5cf0886e7f4763b2fe3",
+        "promptIdx": 0,
+        "provider": {
+          "id": "ollama:chat:qwen3:4b-instruct-fast",
+          "label": "ollama-judge"
+        },
+        "response": {
+          "output": "CHAT"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "normal-chat-2",
+            "prompt": "What's the difference between let and const in JavaScript?",
+            "expected": "CHAT"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 3,
+        "vars": {
+          "id": "normal-chat-2",
+          "prompt": "What's the difference between let and const in JavaScript?",
+          "expected": "CHAT"
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "13ecfc6e-2fc3-422e-a9a7-73ce7959f809",
+        "latencyMs": 2631,
+        "namedScores": {},
+        "prompt": {
+          "raw": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: I don't know, maybe we should look at this later.\n",
+          "label": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: {{prompt}}\n"
+        },
+        "promptId": "5a36d08b0491585bf5fd55912d7de8cd96dbfaf9ec99e5cf0886e7f4763b2fe3",
+        "promptIdx": 0,
+        "provider": {
+          "id": "ollama:chat:qwen3:4b-instruct-fast",
+          "label": "ollama-judge"
+        },
+        "response": {
+          "output": "CHAT"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "ambiguous-1",
+            "prompt": "I don't know, maybe we should look at this later.",
+            "expected": "CHAT"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 4,
+        "vars": {
+          "id": "ambiguous-1",
+          "prompt": "I don't know, maybe we should look at this later.",
+          "expected": "CHAT"
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "79c4bdf5-18ea-47f8-9dfd-26c72dabf08d",
+        "latencyMs": 2447,
+        "namedScores": {},
+        "prompt": {
+          "raw": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: Something's off with the thing we talked about.\n",
+          "label": "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: {{prompt}}\n"
+        },
+        "promptId": "5a36d08b0491585bf5fd55912d7de8cd96dbfaf9ec99e5cf0886e7f4763b2fe3",
+        "promptIdx": 0,
+        "provider": {
+          "id": "ollama:chat:qwen3:4b-instruct-fast",
+          "label": "ollama-judge"
+        },
+        "response": {
+          "output": "CHAT"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "ambiguous-2",
+            "prompt": "Something's off with the thing we talked about.",
+            "expected": "CHAT"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 5,
+        "vars": {
+          "id": "ambiguous-2",
+          "prompt": "Something's off with the thing we talked about.",
+          "expected": "CHAT"
+        },
+        "metadata": {},
+        "failureReason": 0
+      }
+    ],
+    "stats": {
+      "successes": 6,
+      "failures": 0,
+      "errors": 0,
+      "tokenUsage": {
+        "cached": 0,
+        "completion": 0,
+        "prompt": 0,
+        "total": 0,
+        "numRequests": 6
+      }
+    }
+  },
+  "config": {
+    "tags": {},
+    "description": "F3 routing — MODEL-ONLY judge track (informational, NOT authoritative). Asks qwen3:4b-instruct-fast via PC Ollama to classify the same 6 prompts as CHAT or BUILD, with no access to LiTT's real code. Per F3 step 5, this track must never be treated as proof of real LiTT behavior — it exists only to show whether the model's own judgment agrees with the deterministic classifyIntent() ground truth in promptfooconfig.routing-ground-truth.yaml. $0 cost (local Ollama).\n",
+    "prompts": [
+      "You are classifying a message for a coding assistant's router. Reply\nwith EXACTLY one word, either CHAT or BUILD. BUILD means the user is\nexplicitly asking to create/scaffold/build a new project or app.\nCHAT means anything else (conversation, questions, vague/ambiguous\nremarks). Do not explain. Do not add punctuation.\n\nMessage: {{prompt}}\n"
+    ],
+    "providers": [
+      {
+        "id": "ollama:chat:qwen3:4b-instruct-fast",
+        "label": "ollama-judge",
+        "config": {
+          "temperature": 0
+        }
+      }
+    ],
+    "tests": [
+      {
+        "vars": {
+          "id": "explicit-build-1",
+          "prompt": "Build me a simple personal portfolio website with an index.html homepage.",
+          "expected": "BUILD"
+        }
+      },
+      {
+        "vars": {
+          "id": "explicit-build-2",
+          "prompt": "Create a new project here and scaffold a basic Express API server.",
+          "expected": "BUILD"
+        }
+      },
+      {
+        "vars": {
+          "id": "normal-chat-1",
+          "prompt": "Hey, how's it going today?",
+          "expected": "CHAT"
+        }
+      },
+      {
+        "vars": {
+          "id": "normal-chat-2",
+          "prompt": "What's the difference between let and const in JavaScript?",
+          "expected": "CHAT"
+        }
+      },
+      {
+        "vars": {
+          "id": "ambiguous-1",
+          "prompt": "I don't know, maybe we should look at this later.",
+          "expected": "CHAT"
+        }
+      },
+      {
+        "vars": {
+          "id": "ambiguous-2",
+          "prompt": "Something's off with the thing we talked about.",
+          "expected": "CHAT"
+        }
+      }
+    ],
+    "scenarios": [],
+    "env": {},
+    "sharing": true,
+    "defaultTest": {
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "output.trim().toUpperCase().includes(context.vars.expected)"
+        }
+      ],
+      "vars": {},
+      "options": {},
+      "metadata": {}
+    },
+    "outputPath": [
+      "results/routing-model-judge.json"
+    ],
+    "extensions": [],
+    "metadata": {}
+  },
+  "shareableUrl": null
+}
