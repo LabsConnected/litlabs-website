@@ -565,7 +565,7 @@ describe("StudioTranscript — conversation/execution separation", () => {
     useExecutionStore.getState().reset();
   });
 
-  it("collapses a completed run's low-level events behind a Details expander by default", () => {
+  it("shows compact activity cards while keeping the low-level execution log collapsed", () => {
     renderTranscript([successfulBuild()]);
 
     const lane = screen.getByTestId("studio-execution-block");
@@ -574,17 +574,18 @@ describe("StudioTranscript — conversation/execution separation", () => {
     const toggle = screen.getByTestId("execution-details-toggle");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
-    // Raw records are hidden until the user expands them.
+    // The human-readable activity cards are visible; raw records stay behind Details.
     expect(screen.queryByTestId("execution-details")).toBeNull();
-    expect(screen.queryByText("Reading index.html")).toBeNull();
-    expect(screen.queryByText("Editing index.html")).toBeNull();
+    expect(screen.getByTestId("conversation-activity-cards")).toBeInTheDocument();
+    expect(screen.getAllByText("Reading index.html").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Editing index.html").length).toBeGreaterThan(0);
 
     fireEvent.click(toggle);
 
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByTestId("execution-details")).toBeInTheDocument();
-    expect(screen.getByText("Reading index.html")).toBeInTheDocument();
-    expect(screen.getByText("Editing index.html")).toBeInTheDocument();
+    expect(screen.getAllByText("Reading index.html").length).toBeGreaterThan(1);
+    expect(screen.getAllByText("Editing index.html").length).toBeGreaterThan(1);
   });
 
   it("collapses the live run's raw events behind Details while running", () => {
