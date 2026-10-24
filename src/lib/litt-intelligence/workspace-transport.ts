@@ -247,6 +247,30 @@ const BINARY_WRITE_TIMEOUT_MS = 120_000;
  */
 const REACHABILITY_PROBE_TIMEOUT_MS = 10_000;
 
+/**
+ * Post-image name of a porcelain rename entry `orig -> new`. Either
+ * side may be C-quoted or itself contain " -> ", so the separator is
+ * the first arrow OUTSIDE a quoted span (backslash escapes are skipped
+ * inside quotes). Returns the remainder when no separator is found.
+ */
+function postRenamePath(spec: string): string {
+  let inQuotes = false;
+  for (let i = 0; i + 3 < spec.length; i++) {
+    const ch = spec[i];
+    if (inQuotes) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inQuotes = false;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (spec.startsWith(" -> ", i)) return spec.slice(i + 4);
+  }
+  return spec;
+}
+
 class WorkspaceTransportImpl implements WorkspaceTransport {
   constructor(
     public readonly projectId: string,
@@ -463,14 +487,12 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       const workDir = line[1] || " ";
       // Porcelain quotes paths with non-ASCII/special bytes the same way
       // diff headers do — decode so downstream path comparisons see the
-      // real name. Only RENAME entries carry "orig -> new" (the last one
-      // is the separator — either side may itself be quoted or contain
-      // " -> "); the post-image name is the changed path.
+      // real name. Only RENAME entries carry "orig -> new"; either side
+      // may be quoted or itself contain " -> ", so the separator is the
+      // first arrow OUTSIDE quotes. The post-image name is the changed
+      // path.
       let filePath = line.slice(3);
-      if (index === "R" || workDir === "R") {
-        const arrow = filePath.lastIndexOf(" -> ");
-        if (arrow >= 0) filePath = filePath.slice(arrow + 4);
-      }
+      if (index === "R" || workDir === "R") filePath = postRenamePath(filePath);
       filePath = unquoteGitPath(filePath);
 
       if (index === "?" && workDir === "?") {
