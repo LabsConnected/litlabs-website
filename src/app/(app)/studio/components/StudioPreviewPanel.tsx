@@ -1065,7 +1065,7 @@ export default function StudioPreviewPanel({
           type="button"
           onClick={handleHardRefresh}
           disabled={state === "loading" || state === "starting" || state === "restarting"}
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+          className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
           aria-label="Refresh preview"
           title="Refresh preview (Ctrl+R)"
           data-testid="preview-refresh"
