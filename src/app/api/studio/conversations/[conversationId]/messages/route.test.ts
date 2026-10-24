@@ -325,8 +325,9 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
           stepsUsed: 2,
           toolCalls: [
             { toolId: "files.list", toolCallId: "tc1", inputs: {}, success: true, mutating: false, summary: "5 entries" },
-            { toolId: "files.write", toolCallId: "tc2", inputs: { path: "index.html" }, success: true, mutating: true, summary: "saved" },
+            { toolId: "files.write", toolCallId: "tc2", inputs: { path: "index.html" }, success: true, mutating: true, summary: "saved", paths: ["index.html"] },
           ],
+          workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true },
           cancelled: false,
           pendingApproval: null,
         } as any,
@@ -429,7 +430,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "I built your landing page.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"] }], workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true }, cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 100,
       } as any;
@@ -508,7 +509,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "Built after disconnect.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"] }], workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true }, cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 60,
       } as any;
@@ -715,7 +716,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "Done after downstream cancel.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"] }], workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true }, cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 100,
       } as any;
@@ -1257,6 +1258,80 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     expect(doneEvents[0]?.assistantMessage.status).toBe("completed");
   });
 
+  it("per-claim verification: a contradicted write in a multi-file build reports failed even when the other writes verified (gitless)", async () => {
+    // Issue #704: before per-claim tracking, one verified mutation
+    // satisfied the whole run — a write contradicted by read-back was
+    // silently dropped whenever another mutation verified.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      finalText: "Done! I've created all three files.",
+      agentLoopResult: {
+        stepsUsed: 3,
+        toolCalls: [
+          { toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"], persisted: true },
+          { toolId: "files.write", success: true, summary: "wrote style.css", mutating: true, paths: ["style.css"], persisted: true },
+          { toolId: "files.write", success: true, summary: "wrote app.js", mutating: true, paths: ["app.js"], persisted: false },
+        ],
+        // A static workspace can never produce a checkpoint diff — the
+        // read-back evidence above is the only channel.
+        workspaceChange: null,
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.stringContaining("did not find the claimed change"),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("failed");
+  });
+
+  it("a gitless run whose only mutation is files.mkdir verified by read-back reports completed, not failed", async () => {
+    // Issue #703: on static workspaces (no checkpoint diff is ever
+    // possible), mutations beyond files.write/patch/delete/rename were
+    // unverifiable and reported failed on real success.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      finalText: "Done! I've created the assets folder.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [{ toolId: "files.mkdir", success: true, summary: "created assets/", mutating: true, paths: ["assets"], persisted: true }],
+        workspaceChange: null,
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "completed",
+      expect.any(String),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("completed");
+  });
+
   it("a failed run releases the conversation — an immediate second send is not rejected", async () => {
     vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
     vi.mocked(runLaunchFlow).mockRejectedValue(new Error("Provider connection refused"));
@@ -1274,7 +1349,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       previewUrl: null,
       productionUrl: null,
       finalText: "Recovered answer.",
-      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
+      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"] }], workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true }, cancelled: false, pendingApproval: null } as any,
       cancelled: false,
       totalDurationMs: 50,
     } as any);

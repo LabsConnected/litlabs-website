@@ -19,6 +19,7 @@ import { isCanonicalBase64 } from "@/lib/deployments/user-deployment";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createWorkspaceCheckpoint } from "@/lib/missions/workspace-checkpoint";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
+import { unquoteGitPath } from "./workspace-change-producer";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -460,7 +461,14 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       const line = lines[i];
       const index = line[0] || " ";
       const workDir = line[1] || " ";
-      const filePath = line.slice(3);
+      // Porcelain quotes paths with non-ASCII/special bytes the same way
+      // diff headers do — decode so downstream path comparisons see the
+      // real name. Rename entries carry "orig -> new"; the post-image
+      // name is the changed path.
+      let filePath = line.slice(3);
+      const arrow = filePath.indexOf(" -> ");
+      if (arrow >= 0) filePath = filePath.slice(arrow + 4);
+      filePath = unquoteGitPath(filePath);
 
       if (index === "?" && workDir === "?") {
         untracked.push(filePath);
@@ -488,7 +496,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     };
   }
 
-  async gitDiff(options?: { staged?: boolean; path?: string; untracked?: boolean }): Promise<{ diff: string }> {
+  async gitDiff(options?: { staged?: boolean; path?: string; untracked?: boolean; base?: string }): Promise<{ diff: string }> {
     // `git diff` omits untracked files. Compare each requested untracked
     // path against /dev/null so newly-created files appear in the same real
     // unified diff as tracked edits. The path came from git status, not the
@@ -500,9 +508,25 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     }
 
     const parts = ["git diff"];
+    if (options?.base) {
+      // A diff baseline must be a commit-ish hex SHA — refuse anything else
+      // rather than silently producing a diff against HEAD, which would
+      // change what the evidence claims without telling the caller.
+      if (!/^[0-9a-f]{7,40}$/i.test(options.base)) {
+        throw new Error("gitDiff base must be a git SHA");
+      }
+      parts.push(options.base);
+    }
     if (options?.staged) parts.push("--staged");
     if (options?.path) parts.push(`-- ${options.path}`);
     const result = await this.exec(parts.join(" "));
+    // A failed baseline diff exits nonzero with EMPTY stdout — indistinguishable
+    // from "no changes" unless the exit code is checked. An unreachable baseline
+    // must surface as a failure so callers fall back instead of reporting a
+    // false "unchanged".
+    if (options?.base && result.exitCode !== 0) {
+      throw new Error(`git diff ${options.base} failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`);
+    }
     return { diff: result.stdout };
   }
 

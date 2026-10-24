@@ -104,7 +104,7 @@ describe("C. a mutating tool call completes the step only after a successful res
 
   it("is complete once the mutating call returns success", () => {
     const verdict = evaluateCompletion(req, {
-      toolCalls: [{ toolId: "edit_file", success: true, mutating: true }],
+      toolCalls: [{ toolId: "edit_file", success: true, mutating: true, persisted: true }],
     });
     expect(verdict.state).toBe("complete");
     expect(verdict.completedSteps).toBe(1);
@@ -119,7 +119,7 @@ describe("D. deploy requested but never performed", () => {
 
   it("remains partial when files were written but no deployment started", () => {
     const verdict = evaluateCompletion(req, {
-      toolCalls: [{ toolId: "edit_file", success: true, mutating: true }],
+      toolCalls: [{ toolId: "edit_file", success: true, mutating: true, persisted: true }],
     });
     expect(verdict.state).toBe("partial");
     expect(verdict.missing).toContain("deployment");
@@ -127,7 +127,7 @@ describe("D. deploy requested but never performed", () => {
 
   it("remains partial when deployment started but did not succeed", () => {
     const verdict = evaluateCompletion(req, {
-      toolCalls: [{ toolId: "edit_file", success: true, mutating: true }],
+      toolCalls: [{ toolId: "edit_file", success: true, mutating: true, persisted: true }],
       deployment: { started: true, succeeded: false, url: null, urlVerified: false },
     });
     expect(verdict.state).toBe("partial");
@@ -136,7 +136,7 @@ describe("D. deploy requested but never performed", () => {
 
   it("remains partial when deployment succeeded but the live URL is unverified", () => {
     const verdict = evaluateCompletion(req, {
-      toolCalls: [{ toolId: "edit_file", success: true, mutating: true }],
+      toolCalls: [{ toolId: "edit_file", success: true, mutating: true, persisted: true }],
       deployment: { started: true, succeeded: true, url: "https://ember.example", urlVerified: false },
     });
     expect(verdict.state).toBe("partial");
@@ -145,7 +145,7 @@ describe("D. deploy requested but never performed", () => {
 
   it("is complete only with a verified live URL", () => {
     const verdict = evaluateCompletion(req, {
-      toolCalls: [{ toolId: "edit_file", success: true, mutating: true }],
+      toolCalls: [{ toolId: "edit_file", success: true, mutating: true, persisted: true }],
       deployment: { started: true, succeeded: true, url: "https://ember.example", urlVerified: true },
     });
     expect(verdict.state).toBe("complete");
@@ -203,7 +203,7 @@ describe("workLogLabel", () => {
     const verdict = evaluateCompletion(requirementForMode("build"), {
       toolCalls: [
         { toolId: "read_file", success: true, mutating: false },
-        { toolId: "edit_file", success: true, mutating: true },
+        { toolId: "edit_file", success: true, mutating: true, persisted: true },
         { toolId: "run_command", success: false, mutating: false },
       ],
     });
@@ -214,7 +214,7 @@ describe("workLogLabel", () => {
 
   it("states what is missing when partial", () => {
     const verdict = evaluateCompletion(requirementForMode("ship"), {
-      toolCalls: [{ toolId: "edit_file", success: true, mutating: true }],
+      toolCalls: [{ toolId: "edit_file", success: true, mutating: true, persisted: true }],
     });
     expect(workLogLabel(verdict)).toBe("1 of 1 steps complete · deployment missing");
   });
@@ -234,7 +234,7 @@ describe("deploymentEvidenceFrom", () => {
     // Preview readiness is not a deployment.
     const verdict = evaluateCompletion(requirementForMode("ship"), {
       toolCalls: [
-        { toolId: "files.write", success: true, mutating: true },
+        { toolId: "files.write", success: true, mutating: true, persisted: true },
         { toolId: "preview.open", success: true, mutating: false },
       ],
       deployment: deploymentEvidenceFrom([
@@ -295,7 +295,7 @@ describe("project.deploy is the deployment tool", () => {
       { toolId: "project.deploy", success: true },
     ];
     const verdict = evaluateCompletion(requirementForMode("ship"), {
-      toolCalls: toolCalls.map((c) => ({ ...c, mutating: true })),
+      toolCalls: toolCalls.map((c) => ({ ...c, mutating: true, persisted: true })),
       deployment: deploymentEvidenceFrom(toolCalls),
     });
     expect(verdict.state).toBe("complete");
@@ -307,7 +307,7 @@ describe("project.deploy is the deployment tool", () => {
       { toolId: "project.deploy", success: false },
     ];
     const verdict = evaluateCompletion(requirementForMode("ship"), {
-      toolCalls: toolCalls.map((c) => ({ ...c, mutating: true })),
+      toolCalls: toolCalls.map((c) => ({ ...c, mutating: true, persisted: true })),
       deployment: deploymentEvidenceFrom(toolCalls),
     });
     expect(verdict.state).toBe("partial");
