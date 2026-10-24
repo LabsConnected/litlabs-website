@@ -99,4 +99,20 @@ describe("validateCaptureUrl", () => {
       /not allowed/i,
     );
   });
+
+  // Regression — security review finding: isBlockedIpv6() checks loopback
+  // (::1), unique-local (fc00::/7), and link-local (fe80::/10) by inspecting
+  // only the first hextet, but never special-cases IPv4-mapped (::ffff:a.b.c.d)
+  // or IPv4-compatible (::a.b.c.d) addresses. Those embed a blocked IPv4
+  // address in the low 32 bits while the first hextet stays 0, so they are
+  // never flagged. These tests currently FAIL (no throw) — a real headless
+  // browser would navigate to the embedded loopback/metadata address.
+  it("rejects IPv4-mapped IPv6 literals embedding a blocked IPv4 address", async () => {
+    await expect(validateCaptureUrl("http://[::ffff:127.0.0.1]/")).rejects.toThrow(
+      /not allowed/i,
+    );
+    await expect(
+      validateCaptureUrl("http://[::ffff:169.254.169.254]/"),
+    ).rejects.toThrow(/not allowed/i);
+  });
 });
