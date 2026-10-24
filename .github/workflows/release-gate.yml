@@ -25,22 +25,27 @@ jobs:
       - name: Check web health endpoint
         id: web
         run: |
+          set +x
           RESPONSE=$(curl -sSf --max-time 10 \
             "https://www.litlabs.net/api/health" || echo '{"status":"unreachable"}')
-          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
-          DEPLOYED_SHA=$(echo "$RESPONSE" | jq -r '.checks.build.detail // "unknown"')
-          echo "deployed_sha=$DEPLOYED_SHA" >> $GITHUB_OUTPUT
+          # Keep the raw body in this step only. It is not stored as a step
+          # output: database errors in the payload can include connection text.
+          DEPLOYED_SHA=$(printf '%s' "$RESPONSE" | jq -r '.checks.build.detail // "unknown"')
+          echo "deployed_sha=$DEPLOYED_SHA" >> "$GITHUB_OUTPUT"
           echo "Web deployed SHA: $DEPLOYED_SHA"
           # Auth check: /api/health makes a real Clerk backend call (not just
           # "is CLERK_SECRET_KEY set") — see docs/qa/production-login-recovery-20260902.md,
           # where a present-but-invalid key passed every presence check while
           # sign-in was completely broken. Surface it here so this scheduled
-          # gate catches a reverted/invalid production secret within about an
-          # hour (hourly schedule) instead of waiting for a user report.
-          AUTH_STATUS=$(echo "$RESPONSE" | jq -r '.checks.auth.status // "unknown"')
-          AUTH_DETAIL=$(echo "$RESPONSE" | jq -r '.checks.auth.detail // ""')
-          echo "auth_status=$AUTH_STATUS" >> $GITHUB_OUTPUT
-          echo "auth_detail=$AUTH_DETAIL" >> $GITHUB_OUTPUT
+          # gate catches a reverted/invalid production secret within 30
+          # minutes instead of waiting for a user report.
+          AUTH_STATUS=$(printf '%s' "$RESPONSE" | jq -r '.checks.auth.status // "unknown"')
+          AUTH_DETAIL=$(printf '%s' "$RESPONSE" | jq -r '.checks.auth.detail // ""' | sed -E \
+            -e 's/(sk|pk)_(live|test)_[A-Za-z0-9]+/[redacted]/g' \
+            -e 's/[Bb]earer[[:space:]]+[A-Za-z0-9._~+/-]+/Bearer [redacted]/g' \
+            -e 's/([Tt]oken|[Ss]ecret|[Kk]ey)=[^[:space:]&]+/\1=[redacted]/g')
+          echo "auth_status=$AUTH_STATUS" >> "$GITHUB_OUTPUT"
+          echo "auth_detail=$AUTH_DETAIL" >> "$GITHUB_OUTPUT"
           echo "Web Clerk auth check: $AUTH_STATUS ${AUTH_DETAIL:+($AUTH_DETAIL)}"
 
       - name: Check terminal-server health endpoint

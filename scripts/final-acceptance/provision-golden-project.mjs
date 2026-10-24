@@ -16,6 +16,7 @@
 
 import { chromium } from "@playwright/test";
 import { resolveAcceptanceUserId } from "./acceptance-user.mjs";
+import { maskForActions, maskUrl, redactText } from "./redact-secrets.mjs";
 
 const BASE = (process.env.LITT_PROD_BASE_URL || "https://www.litlabs.net").replace(/\/$/, "");
 const USER_ID = resolveAcceptanceUserId({
@@ -23,6 +24,10 @@ const USER_ID = resolveAcceptanceUserId({
   envUserId: process.env.LITT_ACCEPTANCE_USER_ID,
 });
 const PROJECT_NAME = "Golden Acceptance — Ember Roast";
+maskForActions(USER_ID);
+function redact(text) {
+  return redactText(text, [USER_ID]);
+}
 const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
 if (!CLERK_SECRET_KEY) throw new Error("CLERK_SECRET_KEY not set");
 
@@ -83,6 +88,7 @@ async function main() {
   const page = await context.newPage();
 
   const signInUrl = await createSignInUrl(CLERK_SECRET_KEY);
+  maskUrl(signInUrl);
   await page.goto(signInUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await page.waitForURL(/litlabs\.net/, { timeout: 60_000 });
   await page.waitForTimeout(4000);
@@ -103,14 +109,14 @@ async function main() {
     const body = await resp.json().catch(() => null);
     projectId = body?.project?.id ?? null;
     if (resp.status() !== 201 || !projectId) {
-      throw new Error(`project create failed: HTTP ${resp.status()} ${JSON.stringify(body)?.slice(0, 200)}`);
+      throw new Error(redact(`project create failed: HTTP ${resp.status()} ${JSON.stringify(body)?.slice(0, 200)}`));
     }
     console.log(`Created project ${projectId}`);
   }
 
   const prep = await page.request.post(`${BASE}/api/studio-projects/${projectId}/workspace/prepare`, { timeout: 120_000 });
   const prepBody = await prep.json().catch(() => null);
-  console.log(`workspace/prepare → ${prep.status()} ${JSON.stringify(prepBody)?.slice(0, 200)}`);
+  console.log(redact(`workspace/prepare → ${prep.status()} ${JSON.stringify(prepBody)?.slice(0, 200)}`));
 
   const write = await page.request.post(`${BASE}/api/studio-projects/${projectId}/files`, {
     data: { action: "write", path: "index.html", content: SEED_INDEX_HTML },
@@ -135,6 +141,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("PROVISION FAILED:", err instanceof Error ? err.message : err);
+  const message = err instanceof Error ? err.message : String(err);
+  console.error("PROVISION FAILED:", redact(message));
   process.exit(1);
 });
