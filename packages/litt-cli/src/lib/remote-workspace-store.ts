@@ -9,8 +9,8 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { getLittHome } from "./config.js";
 
 export interface RemoteWorkspaceSelection {
   workspaceId: string;
@@ -23,7 +23,7 @@ export interface RemoteWorkspaceSelection {
 function storeFile(): string {
   const override = process.env.LITT_REMOTE_WORKSPACE_FILE;
   if (override) return override;
-  return join(homedir(), ".litt", "remote-workspace.json");
+  return join(getLittHome(), "remote-workspace.json");
 }
 
 /** Validate the complete persisted selection shape. */

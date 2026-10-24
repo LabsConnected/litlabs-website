@@ -1,13 +1,10 @@
 name: Deploy Terminal Server
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "terminal-server/**"
-      - "docker/Dockerfile.terminal"
-      - "pnpm-workspace.yaml"
-      - ".github/workflows/deploy-terminal.yml"
+  # PRODUCTION HOLD (2026-10-22): the automatic push-to-main trigger was
+  # removed so a merge can never deploy production unattended. Deployment is
+  # manual-only: a human with write access must explicitly run this workflow
+  # via workflow_dispatch. Rollback of this gate: restore the push block.
   workflow_dispatch:
 
 jobs:

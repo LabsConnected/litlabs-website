@@ -28,6 +28,7 @@ export type ProviderId =
   | "mistral"
   | "qwen"
   | "groq"
+  | "openagents"
   | "openrouter"
   | "ollama"
   | "lmstudio";

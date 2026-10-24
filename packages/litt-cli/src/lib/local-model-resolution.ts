@@ -301,6 +301,87 @@ export function resolveLocalModel(
   };
 }
 
+// ─── 3b. Explicit-selection helpers (/model <arg>, /remote) ─────────
+
+/**
+ * The selection REMOTE can honour from a persisted prefs value: the
+ * stored id unchanged, or null when it is a local-only ("ollama:")
+ * model — the remote catalog can never serve a daemon tag. Used when
+ * switching execution targets so a local pin degrades to AUTO routing
+ * instead of a strict-pinned "not in catalog" failure.
+ */
+export function remoteSelectionOf(
+  persistedSelectedModel: string | null | undefined,
+): string | null {
+  if (!persistedSelectedModel || isLocalModelId(persistedSelectedModel)) return null;
+  return persistedSelectedModel;
+}
+
+/** Minimal shape of a catalog model for argument resolution. */
+export interface ModelArgCatalogEntry {
+  canonicalId: string;
+  displayName: string;
+}
+
+export type ModelArgResolution =
+  | { ok: true; canonicalId: string; label: string; source: "catalog" | "local" }
+  | { ok: false; error: string };
+
+/**
+ * Resolve a `/model <arg>` string to a canonical model id.
+ *
+ * Lookup order:
+ *   1. Catalog — exact canonicalId, then case-insensitive canonicalId
+ *      or displayName match.
+ *   2. Local daemon — the arg (with or without the "ollama:" prefix)
+ *      matched against installed tags; a bare prefix like "qwen3" may
+ *      match "qwen3:4b-instruct" but "qwen3:4b" never silently matches
+ *      "qwen3:4b-instruct" (same rule as resolveLocalModel).
+ *   3. Clear error listing what IS installed — "not found" must never
+ *      be mistaken for success.
+ */
+export function resolveModelArg(
+  arg: string,
+  catalog: ModelArgCatalogEntry[],
+  lane: LocalLaneStatus,
+): ModelArgResolution {
+  const needle = arg.trim();
+  if (!needle) {
+    return { ok: false, error: "Usage: /model <model-id-or-name> — or bare /model for the picker." };
+  }
+
+  const cat = catalog.find((m) => m.canonicalId === needle)
+    ?? catalog.find((m) => m.canonicalId.toLowerCase() === needle.toLowerCase())
+    ?? catalog.find((m) => m.displayName.toLowerCase() === needle.toLowerCase());
+  if (cat) {
+    return { ok: true, canonicalId: cat.canonicalId, label: cat.displayName, source: "catalog" };
+  }
+
+  const tag = ollamaTagOf(needle);
+  const hit = lane.available
+    ? lane.models.find((m) => m === tag)
+      ?? lane.models.find((m) => m.startsWith(`${tag}:`) && !tag.includes(":"))
+    : undefined;
+  if (hit) {
+    return {
+      ok: true,
+      canonicalId: `${OLLAMA_CANONICAL_PREFIX}${hit}`,
+      label: hit,
+      source: "local",
+    };
+  }
+
+  const installed = lane.available
+    ? lane.models.join(", ") || "(none)"
+    : `(daemon unavailable at ${lane.endpoint})`;
+  return {
+    ok: false,
+    error:
+      `Model "${needle}" not found — not in the catalog and not installed locally. ` +
+      `Installed local models: ${installed}.`,
+  };
+}
+
 // ─── 3. The RoutedModel the adapter layer consumes ──────────────────
 
 /**
