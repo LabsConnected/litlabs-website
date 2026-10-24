@@ -555,6 +555,22 @@ async function runMachineLane(
  *   - contact any remote server
  *   - fake any status — every line derives from real tool evidence
  */
+
+/**
+ * Wall-clock budget for one cockpit agent run.
+ *
+ * LITT_RUN_TIMEOUT_MS overrides both lanes. Defaults: 180s for chat
+ * (4 rounds — anything longer is a stalled loop, not an answer) and
+ * 600s for missions (10 rounds with verification). The deadline is
+ * enforced inside runAgentLoop and surfaced as an honest
+ * "Agent timed out…" failure, never a silent hang.
+ */
+function resolveRunTimeoutMs(kind: "chat" | "mission"): number {
+  const env = Number(process.env.LITT_RUN_TIMEOUT_MS);
+  if (Number.isFinite(env) && env > 0) return Math.floor(env);
+  return kind === "mission" ? 600_000 : 180_000;
+}
+
 async function runLocalToolMission(
   input: string,
   match: import("../lib/local-tool-mission.js").LocalToolMissionMatch,
@@ -2676,6 +2692,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             gateway,
             cwd: projectRoot, userId: "cli-user",
             mode: session.getMode(), maxRounds: 4,
+            // Wall-clock cap — without it a weak local model can burn
+            // unlimited time in tool-call rounds while the cockpit shows
+            // only "LiTT is working…" (observed >8 min on this device).
+            totalTimeoutMs: resolveRunTimeoutMs("chat"),
             projectContext: { name: projectName ?? "chat", root: projectRoot, branch: freshBranch ?? branch ?? "unknown" },
             store: agentStore,
             // Prior completed turns from THIS cockpit session — without
@@ -3102,6 +3122,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           gateway,
           cwd: projectRoot, userId: "cli-user",
           mode: session.getMode(), maxRounds: 10,
+          // Same wall-clock cap as CHAT, but missions legitimately run
+          // longer (multi-step tool work + verification) — larger default.
+          totalTimeoutMs: resolveRunTimeoutMs("mission"),
           projectContext: {
             name: projectName ?? "unnamed",
             root: projectRoot,

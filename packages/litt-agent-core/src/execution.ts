@@ -105,6 +105,17 @@ interface CommandSpec {
   pathArgs?: string[];
   /** Whether this command can execute arbitrary code */
   arbitraryCode?: boolean;
+  /**
+   * Flags that upgrade a `read_only` command to `workspace_edit`: they
+   * cause the tool to write files — e.g. `eslint --fix`, `prettier -w`,
+   * `find -delete`. Checked against both `flag` and `flag=value` forms.
+   */
+  mutatingFlags?: string[];
+  /**
+   * Flags that upgrade a `read_only` command to `arbitrary_code`: they
+   * spawn another program — e.g. `find -exec`, `find -ok`.
+   */
+  arbitraryCodeFlags?: string[];
 }
 
 const COMMAND_SPECS: Record<string, CommandSpec> = {
@@ -265,10 +276,13 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   },
 
   // Build tools — mostly read-only
-  tsc: { defaultCapability: "read_only", pathArgs: ["--project", "-p", "--outDir", "--out", "--declarationDir"] },
-  "tsc-watch": { defaultCapability: "read_only", pathArgs: ["--project", "-p"] },
-  eslint: { defaultCapability: "read_only", pathArgs: ["--config", "-c", "--output-file"] },
-  prettier: { defaultCapability: "read_only", pathArgs: ["--config", "-c"] },
+  // tsc EMITS output files by default — it is only read-only in its
+  // `--noEmit` (typecheck-only) form, enforced by the special case in
+  // classifyCommand below.
+  tsc: { defaultCapability: "workspace_edit", pathArgs: ["--project", "-p", "--outDir", "--out", "--declarationDir"] },
+  "tsc-watch": { defaultCapability: "workspace_edit", pathArgs: ["--project", "-p"] },
+  eslint: { defaultCapability: "read_only", pathArgs: ["--config", "-c", "--output-file"], mutatingFlags: ["--fix", "--fix-type", "--output-file", "-o"] },
+  prettier: { defaultCapability: "read_only", pathArgs: ["--config", "-c"], mutatingFlags: ["--write", "-w", "--output-file", "-o"] },
   vitest: { defaultCapability: "arbitrary_code", arbitraryCode: true, pathArgs: ["--config", "-c"] },
   jest: { defaultCapability: "arbitrary_code", arbitraryCode: true, pathArgs: ["--config", "-c"] },
 
@@ -280,7 +294,14 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   head: { defaultCapability: "read_only" },
   tail: { defaultCapability: "read_only" },
   wc: { defaultCapability: "read_only" },
-  find: { defaultCapability: "read_only" },
+  // `find` is read-only only for pure searches: -delete removes files,
+  // -fprint/-fprintf/-fls write files, -exec/-execdir/-ok/-okdir spawn
+  // arbitrary programs.
+  find: {
+    defaultCapability: "read_only",
+    mutatingFlags: ["-delete", "-fprint", "-fprintf", "-fls"],
+    arbitraryCodeFlags: ["-exec", "-execdir", "-ok", "-okdir"],
+  },
   grep: { defaultCapability: "read_only" },
   rg: { defaultCapability: "read_only" },
 
@@ -289,6 +310,9 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   hostname: { defaultCapability: "read_only" },
   uname: { defaultCapability: "read_only" },
   pwd: { defaultCapability: "read_only" },
+  // `env` with no command operand prints the environment (read-only);
+  // `env VAR=x cmd args...` EXECUTES cmd — the operand detection in
+  // classifyCommand upgrades that form to arbitrary_code.
   env: { defaultCapability: "read_only" },
   printenv: { defaultCapability: "read_only" },
 
@@ -433,6 +457,43 @@ export function classifyCommand(command: string, args: string[], cwd?: string): 
   // Special case: git branch -D (destructive)
   if (cmd === "git" && args[0] === "branch" && (args.includes("-D") || args.includes("-d"))) {
     capability = "destructive";
+  }
+
+  // Special case: tsc is read-only ONLY in its typecheck-only form.
+  // Any other invocation emits .js/.d.ts/.tsbuildinfo output — that
+  // includes `tsc --outDir build` which an earlier read_only default
+  // allowed straight through the PLAN-mode gate.
+  if (cmd === "tsc" && args.includes("--noEmit")) {
+    capability = "read_only";
+  }
+
+  // Special case: `env` executes its first non-assignment operand —
+  // `env rm -rf x` must be arbitrary code, not read-only env printing.
+  if (cmd === "env") {
+    const valueFlags = new Set(["-u", "-C", "-S", "-v"]);
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (valueFlags.has(a)) { i++; continue; }
+      if (a.startsWith("-") || /^[A-Za-z_][A-Za-z0-9_]*=/.test(a)) continue;
+      capability = "arbitrary_code";
+      break;
+    }
+  }
+
+  // Flag-level escalation: a command whose registry default is
+  // read_only must not keep that class when invoked with flags that
+  // write files (`eslint --fix`, `prettier -w`, `find -delete`,
+  // `tsc --outDir`) or spawn other programs (`find -exec`).
+  // `flag=value` is treated the same as `flag value`.
+  if (capability === "read_only") {
+    const hasFlag = (flags?: string[]) =>
+      !!flags?.length &&
+      args.some((a) => flags.some((f) => a === f || a.startsWith(`${f}=`)));
+    if (hasFlag(spec.arbitraryCodeFlags)) {
+      capability = "arbitrary_code";
+    } else if (hasFlag(spec.mutatingFlags)) {
+      capability = "workspace_edit";
+    }
   }
 
   // Special case: litt --remote <subcommand> or litt <subcommand>

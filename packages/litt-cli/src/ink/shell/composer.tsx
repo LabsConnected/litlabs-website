@@ -198,6 +198,32 @@ export function Composer({
       return;
     }
 
+    // Coalesced input — on a slow terminal the draft text and the Enter
+    // keypress can arrive in ONE stdin chunk ("hello\r"). If the chunk
+    // goes through INSERT_TEXT whole, the "\r" lands in the draft as a
+    // literal character and the Enter is swallowed — observed on
+    // Android/Termux as "Enter needs multiple presses" and merged or
+    // duplicated messages ("Say hi" + "/help" → "Say hi /help").
+    // Split the chunk: interior newlines become spaces in the draft,
+    // and a trailing newline is the Enter the user actually pressed.
+    if (input.length > 1 && /[\r\n]/.test(input)) {
+      const text = input.split(/[\r\n]+/).filter(Boolean).join(" ");
+      if (text) {
+        const state: ComposerState = { text: valueRef.current, caret: caretRef.current };
+        const next = applyKeyEvent(state, { kind: "INSERT_TEXT", text });
+        onChangeRef.current(next.text);
+        setCaret(next.caret);
+        valueRef.current = next.text;
+        caretRef.current = next.caret;
+        pokeRef.current();
+      }
+      if (/[\r\n]$/.test(input)) {
+        const draft = valueRef.current.trim();
+        if (draft) onSubmitRef.current(draft);
+      }
+      return;
+    }
+
     const evt = normalizeKey(input, key);
     debugInput(`normalized: kind=${evt.kind} raw=${JSON.stringify(evt.raw ?? "")} text=${JSON.stringify(evt.text ?? "")}`);
 
