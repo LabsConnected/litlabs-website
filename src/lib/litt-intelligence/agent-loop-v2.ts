@@ -29,6 +29,11 @@ import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
+import {
+  captureWorkspaceManifest,
+  manifestChangeEvidence,
+  type WorkspaceManifest,
+} from "./workspace-manifest";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
 import {
@@ -2082,6 +2087,14 @@ export interface DeferredToolBatchState {
   cancelled: boolean;
   cancelReason?: string;
   checkpoint?: { checkpointId: string; label: string; gitSha: string };
+  /**
+   * Static-workspace baseline captured inside the deferred batch when no
+   * git checkpoint can be made — propagated back to the resume loop so the
+   * post-run workspace comparison covers deferred mutations too (the same
+   * truthfulness guarantee as the live loop; see workspace-manifest.ts).
+   */
+  manifestBefore?: WorkspaceManifest;
+  manifestTruncated?: boolean;
   mutationBatchPending: boolean;
   batchHasMutation: boolean;
   completedDeployment: CompletedDeployment | null;
@@ -2292,6 +2305,15 @@ export async function executeDeferredToolCalls(
       state.checkpoint = await ctx.transport.createCheckpointBeforeMutation(
         `Pre-mutation resume (deferred batch): ${toolCall.toolId}`,
       ) ?? undefined;
+      if (!state.checkpoint && !state.manifestBefore) {
+        try {
+          const m = await captureWorkspaceManifest(ctx.transport);
+          state.manifestBefore = m.manifest;
+          state.manifestTruncated = m.truncated;
+        } catch {
+          // Failed snapshot leaves manifestBefore unset → evidence "unknown".
+        }
+      }
       if (state.checkpoint) {
         ctx.localProgress.emit({
           type: "checkpoint",
@@ -2523,6 +2545,22 @@ async function resumeAgentLoopV2Inner(
   let modelFailureText: string | undefined;
   let failedHonestly: string | undefined;
   let checkpoint = resume.existingCheckpoint;
+  // Static-workspace baseline (see workspace-manifest.ts): captured before
+  // the first mutation when no git checkpoint can be made, propagated
+  // through the deferred batch so pause/resume mutations remain
+  // verifiable instead of reporting "unknown".
+  let manifestBefore: WorkspaceManifest | undefined;
+  let manifestTruncated = false;
+  const ensureManifestBaseline = async () => {
+    if (manifestBefore) return;
+    try {
+      const m = await captureWorkspaceManifest(transport);
+      manifestBefore = m.manifest;
+      manifestTruncated = m.truncated;
+    } catch {
+      // A failed snapshot leaves manifestBefore unset → evidence "unknown".
+    }
+  };
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
   // NOTE: checkpoints are now created before EVERY mutation, so this flag no
@@ -2698,6 +2736,8 @@ async function resumeAgentLoopV2Inner(
       cancelled,
       cancelReason,
       checkpoint,
+      manifestBefore,
+      manifestTruncated,
       mutationBatchPending,
       batchHasMutation,
       completedDeployment,
@@ -2727,6 +2767,8 @@ async function resumeAgentLoopV2Inner(
     cancelled = deferredState.cancelled;
     cancelReason = deferredState.cancelReason;
     checkpoint = deferredState.checkpoint;
+    manifestBefore = deferredState.manifestBefore;
+    manifestTruncated = deferredState.manifestTruncated ?? false;
     mutationBatchPending = deferredState.mutationBatchPending;
     batchHasMutation = deferredState.batchHasMutation;
     completedDeployment = deferredState.completedDeployment;
@@ -2967,6 +3009,7 @@ async function resumeAgentLoopV2Inner(
       // never checkpoint.
       if (!toolDef.readOnly) {
         checkpoint = await transport.createCheckpointBeforeMutation(`Pre-mutation resume: ${toolCall.toolId} (step ${stepsUsed})`) ?? undefined;
+        if (!checkpoint) await ensureManifestBaseline();
         if (checkpoint) {
           localProgress.emit({ type: "checkpoint", label: checkpoint.label, gitSha: checkpoint.gitSha });
         }
@@ -3161,7 +3204,15 @@ async function resumeAgentLoopV2Inner(
   // rather than being silently omitted.
   const attemptedMutation = toolCallLog.some((call) => call.mutating);
   const workspaceChange = checkpoint || attemptedMutation
-    ? await computeWorkspaceChange(transport, checkpoint ?? null)
+    ? checkpoint
+      ? await computeWorkspaceChange(transport, checkpoint)
+      : manifestBefore
+        ? manifestChangeEvidence(
+            manifestBefore,
+            (await captureWorkspaceManifest(transport).catch(() => ({ manifest: new Map() as WorkspaceManifest, truncated: true }))).manifest,
+            manifestTruncated,
+          )
+        : await computeWorkspaceChange(transport, null)
     : undefined;
 
   if (workspaceChange) {
