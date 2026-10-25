@@ -110,7 +110,7 @@ function AssistantMessage({ msg, width }: { msg: ChatMessage; width: number }): 
   return (
     <Box flexDirection="column">
       <Text bold color={COLORS.brand}>LiTT</Text>
-      {isError || rendered === null ? (
+      {isError || rendered === null || lines.length === 0 ? (
         lines.length === 0 ? (
           <Text color={bodyColor} dimColor={!isError}>…</Text>
         ) : (

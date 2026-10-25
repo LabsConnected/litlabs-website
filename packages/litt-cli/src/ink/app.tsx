@@ -311,6 +311,11 @@ export function CockpitApp({
       } else {
         controller.openDiffViewer();
       }
+    } else if (isCtrl(input, key, "g")) {
+      // Ctrl+G — expand/collapse the most recent activity entry's detail.
+      // (Ctrl+E is the composer's move-to-end and must not be shadowed.)
+      const last = store.state.activityLog[store.state.activityLog.length - 1];
+      if (last) store.actions.toggleActivityExpanded(last.id);
     } else if (isCtrl(input, key, "n")) {
       controller.newSession();
     } else if (isCtrl(input, key, "r")) {
@@ -501,6 +506,7 @@ export function CockpitApp({
             gitUntracked={store.state.gitUntracked}
             toolProgress={store.state.toolProgress}
             toolDetails={store.state.toolDetails}
+            expandedActivityIds={store.state.expandedActivityIds}
             executionTarget={store.state.executionTarget}
             canonicalMission={store.state.canonicalMission}
             workstream={store.state.workstream}
