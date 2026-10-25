@@ -63,6 +63,7 @@ const ENV_KEYS = [
   "DASHSCOPE_API_KEY",
   "QWEN_API_KEY",
   // Prefs home
+  "LITT_STATE_HOME",
   "LITT_HOME",
 ] as const;
 
@@ -495,8 +496,8 @@ describe("Model preferences persistence", () => {
     expect(prefsPath).toContain("model-prefs.json");
   });
 
-  it("getDefaultPrefsPath respects LITT_HOME env var", () => {
-    process.env.LITT_HOME = "/tmp/custom-litt-home";
+  it("getDefaultPrefsPath respects LITT_STATE_HOME env var", () => {
+    process.env.LITT_STATE_HOME = "/tmp/custom-litt-home";
     const prefsPath = getDefaultPrefsPath();
     expect(prefsPath).toContain("custom-litt-home");
     expect(prefsPath).toContain("model-prefs.json");
