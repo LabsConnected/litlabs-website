@@ -51,6 +51,7 @@ import type { ToolRegistry } from "./tools.js";
 import type { RuntimeStore } from "./state.js";
 import type { CommandExecutor } from "./command-executor.js";
 import type { ExecutionGateway } from "./execution-gateway.js";
+import { REDACTED, redactForAudit } from "./contracts/credential.js";
 import type { VerificationResult } from "./verification-gate.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
@@ -945,6 +946,34 @@ export function normalizeToolCallArgs(
   return { inputs: out, renames, changed: changed || renames.length > 0 };
 }
 
+// ─── Debug-log secret hygiene ─────────────────────────────────────
+// LITT_TOOLCALL_DEBUG dumps raw model-emitted tool arguments to a file.
+// Those arguments routinely carry credentials — API keys in command
+// strings, bearer tokens in headers, secrets inside file content — so
+// the log must never record them in the clear. Leaf values go through
+// the canonical redactForAudit()/redactString() (contracts/credential.ts —
+// the same mechanism guarding audit events and model context), and any
+// value stored under a credential-sounding KEY is masked wholesale — a
+// secret needn't match a token regex to be real. The key list below is
+// a debug-path superset of the audit list (nested_token, authorization,
+// cookie, passwd, session_key). Non-credential arguments (paths,
+// commands, content) pass through unchanged so the log keeps its
+// diagnostic value.
+const SENSITIVE_ARG_KEY_RE =
+  /(pass(word|wd)?|secret|token|api[-_]?key|apikey|access[-_]?key|auth(orization)?|credential|cookie|private[-_]?key|client[-_]?secret|session[-_]?key)/i;
+
+export function redactToolCallInputs(inputs: unknown): unknown {
+  if (Array.isArray(inputs)) return inputs.map(redactToolCallInputs);
+  if (inputs !== null && typeof inputs === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(inputs as Record<string, unknown>)) {
+      out[k] = SENSITIVE_ARG_KEY_RE.test(k) ? REDACTED : redactToolCallInputs(v);
+    }
+    return out;
+  }
+  return redactForAudit(inputs);
+}
+
 /**
  * Remove tool calls that exactly repeat a call already recorded as
  * SUCCESSFUL earlier in this loop (same toolId + same inputs).
@@ -1227,7 +1256,7 @@ export async function runAgentLoop(
         const { appendFileSync } = await import("node:fs");
         appendFileSync(
           process.env.LITT_TOOLCALL_DEBUG_FILE ?? "/tmp/litt-toolcall-args.log",
-          JSON.stringify({ toolId: parsed.toolId, inputs: parsed.inputs }) + "\n",
+          JSON.stringify({ toolId: parsed.toolId, inputs: redactToolCallInputs(parsed.inputs) }) + "\n",
         );
       } catch { /* debug only */ }
     }
