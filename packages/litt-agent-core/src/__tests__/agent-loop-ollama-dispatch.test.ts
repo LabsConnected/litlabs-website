@@ -1372,3 +1372,165 @@ describe("R. Builder execution fixes", () => {
     }
   });
 });
+
+// ─── S. False completion when no filename is named in the prompt ──────
+//
+// Section R's "Required output artifact verification" (agent-loop.ts)
+// only runs its real-disk existence check when the prompt names a
+// specific filename with a recognized extension
+// (mentionedArtifactFiles.length > 0). A bare creation request like
+// "build me a landing page" (no filename) still matches
+// `creationRequested` via its site-noun branch, but
+// mentionedArtifactFiles is empty — so the real-disk check is skipped
+// entirely, and completion falls back to the weaker `mutationSucceeded`
+// flag, which any mutating tool call reporting success can satisfy, even
+// one that writes nothing. This closes that gap: a build-ish request
+// with no named file must still require a genuinely created file before
+// reporting complete.
+describe("S. False completion when no filename is named in the prompt", () => {
+  it("a mutating tool that succeeds without creating any file must not let a bare creation request report complete", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      // A mutating tool that reports success but writes nothing — stands
+      // in for e.g. a shell command that merely echoes or no-ops.
+      const tools = makeRegistryWithTool(
+        "project.run",
+        async () => ({ status: "success", success: true, message: "exit 0", data: {} }),
+        { readOnly: false, mutating: true },
+      );
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.run", "inputs": { "command": "echo", "args": ["ok"] } }\n\`\`\``,
+        "Done! I've built the landing page for your coffee shop.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a landing page for my coffee shop",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      // No file of any kind was created — the directory still contains
+      // only the fixture's package.json.
+      const entries = fs.readdirSync(dir);
+      assert.deepEqual(entries, ["package.json"]);
+      assert.equal(
+        result.termination,
+        "failed",
+        "a creation request with no named filename must not report complete when nothing was " +
+          "actually written, even though a mutating tool call reported success",
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a bare creation request that genuinely creates a file still reports complete (no over-triggering)", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.write_file", "inputs": { "path": "index.html", "content": "<!DOCTYPE html><html><body><h1>Coffee</h1></body></html>" } }\n\`\`\``,
+        "Done — the landing page is live at index.html.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a landing page for my coffee shop",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      assert.equal(fs.existsSync(path.join(dir, "index.html")), true);
+      assert.equal(result.termination, "complete",
+        "a genuinely created file must not be blocked by the no-filename-named existence check");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The three tests below reproduce confirmed findings from independent
+  // review of this fix's first version (a path-presence-only diff):
+  //   1. overwriting an EXISTING file was wrongly reported as failed
+  //      (new-path detection never sees a path that already existed).
+  //   2. creating a file unrelated to the request (e.g. a stray note)
+  //      wrongly satisfied the check and reported complete.
+  //   3. a deeply nested write (past an arbitrary depth cap) was wrongly
+  //      reported as failed even though the file genuinely existed.
+  // Run against the path-presence-only version, all three failed their
+  // assertions exactly as described above — this is reproduction
+  // evidence, not a hypothetical.
+
+  it("overwriting an EXISTING file with real new content reports complete, not failed", async () => {
+    const dir = makeTempProject();
+    try {
+      fs.writeFileSync(path.join(dir, "index.html"), "<html>stale starter page</html>");
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.write_file", "inputs": { "path": "index.html", "content": "<html><body><h1>Brand New Coffee Shop Page</h1></body></html>" } }\n\`\`\``,
+        "Done — I've rebuilt the landing page.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a landing page for my coffee shop",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      assert.equal(
+        fs.readFileSync(path.join(dir, "index.html"), "utf8"),
+        "<html><body><h1>Brand New Coffee Shop Page</h1></body></html>",
+      );
+      assert.equal(result.termination, "complete",
+        "a real content overwrite of an already-existing file must count as the requested " +
+          "artifact being built, not be invisible to a new-path-only check");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("creating a file unrelated to the request must NOT count as proof the website was built", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.write_file", "inputs": { "path": "notes.txt", "content": "todo: build landing page later" } }\n\`\`\``,
+        "Done — I've built the landing page for your coffee shop.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a landing page for my coffee shop",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      assert.deepEqual(fs.readdirSync(dir).sort(), ["notes.txt", "package.json"]);
+      assert.notEqual(result.termination, "complete",
+        "an unrelated file (not a recognized build artifact type) must not let the run claim " +
+          "the requested website/page was actually created");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a deeply nested write (beyond any fixed depth) still reports complete", async () => {
+    const dir = makeTempProject();
+    try {
+      const shell = new NodeShellExecutor(dir);
+      const tools = new ToolRegistry();
+      const model = makeMockModel([
+        `\`\`\`tool_call\n{ "tool": "project.write_file", "inputs": { "path": "a/b/c/d/e/index.html", "content": "<html><body>deep</body></html>" } }\n\`\`\``,
+        "Done — created the deeply nested landing page.",
+      ]);
+
+      const result = await runAgentLoop(
+        "Build me a landing page for my coffee shop",
+        { model, tools, shell, cwd: dir, maxRounds: 3 },
+      );
+
+      assert.equal(fs.existsSync(path.join(dir, "a/b/c/d/e/index.html")), true);
+      assert.equal(result.termination, "complete",
+        "a genuinely created file must be recognized regardless of how deeply it is nested");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
