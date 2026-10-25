@@ -1,0 +1,51 @@
+description: >
+  F3 routing — ground truth. Calls LiTT's real classifyIntent() function
+  (packages/litt-cli/src/lib/intent.ts), the exact code the interactive
+  cockpit runs at ink/controller.ts:2181. No model, no network, $0 cost.
+  This is the AUTHORITATIVE track per F3 step 5 — real end-to-end LiTT
+  routing behavior, not model-only scoring.
+
+providers:
+  - id: file://provider/classify-direct.cjs
+    label: classify-direct
+
+prompts:
+  - "{{prompt}}"
+
+tests:
+  - vars:
+      id: explicit-build-1
+      prompt: "Build me a simple personal portfolio website with an index.html homepage."
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'mission'"
+  - vars:
+      id: explicit-build-2
+      prompt: "Create a new project here and scaffold a basic Express API server."
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'mission'"
+  - vars:
+      id: normal-chat-1
+      prompt: "Hey, how's it going today?"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'chat'"
+  - vars:
+      id: normal-chat-2
+      prompt: "What's the difference between let and const in JavaScript?"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'chat'"
+  - vars:
+      id: ambiguous-1
+      prompt: "I don't know, maybe we should look at this later."
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'chat'"
+  - vars:
+      id: ambiguous-2
+      prompt: "Something's off with the thing we talked about."
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'chat'"
