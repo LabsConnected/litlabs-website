@@ -28,6 +28,7 @@ import {
   workspaceApplyPatch,
   type ToolHandler,
 } from "@/lib/project-tools/registry";
+import { validateOutboundHost, createSsrfDispatcher } from "@/lib/ssrf-guard";
 
 // ─── String helpers ─────────────────────────────────────────────
 
@@ -454,8 +455,18 @@ const SAFE_COMMAND_PREFIXES = [
   "node --version", "node -v", "pnpm --version",
   "git status", "git branch", "git log", "git diff", "git show", "git remote -v",
   "ls ", "ls -", "cat ", "head ", "tail ", "wc ", "grep ", "rg ", "find .",
-  "echo ", "pwd", "which ", "env | grep",
+  "echo ", "pwd", "which ",
 ];
+
+// Flags on allowlisted programs that spawn subcommands or delete files
+// without needing any shell metacharacter (find -exec/-ok/-delete, xargs-style).
+const DANGEROUS_COMMAND_FLAGS = /\s-(exec|execdir|ok|okdir|delete)\b/;
+
+// Shell operators and substitutions — ANY of these create an alternate
+// execution path after the allowlisted prefix, so they are rejected
+// unconditionally. No prefix exemption: "cat f && curl evil" must never
+// pass just because it starts with "cat ".
+const SHELL_METACHARACTERS = /[;`$()|&<>\r\n]/;
 
 const REQUIRES_APPROVAL_PATTERNS = [
   /--force/i, /-f\b/i, /git push/i, /git reset\s+--hard/i, /git clean/i,
@@ -467,10 +478,14 @@ function isCommandSafe(command: string): { safe: boolean; reason?: string } {
   const trimmed = command.trim();
   if (!trimmed) return { safe: false, reason: "Empty command." };
   if (trimmed.length > 500) return { safe: false, reason: "Command too long (max 500 chars)." };
-  if (/[;`$()|&<>]/.test(trimmed) && !trimmed.startsWith("echo ")) {
-    if (!/^(ls|cat|head|tail|wc|grep|rg|find)\s/.test(trimmed)) {
-      return { safe: false, reason: "Shell metacharacters not allowed." };
-    }
+  if (SHELL_METACHARACTERS.test(trimmed)) {
+    return {
+      safe: false,
+      reason: "Shell operators are not allowed — run a single command, or use request_approval.",
+    };
+  }
+  if (DANGEROUS_COMMAND_FLAGS.test(trimmed)) {
+    return { safe: false, reason: "Command flag executes subcommands or deletes files — use request_approval." };
   }
   for (const p of REQUIRES_APPROVAL_PATTERNS) {
     if (p.test(trimmed)) return { safe: false, reason: `Command requires approval: ${p.source}` };
@@ -549,36 +564,74 @@ export const toolWebSearch: ToolHandler = async (_userId, args) => {
   }
 };
 
+const WEB_FETCH_MAX_REDIRECTS = 5;
+const WEB_FETCH_TIMEOUT_MS = 20_000;
+// Every socket this dispatcher opens must pass isBlockedIp at connect time —
+// the only addresses a socket can reach are ones the validator returned.
+let webFetchDispatcher: ReturnType<typeof createSsrfDispatcher> | null = null;
+function getWebFetchDispatcher() {
+  if (!webFetchDispatcher) webFetchDispatcher = createSsrfDispatcher();
+  return webFetchDispatcher;
+}
+
 export const toolWebFetch: ToolHandler = async (_userId, args) => {
-  const url = str(args.url);
-  if (!url) return fail("web_fetch requires a url.");
-
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-    if (!["http:", "https:"].includes(parsed.protocol)) return fail("URL must use http or https.");
-  } catch {
-    return fail("Invalid URL format.");
-  }
-
-  const hostname = parsed.hostname.toLowerCase();
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" ||
-      hostname.startsWith("10.") || hostname.startsWith("192.168.") ||
-      hostname.startsWith("169.254.") || hostname.endsWith(".internal") || hostname.endsWith(".local")) {
-    return fail("URLs pointing to internal/private addresses are blocked.");
-  }
+  const initialUrl = str(args.url);
+  if (!initialUrl) return fail("web_fetch requires a url.");
 
   const maxChars = Math.min(Math.max(parseInt(String(args.max_chars ?? "4000"), 10) || 4000, 500), 20000);
 
+  let current = initialUrl;
+  let resp: Response | null = null;
+
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20_000);
-    const resp = await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": "LiTT-Fetch/1.0", Accept: "text/html,application/json,text/plain" },
-      redirect: "follow",
-    });
-    clearTimeout(timeout);
+    // Manual redirect following: every hop is a fresh, fully validated
+    // target. A public URL must not be allowed to 30x into a private one.
+    for (let hop = 0; hop <= WEB_FETCH_MAX_REDIRECTS; hop++) {
+      let parsed: URL;
+      try {
+        parsed = new URL(current);
+        if (!["http:", "https:"].includes(parsed.protocol)) {
+          return fail("URL must use http or https.");
+        }
+        if (parsed.username || parsed.password) {
+          return fail("URLs with embedded credentials are not allowed.");
+        }
+      } catch {
+        return fail("Invalid URL format.");
+      }
+
+      // Host-level gate: literal-IP table, blocked hostname suffixes, and
+      // DNS resolution with every answer checked. Fails closed.
+      const verdict = await validateOutboundHost(parsed.hostname);
+      if (!verdict.ok) {
+        return fail(`URLs pointing to internal/private addresses are blocked (${verdict.reason}).`);
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), WEB_FETCH_TIMEOUT_MS);
+      try {
+        resp = await fetch(current, {
+          signal: controller.signal,
+          headers: { "User-Agent": "LiTT-Fetch/1.0", Accept: "text/html,application/json,text/plain" },
+          redirect: "manual",
+          dispatcher: getWebFetchDispatcher(),
+        } as RequestInit);
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      if (resp.status >= 300 && resp.status < 400) {
+        const location = resp.headers.get("location");
+        if (!location) return fail(`web_fetch got a ${resp.status} redirect without a Location header.`);
+        current = new URL(location, current).toString();
+        continue;
+      }
+      break;
+    }
+
+    if (!resp || (resp.status >= 300 && resp.status < 400)) {
+      return fail(`web_fetch exceeded ${WEB_FETCH_MAX_REDIRECTS} redirects for ${initialUrl}.`);
+    }
 
     const contentType = resp.headers.get("content-type") ?? "";
     const text = await resp.text();
@@ -588,13 +641,13 @@ export const toolWebFetch: ToolHandler = async (_userId, args) => {
         .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
         .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     }
-    return ok(null, `Fetched ${url} (${resp.status}, ${content.length} chars).`, {
-      url, finalUrl: resp.url, statusCode: resp.status, contentType,
+    return ok(null, `Fetched ${initialUrl} (${resp.status}, ${content.length} chars).`, {
+      url: initialUrl, finalUrl: current, statusCode: resp.status, contentType,
       content: content.slice(0, maxChars), truncated: content.length > maxChars,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("abort")) return fail(`web_fetch timed out after 20 seconds fetching ${url}.`);
+    if (msg.includes("abort")) return fail(`web_fetch timed out after 20 seconds fetching ${initialUrl}.`);
     return fail(`web_fetch failed: ${msg.slice(0, 300)}`);
   }
 };
