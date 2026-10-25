@@ -272,6 +272,24 @@ describe("deploymentEvidenceFrom", () => {
       started: true, succeeded: false, url: null, urlVerified: false,
     });
   });
+
+  // Ported from local salvage branch fix/studio-completion-evidence-gaps
+  // (2026-10-19): step2B studio recovery — deploy.execute was a real tool id
+  // in our runtime; a parking it outside DEPLOY_TOOL_IDS hid its failures.
+  it("reports a failed deploy.execute as started but not succeeded", () => {
+    expect(deploymentEvidenceFrom([{ toolId: "deploy.execute", success: false }])).toEqual({
+      started: true, succeeded: false, url: null, urlVerified: false,
+    });
+  });
+
+  it("treats deploy.verify after a non-self-verifying deploy as URL verification", () => {
+    // deploy.execute/deploy are not self-verifying; only an explicit URL
+    // verification afterwards makes the deployment evidence complete.
+    expect(deploymentEvidenceFrom([
+      { toolId: "deploy.execute", success: true },
+      { toolId: "deploy.verify", success: true },
+    ])).toEqual({ started: true, succeeded: true, url: null, urlVerified: true });
+  });
 });
 
 /* ── The real deploy tool is recognised as deployment evidence ───── */

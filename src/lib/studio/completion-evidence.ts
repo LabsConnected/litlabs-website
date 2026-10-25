@@ -602,6 +602,7 @@ export function workLogLabel(verdict: CompletionVerdict): string | null {
 const DEPLOY_TOOL_IDS = new Set([
   "project.deploy",
   "deploy",
+  "deploy.execute",
   "deploy.run",
   "deployment.create",
   "deployment.deploy",
@@ -625,6 +626,9 @@ const URL_VERIFY_TOOL_IDS = new Set([
   "browser.snapshot",
   "web.fetch",
   "browser_test",
+  // A dedicated verify tool whose whole job is one confirmed URL fetch
+  // counts as URL verification for a non-self-verifying deploy.
+  "deploy.verify",
 ]);
 
 /**
