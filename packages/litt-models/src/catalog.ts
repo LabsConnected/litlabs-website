@@ -414,6 +414,34 @@ const DEEPSEEK_MODELS: ModelDefinition[] = [
   },
 ];
 
+// ─── OpenAgents gateway (UNVERIFIED) ──────────────────────────────
+// Third-party inference gateway added 2026-10-23. Its endpoint and model
+// lineup are NOT independently verified — entries are manualOnly, carry
+// no recommendation metadata, and cannot be auto-selected or used as a
+// fallback. Promotion path: verify the gateway end-to-end, then flip the
+// provider's `unverified` flag and re-add littRecommended/littTier.
+const OPENAGENTS_MODELS: ModelDefinition[] = [
+  {
+    canonicalId: "openagents-deepseek-4-flash",
+    displayName: "DeepSeek 4 Flash (OpenAgents)",
+    provider: "openagents",
+    providerModelId: "deepseek-4-flash",
+    capabilities: { ...TEXT_CHAT, longContext: true },
+    speed: "fast",
+    intelligence: "balanced",
+    contextWindow: 1_048_576,
+    availability: "unverified",
+    verified: false,
+    verifiedAt: null,
+    source: "unverified",
+    description: "Unverified OpenAgents gateway model — explicit selection only pending independent verification.",
+    recommendedFor: [],
+    manualOnly: true,
+    domain: "text",
+    notes: "Requires OPENAGENTS_API_KEY. Served by api-gateway.openagents.org (OpenAI-compatible). Reported live-checked by the operator on 2026-10-23; not independently verified.",
+  },
+];
+
 // ─── Kimi — K3 + K2.7 Code family ──────────────────────────────────
 const KIMI_MODELS: ModelDefinition[] = [
   {
@@ -752,6 +780,7 @@ export const MODEL_CATALOG: ModelDefinition[] = [
   ...GOOGLE_MODELS,
   ...XAI_MODELS,
   ...DEEPSEEK_MODELS,
+  ...OPENAGENTS_MODELS,
   ...KIMI_MODELS,
   ...MISTRAL_MODELS,
   ...QWEN_MODELS,

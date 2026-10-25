@@ -534,13 +534,27 @@ export function useCockpitStore() {
 
   const updateSelectedModel = useCallback((modelId: string | null) => {
     setSelectedModel(modelId);
-    savePrefs({ selectedModel: modelId, lastUsedModel: modelId });
+    savePrefs(modelId
+      ? { selectedModel: modelId, lastUsedModel: modelId }
+      : { selectedModel: modelId });
   }, [savePrefs]);
 
   const updateRoutingMode = useCallback((mode: RoutingMode) => {
     setRoutingMode(mode);
     savePrefs({ routingMode: mode });
   }, [savePrefs]);
+
+  // Auto-derived selections (local-lane reconcile, target switches)
+  // update state ONLY — they must not write model-prefs.json: the
+  // operator's persisted choice stays on disk for /remote and restart
+  // instead of being overwritten by whatever the local daemon served.
+  const applyAutoSelectedModel = useCallback((modelId: string | null) => {
+    setSelectedModel(modelId);
+  }, []);
+
+  const applyAutoRoutingMode = useCallback((mode: RoutingMode) => {
+    setRoutingMode(mode);
+  }, []);
 
   // ─── Chat transcript actions ─────────────────────────────────────
   // The transcript is the PERSISTED assistant response body. All
@@ -1013,6 +1027,8 @@ export function useCockpitStore() {
       setCurrentRunId,
       updateSelectedModel,
       updateRoutingMode,
+      applyAutoSelectedModel,
+      applyAutoRoutingMode,
       setActiveModel,
       setActiveProvider,
       setOverlay,

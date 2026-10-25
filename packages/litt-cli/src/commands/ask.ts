@@ -31,8 +31,9 @@ import { ModelRuntime } from "../lib/model-runtime.js";
 import { probeLocalLane } from "../lib/local-lane.js";
 import {
   localRoutePolicy,
-  isLocalModelId,
+  resolveRequestedLocalModel,
 } from "../lib/local-model-resolution.js";
+import { getDefaultPrefsPath, loadModelPrefs } from "../lib/provider-registry.js";
 import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import { resolveActiveProject } from "../lib/active-project.js";
@@ -81,7 +82,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // local model are available.
   const providerConfigured = hasAnyProviderKey();
   const localLane = providerConfigured ? null : await probeLocalLane();
-  const selectedModel = process.env.LITT_MODEL?.trim() || process.env.OPENROUTER_MODEL?.trim() || null;
+  const persistedPrefs = loadModelPrefs(getDefaultPrefsPath());
+  const selectedModel = process.env.LITT_MODEL?.trim()
+    || process.env.OPENROUTER_MODEL?.trim()
+    || persistedPrefs.selectedModel
+    || null;
 
   if (!providerConfigured && !localLane?.available) {
     if (selectedModel) {
@@ -156,6 +161,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       process.env.OPENAI_API_KEY ||
       process.env.OPENROUTER_API_KEY ||
       process.env.ANTHROPIC_API_KEY ||
+      process.env.OPENAGENTS_API_KEY ||
       process.env.DEEPSEEK_API_KEY ||
       process.env.MISTRAL_API_KEY
     );
@@ -168,8 +174,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     // When executionTarget=local (LITT_LOCAL_MODE=1, --local, or default),
     // the local daemon (Ollama/LM Studio) is the ONLY provider lane.
     // A persisted or env-selected remote model is never used in LOCAL mode.
-    const requestedLocalModel = process.env.LITT_MODEL?.trim()
-      || (isLocalModelId(selectedModel) ? selectedModel : null);
+    const requestedLocalModel = resolveRequestedLocalModel(persistedPrefs.selectedModel).model;
     const policy = localRoutePolicy({
       executionTarget,
       localOnly,

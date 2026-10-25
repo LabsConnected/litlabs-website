@@ -55,7 +55,7 @@ import {
   type ResolvedModelProvider,
 } from "../lib/model-provider.js";
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
-import { TelemetryStore } from "../lib/provider-registry.js";
+import { TelemetryStore, loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
 import {
@@ -71,6 +71,8 @@ import {
   localRoutePolicy,
   resolveLocalModel,
   resolveRequestedLocalModel,
+  resolveModelArg,
+  remoteSelectionOf,
   type LocalRoutePolicy,
 } from "../lib/local-model-resolution.js";
 import {
@@ -1084,12 +1086,15 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
     const { resolution } = outcome;
     modelRuntime.registerLocalModel(resolution);
-    // FIXED so cliModeToRouteOptions honours the pick — in "auto" mode
-    // the selected id is ignored entirely and the badge would drift back.
+    // Ephemeral only — auto-resolution must NOT write model-prefs.json.
+    // A persisted REMOTE (cloud) selection stays on disk so /remote can
+    // restore it later; the in-memory pick keeps the badge honest and
+    // FIXED so cliModeToRouteOptions honours it — in "auto" mode the
+    // selected id is ignored entirely and the badge would drift back.
     if (store.state.selectedModel !== resolution.canonicalId) {
-      store.actions.updateSelectedModel(resolution.canonicalId);
+      store.actions.applyAutoSelectedModel(resolution.canonicalId);
     }
-    if (store.state.routingMode !== "fixed") store.actions.updateRoutingMode("fixed");
+    if (store.state.routingMode !== "fixed") store.actions.applyAutoRoutingMode("fixed");
     store.actions.setActiveModel(resolution.tag);
     store.actions.setActiveProvider("ollama");
     return resolution.tag;
@@ -1649,8 +1654,26 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       submitRef.current(goal, { forceMission: true });
       return;
     }
-    if (input === "/model") {
-      store.actions.setOverlay("model-picker");
+    if (input === "/model" || input.startsWith("/model ")) {
+      const arg = input.slice("/model".length).trim();
+      if (!arg) {
+        store.actions.setOverlay("model-picker");
+        return;
+      }
+      // Direct selection: resolve against the catalog, then installed
+      // local tags. An explicit pick persists (fixed mode honours it);
+      // a miss is a clear error, never a silent fallback.
+      void (async () => {
+        const lane = await probeLocalLane();
+        const resolved = resolveModelArg(arg, modelRuntime.getAllModels(), lane);
+        if (!resolved.ok) {
+          act(store, resolved.error, "error", undefined, "MODEL");
+          return;
+        }
+        store.actions.updateSelectedModel(resolved.canonicalId);
+        store.actions.updateRoutingMode("fixed");
+        act(store, `Model set: ${resolved.label} (${resolved.canonicalId})`, "info", undefined, "MODEL");
+      })();
       return;
     }
     if (input === "/models") {
@@ -1967,7 +1990,20 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         return;
       }
 
-      // Validation passed: switch to REMOTE
+      // Validation passed: re-resolve the selection for REMOTE before
+      // switching. The in-memory selection may be an ephemeral local
+      // (ollama:) pick the remote catalog can never serve — restore the
+      // persisted selection. When the only stored choice is itself
+      // local-only, drop to AUTO (state only — the disk pin is the
+      // operator's explicit local pick and stays for future /local use).
+      const persistedPrefs = loadModelPrefs(getDefaultPrefsPath());
+      const remoteSelection = remoteSelectionOf(persistedPrefs.selectedModel);
+      if (store.state.selectedModel !== remoteSelection) {
+        store.actions.applyAutoSelectedModel(remoteSelection);
+      }
+      if (!remoteSelection && store.state.routingMode === "fixed") {
+        store.actions.applyAutoRoutingMode("auto");
+      }
       store.actions.setExecutionTarget("remote");
       store.actions.addActivity({
         id: `act_${Date.now()}_remote`,
