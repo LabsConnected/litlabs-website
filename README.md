@@ -1,6 +1,20 @@
-# LiTTree Lab Studios
+![LiTT](.github/assets/litt-banner.webp)
 
-LiTTree Lab Studios is a multi-agent creative workspace built with Next.js 16, React 19, Tailwind CSS 4, Clerk, Supabase, Stripe, and several AI providers.
+# LiTT — the AI-native creation platform
+
+**Describe → Generate → Preview → Edit → Verify → Publish.**
+
+[![litlabs.net](https://img.shields.io/badge/litlabs.net-live-22D3EE)](https://litlabs.net)
+![Status](https://img.shields.io/badge/status-Paid%20beta%20%E2%80%94%20in%20development-A855F7)
+![License](https://img.shields.io/badge/license-decision%20pending-lightgrey)
+
+LiTT is built by **LiTTree LabStudios**. Describe the software you want, watch it generate, preview it live, edit, verify, and publish — without understanding hosting or DNS.
+
+---
+
+## About this repository
+
+This repository holds LiTT — a multi-agent creative workspace built with Next.js 16, React 19, Tailwind CSS 4, Clerk, Supabase, Stripe, and several AI providers.
 
 ## Requirements
 
