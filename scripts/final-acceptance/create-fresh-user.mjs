@@ -27,8 +27,9 @@ const response = await fetch("https://api.clerk.com/v1/users", {
 });
 
 if (!response.ok) {
-  const body = await response.text().catch(() => "");
-  throw new Error(`Clerk fresh-user creation failed: HTTP ${response.status} ${body.slice(0, 500)}`);
+  // Status only. The Clerk error body can echo request fields and must not
+  // land in the public Actions log.
+  throw new Error(`Clerk fresh-user creation failed: HTTP ${response.status}`);
 }
 
 const user = await response.json();

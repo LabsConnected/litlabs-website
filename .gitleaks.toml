@@ -1,0 +1,70 @@
+title = "LiTTree Lab Studios"
+
+[extend]
+useDefault = true
+
+# Test fixtures, docs, and the redaction code that intentionally mentions
+# credential shapes. A real secret committed outside these paths still fails.
+[[allowlists]]
+description = "Known test fixtures, documentation, and in-repo redaction patterns"
+paths = [
+  '''(^|.*/)tests/''',
+  '''(^|.*/)__tests__/''',
+  '''\.test\.(ts|tsx|js|mjs)$''',
+  '''\.spec\.(ts|tsx|js|mjs)$''',
+  '''(^|.*/)docs/''',
+  '''\.md$''',
+  '''scripts/final-acceptance/redact-secrets\.mjs$''',
+  '''scripts/final-acceptance/redact-artifacts\.mjs$''',
+  '''scripts/check-client-env-secrets\.mjs$''',
+  '''tools/test-runtime\.ps1$''',
+  '''\.github/workflows/build\.yml$''',
+  '''\.github/workflows/gitleaks\.yml$''',
+  '''\.github/gitleaks-report\.tmpl$''',
+]
+
+# Product identifiers that share a shape with generic-api-key. Scoped so a
+# different secret in the same file still fails.
+[[allowlists]]
+description = "Video model id assigned to apiModel, not a credential"
+condition = "AND"
+paths = ['''src/lib/studio-models\.ts''']
+regexTarget = "line"
+regexes = ['''apiModel:\s*"happyhorse-1\.1-i2v"''']
+
+[[allowlists]]
+description = "localStorage key for the mission-forge canvas, not a credential"
+condition = "AND"
+paths = ['''src/app/\(app\)/studio/tools/MissionForge\.tsx''']
+regexTarget = "line"
+regexes = ['''const STORAGE_KEY = "litlabs-mission-forge-v1"''']
+
+# layout.tsx uses a clearly-fake publishable key when Clerk is unconfigured.
+# Allow only that assignment, not the rest of the file.
+[[allowlists]]
+description = "Documented fake Clerk publishable key placeholder in the root layout"
+condition = "AND"
+paths = ['''src/app/layout\.tsx''']
+regexTarget = "line"
+regexes = ['''resolvedClerkKey = clerkKey \|\| "pk_test_''']
+
+# This snapshot is already on main. The redaction commit's deleted lines still
+# contain the old query value, and gitleaks scans patches. Limit the allowlist
+# to this directory so a newly committed dump is still scanned.
+[[allowlists]]
+description = "Historical final-acceptance evidence snapshot whose preview tokens were redacted in-tree"
+paths = ['''artifacts/final-acceptance/2026-09-16T01-40-48/''']
+
+# Public PKCE client id. The auth module otherwise stays fully scanned.
+[[allowlists]]
+description = "Public PKCE OAuth client id (no client secret)"
+condition = "AND"
+paths = [
+  '''packages/litt-cli/src/lib/auth/auth-config\.ts''',
+  '''\.git-commit-msg\.txt''',
+]
+regexTarget = "line"
+regexes = [
+  '''DEFAULT_CLERK_OAUTH_CLIENT_ID''',
+  '''PKCE public client, no secret''',
+]
