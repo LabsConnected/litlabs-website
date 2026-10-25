@@ -42,6 +42,18 @@ import { getTerminalUrl } from "../lib/auth/auth-config.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
 import * as readline from "node:readline/promises";
 
+const EXACT_ANSWER_RE = /^\s*(?:reply|respond|answer|say)\s+with\s+exactly\s*(?::\s*|["'])(.+?)["']?\s*$/i;
+const PROJECT_EVIDENCE_RE = /\b(project|repo|repository|file|path|git|build|test|check|code|command|tool|read|write|edit|search|status|diff|log|package)\b/i;
+
+/**
+ * True only for literal echo-style asks such as `Reply with exactly: OK`.
+ * Multi-part or repository-aware requests keep tools enabled.
+ */
+export function isExactAnswerPrompt(question: string): boolean {
+  const match = EXACT_ANSWER_RE.exec(question);
+  return !!match && !PROJECT_EVIDENCE_RE.test(match[1]);
+}
+
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
   const question = args.join(" ").trim();
 
@@ -108,7 +120,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const store = new RuntimeStore();
   const shell = createShellExecutor(projectRoot);
   const executor = new CommandExecutor(shell, store);
-  const tools = new ToolRegistry();
+  // Exact-answer prompts need no repository evidence. Keeping tools enabled
+  // lets weak local models invoke expensive checks for a prompt that cannot
+  // use their results (observed: `Reply with exactly...` -> project.check).
+  const directAnswerOnly = isExactAnswerPrompt(question);
+  const tools = new ToolRegistry(undefined, { includeDefaults: !directAnswerOnly });
   const gateway = new ExecutionGateway({
     tools,
     shell,
