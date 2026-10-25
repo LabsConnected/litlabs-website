@@ -201,6 +201,28 @@ describe("completion verdict vs. actual workspace state", () => {
     expect(verdict.reason).not.toMatch(/rolled back|reverted|restored/i);
   });
 
+  // The mirror of the headline case: a tool-flag success that left no trace.
+  it("does not report complete when the diff proves nothing persisted", () => {
+    const verdict = evaluateCompletion(
+      BUILD,
+      evidence([{ toolId: "files.write", mutating: true, success: true }], unchanged),
+    );
+
+    expect(verdict.state).toBe("failed");
+    expect(verdict.workspaceChange).toBe("unchanged");
+    expect(verdict.missing).toContain("persisted workspace change");
+  });
+
+  it("still reports complete when the diff confirms the write landed", () => {
+    const verdict = evaluateCompletion(
+      BUILD,
+      evidence([{ toolId: "files.write", mutating: true, success: true }], changed()),
+    );
+
+    expect(verdict.state).toBe("complete");
+    expect(verdict.workspaceChange).toBe("changed");
+  });
+
   it("still reports nothing changed when no mutation was even attempted", () => {
     const verdict = evaluateCompletion(BUILD, evidence([], unchanged));
 
