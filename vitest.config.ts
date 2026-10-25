@@ -33,6 +33,8 @@ export default defineConfig({
       "test-results",
       "playwright-report",
       "coverage",
+      "**/__pycache__/**",
+      "**/*.pyc",
       // Requires a built terminal server and the platform-specific node-pty binary.
       // Run this separately as an integration smoke test in a prepared environment.
       "tests/terminal-server-smoke.test.ts",

@@ -130,13 +130,17 @@ function nodeToHtml(node: CanvasNode, doc: CanvasDocument, depth = 0, ex?: Expor
     case "image": {
       const src = node.props.src || "";
       if (!src) {
-        // Empty slot: render a clean, clearly-labeled placeholder instead of
-        // a broken <img src=""> frame. This is what the user sees in the
-        // preview and in the published page until they add an image.
         const alt = escapeHtml(node.props.alt || "Image");
-        return `<div${styleAttr} style="display:flex;align-items:center;justify-content:center;border:2px dashed #6b7280;border-radius:12px;min-height:120px;color:#9ca3af;font-size:13px;font-family:system-ui,sans-serif">Add image — ${alt}</div>`;
+        return `<div${styleAttr} style="display:flex;align-items:center;justify-content:center;border:1px dashed rgba(255,255,255,0.18);border-radius:10px;min-height:160px;color:var(--muted);font-size:13px;font-family:'IBM Plex Sans',system-ui,sans-serif;background:var(--surface)">Add image — ${alt}</div>`;
       }
-      return `<img src="${escapeHtml(src)}" alt="${escapeHtml(node.props.alt || "")}"${styleAttr} />`;
+      // Professional imagery: lazy, async decode, srcset for responsive variants, licensing hint
+      const alt = escapeHtml(node.props.alt || "");
+      const license = node.props.imageLicense ? ` data-license="${escapeHtml(String(node.props.imageLicense))}"` : "";
+      const attribution = node.props.imageAttribution ? ` data-attribution="${escapeHtml(String(node.props.imageAttribution))}"` : "";
+      // Generate responsive srcset if src looks like a local asset (no srcset if external CDN already handles it)
+      const srcset = src.includes("/assets/") ? ` srcset="${escapeHtml(src)} 1x, ${escapeHtml(src)} 2x"` : "";
+      const sizes = src.includes("/assets/") ? ` sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"` : "";
+      return `<img src="${escapeHtml(src)}" alt="${alt}" loading="lazy" decoding="async"${srcset}${sizes}${license}${attribution}${styleAttr} />`;
     }
 
     case "input":
@@ -258,30 +262,85 @@ export function canvasToHtml(doc: CanvasDocument, opts?: CanvasExportOptions): s
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Preview — ${escapeHtml(doc.route)}</title>
+<title>${escapeHtml(doc.route)} — Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #0a0b10;
-    color: #f8f8f2;
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
+  :root {
+    --bg: #0a0a0b;
+    --bg-soft: #141416;
+    --surface: #1a1a1e;
+    --border: rgba(255,255,255,0.08);
+    --text: #f5f3f0;
+    --muted: #9a9590;
+    --accent: #c8a96a;
+    --accent-strong: #b8924a;
+    --radius: 10px;
+    --content-max: 1120px;
   }
-  img { max-width: 100%; height: auto; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  h1, h2, h3, h4 {
+    font-family: 'Crimson Pro', Georgia, serif;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+  }
+  h1 { font-size: clamp(32px, 4vw, 48px); }
+  h2 { font-size: clamp(24px, 3vw, 32px); }
+  h3 { font-size: 20px; }
+  p { color: var(--text); opacity: 0.92; }
+  img { max-width: 100%; height: auto; display: block; }
   a { text-decoration: none; color: inherit; }
-  button { font-family: inherit; }
+  a:hover { color: var(--accent); }
+  button { font-family: inherit; cursor: pointer; }
   table { border-collapse: collapse; width: 100%; }
-  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
+  th { font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; }
   ul { list-style: none; }
-  details summary { list-style: none; }
+  details summary { list-style: none; cursor: pointer; }
   details summary::-webkit-details-marker { display: none; }
   .tab-panel { display: none; }
   .tab-panel:first-child { display: block; }
-  input, textarea {
-    font-family: inherit;
+  input, textarea, select {
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
     outline: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: var(--radius);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
   }
+  input:focus, textarea:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(200,169,106,0.15);
+  }
+  /* Premium container */
+  .litt-container { max-width: var(--content-max); margin: 0 auto; padding: 0 24px; }
+  /* Section rhythm */
+  section { padding: 64px 0; }
+  @media (max-width: 768px) { section { padding: 40px 0; } .litt-container { padding: 0 16px; } }
+  /* Subtle entrance — respects reduced-motion */
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal { animation: littReveal 420ms ease both; }
+    @keyframes littReveal { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { animation: none; }
+    * { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+  /* Responsive grid helper */
+  .litt-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 24px; }
+  @media (max-width: 1024px) { .litt-grid { gap: 16px; } }
+  @media (max-width: 640px) { .litt-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
