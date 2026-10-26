@@ -209,7 +209,7 @@ describe("audit", () => {
   it("write failure keeps diagnostics working + warns once, sanitized", () => {
     const warns: string[] = [];
     const throwingWrite = () => {
-      throw Object.assign(new Error("EPERM: open '/p/secret=sk_live_abc123456789' failed"), { code: "EPERM" });
+      throw Object.assign(new Error("EPERM: open '/p/credentials/dontleak-fixture-731' failed"), { code: "EPERM" });
     };
     // Must not throw — the diagnostic path continues regardless.
     audit(
@@ -224,7 +224,7 @@ describe("audit", () => {
     if (warns.length) {
       expect(warns[0]).toContain("EPERM");
       // Sanitized: errno only — never the raw message or secret content.
-      expect(warns[0]).not.toContain("sk_live");
+      expect(warns[0]).not.toContain("dontleak");
       expect(warns[0]).not.toContain("open '/p/");
     }
   });
