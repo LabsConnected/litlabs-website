@@ -101,6 +101,7 @@ function deriveStartPhase(state: PreviewState, workspaceStatus: string | null, r
 interface PreviewPayload {
   runtimeStatus?: unknown;
   previewUrl?: unknown;
+  previewShareUrl?: unknown;
   runtimeError?: unknown;
   runtimeErrorCode?: unknown;
   framework?: unknown;
@@ -249,6 +250,7 @@ export default function StudioPreviewPanel({
   const { getToken } = useClerkAuth();
   const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_started");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewShareUrl, setPreviewShareUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [frameKey, setFrameKey] = useState(0);
@@ -477,6 +479,7 @@ export default function StudioPreviewPanel({
     if (!projectId) {
       setState("not_started");
       setPreviewUrl(null);
+      setPreviewShareUrl(null);
       setError(null);
       clearSelection(false);
       return;
@@ -517,6 +520,7 @@ export default function StudioPreviewPanel({
         return next.state;
       });
       setPreviewUrl(next.url);
+      setPreviewShareUrl(typeof payload.previewShareUrl === "string" && payload.previewShareUrl ? payload.previewShareUrl : null);
       setError(next.error);
       setErrorCode(next.errorCode);
       setFramework(typeof payload.framework === "string" ? payload.framework : null);
@@ -803,14 +807,17 @@ export default function StudioPreviewPanel({
         if (response.ok && payload && payload.runtimeStatus === "ready") {
           setState("ready");
           setPreviewUrl(`/api/preview/${encodeURIComponent(projectId)}/index.html`);
+          setPreviewShareUrl(typeof payload.previewShareUrl === "string" && payload.previewShareUrl ? payload.previewShareUrl : null);
           setError(null);
         } else {
           setState("not_started");
           setPreviewUrl(null);
+          setPreviewShareUrl(null);
         }
       } catch {
         setState("not_started");
         setPreviewUrl(null);
+        setPreviewShareUrl(null);
       }
       setIframeFailed(false);
       return;
@@ -899,15 +906,18 @@ export default function StudioPreviewPanel({
   }, [state, projectId, preparePreview, workspaceTruth]);
 
   const handleCopyUrl = useCallback(async () => {
-    if (!previewUrl) return;
+    // Prefer the scoped share URL (works in any browser via the preview
+    // token); fall back to the session URL for the signed-in owner.
+    const url = previewShareUrl ?? previewUrl;
+    if (!url) return;
     try {
-      await navigator.clipboard.writeText(previewUrl);
+      await navigator.clipboard.writeText(url);
       setUrlCopied(true);
       setTimeout(() => setUrlCopied(false), 2000);
     } catch {
       // Clipboard API may be blocked — ignore silently
     }
-  }, [previewUrl]);
+  }, [previewUrl, previewShareUrl]);
 
   const stopPreview = async () => {
     if (!projectId) return;

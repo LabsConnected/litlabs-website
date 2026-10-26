@@ -158,13 +158,21 @@ describe("ElementInspectorPanel — real element edit write path", () => {
     await waitFor(() => expect(written.length).toBe(1));
     unmount();
 
-    // Reopen the inspector — the file read must serve the edited content,
-    // so the write IS the persistence layer (no separate save step).
-    const updatedSelection = { ...SELECTION, text: "Persisted headline" };
-    render(<ElementInspectorPanel selection={updatedSelection} projectId="p1" route="/" />);
+    // Reopen the inspector with the ORIGINAL (stale) selection text — the
+    // reopen performs a SECOND file read that must serve the saved content.
+    // Applying another edit and checking that the persisted change survives
+    // in the new write proves the patch base came from that read, not from
+    // the stale selection or the pre-edit document.
+    render(<ElementInspectorPanel selection={SELECTION} projectId="p1" route="/" />);
     await waitFor(() => expect(screen.getByTestId("element-edit-status").textContent).toContain("index.html"));
-    const doc = new DOMParser().parseFromString(written[0].content ?? "", "text/html");
-    expect(doc.querySelector("#hero-title")?.textContent).toBe("Persisted headline");
+
+    fireEvent.change(screen.getByTestId("element-edit-display"), { target: { value: "flex" } });
+    await waitFor(() => expect(written.length).toBe(2));
+    const reopened = new DOMParser().parseFromString(written[1].content ?? "", "text/html");
+    const hero = reopened.querySelector("#hero-title");
+    // The change that exists ONLY in the saved file must survive the second edit.
+    expect(hero?.textContent).toBe("Persisted headline");
+    expect(hero?.getAttribute("style")).toContain("display: flex");
   });
 
   it("undo writes the previous file content back", async () => {

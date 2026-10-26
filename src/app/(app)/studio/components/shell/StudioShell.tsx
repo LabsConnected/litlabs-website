@@ -13,20 +13,19 @@
  * stay mounted (hidden) so preview iframes, terminal sessions, files,
  * and canvas state survive surface/task switching.
  *
- * Baseline preserved: flexbox shell (verified 320 checks) with added
- * Dockview-style resizable handles via react-resizable-panels primitives
- * where safe. Full PanelGroup migration is Phase 2 (see docs/studio/layout-migration.md)
- * to avoid regressing litt-collapsed session logic.
+ * Width ownership: each panel owns its own width. LiTTPanel carries its
+ * expanded/collapsed width (driven by the caller's useResizableWidth +
+ * ResizeHandle via the dockHandle slot); ContextInspector is fixed-width by
+ * design. The shell applies NO competing widths — a resize wrapper around a
+ * self-sized child only clips its controls.
  *
  * Accessibility: role="main" + complementary inspector, aria-labels on
- * resize handles, focus-visible outlines, reduced-motion disables transitions.
- * Docking: flexbox + custom ResizeHandle (mouse drag + keyboard Left/Right
- * 10px) with localStorage persistence for litt-left 22% / inspector 18%,
- * floating overlay, popout window via BroadcastChannel, and recovery reset.
- * Uses plain flexbox to avoid react-resizable-panels@4 React 19 mount bug
- * (TypeError n is not a constructor) while preserving manual-collapse test.
+ * docking controls, focus-visible outlines, reduced-motion disables
+ * transitions. Floating is an in-tree overlay dialog; popout is a real
+ * React portal into a same-origin window carrying the app's stylesheets.
  */
-import { type ReactNode, useState, useEffect, useCallback, useRef } from "react";
+import { type ReactNode, useState, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 
 export default function StudioShell({
   taskbar,
@@ -53,160 +52,61 @@ export default function StudioShell({
   dockHandle?: ReactNode;
 }) {
   const [floating, setFloating] = useState<string | null>(null);
-  const leftWidthRef = useRef(280);
-  const inspectorWidthRef = useRef(320);
-  const [leftWidth, setLeftWidth] = useState(() => {
-    try {
-      const v = localStorage.getItem("litt-studio-layout");
-      if (v) {
-        const j = JSON.parse(v);
-        if (typeof j.left === "number") return j.left;
-      }
-    } catch {}
-    return 280;
-  });
-  const [inspectorWidth, setInspectorWidth] = useState(() => {
-    try {
-      const v = localStorage.getItem("litt-studio-layout");
-      if (v) {
-        const j = JSON.parse(v);
-        if (typeof j.inspector === "number") return j.inspector;
-      }
-    } catch {}
-    return 320;
-  });
+  const [popoutDoc, setPopoutDoc] = useState<Document | null>(null);
+  const popoutWinRef = useRef<Window | null>(null);
 
-  // Persist layout
-  useEffect(() => {
-    try {
-      localStorage.setItem("litt-studio-layout", JSON.stringify({ left: leftWidth, inspector: inspectorWidth }));
-    } catch {}
-  }, [leftWidth, inspectorWidth]);
-
-  // Corruption recovery
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem("litt-studio-layout");
-      if (v) JSON.parse(v);
-    } catch {
-      localStorage.removeItem("litt-studio-layout");
-    }
+  const closePopout = useCallback(() => {
+    popoutWinRef.current?.close();
+    popoutWinRef.current = null;
+    setPopoutDoc(null);
   }, []);
 
   const handleReset = useCallback(() => {
     localStorage.removeItem("litt-studio-layout");
     sessionStorage.removeItem("littree:studio:litt-collapsed");
     localStorage.removeItem("littree:studio:litt-collapsed");
-    setLeftWidth(280);
-    setInspectorWidth(320);
-    // Don't reload — let React reconcile so test can observe reset without navigation
-  }, []);
+    // Restore docked state too — a reset that leaves the inspector floating
+    // or popped out is not a reset.
+    setFloating(null);
+    closePopout();
+  }, [closePopout]);
 
+  // Real popout: the SAME inspector element is portal-rendered into a
+  // same-origin window carrying the app's stylesheets, so it keeps its real
+  // content and appearance. Closing the window (or Dock) returns it docked.
   const handlePopout = useCallback(
     (id: string, title: string) => {
+      if (popoutWinRef.current) return;
       const w = window.open("", "_blank", "width=420,height=600");
       if (!w) return;
-      w.document.title = title;
-      w.document.body.style.margin = "0";
-      w.document.body.style.fontFamily = "system-ui, sans-serif";
-      w.document.body.innerHTML = `<div style="padding:16px"><h2>${title}</h2><p>Popout for ${id} — BroadcastChannel live.</p></div>`;
-      const bc = new BroadcastChannel(`litt-studio-popout-${id}`);
-      const onMsg = (e: MessageEvent) => {
-        if (e.data?.type === "close") w.close();
-      };
-      bc.addEventListener("message", onMsg);
+      try {
+        w.document.title = title;
+        w.document.body.style.margin = "0";
+        w.document.body.style.height = "100vh";
+        w.document.body.style.background = "#0a0a0b";
+        // Carry the app's styles so the inspector keeps its real appearance:
+        // linked stylesheets and inline style blocks clone directly; CSS
+        // variables come along with them via :root rules.
+        for (const node of Array.from(
+          document.querySelectorAll('link[rel="stylesheet"], style'),
+        )) {
+          w.document.head.appendChild(node.cloneNode(true));
+        }
+        try {
+          // Tailwind v4 / CSS-in-JS may use constructable stylesheets.
+          (w.document as Document & { adoptedStyleSheets: CSSStyleSheet[] }).adoptedStyleSheets = [
+            ...document.adoptedStyleSheets,
+          ];
+        } catch {}
+      } catch {
+        // Style carry-over is best-effort — content remains functional.
+      }
+      popoutWinRef.current = w;
+      setPopoutDoc(w.document);
       w.addEventListener("beforeunload", () => {
-        bc.removeEventListener("message", onMsg);
-        bc.close();
+        popoutWinRef.current = null;
+        setPopoutDoc(null);
       });
-    },
-    [],
-  );
-
-  const onLeftHandleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        setLeftWidth((v: number) => Math.max(200, v - 10));
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        setLeftWidth((v: number) => Math.min(420, v + 10));
-      } else if (e.key === "Home") {
-        e.preventDefault();
-        setLeftWidth(200);
-      } else if (e.key === "End") {
-        e.preventDefault();
-        setLeftWidth(420);
-      }
-    },
-    [],
-  );
-
-  const onInspectorHandleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        setInspectorWidth((v: number) => Math.min(480, v + 10));
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        setInspectorWidth((v: number) => Math.max(240, v - 10));
-      } else if (e.key === "Home") {
-        e.preventDefault();
-        setInspectorWidth(480);
-      } else if (e.key === "End") {
-        e.preventDefault();
-        setInspectorWidth(240);
-      }
-    },
-    [],
-  );
-
-  // Mouse drag for left handle
-  const onLeftMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startW = leftWidthRef.current;
-      const onMove = (ev: MouseEvent) => {
-        const delta = ev.clientX - startX;
-        const next = Math.max(200, Math.min(420, startW + delta));
-        leftWidthRef.current = next;
-        setLeftWidth(next);
-      };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    leftWidthRef.current = leftWidth;
-  }, [leftWidth]);
-  useEffect(() => {
-    inspectorWidthRef.current = inspectorWidth;
-  }, [inspectorWidth]);
-
-  const onInspectorMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startW = inspectorWidthRef.current;
-      const onMove = (ev: MouseEvent) => {
-        const delta = startX - ev.clientX;
-        const next = Math.max(240, Math.min(480, startW + delta));
-        inspectorWidthRef.current = next;
-        setInspectorWidth(next);
-      };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
     },
     [],
   );
@@ -214,10 +114,11 @@ export default function StudioShell({
   const hasLeft = Boolean(leftPanel);
   const hasInspector = Boolean(inspector);
   const isFloating = floating === "inspector";
+  const inspectorDetached = isFloating || popoutDoc !== null;
 
   return (
     <div
-      className="studio-shell flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
+      className="studio-shell relative flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
       data-testid="studio-shell"
       role="main"
       aria-label="Studio workspace"
@@ -241,7 +142,7 @@ export default function StudioShell({
         </button>
         <button
           type="button"
-          onClick={() => hasInspector && handlePopout("inspector", "Inspector")}
+          onClick={() => hasInspector && !popoutDoc && handlePopout("inspector", "Inspector")}
           aria-label="Pop out inspector"
           className="rounded px-2 py-1 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
           data-testid="dock-popout"
@@ -263,28 +164,22 @@ export default function StudioShell({
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        {hasLeft && !isFloating && (
+        {/* Left panel (LiTT chat) stays mounted while the inspector floats —
+            floating the inspector must never hide the chat or drop its
+            preserved scroll/UI state. The panel owns its own width. */}
+        {hasLeft && (
           <>
-            <div style={{ width: leftWidth, minWidth: 200, maxWidth: 420 }} className="shrink-0 overflow-hidden">
-              {leftPanel}
-            </div>
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize LiTT panel"
-              tabIndex={0}
-              onKeyDown={onLeftHandleKeyDown}
-              onMouseDown={onLeftMouseDown}
-              data-testid="dock-resize-left"
-              className="group flex w-1.5 shrink-0 cursor-col-resize items-center justify-center bg-transparent hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
-            >
-              <span className="h-8 w-0.5 rounded-full bg-white/15 group-hover:bg-white/25" aria-hidden="true" />
-            </div>
+            {leftPanel}
+            {dockHandle}
           </>
         )}
 
-        {dockHandle}
-        <div className="flex h-14 shrink-0 flex-col overflow-hidden" style={{ minWidth: 56, width: 56 }}>
+        {/* The rail holds every workspace switch — let it fill the available
+            height and scroll internally so no control is ever clipped away. */}
+        <div
+          className="flex h-full shrink-0 flex-col overflow-x-hidden overflow-y-auto"
+          style={{ minWidth: 56, width: 56 }}
+        >
           {rail}
         </div>
 
@@ -292,30 +187,17 @@ export default function StudioShell({
           {stage}
         </div>
 
-        {hasInspector && !isFloating && (
-          <>
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize inspector"
-              tabIndex={0}
-              onKeyDown={onInspectorHandleKeyDown}
-              onMouseDown={onInspectorMouseDown}
-              data-testid="dock-resize-inspector"
-              className="group flex w-1.5 shrink-0 cursor-col-resize items-center justify-center bg-transparent hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
-            >
-              <span className="h-8 w-0.5 rounded-full bg-white/15 group-hover:bg-white/25" aria-hidden="true" />
-            </div>
-            <div
-              role="complementary"
-              aria-label="Inspector"
-              style={{ width: inspectorWidth, minWidth: 240, maxWidth: 480 }}
-              className="shrink-0 overflow-hidden"
-              data-testid="dock-inspector-panel"
-            >
-              {inspector}
-            </div>
-          </>
+        {/* Inspector owns its width (fixed by design); the wrapper only
+            carries landmark semantics and never competes on sizing. */}
+        {hasInspector && !inspectorDetached && (
+          <div
+            role="complementary"
+            aria-label="Inspector"
+            className="flex h-full min-h-0 shrink-0 overflow-hidden"
+            data-testid="dock-inspector-panel"
+          >
+            {inspector}
+          </div>
         )}
       </div>
 
@@ -344,6 +226,32 @@ export default function StudioShell({
           </div>
         </div>
       )}
+
+      {popoutDoc &&
+        hasInspector &&
+        createPortal(
+          <div className="flex h-full min-h-0 flex-col" style={{ background: "#0a0a0b" }}>
+            <div
+              className="flex items-center justify-between border-b px-3 py-2"
+              style={{ borderColor: "rgba(255,255,255,0.08)", color: "#f5f3f0" }}
+            >
+              <span className="text-xs font-semibold">Inspector</span>
+              <button
+                type="button"
+                onClick={closePopout}
+                aria-label="Dock popped-out inspector"
+                className="rounded px-2 py-1 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+                style={{ color: "#f5f3f0" }}
+              >
+                Dock
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto" role="complementary" aria-label="Inspector (popped out)">
+              {inspector}
+            </div>
+          </div>,
+          popoutDoc.body,
+        )}
 
       {littLayer}
     </div>

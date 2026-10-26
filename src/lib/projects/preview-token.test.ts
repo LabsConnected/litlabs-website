@@ -4,6 +4,10 @@ import {
   createPreviewToken,
   verifyPreviewToken,
 } from "./preview-token";
+import {
+  createTerminalToken,
+  verifyTerminalToken,
+} from "@/lib/terminal-auth";
 
 function paddedSecret(): string {
   const base =
@@ -147,12 +151,61 @@ describe("preview-token", () => {
     expect(claims.assets).not.toContain("secret.log");
   });
 
-  it("authorizes no assets when the manifest is missing or malformed", () => {
+  it("rejects a token with an invalid signature", () => {
     const badPayload =
       "eyJzdWIiOiJ1c2VyLTEiLCJhdWQiOiJsaXR0cmVlLXByZXZpZXciLCJpYXQiOjE3OTI4MDY5MTIsImV4cCI6MTc5MjgwNzIxMiwicGlkIjoicHJvai0xIiwid2lkIjoid3MtMSIsImFzdCI6W10ufQ.invalidsignature";
     expect(() => verifyPreviewToken(badPayload)).toThrow(
       /Invalid preview token signature/,
     );
+  });
+
+  it("a token minted without a manifest authorizes nothing (fail closed)", () => {
+    // A VALID token that simply carries no manifest — verification succeeds
+    // but must still authorize zero assets. (The invalid-signature case
+    // above never reaches manifest handling.)
+    const token = createPreviewToken("user-1", {
+      projectId: "proj-1",
+      workspaceId: "ws-1",
+    });
+    expect(verifyPreviewToken(token.token).assets).toEqual([]);
+  });
+
+  it("rejects a forged asset manifest under a stolen signature", () => {
+    const token = createPreviewToken("user-1", {
+      projectId: "proj-1",
+      workspaceId: "ws-1",
+      assets: ["app.js"],
+    });
+    const [, signature] = token.token.split(".");
+    const forgedPayload = Buffer.from(
+      JSON.stringify({
+        sub: "user-1",
+        aud: "littree-preview",
+        iat: 1,
+        exp: 9999999999,
+        pid: "proj-1",
+        wid: "ws-1",
+        ast: ["app.js", "QUALITY_LOG.md", ".env"],
+      }),
+    ).toString("base64url");
+    expect(() => verifyPreviewToken(`${forgedPayload}.${signature}`)).toThrow();
+  });
+
+  it("never cross-verifies with terminal tokens (key separation)", () => {
+    // Same base secret, same payload shape: the preview signing key is
+    // derived under a distinct label, so neither token family can be
+    // replayed as the other.
+    const terminal = createTerminalToken("user-1", {
+      projectId: "proj-1",
+      workspaceId: "ws-1",
+    });
+    expect(() => verifyPreviewToken(terminal.token)).toThrow();
+
+    const preview = createPreviewToken("user-1", {
+      projectId: "proj-1",
+      workspaceId: "ws-1",
+    });
+    expect(() => verifyTerminalToken(preview.token)).toThrow();
   });
 
   it("rejects a token with an invalid audience", () => {

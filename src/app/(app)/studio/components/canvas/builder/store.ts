@@ -97,6 +97,18 @@ function saveToStorage(doc: CanvasDocument) {
 }
 
 /**
+ * Server-side canvas flush, registered by useCanvasFileSync while it is
+ * mounted. saveDocument() invokes it so the toolbar Save button performs a
+ * real workspace write — not just a localStorage update that can never be
+ * retried.
+ */
+let canvasServerFlush: (() => void) | null = null;
+
+export function setCanvasServerFlush(fn: (() => void) | null): void {
+  canvasServerFlush = fn;
+}
+
+/**
  * Save to localStorage AND mark the document as dirty (unsaved to server).
  * Used by all mutation actions so the save badge stays truthful.
  */
@@ -271,6 +283,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     saveToStorage(get().document);
     // Mark as saved locally — server save is a separate explicit action
     set({ saveState: get().serverCanvasId ? "saved" : "local" });
+    canvasServerFlush?.();
   },
 
   setDocument: (doc) => {

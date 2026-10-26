@@ -105,7 +105,7 @@ describe("studio-projects preview route — static guards", () => {
     expect(startPreviewMock).not.toHaveBeenCalled();
   });
 
-  it("GET returns ready + static URL with a project-scoped preview token", async () => {
+  it("GET returns ready + session-compatible URL + project-scoped share token", async () => {
     const fetchMock = vi.fn(async (url: string | URL | Request, _opts?: RequestInit) =>
       new Response(JSON.stringify({ content: "<html></html>" }), { status: 200 }),
     );
@@ -122,7 +122,12 @@ describe("studio-projects preview route — static guards", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.runtimeStatus).toBe("ready");
-    expect(body.previewUrl).toBe("/api/preview/proj-1/t/preview-token-1/index.html");
+    // Owner-facing URL is session-compatible — under a session the serving
+    // route treats t/<token> segments as a file path, so a token-bearing
+    // previewUrl breaks every signed-in tab that opens it.
+    expect(body.previewUrl).toBe("/api/preview/proj-1/index.html");
+    // The token-bearing form is the share link for unsigned browsers.
+    expect(body.previewShareUrl).toBe("/api/preview/proj-1/t/preview-token-1/index.html");
     expect(body.previewToken).toBe("preview-token-1");
     expect(body.previewTokenExpiresAt).toBeGreaterThan(Date.now());
     expect(body.previewTokenExpiresAt).toBeLessThanOrEqual(Date.now() + 60000);
@@ -137,6 +142,73 @@ describe("studio-projects preview route — static guards", () => {
       "user-1",
       expect.objectContaining({ projectId: "proj-1", workspaceId: "ws-1", assets: ["index.html"] }),
     );
+  });
+
+  it("GET signs the real script closure so a copied preview keeps its scripts", async () => {
+    // index.html references ./app.js — the manifest must be computed from the
+    // REAL document and its referenced files, or a copied token URL is refused
+    // every subresource by the serving route.
+    const files: Record<string, string> = {
+      "index.html": '<html><head></head><body><script type="module" src="./app.js"></script></body></html>',
+      "app.js": 'import "./lib/util.js"; console.log("ok");',
+      "lib/util.js": "export const x = 1;",
+    };
+    const fetchMock = vi.fn(async (url: string | URL | Request, opts?: RequestInit) => {
+      const body = JSON.parse((opts?.body as string) ?? "{}") as { path?: string };
+      const content = files[body.path ?? ""];
+      if (content === undefined) {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      return new Response(JSON.stringify({ content }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await GET(
+      new Request("https://x.test/api/studio-projects/proj-1/preview") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("ready");
+    expect(body.previewUrl).toBe("/api/preview/proj-1/index.html");
+    expect(body.previewShareUrl).toBe("/api/preview/proj-1/t/preview-token-1/index.html");
+    expect(createPreviewTokenMock).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({
+        projectId: "proj-1",
+        workspaceId: "ws-1",
+        assets: ["app.js", "index.html", "lib/util.js"],
+      }),
+    );
+  });
+
+  it("GET fails closed on share token when the manifest cannot be verified", async () => {
+    // index.html references a script the workspace cannot serve — the
+    // manifest is incomplete, so no share token may be minted. The owner's
+    // session URL still reports ready.
+    const fetchMock = vi.fn(async (url: string | URL | Request, opts?: RequestInit) => {
+      const body = JSON.parse((opts?.body as string) ?? "{}") as { path?: string };
+      if (body.path === "index.html") {
+        return new Response(
+          JSON.stringify({ content: '<html><body><script type="module" src="./gone.js"></script></body></html>' }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await GET(
+      new Request("https://x.test/api/studio-projects/proj-1/preview") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("ready");
+    expect(body.previewUrl).toBe("/api/preview/proj-1/index.html");
+    expect(body.previewShareUrl).toBeNull();
+    expect(body.previewToken).toBeNull();
+    expect(createPreviewTokenMock).not.toHaveBeenCalled();
   });
 
   it("GET returns not_started when the terminal is unreachable", async () => {
