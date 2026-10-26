@@ -104,6 +104,15 @@ interface CommandSpec {
   /** Args that carry path values — validated against workspace root */
   pathArgs?: string[];
   /**
+   * Every operand (non-flag token) is a filesystem path that must resolve
+   * inside the workspace. For file-reading commands (cat, grep, find, ...)
+   * the operands ARE the target paths — without this, `cat ../../.env`
+   * reads outside the workspace while staying classified read_only.
+   * Non-path operands (grep patterns, find predicates) still resolve
+   * inside the workspace, so legitimate use is unaffected.
+   */
+  confineOperands?: boolean;
+  /**
    * Global (pre-subcommand) flags that consume the NEXT argv token as
    * their value (e.g. `git -C <dir>`, `git -c k=v`). Without this, a
    * flag's value could be mistaken for the subcommand — and worse, the
@@ -123,24 +132,24 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   // `where.cmd`) are normalized before this lookup — see normalizeCommand().
   where: { defaultCapability: "read_only" },
   which: { defaultCapability: "read_only" },
-  type: { defaultCapability: "read_only" }, // cmd: print file · sh builtin: describe command — both read-only
-  stat: { defaultCapability: "read_only" },
-  file: { defaultCapability: "read_only" },
-  tree: { defaultCapability: "read_only" },
-  du: { defaultCapability: "read_only" },
+  type: { defaultCapability: "read_only", confineOperands: true }, // cmd: print file · sh builtin: describe command — both read-only
+  stat: { defaultCapability: "read_only", confineOperands: true },
+  file: { defaultCapability: "read_only", confineOperands: true },
+  tree: { defaultCapability: "read_only", confineOperands: true },
+  du: { defaultCapability: "read_only", confineOperands: true },
   df: { defaultCapability: "read_only" },
-  diff: { defaultCapability: "read_only" },
-  cmp: { defaultCapability: "read_only" },
-  cut: { defaultCapability: "read_only" },
+  diff: { defaultCapability: "read_only", confineOperands: true },
+  cmp: { defaultCapability: "read_only", confineOperands: true },
+  cut: { defaultCapability: "read_only", confineOperands: true },
   // sort is arg-sensitive: `sort -o out in` writes a file — see
   // classifyArgSensitive(). -o/--output stay path-confined.
-  sort: { defaultCapability: "read_only", pathArgs: ["-o", "--output"] },
-  uniq: { defaultCapability: "read_only" },
-  md5sum: { defaultCapability: "read_only" },
-  sha256sum: { defaultCapability: "read_only" },
-  findstr: { defaultCapability: "read_only" },
-  more: { defaultCapability: "read_only" },
-  less: { defaultCapability: "read_only" },
+  sort: { defaultCapability: "read_only", pathArgs: ["-o", "--output"], confineOperands: true },
+  uniq: { defaultCapability: "read_only", confineOperands: true },
+  md5sum: { defaultCapability: "read_only", confineOperands: true },
+  sha256sum: { defaultCapability: "read_only", confineOperands: true },
+  findstr: { defaultCapability: "read_only", confineOperands: true },
+  more: { defaultCapability: "read_only", confineOperands: true },
+  less: { defaultCapability: "read_only", confineOperands: true },
   date: { defaultCapability: "read_only" },
   cal: { defaultCapability: "read_only" },
   id: { defaultCapability: "read_only" },
@@ -326,16 +335,16 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   jest: { defaultCapability: "arbitrary_code", arbitraryCode: true, pathArgs: ["--config", "-c"] },
 
   // File inspection — read-only
-  cat: { defaultCapability: "read_only" },
-  ls: { defaultCapability: "read_only" },
-  dir: { defaultCapability: "read_only" },
+  cat: { defaultCapability: "read_only", confineOperands: true },
+  ls: { defaultCapability: "read_only", confineOperands: true },
+  dir: { defaultCapability: "read_only", confineOperands: true },
   echo: { defaultCapability: "read_only" },
-  head: { defaultCapability: "read_only" },
-  tail: { defaultCapability: "read_only" },
-  wc: { defaultCapability: "read_only" },
-  find: { defaultCapability: "read_only" },
-  grep: { defaultCapability: "read_only" },
-  rg: { defaultCapability: "read_only" },
+  head: { defaultCapability: "read_only", confineOperands: true },
+  tail: { defaultCapability: "read_only", confineOperands: true },
+  wc: { defaultCapability: "read_only", confineOperands: true },
+  find: { defaultCapability: "read_only", confineOperands: true },
+  grep: { defaultCapability: "read_only", confineOperands: true },
+  rg: { defaultCapability: "read_only", confineOperands: true },
 
   // System info — read-only
   whoami: { defaultCapability: "read_only" },
@@ -817,6 +826,20 @@ function gitSubcommandCapability(sub: string, rest: string[]): CapabilityTier | 
       // `symbolic-ref -q HEAD` reads; `symbolic-ref HEAD <ref>` writes.
       return countOperands(rest, new Set(["-m"])) >= 2 ? "workspace_edit" : "read_only";
     }
+    // The diff-family commands share diff machinery's --output flag, which
+    // writes output to a file — `git diff --output=/abs/path` escapes the
+    // workspace while looking read-only. Classify as a workspace write.
+    case "diff":
+    case "log":
+    case "show":
+    case "whatchanged":
+    case "shortlog":
+    case "blame": {
+      if (rest.some((a) => a === "--output" || a === "-o" || a.startsWith("--output="))) {
+        return "workspace_edit";
+      }
+      return null;
+    }
     default:
       return null;
   }
@@ -1156,6 +1179,40 @@ function validatePathArgs(
   return null;
 }
 
+/**
+ * For commands marked confineOperands, every operand (non-flag token)
+ * is resolved against the command cwd and must stay inside the
+ * workspace. This closes the read-escape path — `cat ../../.env`,
+ * `grep -r secret /`, `find /` — that flag-level pathArgs checking
+ * cannot reach, because for these commands the operand IS the path.
+ *
+ * Non-path operands are unaffected: a grep pattern or find predicate
+ * resolves to a (probably nonexistent) path inside the workspace.
+ * Flag tokens (`-x`, `--foo`) are skipped; `--flag=value` tokens are
+ * skipped because value-carrying flags are covered by pathArgs.
+ */
+function validateOperandPaths(
+  command: string,
+  args: string[],
+  cwd: string,
+  workspaceRoot: string,
+): ExecutionError | null {
+  const spec = COMMAND_SPECS[command.toLowerCase()];
+  if (!spec?.confineOperands) return null;
+  for (const arg of args) {
+    if (arg.length > 1 && arg.startsWith("-")) continue;
+    if (!arg) continue;
+    const resolved = path.resolve(cwd, arg);
+    if (!isWithinWorkspace(resolved, workspaceRoot)) {
+      return new ExecutionError(
+        `Operand "${arg}" resolves outside workspace root`,
+        "PATH_ARG_ESCAPE",
+      );
+    }
+  }
+  return null;
+}
+
 // ─── Environment variable filtering ───────────────────────────────
 
 /**
@@ -1176,6 +1233,40 @@ const BLOCKED_ENV_VARS = new Set([
 ]);
 
 /**
+ * Infrastructure/service-role credentials that must never leak into
+ * workspace child processes. Deliberately narrow: provider API keys
+ * (OPENAI_API_KEY etc.) stay, because workspace dev servers and test
+ * runners legitimately need them — but host-level secrets (service-role
+ * DB keys, internal service tokens, deploy tokens, Stripe, webhook
+ * secrets) are never part of a project's runtime environment; the
+ * project reads its own values from workspace .env files instead.
+ */
+const BLOCKED_INFRA_ENV_VARS = new Set([
+  "TERMINAL_INTERNAL_SERVICE_KEY",
+  "TERMINAL_AUTH_SECRET",
+  "INTERNAL_API_KEY",
+  "AGENT_API_KEY",
+  "AUTH_SECRET",
+  "VOICE_AUTH_SECRET",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_SECRET_KEY",
+  "DATABASE_URL",
+  "CLERK_SECRET_KEY",
+  "CLERK_WEBHOOK_SECRET",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
+  "RAILWAY_API_TOKEN",
+  "GITHUB_PRIVATE_KEY",
+  "GITHUB_WEBHOOK_SECRET",
+  "META_APP_SECRET",
+  "R2_SECRET_ACCESS_KEY",
+  "AWS_SECRET_ACCESS_KEY",
+  "VAPID_PRIVATE_KEY",
+  "LIVEKIT_API_SECRET",
+  "SUPERMEMORY_API_KEY",
+]);
+
+/**
  * Filter environment variables to remove dangerous ones.
  * Merges process.env with provided env, then strips blocked vars.
  */
@@ -1183,7 +1274,7 @@ function filterEnv(provided?: Record<string, string>): Record<string, string> {
   const merged = { ...process.env, ...provided };
   const filtered: Record<string, string> = {};
   for (const [key, value] of Object.entries(merged)) {
-    if (BLOCKED_ENV_VARS.has(key)) continue;
+    if (BLOCKED_ENV_VARS.has(key) || BLOCKED_INFRA_ENV_VARS.has(key)) continue;
     filtered[key] = value ?? "";
   }
   return filtered;
@@ -1199,6 +1290,16 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\b(secret|password|passwd|token|api_key|apikey|access_key)\s*[:=]\s*["']?([a-zA-Z0-9+/=_-]{16,})["']?/gi,
   /\b(AKIA[0-9A-Z]{16})\b/g,
   /\b(gh[pousr]_[A-Za-z0-9]{36,})\b/g,
+  // Named secret assignments: NAME_SECRET, NAME_TOKEN, NAME_KEY, etc.
+  // Catches `SUPABASE_SERVICE_ROLE_KEY=x`, `RAILWAY_API_TOKEN=y`,
+  // `DATABASE_URL=postgres://u:p@h` — the *_KEY/SECRET/TOKEN family the
+  // generic value-shape patterns above miss. Underscore-suffixed match
+  // avoids false positives like MONKEY= or TURKEY=.
+  /\b((?:[A-Za-z][A-Za-z0-9_]*_)?(?:SECRET_KEY|PRIVATE_KEY|ACCESS_KEY|SERVICE_KEY|ROLE_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASSWD|DATABASE_URL|CONNECTION_STRING|DSN|CREDENTIALS?|KEY)[A-Za-z0-9_]*)\s*[=:]\s*[^\s"']{3,}/gi,
+  // URL-embedded credentials: scheme://user:pass@host
+  /\b([a-z][a-z0-9+.-]*):\/\/[^\s/:]+:[^\s/@]+@/gi,
+  // PEM private key blocks
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
 ];
 
 export function redactSecrets(input: string): string {
@@ -1349,6 +1450,12 @@ export async function runCommand(
   const pathError = validatePathArgs(command, args, workspaceRoot);
   if (pathError) {
     return executionError(pathError);
+  }
+
+  // 6b. For file-reading commands, confine path operands to the workspace
+  const operandError = validateOperandPaths(command, args, cwd, workspaceRoot);
+  if (operandError) {
+    return executionError(operandError);
   }
 
   // 7. Filter environment variables
