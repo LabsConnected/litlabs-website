@@ -220,13 +220,12 @@ describe("audit", () => {
       { verb: "cpu", ok: true, ms: 1 },
       { write: throwingWrite, onWarn: (m) => warns.push(m) },
     );
-    expect(warns.length).toBeLessThanOrEqual(1); // warn-once, not spam
-    if (warns.length) {
-      expect(warns[0]).toContain("EPERM");
-      // Sanitized: errno only — never the raw message or secret content.
-      expect(warns[0]).not.toContain("dontleak");
-      expect(warns[0]).not.toContain("open '/p/");
-    }
+    // Exactly one warning — a return to silent failure must fail here.
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("EPERM");
+    // Sanitized: errno only — never the raw message or secret content.
+    expect(warns[0]).not.toContain("dontleak");
+    expect(warns[0]).not.toContain("open '/p/");
   });
 });
 
