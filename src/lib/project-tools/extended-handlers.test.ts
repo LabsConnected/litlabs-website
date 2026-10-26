@@ -33,7 +33,22 @@ vi.mock("@/lib/project-tools/registry", () => ({
   workspaceRename: vi.fn(),
   workspaceApplyPatch: vi.fn(),
 }));
+// Partial mock: keep the REAL dispatcher + IP tables; only the
+// host-validation verdict is stubbable so a test can pass the gate while
+// the connect-time lookup stays live (DNS-rebinding scenario).
+vi.mock("@/lib/ssrf-guard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ssrf-guard")>();
+  return { ...actual, validateOutboundHost: vi.fn(actual.validateOutboundHost) };
+});
+// The handler must use undici's fetch — the only implementation whose
+// dispatcher contract matches the SSRF guard's Agent. Pass-through so
+// tests can stub responses or assert the call never happens.
+vi.mock("undici", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("undici")>();
+  return { ...actual, fetch: vi.fn(actual.fetch) };
+});
 
+import { fetch as undiciFetch } from "undici";
 import { toolCreateProject, toolRunCommand, toolWebFetch } from "./extended-handlers";
 import { createBlankProject, getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
@@ -185,34 +200,59 @@ describe("toolWebFetch — SSRF hardening", () => {
 
   for (const url of blockedUrls) {
     it(`rejects ${url} before any fetch`, async () => {
-      const fetchSpy = vi.spyOn(global, "fetch");
+      const fetchSpy = vi.mocked(undiciFetch).mockClear();
       const result = await toolWebFetch("user-A", { url });
       expect(result.success).toBe(false);
       expect(fetchSpy).not.toHaveBeenCalled();
-      fetchSpy.mockRestore();
     });
   }
 
   it("rejects a redirect to a private target after a public first hop", async () => {
-    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(
+    const fetchSpy = vi.mocked(undiciFetch).mockResolvedValueOnce(
       new Response(null, {
         status: 302,
         headers: { location: "http://169.254.169.254/latest/meta-data/" },
-      }),
+      }) as never,
     );
     const result = await toolWebFetch("user-A", { url: "http://8.8.8.8/start" });
     expect(result.success).toBe(false);
     // Exactly one fetch happened (the public hop); the private hop never ran.
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    fetchSpy.mockRestore();
   });
 
   it("fails closed when the destination cannot be validated", async () => {
-    const fetchSpy = vi.spyOn(global, "fetch");
+    const fetchSpy = vi.mocked(undiciFetch).mockClear();
     const result = await toolWebFetch("user-A", { url: "http://definitely-not-a-real-host.invalid/" });
     expect(result.success).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
-    fetchSpy.mockRestore();
+  });
+
+  it("blocks at connect time when the socket lookup re-resolves private (DNS rebinding)", async () => {
+    // Host gate passes once (its own coverage lives in ssrf-guard.test.ts);
+    // the connect-time resolver (node:dns, used by validatingLookup) says
+    // PRIVATE — the dispatcher must reject independently of the verdict.
+    const { validateOutboundHost } = await import("@/lib/ssrf-guard");
+    vi.mocked(validateOutboundHost).mockResolvedValueOnce({ ok: true, addresses: ["93.184.216.34"] });
+    const dns = await import("node:dns");
+    const socketSpy = vi.spyOn(dns.default, "lookup").mockImplementation(((
+      _hostname: string,
+      options: unknown,
+      cb?: unknown,
+    ) => {
+      const callback = (typeof options === "function" ? options : cb) as (...a: unknown[]) => void;
+      const opts = typeof options === "function" ? {} : (options as { all?: boolean });
+      const addr = [{ address: "127.0.0.1", family: 4 }];
+      return opts.all ? callback(null, addr) : callback(null, addr[0].address, addr[0].family);
+    }) as never);
+    try {
+      // Real fetch runs through the SSRF dispatcher — the connect-time
+      // lookup is what must reject, NOT the validation-time verdict.
+      const result = await toolWebFetch("user-A", { url: "http://rebinding.example/" });
+      expect(result.success).toBe(false);
+      expect(socketSpy).toHaveBeenCalled();
+    } finally {
+      socketSpy.mockRestore();
+    }
   });
 });
 
@@ -230,8 +270,10 @@ describe("web_fetch transport — real socket enforcement", () => {
     const port = typeof address === "object" && address ? address.port : 0;
     try {
       const dispatcher = createSsrfDispatcher();
+      // undici's fetch — the implementation the handler actually uses.
+      // (Node's built-in fetch rejects undici-8 dispatchers outright.)
       await expect(
-        fetch(`http://127.0.0.1:${port}/`, { dispatcher } as RequestInit),
+        undiciFetch(`http://127.0.0.1:${port}/`, { dispatcher }),
       ).rejects.toThrow();
       expect(connections).toBe(0);
       await dispatcher.close();

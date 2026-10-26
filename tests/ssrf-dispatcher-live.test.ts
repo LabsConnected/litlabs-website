@@ -1,8 +1,9 @@
 /**
- * SCRATCH (untracked, not for commit) — live-socket verification of the
- * PR #736 SSRF dispatcher. Proves that blocked destinations open ZERO
- * connections on a real local HTTP server, and that a hostname resolving
- * to a private address at connect time is rejected (DNS-rebinding analogue).
+ * Live-socket verification of the PR #736 SSRF dispatcher. Proves that
+ * blocked destinations open ZERO connections on a real local HTTP server,
+ * and that a hostname resolving to a private address at connect time is
+ * rejected (DNS-rebinding analogue — exercises the `node:dns`
+ * `validatingLookup` path that unit tests mocking `dns/promises` miss).
  */
 import { describe, it, expect, vi, afterAll } from "vitest";
 import http from "node:http";
@@ -55,7 +56,6 @@ describe("ssrf dispatcher — live sockets", () => {
         const addr = [{ address: "127.0.0.1", family: 4 }];
         return opts.all ? callback(null, addr) : callback(null, addr[0].address, addr[0].family);
       }
-      // @ts-expect-error pass through to the real resolver
       return realLookup(hostname, options as never, callback as never);
     }) as never);
     try {

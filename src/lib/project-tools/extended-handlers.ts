@@ -28,6 +28,7 @@ import {
   workspaceApplyPatch,
   type ToolHandler,
 } from "@/lib/project-tools/registry";
+import { fetch as undiciFetch, type Response as UndiciResponse } from "undici";
 import { validateOutboundHost, createSsrfDispatcher } from "@/lib/ssrf-guard";
 
 // ─── String helpers ─────────────────────────────────────────────
@@ -581,7 +582,12 @@ export const toolWebFetch: ToolHandler = async (_userId, args) => {
   const maxChars = Math.min(Math.max(parseInt(String(args.max_chars ?? "4000"), 10) || 4000, 500), 20000);
 
   let current = initialUrl;
-  let resp: Response | null = null;
+  let resp: UndiciResponse | null = null;
+
+  // ONE deadline for the whole call — a redirect hop must not reset it,
+  // and host-validation time counts against it too.
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), WEB_FETCH_TIMEOUT_MS);
 
   try {
     // Manual redirect following: every hop is a fresh, fully validated
@@ -607,22 +613,28 @@ export const toolWebFetch: ToolHandler = async (_userId, args) => {
         return fail(`URLs pointing to internal/private addresses are blocked (${verdict.reason}).`);
       }
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), WEB_FETCH_TIMEOUT_MS);
-      try {
-        resp = await fetch(current, {
-          signal: controller.signal,
-          headers: { "User-Agent": "LiTT-Fetch/1.0", Accept: "text/html,application/json,text/plain" },
-          redirect: "manual",
-          dispatcher: getWebFetchDispatcher(),
-        } as RequestInit);
-      } finally {
-        clearTimeout(timeout);
-      }
+      // undici's fetch — the ONLY fetch whose dispatcher contract matches
+      // the Agent this guard builds. Node's global fetch rejects undici-8
+      // dispatchers ("invalid onRequestStart method") and would silently
+      // break every call, or worse bypass the connect-time validation.
+      const r = await undiciFetch(current, {
+        signal: controller.signal,
+        headers: { "User-Agent": "LiTT-Fetch/1.0", Accept: "text/html,application/json,text/plain" },
+        redirect: "manual",
+        dispatcher: getWebFetchDispatcher(),
+      });
+      resp = r;
 
-      if (resp.status >= 300 && resp.status < 400) {
-        const location = resp.headers.get("location");
-        if (!location) return fail(`web_fetch got a ${resp.status} redirect without a Location header.`);
+      if (r.status >= 300 && r.status < 400) {
+        const location = r.headers.get("location");
+        if (!location) return fail(`web_fetch got a ${r.status} redirect without a Location header.`);
+        // Release this hop's socket before following — an unread body
+        // leaves the connection busy in the shared dispatcher.
+        try {
+          await r.body?.cancel();
+        } catch {
+          /* body already consumed/aborted — nothing to release */
+        }
         current = new URL(location, current).toString();
         continue;
       }
@@ -649,6 +661,8 @@ export const toolWebFetch: ToolHandler = async (_userId, args) => {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("abort")) return fail(`web_fetch timed out after 20 seconds fetching ${initialUrl}.`);
     return fail(`web_fetch failed: ${msg.slice(0, 300)}`);
+  } finally {
+    clearTimeout(deadline);
   }
 };
 
