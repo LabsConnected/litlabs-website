@@ -45,64 +45,121 @@ describe("parseTasklistCsv", () => {
 });
 
 describe("listProcesses", () => {
-  it("returns top-N via injected execFile on Windows; honest unavailable elsewhere", async () => {
-    const run = vi.fn((_cmd: string, _args: string[], cb: (e: Error | null, o: string) => void) => {
-      cb(null, TASKLIST_CSV);
-    });
-    const result = await listProcesses(3, run);
-    if (process.platform === "win32") {
-      expect(result).toMatchObject({ ok: true, total: 5 });
-      if (result.ok) {
-        expect(result.top).toHaveLength(3);
-        expect(result.top[0].name).toBe("chrome.exe");
-      }
-      // Structured argv — tasklist.exe, CSV format flag, no shell.
-      expect(run).toHaveBeenCalledWith(
-        "tasklist.exe",
-        ["/fo", "csv", "/nh"],
-        expect.any(Function),
-      );
-    } else {
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.reason).toContain("tasklist");
-      expect(run).not.toHaveBeenCalled();
+  it("returns top-N via injected execFile on the win32 path — on any host", async () => {
+    const run = vi.fn(
+      (_c: string, _a: string[], _o: { timeout: number }, cb: (e: Error | null, o: string) => void) =>
+        cb(null, TASKLIST_CSV),
+    );
+    // Platform injection exercises the Windows codepath on Linux CI too.
+    const result = await listProcesses({ limit: 3, run, platform: "win32" });
+    expect(result).toMatchObject({ ok: true, total: 5 });
+    if (result.ok) {
+      expect(result.top).toHaveLength(3);
+      expect(result.top[0].name).toBe("chrome.exe");
     }
+    // Structured argv + bounded timeout — no shell, no unbounded child.
+    expect(run).toHaveBeenCalledWith(
+      "tasklist.exe",
+      ["/fo", "csv", "/nh"],
+      expect.objectContaining({ timeout: expect.any(Number) }),
+      expect.any(Function),
+    );
+  });
+
+  it("reports real-platform unavailable honestly without spawning", async () => {
+    if (process.platform === "win32") return; // covered by the win32-path test
+    const run = vi.fn();
+    const result = await listProcesses({ run });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("tasklist");
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("reports exec failure honestly", async () => {
-    const run = vi.fn((_c: string, _a: string[], cb: (e: Error | null, o: string) => void) =>
-      cb(new Error("spawn failed"), ""),
+    const run = vi.fn(
+      (_c: string, _a: string[], _o: { timeout: number }, cb: (e: Error | null, o: string) => void) =>
+        cb(new Error("spawn failed"), ""),
     );
-    const result = await listProcesses(5, run);
-    if (process.platform === "win32") {
-      expect(result).toMatchObject({ ok: false });
-    } else {
-      expect(result.ok).toBe(false);
-    }
+    const result = await listProcesses({ run, platform: "win32" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("tasklist failed");
+  });
+
+  it("reports timeout as termination, not silent failure", async () => {
+    const run = vi.fn(
+      (_c: string, _a: string[], _o: { timeout: number }, cb: (e: (Error & { killed?: boolean }) | null, o: string) => void) =>
+        cb(Object.assign(new Error("timed out"), { killed: true }), ""),
+    );
+    const result = await listProcesses({ run, platform: "win32" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("timed out");
+    if (!result.ok) expect(result.reason).toContain("terminated");
   });
 });
 
 describe("captureScreenshot", () => {
-  it("uses non-interactive structured PowerShell argv; reports platform honestly", async () => {
-    const run = vi.fn((_c: string, _a: string[], cb: (e: Error | null, o: string) => void) =>
-      cb(null, ""),
+  it("uses non-interactive structured PowerShell argv on the win32 path — on any host", async () => {
+    const run = vi.fn(
+      (_c: string, _a: string[], _o: { timeout: number }, cb: (e: Error | null, o: string) => void) =>
+        cb(null, ""),
     );
-    const result = await captureScreenshot(run);
-    if (process.platform === "win32") {
-      // The fake run wrote no file → honest "no output" rather than success.
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.reason).toContain("no output");
-      const [cmd, args] = run.mock.calls[0];
-      expect(cmd).toBe("powershell.exe");
-      expect(args).toContain("-NoProfile");
-      expect(args).toContain("-NonInteractive");
-      // Output path lands inside the dex shots dir, not caller input.
-      expect(args[args.length - 1]).toMatch(/dex[\\/]shots[\\/]shot-.*\.png/);
-    } else {
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.reason).toContain("System.Drawing");
-      expect(run).not.toHaveBeenCalled();
+    const result = await captureScreenshot({ run, platform: "win32" });
+    // The fake run wrote no file → honest "no output" rather than success.
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("no output");
+    const [cmd, args, opts] = run.mock.calls[0];
+    expect(cmd).toBe("powershell.exe");
+    expect(args).toContain("-NoProfile");
+    expect(args).toContain("-NonInteractive");
+    expect(opts.timeout).toBeGreaterThan(0);
+    // Output path lands inside the dex shots dir, as a standalone argv
+    // element — never interpolated into the script text.
+    expect(args[args.length - 1]).toMatch(/dex[\\/]shots[\\/]shot-.*\.png/);
+  });
+
+  it("path with an apostrophe is passed verbatim — quoting cannot break", async () => {
+    // Greptile regression: a dex home containing an apostrophe must not
+    // corrupt or inject into the PowerShell command line.
+    const apostropheHome = mkdtempSync(join(tmpdir(), "litt-dex'o'brien-"));
+    const prev2 = process.env.LITT_STATE_HOME;
+    process.env.LITT_STATE_HOME = apostropheHome;
+    try {
+      const run = vi.fn(
+        (_c: string, args: string[], _o: { timeout: number }, cb: (e: Error | null, o: string) => void) => {
+          // The LAST argv element is the path, verbatim, outside the script.
+          expect(args[args.length - 1]).toContain("'o'brien");
+          const script = args[args.indexOf("-Command") + 1];
+          expect(script).toContain("param($outPath)");
+          expect(script).not.toContain("o'brien"); // path NOT in script text
+          cb(null, "");
+        },
+      );
+      await captureScreenshot({ run, platform: "win32" });
+      expect(run).toHaveBeenCalled();
+    } finally {
+      if (prev2 === undefined) delete process.env.LITT_STATE_HOME;
+      else process.env.LITT_STATE_HOME = prev2;
+      await fs.rm(apostropheHome, { recursive: true, force: true });
     }
+  });
+
+  it("reports timeout as termination, not silent failure", async () => {
+    const run = vi.fn(
+      (_c: string, _a: string[], _o: { timeout: number }, cb: (e: (Error & { killed?: boolean }) | null, o: string) => void) =>
+        cb(Object.assign(new Error("timed out"), { killed: true }), ""),
+    );
+    const result = await captureScreenshot({ run, platform: "win32" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("timed out");
+  });
+
+  it("reports real-platform unavailable honestly without spawning", async () => {
+    if (process.platform === "win32") return; // covered by win32-path tests
+    const run = vi.fn();
+    const result = await captureScreenshot({ run });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("System.Drawing");
+    expect(run).not.toHaveBeenCalled();
   });
 });
 
@@ -147,6 +204,29 @@ describe("audit", () => {
     expect(rec.verb).toBe("status");
     expect(rec.ok).toBe(true);
     expect(rec.detail).not.toContain("superlongsecretvalue");
+  });
+
+  it("write failure keeps diagnostics working + warns once, sanitized", () => {
+    const warns: string[] = [];
+    const throwingWrite = () => {
+      throw Object.assign(new Error("EPERM: open '/p/secret=sk_live_abc123456789' failed"), { code: "EPERM" });
+    };
+    // Must not throw — the diagnostic path continues regardless.
+    audit(
+      { verb: "ram", ok: true, ms: 1, detail: "still works" },
+      { write: throwingWrite, onWarn: (m) => warns.push(m) },
+    );
+    audit(
+      { verb: "cpu", ok: true, ms: 1 },
+      { write: throwingWrite, onWarn: (m) => warns.push(m) },
+    );
+    expect(warns.length).toBeLessThanOrEqual(1); // warn-once, not spam
+    if (warns.length) {
+      expect(warns[0]).toContain("EPERM");
+      // Sanitized: errno only — never the raw message or secret content.
+      expect(warns[0]).not.toContain("sk_live");
+      expect(warns[0]).not.toContain("open '/p/");
+    }
   });
 });
 

@@ -5,11 +5,17 @@
  * how long it took. Details pass through the CLI's canonical secret
  * redaction before hitting disk — a diagnostic that echoes an env value
  * can never become a secret store.
+ *
+ * If the write fails, diagnostics keep working: a sanitized warning is
+ * emitted once per process. The warning carries only the errno code —
+ * never the raw exception message, which could contain file content or
+ * other sensitive detail.
  */
 
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { redact } from "../secret-redaction.js";
+import { warn } from "../utils.js";
 import { dexHome } from "./dex-home.js";
 
 export interface DexAuditRecord {
@@ -25,7 +31,23 @@ export function auditLogPath(): string {
   return join(dexHome(), "audit.jsonl");
 }
 
-export function audit(record: Omit<DexAuditRecord, "ts">): void {
+let warned = false;
+
+/** Errno code only — raw messages may carry paths/content, never emit. */
+function sanitizedWarn(err: unknown): string {
+  const code = (err as NodeJS.ErrnoException | null)?.code ?? "ERR";
+  return `Dex audit write failed (${String(code)}) — diagnostics continue but are not being recorded.`;
+}
+
+export interface AuditDeps {
+  /** Injectable sink for tests. */
+  write?: (path: string, data: string, encoding: "utf-8") => void;
+  /** Injectable warning sink for tests. */
+  onWarn?: (msg: string) => void;
+}
+
+export function audit(record: Omit<DexAuditRecord, "ts">, deps: AuditDeps = {}): void {
+  const write = deps.write ?? appendFileSync;
   const line: DexAuditRecord = {
     ts: new Date().toISOString(),
     verb: record.verb,
@@ -34,9 +56,13 @@ export function audit(record: Omit<DexAuditRecord, "ts">): void {
     detail: record.detail === undefined ? undefined : redact(record.detail),
   };
   try {
-    appendFileSync(auditLogPath(), JSON.stringify(line) + "\n", "utf-8");
-  } catch {
-    // Audit must never break the diagnostic itself — a full/locked disk
-    // degrades to "no audit", which is visible in the file's absence.
+    write(auditLogPath(), JSON.stringify(line) + "\n", "utf-8");
+  } catch (err) {
+    // Diagnostics must never break on audit failure — warn once,
+    // sanitized, then keep serving truthful results.
+    if (!warned) {
+      warned = true;
+      (deps.onWarn ?? warn)(sanitizedWarn(err));
+    }
   }
 }
