@@ -68,6 +68,7 @@ import { stripeSandboxCommand } from "./commands/stripe-sandbox.js";
 import { deployVerifyCommand } from "./commands/deploy-verify.js";
 import { studioAcceptanceCommand } from "./commands/studio-acceptance.js";
 import { productionFinishCommand } from "./commands/production-finish.js";
+import { dexCommand } from "./commands/dex.js";
 import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
 import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
 import { executeCommand } from "./lib/command-execution.js";
@@ -151,6 +152,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   "stripe-sandbox": stripeSandboxCommand,
   "deploy-verify": deployVerifyCommand,
   "studio-acceptance": studioAcceptanceCommand,
+  dex: dexCommand,
   // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
@@ -192,6 +194,10 @@ const NESTED_GROUPS = new Set(Object.keys(NESTED_COMMANDS));
  *  `shell` is an explicit alias for the same Ink cockpit as bare `litt`. */
 const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
 
+/** Commands whose --help is handled by the command itself, because their
+ *  subcommands are runtime args rather than COMMANDS-registry entries. */
+const SELF_HELP_COMMANDS = new Set(["dex"]);
+
 /**
  * Commands allowed while signed out (no valid user session).
  *
@@ -213,7 +219,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * features remain auth-gated at the provider level (resolveModelProvider
  * and awaitRemoteReady enforce this at call time, not at the gate).
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "dex"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
@@ -430,8 +436,10 @@ async function main(): Promise<number> {
       console.error(`Run 'litt ${command} --help' for available subcommands.`);
       return 1;
     }
-  } else if (rest.includes("--help") || rest.includes("-h")) {
-    // `litt <command> --help` — show main help, never execute
+  } else if ((rest.includes("--help") || rest.includes("-h")) && !SELF_HELP_COMMANDS.has(command)) {
+    // `litt <command> --help` — show main help, never execute.
+    // SELF_HELP_COMMANDS own their subcommand help — the flag is passed
+    // through to the handler (which never executes anything for it).
     printHelp();
     return 0;
   }
