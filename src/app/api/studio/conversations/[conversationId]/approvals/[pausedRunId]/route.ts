@@ -739,6 +739,10 @@ export async function POST(
       // re-injected after the approved tool runs so approving one tool
       // cannot silently drop the rest of the batch.
       deferredToolCalls: resolved.deferredToolCalls,
+      // Calls that already executed before the pause — including their
+      // read-back evidence — seeded into the resumed run's log so the
+      // verdict covers the whole mutation history.
+      priorToolCalls: resolved.priorToolCalls,
       existingCheckpoint: resumeCheckpoint,
       // Capability set for the resume execution gate. Resolved fresh here
       // from the same source of truth the initial loop used
@@ -949,12 +953,19 @@ export async function POST(
             pausedMessages: result.pendingApproval.pausedMessages,
             executionMode: resolved.executionMode,
             systemPrompt: resolved.systemPrompt,
-            checkpointId: null,
+            // Persist the run baseline (the original run's first
+            // pre-mutation checkpoint), not null: the next resume diffs
+            // the whole run's work instead of reporting "unknown".
+            checkpointId: result.baselineCheckpoint?.checkpointId ?? result.checkpoint?.checkpointId ?? null,
             actionRunId: resolved.actionRunId ?? null,
             qualityLoopState: result.pendingApproval.qualityLoopState,
             deferredToolCalls: result.pendingApproval.deferredToolCalls,
             stepsUsed: result.pendingApproval.stepsUsedAtPause,
             hadInterveningMutation: result.pendingApproval.hadInterveningMutationAtPause,
+            // Carry the first gate's verified/contradicted call history —
+            // omitting it writes prior_tool_calls: null, so the next
+            // resume would lose every mutation proven across THIS gate.
+            priorToolCalls: result.pendingApproval.priorToolCalls,
           });
           nestedPausedRunId = nested.id;
         } catch (nestedErr) {

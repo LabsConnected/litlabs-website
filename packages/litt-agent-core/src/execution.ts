@@ -103,6 +103,15 @@ interface CommandSpec {
   subcommands?: Record<string, CapabilityTier>;
   /** Args that carry path values — validated against workspace root */
   pathArgs?: string[];
+  /**
+   * Global (pre-subcommand) flags that consume the NEXT argv token as
+   * their value (e.g. `git -C <dir>`, `git -c k=v`). Without this, a
+   * flag's value could be mistaken for the subcommand — and worse, the
+   * real subcommand could be shifted out of the position the classifier
+   * checks (`git -C . commit` must still resolve `commit`).
+   * `--flag=value` forms are self-delimiting and need no entry here.
+   */
+  valueFlags?: string[];
   /** Whether this command can execute arbitrary code */
   arbitraryCode?: boolean;
 }
@@ -123,7 +132,9 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   diff: { defaultCapability: "read_only" },
   cmp: { defaultCapability: "read_only" },
   cut: { defaultCapability: "read_only" },
-  sort: { defaultCapability: "read_only" },
+  // sort is arg-sensitive: `sort -o out in` writes a file — see
+  // classifyArgSensitive(). -o/--output stay path-confined.
+  sort: { defaultCapability: "read_only", pathArgs: ["-o", "--output"] },
   uniq: { defaultCapability: "read_only" },
   md5sum: { defaultCapability: "read_only" },
   sha256sum: { defaultCapability: "read_only" },
@@ -222,7 +233,11 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
     pathArgs: ["--cwd", "--prefix"],
   },
 
-  // Git — read-only vs mutating
+  // Git — read-only vs mutating. Subcommand detection is flag-aware:
+  // value-taking global flags (-C, -c, --git-dir, ...) are skipped so
+  // `git -C <dir> commit` still resolves `commit`. `branch`, `tag`,
+  // `remote`, `config`, `reflog`, `worktree`, `submodule` and
+  // `symbolic-ref` are arg-sensitive — see gitSubcommandCapability().
   git: {
     defaultCapability: "read_only",
     subcommands: {
@@ -234,16 +249,37 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
       blame: "read_only",
       ls: "read_only",
       "ls-files": "read_only",
+      "ls-remote": "read_only",
+      "ls-tree": "read_only",
       remote: "read_only",
       tag: "read_only",
       describe: "read_only",
       rev: "read_only",
       "rev-parse": "read_only",
+      "rev-list": "read_only",
+      "cat-file": "read_only",
+      "for-each-ref": "read_only",
+      "count-objects": "read_only",
+      "name-rev": "read_only",
+      "show-branch": "read_only",
+      whatchanged: "read_only",
+      fsck: "read_only",
+      grep: "read_only",
+      var: "read_only",
+      "verify-tag": "read_only",
+      "verify-commit": "read_only",
+      shortlog: "read_only",
+      help: "read_only",
+      reflog: "read_only",
+      worktree: "read_only",
+      submodule: "read_only",
+      "symbolic-ref": "read_only",
       config: "workspace_edit",
       checkout: "workspace_edit",
       switch: "workspace_edit",
       restore: "workspace_edit",
       add: "workspace_edit",
+      stage: "workspace_edit",
       commit: "workspace_edit",
       merge: "workspace_edit",
       rebase: "workspace_edit",
@@ -251,6 +287,22 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
       "cherry-pick": "workspace_edit",
       revert: "workspace_edit",
       stash: "workspace_edit",
+      bisect: "workspace_edit",
+      gc: "workspace_edit",
+      prune: "workspace_edit",
+      repack: "workspace_edit",
+      archive: "workspace_edit",
+      bundle: "workspace_edit",
+      am: "workspace_edit",
+      apply: "workspace_edit",
+      "format-patch": "workspace_edit",
+      "checkout-index": "workspace_edit",
+      "update-index": "workspace_edit",
+      "read-tree": "workspace_edit",
+      "write-tree": "workspace_edit",
+      "commit-tree": "workspace_edit",
+      "update-ref": "workspace_edit",
+      "pack-refs": "workspace_edit",
       reset: "destructive",
       clean: "destructive",
       push: "external_action",
@@ -262,6 +314,7 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
       rm: "destructive",
     },
     pathArgs: ["-C", "--git-dir", "--work-tree"],
+    valueFlags: ["-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--namespace", "--config-env"],
   },
 
   // Build tools — mostly read-only
@@ -289,7 +342,11 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   hostname: { defaultCapability: "read_only" },
   uname: { defaultCapability: "read_only" },
   pwd: { defaultCapability: "read_only" },
-  env: { defaultCapability: "read_only" },
+  // env is a command WRAPPER: `env [opts] [K=V ...] CMD [ARGS...]` runs
+  // CMD. unwrapEnvCommand() exposes the inner command before this spec
+  // is used. -C/--chdir is a path arg: `env -C /outside cat x` must not
+  // escape the workspace.
+  env: { defaultCapability: "read_only", pathArgs: ["-C", "--chdir"] },
   printenv: { defaultCapability: "read_only" },
 
   // LiTT CLI self-introspection — read-only diagnostic subcommands.
@@ -359,6 +416,412 @@ function isVersionFlag(arg: string): boolean {
   return VERSION_FLAGS.has(arg);
 }
 
+// ─── Operand walking ──────────────────────────────────────────────
+
+/**
+ * Return the argv indices of operand (non-flag) tokens.
+ *
+ * Flag tokens (`-x`, `--foo`) are skipped. A flag listed in
+ * spec.valueFlags also consumes the following token as its value
+ * (`git -C <dir>`); `--flag=value` is self-contained. This prevents
+ * flag/value pairs from shifting the subcommand out of argv[0] —
+ * `git -C . commit` must still resolve the `commit` subcommand, and
+ * `git -c k=v commit` must not see `k=v` as an unknown subcommand.
+ */
+function operandIndices(spec: CommandSpec, args: string[]): number[] {
+  const valueFlags = new Set(spec.valueFlags ?? []);
+  const out: number[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg.length > 1 && arg.startsWith("-")) {
+      if (!arg.includes("=") && valueFlags.has(arg)) i++; // flag consumes next token
+      continue;
+    }
+    out.push(i);
+  }
+  return out;
+}
+
+// ─── Command wrappers ─────────────────────────────────────────────
+
+/**
+ * `env` is a command wrapper: `env [opts] [K=V ...] CMD [ARGS ...]`
+ * executes CMD — `env FOO=1 rm -rf x` runs rm, so registering `env` as
+ * read_only would let any command bypass classification. Unwrap env's
+ * own options and assignments to expose the real command.
+ *
+ * Returns the inner command, or null when env is only printing the
+ * environment (no command operand) or just setting variables.
+ */
+function unwrapEnvCommand(args: string[]): { command: string; args: string[] } | null {
+  // env options that consume the next argv token as their value
+  const VALUE_OPTS = new Set(["-u", "--unset", "-C", "--chdir", "-a", "--argv0", "-P"]);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--") {
+      i++;
+      return i < args.length ? { command: args[i], args: args.slice(i + 1) } : null;
+    }
+    // -S/--split-string: the VALUE is a command line — split it and
+    // classify the result (`env -S 'touch x'` runs touch).
+    if (arg === "-S" || arg === "--split-string") {
+      const line = args[i + 1];
+      if (line === undefined) return null;
+      const parts = line.trim().split(/\s+/).filter(Boolean);
+      return parts.length > 0 ? { command: parts[0], args: parts.slice(1) } : null;
+    }
+    const splitEq = arg.match(/^(--split-string=|-S)([\s\S]*)$/);
+    if (splitEq && splitEq[2]) {
+      const parts = splitEq[2].trim().split(/\s+/).filter(Boolean);
+      return parts.length > 0 ? { command: parts[0], args: parts.slice(1) } : null;
+    }
+    if (arg.length > 1 && arg.startsWith("-")) {
+      if (!arg.includes("=") && VALUE_OPTS.has(arg)) i++; // consume value
+      continue;
+    }
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(arg)) continue; // K=V assignment
+    return { command: arg, args: args.slice(i + 1) }; // inner command
+  }
+  return null;
+}
+
+// ─── Arg-sensitive read-only commands ─────────────────────────────
+//
+// These commands are registered read_only, but specific flags or
+// operands turn them into mutating or arbitrary-code operations. The
+// classification must reflect the args, not just the binary name —
+// otherwise PLAN mode and the approval gate let the mutating forms
+// through (`find -delete`, `sort -o`, `date -s`, `eslint --fix`, ...).
+
+const FIND_EXEC_FLAGS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+const FIND_WRITE_FLAGS = new Set(["-fprint", "-fprint0", "-fprintf", "-fls"]);
+const DATE_VALUE_FLAGS = new Set(["-d", "--date", "-r", "--reference", "-f", "--file"]);
+
+function classifyArgSensitive(cmd: string, args: string[]): RiskAssessment | null {
+  switch (cmd) {
+    case "find": {
+      if (args.some((a) => FIND_EXEC_FLAGS.has(a))) {
+        return {
+          level: "elevated",
+          capability: "arbitrary_code",
+          reason: "find -exec/-ok runs an embedded command",
+          mutating: true,
+        };
+      }
+      if (args.includes("-delete")) {
+        return {
+          level: "dangerous",
+          capability: "destructive",
+          reason: "find -delete removes matched files",
+          mutating: true,
+        };
+      }
+      if (args.some((a) => FIND_WRITE_FLAGS.has(a))) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "find -fprint/-fprintf writes an output file",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "sort": {
+      if (
+        args.some(
+          (a) =>
+            a === "-o" ||
+            a === "--output" ||
+            a.startsWith("--output=") ||
+            (a.startsWith("-o") && a.length > 2),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "sort -o/--output writes a file",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "date": {
+      if (args.some((a) => a === "-s" || a === "--set" || a.startsWith("--set="))) {
+        return {
+          level: "dangerous",
+          capability: "external_action",
+          reason: "date -s/--set changes the system clock",
+          mutating: true,
+        };
+      }
+      // A bare operand (not a flag value, not a +FORMAT) is a new time
+      // to set (MMDDhhmm). Skip values of flags that take one.
+      for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (a.length > 1 && a.startsWith("-")) {
+          if (!a.includes("=") && DATE_VALUE_FLAGS.has(a)) i++;
+          continue;
+        }
+        if (!a.startsWith("+")) {
+          return {
+            level: "dangerous",
+            capability: "external_action",
+            reason: "date <operand> sets the system clock",
+            mutating: true,
+          };
+        }
+      }
+      return null;
+    }
+    case "hostname": {
+      // `hostname` prints the name; `hostname NAME` sets it.
+      // -F/--file also sets it (from file contents).
+      if (
+        args.some((a) => a === "-F" || a === "--file") ||
+        args.some((a) => !(a.length > 1 && a.startsWith("-")))
+      ) {
+        return {
+          level: "dangerous",
+          capability: "external_action",
+          reason: "hostname <name>/-F changes the system hostname",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "rg": {
+      if (
+        args.some(
+          (a) =>
+            a === "--pre" ||
+            a.startsWith("--pre=") ||
+            a === "--pre-glob" ||
+            a.startsWith("--pre-glob=") ||
+            a === "--hostname-bin" ||
+            a.startsWith("--hostname-bin="),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "arbitrary_code",
+          reason: "rg --pre/--hostname-bin runs an external program",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "eslint": {
+      if (
+        args.some(
+          (a) =>
+            a === "--fix" ||
+            a === "--cache" ||
+            a === "-o" ||
+            a === "--output-file" ||
+            a.startsWith("--output-file="),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "eslint --fix/--cache/-o writes files",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "prettier": {
+      if (args.some((a) => a === "-w" || a === "--write")) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "prettier --write modifies files",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "tsc":
+    case "tsc-watch": {
+      // tsc emits build artifacts by default; only explicitly
+      // non-emitting modes stay read-only.
+      const nonEmitting = args.some((a) =>
+        ["--noEmit", "--showConfig", "--listFilesOnly", "--noCheck"].includes(a),
+      );
+      if (!nonEmitting) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "tsc emits build artifacts (no --noEmit)",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+// ─── Git arg-sensitive subcommands ────────────────────────────────
+
+const GIT_CONFIG_MUTATE_FLAGS = new Set([
+  "--add",
+  "--unset",
+  "--unset-all",
+  "--replace-all",
+  "--rename-section",
+  "--remove-section",
+  "-e",
+  "--edit",
+]);
+const GIT_CONFIG_VALUE_FLAGS = new Set([
+  "-f",
+  "--file",
+  "--blob",
+  "--default",
+  "--type",
+  "--get",
+  "--get-all",
+  "--get-regexp",
+  "--get-urlmatch",
+  "--fixed-value",
+]);
+const GIT_REF_LIST_FLAGS = new Set([
+  "-l",
+  "--list",
+  "--show-current",
+  "-r",
+  "--remotes",
+  "-v",
+  "-vv",
+  "-q",
+  "--quiet",
+  "-i",
+  "--ignore-case",
+  "--omit-empty",
+  "--sort",
+  "--format",
+  "--points-at",
+  "--merged",
+  "--no-merged",
+  "--contains",
+  "--no-contains",
+  "--column",
+  "--no-column",
+  "--color",
+  "--no-color",
+  "--abbrev",
+  "--no-abbrev",
+  "--exclude",
+  "-n",
+]);
+// `-a`/`--all` mean "list all" for `git branch` but `-a` is `--annotate`
+// (creates a tag) for `git tag` — kept out of the shared set.
+const GIT_BRANCH_LIST_FLAGS = new Set(["-a", "--all"]);
+const GIT_REF_MUTATE_FLAGS = new Set([
+  "-m",
+  "-M",
+  "--move",
+  "-c",
+  "-C",
+  "--copy",
+  "-u",
+  "--set-upstream-to",
+  "--unset-upstream",
+  "-f",
+  "--force",
+  "-t",
+  "--track",
+  "-s",
+  "--sign",
+  "--annotate",
+  "-e",
+  "--edit-description",
+]);
+const GIT_REMOTE_MUTATE_OPS = new Set([
+  "add",
+  "rename",
+  "remove",
+  "rm",
+  "set-url",
+  "set-head",
+  "set-branches",
+  "prune",
+  "update",
+]);
+
+/** Count operand tokens (non-flag args, skipping values of known value-flags). */
+function countOperands(args: string[], valueFlags: Set<string>): number {
+  let count = 0;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.length > 1 && a.startsWith("-")) {
+      if (!a.includes("=") && valueFlags.has(a)) i++;
+      continue;
+    }
+    count++;
+  }
+  return count;
+}
+
+/**
+ * Argument-sensitive capability for git subcommands registered
+ * read_only whose operands can mutate (`git branch foo` creates a
+ * branch, `git tag v1` creates a tag, `git remote add` writes config).
+ * Returns the corrected tier, or null to keep the map value.
+ */
+function gitSubcommandCapability(sub: string, rest: string[]): CapabilityTier | null {
+  switch (sub) {
+    case "config": {
+      if (rest.some((a) => GIT_CONFIG_MUTATE_FLAGS.has(a))) return "workspace_edit";
+      // `git config <key>` reads; `git config <key> <value>` writes.
+      return countOperands(rest, GIT_CONFIG_VALUE_FLAGS) >= 2 ? "workspace_edit" : "read_only";
+    }
+    case "branch":
+    case "tag": {
+      if (rest.some((a) => a === "-d" || a === "-D" || a === "--delete")) return "destructive";
+      const isListFlag = (a: string) =>
+        GIT_REF_LIST_FLAGS.has(a) ||
+        GIT_REF_LIST_FLAGS.has(a.split("=")[0]) ||
+        (sub === "branch" && GIT_BRANCH_LIST_FLAGS.has(a));
+      if (rest.some(isListFlag)) return "read_only";
+      // A name operand (or a mutate flag) creates/moves the ref.
+      // `git tag -a` is annotate (mutating) — for tag, -a is not a list flag.
+      const isMutateFlag = (a: string) =>
+        GIT_REF_MUTATE_FLAGS.has(a) || (sub === "tag" && a === "-a");
+      if (rest.some(isMutateFlag)) return "workspace_edit";
+      if (countOperands(rest, new Set(["-u", "--set-upstream-to", "-m", "-F"])) > 0)
+        return "workspace_edit";
+      return null;
+    }
+    case "remote": {
+      const op = rest.find((a) => !(a.length > 1 && a.startsWith("-")));
+      return op !== undefined && GIT_REMOTE_MUTATE_OPS.has(op) ? "workspace_edit" : null;
+    }
+    case "reflog": {
+      const op = rest.find((a) => !(a.length > 1 && a.startsWith("-")));
+      return op === "expire" || op === "delete" ? "destructive" : "read_only";
+    }
+    case "worktree": {
+      const op = rest.find((a) => !(a.length > 1 && a.startsWith("-")));
+      return op === undefined || op === "list" ? "read_only" : "workspace_edit";
+    }
+    case "submodule": {
+      const op = rest.find((a) => !(a.length > 1 && a.startsWith("-")));
+      if (op === "foreach") return "arbitrary_code";
+      return op === undefined || op === "status" ? "read_only" : "workspace_edit";
+    }
+    case "symbolic-ref": {
+      if (rest.some((a) => a === "-d" || a === "--delete")) return "workspace_edit";
+      // `symbolic-ref -q HEAD` reads; `symbolic-ref HEAD <ref>` writes.
+      return countOperands(rest, new Set(["-m"])) >= 2 ? "workspace_edit" : "read_only";
+    }
+    default:
+      return null;
+  }
+}
+
 // ─── Operation parser ─────────────────────────────────────────────
 
 /**
@@ -421,38 +884,77 @@ export function classifyCommand(command: string, args: string[], cwd?: string): 
     };
   }
 
-  // Determine capability from subcommand
-  let capability = spec.defaultCapability;
-  if (spec.subcommands && args.length > 0) {
-    const subcmd = args[0].toLowerCase();
-    if (spec.subcommands[subcmd]) {
-      capability = spec.subcommands[subcmd];
+  // Command wrappers: `env CMD ...` executes CMD — classify the inner
+  // command so a wrapper can't launder a mutation through a read-only
+  // registration (`env rm -rf x`, `env -S 'rm -rf x'`).
+  if (cmd === "env") {
+    const inner = unwrapEnvCommand(args);
+    if (inner) {
+      const innerRisk = classifyCommand(inner.command, inner.args, cwd);
+      return { ...innerRisk, reason: `env wrapper → ${innerRisk.reason}` };
     }
+    return {
+      level: "safe",
+      capability: "read_only",
+      reason: "env → prints environment (no wrapped command)",
+      mutating: false,
+    };
   }
 
-  // Special case: git branch -D (destructive)
-  if (cmd === "git" && args[0] === "branch" && (args.includes("-D") || args.includes("-d"))) {
-    capability = "destructive";
-  }
+  // Registered read_only commands whose flags/operands turn them
+  // mutating or arbitrary-code (find -exec, sort -o, eslint --fix, ...).
+  const argSensitive = classifyArgSensitive(cmd, args);
+  if (argSensitive) return argSensitive;
 
-  // Special case: litt --remote <subcommand> or litt <subcommand>
-  // The --remote flag can appear before the subcommand, so we scan args
-  // for the first non-flag token and check if it's a known read-only
-  // subcommand. This lets the agent run `litt --remote doctor` etc.
-  if (cmd === "litt" && spec.subcommands) {
-    const firstNonFlag = args.find((a) => !a.startsWith("-"));
-    if (firstNonFlag) {
-      const subcmd = firstNonFlag.toLowerCase();
-      if (spec.subcommands[subcmd]) {
-        capability = spec.subcommands[subcmd];
+  // Determine capability from the subcommand — the first OPERAND
+  // token. Flag/value pairs before it must not shift it out of place:
+  // `git -C <dir> commit` and `git -c k=v commit` still resolve
+  // `commit`. If the first operand is unknown but a later operand is a
+  // known subcommand (a value-flag we don't model consumed nothing),
+  // use it — fail closed toward the known capability.
+  let capability = spec.defaultCapability;
+  let subIndex: number | null = null;
+  if (spec.subcommands) {
+    const ops = operandIndices(spec, args);
+    if (ops.length > 0) {
+      if (spec.subcommands[args[ops[0]].toLowerCase()]) {
+        subIndex = ops[0];
+      } else {
+        const hit = ops.find((i) => spec.subcommands![args[i].toLowerCase()]);
+        if (hit !== undefined) {
+          subIndex = hit;
+        } else if (cmd === "git") {
+          // `git <unknown-op>` resolves an external `git-<op>` binary
+          // from PATH — arbitrary code, not a read-only builtin.
+          capability = "arbitrary_code";
+        }
+      }
+      if (subIndex !== null) {
+        capability = spec.subcommands[args[subIndex].toLowerCase()];
       }
     }
   }
 
+  // Arg-sensitive git subcommands: `git branch foo` creates a branch,
+  // `git remote add` writes config — the subcommand name alone is
+  // registered read_only, so the operands decide.
+  if (cmd === "git" && subIndex !== null) {
+    const upgraded = gitSubcommandCapability(
+      args[subIndex].toLowerCase(),
+      args.slice(subIndex + 1),
+    );
+    if (upgraded) capability = upgraded;
+  }
+
   // Special case: npm/pnpm/yarn run <script> — inspect package.json
   let resolvedScriptBody: string | null | undefined;
-  if ((cmd === "npm" || cmd === "pnpm" || cmd === "yarn") && args[0] === "run" && args.length >= 2) {
-    const scriptName = args[1];
+  if (
+    (cmd === "npm" || cmd === "pnpm" || cmd === "yarn") &&
+    subIndex !== null &&
+    args[subIndex] === "run" &&
+    args[subIndex + 1] !== undefined
+  ) {
+    const scriptName = args[subIndex + 1];
     resolvedScriptBody = resolvePackageScript(cwd ?? process.cwd(), scriptName);
     if (resolvedScriptBody === null) {
       return {

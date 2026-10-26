@@ -117,6 +117,7 @@ import {
   markRunProcessing,
   verifyRunClaim,
   releaseRunClaim,
+  createPausedRun,
 } from "@/lib/litt-intelligence/paused-run-store";
 import { callLLMWithTools, buildAssistantToolCallMessage } from "@/lib/litt-intelligence/llm-tool-calling";
 import { transitionActionRunEventActivity } from "@/lib/action-runtime";
@@ -248,5 +249,64 @@ describe("POST approval → real resume executes the approved mutation", () => {
     // The claim was verified and released around the canonical write.
     expect(verifyRunClaim).toHaveBeenCalled();
     expect(releaseRunClaim).toHaveBeenCalledWith(PAUSED_ID, "user_123", expect.any(String), "completed");
+  });
+});
+
+describe("nested approval preserves first-gate evidence", () => {
+  // The nested gate used to write prior_tool_calls: null — so a run that
+  // hit TWO approval gates resumed the second with an empty evidence log
+  // and lost every verified/contradicted call proven across the first.
+  it("passes the seeded + newly executed call history to the nested paused run", async () => {
+    vi.mocked(getProject).mockResolvedValue({ framework: "static" } as never);
+    const seededPrior = [{
+      toolId: "files.write",
+      success: true,
+      summary: "wrote index.html (v0)",
+      mutating: true,
+      paths: ["index.html"],
+      persisted: true,
+    }];
+    const run = {
+      ...pendingRun(),
+      toolId: "files.write",
+      toolCallId: "tc-write-1",
+      inputs: { projectId: "proj-123", path: "index.html", content: "<html>v1</html>" },
+      priorToolCalls: seededPrior,
+      // The remainder of the batch: a gated mutation that pauses AGAIN.
+      deferredToolCalls: [
+        { toolId: "files.mkdir", toolCallId: "tc-mkdir-2", inputs: { path: "nested-dir" } },
+      ],
+      pausedMessages: [
+        { role: "user" as const, content: "Build a roofing site" },
+        buildAssistantToolCallMessage(
+          [{ toolId: "files.write", toolCallId: "tc-write-1", inputs: { projectId: "proj-123", path: "index.html", content: "<html>v1</html>" } }],
+          "Writing the site.",
+          undefined,
+        ),
+      ],
+    };
+    vi.mocked(getPausedRun).mockResolvedValue(run as never);
+    vi.mocked(resolvePausedRun).mockResolvedValue(run as never);
+    vi.mocked(createPausedRun).mockResolvedValue({ id: "nested-1" } as never);
+
+    expect((await POST(makeRequest("approved"), routeParams)).status).toBe(202);
+    await waitFor(() => vi.mocked(createPausedRun).mock.calls.length > 0);
+
+    const nestedInput = vi.mocked(createPausedRun).mock.calls[0][0] as {
+      toolId: string;
+      priorToolCalls?: Array<{ toolId: string; summary: string }>;
+    };
+    expect(nestedInput.toolId).toBe("files.mkdir");
+    expect(nestedInput.priorToolCalls).toBeDefined();
+    // The seeded first-gate evidence survives into the second gate.
+    expect(nestedInput.priorToolCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolId: "files.write", summary: "wrote index.html (v0)" }),
+      ]),
+    );
+    // …plus the write that was approved and executed in THIS resume.
+    expect(nestedInput.priorToolCalls!.length).toBeGreaterThanOrEqual(2);
+    // The deferred mkdir paused instead of executing unapproved.
+    expect(mkdirCalls).not.toContain("nested-dir");
   });
 });
