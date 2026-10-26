@@ -1,0 +1,8 @@
+# Suppresses confirmed synthetic test fixtures — stripe-shaped literals that are
+# not real credentials. Each fingerprint is pinned to an exact commit/file/rule/
+# line, so any new occurrence elsewhere still reports.
+#
+# 1) audit-failure error-string fixture, introduced at cf80a8f1, removed in dbf5b43f.
+cf80a8f1c71e42c1d83daf42a55445a7b06d941e:packages/litt-cli/src/__tests__/dex-stage1a.test.ts:stripe-access-token:212
+# 2) the literal accidentally quoted inside this file's own comment at f6bf00cc.
+f6bf00cc1f28803dea516f8487e612fbd7c2bb3d:.gitleaksignore:stripe-access-token:1
