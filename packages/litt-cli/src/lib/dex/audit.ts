@@ -18,6 +18,7 @@
  */
 
 import { appendFileSync, closeSync, existsSync, openSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { open as openAsync, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { redact } from "../secret-redaction.js";
 import { warn } from "../utils.js";
@@ -77,6 +78,149 @@ export interface AuditLockOpts {
   waitMs?: number;
   staleMs?: number;
   pollMs?: number;
+}
+
+/**
+ * Async twin of auditWithLock for the long-lived agent: lock waits use
+ * real timers, so the event loop stays free while a peer holds the lock.
+ * Same exclusivity, bounded wait, and stale-holder recovery — an agent
+ * request path can wait out a held lock WITHOUT freezing every other
+ * request or the sentinel poll.
+ */
+export async function auditWithLockAsync<T>(path: string, fn: () => T | Promise<T>, opts: AuditLockOpts = {}): Promise<T> {
+  const waitMs = opts.waitMs ?? AUDIT_LOCK_WAIT_MS;
+  const staleMs = opts.staleMs ?? AUDIT_LOCK_STALE_MS;
+  const pollMs = opts.pollMs ?? AUDIT_LOCK_POLL_MS;
+  const lock = auditLockPath(path);
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    let handle: FileHandle;
+    try {
+      handle = await openAsync(lock, "wx", 0o600);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException | null)?.code !== "EEXIST") throw err;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > staleMs) {
+          unlinkSync(lock); // abandoned lock — holder died mid-write
+          continue;
+        }
+      } catch {
+        /* stat/unlink raced with another waiter — loop and re-try */
+      }
+      if (Date.now() >= deadline) throw err;
+      await new Promise((r) => setTimeout(r, pollMs)); // event loop free here
+      continue;
+    }
+    try {
+      await handle.writeFile(String(process.pid));
+    } catch {
+      /* pid write is best-effort */
+    }
+    try {
+      return await fn();
+    } finally {
+      await handle.close().catch(() => {});
+      try {
+        unlinkSync(lock);
+      } catch {
+        /* released — a recovering waiter may already own it */
+      }
+    }
+  }
+}
+
+/** One queued record: the line is built+redacted at CALL time so its
+ * timestamp reflects the event, not the eventual write. */
+interface QueuedAudit {
+  path: string;
+  line: string;
+  deps: AuditDeps;
+}
+const auditQueue: QueuedAudit[] = [];
+let auditDraining = false;
+let dropWarned = false;
+
+function buildLine(record: Omit<DexAuditRecord, "ts">): string {
+  const line: DexAuditRecord = {
+    ts: new Date().toISOString(),
+    verb: record.verb,
+    ok: record.ok,
+    ms: Math.round(record.ms),
+    detail: record.detail === undefined ? undefined : redact(record.detail),
+  };
+  return JSON.stringify(line) + "\n";
+}
+
+async function drainAuditQueue(): Promise<void> {
+  while (auditQueue.length > 0) {
+    const item = auditQueue[0]!;
+    const write = item.deps.write ?? appendFileSync;
+    try {
+      if (item.deps.write) {
+        write(item.path, item.line, "utf-8"); // injected sink — lock-free
+      } else {
+        await auditWithLockAsync(item.path, () => {
+          rotateAuditIfNeeded(item.path, item.deps.maxBytes, item.deps.maxBackups);
+          write(item.path, item.line, "utf-8");
+        });
+      }
+    } catch (err) {
+      // A record we could not preserve is reported, once, sanitized —
+      // never silently discarded, never a raw exception message.
+      if (!dropWarned) {
+        dropWarned = true;
+        (item.deps.onWarn ?? warn)(`Dex audit record dropped (${sanitizedWarn(err)})`);
+      }
+    }
+    auditQueue.shift();
+  }
+  auditDraining = false;
+}
+
+/**
+ * Non-blocking audit for the long-lived agent: records queue FIFO and a
+ * background drain writes them under the same cross-process lock. The
+ * request path and the emergency-stop path NEVER wait on the lock — a
+ * record that outlives its bounded wait is dropped and reported once.
+ */
+export function auditSoon(record: Omit<DexAuditRecord, "ts">, deps: AuditDeps = {}): void {
+  auditQueue.push({ path: auditLogPath(), line: buildLine(record), deps });
+  if (!auditDraining) {
+    auditDraining = true;
+    setImmediate(() => void drainAuditQueue());
+  }
+}
+
+/**
+ * Best-effort synchronous flush for the agent stop path: try the lock
+ * once per queued record (waitMs 0 — never blocks), preserving whatever
+ * fits. Called from stop() so the halt record and pending queue stand a
+ * real chance of landing before the listener closes.
+ */
+export function flushAuditQueue(): void {
+  while (auditQueue.length > 0) {
+    const item = auditQueue.shift()!;
+    const write = item.deps.write ?? appendFileSync;
+    try {
+      if (item.deps.write) {
+        write(item.path, item.line, "utf-8");
+      } else {
+        auditWithLock(item.path, () => {
+          rotateAuditIfNeeded(item.path, item.deps.maxBytes, item.deps.maxBackups);
+          write(item.path, item.line, "utf-8");
+        }, { waitMs: 0 });
+      }
+    } catch {
+      /* record dropped during shutdown — nothing more to report to */
+    }
+  }
+}
+
+/** Test seam — resolves once the drain is idle (queue empty). */
+export async function waitAuditIdle(): Promise<void> {
+  while (auditDraining || auditQueue.length > 0) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
 }
 
 /**

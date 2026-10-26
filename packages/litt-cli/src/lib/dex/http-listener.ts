@@ -14,7 +14,7 @@
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
-import { audit } from "./audit.js";
+import { auditSoon } from "./audit.js";
 import { isStopRequested } from "./kill-switch.js";
 import { verifyToken } from "./auth-token.js";
 import { reportCpu, reportOllama, reportProcs, reportProject, reportRam, reportStatus } from "./report.js";
@@ -81,7 +81,9 @@ export function createDexListener(token: string, port: number, onHalt: () => voi
     req.setTimeout(REQUEST_TIMEOUT_MS, () => reject(res, 408, "request timeout"));
 
     const finish = (status: number, reason: string) => {
-      audit({ verb: `http:${req.method} ${verb}`, ok: status < 400, ms: Date.now() - t0, detail: `${status} ${reason} from ${remote}` });
+      // Non-blocking queue — a held audit lock must never freeze the
+      // request path or stall the emergency-stop poll.
+      auditSoon({ verb: `http:${req.method} ${verb}`, ok: status < 400, ms: Date.now() - t0, detail: `${status} ${reason} from ${remote}` });
     };
 
     // ── 1. Emergency stop checked per-request ──

@@ -11,7 +11,7 @@
 import type { AddressInfo } from "node:net";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { audit } from "./audit.js";
+import { auditSoon, flushAuditQueue } from "./audit.js";
 import { dexHome } from "./dex-home.js";
 import { loadOrCreateToken } from "./auth-token.js";
 import { clearStop, isStopRequested } from "./kill-switch.js";
@@ -58,6 +58,9 @@ export async function startDexAgent(requestedPort = 0): Promise<DexAgent> {
     new Promise<void>((resolve) => {
       clearInterval(sentinelTimer);
       clearInterval(heartbeat);
+      // Flush pending audit records best-effort — try-lock only, never
+      // blocks: the emergency stop must not wait on a peer's lock.
+      flushAuditQueue();
       // Force-close keep-alive/stalled connections — close() alone waits
       // for them to drain, which would let a wedged request stall the
       // emergency stop itself.
@@ -67,7 +70,7 @@ export async function startDexAgent(requestedPort = 0): Promise<DexAgent> {
 
   const sentinelTimer = setInterval(() => {
     if (isStopRequested()) {
-      audit({ verb: "agent", ok: true, ms: 0, detail: "stop sentinel observed — halting" });
+      auditSoon({ verb: "agent", ok: true, ms: 0, detail: "stop sentinel observed — halting" });
       void stop().then(() => {
         halted = true;
         haltResolve?.();
@@ -79,7 +82,7 @@ export async function startDexAgent(requestedPort = 0): Promise<DexAgent> {
   const heartbeat = setInterval(() => {
     const mem = process.memoryUsage();
     const cpu = process.cpuUsage();
-    audit({
+    auditSoon({
       verb: "agent.heartbeat",
       ok: true,
       ms: 0,
@@ -88,7 +91,7 @@ export async function startDexAgent(requestedPort = 0): Promise<DexAgent> {
   }, HEARTBEAT_MS);
   heartbeat.unref();
 
-  audit({ verb: "agent.start", ok: true, ms: 0, detail: `${url} pid=${process.pid}` });
+  auditSoon({ verb: "agent.start", ok: true, ms: 0, detail: `${url} pid=${process.pid}` });
 
   return {
     url,

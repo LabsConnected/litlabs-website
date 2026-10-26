@@ -2,14 +2,21 @@
  * Dex agent bearer token — mint, store (ACL-hardened), verify.
  *
  * 256-bit random token per install. Stored under <LiTT home>/dex/ with the
- * tightest local permissions available: owner-only ACL via icacls on
- * Windows (structured argv, no shell), mode 0600 elsewhere.
- * Verification compares SHA-256 digests through timingSafeEqual so a
- * malformed/mismatched token never leaks length or prefix information.
+ * tightest local permissions available: owner-only ACL via one atomic
+ * Set-Acl on Windows (structured argv, no shell), mode 0700 dir + 0600
+ * file elsewhere. Verification compares SHA-256 digests through
+ * timingSafeEqual so a malformed/mismatched token never leaks length or
+ * prefix information.
  *
- * Two invariants beyond that:
+ * Invariants beyond that:
  *   - ACL failures fail closed — the agent never serves a token that is
  *     readable by another account.
+ *   - The ACL is replaced ATOMICALLY: icacls /reset would briefly restore
+ *     inherited (possibly broad) access on an existing file — a real
+ *     exposure window and a crash-hazard — so the complete DACL is built
+ *     off-object and applied in a single Set-Acl.
+ *   - The parent dex directory is hardened too, so a fresh token file is
+ *     born inside owner-only inheritance — no create→harden window.
  *   - Concurrent first-time starts cannot diverge: creation is an
  *     exclusive O_EXCL write; a losing process adopts the winner's
  *     persisted token instead of overwriting it.
@@ -17,7 +24,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, closeSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { dexHome } from "./dex-home.js";
 
@@ -61,45 +68,77 @@ export function tokenPath(): string {
 }
 
 /**
- * icacls argv sequence leaving ONLY `user` with access:
- *   /reset         — replace the DACL with inherited defaults, wiping
- *                    every stale EXPLICIT grant to other accounts
- *   /inheritance:r — then drop the inherited grants → empty DACL
- *   /grant:r u:F   — finally grant the owner full control (sole ACE)
+ * PowerShell script that replaces BOTH ACLs atomically — the dex
+ * directory first (owner-only, inheritable so children are born
+ * restricted), then the token file. Each DACL is built off-object —
+ * drop inherited rules, purge every explicit ACE, add owner:F — then
+ * written back in ONE SetAccessControl call. There is NO intermediate
+ * state where inherited/broad access is live, which is precisely the
+ * window icacls /reset opens on an existing file.
  *
- * `/inheritance:r` alone cannot help: it strips only inherited ACEs —
- * explicit grants to other principals would survive.
+ * Pure .NET calls — the Get-Acl/Set-Acl cmdlets need the
+ * Microsoft.PowerShell.Security module, which is not guaranteed to
+ * load (verified broken under sandboxed PowerShell 5.1).
+ *
+ * Values travel through ENV VARS, not argv: powershell -Command does
+ * not bind trailing arguments to param() (verified — they execute as
+ * extra statements). Paths/user are never interpolated into the text.
  */
-export function ownerOnlyAclArgv(path: string, user: string): string[][] {
-  return [
-    [path, "/reset"],
-    [path, "/inheritance:r"],
-    [path, "/grant:r", `${user}:F`],
-  ];
+const ACL_SCRIPT =
+  "$ErrorActionPreference='Stop'; " +
+  "function Set-OwnerOnly([string]$p,[bool]$isDir){ " +
+  "if($isDir){$a=[System.IO.Directory]::GetAccessControl($p)}" +
+  "else{$a=[System.IO.File]::GetAccessControl($p)}; " +
+  "$a.SetAccessRuleProtection($true,$false); " +
+  "foreach($r in @($a.Access)){[void]$a.RemoveAccessRule($r)}; " +
+  "if($isDir){" +
+  "$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($env:LITT_DEX_ACL_USER,'FullControl','ContainerInherit,ObjectInherit','None','Allow')" +
+  "}else{" +
+  "$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($env:LITT_DEX_ACL_USER,'FullControl','None','None','Allow')" +
+  "}; " +
+  "[void]$a.AddAccessRule($rule); " +
+  "if($isDir){[System.IO.Directory]::SetAccessControl($p,$a)}" +
+  "else{[System.IO.File]::SetAccessControl($p,$a)} " +
+  "}; " +
+  "Set-OwnerOnly $env:LITT_DEX_ACL_DIR $true; " +
+  "if(Test-Path -LiteralPath $env:LITT_DEX_ACL_FILE){Set-OwnerOnly $env:LITT_DEX_ACL_FILE $false}";
+
+export function ownerOnlyAclSpec(
+  dir: string,
+  file: string,
+  user: string,
+): { cmd: string; argv: string[]; env: NodeJS.ProcessEnv } {
+  return {
+    cmd: "powershell.exe",
+    argv: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ACL_SCRIPT],
+    env: { ...process.env, LITT_DEX_ACL_DIR: dir, LITT_DEX_ACL_FILE: file, LITT_DEX_ACL_USER: user },
+  };
 }
 
 /**
- * Reduce the token file to owner-only access. Throws DexTokenError on
- * any failure — the caller fails closed rather than serving a token
- * whose permissions it could not prove.
+ * Reduce the dex directory AND token file to owner-only access in one
+ * atomic pass. Throws DexTokenError on any failure — the caller fails
+ * closed rather than serving a credential it cannot prove is protected.
+ * POSIX: dir 0700 (children protected) + file 0600 when it exists.
  */
-function restrictTokenFile(path: string, deps: TokenDeps): void {
+function restrictDexAcl(dir: string, file: string, deps: TokenDeps): void {
   if ((deps.platform ?? process.platform) === "win32") {
     const user = deps.user ?? process.env.USERNAME ?? process.env.USER ?? "";
     const run = deps.execFile ?? execFileSync;
-    for (const argv of ownerOnlyAclArgv(path, user)) {
-      try {
-        run("icacls.exe", argv, { stdio: "pipe", timeout: 5_000 });
-      } catch (err) {
-        // Sanitized: errno/syscall only — never the raw message.
-        const code = (err as NodeJS.ErrnoException | null)?.code ?? "ERR";
-        throw new DexTokenError(`icacls ${String(code)}`);
-      }
+    const { cmd, argv, env } = ownerOnlyAclSpec(dir, file, user);
+    try {
+      run(cmd, argv, { stdio: "pipe", timeout: 8_000, env });
+    } catch (err) {
+      // Sanitized: errno/syscall only — never the raw message.
+      const code = (err as NodeJS.ErrnoException | null)?.code ?? "ERR";
+      throw new DexTokenError(`acl ${String(code)}`);
     }
     return;
   }
+  const chmod = deps.chmod ?? chmodSync;
   try {
-    (deps.chmod ?? chmodSync)(path, 0o600);
+    chmod(dir, 0o700);
+    if (existsSync(file)) chmod(file, 0o600);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException | null)?.code ?? "ERR";
     throw new DexTokenError(`chmod ${String(code)}`);
@@ -177,10 +216,11 @@ function withInitLock<T>(dir: string, fn: () => T): T {
  * adopts THAT token — the file and every in-memory copy agree.
  */
 export function loadOrCreateToken(deps: TokenDeps = {}): string {
-  const path = tokenPath();
+  const dir = dexHome();
+  const path = join(dir, TOKEN_FILE);
   const existing = readUsableToken(path);
   if (existing) {
-    restrictTokenFile(path, deps); // re-assert owner-only on every start
+    restrictDexAcl(dir, path, deps); // re-assert owner-only on every start
     return existing;
   }
 
@@ -188,6 +228,10 @@ export function loadOrCreateToken(deps: TokenDeps = {}): string {
   // Test seam: widens the create→write window so a second process is
   // provably inside its EEXIST path (mirrors LITT_SESSIONS_LOCK_HOLD_MS).
   const holdMs = Number(process.env.LITT_DEX_TOKEN_CREATE_HOLD_MS ?? 0);
+
+  // Harden the PARENT DIRECTORY before the file exists — the token is
+  // then born under owner-only inheritance; no create→harden window.
+  restrictDexAcl(dir, path, deps);
   try {
     const fd = openSync(path, "wx", 0o600);
     try {
@@ -196,7 +240,7 @@ export function loadOrCreateToken(deps: TokenDeps = {}): string {
     } finally {
       closeSync(fd);
     }
-    restrictTokenFile(path, deps);
+    restrictDexAcl(dir, path, deps);
     return token;
   } catch (err) {
     if ((err as NodeJS.ErrnoException | null)?.code !== "EEXIST") throw err;
@@ -207,7 +251,7 @@ export function loadOrCreateToken(deps: TokenDeps = {}): string {
     syncPause(WINNER_READ_PAUSE_MS);
     const winner = readUsableToken(path);
     if (winner) {
-      restrictTokenFile(path, deps);
+      restrictDexAcl(dir, path, deps);
       return winner;
     }
   }
@@ -217,10 +261,10 @@ export function loadOrCreateToken(deps: TokenDeps = {}): string {
   // same stale file, one could unlink a peer's FRESH recreate in the
   // stat→unlink gap, and the processes would diverge from the disk.
   // Inside the lock the file is re-validated before anything is removed.
-  return withInitLock(dexHome(), () => {
+  return withInitLock(dir, () => {
     const winner = readUsableToken(path); // winner finished during our wait
     if (winner) {
-      restrictTokenFile(path, deps);
+      restrictDexAcl(dir, path, deps);
       return winner;
     }
     // Reclaim only a provably dead remnant: an mtime older than STALE
@@ -242,13 +286,13 @@ export function loadOrCreateToken(deps: TokenDeps = {}): string {
       } finally {
         closeSync(fd);
       }
-      restrictTokenFile(path, deps);
+      restrictDexAcl(dir, path, deps);
       return token;
     } catch (err) {
       // A peer beat us to the recreate — take theirs if it works.
       const late = readUsableToken(path);
       if (late) {
-        restrictTokenFile(path, deps);
+        restrictDexAcl(dir, path, deps);
         return late;
       }
       const code = (err as NodeJS.ErrnoException | null)?.code ?? "ERR";

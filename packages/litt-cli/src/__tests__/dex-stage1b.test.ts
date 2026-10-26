@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, existsSync, openSync, readFileSync, writeFileSync, utimesSync, closeSync } from "node:fs";
+import { mkdtempSync, existsSync, openSync, readFileSync, writeFileSync, utimesSync, unlinkSync, closeSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,8 +17,9 @@ import net from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { startDexAgent, type DexAgent } from "../lib/dex/agent.js";
-import { loadOrCreateToken, verifyToken, ownerOnlyAclArgv, DexTokenError } from "../lib/dex/auth-token.js";
+import { loadOrCreateToken, verifyToken, ownerOnlyAclSpec, DexTokenError } from "../lib/dex/auth-token.js";
 import { requestStop, isStopRequested } from "../lib/dex/kill-switch.js";
+import { waitAuditIdle } from "../lib/dex/audit.js";
 import type { execFileSync } from "node:child_process";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -75,6 +76,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await agent?.stop().catch(() => {});
+  // Let the async audit drain settle before the tmp home disappears —
+  // otherwise a pending write fails and poisons the warn-once flags.
+  await waitAuditIdle().catch(() => {});
   if (prev === undefined) delete process.env.LITT_STATE_HOME;
   else process.env.LITT_STATE_HOME = prev;
   await fs.rm(tmp, { recursive: true, force: true });
@@ -212,43 +216,73 @@ describe("audit rotation & token hygiene", () => {
     expect(auditText).not.toContain("Bearer");
   });
 
-  it("token file is owner-restricted (icacls shows no broad grants)", async () => {
+  it("token file AND its parent dir are owner-restricted (real icacls)", async () => {
     if (process.platform !== "win32") return;
     const { execFileSync } = await import("node:child_process");
-    const out = execFileSync("icacls.exe", [join(tmp, "dex", "agent-token")]).toString();
-    expect(out).not.toMatch(/Everyone:\(F\)|BUILTIN\\Users:\(F\)|Users:\(F\)/);
-    // Owner-only: every ACE line must grant the current user — a stale
-    // explicit grant to any other principal would appear here.
-    const aces = out.split(/\r?\n/).filter((l) => l.includes(":("));
-    expect(aces.length).toBeGreaterThan(0);
-    for (const ace of aces) {
-      expect(ace).toContain(`${process.env.USERNAME}:(`);
+    for (const p of [join(tmp, "dex"), join(tmp, "dex", "agent-token")]) {
+      const out = execFileSync("icacls.exe", [p]).toString();
+      expect(out).not.toMatch(/Everyone:\(F\)|BUILTIN\\Users:\(F\)|Users:\(F\)/);
+      // Owner-only: every ACE line must grant the current user — a stale
+      // explicit grant to any other principal would appear here.
+      const aces = out.split(/\r?\n/).filter((l) => l.includes(":("));
+      expect(aces.length).toBeGreaterThan(0);
+      for (const ace of aces) {
+        expect(ace).toContain(`${process.env.USERNAME}:(`);
+      }
     }
   });
 });
 
-describe("R1 — token ACL: purge stale grants, fail closed", () => {
-  it("icacls argv resets the DACL before granting owner-only access", () => {
-    const argv = ownerOnlyAclArgv("C:\\dex\\agent-token", "BOX\\tester");
-    // /reset first — explicit grants to other accounts cannot survive.
-    expect(argv[0]).toEqual(["C:\\dex\\agent-token", "/reset"]);
-    expect(argv[1]).toEqual(["C:\\dex\\agent-token", "/inheritance:r"]);
-    expect(argv[2]).toEqual(["C:\\dex\\agent-token", "/grant:r", "BOX\\tester:F"]);
+describe("N1 — token ACL: atomic owner-only replace, fail closed", () => {
+  it("script applies the complete DACL in one write — no permissive intermediate", () => {
+    const { cmd, argv, env } = ownerOnlyAclSpec("C:\\dex", "C:\\dex\\agent-token", "BOX\\tester");
+    expect(cmd).toBe("powershell.exe");
+    expect(argv.slice(0, 5)).toEqual(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"]);
+    const script = argv[5]!;
+    // The replace is atomic per path: the new DACL is built on an
+    // in-memory object — drop inherited rules, purge every ACE, add
+    // owner:F — and only ONE SetAccessControl writes it back. No staged
+    // icacls sequence → NO window where inherited/broad access is live.
+    expect(script).toContain("SetAccessRuleProtection($true,$false)");
+    expect(script).toContain("RemoveAccessRule");
+    expect(script).toContain("AddAccessRule");
+    expect(script).toContain("SetAccessControl");
+    expect(script).not.toMatch(/\/reset|\/inheritance|icacls/i);
+    // Values travel via env — never interpolated into the script text.
+    expect(script).not.toContain("C:\\dex");
+    expect(script).not.toContain("BOX\\tester");
+    expect(env.LITT_DEX_ACL_DIR).toBe("C:\\dex");
+    expect(env.LITT_DEX_ACL_FILE).toBe("C:\\dex\\agent-token");
+    expect(env.LITT_DEX_ACL_USER).toBe("BOX\\tester");
   });
 
-  it("runs the full reset sequence via structured execFile (platform injection)", () => {
-    const calls: string[][] = [];
-    const spy = ((cmd: string, args: string[]) => {
-      calls.push([cmd, ...args]);
-      return Buffer.from("");
-    }) as unknown as typeof execFileSync;
-    const token = loadOrCreateToken({ platform: "win32", execFile: spy, user: "BOX\\tester" });
-    expect(token.length).toBeGreaterThanOrEqual(32);
-    const expected = ownerOnlyAclArgv(join(tmp, "dex", "agent-token"), "BOX\\tester");
-    expect(calls).toEqual(expected.map((a) => ["icacls.exe", ...a]));
+  it("hardens the parent dir before create AND dir+file after (structured execFile)", () => {
+    // Fresh home → the create path (beforeEach already minted one in tmp).
+    const home = join(tmp, "fresh-home");
+    process.env.LITT_STATE_HOME = home;
+    try {
+      const calls: Array<{ cmd: string; args: string[]; env: NodeJS.ProcessEnv }> = [];
+      const spy = ((cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv }) => {
+        calls.push({ cmd, args, env: opts?.env ?? {} });
+        return Buffer.from("");
+      }) as unknown as typeof execFileSync;
+      const token = loadOrCreateToken({ platform: "win32", execFile: spy, user: "BOX\\tester" });
+      expect(token.length).toBeGreaterThanOrEqual(32);
+      // Two passes: (1) before wx-create — dir hardened first so the token
+      // is born under owner-only inheritance; (2) after — dir + file.
+      expect(calls.length).toBe(2);
+      for (const call of calls) {
+        expect(call.cmd).toBe("powershell.exe");
+        expect(call.env.LITT_DEX_ACL_DIR).toBe(join(home, "dex"));
+        expect(call.env.LITT_DEX_ACL_FILE).toBe(join(home, "dex", "agent-token"));
+        expect(call.env.LITT_DEX_ACL_USER).toBe("BOX\\tester");
+      }
+    } finally {
+      process.env.LITT_STATE_HOME = tmp;
+    }
   });
 
-  it("fails closed when the token file cannot be ACL-restricted", () => {
+  it("fails closed when the ACL cannot be applied", () => {
     const throwing = (() => {
       throw Object.assign(new Error("denied"), { code: "EPERM" });
     }) as unknown as typeof execFileSync;
@@ -260,6 +294,18 @@ describe("R1 — token ACL: purge stale grants, fail closed", () => {
       throw Object.assign(new Error("denied"), { code: "EPERM" });
     };
     expect(() => loadOrCreateToken({ platform: "linux", chmod: badChmod })).toThrow(DexTokenError);
+  });
+
+  it("posix path: dir 0700 before create, file 0600 after", () => {
+    const seen: Array<[string, number]> = [];
+    const chmod = (p: string, mode: number) => {
+      seen.push([p, mode]);
+    };
+    loadOrCreateToken({ platform: "linux", chmod });
+    const dir = join(tmp, "dex");
+    const file = join(dir, "agent-token");
+    expect(seen[0]).toEqual([dir, 0o700]); // dir hardened BEFORE create
+    expect(seen).toContainEqual([file, 0o600]);
   });
 });
 
@@ -423,4 +469,80 @@ describe("R4 — audit rotation under cross-process writers", () => {
     expect(records).toBeLessThanOrEqual(50);
     expect(existsSync(lock)).toBe(false); // no lock leaked
   }, 60_000);
+});
+
+describe("N2 — nonblocking audit for the long-lived agent", () => {
+  const lockFile = () => join(tmp, "dex", "audit.jsonl.lock");
+  const pkgRoot = join(__dirname, "..", "..");
+
+  it("request path stays responsive while a peer holds the audit lock", async () => {
+    const out = join(tmp, "held.out");
+    const child = spawn(process.execPath, ["--import", "tsx", RACE_FIXTURE, "holdlock", "h", out], {
+      cwd: pkgRoot,
+      env: { ...process.env, LITT_STATE_HOME: tmp, LITT_DEX_AUDIT_LOCK_HOLD_MS: "1500" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let childErr = "";
+    child.stderr?.on("data", (d) => (childErr += d));
+    await waitFor(() => existsSync(out), 20_000, "child to hold the audit lock");
+    const t0 = Date.now();
+    const r1 = await authed("/ram");
+    const r2 = await authed("/status");
+    const elapsed = Date.now() - t0;
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    // The lock was still held — the loop stayed free (records queued,
+    // not waited-on). A blocking audit would stall ≥ the remaining hold.
+    expect(elapsed).toBeLessThan(1_300);
+    const code = await new Promise<number>((r) => child.on("exit", (c) => r(c ?? -1)));
+    expect(code, `holdlock child failed: ${childErr}`).toBe(0);
+    // Queued records actually landed once the lock freed.
+    await waitAuditIdle();
+    expect(readFileSync(join(tmp, "dex", "audit.jsonl"), "utf-8")).toContain("http:GET /ram");
+  }, 30_000);
+
+  it("emergency stop never waits on the audit lock", async () => {
+    // Fresh lock held by THIS process — a live holder, not reclaimable.
+    const fd = openSync(lockFile(), "wx", 0o600);
+    const t0 = Date.now();
+    requestStop();
+    await agent.ready; // halt path never touches the lock synchronously
+    const elapsed = Date.now() - t0;
+    // sentinel poll 500ms + slack — a blocking audit would add ~2s.
+    expect(elapsed).toBeLessThan(2_000);
+    closeSync(fd); // close BEFORE unlink — required on Windows
+    unlinkSync(lockFile());
+    await waitAuditIdle();
+  }, 15_000);
+
+  it("queued records land FIFO once the lock frees", async () => {
+    const { auditSoon } = await import("../lib/dex/audit.js");
+    await waitAuditIdle(); // settle records from startup
+    auditSoon({ verb: "q", ok: true, ms: 0, detail: "q-a" });
+    auditSoon({ verb: "q", ok: true, ms: 0, detail: "q-b" });
+    auditSoon({ verb: "q", ok: true, ms: 0, detail: "q-c" });
+    await waitAuditIdle();
+    const text = readFileSync(join(tmp, "dex", "audit.jsonl"), "utf-8");
+    expect(text.indexOf("q-a")).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("q-a")).toBeLessThan(text.indexOf("q-b"));
+    expect(text.indexOf("q-b")).toBeLessThan(text.indexOf("q-c"));
+  });
+
+  it("a record that outlives its bounded wait is dropped and reported once", async () => {
+    const { auditSoon } = await import("../lib/dex/audit.js");
+    await waitAuditIdle();
+    const fd = openSync(lockFile(), "wx", 0o600); // held fresh past both waits
+    const warns: string[] = [];
+    auditSoon({ verb: "q", ok: true, ms: 0, detail: "q1" }, { onWarn: (m) => warns.push(m) });
+    auditSoon({ verb: "q", ok: true, ms: 0, detail: "q2" }, { onWarn: (m) => warns.push(m) });
+    const t0 = Date.now();
+    await waitAuditIdle(); // each record exhausts its ~2s bound then drops
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(3_500);
+    expect(warns.length).toBe(1); // warn-once, not per record
+    expect(warns[0]).toContain("dropped");
+    expect(warns[0]).not.toMatch(/[A-Za-z]:\\|\/tmp\//); // sanitized: errno only, no paths
+    closeSync(fd);
+    unlinkSync(lockFile());
+    await waitAuditIdle();
+  }, 20_000);
 });
