@@ -52,6 +52,7 @@ tests/playwright/screenshots/
 tests/playwright/.auth/
 playwright-report/
 tests/playwright/.clerk/
+tests/playwright-e2e/.clerk/
 
 # Next.js
 /.next/
@@ -228,3 +229,19 @@ COMMIT_MSG_DO_FIX*
 *.bak
 *.backup
 *.tar.gz
+
+# E2E-only artifacts
+e2e/env.e2e
+e2e/*.log
+e2e/*.pid
+e2e/.session-jwt
+e2e/*.jwt
+e2e/backups/
+e2e-workspaces/
+test-results-e2e/
+playwright-report-e2e/
+# Authenticated Playwright storage state (Clerk session material)
+tests/playwright-e2e/.clerk/
+**/playwright-e2e/**/.clerk/
+**/storage-state*.json
+**/storageState*.json
