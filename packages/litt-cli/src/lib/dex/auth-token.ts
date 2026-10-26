@@ -1,7 +1,7 @@
 /**
  * Dex agent bearer token — mint, store (ACL-hardened), verify.
  *
- * 256-bit random token per install. Stored under ~/.litt/dex/ with the
+ * 256-bit random token per install. Stored under <LiTT home>/dex/ with the
  * tightest local permissions available: owner-only ACL via icacls on
  * Windows (structured argv, no shell), mode 0600 elsewhere.
  * Verification compares SHA-256 digests through timingSafeEqual so a

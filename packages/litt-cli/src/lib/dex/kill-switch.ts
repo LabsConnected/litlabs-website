@@ -1,7 +1,7 @@
 /**
  * Dex emergency stop — independent of the HTTP listener.
  *
- * A `STOP` sentinel file under ~/.litt/dex/ halts the agent: checked on
+ * A `STOP` sentinel file under <LiTT home>/dex/ halts the agent: checked on
  * EVERY request and on a timer, so it works even when the loop is wedged.
  * `litt dex stop` writes the sentinel; the agent deletes it on clean
  * startup only — a stale sentinel from a previous kill stays honored
