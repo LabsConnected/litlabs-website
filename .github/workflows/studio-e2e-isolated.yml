@@ -98,8 +98,10 @@ jobs:
         run: supabase start -x studio,mailpit,imgproxy,edge-runtime,vector,logflare,supavisor
         working-directory: .
 
-      - name: Apply E2E RPC lockdown to the disposable stack (E2E-only, not a deployable migration)
-        run: docker exec -i supabase_db_LiTTreeLabStudio_E2E psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f - < e2e/db/rpc-exec-lockdown.sql
+      - name: Apply E2E table grants + RPC lockdown to the disposable stack (E2E-only, not deployable migrations)
+        run: |
+          docker exec -i supabase_db_LiTTreeLabStudio_E2E psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f - < e2e/db/api-table-grants.sql
+          docker exec -i supabase_db_LiTTreeLabStudio_E2E psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f - < e2e/db/rpc-exec-lockdown.sql
 
       - name: Verify RPC lockdown applied (fail if any definer function stays exposed)
         run: |
