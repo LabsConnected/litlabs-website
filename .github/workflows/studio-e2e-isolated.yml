@@ -31,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: studio-e2e-isolated
+  group: studio-e2e-isolated-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -76,6 +76,19 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install native build toolchain (node-pty compiles from source on Linux)
+        run: sudo apt-get update && sudo apt-get install -y python3 make g++
+
+      - name: Enable native builds for terminal dependencies
+        # Keep the full app install script-locked; enable scripts only for the
+        # terminal dependency subgraph, as in the terminal-server test job.
+        run: |
+          pnpm install --frozen-lockfile \
+            --filter terminal-server... \
+            --filter @litt/agent-core... \
+            --filter @litt/models... \
+            --config.ignore-scripts=false
 
       - name: Start reduced Supabase stack
         run: supabase start -x studio,mailpit,imgproxy,edge-runtime,vector,logflare,supavisor
@@ -155,13 +168,14 @@ jobs:
       - name: Build and start E2E terminal-server (port 4401)
         run: |
           set -a; . ./e2e/env.e2e; set +a
-          pnpm --dir terminal-server build:server
+          pnpm terminal:build
           mkdir -p "$TERMINAL_WORKSPACE_ROOT"
-          nohup node terminal-server/dist/server.js > e2e/terminal.out.log 2> e2e/terminal.err.log &
+          PORT=4401 nohup node terminal-server/dist/server.js > e2e/terminal.out.log 2> e2e/terminal.err.log &
           echo $! > e2e/terminal.pid
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:4401/health && break || sleep 2
           done
+          curl -sf http://127.0.0.1:4401/health || { echo "::error::Terminal server did not become healthy"; exit 1; }
 
       - name: Build Next.js app (NEXT_PUBLIC_* baked at build time)
         run: |
