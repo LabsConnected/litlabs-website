@@ -229,12 +229,14 @@ test.describe("onboarding gate → canvas builder", () => {
 
   const SEED_TEXT = "E2E seed text";
 
-  // Product decision (2H): a user with zero projects must see the onboarding
-  // composer — the design tool is reached only after a project exists.
+  // Product decision (2H): a user with zero projects must see the
+  // FirstRunWelcome onboarding surface — the design tool is reached only
+  // after a project exists.
   test("zero-project user sees onboarding composer, not the builder", async ({ page }) => {
     await seedCanvasStorage(page, SEED_TEXT);
     await page.goto("/studio?tool=design", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("studio-command-composer")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByLabel("What do you want to build?")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole("button", { name: "Start building" })).toBeDisabled();
     // Truthful gate: the project-less builder (CanvasToolbar Save) must NOT mount.
     await expect(page.getByTitle("Save", { exact: true })).toHaveCount(0);
   });
