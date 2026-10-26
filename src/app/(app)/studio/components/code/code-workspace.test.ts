@@ -3,6 +3,7 @@ import {
   mapLegacyToolToDestination,
   destinationToLegacyTool,
 } from "../../lib/studio-destinations";
+import { CODE_VIEW_MODES } from "./code-view-modes";
 
 /**
  * Regression tests for the Studio Code workspace routing and lifecycle fixes.
@@ -167,8 +168,7 @@ describe("Studio Code workspace lifecycle (regression)", () => {
 });
 
 describe("Code workspace view-mode toggle", () => {
-  it("has no duplicate Code button — the Code tab itself is the code view", async () => {
-    const { CODE_VIEW_MODES } = await import("./CodeWorkspace");
+  it("has no duplicate Code button — the Code tab itself is the code view", () => {
     const labels = CODE_VIEW_MODES.map((m) => m.label);
     // The toggle must not repeat the "Code" workspace tab label.
     expect(labels).not.toContain("Code");
