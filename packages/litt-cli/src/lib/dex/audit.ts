@@ -1,5 +1,5 @@
 /**
- * Dex audit log — append-only JSONL under ~/.litt/dex/.
+ * Dex audit log — append-only JSONL under <LiTT home>/dex/.
  *
  * Every dex verb writes one record: what was asked, whether it worked,
  * how long it took. Details pass through the CLI's canonical secret

@@ -9,14 +9,14 @@
  *   litt dex procs     — top processes by working set (Windows)
  *   litt dex ollama    — local model daemon reachability + route tier
  *   litt dex project   — detected project + git state
- *   litt dex shot      — screenshot to ~/.litt/dex/shots (requires --yes)
+ *   litt dex shot      — screenshot to <LiTT home>/dex/shots (requires --yes)
  *
  * Stage 1A boundaries — enforced by construction, not just policy:
  *   - no Twilio, no Funnel, no HTTP listener, no remote control
  *   - no shell strings — subprocesses are structured argv only
  *   - read-only diagnostics; the only write side-effects are the
  *     audit JSONL and --yes-consented screenshots, both under
- *     ~/.litt/dex/ (outside any git worktree)
+ *     <LiTT home>/dex/ (outside any git worktree)
  *   - every verb is appended to a secret-redacted audit log
  */
 
@@ -36,6 +36,7 @@ import { probeLocalLane } from "../lib/local-lane.js";
 import { collectMetrics, type DexMetrics } from "../lib/dex/metrics.js";
 import { listProcesses } from "../lib/dex/processes.js";
 import { captureScreenshot } from "../lib/dex/screenshot.js";
+import { dexShotsDir } from "../lib/dex/dex-home.js";
 import { audit } from "../lib/dex/audit.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 
@@ -166,7 +167,7 @@ async function runVerb(verb: Verb, rest: string[]): Promise<number> {
       header("Dex — Screenshot");
       if (!rest.includes("--yes") && !rest.includes("-y")) {
         warn("Explicit consent required: rerun as `litt dex shot --yes`.");
-        console.log(`  ${c.dim}Captures the full virtual screen to ~/.litt/dex/shots/. Nothing leaves this machine.${c.reset}`);
+        console.log(`  ${c.dim}Captures the full virtual screen to ${dexShotsDir()}. Nothing leaves this machine.${c.reset}`);
         exitCode = 1;
         detail = "consent-missing";
         break;
