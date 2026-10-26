@@ -100,6 +100,15 @@ export async function POST(
     return NextResponse.json({ checkpoint }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create checkpoint";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // Same code→status mapping as the sibling files route: a foreign or
+    // missing project must read as 404 (not 500), so cross-user callers
+    // cannot distinguish "exists but not yours" from an internal failure.
+    const code = (err as { code?: string }).code;
+    const status =
+      code === "PROJECT_NOT_FOUND" ? 404 :
+      code === "FORBIDDEN" ? 404 :
+      code === "WORKSPACE_NOT_PROVISIONED" || code === "WORKSPACE_NOT_READY" ? 409 :
+      500;
+    return NextResponse.json({ error: message }, { status });
   }
 }
