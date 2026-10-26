@@ -1,0 +1,193 @@
+# studio-e2e-isolated.yml — MANUAL, fully isolated Studio E2E.
+#
+# Trigger: Actions → "studio-e2e-isolated" → Run workflow. Never runs on push.
+# This file must exist on the default branch to be dispatchable (GitHub
+# requirement); ALWAYS dispatch with ref ci/studio-e2e-isolated — the guard
+# step fails fast on any other ref.
+#
+# Isolation contract (mirrors local E2E):
+# - Fresh reduced Supabase stack built from migrations at run time
+#   (supabase_admin default ACLs apply — the local-only postgres-ownership
+#   grants repair is NOT needed or run here).
+# - The SECURITY DEFINER lockdown is deliberately NOT a deployable migration:
+#   it lives at e2e/db/rpc-exec-lockdown.sql and is applied explicitly to the
+#   disposable stack below, keeping supabase/migrations identical to canonical.
+# - Clerk DEV instance only (pk_test_/sk_test_ secrets). No production or
+#   staging endpoints anywhere in this file.
+# - Terminal-server runs with a scratch workspace root inside the runner.
+# - The Playwright config (playwright.e2e.config.ts) forwards only its
+#   allowlisted env keys to the server-under-test; ambient env never leaks.
+# - Per-run random TERMINAL/AUTH secrets are generated in-runner — shared
+#   between app and terminal-server, never committed.
+#
+# Estimated cost: ~15-25 min per run on ubuntu-latest.
+
+name: studio-e2e-isolated
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-e2e-isolated
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    # Protected environment gate: the job cannot start (and no Clerk secrets
+    # inject) until the `e2e` environment's required reviewer approves.
+    environment: e2e
+
+    env:
+      E2E_BASE_URL: http://127.0.0.1:3001
+      E2E_STACK_READY: "true"
+      E2E_CLERK_AUTH: "true"
+      PORT: "3001"
+      HOSTNAME: 127.0.0.1
+      TERMINAL_SERVER_PORT: "4401"
+      TERMINAL_WORKSPACE_ROOT: /tmp/e2e-workspaces
+      TERMINAL_ALLOWED_ORIGIN: http://127.0.0.1:3001
+      CI: "true"
+      PLAYWRIGHT_TEST: "true"
+
+    steps:
+      - name: Guard — only dispatchable against the isolated E2E branch
+        run: test "$GITHUB_REF_NAME" = "ci/studio-e2e-isolated" || { echo "::error::Dispatch this workflow with branch ref ci/studio-e2e-isolated"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start reduced Supabase stack
+        run: supabase start -x studio,mailpit,imgproxy,edge-runtime,vector,logflare,supavisor
+        working-directory: .
+
+      - name: Apply E2E RPC lockdown to the disposable stack (E2E-only, not a deployable migration)
+        run: docker exec -i supabase_db_LiTTreeLabStudio_E2E psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f - < e2e/db/rpc-exec-lockdown.sql
+
+      - name: Verify RPC lockdown applied (fail if any definer function stays exposed)
+        run: |
+          exposed=$(docker exec supabase_db_LiTTreeLabStudio_E2E psql -U postgres -d postgres -tAc "
+            SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+            WHERE n.nspname='public' AND p.prosecdef
+            AND p.proname IN ('charge_credits','refund_credits','reserve_credits',
+              'reserve_bits','release_bits','settle_bits','get_available_balance',
+              'expire_stale_reservations','action_runtime_create_run','claim_next_work',
+              'complete_work','mark_stale_mission_runs','touch_mission_run_heartbeat',
+              'try_increment_conversation_revision','purge_expired_data',
+              'create_booking_atomic','check_booking_overlap','increment_comment_likes',
+              'decrement_comment_likes','increment_post_reposts','decrement_post_reposts',
+              'increment_post_saves','decrement_post_saves','increment_post_shares',
+              'increment_poll_option_votes')
+            AND (has_function_privilege('anon', p.oid, 'EXECUTE')
+              OR has_function_privilege('authenticated', p.oid, 'EXECUTE'));")
+          echo "exposed definer functions: $exposed"
+          test "$exposed" -eq 0
+
+      - name: Generate e2e/env.e2e (secrets + fresh stack keys, never committed)
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.E2E_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.E2E_CLERK_SECRET_KEY }}
+          CLERK_TEST_USER_E2E_EMAIL: ${{ secrets.E2E_CLERK_TEST_USER_EMAIL }}
+        run: |
+          set -e
+          eval "$(supabase status -o env)"
+          mkdir -p e2e
+          cat > e2e/env.e2e <<EOF
+          NEXT_PUBLIC_APP_URL=http://127.0.0.1:3001
+          NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3001
+          NEXT_PUBLIC_API_BASE=http://127.0.0.1:3001
+          NEXT_PUBLIC_MEDIA_BASE=http://127.0.0.1:3001
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+          CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+          CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
+          NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+          NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/studio
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/studio
+          NEXT_PUBLIC_SUPABASE_URL=${API_URL}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON_KEY}
+          SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}
+          SUPABASE_JWT_SECRET=${JWT_SECRET}
+          TERMINAL_SERVER_INTERNAL_URL=http://127.0.0.1:4401
+          TERMINAL_PUBLIC_URL=http://127.0.0.1:4401
+          NEXT_PUBLIC_TERMINAL_HTTP_URL=http://127.0.0.1:4401
+          NEXT_PUBLIC_TERMINAL_WS_URL=ws://127.0.0.1:4401
+          TERMINAL_ALLOWED_ORIGIN=http://127.0.0.1:3001
+          TERMINAL_INTERNAL_SERVICE_KEY=$(openssl rand -hex 32)
+          TERMINAL_AUTH_SECRET=$(openssl rand -hex 32)
+          INTERNAL_API_KEY=$(openssl rand -hex 32)
+          AUTH_SECRET=$(openssl rand -hex 32)
+          EOF
+          # Fail closed: every required key present and non-empty.
+          for key in NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY CLERK_SECRET_KEY \
+                     NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY \
+                     SUPABASE_SERVICE_ROLE_KEY SUPABASE_JWT_SECRET \
+                     TERMINAL_INTERNAL_SERVICE_KEY TERMINAL_AUTH_SECRET \
+                     INTERNAL_API_KEY AUTH_SECRET; do
+            grep -q "^${key}=." "e2e/env.e2e" || { echo "missing/empty required key: $key"; exit 1; }
+          done
+          # No unresolved template placeholders may remain.
+          ! grep -qE '__UNRESOLVED_|__FILLED_FROM_' e2e/env.e2e
+          # Dev-instance guard: reject live Clerk keys outright.
+          grep -q '^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_' e2e/env.e2e || { echo "publishable key is not a pk_test_ dev key"; exit 1; }
+          grep -q '^CLERK_SECRET_KEY=sk_test_' e2e/env.e2e || { echo "secret key is not an sk_test_ dev key"; exit 1; }
+
+      - name: Build and start E2E terminal-server (port 4401)
+        run: |
+          set -a; . ./e2e/env.e2e; set +a
+          pnpm --dir terminal-server build:server
+          mkdir -p "$TERMINAL_WORKSPACE_ROOT"
+          nohup node terminal-server/dist/server.js > e2e/terminal.out.log 2> e2e/terminal.err.log &
+          echo $! > e2e/terminal.pid
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4401/health && break || sleep 2
+          done
+
+      - name: Build Next.js app (NEXT_PUBLIC_* baked at build time)
+        run: |
+          set -a; . ./e2e/env.e2e; set +a
+          pnpm build
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run Playwright E2E (sequential, workers=1)
+        env:
+          CLERK_TEST_USER_E2E_EMAIL: ${{ secrets.E2E_CLERK_TEST_USER_EMAIL }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.E2E_CLERK_PUBLISHABLE_KEY }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.E2E_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.E2E_CLERK_SECRET_KEY }}
+        run: pnpm exec playwright test -c playwright.e2e.config.ts
+
+      - name: Upload Playwright evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-e2e-artifacts
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            playwright-report-e2e/
+            test-results-e2e/
+            e2e/terminal.out.log
+            e2e/terminal.err.log
