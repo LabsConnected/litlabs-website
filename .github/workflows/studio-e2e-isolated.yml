@@ -83,12 +83,16 @@ jobs:
       - name: Enable native builds for terminal dependencies
         # Keep the full app install script-locked; enable scripts only for the
         # terminal dependency subgraph, as in the terminal-server test job.
+        # pnpm install is a no-op once node_modules is consistent, so the
+        # script-locked first install leaves node-pty pending — rebuild it
+        # explicitly (Linux has no prebuild; compiles via node-gyp toolchain).
         run: |
           pnpm install --frozen-lockfile \
             --filter terminal-server... \
             --filter @litt/agent-core... \
             --filter @litt/models... \
             --config.ignore-scripts=false
+          pnpm --filter terminal-server rebuild node-pty --config.ignore-scripts=false
 
       - name: Start reduced Supabase stack
         run: supabase start -x studio,mailpit,imgproxy,edge-runtime,vector,logflare,supavisor
