@@ -39,7 +39,7 @@ import { captureScreenshot } from "../lib/dex/screenshot.js";
 import { audit } from "../lib/dex/audit.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 
-const VERBS = ["status", "cpu", "ram", "procs", "ollama", "project", "shot"] as const;
+const VERBS = ["status", "cpu", "ram", "procs", "ollama", "project", "shot", "serve", "stop"] as const;
 type Verb = (typeof VERBS)[number];
 
 function usage(): number {
@@ -51,7 +51,9 @@ function usage(): number {
   console.log(`  ${value("litt dex ollama", c.bold)}   local model daemon`);
   console.log(`  ${value("litt dex project", c.bold)}  project + git state`);
   console.log(`  ${value("litt dex shot", c.bold)}     screenshot ${c.dim}(requires --yes)${c.reset}`);
-  console.log(`\n  ${c.dim}Local-only. No listeners, no remote control, no network side-effects.${c.reset}`);
+  console.log(`  ${value("litt dex serve", c.bold)}    local agent on 127.0.0.1 ${c.dim}(explicit start only)${c.reset}`);
+  console.log(`  ${value("litt dex stop", c.bold)}     emergency stop — no HTTP needed${c.reset}`);
+  console.log(`\n  ${c.dim}Agent binds 127.0.0.1 only. No LAN, no Tailscale, no public exposure.${c.reset}`);
   return 0;
 }
 
@@ -180,6 +182,31 @@ async function runVerb(verb: Verb, rest: string[]): Promise<number> {
         ok(`Saved ${result.path} (${Math.round(result.bytes / 1024)} KB)`);
         detail = `saved ${result.path}`;
       }
+      break;
+    }
+    case "serve": {
+      header("Dex — Local Agent");
+      const { startDexAgent } = await import("../lib/dex/agent.js");
+      const { tokenPath } = await import("../lib/dex/auth-token.js");
+      const { isStopRequested } = await import("../lib/dex/kill-switch.js");
+      const agent = await startDexAgent();
+      ok(`Agent listening on ${agent.url} (loopback only)`);
+      console.log(`  ${c.dim}Bearer token required — stored ACL-locked at ${tokenPath()}${c.reset}`);
+      console.log(`  ${c.dim}Stop: litt dex stop (writes the STOP sentinel — no HTTP needed)${c.reset}`);
+      detail = `listening ${agent.url}`;
+      await agent.ready; // resolves when the sentinel or a signal halts us
+      if (isStopRequested()) {
+        await agent.stop();
+        warn("Agent stopped by sentinel.");
+      }
+      break;
+    }
+    case "stop": {
+      header("Dex — Emergency Stop");
+      const { requestStop } = await import("../lib/dex/kill-switch.js");
+      requestStop();
+      ok("STOP sentinel written — any running agent halts within ~0.5s and on its next request.");
+      detail = "stop-requested";
       break;
     }
     case "status": {
