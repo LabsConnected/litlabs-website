@@ -1,0 +1,4 @@
+# Suppresses one confirmed synthetic test fixture (sk_live_abc123456789 — not a real credential).
+# The literal was introduced at commit cf80a8f1 and removed in dbf5b43f; fingerprint is
+# pinned to that exact commit/file/rule/line so any new occurrence is still flagged.
+cf80a8f1c71e42c1d83daf42a55445a7b06d941e:packages/litt-cli/src/__tests__/dex-stage1a.test.ts:stripe-access-token:212
