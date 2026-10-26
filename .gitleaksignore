@@ -1,0 +1,4 @@
+# Synthetic redaction-test fixture — not a real credential.
+# "SUPABASE_SERVICE_ROLE_KEY=sr-live-key-12345" is a made-up string whose
+# whole purpose is proving redactSecrets() strips such assignments.
+c98961334e5a11830e5081100c6b9c41e4bb0ddb:packages/litt-agent-core/src/__tests__/workspace-confinement.test.ts:generic-api-key:234
