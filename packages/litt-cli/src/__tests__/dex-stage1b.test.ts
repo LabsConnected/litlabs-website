@@ -529,8 +529,9 @@ describe("N2 — nonblocking audit for the long-lived agent", () => {
   });
 
   it("a record that outlives its bounded wait is dropped and reported once", async () => {
-    const { auditSoon } = await import("../lib/dex/audit.js");
+    const { auditSoon, resetAuditStateForTests } = await import("../lib/dex/audit.js");
     await waitAuditIdle();
+    resetAuditStateForTests(); // warn-once flags are process-global — earlier stops may have fired
     const fd = openSync(lockFile(), "wx", 0o600); // held fresh past both waits
     const warns: string[] = [];
     auditSoon({ verb: "q", ok: true, ms: 0, detail: "q1" }, { onWarn: (m) => warns.push(m) });
@@ -545,4 +546,45 @@ describe("N2 — nonblocking audit for the long-lived agent", () => {
     unlinkSync(lockFile());
     await waitAuditIdle();
   }, 20_000);
+
+  it("an in-flight record is written exactly once across a shutdown flush", async () => {
+    const { auditSoon, flushAuditQueue } = await import("../lib/dex/audit.js");
+    await waitAuditIdle();
+    const log = join(tmp, "dex", "audit.jsonl");
+    const fd = openSync(lockFile(), "wx", 0o600); // we hold the lock
+    auditSoon({ verb: "q", ok: true, ms: 0, detail: "once" });
+    await sleep(60); // drain has dequeued the record and is waiting on our lock
+    // Release the lock and flush in the SAME synchronous turn: under the
+    // old peek-then-shift code the record was still queued, so this flush
+    // wrote it AND the resumed drain wrote it again (the reported bug).
+    closeSync(fd);
+    unlinkSync(lockFile());
+    flushAuditQueue(); // runs before the drain's next poll — lock is free
+    await waitAuditIdle();
+    const occurrences = readFileSync(log, "utf-8")
+      .split("\n")
+      .filter((l) => l.includes('"once"')).length;
+    expect(occurrences).toBe(1);
+  }, 15_000);
+
+  it("queue and shutdown flush are bounded; every drop is counted", async () => {
+    const { auditSoon, flushAuditQueue, AUDIT_QUEUE_MAX, AUDIT_FLUSH_MAX, auditDroppedCount } =
+      await import("../lib/dex/audit.js");
+    await waitAuditIdle();
+    const fd = openSync(lockFile(), "wx", 0o600); // held so the flush below must drop, not write
+    const warns: string[] = [];
+    const before = auditDroppedCount();
+    for (let i = 0; i < AUDIT_QUEUE_MAX + 10; i++) {
+      auditSoon({ verb: "q", ok: true, ms: 0, detail: `b-${i}` }, { onWarn: (m) => warns.push(m) });
+    }
+    expect(auditDroppedCount() - before).toBe(10); // cap enforced
+    expect(warns.length).toBeLessThanOrEqual(1); // warn-once, may have fired earlier
+    if (warns.length === 1) expect(warns[0]).toContain("queue full");
+    const beforeFlush = auditDroppedCount();
+    flushAuditQueue(); // all 500 queued records dropped: 200 bounded attempts + 300 remainder
+    expect(auditDroppedCount() - beforeFlush).toBe(AUDIT_QUEUE_MAX);
+    closeSync(fd);
+    unlinkSync(lockFile());
+    await waitAuditIdle(); // in-flight record lands; nothing hangs
+  }, 30_000);
 });

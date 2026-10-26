@@ -139,6 +139,24 @@ interface QueuedAudit {
 const auditQueue: QueuedAudit[] = [];
 let auditDraining = false;
 let dropWarned = false;
+let droppedCount = 0;
+
+/** Bounds the pending backlog (a held/fresh lock would otherwise grow it
+ * without limit) and the synchronous work a shutdown flush may do. */
+export const AUDIT_QUEUE_MAX = 500;
+export const AUDIT_FLUSH_MAX = 200;
+
+/** Test/observability seam — cumulative records dropped this process. */
+export function auditDroppedCount(): number {
+  return droppedCount;
+}
+
+/** Test seam — resets warn-once flags and the drop counter. */
+export function resetAuditStateForTests(): void {
+  warned = false;
+  dropWarned = false;
+  droppedCount = 0;
+}
 
 function buildLine(record: Omit<DexAuditRecord, "ts">): string {
   const line: DexAuditRecord = {
@@ -153,7 +171,11 @@ function buildLine(record: Omit<DexAuditRecord, "ts">): string {
 
 async function drainAuditQueue(): Promise<void> {
   while (auditQueue.length > 0) {
-    const item = auditQueue[0]!;
+    // Dequeue BEFORE the await: while suspended on the lock the record is
+    // owned solely by this drain — a concurrent flushAuditQueue can never
+    // observe it (no double-write) and the trailing state can't shift a
+    // record this drain never wrote (no silent loss).
+    const item = auditQueue.shift()!;
     const write = item.deps.write ?? appendFileSync;
     try {
       if (item.deps.write) {
@@ -167,12 +189,12 @@ async function drainAuditQueue(): Promise<void> {
     } catch (err) {
       // A record we could not preserve is reported, once, sanitized —
       // never silently discarded, never a raw exception message.
+      droppedCount++;
       if (!dropWarned) {
         dropWarned = true;
         (item.deps.onWarn ?? warn)(`Dex audit record dropped (${sanitizedWarn(err)})`);
       }
     }
-    auditQueue.shift();
   }
   auditDraining = false;
 }
@@ -184,6 +206,14 @@ async function drainAuditQueue(): Promise<void> {
  * record that outlives its bounded wait is dropped and reported once.
  */
 export function auditSoon(record: Omit<DexAuditRecord, "ts">, deps: AuditDeps = {}): void {
+  if (auditQueue.length >= AUDIT_QUEUE_MAX) {
+    droppedCount++;
+    if (!dropWarned) {
+      dropWarned = true;
+      (deps.onWarn ?? warn)(`Dex audit queue full (${AUDIT_QUEUE_MAX}) — records are being dropped.`);
+    }
+    return;
+  }
   auditQueue.push({ path: auditLogPath(), line: buildLine(record), deps });
   if (!auditDraining) {
     auditDraining = true;
@@ -198,7 +228,9 @@ export function auditSoon(record: Omit<DexAuditRecord, "ts">, deps: AuditDeps = 
  * real chance of landing before the listener closes.
  */
 export function flushAuditQueue(): void {
-  while (auditQueue.length > 0) {
+  let attempts = 0;
+  while (auditQueue.length > 0 && attempts < AUDIT_FLUSH_MAX) {
+    attempts++;
     const item = auditQueue.shift()!;
     const write = item.deps.write ?? appendFileSync;
     try {
@@ -211,8 +243,15 @@ export function flushAuditQueue(): void {
         }, { waitMs: 0 });
       }
     } catch {
-      /* record dropped during shutdown — nothing more to report to */
+      droppedCount++; // try-lock lost — record dropped during shutdown
     }
+  }
+  // Any records beyond the flush bound are discarded, but never silently.
+  droppedCount += auditQueue.length;
+  auditQueue.length = 0;
+  if (droppedCount > 0 && !dropWarned) {
+    dropWarned = true;
+    warn(`Dex audit shutdown dropped ${droppedCount} record(s).`);
   }
 }
 
