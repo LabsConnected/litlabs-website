@@ -10,9 +10,14 @@
  * emitted once per process. The warning carries only the errno code —
  * never the raw exception message, which could contain file content or
  * other sensitive detail.
+ *
+ * Rotation and append run under an O_EXCL lockfile so concurrent
+ * processes (the agent and separately invoked `litt dex` verbs) never
+ * interleave a mid-rotation file: a peer waits — bounded — for the
+ * holder, and a lock whose holder died is reclaimed once stale.
  */
 
-import { appendFileSync, existsSync, renameSync, statSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, openSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { redact } from "../secret-redaction.js";
 import { warn } from "../utils.js";
@@ -21,6 +26,12 @@ import { dexHome } from "./dex-home.js";
 /** Bounded retention: at most `MAX_BYTES` live + `MAX_BACKUPS` rotated files. */
 export const AUDIT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 export const AUDIT_MAX_BACKUPS = 3;
+
+/** Cross-process coordination: wait at most WAIT for a peer's critical
+ * section, and reclaim a lock whose holder died (mtime older than STALE). */
+export const AUDIT_LOCK_WAIT_MS = 2_000;
+export const AUDIT_LOCK_STALE_MS = 30_000;
+const AUDIT_LOCK_POLL_MS = 10;
 
 export interface DexAuditRecord {
   ts: string;
@@ -33,6 +44,10 @@ export interface DexAuditRecord {
 
 export function auditLogPath(): string {
   return join(dexHome(), "audit.jsonl");
+}
+
+export function auditLockPath(path = auditLogPath()): string {
+  return `${path}.lock`;
 }
 
 let warned = false;
@@ -48,6 +63,77 @@ export interface AuditDeps {
   write?: (path: string, data: string, encoding: "utf-8") => void;
   /** Injectable warning sink for tests. */
   onWarn?: (msg: string) => void;
+  /** Test seams — override the rotation cap and backup count. */
+  maxBytes?: number;
+  maxBackups?: number;
+}
+
+const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
+function syncPause(ms: number): void {
+  Atomics.wait(sleepBuf, 0, 0, ms);
+}
+
+export interface AuditLockOpts {
+  waitMs?: number;
+  staleMs?: number;
+  pollMs?: number;
+}
+
+/**
+ * Run `fn` while holding `path`'s lockfile. The lock is an exclusive
+ * `wx` create — atomic on every target platform (CreateFile CREATE_NEW
+ * on Windows). A peer that finds the lock held waits up to `waitMs`
+ * (poll intervals), reclaiming it only when it is older than `staleMs`
+ * — i.e. its holder died mid-write. On timeout the EEXIST propagates so
+ * the caller degrades honestly rather than racing through.
+ */
+export function auditWithLock<T>(path: string, fn: () => T, opts: AuditLockOpts = {}): T {
+  const waitMs = opts.waitMs ?? AUDIT_LOCK_WAIT_MS;
+  const staleMs = opts.staleMs ?? AUDIT_LOCK_STALE_MS;
+  const pollMs = opts.pollMs ?? AUDIT_LOCK_POLL_MS;
+  const lock = auditLockPath(path);
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    let fd: number;
+    try {
+      fd = openSync(lock, "wx", 0o600);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException | null)?.code !== "EEXIST") throw err;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > staleMs) {
+          unlinkSync(lock); // abandoned lock — holder died mid-write
+          continue;
+        }
+      } catch {
+        /* stat/unlink raced with another waiter — loop and re-try */
+      }
+      if (Date.now() >= deadline) throw err;
+      syncPause(pollMs);
+      continue;
+    }
+    // Lock acquired. The fd stays OPEN through the section: on Windows an
+    // open lock cannot be unlinked by a stale-reclaimer at all (EPERM),
+    // and everywhere it proves the lock is owned by a live process.
+    try {
+      writeSync(fd, String(process.pid)); // diagnosis aid, not security
+    } catch {
+      /* pid write is best-effort */
+    }
+    // Test seam: widen the held window so a second process is provably
+    // blocked on the lock (mirrors LITT_SESSIONS_LOCK_HOLD_MS).
+    const holdMs = Number(process.env.LITT_DEX_AUDIT_LOCK_HOLD_MS ?? 0);
+    try {
+      if (holdMs > 0) syncPause(holdMs);
+      return fn();
+    } finally {
+      closeSync(fd); // close BEFORE unlink — an open file cannot be removed on Windows
+      try {
+        unlinkSync(lock);
+      } catch {
+        /* released — a recovering waiter may already own it */
+      }
+    }
+  }
 }
 
 /**
@@ -85,8 +171,15 @@ export function audit(record: Omit<DexAuditRecord, "ts">, deps: AuditDeps = {}):
   };
   try {
     const path = auditLogPath();
-    rotateAuditIfNeeded(path);
-    write(path, JSON.stringify(line) + "\n", "utf-8");
+    const rotateAndWrite = () => {
+      rotateAuditIfNeeded(path, deps.maxBytes, deps.maxBackups);
+      write(path, JSON.stringify(line) + "\n", "utf-8");
+    };
+    // The real on-disk path serializes rotation+append under the lockfile
+    // so concurrent processes never see a half-rotated log; an injected
+    // sink runs lock-free for tests.
+    if (deps.write) rotateAndWrite();
+    else auditWithLock(path, rotateAndWrite);
   } catch (err) {
     // Diagnostics must never break on audit failure — warn once,
     // sanitized, then keep serving truthful results.

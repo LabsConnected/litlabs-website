@@ -9,7 +9,8 @@
  *   5. GET only, verb allowlist only — no shot, no mutations, no body
  *   6. fixed-window rate limit per source
  *   7. STOP sentinel checked per request — halts even if the loop is wedged
- *   8. 5s request timeout, JSON-only responses, secrets never emitted
+ *   8. transport timeouts cover stalled headers AND slow requests;
+ *      JSON-only responses, secrets never emitted
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
@@ -38,6 +39,16 @@ const RATE_LIMIT = 30;
 const RATE_WINDOW_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 5_000;
 const MAX_BODY_BYTES = 64; // the API takes no bodies — anything larger is anomalous
+// Transport ceilings (server-level — they cover connections that stall
+// before a complete header block exists, which the per-request timeout
+// installed in the callback below can never see).
+const HEADERS_TIMEOUT_MS = 4_000;
+// Socket-inactivity ceiling: covers a client that connects and never
+// completes a request (Node's headersTimeout does not fire on a stalled
+// partial header block — verified on Node 22). In-flight requests are
+// already bounded by REQUEST_TIMEOUT_MS; keep-alive idle by the 5s
+// keepAliveTimeout default.
+const SOCKET_IDLE_MS = 6_000;
 
 export interface DexListener {
   server: Server;
@@ -155,6 +166,17 @@ export function createDexListener(token: string, port: number, onHalt: () => voi
         finish(500, `${verb}:${msg.slice(0, 120)}`);
       });
   });
+
+  // Server-level timeouts. headersTimeout/requestTimeout are the standard
+  // knobs; on Node 22 a stalled PARTIAL header block is not covered by
+  // headersTimeout (verified: only the socket-inactivity timeout fires),
+  // so server.timeout is also bounded at SOCKET_IDLE_MS and its handler
+  // destroys the stalled socket. In-flight requests are separately
+  // bounded by requestTimeout; keep-alive idle by keepAliveTimeout.
+  server.headersTimeout = HEADERS_TIMEOUT_MS;
+  server.requestTimeout = REQUEST_TIMEOUT_MS;
+  server.timeout = SOCKET_IDLE_MS;
+  server.on("timeout", (socket) => socket.destroy());
 
   return {
     server,
