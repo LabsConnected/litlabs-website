@@ -135,11 +135,17 @@ interface QueuedAudit {
   path: string;
   line: string;
   deps: AuditDeps;
+  /** Exactly-once marker shared by the drain and the shutdown flush —
+   * whichever takes the lock first writes; the other skips. */
+  done?: boolean;
 }
 const auditQueue: QueuedAudit[] = [];
 let auditDraining = false;
 let dropWarned = false;
 let droppedCount = 0;
+/** The record the drain has dequeued but not finished — the shutdown
+ * flush must see it so shutdown cannot lose an unwritten record. */
+let inflightItem: QueuedAudit | null = null;
 
 /** Bounds the pending backlog (a held/fresh lock would otherwise grow it
  * without limit) and the synchronous work a shutdown flush may do. */
@@ -172,18 +178,25 @@ function buildLine(record: Omit<DexAuditRecord, "ts">): string {
 async function drainAuditQueue(): Promise<void> {
   while (auditQueue.length > 0) {
     // Dequeue BEFORE the await: while suspended on the lock the record is
-    // owned solely by this drain — a concurrent flushAuditQueue can never
-    // observe it (no double-write) and the trailing state can't shift a
-    // record this drain never wrote (no silent loss).
+    // owned by this drain alone — a concurrent flushAuditQueue can never
+    // double-write it (the shared `done` flag settles whoever wins the
+    // lock) and can never shift a record this drain never wrote.
     const item = auditQueue.shift()!;
+    inflightItem = item;
     const write = item.deps.write ?? appendFileSync;
     try {
       if (item.deps.write) {
-        write(item.path, item.line, "utf-8"); // injected sink — lock-free
+        if (!item.done) {
+          write(item.path, item.line, "utf-8"); // injected sink — lock-free
+          item.done = true;
+        }
       } else {
         await auditWithLockAsync(item.path, () => {
-          rotateAuditIfNeeded(item.path, item.deps.maxBytes, item.deps.maxBackups);
-          write(item.path, item.line, "utf-8");
+          if (!item.done) {
+            rotateAuditIfNeeded(item.path, item.deps.maxBytes, item.deps.maxBackups);
+            write(item.path, item.line, "utf-8");
+            item.done = true;
+          }
         });
       }
     } catch (err) {
@@ -194,6 +207,8 @@ async function drainAuditQueue(): Promise<void> {
         dropWarned = true;
         (item.deps.onWarn ?? warn)(`Dex audit record dropped (${sanitizedWarn(err)})`);
       }
+    } finally {
+      inflightItem = null;
     }
   }
   auditDraining = false;
@@ -229,22 +244,41 @@ export function auditSoon(record: Omit<DexAuditRecord, "ts">, deps: AuditDeps = 
  */
 export function flushAuditQueue(): void {
   let attempts = 0;
-  while (auditQueue.length > 0 && attempts < AUDIT_FLUSH_MAX) {
-    attempts++;
-    const item = auditQueue.shift()!;
-    const write = item.deps.write ?? appendFileSync;
+  // The drain's in-flight record is invisible in the queue — try it FIRST
+  // so shutdown cannot lose a dequeued-but-unwritten record. `done` makes
+  // flush/drain exactly-once regardless of who wins the lock.
+  const inflight = inflightItem;
+  let item: QueuedAudit | null = inflight;
+  for (;;) {
+    if (!item) {
+      if (auditQueue.length === 0 || attempts >= AUDIT_FLUSH_MAX) break;
+      attempts++;
+      item = auditQueue.shift()!;
+    }
+    const current = item;
+    const write = current.deps.write ?? appendFileSync;
     try {
-      if (item.deps.write) {
-        write(item.path, item.line, "utf-8");
+      if (current.deps.write) {
+        if (!current.done) {
+          write(current.path, current.line, "utf-8");
+          current.done = true;
+        }
       } else {
-        auditWithLock(item.path, () => {
-          rotateAuditIfNeeded(item.path, item.deps.maxBytes, item.deps.maxBackups);
-          write(item.path, item.line, "utf-8");
+        auditWithLock(current.path, () => {
+          if (!current.done) {
+            rotateAuditIfNeeded(current.path, current.deps.maxBytes, current.deps.maxBackups);
+            write(current.path, current.line, "utf-8");
+            current.done = true;
+          }
         }, { waitMs: 0 });
       }
     } catch {
-      droppedCount++; // try-lock lost — record dropped during shutdown
+      // Queue items are dropped permanently — count them. The in-flight
+      // record still belongs to the live drain (it will write it once the
+      // peer releases, or drop+count at its own bound) — do not count twice.
+      if (current !== inflight) droppedCount++;
     }
+    item = null;
   }
   // Any records beyond the flush bound are discarded, but never silently.
   droppedCount += auditQueue.length;

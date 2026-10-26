@@ -560,6 +560,10 @@ describe("N2 — nonblocking audit for the long-lived agent", () => {
     closeSync(fd);
     unlinkSync(lockFile());
     flushAuditQueue(); // runs before the drain's next poll — lock is free
+    // The flush itself salvaged the in-flight record — it is durable NOW,
+    // without waiting for the drain to resume (the exit-path the review
+    // flagged: shutdown must not lose a dequeued-but-unwritten record).
+    expect(readFileSync(log, "utf-8")).toContain('"once"');
     await waitAuditIdle();
     const occurrences = readFileSync(log, "utf-8")
       .split("\n")
