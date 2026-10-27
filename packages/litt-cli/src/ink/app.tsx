@@ -259,11 +259,12 @@ export function CockpitApp({
       || store.state.holoState === "PLANNING"
       || store.state.holoState === "READING" || store.state.holoState === "EDITING"
       || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING")) {
-      session.cancel().catch(() => {});
-      // Also cancel an in-flight REMOTE model stream — session.cancel()
-      // only stops local tool execution; the server-side model call
-      // would otherwise keep running (and being billed) unheard.
-      controller.cancelRemoteModel();
+      // One canonical teardown: aborts the agent loop (a LOCAL Ollama
+      // model stream is cancelled too, not just spawned processes), and
+      // cancels an in-flight REMOTE model stream — session.cancel()
+      // alone only stops local tool execution; the server-side model
+      // call would otherwise keep running (and being billed) unheard.
+      controller.cancelActiveRun();
       store.actions.setIsProcessing(false);
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
@@ -281,8 +282,7 @@ export function CockpitApp({
         || store.state.holoState === "PLANNING"
         || store.state.holoState === "READING" || store.state.holoState === "EDITING"
         || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING") {
-        session.cancel().catch(() => {});
-        controller.cancelRemoteModel();
+        controller.cancelActiveRun();
         store.actions.setIsProcessing(false);
         store.actions.setHoloState("IDLE");
         store.actions.clearMission();
@@ -328,7 +328,7 @@ export function CockpitApp({
     } else if (input === "?") {
       if (!store.state.isProcessing) store.actions.setOverlay("help");
     }
-  }, [controller, session, store, approvalBridge, exit]);
+  }, [controller, store, approvalBridge, exit]);
 
   const disabled = store.state.isProcessing
     || store.state.holoState === "RUNNING"
