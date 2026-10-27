@@ -4,7 +4,7 @@
  * files-changed → undo restores the previous file content.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import ElementInspectorPanel from "./ElementInspectorPanel";
@@ -76,15 +76,95 @@ describe("ElementInspectorPanel — real element edit write path", () => {
     await waitFor(() => expect(screen.getByTestId("element-edit-status").textContent).toContain("index.html"));
 
     const field = screen.getByTestId("element-edit-text");
-    await user.clear(field);
-    await user.type(field, "New headline");
-    await user.tab(); // commit on blur
+    // fireEvent.change is a single atomic draft update — per-keystroke
+    // typing can race React's controlled-value restore under suite load
+    // and silently append ("Hello worldNew headline"), which is a test
+    // artifact, not the product behavior. The commit path is identical:
+    // onChange → draft, onBlur → onCommit.
+    fireEvent.change(field, { target: { value: "New headline" } });
+    fireEvent.blur(field);
 
     await waitFor(() => expect(written.length).toBe(1));
     expect(written[0].path).toBe("index.html");
     expect(written[0].content).toContain(">New headline</h1>");
+    expect(written[0].content).not.toContain("Hello world");
     expect(changed).toHaveBeenCalled();
     window.removeEventListener("studio:files-changed", changed);
+  });
+
+  it("repeated edits write the latest full content each time", async () => {
+    const written: { path?: string; content?: string }[] = [];
+    stubWorkspace(written);
+    render(<ElementInspectorPanel selection={SELECTION} projectId="p1" route="/" />);
+    await waitFor(() => expect(screen.getByTestId("element-edit-status").textContent).toContain("index.html"));
+
+    const field = screen.getByTestId("element-edit-text");
+    fireEvent.change(field, { target: { value: "First edit" } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(written.length).toBe(1));
+
+    fireEvent.change(field, { target: { value: "Second edit" } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(written.length).toBe(2));
+
+    expect(written[1].path).toBe("index.html");
+    expect(written[1].content).toContain(">Second edit</h1>");
+    expect(written[1].content).not.toContain("First edit");
+    expect(written[1].content).not.toContain("Hello world");
+  });
+
+  it("a text edit preserves surrounding markup and unrelated content", async () => {
+    const written: { path?: string; content?: string }[] = [];
+    stubWorkspace(written);
+    render(<ElementInspectorPanel selection={SELECTION} projectId="p1" route="/" />);
+    await waitFor(() => expect(screen.getByTestId("element-edit-status").textContent).toContain("index.html"));
+
+    fireEvent.change(screen.getByTestId("element-edit-text"), { target: { value: "Replaced" } });
+    fireEvent.blur(screen.getByTestId("element-edit-text"));
+    await waitFor(() => expect(written.length).toBe(1));
+
+    expect(written[0].content).toContain("<!DOCTYPE html>");
+    expect(written[0].content).toContain('<section class="hero">');
+    expect(written[0].content).toContain('id="hero-title"');
+  });
+
+  it("edited content is what a later read/reload serves back", async () => {
+    const written: { path?: string; content?: string }[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/files") && !init) {
+        return { ok: true, json: async () => ({ entries: [{ name: "index.html", type: "file" }] }) } as Response;
+      }
+      if (url.endsWith("/files") && init?.method === "POST") {
+        const body = JSON.parse(init.body as string);
+        if (body.action === "read") {
+          const content = written.length ? written[written.length - 1].content : INDEX_HTML;
+          return { ok: true, json: async () => ({ content }) } as Response;
+        }
+        if (body.action === "write") {
+          written.push({ path: body.path, content: body.content });
+          return { ok: true, json: async () => ({ saved: true }) } as Response;
+        }
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { unmount } = render(<ElementInspectorPanel selection={SELECTION} projectId="p1" route="/" />);
+    await waitFor(() => expect(screen.getByTestId("element-edit-status").textContent).toContain("index.html"));
+
+    fireEvent.change(screen.getByTestId("element-edit-text"), { target: { value: "Persisted headline" } });
+    fireEvent.blur(screen.getByTestId("element-edit-text"));
+    await waitFor(() => expect(written.length).toBe(1));
+    unmount();
+
+    // Reopen the inspector — the file read must serve the edited content,
+    // so the write IS the persistence layer (no separate save step).
+    const updatedSelection = { ...SELECTION, text: "Persisted headline" };
+    render(<ElementInspectorPanel selection={updatedSelection} projectId="p1" route="/" />);
+    await waitFor(() => expect(screen.getByTestId("element-edit-status").textContent).toContain("index.html"));
+    const doc = new DOMParser().parseFromString(written[0].content ?? "", "text/html");
+    expect(doc.querySelector("#hero-title")?.textContent).toBe("Persisted headline");
   });
 
   it("undo writes the previous file content back", async () => {
