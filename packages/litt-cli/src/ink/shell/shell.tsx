@@ -38,6 +38,7 @@ import type { ExecutionTarget } from "../../lib/execution-target.js";
 import { WorkstreamDock, estimateWorkstreamDockRows } from "../workstream-dock.js";
 import { ActivityStream, fitActivityFeed } from "../activity-stream.js";
 import { SectionDivider } from "../ui-primitives.js";
+import { useTerminalSize } from "../use-terminal-size.js";
 
 /** Rows consumed by fixed chrome below the content region:
  *  margin(1) + divider(1) + composer(1) + mode/hint(1), plus one slack
@@ -142,8 +143,9 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   } = props;
 
   const { stdout } = useStdout();
-  const columns = stdout?.columns ?? 80;
-  const rows = stdout?.rows ?? 24;
+  // Reactive size — shell must re-render on resize even when mounted
+  // without the app-level useTerminalSize subscription (tests, embeds).
+  const { columns, rows } = useTerminalSize(stdout);
 
   // ── Workstream dock: when LiTT is actively working, the dock becomes
   //    the primary center view — with the detailed ActivityStream feed

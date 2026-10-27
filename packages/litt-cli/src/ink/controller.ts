@@ -1013,7 +1013,19 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // ends. Lets Escape (app.tsx) cancel the remote model stream, not
   // just the local tool executor (session.cancel()).
   const currentRemoteModelRef = useRef<RemoteModelProvider | null>(null);
+  // In-flight LOCAL model run (Ollama/LM Studio). runAgentLoop accepts
+  // an abortSignal; Esc aborts this so a streaming local request
+  // actually stops instead of generating unheard behind an IDLE UI
+  // (and blocking the next turn on a busy daemon).
+  const currentLocalAbortRef = useRef<AbortController | null>(null);
+  // Set when Esc/watchdog requests a cancel. The lanes check this when
+  // they create the turn's AbortController — without it, an Esc landing
+  // between submit-accept and controller registration aborts NOTHING
+  // (the ref is still null), the UI resets, and the turn keeps running
+  // invisibly (~48s observed live: cancelled mission continued to COMPLETE).
+  const cancelRequestedRef = useRef(false);
   const cancelRemoteModel = useCallback(() => {
+    cancelRequestedRef.current = true;
     currentRemoteModelRef.current?.cancel();
   }, []);
 
@@ -1545,6 +1557,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
+    // A cancel pending from a PREVIOUS turn dies here — it targeted the
+    // turn that was running, not this new submission.
+    cancelRequestedRef.current = false;
     // Clear the composer only AFTER this submission is accepted.
     // A rejected/re-entrant submit must never eat the user's draft.
     store.actions.setComposerValue("");
@@ -2747,7 +2762,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             store.actions.setActiveModel(routed.label);
             await awaitRemoteReady(store, client, store.state.executionTarget);
             const adapter = resolveModelProvider(store.state.executionTarget, client, routed);
-            if (adapter instanceof RemoteModelProvider) currentRemoteModelRef.current = adapter;
+            if (adapter instanceof RemoteModelProvider) {
+              currentRemoteModelRef.current = adapter;
+              if (cancelRequestedRef.current) adapter.cancel();
+            }
             store.actions.setActiveProvider(adapter.providerId);
             // Start the assistant message for streaming synthesis.
             readAssistantMsgId = store.actions.addChatMessage({
@@ -2889,6 +2907,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // routing/planning failure never records a fake model failure.
         let chatModelId: string | null = null;
         let chatStartMs = 0;
+        // Register the turn's AbortController IMMEDIATELY — Esc during
+        // routing/planning must still land: runAgentLoop's round-0
+        // aborted-guard then exits instantly once reached.
+        const turnAbort = new AbortController();
+        currentLocalAbortRef.current = turnAbort;
+        // Esc may already have fired during classification/routing —
+        // honor the pending cancel rather than launching a dead turn.
+        if (cancelRequestedRef.current) turnAbort.abort();
         try {
           // ─── CANONICAL PATH — one brain, one RuntimeStore ───
           // Reuse the session's canonical ExecutionGateway + RuntimeStore.
@@ -2943,7 +2969,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const model = resolveModelProvider(store.state.executionTarget, client, routed, {
             tools: tools.list(),
           });
-          if (model instanceof RemoteModelProvider) currentRemoteModelRef.current = model;
+          if (model instanceof RemoteModelProvider) {
+            currentRemoteModelRef.current = model;
+            if (cancelRequestedRef.current) model.cancel();
+          }
           // Truthful label: this marks the provider adapter being READY,
           // not an outbound request. The actual request fires inside
           // runAgentLoop below; we do not claim provider latency here.
@@ -3202,6 +3231,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // routing/planning failure never records a fake model failure.
       let missionModelId: string | null = null;
       let missionModelStartMs = 0;
+      const turnAbort = new AbortController();
+      currentLocalAbortRef.current = turnAbort;
+      // Esc may already have fired during classification/routing —
+      // honor the pending cancel rather than launching a dead turn.
+      if (cancelRequestedRef.current) turnAbort.abort();
       try {
         // ─── CANONICAL PATH — one brain, one RuntimeStore ───
         const gateway = session.getGateway();
@@ -3280,7 +3314,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const model = resolveModelProvider(store.state.executionTarget, client, routed, {
           tools: tools.list(),
         });
-        if (model instanceof RemoteModelProvider) currentRemoteModelRef.current = model;
+        if (model instanceof RemoteModelProvider) {
+          currentRemoteModelRef.current = model;
+          if (cancelRequestedRef.current) model.cancel();
+        }
         // Truthful label: provider adapter READY, not an outbound request.
         // The actual request fires inside runAgentLoop below.
         perf.mark("provider_ready");
@@ -3393,6 +3430,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             // verification failure (observed: "scan" failed on
             // "Apply approved repairs" having no possible evidence).
             mutationRequested: detectMutationRequest(input),
+            abortSignal: turnAbort.signal,
             projectContext: {
               name: projectName ?? "unnamed",
               root: projectRoot,
@@ -3782,27 +3820,38 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           }
         }
 
+        // ─── Cancelled runs settle CANCELLED — never re-verified ───
+        // The operator stopped this run (Esc). It did not complete and
+        // is NOT a failure: the VERIFYING phase and the session.verify()
+        // fallback below must be skipped — otherwise a cancelled mission
+        // still runs the full check suite (observed: a 3s cancel became
+        // ~46s of gate work) and reports a dishonest FAILED instead of
+        // CANCELLED.
+        const userCancelled = result.termination === "cancelled";
+
         // ─── VerificationGate owns completion ───
         // The agent loop already ran the gate (if configured). Use the
         // loop's verification result if available — it contains the
         // repair/revalidation outcome. Only run the gate separately if
         // the loop didn't (e.g. no gate was configured).
-        store.actions.setHoloState("VERIFYING");
-        store.actions.updateMissionState("VERIFYING");
-        store.actions.addActivity({
-          id: `act_${Date.now()}_verify`,
-          ts: Date.now(),
-          type: "info",
-          tag: "VERIFY",
-          text: "Running verification gate",
-        });
+        if (!userCancelled) {
+          store.actions.setHoloState("VERIFYING");
+          store.actions.updateMissionState("VERIFYING");
+          store.actions.addActivity({
+            id: `act_${Date.now()}_verify`,
+            ts: Date.now(),
+            type: "info",
+            tag: "VERIFY",
+            text: "Running verification gate",
+          });
 
-        await agentStore.setMissionVerifying();
+          await agentStore.setMissionVerifying();
+        }
 
         let verificationSummary = "Verification not run";
         let verification: VerificationResult | null = null;
 
-        try {
+        if (!userCancelled) try {
           // Use the loop's verification result if it ran the gate.
           // When the loop terminated WITHOUT running the gate (honest
           // failure report, max rounds) a read-only inspection mission

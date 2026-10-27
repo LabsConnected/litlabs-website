@@ -22,7 +22,7 @@
  *   to the Composer's own useInput.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, useApp, useStdout } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
@@ -425,8 +425,20 @@ export function CockpitApp({
 
   const overlayOpen = overlay !== "none";
 
+  // Feeds the Esc watchdog in OverlayKeyboardProvider: while a turn is
+  // busy, an \x1b byte glued to text is treated as Esc + that text
+  // (Ink's parser would otherwise merge it into meta-key and eat both).
+  const busyRef = useRef(false);
+  useEffect(() => {
+    busyRef.current = store.state.isProcessing
+      || store.state.holoState === "RUNNING" || store.state.holoState === "UNDERSTANDING"
+      || store.state.holoState === "PLANNING" || store.state.holoState === "READING"
+      || store.state.holoState === "EDITING" || store.state.holoState === "TESTING"
+      || store.state.holoState === "VERIFYING" || store.state.holoState === "APPROVAL";
+  }, [store.state.isProcessing, store.state.holoState]);
+
   return (
-    <OverlayKeyboardProvider appShortcutHandler={appShortcutHandler}>
+    <OverlayKeyboardProvider appShortcutHandler={appShortcutHandler} busyRef={busyRef}>
     <Box flexDirection="column">
       {/* Header — the compact identity bar: mark + lane · target,
           project / branch, one divider. Diagnostic badges live in
