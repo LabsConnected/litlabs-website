@@ -87,11 +87,14 @@ describe("StudioPreviewPanel inspector bridge", () => {
     act(() => useExecutionStore.getState().reset());
   });
 
-  it("sends a token-gated enable command to the preview origin after load", async () => {
+  it("sends a token-gated enable command to the preview iframe after load", async () => {
     const { postMessageSpy } = await renderCrossOriginPreview();
+    // Sandboxed (opaque-origin) frames never match a URL targetOrigin, so
+    // commands are posted with "*" — the target window is pinned to our
+    // iframe and the bridge validates event.source === window.parent.
     expect(postMessageSpy).toHaveBeenCalledWith(
       { source: "litt-inspector", type: "enable", token: "preview-token-123" },
-      PREVIEW_ORIGIN,
+      "*",
     );
   });
 
@@ -191,9 +194,33 @@ describe("StudioPreviewPanel inspector bridge", () => {
     await waitFor(() => {
       expect(postMessageSpy).toHaveBeenCalledWith(
         { source: "litt-inspector", type: "clear", token: "preview-token-123" },
-        PREVIEW_ORIGIN,
+        "*",
       );
       expect(onSelectionChange).toHaveBeenLastCalledWith(null);
+    });
+  });
+
+  it("honors select events from the opaque 'null' origin (sandboxed static previews)", async () => {
+    const onSelectionChange = vi.fn();
+    const { iframe } = await renderCrossOriginPreview(onSelectionChange);
+
+    inspectorMessage(iframe, { source: "litt-inspector", type: "ready" }, "null");
+    inspectorMessage(
+      iframe,
+      {
+        source: "litt-inspector",
+        type: "select",
+        payload: { label: "Sandboxed button", selector: "button", tagName: "button" },
+      },
+      "null",
+    );
+
+    await waitFor(() => {
+      expect(onSelectionChange).toHaveBeenCalledWith({
+        label: "Sandboxed button",
+        selector: "button",
+        tagName: "button",
+      });
     });
   });
 });
