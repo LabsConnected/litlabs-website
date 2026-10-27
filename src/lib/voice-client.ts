@@ -5,7 +5,10 @@ export type VoiceConnectionInfo = {
   expiresAt: number;
   endpoint: string;
   littVoice: string;
+  /** @deprecated Spark is retired — the server maps this to littVoice. */
   sparkVoice: string;
+  /** "env" when INWORLD_LITT_VOICE overrides the built-in LiT-Code default. */
+  littVoiceSource?: "env" | "default";
   /**
    * Non-reversible fingerprint (12 hex chars of SHA-256) of the
    * VOICE_AUTH_SECRET the token was signed with. Used to detect a

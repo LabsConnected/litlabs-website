@@ -166,7 +166,11 @@ export default defineAgent({
     const session = new AgentSession({
       llm: new openai.realtime.RealtimeModel({
         model: "gpt-realtime",
-        voice: (metadata?.voice as openai.realtime.Voice) || "alloy",
+        // Default "onyx" — the same deep OpenAI voice used by the
+        // /api/voice/tts fallback for LiTT. LiT-Code is Inworld-only and
+        // cannot be passed to the OpenAI Realtime API. Room metadata can
+        // still override per-session.
+        voice: (metadata?.voice as openai.realtime.Voice) || "onyx",
         inputAudioTranscription: { model: "whisper-1" },
         // Server-side VAD with 500ms silence → endpoint. The Realtime API
         // handles turn detection natively; we keep the same 500ms silence
