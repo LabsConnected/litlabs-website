@@ -26,7 +26,7 @@ export async function readWorkspaceTextIfExists(
     return (await transport.readFile(path)).content;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (/\b404\b|not found/i.test(msg)) return null;
+    if (/\b404\b|not found|ENOENT/i.test(msg)) return null;
     throw err;
   }
 }
