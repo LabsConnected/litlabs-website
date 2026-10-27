@@ -110,6 +110,21 @@ function isBlockedIpv6(ip: string): boolean {
   if (groups.every((g, i) => g === (i === 7 ? 1 : 0))) return true; // ::1 loopback
   if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
   if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+
+  // Check if IPv4-mapped (::ffff:0:0/96) or IPv4-compatible (::/96) embedding a blocked IPv4 address
+  if (groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0 && groups[4] === 0) {
+    // IPv4-mapped: ::ffff:a.b.c.d -> groups[5] === 0xffff
+    if (groups[5] === 0xffff) {
+      const ipv4Str = `${(groups[6] >>> 8) & 0xff}.${groups[6] & 0xff}.${(groups[7] >>> 8) & 0xff}.${groups[7] & 0xff}`;
+      return isBlockedIpv4(ipv4Str);
+    }
+    // IPv4-compatible: ::a.b.c.d -> groups[5] === 0
+    if (groups[5] === 0) {
+      const ipv4Str = `${(groups[6] >>> 8) & 0xff}.${groups[6] & 0xff}.${(groups[7] >>> 8) & 0xff}.${groups[7] & 0xff}`;
+      return isBlockedIpv4(ipv4Str);
+    }
+  }
+
   return false;
 }
 
