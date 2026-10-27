@@ -2,6 +2,7 @@
 
 import { AlertTriangle, Loader2, RotateCw } from "lucide-react";
 import StudioPreviewPanel, { type PreviewSelection } from "./StudioPreviewPanel";
+import { CanvasFileStateBanner } from "./canvas/builder/CanvasFileStateBanner";
 import { useStudioContext } from "../context/StudioContext";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { useProjectRuntime } from "../hooks/useProjectRuntime";
@@ -62,6 +63,9 @@ export function ProjectDesignSurface() {
         </div>
         {selection && <span className="text-xs text-white/50">Selected: {selection.content ?? selection.componentName ?? selection.elementId}</span>}
       </div>
+      {/* Canvas↔file divergence surfaces here — the only place it can be
+          resolved — so pending/conflict state is never invisible. */}
+      <CanvasFileStateBanner projectId={projectId} />
       <div className="min-h-0 flex-1">
         <StudioPreviewPanel
           projectId={projectId}

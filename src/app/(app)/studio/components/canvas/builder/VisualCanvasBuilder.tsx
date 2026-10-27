@@ -85,10 +85,11 @@ export function VisualCanvasBuilder() {
   const { capabilities } = useConnectionSummary();
   const serverProjectId = capabilities.projectId ?? null;
 
-  // Load persisted document on mount
+  // Load persisted document on mount — namespaced to the active project so a
+  // different project's draft is never adopted.
   useEffect(() => {
-    loadDocument();
-  }, [loadDocument]);
+    loadDocument(activeProjectId ?? null);
+  }, [loadDocument, activeProjectId]);
 
   // Load project type from server when the active project changes
   // The server stores the workspace type in the dedicated `workspace_type` column

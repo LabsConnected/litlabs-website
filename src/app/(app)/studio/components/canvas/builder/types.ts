@@ -150,6 +150,23 @@ export interface CanvasDocument {
   rootNodeIds: string[];
   version: number;
   updatedAt: number;
+  /**
+   * Record of the last materialization of this document into workspace
+   * index.html. `docHash`/`fileHash` are sha256 hex of the canonical document
+   * content and the exact file bytes written — the pair lets the classifier
+   * distinguish canvas drift from external file edits (see canvas-ssot.ts).
+   */
+  materialization?: {
+    docHash: string;
+    fileHash: string;
+    materializedAt: number;
+  };
+  /** Set when the user resolves a divergence with "Keep files": the doc is
+   *  preserved but dormant — it stops blocking publish and stops applying. */
+  status?: "superseded";
+  supersededAt?: number;
+  supersededDocHash?: string;
+  supersededFileHash?: string | null;
 }
 
 export interface CanvasHistoryEntry {
