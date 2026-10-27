@@ -119,4 +119,31 @@ describe("proxy.ts exists and protects Studio routes", () => {
     expect(content).toContain("PLAYWRIGHT_TEST");
     expect(content).toContain("isDeployed");
   });
+
+  it("converges Next 16 middleware re-dispatch instead of looping on Clerk header overrides", () => {
+    const content = readFileSync(PROXY_PATH, "utf-8");
+    // Re-dispatched requests carry x-clerk-request-data; they must bypass
+    // clerkMiddleware's re-encryption or every pass emits different injected
+    // headers and ping-pongs until the internal proxy timeout.
+    expect(content).toContain("x-clerk-request-data");
+    expect(content).toContain("convergeRedispatch");
+    // Both innerMiddleware call sites must route through the convergence
+    // wrapper — a bare innerMiddleware call would reintroduce the loop.
+    const innerCalls = content.match(/withBotProtection\(innerMiddleware\)/g);
+    expect(innerCalls).toBeNull();
+    const convergeCalls = content.match(/withBotProtection\(convergeRedispatch\)/g);
+    expect(convergeCalls).toHaveLength(2);
+  });
+
+  it("verifies the injected auth signature instead of trusting status headers", () => {
+    const content = readFileSync(PROXY_PATH, "utf-8");
+    // Forged x-clerk-auth-status/x-clerk-request-data headers must not grant
+    // signed-in access: the decision requires HmacSHA1(token, secretKey)
+    // matching x-clerk-auth-signature, same as Clerk's assertTokenSignature.
+    expect(content).toContain("x-clerk-auth-signature");
+    expect(content).toContain("x-clerk-auth-token");
+    expect(content).toContain("verifyInjectedAuthSignature");
+    expect(content).toContain("SHA-1");
+    expect(content).toContain("CLERK_SECRET_KEY");
+  });
 });

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { createHash, createHmac } from "crypto";
+import { LIT_CODE_VOICE_ID } from "@/lib/voice-constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
   if (!apiKey) {
     return NextResponse.json(
       {
-        error: "Voice service is not configured. Set INWORLD_API_KEY, INWORLD_LITT_VOICE, and INWORLD_SPARK_VOICE.",
+        error: "Voice service is not configured. Set INWORLD_API_KEY.",
         configured: false,
         details: {
           apiKey: false,
@@ -57,21 +58,22 @@ export async function GET(request: NextRequest) {
     const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
     const sig = createHmac("sha256", secret).update(encoded).digest("base64url");
 
-    const littVoice = process.env.INWORLD_LITT_VOICE || "";
+    // LiT-Code is the signature voice — the env var only overrides it.
+    const littVoice = process.env.INWORLD_LITT_VOICE || LIT_CODE_VOICE_ID;
+    // INWORLD_SPARK_VOICE is retired (Spark discontinued). Still read for
+    // diagnostics only; the response maps it to the LiTT voice so clients
+    // never receive a removed/invalid voice ID.
     const sparkVoice = process.env.INWORLD_SPARK_VOICE || "";
 
-    if (!littVoice || !voiceWsUrl) {
-      const missing = [
-        !littVoice && "INWORLD_LITT_VOICE",
-        !voiceWsUrl && "VOICE_WS_URL",
-      ].filter(Boolean);
+    if (!voiceWsUrl) {
+      const missing = ["VOICE_WS_URL"];
       return NextResponse.json(
         {
           error: `Voice service is not configured. Set ${missing.join(" and ")}.`,
           configured: false,
           details: {
             apiKey: true,
-            littVoice: !!littVoice,
+            littVoice: true,
             sparkVoice: !!sparkVoice,
             wsUrl: !!voiceWsUrl,
           },
@@ -86,7 +88,10 @@ export async function GET(request: NextRequest) {
         expiresAt: payload.exp * 1000,
         endpoint: voiceWsUrl,
         littVoice,
-        sparkVoice: sparkVoice || littVoice,
+        // Deprecated: Spark is retired — kept for client compatibility and
+        // always resolves to the LiTT voice (LiT-Code).
+        sparkVoice: littVoice,
+        littVoiceSource: process.env.INWORLD_LITT_VOICE ? "env" : "default",
         configured: true,
         // Non-reversible fingerprint of the signing secret. Lets the client
         // compare it against the voice proxy's own fingerprint to detect a

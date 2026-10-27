@@ -27,7 +27,7 @@ describe("canvas builder — malformed persisted state", () => {
 
   it("rejects persisted state with no nodes", () => {
     seedStorage({ rootNodeIds: ["root-1"] });
-    useCanvasBuilderStore.getState().loadDocument();
+    useCanvasBuilderStore.getState().loadDocument(null);
     // Should fall back to the empty default document, not crash
     const doc = useCanvasBuilderStore.getState().document;
     expect(doc.nodes).toBeDefined();
@@ -36,7 +36,7 @@ describe("canvas builder — malformed persisted state", () => {
 
   it("rejects persisted state with no rootNodeIds", () => {
     seedStorage({ nodes: { "root-1": { id: "root-1", type: "section", children: [] } } });
-    useCanvasBuilderStore.getState().loadDocument();
+    useCanvasBuilderStore.getState().loadDocument(null);
     const doc = useCanvasBuilderStore.getState().document;
     expect(doc.rootNodeIds.length).toBeGreaterThan(0);
   });
@@ -54,7 +54,7 @@ describe("canvas builder — malformed persisted state", () => {
       version: 2,
       updatedAt: Date.now(),
     });
-    useCanvasBuilderStore.getState().loadDocument();
+    useCanvasBuilderStore.getState().loadDocument(null);
     const doc = useCanvasBuilderStore.getState().document;
     // The bad node should be dropped
     expect(doc.nodes["bad-1"]).toBeUndefined();
@@ -73,7 +73,7 @@ describe("canvas builder — malformed persisted state", () => {
       version: 1,
       updatedAt: Date.now(),
     });
-    useCanvasBuilderStore.getState().loadDocument();
+    useCanvasBuilderStore.getState().loadDocument(null);
     const doc = useCanvasBuilderStore.getState().document;
     expect(doc.rootNodeIds).toEqual(["root-1"]);
   });
@@ -85,7 +85,7 @@ describe("canvas builder — malformed persisted state", () => {
       version: 1,
       updatedAt: Date.now(),
     });
-    useCanvasBuilderStore.getState().loadDocument();
+    useCanvasBuilderStore.getState().loadDocument(null);
     const doc = useCanvasBuilderStore.getState().document;
     // Should fall back to a fresh empty document with a valid root
     expect(doc.rootNodeIds.length).toBeGreaterThan(0);
@@ -102,7 +102,7 @@ describe("canvas builder — malformed persisted state", () => {
       version: 1,
       updatedAt: Date.now(),
     });
-    useCanvasBuilderStore.getState().loadDocument();
+    useCanvasBuilderStore.getState().loadDocument(null);
     const doc = useCanvasBuilderStore.getState().document;
     const root = doc.nodes[rootId];
     expect(root.props).toEqual({});

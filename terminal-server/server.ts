@@ -44,6 +44,7 @@ import {
   type WorkspaceDescriptor,
 } from "./workspace/WorkspaceManager";
 import { resolveWorkspacePath as resolveWorkspacePathSecure, validateWritePayload } from "./workspace/WorkspaceSecurity";
+import { checkExpectedSha256, sha256Utf8 } from "./workspace/cas";
 import { deleteResolvedPath } from "./workspace/FileService";
 import { replaceScaffoldingForWrite, SCAFFOLD_DIR_NAME } from "./workspace/scaffold";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
@@ -1540,7 +1541,10 @@ app.post("/ws-files/read", (req: AuthenticatedRequest, res) => {
     // Echo the encoding actually applied so callers can detect a terminal
     // build that ignored it — a utf-8 decode of binary bytes otherwise
     // masquerades as base64 and corrupts anything that stores it as text.
-    res.json({ content, size: stats.size, encoding, workspaceId: req.workspaceId });
+    // sha256 is over the utf-8 content string (the same basis CAS writes
+    // compare against) so callers can advance their expected revision.
+    const sha256 = sha256Utf8(raw.toString("utf-8"));
+    res.json({ content, size: stats.size, encoding, sha256, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to read file";
     const status = fileErrorStatus(msg);
@@ -1564,6 +1568,25 @@ app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
   }
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
+    // ─── Compare-and-swap (canvas↔file unification) ─────────────────
+    // `expectedSha256` makes a write conditional on the caller's last-seen
+    // revision of the file: sha256 of the current utf-8 content, or the
+    // sentinel "absent" to require that the file does not exist. The check
+    // runs synchronously inside this handler — no other request can
+    // interleave between it and writeFileSync — and BEFORE the scaffolding
+    // check so a rejected write never consumes the scaffold flag.
+    const expectedSha256 =
+      typeof req.body.expectedSha256 === "string" ? req.body.expectedSha256 : undefined;
+    if (expectedSha256 !== undefined) {
+      const cas = checkExpectedSha256(target, expectedSha256);
+      if (!cas.ok) {
+        return res.status(409).json({
+          error: `Revision conflict: "${filePath}" ${cas.reason}`,
+          code: "REVISION_CONFLICT",
+          currentSha256: cas.currentSha256,
+        });
+      }
+    }
     // ─── Starter-scaffolding replacement (brief §7) ─────────────────
     // Deterministic complement to the prompt-text rule: the `scaffolded`
     // manifest — not text matching — is the authority on whether this
@@ -1592,6 +1615,9 @@ app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
       );
     }
     mkdirSync(resolve(target, ".."), { recursive: true });
+    // sha256 of the exact bytes-as-written (utf-8 text, or the decoded
+    // binary payload's utf-8 string form is not meaningful — hash text only).
+    const writtenSha256 = sizeCheck.binary ? undefined : sha256Utf8(content);
     if (sizeCheck.binary) {
       // Binary file write — used by the "Use asset in project" feature to
       // save generated images/audio/video into the project workspace.
@@ -1602,6 +1628,7 @@ app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
     res.json({
       saved: true,
       workspaceId: req.workspaceId,
+      ...(writtenSha256 ? { sha256: writtenSha256 } : {}),
       ...(scaffold?.acted ? { scaffold } : {}),
     });
   } catch (err) {

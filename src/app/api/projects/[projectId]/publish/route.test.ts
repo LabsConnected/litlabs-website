@@ -32,6 +32,17 @@ vi.mock("@/lib/deployments/deploy-service", () => ({
   unpublishDeployment: vi.fn(),
 }));
 
+// Publish is gated on unresolved canvas↔file state; tests in this file
+// exercise the publish pipeline itself, so the gate returns a clean pass.
+vi.mock("@/lib/studio/canvas-publish-gate", () => ({
+  evaluateCanvasGate: vi.fn().mockResolvedValue({
+    blocked: false,
+    state: "clean",
+    detail: "canvas and files match",
+    classification: { state: "clean", indexHash: null, canvasHash: null, detail: "" },
+  }),
+}));
+
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
 import { listLatestDeploymentsForUser } from "@/lib/deployments/deployment-store";

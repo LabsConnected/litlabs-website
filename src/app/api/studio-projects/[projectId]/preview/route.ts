@@ -12,6 +12,8 @@ import {
   stopPreviewInternal,
   buildPreviewProxyUrl,
 } from "@/lib/terminal-internal-client";
+import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
+import { createPreviewToken } from "@/lib/projects/preview-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,39 +53,14 @@ export async function GET(
   // No dev-server health check needed — files are served directly.
   // Verify index.html exists; empty workspace reports not_started.
   if (project.framework === "static") {
-    try {
-      const terminalBase = requireTerminalBaseUrl();
-      const { token } = createTerminalToken(userId, {
-        workspaceId: project.workspaceId,
-        projectId,
-      });
-      const checkResp = await fetch(`${terminalBase}/ws-files/read`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-          "X-Workspace-Id": project.workspaceId,
-        },
-        body: JSON.stringify({ path: "index.html", encoding: "utf-8" }),
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!checkResp.ok) {
-        // index.html doesn't exist yet — workspace is empty
-        return NextResponse.json({
-          runtimeStatus: "not_started",
-          previewUrl: null,
-          runtimeError: null,
-          framework: "static",
-          developmentCommand: null,
-          packageManager: null,
-          logs: [],
-        });
-      }
-    } catch {
-      // Terminal unavailable — report not_started rather than broken ready
+    const sessionUrl = `/api/preview/${encodeURIComponent(projectId)}/index.html`;
+    let indexHtml: string;
+    let readWorkspaceText: (path: string) => Promise<string | null>;
+    if (!project.workspaceId) {
       return NextResponse.json({
         runtimeStatus: "not_started",
         previewUrl: null,
+        previewShareUrl: null,
         runtimeError: null,
         framework: "static",
         developmentCommand: null,
@@ -91,9 +68,107 @@ export async function GET(
         logs: [],
       });
     }
+    const workspaceId = project.workspaceId;
+    try {
+      const terminalBase = requireTerminalBaseUrl();
+      const { token } = createTerminalToken(userId, {
+        workspaceId,
+        projectId,
+      });
+      readWorkspaceText = async (path: string): Promise<string | null> => {
+        try {
+          const resp = await fetch(`${terminalBase}/ws-files/read`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`,
+              "X-Workspace-Id": workspaceId,
+            },
+            body: JSON.stringify({ path, encoding: "utf-8" }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!resp.ok) return null;
+          const payload = (await resp.json()) as { content?: unknown };
+          return typeof payload.content === "string" ? payload.content : null;
+        } catch {
+          return null;
+        }
+      };
+      const indexContent = await readWorkspaceText("index.html");
+      if (indexContent === null) {
+        // index.html doesn't exist yet — workspace is empty
+        return NextResponse.json({
+          runtimeStatus: "not_started",
+          previewUrl: null,
+          previewShareUrl: null,
+          runtimeError: null,
+          framework: "static",
+          developmentCommand: null,
+          packageManager: null,
+          logs: [],
+        });
+      }
+      indexHtml = indexContent;
+    } catch {
+      // Terminal unavailable — report not_started rather than broken ready
+      return NextResponse.json({
+        runtimeStatus: "not_started",
+        previewUrl: null,
+        previewShareUrl: null,
+        runtimeError: null,
+        framework: "static",
+        developmentCommand: null,
+        packageManager: null,
+        logs: [],
+      });
+    }
+
+    // The share token's asset set must be the REAL reference closure of the
+    // served index.html — a token that only authorizes the entry document
+    // leaves a copied preview without its scripts.
+    const manifest = await collectPreviewAssetManifest("index.html", indexHtml, readWorkspaceText);
+    console.info("[preview-manifest] static GET", {
+      projectId,
+      assetsIncluded: manifest.assets.length,
+      complete: manifest.complete,
+      truncated: manifest.truncated,
+      truncationReasons: manifest.truncationReasons,
+      readFailures: manifest.readFailures,
+      parseFailures: manifest.parseFailures,
+      timedOut: manifest.timedOut,
+    });
+    if (!manifest.complete) {
+      // Fail closed: the owner-facing session URL still works, but no share
+      // token is minted against an asset set that could not be verified.
+      return NextResponse.json({
+        runtimeStatus: "ready",
+        previewUrl: sessionUrl,
+        previewShareUrl: null,
+        previewToken: null,
+        previewTokenExpiresAt: null,
+        previewShareError: "Preview share link unavailable — asset manifest could not be verified",
+        runtimeError: null,
+        framework: "static",
+        developmentCommand: null,
+        packageManager: null,
+        logs: [],
+      });
+    }
+    const token = createPreviewToken(userId, {
+      projectId,
+      workspaceId: project.workspaceId,
+      assets: manifest.assets,
+    });
     return NextResponse.json({
       runtimeStatus: "ready",
-      previewUrl: `/api/preview/${encodeURIComponent(projectId)}/index.html`,
+      // Owner-facing URL stays session-compatible: under an authenticated
+      // session the serving route treats every segment as a file path, so a
+      // t/<token> URL would resolve as a missing file. previewShareUrl is
+      // the token-bearing form meant to be copied to unsigned browsers.
+      previewUrl: sessionUrl,
+      previewShareUrl: `/api/preview/${encodeURIComponent(projectId)}/t/${token.token}/index.html`,
+      previewToken: token.token,
+      previewTokenExpiresAt: token.expiresAt,
       runtimeError: null,
       framework: "static",
       developmentCommand: null,

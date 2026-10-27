@@ -14,6 +14,10 @@ export const SPOKEN_FALLBACK_MAX_CHARS = 280;
 /** Hard cap (words) for the LLM-generated spoken summary. */
 export const SPOKEN_SUMMARY_MAX_WORDS = 40;
 
+/**
+ * "spark" is still accepted for backward compatibility with older clients
+ * that pass it, but it maps to the LiTT persona — Spark is retired.
+ */
 export type SpokenAgentId = "litt" | "spark";
 
 /**
@@ -46,11 +50,8 @@ export function truncateToSpokenFallback(text: string): string {
  * System prompt for the /api/voice/speak-summary endpoint (gpt-4o-mini).
  * Produces 1–2 conversational spoken sentences from a full chat reply.
  */
-export function buildSpokenSummarySystemPrompt(agentId: SpokenAgentId): string {
-  const persona =
-    agentId === "spark"
-      ? "LiTT's creative voice: bright, warm, expressive."
-      : "LiTT, the lead AI copilot: deep, calm, precise, mid-thirties energy.";
+export function buildSpokenSummarySystemPrompt(_agentId: SpokenAgentId): string {
+  const persona = "LiTT, the lead AI copilot: deep, calm, precise, mid-thirties energy.";
   return `You are ${persona}
 
 Rewrite the assistant reply below into what you would SAY aloud in a voice conversation: 1–2 short conversational sentences, max ${SPOKEN_SUMMARY_MAX_WORDS} words.

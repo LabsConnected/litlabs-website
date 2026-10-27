@@ -6,6 +6,7 @@ import { requireTerminalBaseUrl } from "@/lib/terminal-config";
 import { prepareStaticPreviewDocument } from "@/lib/projects/static-preview-document";
 import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
 import { createPreviewToken, verifyPreviewToken } from "@/lib/projects/preview-token";
+import { injectInspector } from "../../../../../../terminal-server/preview/inspector";
 
 /**
  * Static preview: serves HTML/CSS/JS/image files from a project's workspace
@@ -305,6 +306,13 @@ export async function GET(
       assetBase,
       readStylesheet: readWorkspaceText,
     })).html;
+    // Instrument the document with the litt-inspector bridge so Studio's
+    // element selection works inside the sandboxed iframe. The bridge only
+    // accepts commands from window.parent carrying the preview token; its
+    // outbound payloads are non-sensitive DOM metadata. Session and
+    // token-mode documents are both instrumented so in-preview navigation
+    // keeps selection working.
+    body = injectInspector(body);
   }
 
   return new NextResponse(body, {

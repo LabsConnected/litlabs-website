@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { createHmac } from "crypto";
 import { getVoiceServerUrl } from "@/lib/terminal-url";
+import { LIT_CODE_VOICE_ID } from "@/lib/voice-constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +43,9 @@ export async function GET(req: NextRequest) {
   const checkedAt = new Date().toISOString();
 
   const apiKey = process.env.INWORLD_API_KEY;
-  const littVoice = process.env.INWORLD_LITT_VOICE;
+  const littVoiceEnv = process.env.INWORLD_LITT_VOICE;
+  const littVoice = littVoiceEnv || LIT_CODE_VOICE_ID;
+  // Retired var — read for diagnostics only (Spark is discontinued).
   const sparkVoice = process.env.INWORLD_SPARK_VOICE;
   const authSecret = process.env.VOICE_AUTH_SECRET;
   const voiceServerUrl = getVoiceServerUrl();
@@ -61,6 +64,9 @@ export async function GET(req: NextRequest) {
   const details = {
     apiKey: !!apiKey,
     littVoice: !!littVoice,
+    littVoiceSource: (littVoiceEnv ? "env" : "default") as "env" | "default",
+    // Deprecated: reports whether the retired INWORLD_SPARK_VOICE var is
+    // still present in the environment. Not used for voice selection.
     sparkVoice: !!sparkVoice,
     wsUrl: !!wsUrl,
     authSecret: !!(authSecret && authSecret.length >= 32),
@@ -78,7 +84,6 @@ export async function GET(req: NextRequest) {
   if (!configured) {
     const missing: string[] = [];
     if (!apiKey) missing.push("INWORLD_API_KEY");
-    if (!littVoice) missing.push("INWORLD_LITT_VOICE");
     if (!authSecret || authSecret.length < 32) missing.push("VOICE_AUTH_SECRET");
 
     return NextResponse.json({

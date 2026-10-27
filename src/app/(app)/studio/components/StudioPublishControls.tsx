@@ -89,6 +89,12 @@ export default function StudioPublishControls({
       const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/publish`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
+        // Canvas↔file gate — a truthful, resolvable block, not a generic failure.
+        if (res.status === 409 && data.code === "UNAPPLIED_CANVAS_CHANGES") {
+          throw new Error(
+            "Canvas changes aren't on the site files yet. Open Design to apply them or keep the files — then publish again.",
+          );
+        }
         throw new Error(data.detail || data.error || `Publish failed (${res.status})`);
       }
       setDeployment({
