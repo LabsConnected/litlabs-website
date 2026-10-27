@@ -147,10 +147,14 @@ export interface WorkspaceTransport {
 
   // File operations
   listFiles(path: string): Promise<{ entries: Array<{ name: string; type: string }> }>;
-  readFile(path: string): Promise<{ content: string; size: number }>;
+  readFile(path: string): Promise<{ content: string; size: number; sha256?: string }>;
   /** Read a binary file; content is base64-encoded. */
   readBinaryFile(path: string): Promise<{ content: string; size: number }>;
-  writeFile(path: string, content: string): Promise<{ saved: boolean }>;
+  writeFile(
+    path: string,
+    content: string,
+    opts?: { expectedSha256?: string },
+  ): Promise<{ saved: boolean; sha256?: string }>;
   writeBinaryFile(path: string, base64Content: string): Promise<{ saved: boolean }>;
   deleteFile(path: string): Promise<{ deleted: boolean }>;
   mkdir(path: string): Promise<{ created: boolean }>;
@@ -332,7 +336,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     return resp.json();
   }
 
-  async readFile(path: string): Promise<{ content: string; size: number }> {
+  async readFile(path: string): Promise<{ content: string; size: number; sha256?: string }> {
     return this.readWorkspaceFile(path, "utf-8");
   }
 
@@ -343,7 +347,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
   private async readWorkspaceFile(
     path: string,
     encoding: "utf-8" | "base64",
-  ): Promise<{ content: string; size: number }> {
+  ): Promise<{ content: string; size: number; sha256?: string }> {
     const resp = await fetch(`${terminalBase()}/ws-files/read`, {
       method: "POST",
       headers: this.wsFileHeaders,
@@ -369,16 +373,40 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     return data;
   }
 
-  async writeFile(path: string, content: string): Promise<{ saved: boolean }> {
+  async writeFile(
+    path: string,
+    content: string,
+    opts?: { expectedSha256?: string },
+  ): Promise<{ saved: boolean; sha256?: string }> {
     const resp = await fetch(`${terminalBase()}/ws-files/write`, {
       method: "POST",
       headers: this.wsFileHeaders,
-      body: JSON.stringify({ path, content }),
+      body: JSON.stringify({ path, content, ...(opts?.expectedSha256 ? { expectedSha256: opts.expectedSha256 } : {}) }),
       signal: AbortSignal.timeout(FILE_OP_TIMEOUT_MS),
     });
     if (!resp.ok) {
-      const err = await resp.text().catch(() => "");
-      throw new Error(`writeFile failed (${resp.status}): ${err}`);
+      // Preserve machine-readable conflict details so callers can distinguish
+      // a stale-revision rejection from an ordinary write failure.
+      let code: string | undefined;
+      let currentSha256: string | null | undefined;
+      let message = await resp.text().catch(() => "");
+      try {
+        const data = JSON.parse(message) as { error?: string; code?: string; currentSha256?: string | null };
+        code = data.code;
+        currentSha256 = data.currentSha256;
+        message = data.error ?? message;
+      } catch {
+        // Non-JSON error body — keep the raw text.
+      }
+      const err = new Error(`writeFile failed (${resp.status}): ${message || "unknown"}`) as Error & {
+        code?: string;
+        currentSha256?: string | null;
+        status?: number;
+      };
+      err.code = code;
+      err.currentSha256 = currentSha256;
+      err.status = resp.status;
+      throw err;
     }
     return resp.json();
   }

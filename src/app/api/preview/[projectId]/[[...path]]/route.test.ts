@@ -93,7 +93,12 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
     const res = await GET(new Request("https://x.test/api/preview/proj-1") as unknown as import("next/server").NextRequest, makeParams("proj-1"));
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("text/html");
-    expect(await res.text()).toBe("<h1>Hello</h1>");
+    const html = await res.text();
+    expect(html).toContain("<h1>Hello</h1>");
+    // The inspector bridge is injected into served HTML so Studio element
+    // selection works inside the sandboxed preview iframe.
+    expect(html).toContain("__littInspector");
+    expect(html).toContain("litt-inspector");
     assertZeroSubprocesses();
   });
 

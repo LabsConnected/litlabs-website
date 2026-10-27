@@ -138,6 +138,14 @@ export interface DeployRequest {
    * never caller-supplied.
    */
   hosting?: HostingBackend;
+  /**
+   * sha256 (utf-8 hex) of index.html as classified by the caller immediately
+   * before requesting the deploy. When set, the collected artifact's
+   * index.html must still carry that hash — otherwise a file edit landed
+   * mid-publish and the deploy aborts before any snapshot or upload. Closes
+   * the classify→collect TOCTOU window.
+   */
+  expectedEntrySha256?: string;
 }
 
 export interface DeployDeps {
@@ -361,6 +369,22 @@ export async function deployUserProject(
   if (!validation.ok) {
     // Nothing is created or published for an invalid artifact.
     return failure(null, new Error(validation.error));
+  }
+
+  // ── Freshness pin: the index.html we collected must be the same bytes the
+  // caller's gate classified. An external write racing publish turns this
+  // into a retryable failure instead of shipping unapproved content. ──
+  if (request.expectedEntrySha256) {
+    const entry = artifact.find((f) => f.path === "index.html");
+    const collectedSha = entry
+      ? createHash("sha256").update(entry.content, "utf-8").digest("hex")
+      : null;
+    if (collectedSha !== request.expectedEntrySha256) {
+      return failure(
+        null,
+        new Error("index.html changed while the site was being published. Please try again."),
+      );
+    }
   }
 
   // ── Publish gates: the single pre-publish choke point ──
