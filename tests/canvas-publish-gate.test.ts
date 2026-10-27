@@ -31,6 +31,18 @@ describe("evaluateCanvasGate", () => {
     expect(g.blocked).toBe(false);
   });
 
+  it("passes legacy projects when missing files surface as ENOENT (local fs transport)", async () => {
+    const enoent: WorkspaceTransport = {
+      readFile: async (path: string) => {
+        if (path === "index.html") return { content: "<html>site</html>", size: 16 };
+        throw new Error(`readFile failed (500): {"error":"ENOENT: no such file or directory, stat 'workspace/.litt/canvas.json'"}`);
+      },
+    } as unknown as WorkspaceTransport;
+    const g = await evaluateCanvasGate(enoent);
+    expect(g.state).toBe("absent");
+    expect(g.blocked).toBe(false);
+  });
+
   it("passes a clean (materialized + unchanged) canvas project", async () => {
     const dh = await canvasDocHash(doc);
     const html = injectCanvasMarker("<html>site</html>", dh);
