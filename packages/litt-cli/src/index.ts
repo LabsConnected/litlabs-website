@@ -479,6 +479,19 @@ async function main(): Promise<number> {
     process.env.LITT_CWD = dispatch.cwd;
   }
 
+  // Fail fast on an explicit workspace override that doesn't resolve:
+  // --cwd flag or LITT_CWD env naming a missing/non-directory path is a
+  // hard error — never silently fall back to an unrelated directory.
+  if (process.env.LITT_CWD) {
+    try {
+      resolveProjectCwd(dispatch.cwd);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${c.red}Error:${c.reset} ${message}`);
+      return 1;
+    }
+  }
+
   // ─── Auth gate ──────────────────────────────────────────────────
   // Commands that require a valid user session are blocked when signed
   // out. Only login, logout, whoami, doctor, version, and help work

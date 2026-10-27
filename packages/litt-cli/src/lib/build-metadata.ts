@@ -244,25 +244,46 @@ export function collectBuildIdentity(): BuildIdentity {
  */
 export function resolveLauncherTarget(): string | null {
   try {
-    const which = execFileSync(
+    const matches = execFileSync(
       process.platform === "win32" ? "where" : "which",
       ["litt"],
       { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
-    ).trim().split(/\r?\n/)[0];
+    ).trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
-    if (!which || !existsSync(which)) return null;
+    if (matches.length === 0) return null;
 
-    if (process.platform === "win32" && which.toLowerCase().endsWith(".cmd")) {
-      // Read the .CMD shim to find the target path
-      const content = readFileSync(which, "utf8");
-      // Look for NODE_PATH or the dist/index.js path in the shim
-      const match = content.match(/(?:NODE_PATH|node)\s+"?([A-Z]:\\[^"]+|\/[^\s"]+)/i);
-      if (match) return resolve(match[1]);
-      // Also try to find the package path
-      const pkgMatch = content.match(/(@litlabs1?[\\/]litt-cli|litt-cli)/i);
-      if (pkgMatch) return which;
+    if (process.platform === "win32") {
+      // `where` lists every PATH match in PATH order, NOT the order a
+      // real shell would resolve them in. cmd.exe/PowerShell apply
+      // PATHEXT resolution and run the FIRST extension match for a
+      // bare `litt` (typically .cmd before an extensionless file) —
+      // so naively taking matches[0] can report a git-bash/WSL shim
+      // that isn't what `litt` on a real Windows shell actually runs.
+      // Also: the `readlink`/Unix branch below must NEVER run on
+      // win32 — Git for Windows ships its own `readlink.exe` that
+      // POSIX-translates paths (e.g. "C:\Users\..." → "/c/Users/...");
+      // existsSync() on Windows cannot see that path, so every
+      // downstream check silently reported "launcher missing".
+      const cmdMatch = matches.find((m) => m.toLowerCase().endsWith(".cmd"));
+      const which = cmdMatch ?? matches[0];
+      if (!existsSync(which)) return null;
+
+      if (which.toLowerCase().endsWith(".cmd")) {
+        // Read the .CMD shim to find the target path
+        const content = readFileSync(which, "utf8");
+        // Look for NODE_PATH or the dist/index.js path in the shim
+        const match = content.match(/(?:NODE_PATH|node)\s+"?([A-Z]:\\[^"]+|\/[^\s"]+)/i);
+        if (match) return resolve(match[1]);
+        // Also try to find the package path
+        const pkgMatch = content.match(/(@litlabs1?[\\/]litt-cli|litt-cli)/i);
+        if (pkgMatch) return which;
+        return which;
+      }
       return which;
     }
+
+    const which = matches[0];
+    if (!existsSync(which)) return null;
 
     // Unix: check if it's a symlink
     try {

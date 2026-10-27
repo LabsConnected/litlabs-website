@@ -67,9 +67,40 @@ describe("resolveProjectCwd — cwd override resolution", () => {
     expect(resolveProjectCwd()).toBe(tmpDir);
   });
 
-  it("ignores a non-existent override and falls back to process.cwd()", () => {
-    process.env.LITT_CWD = path.join(tmpDir, "does-not-exist");
-    expect(resolveProjectCwd()).toBe(process.cwd());
+  it("throws a clear error for a non-existent LITT_CWD override", () => {
+    const missing = path.join(tmpDir, "does-not-exist");
+    process.env.LITT_CWD = missing;
+    expect(() => resolveProjectCwd()).toThrow(/LITT_CWD path does not exist/);
+    expect(() => resolveProjectCwd()).toThrow(missing);
+  });
+
+  it("throws a clear error for a non-existent --cwd flag path", () => {
+    const missing = path.join(tmpDir, "missing-flag-dir");
+    expect(() => resolveProjectCwd(missing)).toThrow(/--cwd path does not exist/);
+    expect(() => resolveProjectCwd(missing)).toThrow(missing);
+  });
+
+  it("throws a clear error when the override names a file, not a directory", () => {
+    const filePath = path.join(tmpDir, "a-file.txt");
+    fs.writeFileSync(filePath, "x");
+    expect(() => resolveProjectCwd(filePath)).toThrow(/--cwd path is not a directory/);
+  });
+
+  it("blames --cwd (not LITT_CWD) when the flag path is the bad one", () => {
+    process.env.LITT_CWD = tmpDir; // valid env, bad flag — flag wins
+    const missing = path.join(tmpDir, "missing-flag-dir");
+    expect(() => resolveProjectCwd(missing)).toThrow(/--cwd path does not exist/);
+  });
+
+  it("never falls back to process.cwd() for an explicit missing override", () => {
+    const missing = path.join(tmpDir, "does-not-exist");
+    let result: string | undefined;
+    try {
+      result = resolveProjectCwd(missing);
+    } catch {
+      result = undefined;
+    }
+    expect(result).not.toBe(process.cwd());
   });
 
   it("resolves a relative override to absolute", () => {
