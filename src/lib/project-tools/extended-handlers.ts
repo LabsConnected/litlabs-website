@@ -467,6 +467,9 @@ function isCommandSafe(command: string): { safe: boolean; reason?: string } {
   const trimmed = command.trim();
   if (!trimmed) return { safe: false, reason: "Empty command." };
   if (trimmed.length > 500) return { safe: false, reason: "Command too long (max 500 chars)." };
+  if (/(&&|\|\||;|`|\$\()/.test(trimmed)) {
+    return { safe: false, reason: "Command chaining and substitution not allowed." };
+  }
   if (/[;`$()|&<>]/.test(trimmed) && !trimmed.startsWith("echo ")) {
     if (!/^(ls|cat|head|tail|wc|grep|rg|find)\s/.test(trimmed)) {
       return { safe: false, reason: "Shell metacharacters not allowed." };
@@ -565,6 +568,10 @@ export const toolWebFetch: ToolHandler = async (_userId, args) => {
   if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" ||
       hostname.startsWith("10.") || hostname.startsWith("192.168.") ||
       hostname.startsWith("169.254.") || hostname.endsWith(".internal") || hostname.endsWith(".local")) {
+    return fail("URLs pointing to internal/private addresses are blocked.");
+  }
+  const ipParts = hostname.split(".").map(Number);
+  if (ipParts.length === 4 && ipParts[0] === 172 && ipParts[1] >= 16 && ipParts[1] <= 31) {
     return fail("URLs pointing to internal/private addresses are blocked.");
   }
 

@@ -53,6 +53,7 @@ import type {
 } from "./types.js";
 import type { RuntimeStore } from "./state.js";
 import type { CommandExecutor, CommandExecutorResult } from "./command-executor.js";
+import { redactSecrets } from "./execution.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -265,6 +266,20 @@ const CHECK_LABELS: Record<VerificationCheckId, string> = {
   browser: "Browser",
   evidence: "Evidence",
 };
+
+/**
+ * Bound + redact subprocess output for check-result events.
+ * Compiler/build errors live at the END of stderr — keep the tail,
+ * redact secret-looking patterns, never ship raw output unbounded.
+ */
+const MAX_OUTPUT_EXCERPT_CHARS = 4000;
+function evidenceExcerpt(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const tail = text.length > MAX_OUTPUT_EXCERPT_CHARS
+    ? `…(${text.length - MAX_OUTPUT_EXCERPT_CHARS} chars truncated)…${text.slice(-MAX_OUTPUT_EXCERPT_CHARS)}`
+    : text;
+  return redactSecrets(tail);
+}
 
 // ─── VerificationGate ──────────────────────────────────────────────
 
@@ -578,6 +593,12 @@ export class VerificationGate {
           exitCode: cached.exitCode,
           durationMs: 0,
           reused: true,
+          command: cmd.command,
+          args: cmd.args,
+          cwd: this._cwd,
+          message: reusedResult.message,
+          stdout: evidenceExcerpt(cached.stdout),
+          stderr: evidenceExcerpt(cached.stderr),
         },
         runId,
         toolCallId,
@@ -600,7 +621,11 @@ export class VerificationGate {
       const message = `${CHECK_LABELS[id]} check crashed: ${err instanceof Error ? err.message : String(err)}`;
       this._emit(
         "verification_check_result",
-        { runId, toolCallId, check: id, status: "failed", message },
+        {
+          runId, toolCallId, check: id, status: "failed", message,
+          command: cmd.command, args: cmd.args, cwd: this._cwd,
+          stderr: evidenceExcerpt(message),
+        },
         runId,
         toolCallId,
       );
@@ -652,6 +677,12 @@ export class VerificationGate {
         success: execResult.result.success,
         exitCode,
         durationMs,
+        command: cmd.command,
+        args: cmd.args,
+        cwd: this._cwd,
+        message: execResult.result.message,
+        stdout: evidenceExcerpt(stdout),
+        stderr: evidenceExcerpt(stderr),
       },
       runId,
       toolCallId,
@@ -766,7 +797,9 @@ export class VerificationGate {
     const head = proven
       ? "VERIFIED — runtime proved all checks passed."
       : "NOT VERIFIED — at least one check failed. COMPLETE is not honest.";
-    return `${head} [${parts.join(" | ")}]`;
+    const firstFailure = checks.find((c) => c.status !== "success" && c.status !== "skipped");
+    const detail = firstFailure ? ` First failure: ${firstFailure.message}` : "";
+    return `${head} [${parts.join(" | ")}]${detail}`;
   }
 
   private _emit(

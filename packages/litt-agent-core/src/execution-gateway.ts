@@ -582,7 +582,11 @@ export class ExecutionGateway {
 
     const durationMs = Date.now() - t0;
 
-    // Emit gateway execution result
+    // Emit gateway execution result — include the tool's own message and
+    // bounded output so UI layers can show the REAL result, not just a
+    // status word. Without this, a gateway-routed tool left no evidence
+    // of what it actually did.
+    const rawData = (result.data ?? {}) as Record<string, unknown>;
     this.emit({
       type: "litt_event",
       subtype: "gateway_result",
@@ -594,6 +598,9 @@ export class ExecutionGateway {
         status: result.status,
         success: result.success,
         durationMs,
+        message: result.message,
+        stdout: typeof rawData.stdout === "string" ? redactSecrets(rawData.stdout.slice(-4000)) : undefined,
+        stderr: typeof rawData.stderr === "string" ? redactSecrets(rawData.stderr.slice(-4000)) : undefined,
         policyEffect,
         approved,
         grantVerified,
