@@ -84,8 +84,11 @@ import { probeLocalLane } from "./lib/local-lane.js";
 // These are only imported when the user actually runs them, so
 // `litt doctor` / `litt run` / etc. don't need Ink installed.
 type CommandHandler = (args: string[], session?: RuntimeSession) => Promise<number>;
-const lazyCockpit = async (): Promise<CommandHandler> =>
-  (await import("./commands/cockpit.js")).cockpitCommand;
+const lazyCockpit = async (
+  mode: "plan" | "act" | "auto",
+): Promise<CommandHandler> =>
+  async (rest) =>
+    (await import("./commands/cockpit.js")).cockpitCommand(rest, { mode });
 
 const VERSION = CLI_VERSION;
 
@@ -609,7 +612,7 @@ async function main(): Promise<number> {
   // Resolve handler — lazy-load heavy commands (Ink/React) on demand
   let handler: CommandHandler | undefined;
   if (LAZY_COMMANDS.has(command)) {
-    handler = await lazyCockpit();
+    handler = await lazyCockpit(mode);
   } else {
     handler = COMMANDS[command];
   }
