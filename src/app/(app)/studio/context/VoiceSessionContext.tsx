@@ -5,7 +5,8 @@
  *
  * ARCHITECTURE (v2 — ghost transcription fix):
  * - Uses useInworldSession for STT (WebSocket → voice-server proxy → Inworld)
- * - Uses Inworld TTS (inworld-tts-2 with configured INWORLD_LITT_VOICE / INWORLD_SPARK_VOICE)
+ * - Uses Inworld TTS (inworld-tts-2 with INWORLD_LITT_VOICE or the built-in
+ *   LiT-Code signature voice)
  *   when the transport is connected. A single inline style tag steers delivery
  *   ("deep, calm, precise" for LiTT) — the WebSocket API has no request-level
  *   instruction field, so steering is inline, not in session config.
@@ -784,13 +785,12 @@ export function VoiceSessionProvider({
   const playTtsEndpointAudio = useCallback(
     async (text: string, onDone: () => void): Promise<boolean> => {
       try {
-        const agentId = useVoiceStore.getState().activeAgent;
         const res = await fetch("/api/voice/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             text,
-            voice: agentId === "spark" ? "nova" : "onyx",
+            voice: "onyx",
           }),
         });
         if (!res.ok) return false;
@@ -884,7 +884,7 @@ export function VoiceSessionProvider({
         spokenText = await fetchSpokenSummary(sanitized, agentId);
       }
 
-      // Primary: Inworld TTS (uses configured INWORLD_LITT_VOICE / INWORLD_SPARK_VOICE)
+      // Primary: Inworld TTS (uses INWORLD_LITT_VOICE or the LiT-Code default)
       // Always try Inworld first — inworldSession.speakText auto-connects the
       // transport if needed. This lets "Speak" work without first starting voice.
       try {
@@ -940,14 +940,12 @@ export function VoiceSessionProvider({
       // (rest unchanged — agentId already resolved above)
       const voices = window.speechSynthesis.getVoices();
       if (voices.length > 0) {
-        const preferred = agentId === "spark"
-          ? voices.find((v) => /female|zira|aria|jenny|samantha/i.test(v.name) && v.lang.startsWith("en"))
-          : voices.find((v) => /male|david|mark|alex|daniel|fred/i.test(v.name) && v.lang.startsWith("en"));
+        const preferred = voices.find((v) => /male|david|mark|alex|daniel|fred/i.test(v.name) && v.lang.startsWith("en"));
         utterance.voice = preferred ?? voices.find((v) => v.lang === "en-US") ?? voices[0];
       }
       utterance.lang = "en-US";
-      utterance.rate = agentId === "spark" ? 1.05 : 0.95;
-      utterance.pitch = agentId === "spark" ? 1.1 : 0.9;
+      utterance.rate = 0.95;
+      utterance.pitch = 0.9;
 
       utterance.onend = () => {
         if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] playback ended (browser TTS)");

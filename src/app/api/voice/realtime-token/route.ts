@@ -88,7 +88,9 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify({
           model,
-          voice: voice || "alloy",
+          // "onyx" is LiTT's OpenAI-side voice (matches /api/voice/tts
+          // fallback). LiT-Code is Inworld-only — it cannot be used here.
+          voice: voice || "onyx",
           instructions,
           input_audio_format: "pcm16",
           output_audio_format: "pcm16",

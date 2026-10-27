@@ -102,7 +102,9 @@ export async function POST(req: NextRequest) {
       metadata: JSON.stringify({
         agentId: agentId || "litt",
         instructions: instructions || "",
-        voice: voice || "alloy",
+        // "onyx" is LiTT's OpenAI-side voice (matches /api/voice/tts
+        // fallback). LiT-Code is Inworld-only — it cannot be used here.
+        voice: voice || "onyx",
         userId: session.userId,
       }),
       ttl: 60 * 60, // 1 hour

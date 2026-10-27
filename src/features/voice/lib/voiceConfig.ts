@@ -1,20 +1,11 @@
 import type { VoiceAgentId } from "@/features/voice/types";
 
-export type AgentVoiceId = "litt" | "spark";
-
 export const AGENT_VOICE_CONFIG = {
   litt: {
     agentId: "litt" as const,
     style: "deep-calm-precise",
     rate: 0.9,
     pitch: 0.88,
-    volume: 1,
-  },
-  spark: {
-    agentId: "spark" as const,
-    style: "bright-warm-expressive",
-    rate: 1.04,
-    pitch: 1.03,
     volume: 1,
   },
   researcher: {
@@ -67,20 +58,6 @@ const DEEP_VOICE_PATTERNS = [
   /thomas/i,
 ];
 
-const BRIGHT_VOICE_PATTERNS = [
-  /zira/i,
-  /aria/i,
-  /jenny/i,
-  /samantha/i,
-  /victoria/i,
-  /karen/i,
-  /moira/i,
-  /tessa/i,
-  /google.*us.*english/i,
-  /microsoft.*zira/i,
-  /microsoft.*aria/i,
-];
-
 const VOICE_STORAGE_KEY = "litt-voice-browser-selection";
 
 export function pickBrowserVoice(
@@ -103,15 +80,13 @@ function pickByPatterns(
   voices: SpeechSynthesisVoice[],
   agentId: VoiceAgentId,
 ): SpeechSynthesisVoice {
-  const patterns = agentId === "spark" ? BRIGHT_VOICE_PATTERNS : DEEP_VOICE_PATTERNS;
-
   const stored = getStoredVoiceName(agentId);
   if (stored) {
     const match = voices.find((v) => v.name === stored);
     if (match) return match;
   }
 
-  for (const pattern of patterns) {
+  for (const pattern of DEEP_VOICE_PATTERNS) {
     const match = voices.find((v) => pattern.test(v.name));
     if (match) return match;
   }

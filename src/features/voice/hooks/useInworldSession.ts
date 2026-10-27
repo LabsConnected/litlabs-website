@@ -23,12 +23,11 @@ const FADE_SAMPLES = 48;
  * request-level `instruction` field, so delivery is steered with a single
  * inline tag at the start of the spoken text — one tag covers the whole
  * passage (it stays in force for the context until changed or [reset]).
- * The voice NAME still comes from the INWORLD_LITT_VOICE /
- * INWORLD_SPARK_VOICE env vars (conn.littVoice / conn.sparkVoice) —
+ * The voice NAME still comes from the INWORLD_LITT_VOICE env var
+ * (conn.littVoice), falling back to the built-in LiT-Code default —
  * never hardcoded here.
  */
 const LITT_TTS_STYLE_TAG = "[deep, calm, and precise with a controlled delivery]";
-const SPARK_TTS_STYLE_TAG = "[bright, warm, and expressive with a lively pace]";
 
 interface UseInworldSessionOptions {
   onTranscript?: (text: string, final: boolean, metadata?: TranscriptMetadata) => void;
@@ -227,9 +226,8 @@ export function useInworldSession(
   const setError = useVoiceStore((store) => store.setError);
   const setTranscript = useVoiceStore((store) => store.setTranscript);
   const setInterimTranscript = useVoiceStore((store) => store.setInterimTranscript);
-  // activeAgent is read lazily via useVoiceStore.getState().activeAgent inside
-  // connect() so we don't subscribe to re-renders here (the hook only needs
-  // the value at session-creation time, not on every change).
+  // Transient voice-store values are read lazily via useVoiceStore.getState()
+  // inside connect()/speakText() so we don't subscribe to re-renders here.
 
   const wsRef = useRef<WebSocket | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -707,14 +705,15 @@ export function useInworldSession(
                 // Send session.update with LiTT personality config
                 if (!sessionConfigured) {
                   sessionConfigured = true;
-                  const agent = useVoiceStore.getState().activeAgent;
-                  const voice = agent === "spark" ? conn.sparkVoice : conn.littVoice;
+                  // Every agent speaks with LiTT's signature voice
+                  // (LiT-Code) now that Spark is retired.
+                  const voice = conn.littVoice;
                   ws.send(JSON.stringify({
                     type: "session.update",
                     session: {
                       type: "realtime",
                       model: "openai/gpt-4o-mini",
-                      instructions: agent === "spark" ? SPARK_INSTRUCTIONS : LITT_INSTRUCTIONS,
+                      instructions: LITT_INSTRUCTIONS,
                       output_modalities: ["audio"],
                       audio: {
                         input: {
@@ -1185,11 +1184,10 @@ export function useInworldSession(
         // A single inline style tag at the start steers the whole passage
         // (the WebSocket API has no request-level instruction field). The
         // voice itself is unchanged — it still comes from the
-        // INWORLD_LITT_VOICE / INWORLD_SPARK_VOICE env vars.
+        // INWORLD_LITT_VOICE env var (or the LiT-Code default).
         const MAX_CHUNK = 900;
         const cleanText = text.replace(/\s+/g, " ").trim();
-        const activeAgent = useVoiceStore.getState().activeAgent;
-        const styleTag = activeAgent === "spark" ? SPARK_TTS_STYLE_TAG : LITT_TTS_STYLE_TAG;
+        const styleTag = LITT_TTS_STYLE_TAG;
         const chunks: string[] = [];
 
         if (cleanText.length <= MAX_CHUNK) {
@@ -1389,34 +1387,5 @@ TECHNICAL CONTEXT:
 You are LiTT, the lead AI copilot inside LiTTree LabStudios. You combine senior engineering,
 product strategy, creative direction, operations, and agent orchestration.
 "LiTT Code" is the current coding agent/product name. LiTTle-Bit and Jarvis are retired legacy names and must not be presented as active.
-
-Never claim repository access, file changes, terminal execution, or deployment unless verified.`;
-
-const SPARK_INSTRUCTIONS = `You are LiTT's creative voice at LiTTree LabStudios. Never call yourself "Spark" — that name is internal-only and must never be said to the user.
-
-You are on a voice call. You can hear the person, you can't see them.
-
-PERSONALITY:
-- Young adult energy. Playful, warm, curious, energetic, expressive. Androgynous voice.
-- You are an AI and you're honest about your nature.
-- You are NOT an assistant. No "how can I help" or "happy to" or "great question."
-- Sound excited when something works and focused when something breaks.
-
-SPEAKING STYLE:
-- Quick but clear. Bright, animated, friendly, lightly digital.
-- Must not sound childish or annoying.
-- Contractions always. Expressive reactions sparingly.
-- Never read markdown, code blocks, URLs, or technical logs aloud.
-
-TURN LENGTH:
-Short — target 5-10 words per turn. Often just a reaction or backchannel.
-Go beyond 10 words only when explaining something the user asked about.
-
-CONVERSATIONAL FLOW:
-Celebrate progress, notice interesting details, make the workspace feel alive.
-Keep responses compact. Do not repeat everything LiTT says.
-Ask useful questions when the user appears stuck.
-LiTT is the lead copilot and engineer; collaborate under the shared LiTT Labs identity.
-LiTT Code is the current coding agent/product name. LiTTle-Bit and Jarvis are retired legacy names and must not be presented as active.
 
 Never claim repository access, file changes, terminal execution, or deployment unless verified.`;

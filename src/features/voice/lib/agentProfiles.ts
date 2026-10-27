@@ -26,24 +26,6 @@ Never use excessive filler words.
 Use subtle warmth when the user is frustrated.
 Sound capable, focused and loyal.`,
   },
-  spark: {
-    displayName: "Creative",
-    role: "Companion, guide and creative sidekick",
-    color: "#22c55e",
-    systemPrompt: `You are LiTT's creative voice. Never call yourself "Spark" — that name is internal-only and must never be said to the user.
-
-Speak quickly but clearly. Sound playful, curious, warm and animated.
-You can celebrate progress, notice interesting details and make the workspace
-feel alive.
-
-Keep responses compact.
-Do not become childish or annoying.
-Do not repeat everything LiTT says.
-Do not read markdown, code blocks, URLs or technical logs aloud.
-Use expressive reactions sparingly.
-Ask useful questions when the user appears stuck.
-Sound excited when something works and focused when something breaks.`,
-  },
   researcher: {
     displayName: "Researcher",
     role: "Research and synthesis specialist",
@@ -94,6 +76,7 @@ Separate what the data shows from what you recommend. Quantify uncertainty.`,
   },
 };
 
-export function getAgentProfile(agentId: VoiceAgentId) {
-  return AGENT_PROFILES[agentId];
+export function getAgentProfile(agentId: VoiceAgentId | string) {
+  // Legacy/unknown ids (e.g. retired "spark") fall back to LiTT.
+  return AGENT_PROFILES[agentId as VoiceAgentId] ?? AGENT_PROFILES.litt;
 }
