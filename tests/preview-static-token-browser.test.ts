@@ -23,7 +23,7 @@
 // pass because ordering is the browser's own.
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
-import { chromium, type Browser } from "@playwright/test";
+import { chromium, expect as playwrightExpect, type Browser } from "@playwright/test";
 import { NextRequest } from "next/server";
 vi.mock("@clerk/nextjs/server", () => ({ clerkMiddleware: vi.fn(() => vi.fn()), createRouteMatcher: vi.fn(() => vi.fn()) }));
 vi.mock("@clerk/backend/proxy", () => ({ clerkFrontendApiProxy: vi.fn() }));
@@ -238,7 +238,7 @@ it("rejects dynamic unauthorized navigation and does not tokenize external links
   const { context, frame } = await openPreview();
   expect(await frame.locator("#external-link").getAttribute("href")).toBe("https://evil.example/exfil.html");
   await frame.locator("#secret-link").click();
-  expect(await frame.locator("body").textContent()).toContain("Unauthorized");
+  await playwrightExpect(frame.locator("body")).toContainText("Unauthorized");
   expect(frame.url()).toContain("/api/preview/owned-project/secret.html");
   await context.close();
 }, 20000);
