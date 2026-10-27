@@ -112,7 +112,9 @@ function deriveCommandExcerpt(_failureEntry: ActivityEntry | null, terminalMissi
 function deriveOutputExcerpt(failureEntry: ActivityEntry | null, reason: string): string | null {
   const candidate = failureEntry?.fullText ?? failureEntry?.text;
   if (candidate && candidate !== reason) {
-    return candidate.length > 400 ? `${candidate.slice(0, 397)}…` : candidate;
+    // Bounded but useful: a real compiler error needs more than 400 chars.
+    // The full (bounded) excerpt still lives in the activity entry.
+    return candidate.length > 2000 ? `${candidate.slice(0, 1997)}…` : candidate;
   }
   return null;
 }

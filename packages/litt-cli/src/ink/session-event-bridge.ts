@@ -20,6 +20,28 @@ export type SessionEventListener = (event: LifecycleEvent) => void;
 export class SessionEventBridge {
   private listeners = new Set<SessionEventListener>();
   private currentRunId: string | null = null;
+  /** toolCallIds already projected as tool.started — one start per tool call. */
+  private startedTools = new Set<string>();
+  /** toolCallIds already projected to a terminal state — one result per tool call. */
+  private finishedTools = new Set<string>();
+
+  /** Dedup guard: a single tool execution can emit up to three parallel
+   *  event streams (agent_tool_*, gateway_*, tool_call/tool_result).
+   *  Project at most one start and one terminal event per toolCallId. */
+  private claimStart(toolCallId: string | undefined): boolean {
+    if (!toolCallId) return true;
+    if (this.startedTools.has(toolCallId)) return false;
+    this.startedTools.add(toolCallId);
+    if (this.startedTools.size > 2000) this.startedTools.clear();
+    return true;
+  }
+  private claimFinish(toolCallId: string | undefined): boolean {
+    if (!toolCallId) return true;
+    if (this.finishedTools.has(toolCallId)) return false;
+    this.finishedTools.add(toolCallId);
+    if (this.finishedTools.size > 2000) this.finishedTools.clear();
+    return true;
+  }
 
   /** Subscribe to lifecycle events. Returns unsubscribe function. */
   subscribe(listener: SessionEventListener): () => void {
@@ -126,7 +148,9 @@ export class SessionEventBridge {
         // agent runs (runId starts with "agent_"), same as command_start.
         const runnerRunId = (data.runId as string) ?? runId;
         if (runnerRunId.startsWith("agent_")) return null;
-        return { type: "tool.started", runId, toolCallId, ts, data };
+        const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
+        if (!this.claimStart(toolCallIdFromData)) return null;
+        return { type: "tool.started", runId, toolCallId: toolCallIdFromData, ts, data };
       }
 
       case "tool_result": {
@@ -139,6 +163,7 @@ export class SessionEventBridge {
         if (runnerRunId.startsWith("agent_")) return null;
         const status = data.status as string;
         const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
+        if (!this.claimFinish(toolCallIdFromData)) return null;
         switch (status) {
           case "success":
             return { type: "tool.completed", runId, toolCallId: toolCallIdFromData, ts, data };
@@ -177,12 +202,14 @@ export class SessionEventBridge {
         if (subtype === "agent_tool_call") {
           const tool = (data.tool as string) ?? "unknown";
           const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
+          this.claimStart(toolCallIdFromData);
           return { type: "tool.started", runId, toolCallId: toolCallIdFromData, ts, data: { tool, ...data } };
         }
         if (subtype === "agent_tool_result") {
           const success = (data.success as boolean) ?? true;
           const tool = (data.tool as string) ?? "unknown";
           const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
+          if (!this.claimFinish(toolCallIdFromData)) return null;
           return {
             type: success ? "tool.completed" : "tool.failed",
             runId,
@@ -190,6 +217,91 @@ export class SessionEventBridge {
             ts,
             data: { tool, ...data },
           };
+        }
+
+        // Gateway lifecycle — for tools routed through ExecutionGateway
+        // WITHOUT an agent_tool_* pair (local-tool missions, direct
+        // gateway executions, plan-denied calls). gateway_* events were
+        // previously dropped: the tool showed started-but-never-finished
+        // and its real output never reached the UI. In agent runs the
+        // agent_tool_* pair is canonical (runId "agent_…" — suppressed).
+        if (subtype === "gateway_execute") {
+          if (runId.startsWith("agent_")) return null;
+          const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
+          if (!this.claimStart(toolCallIdFromData)) return null;
+          const tool = (data.toolId as string) ?? "tool";
+          return { type: "tool.started", runId, toolCallId: toolCallIdFromData, ts, data: { tool, ...data } };
+        }
+        if (subtype === "gateway_result") {
+          if (runId.startsWith("agent_")) return null;
+          const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
+          if (!this.claimFinish(toolCallIdFromData)) return null;
+          const status = (data.status as string) ?? "failed";
+          const tool = (data.toolId as string) ?? "tool";
+          const detail = { tool, ...data, error: data.message, timeoutMs: data.durationMs };
+          const type =
+            status === "success" ? "tool.completed"
+            : status === "timeout" ? "tool.timeout"
+            : status === "cancelled" ? "tool.cancelled"
+            : "tool.failed";
+          return { type, runId, toolCallId: toolCallIdFromData, ts, data: detail };
+        }
+        if (subtype === "gateway_denied") {
+          const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
+          if (!this.claimFinish(toolCallIdFromData)) return null;
+          return {
+            type: "tool.failed",
+            runId,
+            toolCallId: toolCallIdFromData,
+            ts,
+            data: { tool: (data.toolId as string) ?? "tool", error: (data.reason as string) ?? "denied", message: (data.reason as string) ?? "denied" },
+          };
+        }
+
+        // Verification-gate lifecycle — a failed check must surface the
+        // REAL subprocess evidence (command, cwd, exit, stderr), not a
+        // generic summary. These were previously dropped entirely.
+        if (subtype === "verification_check_start") {
+          const check = (data.check as string) ?? "check";
+          return {
+            type: "tool.started",
+            runId,
+            toolCallId,
+            ts,
+            data: { tool: `project.${check}`, check, label: data.label },
+          };
+        }
+        if (subtype === "verification_check_result") {
+          const status = (data.status as string) ?? "failed";
+          if (status === "skipped") return null;
+          const check = (data.check as string) ?? "check";
+          const tool = (data.tool as string) ?? `project.${check}`;
+          const shortMessage = (data.message as string) ?? `${tool} ${status}`;
+          const cmdLine = [data.command, ...(Array.isArray(data.args) ? (data.args as string[]) : [])]
+            .filter(Boolean)
+            .join(" ");
+          const evidenceLines = [
+            shortMessage,
+            `command: ${cmdLine || "?"}`,
+            `cwd: ${(data.cwd as string) ?? "?"}`,
+            `exit: ${data.exitCode ?? "?"} · ${data.durationMs ?? 0}ms`,
+            data.stderr ? `stderr:\n${data.stderr}` : null,
+            data.stdout ? `stdout:\n${data.stdout}` : null,
+          ].filter((l): l is string => typeof l === "string");
+          const detail = {
+            ...data,
+            tool,
+            check,
+            error: shortMessage,
+            message: evidenceLines.join("\n"),
+            timeoutMs: data.durationMs,
+          };
+          const type =
+            status === "success" ? "tool.completed"
+            : status === "timeout" ? "tool.timeout"
+            : status === "cancelled" ? "tool.cancelled"
+            : "tool.failed";
+          return { type, runId, toolCallId, ts, data: detail };
         }
 
         // Mission lifecycle events — map to mission.* LifecycleEvents

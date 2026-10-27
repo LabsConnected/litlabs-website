@@ -116,19 +116,16 @@ export async function createWorkspaceCheckpoint(
 ): Promise<WorkspaceCheckpointResult> {
   const { projectId, userId, workspaceId, label, description } = input;
 
-  // Stage all changes
-  await execInWorkspace(workspaceId, userId, "git add -A");
-
   const commitMessage = description ? `${label}\n\n${description}` : label;
+
+  // Ensure git user identity is configured, stage all changes, and commit via stdin
   const commit = await execInWorkspace(
     workspaceId,
     userId,
-    "git commit --file=- --allow-empty",
+    "git config --local user.name 'LiTT Agent' && git config --local user.email 'agent@litt.ai' && git add -A && git commit --file=- --allow-empty",
     commitMessage,
   );
-  // The exec endpoint returns 200 even when git fails. A failed commit
-  // followed by rev-parse would record the PREVIOUS commit as this
-  // checkpoint — a silent lie that makes Revert a no-op. Fail loudly.
+
   if (commit.exitCode !== 0) {
     throw new Error(`Checkpoint commit failed (exit ${commit.exitCode}): ${commit.stderr.slice(0, 200)}`);
   }

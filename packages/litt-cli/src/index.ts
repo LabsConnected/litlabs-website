@@ -83,7 +83,15 @@ import { probeLocalLane } from "./lib/local-lane.js";
 // Lazy-loaded commands that pull in heavy dependencies (Ink/React).
 // These are only imported when the user actually runs them, so
 // `litt doctor` / `litt run` / etc. don't need Ink installed.
-type CommandHandler = (args: string[], session?: RuntimeSession) => Promise<number>;
+/**
+ * Dispatch context — parsed CLI flags that every command surface must
+ * honor. `mode` is the --mode <plan|act|auto> value from dispatch; it
+ * is the explicit launch mode and takes precedence over every default.
+ */
+export interface CommandContext {
+  mode: "plan" | "act" | "auto";
+}
+type CommandHandler = (args: string[], session?: RuntimeSession, context?: CommandContext) => Promise<number>;
 const lazyCockpit = async (): Promise<CommandHandler> =>
   (await import("./commands/cockpit.js")).cockpitCommand;
 
@@ -642,7 +650,7 @@ async function main(): Promise<number> {
   }
 
   try {
-    return await handler(rest, session);
+    return await handler(rest, session, { mode });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`${c.red}Error:${c.reset} ${message}`);
