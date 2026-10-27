@@ -313,7 +313,11 @@ export default function StudioPreviewPanel({
     const bridge = bridgeRef.current;
     if (!bridge?.target) return;
     try {
-      bridge.target.postMessage({ source: "litt-inspector", type, token: bridge.token }, bridge.origin);
+      // Sandboxed (opaque-origin) frames never match a URL targetOrigin, so
+      // commands must be posted with "*" — the target window is pinned to
+      // our own iframe via bridgeRef, and the injected bridge only accepts
+      // messages whose source is window.parent.
+      bridge.target.postMessage({ source: "litt-inspector", type, token: bridge.token }, "*");
     } catch {
       // Frame navigated away mid-flight — the next load re-attaches.
     }
@@ -369,7 +373,11 @@ export default function StudioPreviewPanel({
       bridgeRef.current = bridge;
       const onMessage = (event: MessageEvent) => {
         if (bridgeRef.current !== bridge) return;
-        if (event.source !== bridge.target || event.origin !== bridge.origin) return;
+        // Sandboxed static previews post from the opaque origin "null" — the
+        // event.source window-identity check still pins messages to OUR
+        // iframe, so a sandboxed document's "null" origin is safe to accept
+        // alongside the resolved URL origin.
+        if (event.source !== bridge.target || (event.origin !== bridge.origin && event.origin !== "null")) return;
         const data = event.data as { source?: unknown; type?: unknown; payload?: unknown } | null;
         if (!data || data.source !== "litt-inspector" || typeof data.type !== "string") return;
         if (data.type === "ready") {
@@ -406,7 +414,10 @@ export default function StudioPreviewPanel({
       // is not instrumented (external URL, CSP block, older terminal
       // server) — surface that truthfully.
       try {
-        target.postMessage({ source: "litt-inspector", type: "enable", token }, origin);
+        // Opaque-origin frames drop messages addressed to a URL targetOrigin;
+        // "*" is required and safe (target is our own iframe window, the
+        // bridge validates event.source === window.parent).
+        target.postMessage({ source: "litt-inspector", type: "enable", token }, "*");
       } catch {
         // Frame navigated away; the load handler will re-attach.
       }
