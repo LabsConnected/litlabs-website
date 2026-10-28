@@ -3,6 +3,13 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
+    pool: "threads",
+    poolOptions: {
+      threads: {
+        minThreads: 1,
+        maxThreads: 4,
+      },
+    },
     // Surface failing tests as GitHub annotations (readable without log access).
     reporters: process.env.GITHUB_ACTIONS ? ["default", "github-actions"] : ["default"],
     include: ["__tests__/**/*.test.ts"],

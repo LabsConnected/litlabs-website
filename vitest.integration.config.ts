@@ -26,6 +26,13 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    pool: "threads",
+    poolOptions: {
+      threads: {
+        minThreads: 1,
+        maxThreads: 4,
+      },
+    },
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/growth-engine-smoke.test.ts"],
     // Long timeouts for real LLM + DB calls.

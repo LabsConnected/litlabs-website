@@ -16,6 +16,16 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Capped below the device's 8 cores — each worker thread carries its own
+    // jsdom instance, and uncapped parallelism was pushing peak RAM close to
+    // the ceiling on this 7.4GB device.
+    pool: "threads",
+    poolOptions: {
+      threads: {
+        minThreads: 1,
+        maxThreads: 4,
+      },
+    },
     // Surface failing tests as GitHub annotations (readable without log access).
     reporters: process.env.GITHUB_ACTIONS ? ["default", "github-actions"] : ["default"],
     setupFiles: ["./tests/setup.ts"],
