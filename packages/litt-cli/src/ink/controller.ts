@@ -26,6 +26,7 @@ import { existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import {
   runAgentLoop,
+  buildChatSystemPrompt,
   planMission,
   resolveStepForTool,
   attachToolToStep,
@@ -58,6 +59,8 @@ import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from 
 import { TelemetryStore, loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
+import { matchToolInventoryQuery, formatToolInventory } from "../lib/tool-inventory.js";
+import { resolveMaxRunMs } from "../lib/execution-watchdog.js";
 import {
   matchMachineLane,
   classifyMachineCommand,
@@ -946,6 +949,18 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   const cancelRemoteModel = useCallback(() => {
     currentRemoteModelRef.current?.cancel();
   }, []);
+
+  // The AbortController for the in-flight agent loop. ESC/Ctrl+C and the
+  // execution watchdog abort it so a LOCAL model stream (Ollama) is
+  // cancelled too — previously only the remote provider and spawned
+  // processes were cancelled, so a local model round kept running (and
+  // dispatching tool calls) in the background after the UI reset.
+  const runAbortRef = useRef<AbortController | null>(null);
+  const cancelActiveRun = useCallback(() => {
+    runAbortRef.current?.abort();
+    currentRemoteModelRef.current?.cancel();
+    session.cancel().catch(() => {});
+  }, [session]);
 
   // ─── @mention context logs ──────────────────────────────────────
   // Captured from the runtime event stream so @terminal:last and
@@ -2225,6 +2240,59 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
+    // ─── TOOL INVENTORY lane — deterministic registry answer (no model) ──
+    // "What tools do you have?" asks about LiTT's OWN registered,
+    // permission-filtered ToolRegistry. The truthful answer is local
+    // runtime state — zero model inference, zero tool execution, and it
+    // works signed-out for the same reason READ does: no capability
+    // beyond the local registry is required. Runs BEFORE the capability
+    // gate so a signed-out local session can still answer it.
+    //
+    // Without this lane the question fell through to CHAT, where a weak
+    // local model answered a question ABOUT the tools by CALLING them —
+    // improvised inspection/diagnostics runs that showed INSPECTING/
+    // RUNNING for a minute-plus on phone-class local inference.
+    if (matchToolInventoryQuery(input)) {
+      const invPerf = PerfTrace.start("local");
+      invPerf.mark("local_match");
+      const inventoryText = formatToolInventory(
+        session.getGateway().getTools(),
+        session.getMode(),
+      );
+      store.actions.addChatMessage({
+        role: "user",
+        content: input,
+        ts: Date.now(),
+        status: "complete",
+      });
+      store.actions.addActivity({
+        id: `act_${Date.now()}_inventory`,
+        ts: Date.now(),
+        type: "agent.chat",
+        tag: "LOCAL",
+        text: truncateActivity(input, 40),
+        fullText: input,
+      });
+      store.actions.addChatMessage({
+        role: "assistant",
+        content: inventoryText,
+        ts: Date.now(),
+        status: "complete",
+        servedModel: "local",
+      });
+      store.actions.addActivity({
+        id: `act_${Date.now()}_done`,
+        ts: Date.now(),
+        type: "agent.complete",
+        tag: "LOCAL",
+        text: "Tool inventory — answered from the registered tool set (no model call)",
+      });
+      invPerf.mark("finalize");
+      invPerf.end("local");
+      persistSession();
+      return;
+    }
+
     // ─── MACHINE lane — explicit local command execution (no model) ───
     // Handles requests that explicitly ask to execute LOCAL commands
     // ("execute locally", "do not use REMOTE") with a concrete command
@@ -2763,11 +2831,29 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // is split across many stream deltas.
           const toolCallFilter = createToolCallStreamFilter();
 
+          // Per-run abort + the SAME wall-clock budget the watchdog
+          // enforces — ESC/Ctrl+C/watchdog cancel the model round itself
+          // (LOCAL Ollama streams included), not just spawned processes.
+          const runAbort = new AbortController();
+          runAbortRef.current = runAbort;
+
           const result = await runAgentLoop(modelInput, {
             model, tools, shell: session.getShell(),
             gateway,
             cwd: projectRoot, userId: "cli-user",
             mode: session.getMode(), maxRounds: 4,
+            abortSignal: runAbort.signal,
+            totalTimeoutMs: resolveMaxRunMs(),
+            // Chat-scoped prompt: informational questions are answered
+            // directly; the model calls a tool ONLY when the user asked
+            // for project state or external data. Prevents a weak model
+            // from turning a question into an improvised inspection run.
+            systemPrompt: buildChatSystemPrompt(
+              tools.list(),
+              { name: projectName ?? "chat", root: projectRoot, branch: freshBranch ?? branch ?? "unknown" },
+              undefined,
+              model.providerId === "ollama",
+            ),
             projectContext: { name: projectName ?? "chat", root: projectRoot, branch: freshBranch ?? branch ?? "unknown" },
             store: agentStore,
             // Prior completed turns from THIS cockpit session — without
@@ -2873,6 +2959,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.scheduleIdle(2000);
         } finally {
           currentRemoteModelRef.current = null;
+          runAbortRef.current = null;
           // ONE canonical transition out of a run: every terminal
           // outcome (success, failed, provider error, tool error, stall)
           // re-enables the composer and stops the busy timer. The shell
@@ -3191,11 +3278,19 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // separates planning (plan_start → plan_end) from execution.
         perf.mark("agent_loop_start");
 
+        // Per-run abort + the SAME wall-clock budget the watchdog
+        // enforces — ESC/Ctrl+C/watchdog cancel the model round itself
+        // (LOCAL Ollama streams included), not just spawned processes.
+        const runAbort = new AbortController();
+        runAbortRef.current = runAbort;
+
         const result = await runAgentLoop(modelInput, {
           model, tools, shell: session.getShell(),
           gateway,
           cwd: projectRoot, userId: "cli-user",
           mode: session.getMode(), maxRounds: 10,
+          abortSignal: runAbort.signal,
+          totalTimeoutMs: resolveMaxRunMs(),
           projectContext: {
             name: projectName ?? "unnamed",
             root: projectRoot,
@@ -3677,6 +3772,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         }
       } finally {
         currentRemoteModelRef.current = null;
+        runAbortRef.current = null;
         // The canonical transition out of a run — no terminal outcome
         // (success, failed, cancelled, timeout, provider/tool/planning
         // error, transport stall) may leave the shell visually Working.
@@ -3766,5 +3862,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     runShipVerify,
     runShipCommit,
     cancelRemoteModel,
+    cancelActiveRun,
   };
 }

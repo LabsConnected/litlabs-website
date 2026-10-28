@@ -107,7 +107,7 @@ export class ModelRegistry {
 
   /** Available models tagged littRecommended. */
   getAvailableRecommended(): ModelDefinition[] {
-    return this.getAvailable().filter((m) => m.littRecommended);
+    return this.getAvailable().filter((m) => m.littRecommended && !m.manualOnly);
   }
 
   /**
@@ -287,6 +287,9 @@ export class ModelRegistry {
 
     const candidates = available
       .filter((m) => m.canonicalId !== primaryId)
+      // manualOnly models are never silent fallbacks — they serve only
+      // via an explicit pinned/ask selection.
+      .filter((m) => !m.manualOnly)
       .filter((m) => !capKey || m.capabilities[capKey] || m.recommendedFor.includes(taskKind))
       .sort((a, b) => {
         // Frontier first, then balanced, then light

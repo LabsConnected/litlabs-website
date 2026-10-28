@@ -196,6 +196,7 @@ export {
   validateToolCallArgs,
   filterRedundantToolCalls,
   buildDefaultSystemPrompt,
+  buildChatSystemPrompt,
   classifyAgentFailure,
   sanitizePriorMessages,
   PROJECT_EVIDENCE_TOOL_ID,
