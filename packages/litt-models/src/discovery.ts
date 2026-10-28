@@ -25,7 +25,8 @@
 
 import { getProvider, type ProviderDefinition } from "./providers.js";
 import type { CredentialResolver, ModelDefinition, ProviderId } from "./types.js";
-import { resolveOllamaEndpoint, resolveOllamaTagsUrl } from "./ollama-endpoint.js";
+import { resolveOllamaEndpoint } from "./ollama-endpoint.js";
+import { resolveOllamaRouteCandidates } from "./ollama-route.js";
 
 /** Normal context window for local models (Ollama default). */
 const LOCAL_NORMAL_CONTEXT = 16_384;
@@ -492,11 +493,43 @@ export class ProviderDiscoveryOrchestrator {
     skipDiscovery: boolean,
   ): Promise<{ health: ProviderHealthResult; discovery: DiscoveryResult | null }> {
     // Resolve the endpoint URL. For providers with dynamicEndpoint (Ollama),
-    // use the shared resolver so LITT_OLLAMA_URL / OLLAMA_BASE_URL / OLLAMA_HOST
-    // are honoured. For static providers (LM Studio), use the definition URL.
+    // probe the same ordered route candidates the local lane uses
+    // (local → LAN → Tailscale): the first
+    // endpoint answering /api/tags with at least one installed model
+    // wins; a daemon answering with an empty tag list only wins when
+    // nothing better does (mirrors probeOllamaRoute's "reachable but no
+    // models" semantics). Health and discovery then describe the endpoint
+    // that would actually serve — a device whose own daemon is down but
+    // whose PC answers over Tailscale is "up", not "connection refused".
+    // For static providers (LM Studio), use the definition URL.
     let modelsUrl: string | undefined;
+    let servingEndpoint: string | null = null;
+    let res: FetchResponse | null = null;
     if (def.dynamicEndpoint === "ollama") {
-      modelsUrl = resolveOllamaTagsUrl(this.env.get.bind(this.env));
+      const candidates = resolveOllamaRouteCandidates(this.env.get.bind(this.env));
+      let emptyResponder: { endpoint: string; res: FetchResponse } | null = null;
+      let lastFailure: FetchResponse | null = null;
+      for (const candidate of candidates) {
+        const attempt = await this.fetcher.fetch(`${candidate.endpoint}/api/tags`, { timeoutMs });
+        if (!attempt.ok) {
+          lastFailure = attempt;
+          continue;
+        }
+        const discovered = attempt.json ? parseLocalModels(attempt.json, providerId).length : 0;
+        if (discovered > 0) {
+          servingEndpoint = candidate.endpoint;
+          res = attempt;
+          break;
+        }
+        emptyResponder ??= { endpoint: candidate.endpoint, res: attempt };
+      }
+      if (!res && emptyResponder) {
+        servingEndpoint = emptyResponder.endpoint;
+        res = emptyResponder.res;
+      }
+      servingEndpoint ??= candidates[0]?.endpoint ?? null;
+      if (servingEndpoint) modelsUrl = `${servingEndpoint}/api/tags`;
+      res ??= lastFailure ?? { ok: false, status: 0, json: null, latencyMs: 0 };
     } else {
       modelsUrl = def.modelsUrl;
     }
@@ -507,7 +540,7 @@ export class ProviderDiscoveryOrchestrator {
       return { health, discovery: null };
     }
 
-    const res = await this.fetcher.fetch(modelsUrl, { timeoutMs });
+    res ??= await this.fetcher.fetch(modelsUrl, { timeoutMs });
     if (!res.ok) {
       const health: ProviderHealthResult = {
         providerId,
@@ -550,7 +583,8 @@ export class ProviderDiscoveryOrchestrator {
       // before exposing them to routing; keep curated catalog metadata.
       const known = new Set(registry.getByProvider(providerId).map((model) => model.providerModelId));
       const unknown = [...new Set(entries.map((entry) => entry.id))].filter((id) => !known.has(id));
-      const showUrl = `${resolveOllamaEndpoint(this.env.get.bind(this.env))}/api/show`;
+      const ollamaBase = servingEndpoint ?? resolveOllamaEndpoint(this.env.get.bind(this.env));
+      const showUrl = `${ollamaBase}/api/show`;
       const discovered = await Promise.all(unknown.map(async (id) => {
         const details = await this.fetcher.fetch(showUrl, {
           method: "POST",

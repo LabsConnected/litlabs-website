@@ -205,7 +205,9 @@ export function selectLocalModel(models: string[], preferred?: string): string |
 /**
  * Preference order for the local lane. litt-coder first: it is the build
  * tuned for this tool, so when the operator has installed it they meant
- * for LiTT to use it.
+ * for LiTT to use it. litt-fast before the phone build: on a multi-model
+ * daemon (e.g. the Windows PC) the fast LiTT build is the intended
+ * server, while litt-oc-phone only serves where it's installed.
  */
 const LOCAL_MODEL_PREFERENCE = [
   "litt-coder:fast",
@@ -213,6 +215,7 @@ const LOCAL_MODEL_PREFERENCE = [
   "qwen2.5-coder:3b",
   "qwen3:4b",
   "qwen3:4b-instruct",
+  "litt-fast",
   "litt-oc-phone:1.7b-8k",
 ];
 
