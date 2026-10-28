@@ -294,12 +294,41 @@ export function checkStaleBuild(sourceDir?: string): StaleBuildCheck {
   const launcherTarget = resolveLauncherTarget();
 
   if (!sourceSha) {
+    // Deployed/standalone release: no git repo to resolve a source SHA
+    // from. The build metadata recorded at build time IS the provenance —
+    // trust it, but only when the bundled-entry marker still verifies so
+    // an untracked overwrite can't pass as the recorded release.
+    if (buildMeta) {
+      const bundled = checkBundledEntry(join(pkgDir, "dist"));
+      if (bundled === "match") {
+        return {
+          stale: false,
+          sourceSha: buildMeta.sourceSha,
+          builtSha: buildMeta.sourceSha,
+          launcherTarget,
+          hasBuildMeta: true,
+          status: "fresh",
+          rebuildCommand: null,
+          message: `Deployed release verified (SHA ${buildMeta.sourceSha.slice(0, 8)}). Launcher: ${launcherTarget ?? "not found"}`,
+        };
+      }
+      return {
+        stale: true,
+        sourceSha: null,
+        builtSha: buildMeta.sourceSha,
+        launcherTarget,
+        hasBuildMeta: true,
+        status: "unbundled",
+        rebuildCommand: `cd "${pkgDir}" && pnpm build`,
+        message: `Deployed release's dist/index.js does not match its bundle marker — rebuild from source at ${buildMeta.sourceSha.slice(0, 8)}.`,
+      };
+    }
     return {
       stale: false,
       sourceSha: null,
-      builtSha: buildMeta?.sourceSha ?? null,
+      builtSha: null,
       launcherTarget,
-      hasBuildMeta: buildMeta !== null,
+      hasBuildMeta: false,
       status: "no-source-sha",
       rebuildCommand: null,
       message: "Cannot determine source SHA (not a git repo or git unavailable)",
