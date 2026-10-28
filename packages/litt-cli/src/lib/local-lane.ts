@@ -203,11 +203,15 @@ export function selectLocalModel(models: string[], preferred?: string): string |
 }
 
 /**
- * Preference order for the local lane. litt-coder first: it is the build
- * tuned for this tool, so when the operator has installed it they meant
- * for LiTT to use it.
+ * Preference order for the local lane. LiTT's own tuned builds first —
+ * when the operator has installed them they meant for LiTT to use them —
+ * then known-good general local models.
  */
 const LOCAL_MODEL_PREFERENCE = [
+  // LiTT's own tuned Qwen builds — what the Windows install ships.
+  // litt-fast is the general/interactive pick; litt-tools is tool-tuned.
+  "litt-fast",
+  "litt-tools",
   "litt-coder:8k",
   "litt-coder:fast",
   "litt-coder:3b",
@@ -215,8 +219,46 @@ const LOCAL_MODEL_PREFERENCE = [
   "qwen2.5-coder:3b",
   "qwen3:4b",
   "qwen3:4b-instruct",
+  "litt-hermes",
   "litt-oc-phone:1.7b-8k",
 ];
+
+/**
+ * Keep-alive window for the warmed local model. Ollama evicts a resident
+ * model ~5m after its last request; a CLI session that chats every few
+ * minutes then pays the full ~30s cold load again on a 3 GB card.
+ * 30m keeps the model warm across realistic interactive gaps without
+ * pinning VRAM forever.
+ */
+const WARM_KEEP_ALIVE = "30m";
+
+/**
+ * Load (or refresh residency of) a local model in the background.
+ *
+ * Fires a zero-output `/api/generate` request with `keep_alive` — Ollama
+ * loads the model into VRAM/system RAM without producing tokens, so the
+ * first real user request pays ~70ms first-token instead of the ~30s
+ * cold load measured on this machine (GTX 1050, litt-fast:2k).
+ *
+ * Fire-and-forget contract: never throws, never blocks, never surfaces
+ * an error — a failed warmup simply means the next real request pays
+ * the normal load cost. Callers should `void` the promise.
+ */
+export async function warmLocalModel(
+  endpoint: string,
+  model: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  try {
+    await fetchImpl(`${endpoint}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, prompt: "", stream: false, keep_alive: WARM_KEEP_ALIVE }),
+    });
+  } catch {
+    /* warmup is opportunistic — ignore */
+  }
+}
 
 /** Drop the cached probe result (tests, and after an explicit /local). */
 export function resetLocalLaneCache(): void {

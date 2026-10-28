@@ -75,7 +75,7 @@ import {
   type MachineCommandResult,
 } from "../lib/machine-lane.js";
 import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE, LOCAL_ONLY_GATE_MESSAGE } from "../lib/capability-gate.js";
-import { probeLocalLane, resetLocalLaneCache, type LocalLaneStatus } from "../lib/local-lane.js";
+import { probeLocalLane, resetLocalLaneCache, warmLocalModel, type LocalLaneStatus } from "../lib/local-lane.js";
 import {
   localRoutePolicy,
   resolveLocalModel,
@@ -1181,6 +1181,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
     const { resolution } = outcome;
     modelRuntime.registerLocalModel(resolution);
+    // Warm the resolved model in the background — keeps it resident so the
+    // first real request skips the ~30s cold load. Fire-and-forget.
+    void warmLocalModel(lane.endpoint, resolution.tag);
     // Ephemeral only — auto-resolution must NOT write model-prefs.json.
     // A persisted REMOTE (cloud) selection stays on disk so /remote can
     // restore it later; the in-memory pick keeps the badge honest and
