@@ -775,7 +775,9 @@ describe("Webhook event processing — state mutations", () => {
     const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
     expect(debits.length).toBe(1);
     expect(debits[0].params.p_amount).toBe(4000);
-    expect(debits[0].params.p_idempotency_key).toBe("refund_ch_creditpack_refund");
+    // No refunds.data on this fixture → falls back to charge.id + amount_refunded
+    // (per-refund key; charge.id alone is shared across partial refunds).
+    expect(debits[0].params.p_idempotency_key).toBe("refund_ch_creditpack_refund_1000");
   });
 
   it("charge.refunded (subscription plan) → debits prorated monthly credits and revokes entitlement", async () => {
