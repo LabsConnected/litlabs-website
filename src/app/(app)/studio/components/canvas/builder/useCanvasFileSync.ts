@@ -21,6 +21,7 @@ export function useCanvasFileSync(projectId: string | null) {
   const hasLoadedRef = useRef(false);
   const timerRef = useRef<number | null>(null);
   const lastSavedRef = useRef<string>("");
+  const lastFailedRef = useRef<string>("");
 
   // Load from file on mount (server-wins)
   useEffect(() => {
@@ -42,6 +43,12 @@ export function useCanvasFileSync(projectId: string | null) {
         if (!parsed.nodes || !parsed.rootNodeIds) return;
         // Server-wins: only adopt if server version is newer
         const local = useCanvasBuilderStore.getState().document;
+        if (data.content === JSON.stringify(local)) {
+          // Already in sync — mark as saved so nothing is rewritten.
+          lastSavedRef.current = data.content;
+          setSaveState("saved");
+          return;
+        }
         if (parsed.updatedAt && local.updatedAt && parsed.updatedAt <= local.updatedAt) return;
         setDocument(parsed);
         setSaveState("saved");
@@ -56,7 +63,6 @@ export function useCanvasFileSync(projectId: string | null) {
     if (!projectId) return;
     const serialized = JSON.stringify(doc);
     if (serialized === lastSavedRef.current) return;
-    lastSavedRef.current = serialized;
     setSaveState("saving");
     try {
       const resp = await fetch(`/api/studio-projects/${projectId}/files`, {
@@ -64,8 +70,18 @@ export function useCanvasFileSync(projectId: string | null) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "write", path: CANVAS_FILE, content: serialized }),
       });
+      // lastSaved only on success — a failed write must not poison the dedup
+      // check. lastFailed dedupes retries of the same failing content so the
+      // effect cannot reschedule into an infinite retry loop.
+      if (resp.ok) {
+        lastSavedRef.current = serialized;
+        lastFailedRef.current = "";
+      } else {
+        lastFailedRef.current = serialized;
+      }
       setSaveState(resp.ok ? "saved" : "error");
     } catch {
+      lastFailedRef.current = serialized;
       setSaveState("error");
     }
   }, [projectId, setSaveState]);
@@ -77,14 +93,52 @@ export function useCanvasFileSync(projectId: string | null) {
     if (saveState === "saving") return;
     const serialized = JSON.stringify(document);
     if (serialized === lastSavedRef.current) return;
+    if (serialized === lastFailedRef.current) return;
 
     if (timerRef.current) window.clearTimeout(timerRef.current);
+    const doc = document;
     timerRef.current = window.setTimeout(() => {
-      saveToFile(document);
+      void saveToFile(doc);
     }, DEBOUNCE_MS) as unknown as number;
 
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
   }, [document, projectId, saveState, saveToFile]);
+
+  // Flush unsaved content so a pending debounce or previously-failed write is
+  // not silently lost. Two triggers are required:
+  // - effect cleanup: covers SPA unmount (navigation within the app)
+  // - pagehide: covers full reload/close, where React never runs cleanups
+  // keepalive lets the request survive page unload. Reads the latest document
+  // from the store so stale closures cannot drop newer edits.
+  const flushUnsaved = useCallback((useKeepalive: boolean) => {
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    if (!projectId || !hasLoadedRef.current) return;
+    const serialized = JSON.stringify(useCanvasBuilderStore.getState().document);
+    if (serialized === lastSavedRef.current) return;
+    try {
+      void fetch(`/api/studio-projects/${projectId}/files`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "write", path: CANVAS_FILE, content: serialized }),
+        // keepalive is required on unload but capped at 64KB by browsers —
+        // SPA unmount uses a normal request (no cap, response tracked).
+        ...(useKeepalive ? { keepalive: true } : {}),
+      }).then((resp) => {
+        if (resp.ok) lastSavedRef.current = serialized;
+      });
+    } catch {
+      // fire-and-forget on unload
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    const onPageHide = () => flushUnsaved(true);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      flushUnsaved(false);
+    };
+  }, [flushUnsaved]);
 }
