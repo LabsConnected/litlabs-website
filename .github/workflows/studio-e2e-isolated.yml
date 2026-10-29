@@ -171,6 +171,43 @@ jobs:
           grep -q '^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_' e2e/env.e2e || { echo "publishable key is not a pk_test_ dev key"; exit 1; }
           grep -q '^CLERK_SECRET_KEY=sk_test_' e2e/env.e2e || { echo "secret key is not an sk_test_ dev key"; exit 1; }
 
+      # Credential preflight — validates the E2E environment's Clerk dev keys
+      # against the Clerk API BEFORE the expensive stack/app build. Prints only
+      # instance domains and HTTP statuses; never echoes key material. A bad
+      # sk (clerk_key_invalid) previously surfaced as a Playwright-time 401 and
+      # burned a whole run (40848341999).
+      - name: Preflight — Clerk dev credential + instance check (no secrets printed)
+        run: |
+          set -euo pipefail
+          set -a; . ./e2e/env.e2e; set +a
+          # Decode the publishable key's frontend-API domain — instance
+          # metadata, not secret material.
+          FAPI_DOMAIN=$(python3 -c 'import base64,os; b64=os.environ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"].removeprefix("pk_test_").rstrip("$"); b64+="="*(-len(b64)%4); print(base64.b64decode(b64).decode().strip())')
+          case "$FAPI_DOMAIN" in
+            *.clerk.accounts.dev|*.clerk.accountsstage.dev) ;;
+            *) echo "FAIL: pk_test_ decodes to unexpected domain"; exit 1;;
+          esac
+          echo "pk instance domain: ${FAPI_DOMAIN}"
+          fapi_status=$(curl -s -o /dev/null -w '%{http_code}' "https://${FAPI_DOMAIN}/v1/environment")
+          echo "pk frontend-API reachability: HTTP ${fapi_status}"
+          [ "$fapi_status" -lt 400 ] || { echo "FAIL: pk_test_ instance unreachable/invalid"; exit 1; }
+          # sk validity: Clerk Backend API must accept it.
+          sk_status=$(curl -s -o /tmp/clerk_users_probe.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${CLERK_SECRET_KEY}" \
+            "https://api.clerk.com/v1/users?limit=1")
+          echo "sk backend-API check: HTTP ${sk_status}"
+          if [ "$sk_status" = "401" ]; then
+            echo "FAIL: CLERK_SECRET_KEY rejected (clerk_key_invalid) — update the e2e environment secret E2E_CLERK_SECRET_KEY with a current sk_test_ key for the ${FAPI_DOMAIN} instance"
+            exit 1
+          fi
+          [ "$sk_status" = "200" ] || { echo "FAIL: unexpected Clerk API status ${sk_status}"; exit 1; }
+          # Instance consistency (best-effort): the sk's instance should match
+          # the pk's frontend domain.
+          inst=$(curl -s -H "Authorization: Bearer ${CLERK_SECRET_KEY}" "https://api.clerk.com/v1/instance" || true)
+          inst_env=$(echo "$inst" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("environment_type","?"))' 2>/dev/null || echo unparseable)
+          echo "sk instance environment_type: ${inst_env}"
+          [ "$inst_env" = "development" ] && echo "instance type OK" || echo "WARN: could not confirm development instance (users probe passed)"
+
       - name: Build and start E2E terminal-server (port 4401)
         run: |
           set -a; . ./e2e/env.e2e; set +a
