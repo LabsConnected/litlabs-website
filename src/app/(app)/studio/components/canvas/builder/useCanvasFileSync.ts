@@ -301,8 +301,9 @@ export function useCanvasFileSync(projectId: string | null) {
     if (serialized === sync.lastAttempted) return;
 
     if (timerRef.current) window.clearTimeout(timerRef.current);
+    const doc = document;
     timerRef.current = window.setTimeout(() => {
-      saveToFile(document);
+      void saveToFile(doc);
     }, DEBOUNCE_MS) as unknown as number;
 
     return () => {
@@ -334,4 +335,54 @@ export function useCanvasFileSync(projectId: string | null) {
     setCanvasServerFlush(flushNow);
     return () => setCanvasServerFlush(null);
   }, [flushNow]);
+
+  // Flush unsaved content so a pending debounce is not silently lost. Two
+  // triggers are required:
+  // - effect cleanup: covers SPA unmount (navigation within the app)
+  // - pagehide: covers full reload/close, where React never runs cleanups
+  // keepalive lets the request survive page unload. Reads the latest document
+  // from the store so stale closures cannot drop newer edits, and keeps the
+  // CAS contract so an unload write can never clobber a diverged file.
+  const flushUnsaved = useCallback(
+    (useKeepalive: boolean) => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+      const sync = syncRef.current;
+      if (!projectId || sync.phase !== "ready" || sync.projectId !== projectId) return;
+      const serialized = JSON.stringify(useCanvasBuilderStore.getState().document);
+      if (serialized === sync.lastSaved) return;
+      try {
+        void fetch(`/api/studio-projects/${projectId}/files`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "write",
+            path: CANVAS_FILE,
+            content: serialized,
+            expectedSha256: sync.lastSavedSha,
+          }),
+          // keepalive is required on unload but capped at 64KB by browsers —
+          // SPA unmount uses a normal request (no cap, response tracked).
+          ...(useKeepalive ? { keepalive: true } : {}),
+        }).then(async (resp) => {
+          if (resp.ok) {
+            const data = (await resp.json().catch(() => ({}))) as { sha256?: string };
+            sync.lastSaved = serialized;
+            if (data.sha256) sync.lastSavedSha = data.sha256;
+          }
+        });
+      } catch {
+        // fire-and-forget on unload
+      }
+    },
+    [projectId],
+  );
+
+  useEffect(() => {
+    const onPageHide = () => flushUnsaved(true);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      flushUnsaved(false);
+    };
+  }, [flushUnsaved]);
 }
