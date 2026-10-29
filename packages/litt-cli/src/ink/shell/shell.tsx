@@ -369,6 +369,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
         approvalAccumMs={approvalAccumMs}
         approvalCount={approvalPrompt ? approvalPrompt.depth : 0}
         missionState={missionState}
+        missionRestored={canonicalMission?.restored ?? false}
         gitModified={gitModified}
         gitUntracked={gitUntracked}
       />
