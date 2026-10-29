@@ -1,0 +1,11 @@
+title = "LiTT gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Secret-scanning bookkeeping files legitimately contain quoted fixture literals (baseline Match/Secret fields, ignore-file comments). Scanning them makes the gate self-poisoning."
+paths = [
+  '''^\.gitleaks\.baseline$''',
+  '''^\.gitleaksignore$''',
+]
