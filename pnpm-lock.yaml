@@ -195,8 +195,8 @@ importers:
         specifier: ^1.95.1
         version: 1.96.1
       undici:
-        specifier: '>=6.24.0'
-        version: 8.10.2
+        specifier: '>=8.12.2'
+        version: 8.12.3
       ws:
         specifier: ^8.21.1
         version: 8.21.1(bufferutil@4.1.0)
