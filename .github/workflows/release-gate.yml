@@ -57,6 +57,14 @@ jobs:
           echo "Terminal deployed SHA: $DEPLOYED_SHA"
 
       - name: Compare SHAs
+        env:
+          # Explicit production deploy freeze. When set to "1"/"true" (repo
+          # variable), SHA-parity mismatches are reported as held warnings
+          # instead of failing the gate — a deliberate HOLD means deployed
+          # services are intentionally behind source. Every other check
+          # (Clerk auth validity, endpoint reachability reporting) still
+          # runs and can still fail the gate.
+          PRODUCTION_DEPLOY_HOLD: ${{ vars.PRODUCTION_DEPLOY_HOLD || '' }}
         run: |
           SOURCE_SHA="${{ steps.source.outputs.sha }}"
           SOURCE_SHORT="${SOURCE_SHA:0:8}"
@@ -65,12 +73,19 @@ jobs:
           AUTH_STATUS="${{ steps.web.outputs.auth_status }}"
           AUTH_DETAIL="${{ steps.web.outputs.auth_detail }}"
 
+          HOLD=0
+          if [ "$PRODUCTION_DEPLOY_HOLD" = "1" ] || [ "$PRODUCTION_DEPLOY_HOLD" = "true" ]; then
+            HOLD=1
+            echo "🔒 PRODUCTION_DEPLOY_HOLD is set — SHA parity is reported, not enforced"
+          fi
+
           echo "Source:  $SOURCE_SHORT"
           echo "Web:     $WEB_SHA"
           echo "Terminal: $TERMINAL_SHA"
           echo "Auth:    $AUTH_STATUS"
 
           FAIL=0
+          PARITY=0
 
           if [ "$AUTH_STATUS" = "unknown" ]; then
             echo "⚠️  Web health endpoint did not report a Clerk auth check (got: unknown) — this build predates the check, not a failure by itself"
@@ -83,22 +98,30 @@ jobs:
 
           if [ "$WEB_SHA" = "unknown" ] || [ "$WEB_SHA" = "dev" ]; then
             echo "⚠️  Web health endpoint did not report a real SHA (got: $WEB_SHA)"
-            FAIL=1
+            PARITY=1
           elif [ "$WEB_SHA" != "$SOURCE_SHORT" ]; then
             echo "❌ Web SHA mismatch: source=$SOURCE_SHORT deployed=$WEB_SHA"
-            FAIL=1
+            PARITY=1
           else
             echo "✅ Web SHA matches source"
           fi
 
           if [ "$TERMINAL_SHA" = "unknown" ] || [ "$TERMINAL_SHA" = "dev" ]; then
             echo "⚠️  Terminal health endpoint did not report a real SHA (got: $TERMINAL_SHA)"
-            FAIL=1
+            PARITY=1
           elif [ "$TERMINAL_SHA" != "$SOURCE_SHORT" ]; then
             echo "❌ Terminal SHA mismatch: source=$SOURCE_SHORT deployed=$TERMINAL_SHA"
-            FAIL=1
+            PARITY=1
           else
             echo "✅ Terminal SHA matches source"
+          fi
+
+          if [ "$PARITY" = "1" ]; then
+            if [ "$HOLD" = "1" ]; then
+              echo "🔒 Deployment parity differs while production HOLD is set — expected under a deliberate freeze"
+            else
+              FAIL=1
+            fi
           fi
 
           if [ "$FAIL" = "1" ]; then
@@ -108,4 +131,8 @@ jobs:
           fi
 
           echo ""
-          echo "Release gate PASSED — all services report the source SHA."
+          if [ "$HOLD" = "1" ]; then
+            echo "Release gate PASSED (production HOLD active — parity reported above)."
+          else
+            echo "Release gate PASSED — all services report the source SHA."
+          fi
