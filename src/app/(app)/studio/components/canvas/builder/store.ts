@@ -22,9 +22,17 @@ import {
   createEmptyHtmlProject,
 } from "./projectTypes";
 
-const STORAGE_KEY = "litt:canvasBuilder:document";
+const STORAGE_KEY_PREFIX = "litt:canvasBuilder:document";
+/** Pre-namespacing key — kept only so a legacy document can be adopted by the
+ *  project it actually belongs to; never written to anymore. */
+const LEGACY_STORAGE_KEY = "litt:canvasBuilder:document";
 const PROJECT_TYPE_STORAGE_KEY = "litt:canvasBuilder:projectType";
 const HISTORY_LIMIT = 50;
+
+/** Per-project document key. `null` = the project-less creation session. */
+export function docStorageKey(projectId: string | null): string {
+  return `${STORAGE_KEY_PREFIX}:${projectId ?? "local"}`;
+}
 
 interface CanvasBuilderStore {
   document: CanvasDocument;
@@ -56,8 +64,17 @@ interface CanvasBuilderStore {
   setActiveHtmlFile: (name: string) => void;
   setHtmlProject: (project: HtmlProject) => void;
 
+  /** Classified canvas↔file state for the bound project (set by
+   *  useCanvasFileSync after reads/applies). Drives the conflict banner. */
+  canvasFileState: import("@/lib/studio/canvas-ssot").CanvasFileState | null;
+  setCanvasFileState: (state: import("@/lib/studio/canvas-ssot").CanvasFileState | null) => void;
+  /** A server write was rejected because the file changed elsewhere — the
+   *  local document is preserved in localStorage but not overwriting. */
+  syncConflict: string | null;
+  setSyncConflict: (detail: string | null) => void;
+
   // Actions
-  loadDocument: () => void;
+  loadDocument: (projectId: string | null) => void;
   saveDocument: () => void;
   setDocument: (doc: CanvasDocument) => void;
   selectNode: (nodeId: string | null) => void;
@@ -92,8 +109,20 @@ interface CanvasBuilderStore {
 function saveToStorage(doc: CanvasDocument) {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(doc));
+    localStorage.setItem(docStorageKey(doc.projectId), JSON.stringify(doc));
   } catch {}
+}
+
+/**
+ * Server-side canvas flush, registered by useCanvasFileSync while it is
+ * mounted. saveDocument() invokes it so the toolbar Save button performs a
+ * real workspace write — not just a localStorage update that can never be
+ * retried.
+ */
+let canvasServerFlush: (() => void) | null = null;
+
+export function setCanvasServerFlush(fn: (() => void) | null): void {
+  canvasServerFlush = fn;
 }
 
 /**
@@ -148,41 +177,79 @@ function normalizeNode(raw: unknown): CanvasNode | null {
   };
 }
 
-function loadFromStorage(): CanvasDocument | null {
+function normalizeDocument(parsed: Partial<CanvasDocument>): CanvasDocument | null {
+  if (!parsed.nodes || !parsed.rootNodeIds) return null;
+  if (!Array.isArray(parsed.rootNodeIds)) return null;
+
+  // Validate and normalize each node record
+  const normalizedNodes: Record<string, CanvasNode> = {};
+  for (const [id, rawNode] of Object.entries(parsed.nodes)) {
+    const normalized = normalizeNode(rawNode);
+    if (normalized) normalizedNodes[id] = normalized;
+  }
+
+  // Filter root IDs to only those that exist in nodes
+  const validRootIds = parsed.rootNodeIds.filter((id) => normalizedNodes[id]);
+  if (validRootIds.length === 0) return null;
+
+  // Repair: remove stale child references that point to non-existent nodes
+  for (const node of Object.values(normalizedNodes)) {
+    node.children = node.children.filter((childId) => normalizedNodes[childId]);
+  }
+
+  return {
+    id: typeof parsed.id === "string" ? parsed.id : `doc-${Date.now()}`,
+    projectId: parsed.projectId ?? null,
+    conversationId: parsed.conversationId ?? null,
+    route: parsed.route ?? "/",
+    nodes: normalizedNodes,
+    rootNodeIds: validRootIds,
+    version: typeof parsed.version === "number" ? parsed.version : 1,
+    updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : Date.now(),
+    // Materialization/supersede records must survive the round-trip — dropping
+    // them would make a clean canvas look unapplied and block publishing.
+    materialization: parsed.materialization,
+    status: parsed.status,
+    supersededAt: parsed.supersededAt,
+    supersededDocHash: parsed.supersededDocHash,
+    supersededFileHash: parsed.supersededFileHash,
+  };
+}
+
+/**
+ * Read THIS project's localStorage document only. A namespaced entry whose
+ * embedded projectId disagrees is foreign state — rejected, not adopted.
+ */
+export function loadFromStorage(projectId: string | null): CanvasDocument | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(docStorageKey(projectId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<CanvasDocument>;
-    if (!parsed.nodes || !parsed.rootNodeIds) return null;
-    if (!Array.isArray(parsed.rootNodeIds)) return null;
+    const doc = normalizeDocument(JSON.parse(raw) as Partial<CanvasDocument>);
+    if (!doc) return null;
+    if (doc.projectId !== (projectId ?? null)) return null;
+    return doc;
+  } catch {
+    return null;
+  }
+}
 
-    // Validate and normalize each node record
-    const normalizedNodes: Record<string, CanvasNode> = {};
-    for (const [id, rawNode] of Object.entries(parsed.nodes)) {
-      const normalized = normalizeNode(rawNode);
-      if (normalized) normalizedNodes[id] = normalized;
-    }
-
-    // Filter root IDs to only those that exist in nodes
-    const validRootIds = parsed.rootNodeIds.filter((id) => normalizedNodes[id]);
-    if (validRootIds.length === 0) return null;
-
-    // Repair: remove stale child references that point to non-existent nodes
-    for (const node of Object.values(normalizedNodes)) {
-      node.children = node.children.filter((childId) => normalizedNodes[childId]);
-    }
-
-    return {
-      id: typeof parsed.id === "string" ? parsed.id : `doc-${Date.now()}`,
-      projectId: parsed.projectId ?? null,
-      conversationId: parsed.conversationId ?? null,
-      route: parsed.route ?? "/",
-      nodes: normalizedNodes,
-      rootNodeIds: validRootIds,
-      version: typeof parsed.version === "number" ? parsed.version : 1,
-      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : Date.now(),
-    };
+/**
+ * One-time adoption of the pre-namespacing global document — only when its
+ * embedded projectId matches the project asking for it. A foreign or
+ * anonymous legacy doc is left in place, never attached to another project.
+ */
+function migrateLegacyDocument(projectId: string | null): CanvasDocument | null {
+  if (typeof window === "undefined") return null;
+  if (localStorage.getItem(docStorageKey(projectId))) return null;
+  try {
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return null;
+    const doc = normalizeDocument(JSON.parse(raw) as Partial<CanvasDocument>);
+    if (!doc || doc.projectId !== (projectId ?? null)) return null;
+    localStorage.setItem(docStorageKey(projectId), JSON.stringify(doc));
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    return doc;
   } catch {
     return null;
   }
@@ -237,6 +304,11 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
   setSaveState: (state) => set({ saveState: state }),
   setServerCanvasId: (id) => set({ serverCanvasId: id }),
 
+  canvasFileState: null,
+  setCanvasFileState: (state) => set({ canvasFileState: state }),
+  syncConflict: null,
+  setSyncConflict: (detail) => set({ syncConflict: detail }),
+
   // Project type system — load persisted project type from localStorage
   // (HTML project files are managed by useHtmlProjectSync, not here)
   projectType: loadProjectTypeFromStorage() ?? "website",
@@ -260,8 +332,8 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     })),
   setHtmlProject: (project) => set({ htmlProject: project }),
 
-  loadDocument: () => {
-    const stored = loadFromStorage();
+  loadDocument: (projectId) => {
+    const stored = loadFromStorage(projectId) ?? migrateLegacyDocument(projectId);
     if (stored) {
       set({ document: stored, history: [{ document: stored, description: "Loaded", timestamp: Date.now() }], historyIndex: 0 });
     }
@@ -271,6 +343,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     saveToStorage(get().document);
     // Mark as saved locally — server save is a separate explicit action
     set({ saveState: get().serverCanvasId ? "saved" : "local" });
+    canvasServerFlush?.();
   },
 
   setDocument: (doc) => {
@@ -510,19 +583,24 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
   },
 
   undo: () => {
-    const { history, historyIndex } = get();
+    const { history, historyIndex, document } = get();
     if (historyIndex <= 0) return;
     const newIndex = historyIndex - 1;
     const entry = history[newIndex];
+    // Never undo across a project boundary — a stale history entry from
+    // another project would otherwise write that project's doc into this
+    // project's canvas.
+    if ((entry.document.projectId ?? null) !== (document.projectId ?? null)) return;
     set({ document: entry.document, historyIndex: newIndex, selectedNodeId: null });
     saveAndMarkDirty(entry.document);
   },
 
   redo: () => {
-    const { history, historyIndex } = get();
+    const { history, historyIndex, document } = get();
     if (historyIndex >= history.length - 1) return;
     const newIndex = historyIndex + 1;
     const entry = history[newIndex];
+    if ((entry.document.projectId ?? null) !== (document.projectId ?? null)) return;
     set({ document: entry.document, historyIndex: newIndex, selectedNodeId: null });
     saveAndMarkDirty(entry.document);
   },

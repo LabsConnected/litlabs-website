@@ -1397,7 +1397,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
     configured: boolean;
     apiKey: boolean;
     littVoice: boolean;
-    sparkVoice: boolean;
+    littVoiceSource: "env" | "default";
     wsUrl: boolean;
   } | null>(null);
   const [livekitStatus, setLivekitStatus] = useState<{
@@ -1421,7 +1421,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
             configured: data.configured ?? false,
             apiKey: data.details.apiKey ?? false,
             littVoice: data.details.littVoice ?? false,
-            sparkVoice: data.details.sparkVoice ?? false,
+            littVoiceSource: data.details.littVoiceSource === "env" ? "env" : "default",
             wsUrl: data.details.wsUrl ?? false,
           });
           if (data.details.livekit) {
@@ -1734,13 +1734,13 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
               <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Voice provider status (Inworld)</div>
               <div className="mt-1.5 space-y-1 text-[10px] text-white/60">
                 <div>API Key: <span className={inworldStatus.apiKey ? "text-emerald-400" : "text-red-400"}>{inworldStatus.apiKey ? "Set" : "Missing"}</span></div>
-                <div>LiTT Voice: <span className={inworldStatus.littVoice ? "text-emerald-400" : "text-red-400"}>{inworldStatus.littVoice ? "Set" : "Missing"}</span></div>
+                <div>LiTT Voice: <span className="text-emerald-400">{inworldStatus.littVoiceSource === "env" ? "Custom (INWORLD_LITT_VOICE)" : "LiT-Code (signature default)"}</span></div>
                 <div>WebSocket URL: <span className={inworldStatus.wsUrl ? "text-emerald-400" : "text-red-400"}>{inworldStatus.wsUrl ? "Set" : "Missing"}</span></div>
                 {inworldStatus.configured ? (
                   <div className="mt-1.5 text-emerald-400">Inworld realtime voice is configured and ready.</div>
                 ) : (
                   <div className="mt-1.5 text-amber-400">
-                    Inworld is not configured. Set INWORLD_API_KEY and INWORLD_LITT_VOICE in Vercel env.
+                    Inworld is not configured. Set INWORLD_API_KEY and VOICE_AUTH_SECRET in Railway env.
                   </div>
                 )}
               </div>

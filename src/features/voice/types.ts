@@ -1,6 +1,5 @@
 export type VoiceAgentId =
   | "litt"
-  | "spark"
   | "researcher"
   | "writer"
   | "marketer"

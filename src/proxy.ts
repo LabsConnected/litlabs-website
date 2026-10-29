@@ -500,6 +500,70 @@ const innerMiddleware = useClerkMiddleware
       return protectRoute(req);
     };
 
+// Next 16 re-dispatches a request through middleware whenever a middleware
+// response overrides request headers (x-middleware-request-*). clerkMiddleware
+// re-encrypts x-clerk-request-data with a fresh IV on every pass, so each
+// re-dispatch produces "different" injected headers and ping-pongs until the
+// internal proxy timeout. When the incoming request already carries the
+// injected auth headers, auth state is already attached — verify it and pass
+// through without emitting new overrides, which converges the re-dispatch.
+//
+// The signed-in decision cannot trust x-clerk-auth-status alone (a client can
+// forge headers): Clerk signs the injected session token as
+// HmacSHA1(authToken, secretKey) and downstream auth() verifies it via
+// assertTokenSignature. We replicate exactly that check here.
+const verifyInjectedAuthSignature = async (
+  req: NextRequest,
+): Promise<boolean> => {
+  const token = req.headers.get("x-clerk-auth-token");
+  const signature = req.headers.get("x-clerk-auth-signature");
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  if (!token || !signature || !secretKey) return false;
+  let expected: string;
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secretKey),
+      { name: "HMAC", hash: "SHA-1" },
+      false,
+      ["sign"],
+    );
+    const signed = await crypto.subtle.sign(
+      "HMAC",
+      key,
+      new TextEncoder().encode(token),
+    );
+    expected = Array.from(new Uint8Array(signed))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    // Fail closed: an unusable crypto layer must deny, not crash the request.
+    return false;
+  }
+  if (expected.length !== signature.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < expected.length; i++) {
+    mismatch |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+  }
+  return mismatch === 0;
+};
+
+const convergeRedispatch = async (
+  req: NextRequest,
+  ...rest: never[]
+): Promise<NextResponse> => {
+  if (!req.headers.get("x-clerk-request-data")) {
+    return innerMiddleware(req, rest[0] as never) as Promise<NextResponse>;
+  }
+  const signedIn =
+    req.headers.get("x-clerk-auth-status") === "signed-in" &&
+    (await verifyInjectedAuthSignature(req));
+  if (signedIn || !isProtectedRoute(req)) {
+    return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
+  }
+  return protectRoute(req);
+};
+
 // ─── Clerk Frontend API proxy with Cloudflare header stripping ─────
 //
 // The Clerk Dashboard's registered proxy_url is https://litlabs.net/__clerk
@@ -886,10 +950,10 @@ const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> =
   // Cloudflare header stripping).
   if (req.nextUrl.pathname.startsWith("/__clerk") && isDeployed()) {
     return handleClerkProxy(req).then(res =>
-      res ?? withBotProtection(innerMiddleware)(req, ...rest as never[])
+      res ?? withBotProtection(convergeRedispatch)(req, ...rest as never[])
     );
   }
-  return withBotProtection(innerMiddleware)(req, ...rest as never[]);
+  return withBotProtection(convergeRedispatch)(req, ...rest as never[]);
 };
 
 export default middleware;

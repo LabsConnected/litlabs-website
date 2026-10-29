@@ -56,8 +56,8 @@ describe("useVoiceStore", () => {
   });
 
   it("setActiveAgent switches agent", () => {
-    useVoiceStore.getState().setActiveAgent("spark");
-    expect(useVoiceStore.getState().activeAgent).toBe("spark");
+    useVoiceStore.getState().setActiveAgent("coder");
+    expect(useVoiceStore.getState().activeAgent).toBe("coder");
   });
 
   it("setTiming merges partial timing metrics", () => {
@@ -71,7 +71,7 @@ describe("useVoiceStore", () => {
   });
 
   it("reset clears transient state but keeps activeAgent", () => {
-    useVoiceStore.getState().setActiveAgent("spark");
+    useVoiceStore.getState().setActiveAgent("coder");
     useVoiceStore.getState().setTranscript("hello");
     useVoiceStore.getState().setError("boom");
     useVoiceStore.getState().setAudioLevel(0.5);
@@ -82,7 +82,7 @@ describe("useVoiceStore", () => {
     expect(s.audioLevel).toBe(0);
     expect(s.state).toBe("idle");
     // activeAgent is not reset by reset()
-    expect(s.activeAgent).toBe("spark");
+    expect(s.activeAgent).toBe("coder");
   });
 });
 

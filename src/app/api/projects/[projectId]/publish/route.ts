@@ -114,8 +114,33 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     );
   }
 
+  // Canvas↔file gate: publishing ships workspace files, so canvas state that
+  // was never materialized (or contradicts them) must not ship silently.
+  // Projects with no canvas document pass through unchanged.
+  const { evaluateCanvasGate } = await import("@/lib/studio/canvas-publish-gate");
+  const gate = await evaluateCanvasGate(transport);
+  if (gate.blocked) {
+    return NextResponse.json(
+      {
+        error: "Unapplied canvas changes",
+        code: "UNAPPLIED_CANVAS_CHANGES",
+        state: gate.state,
+        detail: gate.detail,
+        hint: "Open the project's Design surface and apply the canvas to the site, or keep the files and supersede the canvas.",
+      },
+      { status: 409 },
+    );
+  }
+
   const result = await deployUserProject(
-    { userId: owner.userId, projectId, transport },
+    {
+      userId: owner.userId,
+      projectId,
+      transport,
+      // Freshness pin: the bytes the gate classified must be the bytes that
+      // ship — an index.html write racing the publish aborts before upload.
+      expectedEntrySha256: gate.classification?.indexHash ?? undefined,
+    },
     { store: supabaseDeploymentStore },
   );
 

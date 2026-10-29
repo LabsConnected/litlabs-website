@@ -44,19 +44,26 @@ function parseChangedFiles(output: string): string[] {
     .filter(Boolean);
 }
 
-async function runWorkspaceCommand(workspaceId: string, userId: string, command: string) {
+async function runWorkspaceCommand(workspaceId: string, userId: string, command: string, timeoutMs = 120_000) {
   const terminalBase = requireTerminalBaseUrl();
-  const response = await fetch(`${terminalBase}/internal/workspace/${workspaceId}/exec`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Internal-Service-Key": process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "",
-    },
-    body: JSON.stringify({ command, userId }),
-  });
-  const payload = await response.json().catch(() => null) as { exitCode?: number; stdout?: string; stderr?: string; durationMs?: number; error?: string } | null;
-  if (!response.ok) throw new Error(payload?.error ?? `Workspace command failed (${response.status})`);
-  return payload ?? {};
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${terminalBase}/internal/workspace/${workspaceId}/exec`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Service-Key": process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "",
+      },
+      body: JSON.stringify({ command, userId }),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => null) as { exitCode?: number; stdout?: string; stderr?: string; durationMs?: number; error?: string } | null;
+    if (!response.ok) throw new Error(payload?.error ?? `Workspace command failed (${response.status})`);
+    return payload ?? {};
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function labelFor(id: CheckId): string {
