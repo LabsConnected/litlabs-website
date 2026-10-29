@@ -490,15 +490,27 @@ describe("Child env does not inherit host secrets", () => {
     process.env.OPENAI_API_KEY = ["host", "provider", "should", "not", "leak"].join("-");
     try {
       const shell = createShellExecutor(ws);
-      const result = await runCommandSecure(shell, "printenv", [], {
-        cwd: ws,
-        workspaceRoot: ws,
-        env: {
-          LIT_TEST_MARKER: explicit,
-          OPENAI_API_KEY: explicit,
-          TERMINAL_INTERNAL_SERVICE_KEY: "explicit-blocked",
+      // printenv doesn't exist on Windows. `node -e` prints the same
+      // KEY=value format; it classifies arbitrary_code, so the test
+      // supplies an approvalProvider — the allowlist is unchanged.
+      const isWin = process.platform === "win32";
+      const result = await runCommandSecure(
+        shell,
+        isWin ? "node" : "printenv",
+        isWin
+          ? ["-e", 'for (const [k, v] of Object.entries(process.env)) console.log(k + "=" + v)']
+          : [],
+        {
+          cwd: ws,
+          workspaceRoot: ws,
+          env: {
+            LIT_TEST_MARKER: explicit,
+            OPENAI_API_KEY: explicit,
+            TERMINAL_INTERNAL_SERVICE_KEY: "explicit-blocked",
+          },
+          approvalProvider: async () => true,
         },
-      });
+      );
       const out = String(result.data.stdout ?? "");
       assert.equal(result.success, true);
       assert.doesNotMatch(out, new RegExp(hostSecret));
@@ -512,7 +524,8 @@ describe("Child env does not inherit host secrets", () => {
       assert.match(out, new RegExp(`LIT_TEST_MARKER=${explicit}`));
       assert.doesNotMatch(out, new RegExp(`OPENAI_API_KEY=${explicit}`));
       assert.match(out, /\[REDACTED\]/);
-      assert.match(out, /^PATH=/m);
+      // Windows exposes the var as `Path`, POSIX as `PATH`.
+      assert.match(out, /^PATH=/im);
     } finally {
       if (prevService === undefined) delete process.env.TERMINAL_INTERNAL_SERVICE_KEY;
       else process.env.TERMINAL_INTERNAL_SERVICE_KEY = prevService;
