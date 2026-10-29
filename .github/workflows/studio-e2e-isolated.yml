@@ -176,12 +176,25 @@ jobs:
           set -a; . ./e2e/env.e2e; set +a
           pnpm terminal:build
           mkdir -p "$TERMINAL_WORKSPACE_ROOT"
+          # Trusted-local attestation for THIS disposable loopback process only:
+          # without it the server treats itself as production-like and returns
+          # 503 HOST_EXECUTION_DISABLED for workspace prepare, which cascades
+          # into /api/studio-projects/*/files 500s (run 40840503053).
+          NODE_ENV=test \
+          LITT_LOCAL_EXECUTION_OPT_IN=true \
+          LITT_ISOLATION_VERIFIED=true \
           PORT=4401 nohup node terminal-server/dist/server.js > e2e/terminal.out.log 2> e2e/terminal.err.log &
           echo $! > e2e/terminal.pid
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:4401/health && break || sleep 2
           done
           curl -sf http://127.0.0.1:4401/health || { echo "::error::Terminal server did not become healthy"; exit 1; }
+          # Regression guard (run 40840503053): workspace prepare must NOT be
+          # disabled in this disposable loopback stack — otherwise /files 500s.
+          if grep -q "Terminal execution is DISABLED" e2e/terminal.err.log; then
+            echo "::error::Terminal server came up untrusted (host execution disabled); workspace prepare will 503."
+            exit 1
+          fi
 
       - name: Build Next.js app (NEXT_PUBLIC_* baked at build time)
         run: |
