@@ -1494,6 +1494,24 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 })),
                 deployment: deploymentEvidenceFrom(v2Result.toolCalls),
                 workspaceChange: v2Result.workspaceChange ?? null,
+                // Preview evidence comes from the launch flow's own verified
+                // status — never a tool's self-report. Only set when the
+                // launch flow ran; file-only/conversational runs leave it
+                // unset so they are unaffected.
+                ...(launchFlowResult
+                  ? {
+                      preview: {
+                        started:
+                          launchFlowResult.status !== "failed" ||
+                          !!launchFlowResult.previewUrl,
+                        ready:
+                          launchFlowResult.status === "preview_ready" ||
+                          launchFlowResult.status === "deployed" ||
+                          !!launchFlowResult.previewUrl,
+                        failed: launchFlowResult.status === "failed",
+                      },
+                    }
+                  : {}),
               },
             } : {}),
           },
