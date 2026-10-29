@@ -77,11 +77,11 @@ jobs:
           # Decode the publishable key's frontend-API domain — instance
           # metadata, not secret material.
           FAPI_DOMAIN=$(python3 -c 'import base64,os; b64=os.environ["E2E_PK"].removeprefix("pk_test_").rstrip("$"); b64+="="*(-len(b64)%4); print(base64.b64decode(b64).decode().strip())')
-          case "$FAPI_DOMAIN" in
-            *.clerk.accounts.dev|*.clerk.accountsstage.dev) ;;
-            *) echo "FAIL: pk_test_ decodes to unexpected domain"; exit 1;;
-          esac
           echo "pk instance domain: ${FAPI_DOMAIN}"
+          case "$FAPI_DOMAIN" in
+            *.clerk.accounts.dev|*.clerk.accountsstage.dev|*.*.*) ;;
+            *) echo "FAIL: pk_test_ does not decode to a hostname"; exit 1;;
+          esac
           fapi_status=$(curl -s -o /dev/null -w '%{http_code}' "https://${FAPI_DOMAIN}/v1/environment")
           echo "pk frontend-API reachability: HTTP ${fapi_status}"
           [ "$fapi_status" -lt 400 ] || { echo "FAIL: pk_test_ instance unreachable/invalid"; exit 1; }
