@@ -1,0 +1,54 @@
+# Verified synthetic test-fixture fingerprints.
+#
+# The repository-wide gitleaks scan (--log-opts=--all) sees commits on
+# unmerged feature branches, so fixture literals that never shipped to main
+# still fail the gate. Every entry below is an exact commit:file:rule:line
+# fingerprint that was reviewed and confirmed to be a non-credential test
+# fixture. Scoped per-fingerprint only — any new high-entropy literal
+# anywhere still fires the gate.
+#
+# IMPORTANT: keep comments free of secret-shaped literals. Two earlier
+# branch .gitleaksignore files matched the scanner on their own comment
+# text; entries are listed below so those findings are suppressed too.
+#
+# ---------------------------------------------------------------------
+# tests/billing/billing-p0-recovery.test.ts:25 — mock ctx idempotencyKey
+# (synthetic placeholder value; the fixture was later rewritten in 785f0654
+# to lower entropy).
+904a6c05a7bfe1faaf08587ca66f4c24ee133128:tests/billing/billing-p0-recovery.test.ts:generic-api-key:25
+990e0bbe160343ad8c6725f2cb79592c8f939442:tests/billing/billing-p0-recovery.test.ts:generic-api-key:25
+#
+# tests/stripe-webhook-local-db.test.ts:54,56 — Supabase CLI local-demo
+# JWTs (iss=supabase-demo, roles anon and service_role, exp=1983812996).
+# Signed with the published CLI demo secret from `supabase status`;
+# not project credentials. (Ported justification from PR #682.)
+dd8ce36dfe4b3487df7ec33e00d7dcee81d655e3:tests/stripe-webhook-local-db.test.ts:jwt:54
+dd8ce36dfe4b3487df7ec33e00d7dcee81d655e3:tests/stripe-webhook-local-db.test.ts:jwt:56
+#
+# packages/litt-cli/src/__tests__/activity-stream-stage1.test.tsx:58,59 —
+# secret-redaction test strings containing a fake provider key assignment
+# inside quoted fixture text (verified: synthetic literals used to test
+# that redaction catches them).
+7701ef40b605d13811050c42adb31aa92e236045:packages/litt-cli/src/__tests__/activity-stream-stage1.test.tsx:generic-api-key:58
+7701ef40b605d13811050c42adb31aa92e236045:packages/litt-cli/src/__tests__/activity-stream-stage1.test.tsx:generic-api-key:59
+#
+# packages/litt-agent-core/src/__tests__/workspace-confinement.test.ts:234 —
+# env-blocklist fixture; the flagged literal is a plainly fake placeholder
+# (verified at the commit).
+c98961334e5a11830e5081100c6b9c41e4bb0ddb:packages/litt-agent-core/src/__tests__/workspace-confinement.test.ts:generic-api-key:234
+#
+# packages/litt-cli/src/__tests__/dex-stage1a.test.ts:212 — fake key inside
+# a synthetic EPERM error message used to exercise secret scrubbing.
+cf80a8f1c71e42c1d83daf42a55445a7b06d941e:packages/litt-cli/src/__tests__/dex-stage1a.test.ts:stripe-access-token:212
+#
+# packages/litt-agent-core/src/__tests__/toolcall-debug-redaction.test.ts:37 —
+# `const JWT = "<fake>"` redaction fixture; the same content exists on two
+# commits across branches (second SHA is PR #747's failure).
+14eb8f2536b68c8e683a0bf485d6d05e23530c4b:packages/litt-agent-core/src/__tests__/toolcall-debug-redaction.test.ts:jwt:37
+b596db3c67f60020cd5074ab1e87ca03adc30777:packages/litt-agent-core/src/__tests__/toolcall-debug-redaction.test.ts:jwt:37
+#
+# Earlier branch .gitleaksignore files whose own comment text matched the
+# scanner (self-referential findings). Keeping the comments above free of
+# secret-shaped literals prevents a recurrence on this file.
+0efa1d92d3c074ce997436ddcadf02a11c673497:.gitleaksignore:generic-api-key:2
+f6bf00cc1f28803dea516f8487e612fbd7c2bb3d:.gitleaksignore:stripe-access-token:1
