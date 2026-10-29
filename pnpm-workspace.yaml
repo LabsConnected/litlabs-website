@@ -29,7 +29,6 @@ overrides:
   "tinypool": ">=2.1.2"
   "js-yaml": ">=4.3.2"
   "browserslist": ">=4.28.7"
-  "image-size": ">=2.0.3"
   "engine.io": ">=6.6.10"
   "follow-redirects": ">=1.16.1"
   "source-map-js": ">=1.2.2"
