@@ -17,6 +17,7 @@ import {
   probeLocalLane,
   resolveLocalLaneEndpoint,
   resetLocalLaneCache,
+  selectLocalModel,
 } from "../lib/local-lane.js";
 
 const ENV_KEYS = [
@@ -63,6 +64,18 @@ function scriptedFetch(script: Record<string, () => Promise<Response>>): typeof 
     return handler();
   }) as typeof fetch;
 }
+
+describe("selectLocalModel — per-endpoint preference order", () => {
+  it("picks litt-fast:2k on the multi-model PC daemon", () => {
+    expect(
+      selectLocalModel(["litt-tools:4k", "litt-fast:2k", "litt-hermes:64k"]),
+    ).toBe("litt-fast:2k");
+  });
+
+  it("picks litt-oc-phone:1.7b-8k on the phone daemon", () => {
+    expect(selectLocalModel(["litt-oc-phone:1.7b-8k"])).toBe("litt-oc-phone:1.7b-8k");
+  });
+});
 
 describe("probeLocalLane — localhost preferred over everything", () => {
   it("serves from local when local, LAN, and Tailscale are all healthy", async () => {

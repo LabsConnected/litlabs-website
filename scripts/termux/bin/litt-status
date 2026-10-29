@@ -53,10 +53,13 @@ fi
 echo
 echo "OLLAMA"
 
-if curl --max-time 2 -fsS "$LITT_OLLAMA_LAN/api/tags" >/dev/null 2>&1; then
+if curl --max-time 2 -fsS "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
+  OLLAMA="http://127.0.0.1:11434"
+  echo "Route:  ✅ local (this device)"
+elif [ -n "$LITT_OLLAMA_LAN" ] && curl --max-time 2 -fsS "$LITT_OLLAMA_LAN/api/tags" >/dev/null 2>&1; then
   OLLAMA="$LITT_OLLAMA_LAN"
   echo "Route:  ✅ LAN"
-elif curl --max-time 3 -fsS "$LITT_OLLAMA_TAILSCALE/api/tags" >/dev/null 2>&1; then
+elif [ -n "$LITT_OLLAMA_TAILSCALE" ] && curl --max-time 3 -fsS "$LITT_OLLAMA_TAILSCALE/api/tags" >/dev/null 2>&1; then
   OLLAMA="$LITT_OLLAMA_TAILSCALE"
   echo "Route:  ✅ Tailscale"
 else

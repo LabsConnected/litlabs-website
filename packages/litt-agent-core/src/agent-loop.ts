@@ -51,6 +51,7 @@ import type { ToolRegistry } from "./tools.js";
 import type { RuntimeStore } from "./state.js";
 import type { CommandExecutor } from "./command-executor.js";
 import type { ExecutionGateway } from "./execution-gateway.js";
+import { REDACTED, redactForAudit } from "./contracts/credential.js";
 import type { VerificationResult } from "./verification-gate.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
@@ -945,6 +946,34 @@ export function normalizeToolCallArgs(
   return { inputs: out, renames, changed: changed || renames.length > 0 };
 }
 
+// ─── Debug-log secret hygiene ─────────────────────────────────────
+// LITT_TOOLCALL_DEBUG dumps raw model-emitted tool arguments to a file.
+// Those arguments routinely carry credentials — API keys in command
+// strings, bearer tokens in headers, secrets inside file content — so
+// the log must never record them in the clear. Leaf values go through
+// the canonical redactForAudit()/redactString() (contracts/credential.ts —
+// the same mechanism guarding audit events and model context), and any
+// value stored under a credential-sounding KEY is masked wholesale — a
+// secret needn't match a token regex to be real. The key list below is
+// a debug-path superset of the audit list (nested_token, authorization,
+// cookie, passwd, session_key). Non-credential arguments (paths,
+// commands, content) pass through unchanged so the log keeps its
+// diagnostic value.
+const SENSITIVE_ARG_KEY_RE =
+  /(pass(word|wd)?|secret|token|api[-_]?key|apikey|access[-_]?key|auth(orization)?|credential|cookie|private[-_]?key|client[-_]?secret|session[-_]?key)/i;
+
+export function redactToolCallInputs(inputs: unknown): unknown {
+  if (Array.isArray(inputs)) return inputs.map(redactToolCallInputs);
+  if (inputs !== null && typeof inputs === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(inputs as Record<string, unknown>)) {
+      out[k] = SENSITIVE_ARG_KEY_RE.test(k) ? REDACTED : redactToolCallInputs(v);
+    }
+    return out;
+  }
+  return redactForAudit(inputs);
+}
+
 /**
  * Remove tool calls that exactly repeat a call already recorded as
  * SUCCESSFUL earlier in this loop (same toolId + same inputs).
@@ -1227,7 +1256,7 @@ export async function runAgentLoop(
         const { appendFileSync } = await import("node:fs");
         appendFileSync(
           process.env.LITT_TOOLCALL_DEBUG_FILE ?? "/tmp/litt-toolcall-args.log",
-          JSON.stringify({ toolId: parsed.toolId, inputs: parsed.inputs }) + "\n",
+          JSON.stringify({ toolId: parsed.toolId, inputs: redactToolCallInputs(parsed.inputs) }) + "\n",
         );
       } catch { /* debug only */ }
     }
@@ -2407,6 +2436,92 @@ You can also use the OpenAI/Anthropic native format:
 After receiving the tool result, you can either call another tool or
 provide a final text answer. Be concise and actionable. If a tool fails,
 explain what went wrong and suggest next steps.`;
+}
+
+/**
+ * Chat-scoped system prompt — used by surfaces for conversational turns
+ * (the cockpit CHAT lane), as opposed to mission execution.
+ *
+ * Why a separate prompt: the default prompt is a MISSION prompt — it
+ * tells the model it "MUST gather evidence with the available project
+ * tools", which pushes weak/local models to answer informational
+ * questions by CALLING tools ("what tools do you have?" → improvised
+ * repo inspection). Chat keeps the tools available (the model can still
+ * answer "is the repo clean?" honestly) but reverses the default:
+ * answer directly, call a tool ONLY when the user asked for project
+ * state or current external data.
+ *
+ * Tool-inventory questions are additionally covered: the tools are
+ * listed in this prompt, so the model is told to answer from the list
+ * and never to invoke a tool to discover it.
+ */
+export function buildChatSystemPrompt(
+  tools: ToolDefinition[],
+  project?: ProjectContext | null,
+  platform?: string,
+  compact = false,
+): string {
+  const toolList = buildToolList(tools, compact);
+
+  const projectSection = project
+    ? `\nProject context (canonical — do not guess or hallucinate):
+  - Name: ${project.name}
+  - Root: ${project.root}
+  - Branch: ${project.branch ?? "unknown"}`
+    : "";
+
+  if (compact) {
+    const compactProject = project
+      ? `Project: ${project.name} @ ${project.root} (branch ${project.branch ?? "unknown"}).`
+      : "";
+
+    const toolSection = toolList
+      ? `Tools (available if the user asks for project state or external data):\n${toolList}\n\nCall a tool with:\n\`\`\`tool_call\n{ "tool": "<tool_id>", "inputs": { ... } }\n\`\`\``
+      : "Tools: none are available. Answer directly; do not call tools.";
+
+    return `You are LiTT, a coding agent answering a conversational question. Be concise.
+
+Rules:
+- Answer informational and conversational questions directly — do NOT call tools for them.
+- Never call a tool to describe your own tools or capabilities; they are listed below.
+- Only call a tool when the user asks you to inspect, read, search, run, or change something in THIS project, or asks for current external data (web, weather).
+- If a tool fails, report the real failure.
+${compactProject ? `\n${compactProject}` : ""}
+
+${toolSection}`;
+  }
+
+  return `You are LiTT, the AI development agent for LiTTree Lab Studios.
+You are answering a CONVERSATIONAL turn — the user asked a question or
+is chatting; they did not ask you to execute a task.
+
+CHAT RULES:
+- Answer informational and conversational questions directly. Do NOT
+  call tools for questions that are answerable from this prompt or
+  general knowledge.
+- When the user asks what tools you have, what you can do, or about
+  your own capabilities, answer from the tool list below — NEVER call
+  a tool to discover your own tools.
+- Only call a tool when the user explicitly asks you to inspect, read,
+  search, run, check, or change something in THIS project, or asks for
+  current external data (web search, weather).
+- Never claim project state, Git state, or file contents without tool
+  evidence — but do not gather evidence the user did not ask for.
+- If a tool fails, report the actual failure instead of pretending the
+  inspection succeeded.
+${projectSection}
+
+Available tools:
+${toolList}
+
+To call a tool, output a tool call block in this exact format:
+
+\`\`\`tool_call
+{ "tool": "<tool_id>", "inputs": { "<param>": "<value>" } }
+\`\`\`
+
+After receiving the tool result, either call another tool (if the user
+asked for it) or provide a final text answer.`;
 }
 
 function buildToolList(tools: ToolDefinition[], compact: boolean): string {
