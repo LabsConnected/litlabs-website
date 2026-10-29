@@ -681,6 +681,14 @@ function CommandStudioContent() {
     }
   }, [littCollapsed]);
 
+  // StudioShell's Reset clears the stored collapse preference — mirror it in
+  // live state so the docked chat expands immediately, not on next reload.
+  useEffect(() => {
+    const onLayoutReset = () => setLittCollapsed(false);
+    window.addEventListener("littree:studio:layout-reset", onLayoutReset);
+    return () => window.removeEventListener("littree:studio:layout-reset", onLayoutReset);
+  }, []);
+
   // Chat dock position — "left" (persistent left panel, 360px default) or
   // "bottom" (today's bottom command layer). Default "left" per the spec;
   // any stored value other than "bottom" falls back to "left".

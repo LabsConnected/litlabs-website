@@ -163,6 +163,11 @@ describe("ElementInspectorPanel — real element edit write path", () => {
     const updatedSelection = { ...SELECTION, text: "Persisted headline" };
     render(<ElementInspectorPanel selection={updatedSelection} projectId="p1" route="/" />);
     await waitFor(() => expect(screen.getByTestId("element-edit-status").textContent).toContain("index.html"));
+    // Assert on the REOPENED inspector — the file read on remount must serve
+    // the edited content, so the input shows the persisted value.
+    await waitFor(() =>
+      expect((screen.getByTestId("element-edit-text") as HTMLTextAreaElement).value).toBe("Persisted headline"),
+    );
     const doc = new DOMParser().parseFromString(written[0].content ?? "", "text/html");
     expect(doc.querySelector("#hero-title")?.textContent).toBe("Persisted headline");
   });

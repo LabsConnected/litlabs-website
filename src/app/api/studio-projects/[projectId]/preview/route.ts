@@ -53,12 +53,16 @@ export async function GET(
   // No dev-server health check needed — files are served directly.
   // Verify index.html exists; empty workspace reports not_started.
   if (project.framework === "static") {
+    let terminalBase: string;
+    let readToken: string;
+    let indexHtml = "";
     try {
-      const terminalBase = requireTerminalBaseUrl();
+      terminalBase = requireTerminalBaseUrl();
       const { token } = createTerminalToken(userId, {
         workspaceId: project.workspaceId,
         projectId,
       });
+      readToken = token;
       const checkResp = await fetch(`${terminalBase}/ws-files/read`, {
         method: "POST",
         headers: {
@@ -81,6 +85,8 @@ export async function GET(
           logs: [],
         });
       }
+      const indexData = (await checkResp.json().catch(() => null)) as { content?: string } | null;
+      indexHtml = typeof indexData?.content === "string" ? indexData.content : "";
     } catch {
       // Terminal unavailable — report not_started rather than broken ready
       return NextResponse.json({
@@ -94,7 +100,47 @@ export async function GET(
       });
     }
 
-    const manifest = await collectPreviewAssetManifest("index.html", "<html></html>", async () => null);
+    // The token manifest must cover the document's real asset closure
+    // (scripts, stylesheets, linked pages) — not just index.html — or every
+    // subresource a copied/token-mode preview requests gets refused.
+    const readWorkspaceText = async (path: string): Promise<string | null> => {
+      try {
+        const asset = await fetch(`${terminalBase}/ws-files/read`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${readToken}`,
+            "X-Workspace-Id": project.workspaceId!,
+          },
+          body: JSON.stringify({ path, encoding: "utf-8" }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!asset.ok) return null;
+        const payload = (await asset.json()) as { content?: unknown };
+        return typeof payload.content === "string" ? payload.content : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const manifest = await collectPreviewAssetManifest("index.html", indexHtml, readWorkspaceText);
+    if (!manifest.complete) {
+      // An unverifiable manifest means a token URL would serve a broken,
+      // half-authorized preview. Fall back to the session-only URL — it
+      // works for the signed-in owner; it just can't be copied to a
+      // no-session context.
+      return NextResponse.json({
+        runtimeStatus: "ready",
+        previewUrl: `/api/preview/${encodeURIComponent(projectId)}/index.html`,
+        previewToken: null,
+        previewTokenExpiresAt: null,
+        runtimeError: null,
+        framework: "static",
+        developmentCommand: null,
+        packageManager: null,
+        logs: [],
+      });
+    }
     const token = createPreviewToken(userId, {
       projectId,
       workspaceId: project.workspaceId,

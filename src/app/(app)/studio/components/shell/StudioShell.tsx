@@ -53,18 +53,7 @@ export default function StudioShell({
   dockHandle?: ReactNode;
 }) {
   const [floating, setFloating] = useState<string | null>(null);
-  const leftWidthRef = useRef(280);
   const inspectorWidthRef = useRef(320);
-  const [leftWidth, setLeftWidth] = useState(() => {
-    try {
-      const v = localStorage.getItem("litt-studio-layout");
-      if (v) {
-        const j = JSON.parse(v);
-        if (typeof j.left === "number") return j.left;
-      }
-    } catch {}
-    return 280;
-  });
   const [inspectorWidth, setInspectorWidth] = useState(() => {
     try {
       const v = localStorage.getItem("litt-studio-layout");
@@ -79,9 +68,9 @@ export default function StudioShell({
   // Persist layout
   useEffect(() => {
     try {
-      localStorage.setItem("litt-studio-layout", JSON.stringify({ left: leftWidth, inspector: inspectorWidth }));
+      localStorage.setItem("litt-studio-layout", JSON.stringify({ inspector: inspectorWidth }));
     } catch {}
-  }, [leftWidth, inspectorWidth]);
+  }, [inspectorWidth]);
 
   // Corruption recovery
   useEffect(() => {
@@ -97,50 +86,13 @@ export default function StudioShell({
     localStorage.removeItem("litt-studio-layout");
     sessionStorage.removeItem("littree:studio:litt-collapsed");
     localStorage.removeItem("littree:studio:litt-collapsed");
-    setLeftWidth(280);
     setInspectorWidth(320);
+    setFloating(null);
+    // CommandStudio owns the littCollapsed React state — notify it so the
+    // docked chat panel expands again, not just the stored preference.
+    window.dispatchEvent(new Event("littree:studio:layout-reset"));
     // Don't reload — let React reconcile so test can observe reset without navigation
   }, []);
-
-  const handlePopout = useCallback(
-    (id: string, title: string) => {
-      const w = window.open("", "_blank", "width=420,height=600");
-      if (!w) return;
-      w.document.title = title;
-      w.document.body.style.margin = "0";
-      w.document.body.style.fontFamily = "system-ui, sans-serif";
-      w.document.body.innerHTML = `<div style="padding:16px"><h2>${title}</h2><p>Popout for ${id} — BroadcastChannel live.</p></div>`;
-      const bc = new BroadcastChannel(`litt-studio-popout-${id}`);
-      const onMsg = (e: MessageEvent) => {
-        if (e.data?.type === "close") w.close();
-      };
-      bc.addEventListener("message", onMsg);
-      w.addEventListener("beforeunload", () => {
-        bc.removeEventListener("message", onMsg);
-        bc.close();
-      });
-    },
-    [],
-  );
-
-  const onLeftHandleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        setLeftWidth((v: number) => Math.max(200, v - 10));
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        setLeftWidth((v: number) => Math.min(420, v + 10));
-      } else if (e.key === "Home") {
-        e.preventDefault();
-        setLeftWidth(200);
-      } else if (e.key === "End") {
-        e.preventDefault();
-        setLeftWidth(420);
-      }
-    },
-    [],
-  );
 
   const onInspectorHandleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -161,31 +113,6 @@ export default function StudioShell({
     [],
   );
 
-  // Mouse drag for left handle
-  const onLeftMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startW = leftWidthRef.current;
-      const onMove = (ev: MouseEvent) => {
-        const delta = ev.clientX - startX;
-        const next = Math.max(200, Math.min(420, startW + delta));
-        leftWidthRef.current = next;
-        setLeftWidth(next);
-      };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    leftWidthRef.current = leftWidth;
-  }, [leftWidth]);
   useEffect(() => {
     inspectorWidthRef.current = inspectorWidth;
   }, [inspectorWidth]);
@@ -241,15 +168,6 @@ export default function StudioShell({
         </button>
         <button
           type="button"
-          onClick={() => hasInspector && handlePopout("inspector", "Inspector")}
-          aria-label="Pop out inspector"
-          className="rounded px-2 py-1 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
-          data-testid="dock-popout"
-        >
-          Popout
-        </button>
-        <button
-          type="button"
           onClick={handleReset}
           aria-label="Reset layout"
           className="rounded px-2 py-1 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
@@ -263,28 +181,18 @@ export default function StudioShell({
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        {hasLeft && !isFloating && (
-          <>
-            <div style={{ width: leftWidth, minWidth: 200, maxWidth: 420 }} className="shrink-0 overflow-hidden">
-              {leftPanel}
-            </div>
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize LiTT panel"
-              tabIndex={0}
-              onKeyDown={onLeftHandleKeyDown}
-              onMouseDown={onLeftMouseDown}
-              data-testid="dock-resize-left"
-              className="group flex w-1.5 shrink-0 cursor-col-resize items-center justify-center bg-transparent hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
-            >
-              <span className="h-8 w-0.5 rounded-full bg-white/15 group-hover:bg-white/25" aria-hidden="true" />
-            </div>
-          </>
+        {hasLeft && (
+          // The LiTT panel owns its own width (64px collapsed / its resizable
+          // expanded width via the dockHandle). This wrapper must not impose a
+          // competing fixed width — a collapsed panel would otherwise leave
+          // 200+px of dead reserved space.
+          <div style={{ minWidth: 0 }} className="shrink-0 overflow-hidden">
+            {leftPanel}
+          </div>
         )}
 
         {dockHandle}
-        <div className="flex h-14 shrink-0 flex-col overflow-hidden" style={{ minWidth: 56, width: 56 }}>
+        <div className="flex h-full min-h-0 shrink-0 flex-col overflow-y-auto" style={{ minWidth: 56, width: 56 }}>
           {rail}
         </div>
 

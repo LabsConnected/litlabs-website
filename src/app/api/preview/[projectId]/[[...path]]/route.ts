@@ -118,7 +118,7 @@ export async function GET(
     return NextResponse.json({ error: "projectId is required" }, { status: 400 });
   }
 
-  const segments = pathSegments ?? [];
+  const rawSegments = pathSegments ?? [];
 
   // Identity resolution. A session always wins and keeps its exact legacy
   // semantics (the segments are then a plain file path). Only a request
@@ -130,9 +130,25 @@ export async function GET(
   let presentedToken: string | null = null;
   let tokenWorkspaceId: string | null = null;
   let tokenAssets: string[] | null = null;
+  let segments = rawSegments;
   const { userId: sessionUserId } = await auth(_req);
   if (sessionUserId) {
     userId = sessionUserId;
+    // A signed-in owner can open a token-embedded URL (e.g. the copied
+    // preview link). The `t/<token>` prefix must still be stripped from the
+    // file path — otherwise it is resolved as a workspace file and 404s —
+    // but only when it actually verifies as a preview token for THIS
+    // project, so a real workspace directory named "t" keeps working.
+    if (segments[0] === "t" && segments[1]) {
+      try {
+        const claims = verifyPreviewToken(segments[1]);
+        if (claims.projectId === projectId) {
+          segments = segments.slice(2);
+        }
+      } catch {
+        // Not a valid token prefix — treat "t" as a normal path segment.
+      }
+    }
   } else if (segments[0] === "t" && segments[1]) {
     try {
       const claims = verifyPreviewToken(segments[1]);

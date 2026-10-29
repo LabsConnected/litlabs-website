@@ -4,6 +4,7 @@ import {
   createPreviewToken,
   verifyPreviewToken,
 } from "./preview-token";
+import { createTerminalToken, verifyTerminalToken } from "../terminal-auth";
 
 function paddedSecret(): string {
   const base =
@@ -153,6 +154,40 @@ describe("preview-token", () => {
     expect(() => verifyPreviewToken(badPayload)).toThrow(
       /Invalid preview token signature/,
     );
+  });
+
+  it("fails closed when a validly-signed token carries no manifest", () => {
+    // A token without an `ast` claim verifies (signature + scope are valid)
+    // but must authorize NOTHING — fail closed, never open.
+    const encodedPayload = Buffer.from(
+      JSON.stringify({
+        sub: "user-1",
+        aud: "littree-preview",
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 60,
+        pid: "proj-1",
+        wid: "ws-1",
+      }),
+    ).toString("base64url");
+    const token = [encodedPayload, signPayload(encodedPayload, paddedSecret())].join(".");
+    expect(verifyPreviewToken(token).assets).toEqual([]);
+  });
+
+  it("does not verify across token families (preview vs terminal)", () => {
+    // Preview tokens sign with a key DERIVED from TERMINAL_AUTH_SECRET; a
+    // preview token must never verify as a terminal token (or vice versa).
+    const preview = createPreviewToken("user-1", {
+      projectId: "proj-1",
+      workspaceId: "ws-1",
+      assets: ["index.html"],
+    });
+    expect(() => verifyTerminalToken(preview.token)).toThrow();
+
+    const terminal = createTerminalToken("user-1", {
+      workspaceId: "ws-1",
+      projectId: "proj-1",
+    });
+    expect(() => verifyPreviewToken(terminal.token)).toThrow();
   });
 
   it("rejects a token with an invalid audience", () => {

@@ -122,6 +122,100 @@ describe("useCanvasFileSync", () => {
     unmount();
   });
 
+  it("server-wins: a saved canvas replaces a newer local document", async () => {
+    // Regression (Greptile 4374230813): a freshly initialized empty doc has
+    // a newer updatedAt, so the old timestamp comparison let it overwrite
+    // real saved work.
+    const savedDoc = { ...makeDoc("server-canvas"), updatedAt: 1 };
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: JSON.stringify(savedDoc) }),
+    });
+    const local = { ...makeDoc("fresh-local"), updatedAt: Date.now() };
+    useCanvasBuilderStore.setState({ document: local });
+
+    const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
+    await act(async () => { await vi.runAllTimersAsync(); });
+
+    expect(useCanvasBuilderStore.getState().document.route).toBe("server-canvas");
+    // And the adopted document must not be written straight back.
+    expect(writesTo(fetchMock).length).toBe(0);
+    unmount();
+  });
+
+  it("blocks saves until the project's canvas read has settled", async () => {
+    // Regression (Greptile 4374230809): a save timer could fire before the
+    // load completed and overwrite the saved canvas.
+    let resolveRead!: (v: unknown) => void;
+    fetchMock.mockImplementation(
+      () => new Promise((res) => { resolveRead = res; }),
+    );
+    const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
+
+    await act(async () => {
+      useCanvasBuilderStore.setState({ document: makeDoc("early-edit") });
+      await vi.runAllTimersAsync();
+    });
+    expect(writesTo(fetchMock).length).toBe(0);
+
+    await act(async () => {
+      resolveRead({ ok: false, json: async () => ({}) });
+      await vi.runAllTimersAsync();
+    });
+    await act(async () => {
+      useCanvasBuilderStore.setState({ document: makeDoc("after-load") });
+      await vi.runAllTimersAsync();
+    });
+    expect(writesTo(fetchMock).length).toBe(1);
+    unmount();
+  });
+
+  it("re-loads on project switch and never leaks the prior canvas", async () => {
+    // Regression (Greptile 4374230803): hasLoadedRef was global, so project
+    // B never loaded its own canvas and edits wrote A's document into B.
+    const PROJECT_B = "99999999-8888-7777-6666-555555555555";
+    const docA = makeDoc("project-a-canvas");
+    const docB = makeDoc("project-b-canvas");
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? "{}");
+      if (body.action === "read") return { ok: false, json: async () => ({}) };
+      return { ok: true, json: async () => ({}) };
+    });
+
+    const { rerender, unmount } = renderHook(
+      (id: string) => useCanvasFileSync(id),
+      { initialProps: PROJECT_ID },
+    );
+    await settleMount(fetchMock);
+    await act(async () => {
+      useCanvasBuilderStore.setState({ document: docA });
+      await vi.runAllTimersAsync();
+    });
+    fetchMock.mockClear();
+
+    // Switch to B mid-flight — B must issue its own read and adopt its doc.
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? "{}");
+      if (body.action === "read") {
+        return { ok: true, json: async () => ({ content: JSON.stringify(docB) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    rerender(PROJECT_B);
+    await act(async () => { await vi.runAllTimersAsync(); });
+    expect(useCanvasBuilderStore.getState().document.route).toBe("project-b-canvas");
+
+    await act(async () => {
+      useCanvasBuilderStore.setState({ document: makeDoc("b-edit") });
+      await vi.runAllTimersAsync();
+    });
+    const writes = writesTo(fetchMock);
+    expect(writes.length).toBe(1);
+    expect(writes[0].url).toBe(`/api/studio-projects/${PROJECT_B}/files`);
+    expect(writes[0].init.body).not.toContain("project-a-canvas");
+    unmount();
+  });
+
   it("does not double-write on rapid navigation (unmount then remount)", async () => {
     const first = renderHook(() => useCanvasFileSync(PROJECT_ID));
     await settleMount(fetchMock);
