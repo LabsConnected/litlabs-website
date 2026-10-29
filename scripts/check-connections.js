@@ -1,8 +1,7 @@
 // Connect all workspace integrations via Supabase
 // This inserts records for GitHub repo, Vercel project, and Supabase project
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://rokbfvuoqildggnhappy.supabase.co";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const API_URL = process.env.LITLABS_API_URL || "http://localhost:3001";
 
 // We need the service role key to insert records
 // Let's try using the API instead
@@ -11,8 +10,9 @@ async function main() {
   // Check current state via the API
   console.log("Checking current connection state...");
   
-  // We'll use the production API endpoint
-  const healthRes = await fetch("https://litlabs.net/api/system-health", {
+  // Check the API endpoint (defaults to the local dev server — set
+  // LITLABS_API_URL to check another environment)
+  const healthRes = await fetch(`${API_URL}/api/system-health`, {
     headers: { "Cache-Control": "no-store" }
   });
   

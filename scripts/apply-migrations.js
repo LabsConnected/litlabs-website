@@ -3,8 +3,28 @@
 // by leveraging the `pg_exec` function if available, or creates
 // a temporary function to execute the migration SQL.
 
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://rokbfvuoqildggnhappy.supabase.co";
+const PRODUCTION_PROJECT_REF = "rokbfvuoqildggnhappy";
+const SUPABASE_URL =
+  process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SERVICE_KEY = process.env.SERVICE_KEY || "";
+
+if (!SUPABASE_URL) {
+  console.error(
+    "SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) is required — there is no default target.",
+  );
+  process.exit(1);
+}
+if (
+  SUPABASE_URL.includes(PRODUCTION_PROJECT_REF) &&
+  process.env.ALLOW_PRODUCTION_SUPABASE !== "1"
+) {
+  console.error(
+    `Refusing to run migrations against the production project (${PRODUCTION_PROJECT_REF}).\n` +
+      "Point SUPABASE_URL at a staging/dev project, or set ALLOW_PRODUCTION_SUPABASE=1 to override intentionally.",
+  );
+  process.exit(1);
+}
+const PROJECT_REF = new URL(SUPABASE_URL).hostname.split(".")[0];
 
 async function tryRestApi() {
   // Try to execute SQL via the Supabase REST API
@@ -40,9 +60,9 @@ async function tryDirectPg() {
   
   const connectionStrings = [
     // Direct connection with project ref as username
-    `postgresql://postgres.rokbfvuoqildggnhappy:${SERVICE_KEY}@aws-0-us-east-1.pooler.supabase.com:5432/postgres`,
+    `postgresql://postgres.${PROJECT_REF}:${SERVICE_KEY}@aws-0-us-east-1.pooler.supabase.com:5432/postgres`,
     // Try with service role key as password
-    `postgresql://postgres:${SERVICE_KEY}@db.rokbfvuoqildggnhappy.supabase.co:5432/postgres`,
+    `postgresql://postgres:${SERVICE_KEY}@db.${PROJECT_REF}.supabase.co:5432/postgres`,
   ];
 
   for (const connStr of connectionStrings) {

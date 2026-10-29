@@ -9,9 +9,26 @@
 const { createClient } = require("@supabase/supabase-js");
 const fs = require("fs");
 
+const PRODUCTION_PROJECT_REF = "rokbfvuoqildggnhappy";
 const env = fs.readFileSync(".env.local", "utf8");
-const key = env.match(/SUPABASE_SERVICE_ROLE_KEY="([^"]+)"/)[1];
-const url = "https://rokbfvuoqildggnhappy.supabase.co";
+const key = env.match(/SUPABASE_SERVICE_ROLE_KEY="([^"]+)"/)?.[1];
+const url =
+  env.match(/NEXT_PUBLIC_SUPABASE_URL="?([^"\n]+)"?/)?.[1] ||
+  env.match(/SUPABASE_URL="?([^"\n]+)"?/)?.[1];
+
+if (!key || !url) {
+  console.error(
+    ".env.local must define SUPABASE_SERVICE_ROLE_KEY and NEXT_PUBLIC_SUPABASE_URL",
+  );
+  process.exit(1);
+}
+if (url.includes(PRODUCTION_PROJECT_REF) && process.env.ALLOW_PRODUCTION_SUPABASE !== "1") {
+  console.error(
+    `Refusing to write smoke-test data to the production project (${PRODUCTION_PROJECT_REF}).\n` +
+      "Point .env.local at a staging/dev project, or set ALLOW_PRODUCTION_SUPABASE=1 to override intentionally.",
+  );
+  process.exit(1);
+}
 const sb = createClient(url, key);
 
 const TEST_USER = "test-user-smoke-" + Date.now();
