@@ -75,12 +75,13 @@ jobs:
           case "$E2E_PK" in pk_test_*) ;; *) echo "FAIL: E2E_CLERK_PUBLISHABLE_KEY missing or not pk_test_"; exit 1;; esac
           case "$E2E_SK" in sk_test_*) ;; *) echo "FAIL: E2E_CLERK_SECRET_KEY missing or not sk_test_"; exit 1;; esac
           # Decode the publishable key's frontend-API domain — instance
-          # metadata, not secret material.
-          FAPI_DOMAIN=$(python3 -c 'import base64,os; b64=os.environ["E2E_PK"].removeprefix("pk_test_").rstrip("$"); b64+="="*(-len(b64)%4); print(base64.b64decode(b64).decode().strip())')
+          # metadata, not secret material. Clerk pk format is
+          # pk_test_ + base64("hostname$") — strip the trailing $ AFTER decode.
+          FAPI_DOMAIN=$(python3 -c 'import base64,os; b64=os.environ["E2E_PK"].removeprefix("pk_test_"); b64+="="*(-len(b64)%4); print(base64.b64decode(b64).decode().rstrip("$").strip())')
           echo "pk instance domain: ${FAPI_DOMAIN}"
           case "$FAPI_DOMAIN" in
             *.clerk.accounts.dev|*.clerk.accountsstage.dev|*.*.*) ;;
-            *) echo "FAIL: pk_test_ does not decode to a hostname"; exit 1;;
+            *) echo "FAIL: pk_test_ does not decode to a valid hostname"; exit 1;;
           esac
           fapi_status=$(curl -s -o /dev/null -w '%{http_code}' "https://${FAPI_DOMAIN}/v1/environment")
           echo "pk frontend-API reachability: HTTP ${fapi_status}"
