@@ -12,6 +12,7 @@
 import { spawn, execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import { buildChildEnv } from "./child-env.js";
 import type { ShellExecutor, ShellExecuteOptions, ShellResult, StreamChunk } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -229,7 +230,10 @@ export class NodeShellExecutor implements ShellExecutor {
     } = options;
 
     const t0 = Date.now();
-    const mergedEnv = { ...process.env, ...this._env, ...env };
+    // Allowlisted host env + explicit layers. Never re-merge raw process.env:
+    // a filtered `env` argument that simply omits a secret would otherwise
+    // leave the host value in the child (`printenv TERMINAL_INTERNAL_SERVICE_KEY`).
+    const mergedEnv = buildChildEnv(process.env, [this._env, env]);
 
     // Resolve the actual executable path (handles Windows .CMD shims)
     const resolved = resolveCommand(command);

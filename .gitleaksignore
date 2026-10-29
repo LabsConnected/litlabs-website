@@ -1,0 +1,8 @@
+# Synthetic redaction-test fixture — not a real credential.
+# The test file pins the made-up service-role assignment used to prove
+# redactSecrets() strips that shape. The second pin is the earlier
+# ignore-file comment (commit 0efa1d92) that quoted the same shape;
+# a later reword removed it from the tip, but the PR range still
+# contains that commit.
+c98961334e5a11830e5081100c6b9c41e4bb0ddb:packages/litt-agent-core/src/__tests__/workspace-confinement.test.ts:generic-api-key:234
+0efa1d92d3c074ce997436ddcadf02a11c673497:.gitleaksignore:generic-api-key:2
