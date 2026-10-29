@@ -32,6 +32,15 @@ vi.mock("./components/CommandStudio", () => ({
   default: () => <div data-testid="command-studio-mock" />,
 }));
 
+// The project check fetches /api/studio-projects after mount; answer it
+// with a non-empty list so the page proceeds to CommandStudio. jsdom has
+// no real API — an unhandled fetch failure now (correctly) renders the
+// load-error state instead of failing open into the workspace.
+vi.stubGlobal(
+  "fetch",
+  vi.fn(async () => ({ ok: true, json: async () => ({ projects: [{ id: "p1" }] }) })),
+);
+
 const { default: StudioPage } = await import("./page");
 
 describe("StudioPage hydration", () => {
