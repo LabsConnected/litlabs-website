@@ -26,7 +26,14 @@ import { CODE_VIEW_MODES, type ViewMode } from "./code-view-modes";
 
 export { CODE_VIEW_MODES };
 
-const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.default), { ssr: false });
+const MonacoEditor = dynamic(
+  () =>
+    Promise.all([import("@monaco-editor/react"), import("@/lib/monaco/setup")]).then(([m, s]) => {
+      s.configureBundledMonaco();
+      return m.default;
+    }),
+  { ssr: false },
+);
 
 // ─── Types ────────────────────────────────────────────────────────
 
