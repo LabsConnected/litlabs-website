@@ -1256,11 +1256,7 @@ export async function runAgentLoop(
         const { appendFileSync } = await import("node:fs");
         appendFileSync(
           process.env.LITT_TOOLCALL_DEBUG_FILE ?? "/tmp/litt-toolcall-args.log",
-        HEAD
-          JSON.stringify({ toolId: parsed.toolId, inputs: parsed.inputs }) + "\n",
-
           JSON.stringify({ toolId: parsed.toolId, inputs: redactToolCallInputs(parsed.inputs) }) + "\n",
-        14eb8f25 (fix(agent): require evidence before reporting completion)
         );
       } catch { /* debug only */ }
     }
