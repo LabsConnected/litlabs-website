@@ -22,6 +22,30 @@ const DEPLOYMENT_URL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3001";
 const userEmail = process.env.CLERK_TEST_USER_E2E_EMAIL;
 const userAuthFile = path.join(__dirname, ".clerk", "user-e2e.json");
 
+/**
+ * The Clerk dev-instance API (testing-token mint, sign-in ticket) is an
+ * external dependency and flakes on runner network hiccups. Retry ONLY
+ * transient transport/5xx failures; auth/config errors still fail fast so a
+ * broken setup can never masquerade as a pass.
+ */
+async function withClerkRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const transient = /failed to fetch|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|\b5\d\d\b/i;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!transient.test(msg) || attempt === 4) throw err;
+      const backoff = 1000 * 2 ** (attempt - 1);
+      console.warn(`[auth.setup] ${label} transient failure (attempt ${attempt}/4): ${msg}; retrying in ${backoff}ms`);
+      await new Promise((r) => setTimeout(r, backoff));
+    }
+  }
+  throw lastErr;
+}
+
 // @clerk/testing expects CLERK_PUBLISHABLE_KEY; the app uses the NEXT_PUBLIC_ name.
 if (!process.env.CLERK_PUBLISHABLE_KEY && process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
   process.env.CLERK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -36,7 +60,7 @@ setup("clerk global setup (dev instance)", async () => {
     process.env.CLERK_SECRET_KEY,
     "Clerk dev secret key (sk_test_*) must be provided via e2e/env.e2e",
   ).toMatch(/^sk_test_/);
-  await clerkSetup();
+  await withClerkRetry("clerkSetup testing-token mint", () => clerkSetup());
 });
 
 setup("authenticate E2E user and save storage state", async ({ page, context }) => {
@@ -45,14 +69,14 @@ setup("authenticate E2E user and save storage state", async ({ page, context }) 
     "CLERK_TEST_USER_E2E_EMAIL must be set — a dedicated disposable user in the Clerk dev instance",
   ).toBeDefined();
 
-  await setupClerkTestingToken({ page });
+  await withClerkRetry("setupClerkTestingToken", () => setupClerkTestingToken({ page }));
   await page.goto(DEPLOYMENT_URL, { waitUntil: "domcontentloaded", timeout: 90_000 });
   await page.waitForFunction(
     () => Boolean((window as Window & { Clerk?: { loaded?: boolean } }).Clerk?.loaded),
     undefined,
     { timeout: 30_000 },
   );
-  await clerk.signIn({ page, emailAddress: userEmail! });
+  await withClerkRetry("clerk.signIn", () => clerk.signIn({ page, emailAddress: userEmail! }));
 
   const clerkUserId = await page.evaluate(
     () => (window as Window & { Clerk?: { user?: { id?: string } | null } }).Clerk?.user?.id,
