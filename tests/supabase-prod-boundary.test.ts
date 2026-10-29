@@ -36,6 +36,9 @@ const allowedPaths = new Set<string>([
   path.join("scripts", "apply-migrations.js"),
   path.join("scripts", "smoke-canvas-api.cjs"),
   path.join("tests", "playwright", "hire-e2e.spec.ts"),
+  // Environment-shape validator: uses the ref inside a negative-contains
+  // check to assert env files do NOT point at production.
+  path.join("scripts", "validate-env-shape.mjs"),
 ]);
 
 describe("production Supabase project boundary", () => {
@@ -77,12 +80,14 @@ describe("production Supabase project boundary", () => {
       path.join("scripts", "apply-migrations.js"),
       path.join("scripts", "smoke-canvas-api.cjs"),
       path.join("tests", "playwright", "hire-e2e.spec.ts"),
+      path.join("scripts", "validate-env-shape.mjs"),
     ]) {
       const content = fs.readFileSync(path.join(repoRoot, rel), "utf8");
       for (const line of content.split("\n")) {
         if (!line.includes(PRODUCTION_PROJECT_REF)) continue;
         expect(
           line.includes("PRODUCTION_PROJECT_REF") ||
+            line.includes("includes(") ||
             line.trim().startsWith("//") ||
             line.trim().startsWith("*"),
           `${rel} contains a non-guard production reference: ${line.trim()}`,
