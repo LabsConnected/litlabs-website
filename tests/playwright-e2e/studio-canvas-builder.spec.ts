@@ -166,6 +166,22 @@ async function readCanvasFile(
   return { ok: true, content: data.content ?? null };
 }
 
+async function deleteCanvasFile(
+  request: APIRequestContext,
+  page: Page,
+  projectId: string,
+): Promise<void> {
+  const resp = await request.post(`${BASE}/api/studio-projects/${projectId}/files`, {
+    headers: await freshAuthHeader(page),
+    data: { action: "delete", path: CANVAS_FILE },
+  });
+  // 404 is acceptable — the goal is a confirmed-empty canvas slot either way.
+  expect(
+    resp.ok() || resp.status() === 404,
+    `canvas delete should succeed or already be absent, got ${resp.status()}`,
+  ).toBe(true);
+}
+
 /** Wait for the debounced .litt/canvas.json write POST from useCanvasFileSync. */
 function waitForCanvasWrite(page: Page, projectId: string, timeout = 30_000) {
   return page.waitForRequest(
@@ -365,9 +381,26 @@ test.describe("canvas file sync — disposable project", () => {
       const afterFailure = await readCanvasFile(context.request, page, projectId);
       expect(afterFailure.content ?? "").not.toContain(FAILED_TEXT);
 
-      // Recovery: unblock the route, seed a NEWER doc, reload — the debounced
-      // writer must succeed this time.
+      // Recovery (retry): a failed write stays dirty and the teardown flush
+      // retries it — unblock the route and reload; the failed content must
+      // land truthfully. Unload-time writes are not observable to
+      // waitForRequest, so assert on the persisted result instead.
       await page.unroute(`**/api/studio-projects/${projectId}/files`);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("project-design-surface")).toBeVisible({ timeout: 60_000 });
+      await expect
+        .poll(
+          async () =>
+            (await readCanvasFile(context.request, page, projectId)).content,
+          { timeout: 15_000 },
+        )
+        .toContain(FAILED_TEXT);
+
+      // Recovery (new content): the retried file is now the canonical canvas —
+      // server-wins adoption means a reseeded local doc can never overwrite
+      // it. Delete the file through the real API (confirmed-empty), reseed,
+      // reload, and the first-sync writer must persist the new work.
+      await deleteCanvasFile(context.request, page, projectId);
       const recoveredWrite = waitForCanvasWrite(page, projectId);
       await seedCanvasStorage(page, RECOVERED_TEXT);
       await page.reload({ waitUntil: "domcontentloaded" });
