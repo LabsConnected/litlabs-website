@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Get source SHA
         id: source
@@ -57,6 +57,13 @@ jobs:
           echo "Terminal deployed SHA: $DEPLOYED_SHA"
 
       - name: Compare SHAs
+        env:
+          # Repo variable PRODUCTION_DEPLOY_HOLD=1 marks production as frozen:
+          # deployed-code parity (web/terminal SHA vs source) cannot match while
+          # no deploys ship, so it is reported as SKIPPED. The Clerk auth health
+          # check is NOT parity — it still blocks, because an invalid prod
+          # secret is a real incident, not a freeze artifact.
+          PRODUCTION_DEPLOY_HOLD: ${{ vars.PRODUCTION_DEPLOY_HOLD }}
         run: |
           SOURCE_SHA="${{ steps.source.outputs.sha }}"
           SOURCE_SHORT="${SOURCE_SHA:0:8}"
@@ -81,31 +88,35 @@ jobs:
             echo "✅ Clerk backend accepted the production secret key"
           fi
 
-          if [ "$WEB_SHA" = "unknown" ] || [ "$WEB_SHA" = "dev" ]; then
-            echo "⚠️  Web health endpoint did not report a real SHA (got: $WEB_SHA)"
-            FAIL=1
-          elif [ "$WEB_SHA" != "$SOURCE_SHORT" ]; then
-            echo "❌ Web SHA mismatch: source=$SOURCE_SHORT deployed=$WEB_SHA"
-            FAIL=1
+          if [ "$PRODUCTION_DEPLOY_HOLD" = "1" ]; then
+            echo "⏸️  PRODUCTION_DEPLOY_HOLD=1 — deployed SHA parity SKIPPED (production frozen)."
           else
-            echo "✅ Web SHA matches source"
-          fi
+            if [ "$WEB_SHA" = "unknown" ] || [ "$WEB_SHA" = "dev" ]; then
+              echo "⚠️  Web health endpoint did not report a real SHA (got: $WEB_SHA)"
+              FAIL=1
+            elif [ "$WEB_SHA" != "$SOURCE_SHORT" ]; then
+              echo "❌ Web SHA mismatch: source=$SOURCE_SHORT deployed=$WEB_SHA"
+              FAIL=1
+            else
+              echo "✅ Web SHA matches source"
+            fi
 
-          if [ "$TERMINAL_SHA" = "unknown" ] || [ "$TERMINAL_SHA" = "dev" ]; then
-            echo "⚠️  Terminal health endpoint did not report a real SHA (got: $TERMINAL_SHA)"
-            FAIL=1
-          elif [ "$TERMINAL_SHA" != "$SOURCE_SHORT" ]; then
-            echo "❌ Terminal SHA mismatch: source=$SOURCE_SHORT deployed=$TERMINAL_SHA"
-            FAIL=1
-          else
-            echo "✅ Terminal SHA matches source"
+            if [ "$TERMINAL_SHA" = "unknown" ] || [ "$TERMINAL_SHA" = "dev" ]; then
+              echo "⚠️  Terminal health endpoint did not report a real SHA (got: $TERMINAL_SHA)"
+              FAIL=1
+            elif [ "$TERMINAL_SHA" != "$SOURCE_SHORT" ]; then
+              echo "❌ Terminal SHA mismatch: source=$SOURCE_SHORT deployed=$TERMINAL_SHA"
+              FAIL=1
+            else
+              echo "✅ Terminal SHA matches source"
+            fi
           fi
 
           if [ "$FAIL" = "1" ]; then
             echo ""
-            echo "Release gate FAILED — deployed services are out of sync with source."
+            echo "Release gate FAILED — see failing checks above."
             exit 1
           fi
 
           echo ""
-          echo "Release gate PASSED — all services report the source SHA."
+          echo "Release gate PASSED."
