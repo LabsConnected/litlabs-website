@@ -1,0 +1,60 @@
+{
+  "name": "LiTTree — STAGING Synthetic Failure Probe",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "litt-staging-probe",
+        "options": {}
+      },
+      "id": "probe-webhook-trigger",
+      "name": "Run Probe",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "notes": "n8n error workflows only fire for production-mode executions (webhook/schedule/etc.), NOT manual 'Execute workflow' runs. Activate this workflow, then POST to /webhook/litt-staging-probe.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "test-id",
+              "name": "test_id",
+              "value": "litt-staging-probe-001",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "probe-set-test-id",
+      "name": "Set Test ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// STAGING PROBE — intentionally throws to exercise the error pipeline.\n// The error message embeds the unique test id for ledger verification.\nconst testId = $input.first().json.test_id || 'litt-staging-probe-unknown';\nthrow new Error(`litt-staging-probe synthetic failure ${testId}`);\n"
+      },
+      "id": "probe-boom",
+      "name": "Boom",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    }
+  ],
+  "connections": {
+    "Run Probe": {
+      "main": [[{ "node": "Set Test ID", "type": "main", "index": 0 }]]
+    },
+    "Set Test ID": {
+      "main": [[{ "node": "Boom", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "errorWorkflow": "REPLACE_WITH_IMPORTED_P0_HANDLER_WORKFLOW_ID"
+  }
+}
