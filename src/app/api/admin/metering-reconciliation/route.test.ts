@@ -26,7 +26,7 @@ vi.mock("@/lib/supabase-admin", () => ({
   getAdminSupabase: () => ({ from: mocks.from }),
 }));
 
-vi.stubEnv("ADMIN_CLERK_ID", "admin-clerk-1");
+vi.stubEnv("LITTLABS_VAPI_OWNER_CLERK_ID", "admin-clerk-1");
 
 const { GET } = await import("./route");
 
