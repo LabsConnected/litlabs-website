@@ -215,7 +215,12 @@ const nextConfig: NextConfig = {
               // without this the browser silently drops the redirect and the CLI
               // callback server never receives the authorization code.
               "form-action 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev https://clerk.litlabs.net http://127.0.0.1:*",
-              "upgrade-insecure-requests",
+              // upgrade-insecure-requests only applies in production: on an
+              // http dev server bound to a LAN/Tailscale address it upgrades
+              // every subresource to https and fails (no TLS in dev).
+              ...(process.env.NODE_ENV === "production"
+                ? ["upgrade-insecure-requests"]
+                : []),
             ].join("; "),
           },
           {
