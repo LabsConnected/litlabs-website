@@ -65,7 +65,7 @@ async function main() {
     .insert({
       user_id: ownerId,
       provider: "supabase",
-      provider_account_id: "rokbfvuoqildggnhappy",
+      provider_account_id: new URL(getEnv("NEXT_PUBLIC_SUPABASE_URL")).hostname.split(".")[0],
       provider_account_name: "LiTTree Lab Studios DB",
     })
     .select();

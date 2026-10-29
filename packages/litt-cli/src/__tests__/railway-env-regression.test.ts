@@ -81,7 +81,7 @@ const REAL_WEB_ENV: Record<string, string> = {
   STRIPE_SECRET_KEY: SK_LIVE + "FAKEFAKEFAKEFAKEFAKEFAKEFAKE",
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_clerk_fake",
   CLERK_SECRET_KEY: "sk_test_clerk_secret_fake",
-  NEXT_PUBLIC_SUPABASE_URL: "https://rokbfvuoqildggnhappy.supabase.co",
+  NEXT_PUBLIC_SUPABASE_URL: "https://testprojectref0000000.supabase.co",
   NEXT_PUBLIC_TERMINAL_WS_URL: "wss://terminal.example.com",
   NEXT_PUBLIC_TERMINAL_HTTP_URL: "https://terminal.example.com",
   // Genuinely missing on real web service:

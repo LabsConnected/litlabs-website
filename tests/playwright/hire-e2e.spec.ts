@@ -7,8 +7,12 @@ import { test, expect } from "@playwright/test";
  * the row exists in Supabase via the service-role REST API.
  */
 
-const SUPABASE_URL = "https://rokbfvuoqildggnhappy.supabase.co";
+const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+// E2E must never touch the production project — require an explicit
+// non-production target.
+const PRODUCTION_PROJECT_REF = "rokbfvuoqildggnhappy";
 
 test("Hire form creates verified row in Supabase", async ({ page }) => {
   // /hire is retired from the public V1 product: the page now redirects to
@@ -18,6 +22,10 @@ test("Hire form creates verified row in Supabase", async ({ page }) => {
   // both this test and the page.
   test.skip(true, "/hire retired from public V1 (hireServices flag disabled)");
   test.skip(!SERVICE_KEY, "SUPABASE_SERVICE_ROLE_KEY not set");
+  test.skip(
+    !SUPABASE_URL || SUPABASE_URL.includes(PRODUCTION_PROJECT_REF),
+    "SUPABASE_URL must point at a non-production project",
+  );
 
   const testEmail = `e2e-hire-test-${Date.now()}@litlabs.net`;
 
