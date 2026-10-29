@@ -32,6 +32,7 @@
 
 import type { ShellExecutor, ToolResult, StreamChunk } from "./types.js";
 import type { RuntimeStore } from "./state.js";
+import { isBlockedChildEnvKey } from "./child-env.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -108,8 +109,8 @@ interface CommandSpec {
    * inside the workspace. For file-reading commands (cat, grep, find, ...)
    * the operands ARE the target paths — without this, `cat ../../.env`
    * reads outside the workspace while staying classified read_only.
-   * Non-path operands (grep patterns, find predicates) still resolve
-   * inside the workspace, so legitimate use is unaffected.
+   * Search commands (grep, rg) confine path operands only — the pattern
+   * argument is not a path. Other commands confine every operand.
    */
   confineOperands?: boolean;
   /**
@@ -329,7 +330,7 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   // Build tools — mostly read-only
   tsc: { defaultCapability: "read_only", pathArgs: ["--project", "-p", "--outDir", "--out", "--declarationDir"] },
   "tsc-watch": { defaultCapability: "read_only", pathArgs: ["--project", "-p"] },
-  eslint: { defaultCapability: "read_only", pathArgs: ["--config", "-c", "--output-file"] },
+  eslint: { defaultCapability: "read_only", pathArgs: ["--config", "-c", "--output-file", "-o"] },
   prettier: { defaultCapability: "read_only", pathArgs: ["--config", "-c"] },
   vitest: { defaultCapability: "arbitrary_code", arbitraryCode: true, pathArgs: ["--config", "-c"] },
   jest: { defaultCapability: "arbitrary_code", arbitraryCode: true, pathArgs: ["--config", "-c"] },
@@ -1134,12 +1135,18 @@ function isWithinWorkspace(p: string, workspaceRoot: string): boolean {
  *
  * Handles both --flag value and --flag=value forms.
  */
+function pathOutsideWorkspace(pathValue: string, workspaceRoot: string): boolean {
+  if (!pathValue || pathValue.startsWith("-")) return false;
+  return !isWithinWorkspace(path.resolve(pathValue), workspaceRoot);
+}
+
 function validatePathArgs(
   command: string,
   args: string[],
   workspaceRoot: string,
 ): ExecutionError | null {
-  const spec = COMMAND_SPECS[command.toLowerCase()];
+  // `git.exe` / `Cat.CMD` must hit the same spec as `git` / `cat`.
+  const spec = COMMAND_SPECS[normalizeCommand(command)];
   if (!spec?.pathArgs) return null;
 
   const pathFlags = new Set(spec.pathArgs);
@@ -1155,6 +1162,19 @@ function validatePathArgs(
       if (!isWithinWorkspace(resolved, workspaceRoot)) {
         return new ExecutionError(
           `Path argument "${arg} ${pathValue}" resolves outside workspace root`,
+          "PATH_ARG_ESCAPE",
+        );
+      }
+    }
+
+    // Attached short form used by sort: `-o/outside/file` (the separate
+    // `-o <path>` form is handled above). Only `-o`, so `-cconfig` is
+    // not mistaken for a prefix of an unrelated short flag.
+    if (pathFlags.has("-o") && arg.startsWith("-o") && !arg.startsWith("--") && arg.length > 2) {
+      const pathValue = arg.slice(2);
+      if (pathOutsideWorkspace(pathValue, workspaceRoot)) {
+        return new ExecutionError(
+          `Path argument "${arg}" resolves outside workspace root`,
           "PATH_ARG_ESCAPE",
         );
       }
@@ -1186,22 +1206,172 @@ function validatePathArgs(
  * `grep -r secret /`, `find /` — that flag-level pathArgs checking
  * cannot reach, because for these commands the operand IS the path.
  *
- * Non-path operands are unaffected: a grep pattern or find predicate
- * resolves to a (probably nonexistent) path inside the workspace.
+ * Search tools (grep, rg) take `PATTERN [PATH...]`. The pattern is not a
+ * path — `rg /api/ .` and `grep ../ src/file.ts` search inside the
+ * workspace. Only operands that name files are checked. `-e`/`-f` and
+ * the other value-taking flags are skipped so their values are not
+ * mistaken for paths (except flags whose value IS a file, such as
+ * `-f`/`--file`).
+ *
  * Flag tokens (`-x`, `--foo`) are skipped; `--flag=value` tokens are
- * skipped because value-carrying flags are covered by pathArgs.
+ * skipped because value-carrying flags are covered by pathArgs, except
+ * for the search-command parser which understands them directly.
  */
+type SearchFlagKind = "pattern" | "path" | "other";
+
+const SEARCH_PATTERN_SOURCE = new Set(["-e", "--regexp", "-f", "--file"]);
+
+const GREP_SEARCH_FLAGS = new Map<string, SearchFlagKind>([
+  ["-e", "pattern"],
+  ["--regexp", "pattern"],
+  ["-f", "path"],
+  ["--file", "path"],
+  ["--exclude-from", "path"],
+  ["-m", "other"],
+  ["--max-count", "other"],
+  ["--label", "other"],
+  ["--binary-files", "other"],
+  ["-d", "other"],
+  ["--directories", "other"],
+  ["-D", "other"],
+  ["--devices", "other"],
+  ["--include", "other"],
+  ["--exclude", "other"],
+  ["--exclude-dir", "other"],
+  ["-A", "other"],
+  ["--after-context", "other"],
+  ["-B", "other"],
+  ["--before-context", "other"],
+  ["-C", "other"],
+  ["--context", "other"],
+  ["--group-separator", "other"],
+]);
+
+const RG_SEARCH_FLAGS = new Map<string, SearchFlagKind>([
+  ["-e", "pattern"],
+  ["--regexp", "pattern"],
+  ["-f", "path"],
+  ["--file", "path"],
+  ["--ignore-file", "path"],
+  ["--cursor-ignore", "path"],
+  ["--pre", "other"],
+  ["--pre-glob", "other"],
+  ["--dfa-size-limit", "other"],
+  ["-E", "other"],
+  ["--encoding", "other"],
+  ["--engine", "other"],
+  ["-m", "other"],
+  ["--max-count", "other"],
+  ["--regex-size-limit", "other"],
+  ["-j", "other"],
+  ["--threads", "other"],
+  ["-g", "other"],
+  ["--glob", "other"],
+  ["--iglob", "other"],
+  ["-d", "other"],
+  ["--max-depth", "other"],
+  ["--max-filesize", "other"],
+  ["-t", "other"],
+  ["--type", "other"],
+  ["-T", "other"],
+  ["--type-not", "other"],
+  ["--type-add", "other"],
+  ["--type-clear", "other"],
+  ["-A", "other"],
+  ["--after-context", "other"],
+  ["-B", "other"],
+  ["--before-context", "other"],
+  ["--color", "other"],
+  ["--colors", "other"],
+  ["-C", "other"],
+  ["--context", "other"],
+  ["--context-separator", "other"],
+  ["--field-context-separator", "other"],
+  ["--field-match-separator", "other"],
+  ["--hostname-bin", "other"],
+  ["--hyperlink-format", "other"],
+  ["-M", "other"],
+  ["--max-columns", "other"],
+  ["--path-separator", "other"],
+  ["-r", "other"],
+  ["--replace", "other"],
+  ["--sort", "other"],
+  ["--sortr", "other"],
+  ["--generate", "other"],
+]);
+
+/**
+ * Path operands for grep/rg. The pattern (first positional, unless -e/-f
+ * already supplied it) is omitted. `--files` has no pattern, so every
+ * positional is a path.
+ */
+function searchCommandPathOperands(cmd: "grep" | "rg", args: string[]): string[] {
+  const flags = cmd === "rg" ? RG_SEARCH_FLAGS : GREP_SEARCH_FLAGS;
+  const paths: string[] = [];
+  const positionals: string[] = [];
+  let patternFromFlag = false;
+  let endOfFlags = false;
+
+  const note = (name: string, kind: SearchFlagKind | undefined, value: string | undefined, consume: boolean) => {
+    if (SEARCH_PATTERN_SOURCE.has(name)) patternFromFlag = true;
+    if (consume && kind === "path" && value && value !== "-") paths.push(value);
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!endOfFlags && arg === "--") {
+      endOfFlags = true;
+      continue;
+    }
+    if (!endOfFlags && arg.startsWith("--") && arg.includes("=")) {
+      const eq = arg.indexOf("=");
+      const name = arg.slice(0, eq);
+      const value = arg.slice(eq + 1);
+      note(name, flags.get(name), value, true);
+      continue;
+    }
+    if (!endOfFlags && arg.startsWith("-") && !arg.startsWith("--") && arg.length > 2) {
+      const short = arg.slice(0, 2);
+      const kind = flags.get(short);
+      if (kind) {
+        note(short, kind, arg.slice(2), true);
+        continue;
+      }
+    }
+    if (!endOfFlags && flags.has(arg)) {
+      const kind = flags.get(arg);
+      const value = args[i + 1];
+      if (value !== undefined) {
+        i++;
+        note(arg, kind, value, true);
+      } else {
+        note(arg, kind, undefined, false);
+      }
+      continue;
+    }
+    if (!endOfFlags && arg.length > 1 && arg.startsWith("-")) continue;
+    if (arg) positionals.push(arg);
+  }
+
+  const noPattern = patternFromFlag || (cmd === "rg" && args.some((a) => a === "--files" || a === "--type-list"));
+  const pathPositionals = noPattern ? positionals : positionals.slice(1);
+  return [...paths, ...pathPositionals];
+}
+
 function validateOperandPaths(
   command: string,
   args: string[],
   cwd: string,
   workspaceRoot: string,
 ): ExecutionError | null {
-  const spec = COMMAND_SPECS[command.toLowerCase()];
+  const normalized = normalizeCommand(command);
+  const spec = COMMAND_SPECS[normalized];
   if (!spec?.confineOperands) return null;
-  for (const arg of args) {
-    if (arg.length > 1 && arg.startsWith("-")) continue;
-    if (!arg) continue;
+  const operands =
+    normalized === "grep" || normalized === "rg"
+      ? searchCommandPathOperands(normalized, args)
+      : args.filter((arg) => arg && !(arg.length > 1 && arg.startsWith("-")));
+  for (const arg of operands) {
     const resolved = path.resolve(cwd, arg);
     if (!isWithinWorkspace(resolved, workspaceRoot)) {
       return new ExecutionError(
@@ -1213,68 +1383,125 @@ function validateOperandPaths(
   return null;
 }
 
+const GIT_FILE_OUTPUT_SUBCOMMANDS = new Set([
+  "diff",
+  "log",
+  "show",
+  "whatchanged",
+  "shortlog",
+  "blame",
+]);
+
+function outputPathEscape(
+  label: string,
+  outputPath: string,
+  cwd: string,
+  workspaceRoot: string,
+): ExecutionError | null {
+  if (!outputPath) {
+    return new ExecutionError(`${label} output path is empty`, "PATH_ARG_ESCAPE");
+  }
+  const resolved = path.resolve(cwd, outputPath);
+  if (!isWithinWorkspace(resolved, workspaceRoot)) {
+    return new ExecutionError(
+      `${label} output path "${outputPath}" resolves outside workspace root`,
+      "PATH_ARG_ESCAPE",
+    );
+  }
+  return null;
+}
+
+/**
+ * File-writing flags that classification alone does not confine.
+ * `git diff --output=/outside` is a workspace_edit, and workspace_edit
+ * runs without an approval provider (and in auto mode). The output path
+ * has to be inside the workspace or the command is refused before spawn.
+ * The same applies to find's -fprint family.
+ */
+function validateExternalWritePaths(
+  command: string,
+  args: string[],
+  cwd: string,
+  workspaceRoot: string,
+): ExecutionError | null {
+  const normalized = normalizeCommand(command);
+  if (normalized === "git") {
+    const spec = COMMAND_SPECS.git;
+    const ops = operandIndices(spec, args);
+    let sub = "";
+    let subIndex = -1;
+    for (const i of ops) {
+      const name = args[i].toLowerCase();
+      if (spec.subcommands?.[name]) {
+        sub = name;
+        subIndex = i;
+        break;
+      }
+    }
+    if (!GIT_FILE_OUTPUT_SUBCOMMANDS.has(sub)) return null;
+    const rest = args.slice(subIndex + 1);
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === "--output" || a === "-o") {
+        const next = rest[i + 1];
+        if (next === undefined || (next.length > 1 && next.startsWith("-"))) {
+          return new ExecutionError(
+            `git ${sub} ${a} writes a file and requires a path inside the workspace`,
+            "PATH_ARG_ESCAPE",
+          );
+        }
+        const err = outputPathEscape(`git ${sub} ${a}`, next, cwd, workspaceRoot);
+        if (err) return err;
+        i++;
+        continue;
+      }
+      if (a.startsWith("--output=")) {
+        const err = outputPathEscape(`git ${sub} --output`, a.slice("--output=".length), cwd, workspaceRoot);
+        if (err) return err;
+        continue;
+      }
+      if (a.startsWith("-o") && !a.startsWith("--") && a.length > 2) {
+        const err = outputPathEscape(`git ${sub} -o`, a.slice(2), cwd, workspaceRoot);
+        if (err) return err;
+      }
+    }
+    return null;
+  }
+
+  if (normalized === "find") {
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a !== "-fprint" && a !== "-fprint0" && a !== "-fls" && a !== "-fprintf") continue;
+      const file = args[i + 1];
+      if (file === undefined || (file.length > 1 && file.startsWith("-"))) {
+        return new ExecutionError(
+          `find ${a} writes a file and requires a path inside the workspace`,
+          "PATH_ARG_ESCAPE",
+        );
+      }
+      const err = outputPathEscape(`find ${a}`, file, cwd, workspaceRoot);
+      if (err) return err;
+      i++;
+    }
+  }
+  return null;
+}
+
 // ─── Environment variable filtering ───────────────────────────────
 
 /**
- * Environment variables that are blocked from being passed to child processes.
- * These can be used to inject code or override security settings.
+ * Explicit per-call env only. Host `process.env` is NOT copied here —
+ * `NodeShellExecutor` builds the child environment from an allowlist
+ * (`buildChildEnv`) and would otherwise re-expose every host secret
+ * this filter omitted. Blocked names are dropped even if the caller
+ * passed them. Non-blocked explicit keys (a provider key the caller
+ * intentionally supplied) are kept.
  */
-const BLOCKED_ENV_VARS = new Set([
-  "NODE_OPTIONS",      // can inject --require
-  "NODE_PATH",         // can override module resolution
-  "LD_PRELOAD",        // can inject shared libraries
-  "LD_LIBRARY_PATH",   // can override library resolution
-  "DYLD_INSERT_LIBRARIES", // macOS injection
-  "PERL5OPT",          // can inject Perl modules
-  "PYTHONSTARTUP",     // can inject Python code
-  "PYTHONPATH",        // can override Python module resolution
-  "ELECTRON_RUN_AS_NODE", // can change Electron behavior
-  "FORCE_COLOR",       // not security but noisy
-]);
-
-/**
- * Infrastructure/service-role credentials that must never leak into
- * workspace child processes. Deliberately narrow: provider API keys
- * (OPENAI_API_KEY etc.) stay, because workspace dev servers and test
- * runners legitimately need them — but host-level secrets (service-role
- * DB keys, internal service tokens, deploy tokens, Stripe, webhook
- * secrets) are never part of a project's runtime environment; the
- * project reads its own values from workspace .env files instead.
- */
-const BLOCKED_INFRA_ENV_VARS = new Set([
-  "TERMINAL_INTERNAL_SERVICE_KEY",
-  "TERMINAL_AUTH_SECRET",
-  "INTERNAL_API_KEY",
-  "AGENT_API_KEY",
-  "AUTH_SECRET",
-  "VOICE_AUTH_SECRET",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "SUPABASE_SECRET_KEY",
-  "DATABASE_URL",
-  "CLERK_SECRET_KEY",
-  "CLERK_WEBHOOK_SECRET",
-  "STRIPE_SECRET_KEY",
-  "STRIPE_WEBHOOK_SECRET",
-  "RAILWAY_API_TOKEN",
-  "GITHUB_PRIVATE_KEY",
-  "GITHUB_WEBHOOK_SECRET",
-  "META_APP_SECRET",
-  "R2_SECRET_ACCESS_KEY",
-  "AWS_SECRET_ACCESS_KEY",
-  "VAPID_PRIVATE_KEY",
-  "LIVEKIT_API_SECRET",
-  "SUPERMEMORY_API_KEY",
-]);
-
-/**
- * Filter environment variables to remove dangerous ones.
- * Merges process.env with provided env, then strips blocked vars.
- */
-function filterEnv(provided?: Record<string, string>): Record<string, string> {
-  const merged = { ...process.env, ...provided };
+function filterEnv(provided?: Record<string, string>): Record<string, string> | undefined {
+  if (!provided) return undefined;
   const filtered: Record<string, string> = {};
-  for (const [key, value] of Object.entries(merged)) {
-    if (BLOCKED_ENV_VARS.has(key) || BLOCKED_INFRA_ENV_VARS.has(key)) continue;
+  for (const [key, value] of Object.entries(provided)) {
+    if (isBlockedChildEnvKey(key)) continue;
     filtered[key] = value ?? "";
   }
   return filtered;
@@ -1290,12 +1517,11 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\b(secret|password|passwd|token|api_key|apikey|access_key)\s*[:=]\s*["']?([a-zA-Z0-9+/=_-]{16,})["']?/gi,
   /\b(AKIA[0-9A-Z]{16})\b/g,
   /\b(gh[pousr]_[A-Za-z0-9]{36,})\b/g,
-  // Named secret assignments: NAME_SECRET, NAME_TOKEN, NAME_KEY, etc.
-  // Catches `SUPABASE_SERVICE_ROLE_KEY=x`, `RAILWAY_API_TOKEN=y`,
-  // `DATABASE_URL=postgres://u:p@h` — the *_KEY/SECRET/TOKEN family the
-  // generic value-shape patterns above miss. Underscore-suffixed match
-  // avoids false positives like MONKEY= or TURKEY=.
-  /\b((?:[A-Za-z][A-Za-z0-9_]*_)?(?:SECRET_KEY|PRIVATE_KEY|ACCESS_KEY|SERVICE_KEY|ROLE_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASSWD|DATABASE_URL|CONNECTION_STRING|DSN|CREDENTIALS?|KEY)[A-Za-z0-9_]*)\s*[=:]\s*[^\s"']{3,}/gi,
+  // Named secret assignments. The secret word must be its own
+  // underscore-delimited segment (or the whole name): API_KEY, MY_SECRET,
+  // TOKEN_VALUE, DATABASE_URL. A prefix is not enough — `keyword=` and
+  // `tokenizer=` are ordinary words and must pass through.
+  /\b(?:[A-Za-z][A-Za-z0-9]*_)*(?:SECRET_KEY|PRIVATE_KEY|ACCESS_KEY|SERVICE_KEY|ROLE_KEY|API_KEY|DATABASE_URL|CONNECTION_STRING|SECRET|TOKEN|PASSWORD|PASSWD|DSN|CREDENTIALS?|KEY)(?:_[A-Za-z0-9]+)*\b\s*[=:]\s*[^\s"']{3,}/gi,
   // URL-embedded credentials: scheme://user:pass@host
   /\b([a-z][a-z0-9+.-]*):\/\/[^\s/:]+:[^\s/@]+@/gi,
   // PEM private key blocks
@@ -1456,6 +1682,14 @@ export async function runCommand(
   const operandError = validateOperandPaths(command, args, cwd, workspaceRoot);
   if (operandError) {
     return executionError(operandError);
+  }
+
+  // 6c. File-writing flags (git --output/-o, find -fprint) must land
+  // inside the workspace. Classification as workspace_edit is not enough:
+  // that tier still reaches spawn when no approval provider is set.
+  const writeError = validateExternalWritePaths(command, args, cwd, workspaceRoot);
+  if (writeError) {
+    return executionError(writeError);
   }
 
   // 7. Filter environment variables

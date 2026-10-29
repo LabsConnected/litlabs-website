@@ -47,8 +47,24 @@ vi.mock("undici", async (importOriginal) => {
   const actual = await importOriginal<typeof import("undici")>();
   return { ...actual, fetch: vi.fn(actual.fetch) };
 });
+// validateOutboundHost resolves through node:dns/promises. The connect-time
+// check in validatingLookup uses node:dns. Mock the promises lookup so a
+// test can make the first answer public without touching the connection lookup.
+const dnsPromisesLookup = vi.hoisted(() => vi.fn());
+vi.mock("node:dns/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:dns/promises")>();
+  dnsPromisesLookup.mockImplementation((...args: unknown[]) =>
+    (actual.lookup as (...a: unknown[]) => Promise<unknown>)(...args),
+  );
+  return {
+    ...actual,
+    lookup: dnsPromisesLookup,
+    default: { ...actual, lookup: dnsPromisesLookup },
+  };
+});
 
 import { fetch as undiciFetch } from "undici";
+import { validateOutboundHost } from "@/lib/ssrf-guard";
 import { toolCreateProject, toolRunCommand, toolWebFetch } from "./extended-handlers";
 import { createBlankProject, getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
@@ -208,16 +224,53 @@ describe("toolWebFetch — SSRF hardening", () => {
   }
 
   it("rejects a redirect to a private target after a public first hop", async () => {
-    const fetchSpy = vi.mocked(undiciFetch).mockResolvedValueOnce(
-      new Response(null, {
-        status: 302,
-        headers: { location: "http://169.254.169.254/latest/meta-data/" },
-      }) as never,
-    );
+    const redirect = new Response("redirect-body", {
+      status: 302,
+      headers: { location: "http://169.254.169.254/latest/meta-data/" },
+    });
+    const cancel = vi.spyOn(redirect.body!, "cancel");
+    const fetchSpy = vi.mocked(undiciFetch).mockResolvedValueOnce(redirect as never);
     const result = await toolWebFetch("user-A", { url: "http://8.8.8.8/start" });
     expect(result.success).toBe(false);
     // Exactly one fetch happened (the public hop); the private hop never ran.
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // The redirect body is cancelled before the handler returns the error.
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it("cancels a redirect body that has no Location header", async () => {
+    const redirect = new Response("unfinished-body", { status: 302 });
+    const cancel = vi.spyOn(redirect.body!, "cancel");
+    vi.mocked(undiciFetch).mockResolvedValueOnce(redirect as never);
+    const result = await toolWebFetch("user-A", { url: "http://8.8.8.8/start" });
+    expect(result.success).toBe(false);
+    expect(result.message).toMatch(/without a Location header/);
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it("cancels each redirect body before following the next hop", async () => {
+    const order: string[] = [];
+    const redirect = new Response("redirect-body", {
+      status: 302,
+      headers: { location: "http://1.1.1.1/next" },
+    });
+    vi.spyOn(redirect.body!, "cancel").mockImplementation(async () => {
+      order.push("cancel");
+    });
+    const fetchMock = vi.mocked(undiciFetch);
+    const original = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((async () => {
+      order.push("fetch");
+      if (order.filter((event) => event === "fetch").length === 1) return redirect;
+      return new Response("hello", { status: 200, headers: { "content-type": "text/plain" } });
+    }) as never);
+    try {
+      const result = await toolWebFetch("user-A", { url: "http://8.8.8.8/start" });
+      expect(result.success).toBe(true);
+      expect(order).toEqual(["fetch", "cancel", "fetch"]);
+    } finally {
+      if (original) fetchMock.mockImplementation(original);
+    }
   });
 
   it("fails closed when the destination cannot be validated", async () => {
@@ -227,14 +280,16 @@ describe("toolWebFetch — SSRF hardening", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("blocks at connect time when the socket lookup re-resolves private (DNS rebinding)", async () => {
-    // Host gate passes once (its own coverage lives in ssrf-guard.test.ts);
-    // the connect-time resolver (node:dns, used by validatingLookup) says
-    // PRIVATE — the dispatcher must reject independently of the verdict.
-    const { validateOutboundHost } = await import("@/lib/ssrf-guard");
-    vi.mocked(validateOutboundHost).mockResolvedValueOnce({ ok: true, addresses: ["93.184.216.34"] });
+  it("blocks at connect time when validation DNS is public and node:dns is private", async () => {
+    // First lookup: node:dns/promises, used by validateOutboundHost.
+    dnsPromisesLookup.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }]);
+    // Connect-time lookup: node:dns, used by validatingLookup. A regression
+    // that only mocked dns/promises would not see this private answer.
     const dns = await import("node:dns");
-    const socketSpy = vi.spyOn(dns.default, "lookup").mockImplementation(((
+    // ESM namespace exports are not configurable; the CJS default export is
+    // the object `validatingLookup` calls `dns.lookup` on.
+    const dnsTarget = (dns as unknown as { default: typeof dns }).default ?? dns;
+    const socketSpy = vi.spyOn(dnsTarget, "lookup").mockImplementation(((
       _hostname: string,
       options: unknown,
       cb?: unknown,
@@ -245,13 +300,91 @@ describe("toolWebFetch — SSRF hardening", () => {
       return opts.all ? callback(null, addr) : callback(null, addr[0].address, addr[0].family);
     }) as never);
     try {
-      // Real fetch runs through the SSRF dispatcher — the connect-time
-      // lookup is what must reject, NOT the validation-time verdict.
       const result = await toolWebFetch("user-A", { url: "http://rebinding.example/" });
       expect(result.success).toBe(false);
+      expect(dnsPromisesLookup).toHaveBeenCalled();
       expect(socketSpy).toHaveBeenCalled();
+      expect(vi.mocked(validateOutboundHost)).toHaveBeenCalled();
     } finally {
       socketSpy.mockRestore();
+    }
+  });
+
+  it("uses one 20s deadline for host checks, not a fresh timer per hop", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.mocked(undiciFetch);
+    const originalFetch = fetchMock.getMockImplementation();
+    const hostMock = vi.mocked(validateOutboundHost);
+    const originalHost = hostMock.getMockImplementation();
+    let fetches = 0;
+    fetchMock.mockImplementation(((_url: string, init?: { signal?: AbortSignal }) => {
+      fetches++;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          resolve(new Response("next", {
+            status: 302,
+            headers: { location: "http://1.1.1.1/hop" },
+          }));
+        }, 19_000);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+        });
+      });
+    }) as never);
+    try {
+      let settled = false;
+      const pending = toolWebFetch("user-A", { url: "http://1.1.1.1/start" }).then((result) => {
+        settled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      const result = await Promise.race([
+        pending,
+        Promise.resolve("still-pending" as const),
+      ]);
+      expect(settled).toBe(true);
+      expect(result).not.toBe("still-pending");
+      if (result !== "still-pending") {
+        expect(result.success).toBe(false);
+        expect(result.message).toMatch(/timed out/);
+      }
+      // Hop 1 resolves at 19s. A per-hop timer would still be waiting on hop 2
+      // at t=20s. The shared deadline must already have aborted.
+      expect(fetches).toBe(2);
+    } finally {
+      if (originalFetch) fetchMock.mockImplementation(originalFetch);
+      if (originalHost) hostMock.mockImplementation(originalHost);
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies the same deadline to a host check that never returns", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.mocked(undiciFetch);
+    const hostMock = vi.mocked(validateOutboundHost);
+    const originalFetch = fetchMock.getMockImplementation();
+    const originalHost = hostMock.getMockImplementation();
+    hostMock.mockImplementation(() => new Promise(() => {}));
+    try {
+      const pending = toolWebFetch("user-A", { url: "http://example.com/hang" }).then(
+        (result) => ({ done: true as const, result }),
+      );
+      await vi.advanceTimersByTimeAsync(20_000);
+      const result = await Promise.race([
+        pending,
+        Promise.resolve({ done: false as const }),
+      ]);
+      expect(result.done).toBe(true);
+      if (result.done) {
+        expect(result.result.success).toBe(false);
+        expect(result.result.message).toMatch(/timed out/);
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      if (originalFetch) fetchMock.mockImplementation(originalFetch);
+      if (originalHost) hostMock.mockImplementation(originalHost);
+      vi.useRealTimers();
     }
   });
 });

@@ -255,9 +255,272 @@ describe("Widened secret redaction", () => {
   });
 
   it("does not over-redact ordinary words or non-secret assignments", () => {
-    const input = "TURKEY=bird NODE_ENV=production public_path=/srv/x";
+    const input = [
+      "TURKEY=bird NODE_ENV=production public_path=/srv/x",
+      "keyword=example",
+      "tokenizer=standard",
+      "MONKEY=banana",
+      "KEYWORDS=abcdef",
+      "keyboard=qwerty",
+    ].join(" ");
     const out = redactSecrets(input);
     assert.match(out, /TURKEY=bird/);
     assert.match(out, /NODE_ENV=production/);
+    assert.match(out, /keyword=example/);
+    assert.match(out, /tokenizer=standard/);
+    assert.match(out, /MONKEY=banana/);
+    assert.match(out, /KEYWORDS=abcdef/);
+    assert.match(out, /keyboard=qwerty/);
+    assert.doesNotMatch(out, /\[REDACTED\]/);
+  });
+
+  it("still redacts underscore-delimited secret names", () => {
+    const out = redactSecrets("API_KEY=abcd MY_SECRET=hunter2 TOKEN_VALUE=xyz KEY_NAME=abcdef");
+    assert.doesNotMatch(out, /abcd/);
+    assert.doesNotMatch(out, /hunter2/);
+    assert.doesNotMatch(out, /TOKEN_VALUE=xyz/);
+    assert.doesNotMatch(out, /KEY_NAME=abcdef/);
+  });
+});
+
+// ─── Windows executable suffix must not skip path checks ─────────
+
+describe("Windows command-name normalization before path checks", () => {
+  it("rejects `cat.exe ../outside.secret` the same way as `cat`", async () => {
+    const ws = makeTempDir("ws-exe");
+    const secret = path.join(path.dirname(ws), "outside.secret");
+    fs.writeFileSync(secret, "EXE-MARKER-SECRET");
+    try {
+      const shell = createShellExecutor(ws);
+      for (const command of ["cat.exe", "CAT.EXE", "cat.cmd", "cat.bat"]) {
+        const result = await runCommandSecure(shell, command, ["../outside.secret"], {
+          cwd: ws,
+          workspaceRoot: ws,
+        });
+        assert.equal(result.success, false, command);
+        assert.equal(result.data.code, "PATH_ARG_ESCAPE", command);
+        assert.doesNotMatch(String(result.data.stdout ?? ""), /EXE-MARKER-SECRET/);
+      }
+    } finally {
+      fs.rmSync(secret, { force: true });
+      cleanup(ws);
+    }
+  });
+
+  it("rejects `git.exe -C <outside>`", async () => {
+    const ws = makeTempDir("ws-git-exe");
+    const outside = makeTempDir("outside-git-exe");
+    try {
+      const shell = createShellExecutor(ws);
+      const result = await runCommandSecure(shell, "git.EXE", ["-C", outside, "status"], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.equal(result.success, false);
+      assert.equal(result.data.code, "PATH_ARG_ESCAPE");
+    } finally {
+      cleanup(ws);
+      cleanup(outside);
+    }
+  });
+});
+
+// ─── grep/rg patterns are not paths ───────────────────────────────
+
+describe("Search patterns are not path operands", () => {
+  it("allows `rg /api/ .` and `grep ../ <file>` inside the workspace", async () => {
+    const ws = makeTempDir("ws-search-ok");
+    fs.mkdirSync(path.join(ws, "src"));
+    fs.writeFileSync(path.join(ws, "src", "file.ts"), "route /api/ health\n");
+    try {
+      const shell = createShellExecutor(ws);
+      const rg = await runCommandSecure(shell, "rg", ["/api/", "."], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.notEqual(rg.data.code, "PATH_ARG_ESCAPE");
+
+      const rgExe = await runCommandSecure(shell, "Rg.EXE", ["/api/", "."], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.notEqual(rgExe.data.code, "PATH_ARG_ESCAPE");
+
+      const grep = await runCommandSecure(shell, "grep", ["../", "src/file.ts"], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.notEqual(grep.data.code, "PATH_ARG_ESCAPE");
+
+      const withFlag = await runCommandSecure(shell, "rg", ["-e", "/api/", "."], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.notEqual(withFlag.data.code, "PATH_ARG_ESCAPE");
+    } finally {
+      cleanup(ws);
+    }
+  });
+
+  it("still rejects search paths and pattern-files outside the workspace", async () => {
+    const ws = makeTempDir("ws-search-bad");
+    try {
+      const shell = createShellExecutor(ws);
+      const rooted = await runCommandSecure(shell, "rg", ["secret", "/"], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.equal(rooted.data.code, "PATH_ARG_ESCAPE");
+
+      const grepEscape = await runCommandSecure(shell, "grep", ["../", "../outside.secret"], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.equal(grepEscape.data.code, "PATH_ARG_ESCAPE");
+
+      const patternFile = await runCommandSecure(shell, "rg", ["-f", "/etc/passwd", "."], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.equal(patternFile.data.code, "PATH_ARG_ESCAPE");
+
+      const flaggedPath = await runCommandSecure(shell, "grep", ["-e", "../", "/etc/passwd"], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.equal(flaggedPath.data.code, "PATH_ARG_ESCAPE");
+    } finally {
+      cleanup(ws);
+    }
+  });
+});
+
+// ─── git --output / -o cannot write outside the workspace ─────────
+
+describe("git output flags are path-confined", () => {
+  it("blocks `git diff --output` outside the workspace before spawn", async () => {
+    const ws = makeTempDir("ws-git-out");
+    const outside = path.join(os.tmpdir(), `litt-pwned-${process.pid}.patch`);
+    fs.rmSync(outside, { force: true });
+    try {
+      const shell = createShellExecutor(ws);
+      const cases = [
+        ["diff", `--output=${outside}`],
+        ["diff", "--output", outside],
+        ["log", "-o", outside],
+        ["show", "--output", outside],
+        ["blame", `--output=${outside}`],
+        ["diff", "-o" + outside],
+        ["git.exe", "diff", `--output=${outside}`],
+      ];
+      for (const args of cases) {
+        const command = args[0] === "git.exe" ? "git.exe" : "git";
+        const argv = args[0] === "git.exe" ? args.slice(1) : args;
+        const result = await runCommandSecure(shell, command, argv, {
+          cwd: ws,
+          workspaceRoot: ws,
+          mode: "auto",
+        });
+        assert.equal(result.success, false, argv.join(" "));
+        assert.equal(result.data.code, "PATH_ARG_ESCAPE", argv.join(" "));
+        assert.equal(fs.existsSync(outside), false, argv.join(" "));
+      }
+    } finally {
+      fs.rmSync(outside, { force: true });
+      cleanup(ws);
+    }
+  });
+
+  it("allows `git diff --output` when the file stays inside the workspace", async () => {
+    const ws = makeTempDir("ws-git-out-ok");
+    try {
+      const shell = createShellExecutor(ws);
+      const result = await runCommandSecure(shell, "git", ["diff", "--output=inside.patch"], {
+        cwd: ws,
+        workspaceRoot: ws,
+        mode: "auto",
+      });
+      assert.notEqual(result.data.code, "PATH_ARG_ESCAPE");
+    } finally {
+      cleanup(ws);
+    }
+  });
+
+  it("blocks sort -o and find -fprint outside the workspace", async () => {
+    const ws = makeTempDir("ws-write-flags");
+    const outside = path.join(os.tmpdir(), `litt-sort-${process.pid}.txt`);
+    fs.rmSync(outside, { force: true });
+    try {
+      const shell = createShellExecutor(ws);
+      const sort = await runCommandSecure(shell, "sort", [`-o${outside}`, "readme.txt"], {
+        cwd: ws,
+        workspaceRoot: ws,
+        mode: "auto",
+      });
+      assert.equal(sort.data.code, "PATH_ARG_ESCAPE");
+      assert.equal(fs.existsSync(outside), false);
+
+      const find = await runCommandSecure(shell, "find", [".", "-fprint", outside], {
+        cwd: ws,
+        workspaceRoot: ws,
+        mode: "auto",
+      });
+      assert.equal(find.data.code, "PATH_ARG_ESCAPE");
+      assert.equal(fs.existsSync(outside), false);
+    } finally {
+      fs.rmSync(outside, { force: true });
+      cleanup(ws);
+    }
+  });
+});
+
+// ─── Host env is allowlisted before spawn ─────────────────────────
+
+describe("Child env does not inherit host secrets", () => {
+  it("hides host secrets from printenv while keeping PATH and explicit non-secrets", async () => {
+    const ws = makeTempDir("ws-host-env");
+    const hostSecret = ["host", "only", "marker"].join("-");
+    const unlisted = ["unlisted", "host", "marker"].join("-");
+    const explicit = ["explicit", "provider", "marker"].join("-");
+    const prevService = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
+    const prevUnlisted = process.env.UNLISTED_HOST_SECRET;
+    const prevOpenAi = process.env.OPENAI_API_KEY;
+    process.env.TERMINAL_INTERNAL_SERVICE_KEY = hostSecret;
+    process.env.UNLISTED_HOST_SECRET = unlisted;
+    process.env.OPENAI_API_KEY = ["host", "provider", "should", "not", "leak"].join("-");
+    try {
+      const shell = createShellExecutor(ws);
+      const result = await runCommandSecure(shell, "printenv", [], {
+        cwd: ws,
+        workspaceRoot: ws,
+        env: {
+          LIT_TEST_MARKER: explicit,
+          OPENAI_API_KEY: explicit,
+          TERMINAL_INTERNAL_SERVICE_KEY: "explicit-blocked",
+        },
+      });
+      const out = String(result.data.stdout ?? "");
+      assert.equal(result.success, true);
+      assert.doesNotMatch(out, new RegExp(hostSecret));
+      assert.doesNotMatch(out, /TERMINAL_INTERNAL_SERVICE_KEY/);
+      assert.doesNotMatch(out, new RegExp(unlisted));
+      assert.doesNotMatch(out, /UNLISTED_HOST_SECRET/);
+      assert.doesNotMatch(out, /host-provider-should-not-leak/);
+      // Explicit non-secret keys reach the child. A provider key passed
+      // explicitly is in the child env too, then redacted on the way out,
+      // so the raw value must not be visible.
+      assert.match(out, new RegExp(`LIT_TEST_MARKER=${explicit}`));
+      assert.doesNotMatch(out, new RegExp(`OPENAI_API_KEY=${explicit}`));
+      assert.match(out, /\[REDACTED\]/);
+      assert.match(out, /^PATH=/m);
+    } finally {
+      if (prevService === undefined) delete process.env.TERMINAL_INTERNAL_SERVICE_KEY;
+      else process.env.TERMINAL_INTERNAL_SERVICE_KEY = prevService;
+      if (prevUnlisted === undefined) delete process.env.UNLISTED_HOST_SECRET;
+      else process.env.UNLISTED_HOST_SECRET = prevUnlisted;
+      if (prevOpenAi === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = prevOpenAi;
+      cleanup(ws);
+    }
   });
 });

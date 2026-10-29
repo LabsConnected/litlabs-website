@@ -567,6 +567,38 @@ export const toolWebSearch: ToolHandler = async (_userId, args) => {
 
 const WEB_FETCH_MAX_REDIRECTS = 5;
 const WEB_FETCH_TIMEOUT_MS = 20_000;
+
+function abortedError(): Error {
+  return Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+}
+
+/** Bound a promise by the caller's single deadline. Host checks included. */
+function awaitWithinDeadline<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortedError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortedError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+/** Return a redirect hop's socket to the shared dispatcher before moving on. */
+async function releaseFetchBody(response: { body?: { cancel: () => Promise<void> } | null }): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    /* body already consumed or aborted */
+  }
+}
 // Every socket this dispatcher opens must pass isBlockedIp at connect time —
 // the only addresses a socket can reach are ones the validator returned.
 let webFetchDispatcher: ReturnType<typeof createSsrfDispatcher> | null = null;
@@ -607,8 +639,9 @@ export const toolWebFetch: ToolHandler = async (_userId, args) => {
       }
 
       // Host-level gate: literal-IP table, blocked hostname suffixes, and
-      // DNS resolution with every answer checked. Fails closed.
-      const verdict = await validateOutboundHost(parsed.hostname);
+      // DNS resolution with every answer checked. Fails closed. The same
+      // deadline covers this lookup — it must not run outside the timer.
+      const verdict = await awaitWithinDeadline(validateOutboundHost(parsed.hostname), controller.signal);
       if (!verdict.ok) {
         return fail(`URLs pointing to internal/private addresses are blocked (${verdict.reason}).`);
       }
@@ -627,15 +660,15 @@ export const toolWebFetch: ToolHandler = async (_userId, args) => {
 
       if (r.status >= 300 && r.status < 400) {
         const location = r.headers.get("location");
+        // Release this hop's socket before following OR returning an
+        // error — an unread body leaves the connection busy.
+        await releaseFetchBody(r);
         if (!location) return fail(`web_fetch got a ${r.status} redirect without a Location header.`);
-        // Release this hop's socket before following — an unread body
-        // leaves the connection busy in the shared dispatcher.
         try {
-          await r.body?.cancel();
+          current = new URL(location, current).toString();
         } catch {
-          /* body already consumed/aborted — nothing to release */
+          return fail(`web_fetch got a ${r.status} redirect to an invalid URL.`);
         }
-        current = new URL(location, current).toString();
         continue;
       }
       break;
