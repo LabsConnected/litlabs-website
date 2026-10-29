@@ -3,17 +3,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { isOwnerClerkId } from "@/lib/owner-identity";
 import { jarvis, NotificationPayload } from "@/lib/litt";
-
-// Admin user ID
-const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || "user_litbit";
 
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth(req);
-    
-    // Only admin or server can trigger notifications
-    if (!userId || userId !== ADMIN_USER_ID) {
+
+    // Only the platform owner/admin can trigger notifications
+    if (!isOwnerClerkId(userId)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -56,8 +54,8 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const { userId } = await auth(req);
-    
-    if (!userId || userId !== ADMIN_USER_ID) {
+
+    if (!isOwnerClerkId(userId)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
