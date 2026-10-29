@@ -12,6 +12,24 @@ function makeDoc(marker: string): CanvasDocument {
   return { ...doc, route: marker, updatedAt: Date.now() };
 }
 
+/** A doc with real user content — a root section holding a text child. */
+function makeContentDoc(marker: string): CanvasDocument {
+  const doc = makeDoc(marker);
+  const rootId = doc.rootNodeIds[0];
+  const now = Date.now();
+  doc.nodes[`${rootId}-text`] = {
+    id: `${rootId}-text`,
+    type: "text",
+    parentId: rootId,
+    children: [],
+    props: { text: marker },
+    styles: {},
+    metadata: { createdAt: now, updatedAt: now },
+  };
+  doc.nodes[rootId].children = [`${rootId}-text`];
+  return doc;
+}
+
 function writesTo(fetchMock: ReturnType<typeof vi.fn>) {
   return fetchMock.mock.calls
     .map((c) => ({ url: c[0] as string, init: (c[1] ?? {}) as RequestInit }))
@@ -213,6 +231,39 @@ describe("useCanvasFileSync", () => {
     expect(writes.length).toBe(1);
     expect(writes[0].url).toBe(`/api/studio-projects/${PROJECT_B}/files`);
     expect(writes[0].init.body).not.toContain("project-a-canvas");
+    unmount();
+  });
+
+  it("first-syncs real local work into a workspace with no canvas file (404)", async () => {
+    // Regression (run 40967251750): a missing canvas file must write the
+    // local document — baseline-adopting it left the workspace empty and
+    // the Create→Save journey timed out waiting for a write that never came.
+    fetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+    useCanvasBuilderStore.setState({ document: makeContentDoc("seeded-work") });
+    const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
+    await act(async () => { await vi.runAllTimersAsync(); });
+    const writes = writesTo(fetchMock);
+    expect(writes.length).toBe(1);
+    expect(writes[0].init.body).toContain("seeded-work");
+    unmount();
+  });
+
+  it("does not write an untouched empty doc into an empty workspace", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+    const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
+    await act(async () => { await vi.runAllTimersAsync(); });
+    expect(writesTo(fetchMock).length).toBe(0);
+    unmount();
+  });
+
+  it("does not auto-write when the read fails and the server state is unverified", async () => {
+    // A 5xx read cannot confirm the workspace is empty — auto-writing the
+    // local doc could clobber real saved work. Only explicit edits persist.
+    fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    useCanvasBuilderStore.setState({ document: makeContentDoc("risky-local") });
+    const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
+    await act(async () => { await vi.runAllTimersAsync(); });
+    expect(writesTo(fetchMock).length).toBe(0);
     unmount();
   });
 

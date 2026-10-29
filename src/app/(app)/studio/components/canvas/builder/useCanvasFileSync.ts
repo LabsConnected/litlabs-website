@@ -7,6 +7,13 @@ import type { CanvasDocument } from "./types";
 const CANVAS_FILE = ".litt/canvas.json";
 const DEBOUNCE_MS = 1200;
 
+/** True when the document holds user content — any node with children. */
+function hasCanvasContent(doc: CanvasDocument): boolean {
+  return Object.values(doc.nodes ?? {}).some(
+    (node) => (node?.children?.length ?? 0) > 0,
+  );
+}
+
 /**
  * File-backed persistence for VisualCanvas.
  * Mirrors htmlProjectSyncPolicy pattern: server-wins on load, debounced writes.
@@ -17,6 +24,16 @@ const DEBOUNCE_MS = 1200;
  * are gated on it, so a debounced write can never fire for a project whose
  * canvas hasn't finished loading, and switching projects re-loads instead of
  * carrying the previous project's document forward.
+ *
+ * Read outcomes (same contract as htmlProjectSyncPolicy.fetchServerFile):
+ * - valid canvas        → server-wins: adopted unconditionally.
+ * - missing file        → 404 or a 2xx without content = confirmed-empty: real
+ *                         local work is first-synced into the workspace; an
+ *                         untouched empty doc is baseline-adopted instead so
+ *                         it is never persisted as a blank canvas.
+ * - anything else       → 5xx/401/403/network/malformed = unverified server
+ *                         state: the local doc is baseline-adopted and never
+ *                         auto-written over content we could not inspect.
  */
 export function useCanvasFileSync(projectId: string | null) {
   const document = useCanvasBuilderStore((s) => s.document);
@@ -28,74 +45,6 @@ export function useCanvasFileSync(projectId: string | null) {
   const timerRef = useRef<number | null>(null);
   const lastSavedRef = useRef<string>("");
   const lastAttemptedRef = useRef<string>("");
-
-  // Load from file on project change (server-wins)
-  useEffect(() => {
-    if (!projectId) return;
-    if (loadedForRef.current === projectId) return;
-    let cancelled = false;
-
-    // A project switch abandons any pending write and resets the baseline so
-    // the incoming project can never inherit the previous project's markers.
-    if (timerRef.current) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    lastSavedRef.current = "";
-    lastAttemptedRef.current = "";
-
-    (async () => {
-      try {
-        const resp = await fetch(`/api/studio-projects/${projectId}/files`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "read", path: CANVAS_FILE }),
-        });
-        if (cancelled) return;
-
-        let adopted = false;
-        if (resp.ok) {
-          const data = (await resp.json()) as { content?: string };
-          if (data.content) {
-            try {
-              const parsed = JSON.parse(data.content) as CanvasDocument;
-              // Server-wins unconditionally: a valid saved canvas replaces
-              // the local document. A fresh (empty/newer-timestamped) local
-              // doc must never beat real saved work.
-              if (parsed.nodes && parsed.rootNodeIds) {
-                setDocument(parsed);
-                setSaveState("saved");
-                lastSavedRef.current = data.content;
-                adopted = true;
-              }
-            } catch {
-              // Malformed canvas file — keep the local document.
-            }
-          }
-        }
-        if (!adopted && !cancelled) {
-          // No usable canvas on the server. Adopt the current local
-          // document as the baseline so the first load does not trigger a
-          // write, but subsequent edits still save.
-          lastSavedRef.current = JSON.stringify(
-            useCanvasBuilderStore.getState().document,
-          );
-        }
-      } catch {
-        if (!cancelled) {
-          lastSavedRef.current = JSON.stringify(
-            useCanvasBuilderStore.getState().document,
-          );
-        }
-      } finally {
-        if (!cancelled) loadedForRef.current = projectId;
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, setDocument, setSaveState]);
 
   const saveToFile = useCallback(
     async (doc: CanvasDocument) => {
@@ -128,6 +77,95 @@ export function useCanvasFileSync(projectId: string | null) {
     },
     [projectId, setSaveState],
   );
+
+  // Load from file on project change (server-wins)
+  useEffect(() => {
+    if (!projectId) return;
+    if (loadedForRef.current === projectId) return;
+    let cancelled = false;
+
+    // A project switch abandons any pending write and resets the baseline so
+    // the incoming project can never inherit the previous project's markers.
+    if (timerRef.current) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    lastSavedRef.current = "";
+    lastAttemptedRef.current = "";
+
+    (async () => {
+      let settled: "adopted" | "empty" | "unknown";
+      try {
+        const resp = await fetch(`/api/studio-projects/${projectId}/files`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "read", path: CANVAS_FILE }),
+        });
+        if (cancelled) return;
+
+        if (resp.status === 404) {
+          settled = "empty";
+        } else if (!resp.ok) {
+          settled = "unknown";
+        } else {
+          const data = (await resp.json()) as { content?: unknown };
+          if (cancelled) return;
+          const content = data.content;
+          if (content == null || content === "") {
+            settled = "empty";
+          } else if (typeof content !== "string") {
+            // Response contract violation — cannot verify server state.
+            settled = "unknown";
+          } else {
+            try {
+              const parsed = JSON.parse(content) as CanvasDocument;
+              // Server-wins unconditionally: a valid saved canvas replaces
+              // the local document. A fresh (empty/newer-timestamped) local
+              // doc must never beat real saved work.
+              if (parsed.nodes && parsed.rootNodeIds) {
+                setDocument(parsed);
+                setSaveState("saved");
+                lastSavedRef.current = content;
+                settled = "adopted";
+              } else {
+                settled = "unknown";
+              }
+            } catch {
+              // Malformed canvas file — unverified content, not "empty".
+              settled = "unknown";
+            }
+          }
+        }
+      } catch {
+        settled = "unknown";
+      }
+
+      if (cancelled) return;
+      if (settled === "empty") {
+        // The server confirmed it holds no canvas. Local work is real user
+        // content (project-less building, restored session) — first-sync it
+        // into the workspace now that the read has settled.
+        const local = useCanvasBuilderStore.getState().document;
+        if (hasCanvasContent(local)) {
+          loadedForRef.current = projectId;
+          void saveToFile(local);
+        } else {
+          lastSavedRef.current = JSON.stringify(local);
+        }
+      } else if (settled === "unknown") {
+        // Server state could not be verified — never auto-write over it.
+        // Baseline-adopt the local doc so only explicit edits persist.
+        lastSavedRef.current = JSON.stringify(
+          useCanvasBuilderStore.getState().document,
+        );
+      }
+      loadedForRef.current = projectId;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, setDocument, setSaveState, saveToFile]);
 
   // Debounced auto-save on document changes
   useEffect(() => {

@@ -19,6 +19,20 @@ import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/ter
 const TERMINAL_BASE = () => requireTerminalBaseUrl();
 
 /**
+ * True when the terminal-server 404 means the WORKSPACE itself is gone —
+ * only that justifies re-provisioning. A file-level miss ("File not found",
+ * "Path not found", ENOENT) is a routine not-found and must pass through
+ * untouched (see htmlProjectSyncPolicy: 404 = missing file, not an error).
+ */
+async function isWorkspaceMissingResponse(resp: Response): Promise<boolean> {
+  const body = (await resp
+    .clone()
+    .json()
+    .catch(() => null)) as { error?: string } | null;
+  return body?.error === "Workspace not found";
+}
+
+/**
  * GET /api/studio-projects/[projectId]/files?path=...
  * List directory contents in the project workspace.
  * Auto-recovers if the terminal server lost the workspace.
@@ -81,7 +95,8 @@ export async function GET(
 
     // Stale workspace recovery: if the terminal server says the workspace
     // doesn't exist (even though DB says ready), re-provision and retry once.
-    if (resp.status === 404) {
+    // A file-level 404 is not a workspace failure — skip recovery for it.
+    if (resp.status === 404 && (await isWorkspaceMissingResponse(resp))) {
       try {
         const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
         if (recovered.reprepared) {
@@ -199,8 +214,9 @@ export async function POST(
       body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content, encoding: body.encoding }),
     });
 
-    // Stale workspace recovery for POST operations
-    if (resp.status === 404) {
+    // Stale workspace recovery for POST operations — workspace-level 404
+    // only; a missing file is a normal not-found result, not a lost workspace.
+    if (resp.status === 404 && (await isWorkspaceMissingResponse(resp))) {
       try {
         const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
         if (recovered.reprepared) {

@@ -1361,6 +1361,26 @@ function fileErrorStatus(msg: string): number {
   return 500;
 }
 
+/**
+ * Build the {status,error} a file endpoint returns for `err`.
+ * ENOENT is a routine missing-file/directory — 404 with a clean message,
+ * never a 500 and never the raw stat path.
+ */
+function fileErrorResponse(
+  err: unknown,
+  fallback: string,
+  notFound = "File not found",
+): { status: number; error: string } {
+  const msg = err instanceof Error ? err.message : fallback;
+  if (
+    (err as { code?: string } | null)?.code === "ENOENT" ||
+    msg.startsWith("ENOENT")
+  ) {
+    return { status: 404, error: notFound };
+  }
+  return { status: fileErrorStatus(msg), error: msg };
+}
+
 function requireTerminalAuth(
   req: AuthenticatedRequest,
   res: Response,
@@ -1389,8 +1409,8 @@ app.get("/files", (req: AuthenticatedRequest, res) => {
     }));
     res.json({ entries });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to list files";
-    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to list files", "Path not found");
+    res.status(status).json({ error });
   }
 });
 
@@ -1411,8 +1431,8 @@ app.post("/files/read", (req: AuthenticatedRequest, res) => {
     const content = readFileSync(target, "utf-8");
     res.json({ content });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to read file";
-    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to read file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1431,8 +1451,8 @@ app.post("/files/write", (req: AuthenticatedRequest, res) => {
     writeFileSync(target, content, "utf-8");
     res.json({ saved: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to write file";
-    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to write file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1447,8 +1467,8 @@ app.post("/files/delete", (req: AuthenticatedRequest, res) => {
     deleteResolvedPath(target);
     res.json({ deleted: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to delete file";
-    res.status(fileErrorStatus(msg)).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to delete file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1515,8 +1535,8 @@ app.get("/ws-files", (req: AuthenticatedRequest, res) => {
       }));
     res.json({ entries, workspaceId: req.workspaceId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to list files";
-    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to list files", "Path not found");
+    res.status(status).json({ error });
   }
 });
 
@@ -1542,9 +1562,8 @@ app.post("/ws-files/read", (req: AuthenticatedRequest, res) => {
     // masquerades as base64 and corrupts anything that stores it as text.
     res.json({ content, size: stats.size, encoding, workspaceId: req.workspaceId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to read file";
-    const status = fileErrorStatus(msg);
-    res.status(status).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to read file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1605,9 +1624,8 @@ app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
       ...(scaffold?.acted ? { scaffold } : {}),
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to write file";
-    const status = fileErrorStatus(msg);
-    res.status(status).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to write file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1621,9 +1639,8 @@ app.post("/ws-files/delete", (req: AuthenticatedRequest, res) => {
     deleteResolvedPath(target);
     res.json({ deleted: true, workspaceId: req.workspaceId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to delete file";
-    const status = fileErrorStatus(msg);
-    res.status(status).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to delete file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1638,9 +1655,8 @@ app.post("/ws-files/mkdir", (req: AuthenticatedRequest, res) => {
     mkdirSync(target, { recursive: false });
     res.json({ created: true, workspaceId: req.workspaceId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to create folder";
-    const status = fileErrorStatus(msg);
-    res.status(status).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to create folder");
+    res.status(status).json({ error });
   }
 });
 
@@ -1658,9 +1674,8 @@ app.post("/ws-files/rename", (req: AuthenticatedRequest, res) => {
     renameSync(source, target);
     res.json({ renamed: true, workspaceId: req.workspaceId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to rename path";
-    const status = fileErrorStatus(msg);
-    res.status(status).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to rename path");
+    res.status(status).json({ error });
   }
 });
 
