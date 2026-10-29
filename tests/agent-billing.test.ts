@@ -460,3 +460,111 @@ describe("settleRun — canonical settle_bits/release_bits flow", () => {
     expect(mockFrom).toHaveBeenCalledWith("agent_runs");
   });
 });
+
+describe("PostgREST row-shape — RETURNS TABLE arrives as an array", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reserveCredits reads success + reservation_id from array-shaped rpc data", async () => {
+    mockUserFound();
+    // Real PostgREST wire shape: RETURNS TABLE -> Row[]
+    mockRpc.mockResolvedValue({
+      data: [{ success: true, reservation_id: "res-arr-1", available_after: 90, reason: "reserved" }],
+      error: null,
+    });
+
+    const result = await reserveCredits(baseCtx, 10);
+    expect(result.ok).toBe(true);
+    expect(result.reservationId).toBe("res-arr-1");
+    expect(result.runId).toBe("new-run-id");
+  });
+
+  it("reserveCredits honors already_reserved from array-shaped rpc data", async () => {
+    mockUserFound();
+    mockRpc.mockResolvedValue({
+      data: [{ success: false, reservation_id: "res-arr-2", reason: "already_reserved" }],
+      error: null,
+    });
+
+    const result = await reserveCredits(baseCtx, 10);
+    expect(result.ok).toBe(true);
+    expect(result.reservationId).toBe("res-arr-2");
+  });
+
+  it("reserveCredits passes a TTL covering the 30-minute loop cap", async () => {
+    mockUserFound();
+    mockRpc.mockResolvedValue({
+      data: [{ success: true, reservation_id: "res-ttl", available_after: 90, reason: "reserved" }],
+      error: null,
+    });
+
+    await reserveCredits(baseCtx, 10);
+    expect(mockRpc).toHaveBeenCalledWith("reserve_bits", expect.objectContaining({
+      p_expires_seconds: 3600,
+    }));
+  });
+
+  it("settleRun reads settled/released amounts from array-shaped rpc data", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: [{ success: true, settled_amount: 5, released_amount: 5, available_after: 95, reason: "settled" }],
+      error: null,
+    });
+
+    const result = await settleRun("run-1", {
+      inputTokens: 200,
+      outputTokens: 100,
+      actualCredits: 5,
+      status: "completed",
+    }, 10, "res-uuid-123");
+
+    expect(result.creditsCharged).toBe(5);
+    expect(result.creditsRefunded).toBe(5);
+  });
+
+  it("settle passes the bare runId so the ledger key is runId:settle", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: [{ success: true, settled_amount: 5, released_amount: 5, reason: "settled" }],
+      error: null,
+    });
+
+    await settleRun("run-1", {
+      inputTokens: 200,
+      outputTokens: 100,
+      actualCredits: 5,
+      status: "completed",
+    }, 10, "res-uuid-123");
+
+    // settle_bits appends ':settle' to this key — the ledger row must land
+    // at `runId:settle`, which is what emitSettleMetering stamps.
+    expect(mockRpc).toHaveBeenCalledWith("settle_bits", expect.objectContaining({
+      p_idempotency_key: "run-1",
+    }));
+  });
+
+  it("a missing success flag in array data fails closed as settle_rejected", async () => {
+    mockSettleChains();
+    const insertSpy = vi.fn().mockReturnValue({});
+    mockFrom.mockImplementation((table: string) => {
+      if (table === "billing_reconciliations") return { insert: insertSpy };
+      return {
+        update: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) }),
+        select: vi.fn(),
+        insert: vi.fn(),
+      };
+    });
+    mockRpc.mockResolvedValue({ data: [{ reason: "reservation_expired" }], error: null });
+
+    const result = await settleRun("run-1", {
+      inputTokens: 10,
+      outputTokens: 10,
+      actualCredits: 5,
+      status: "completed",
+    }, 10, "res-uuid-123");
+
+    expect(result.creditsCharged).toBe(0);
+    expect(insertSpy).toHaveBeenCalled();
+  });
+});
