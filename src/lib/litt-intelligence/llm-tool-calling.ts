@@ -657,6 +657,25 @@ async function attemptGemini(
   };
   if (functionDeclarations.length > 0) {
     body.tools = [{ functionDeclarations }];
+    // Honor the caller's tool-choice contract. The OpenAI-compatible
+    // adapter already sends tool_choice; the Gemini equivalent is
+    // toolConfig.functionCallingConfig.mode. Without it a "required"
+    // first step silently degrades to AUTO and the model can close the
+    // turn in prose — observed 2026-10-29 on gemini-2.5-flash, where
+    // execution-required runs opened with a text-only QUALITY-marker
+    // reply and zero tool calls (the silent first-turn no-op).
+    if (req.toolChoice) {
+      body.toolConfig = {
+        functionCallingConfig: {
+          mode:
+            req.toolChoice === "required"
+              ? "ANY"
+              : req.toolChoice === "none"
+                ? "NONE"
+                : "AUTO",
+        },
+      };
+    }
   }
 
   // Test seam: when a model factory override is injected, calls route through
@@ -666,6 +685,7 @@ async function attemptGemini(
     ? createGeminiModel({
         model,
         tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
+        toolConfig: body.toolConfig,
         generationConfig: body.generationConfig,
       })
     : null;

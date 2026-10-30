@@ -891,6 +891,149 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
   });
 });
 
+describe("runAgentLoopV2 — required first tool call (immediate execution)", () => {
+  // Release-blocker regression (2026-10-29): an execution-required Studio
+  // build opened with a text-only QUALITY-marker reply and toolCalls:[] —
+  // the Gemini adapter never received the "required" tool choice, and the
+  // loop accepted the stage declaration as the final answer. The run must
+  // hold "required" until a tool call is actually emitted, and a
+  // text-only reply before the first call can never resolve "final".
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  const execCfg = {
+    model: "gemini-2.5-flash",
+    systemPrompt: "You are LiTT.",
+    executionMode: "auto" as const,
+    enableBuildFix: false,
+    requireToolCallOnFirstStep: true,
+  };
+
+  function callToolChoice(index: number): string | undefined {
+    const opts = vi.mocked(callLLMWithTools).mock.calls[index]?.[3] as
+      | { toolChoice?: string }
+      | undefined;
+    return opts?.toolChoice;
+  }
+
+  it("resolveZeroToolCalls: pending required call nudges then fails — never 'final'", () => {
+    expect(
+      resolveZeroToolCalls("QUALITY: understand — captured the brief.", 0, {
+        requiredToolCallPending: true,
+      }).action,
+    ).toBe("nudge");
+    expect(
+      resolveZeroToolCalls("Done — the site is complete.", 1, {
+        requiredToolCallPending: true,
+      }).action,
+    ).toBe("nudge");
+    const exhausted = resolveZeroToolCalls("Done.", 2, { requiredToolCallPending: true });
+    expect(exhausted.action).toBe("fail");
+    // Without the flag the same plain prose stays a final answer.
+    expect(resolveZeroToolCalls("Done.", 0).action).toBe("final");
+    expect(resolveZeroToolCalls("QUALITY: understand — noted.", 0).action).toBe("final");
+  });
+
+  it("a text-only QUALITY-marker first reply is nudged back to execution, then a real write lands", async () => {
+    const writeFile = vi.fn().mockResolvedValue(undefined);
+    const transport = {
+      ...fakeTransport,
+      writeFile,
+      readFile: vi.fn(async () => ({ content: "<html>Built.</html>", size: 18 })),
+      createCheckpointBeforeMutation: vi.fn().mockResolvedValue(null),
+    } as unknown as WorkspaceTransport;
+
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "QUALITY: understand — a landing page for the coffee brand.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "gemini-2.5-flash",
+      })
+      .mockResolvedValueOnce({
+        text: "QUALITY: build — writing index.html",
+        toolCalls: [{
+          toolCallId: "tc-exec-1",
+          toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "<html>Built.</html>" },
+        }],
+        finishReason: "tool_calls",
+        model: "gemini-2.5-flash",
+      })
+      .mockResolvedValueOnce({
+        text: "Built the landing page.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "gemini-2.5-flash",
+      });
+
+    const result = await runAgentLoopV2("build my coffee landing page", transport, execCfg);
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    // "required" is held until a tool call is actually emitted, then "auto".
+    expect(callToolChoice(0)).toBe("required");
+    expect(callToolChoice(1)).toBe("required");
+    expect(callToolChoice(2)).toBe("auto");
+
+    // The text-only reply produced a nudge, not a final answer.
+    const secondCallMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      secondCallMessages.some((m) => m.role === "user" && m.content.includes("emit the tool calls")),
+    ).toBe(true);
+
+    // One explicit build prompt → one real file write.
+    expect(writeFile).toHaveBeenCalledWith("index.html", "<html>Built.</html>");
+    expect(result.toolCalls.some((t) => t.toolId === "files.write" && t.success)).toBe(true);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.finalText).toBe("Built the landing page.");
+  });
+
+  it("fails honestly — never 'final' — when the model never emits a tool call", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "QUALITY: understand — planning the site structure.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "gemini-2.5-flash",
+    });
+
+    const result = await runAgentLoopV2("build my landing page", fakeTransport, {
+      ...execCfg,
+      maxSteps: 10,
+    });
+
+    // 1 initial + 2 bounded nudges, then an honest failure.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    for (let i = 0; i < 3; i++) expect(callToolChoice(i)).toBe("required");
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toContain("no files were changed");
+    expect(result.finalText).toBe(result.failedHonestly);
+  });
+
+  it("still accepts plain prose as final when the flag is off", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done — the site is complete.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2("build a tiny landing page", fakeTransport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "act",
+      enableBuildFix: false,
+    });
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
+    expect(callToolChoice(0)).toBe("auto");
+    expect(result.finalText).toBe("Done — the site is complete.");
+  });
+});
+
 describe("runAgentLoopV2 — persistEvent hook (item 5a)", () => {
   beforeEach(() => {
     vi.mocked(callLLMWithTools).mockReset();

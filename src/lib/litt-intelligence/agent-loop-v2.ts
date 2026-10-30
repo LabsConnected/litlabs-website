@@ -586,8 +586,20 @@ type ZeroCallResolution =
  * approval (or claims work is happening) without emitting the tool call
  * gets a targeted nudge to emit the call; on exhaustion the run fails
  * honestly — no approval card was ever created, so completing would lie.
+ *
+ * `requiredToolCallPending` marks an execution-required run that has not
+ * emitted a single tool call yet (requireToolCallOnFirstStep, unsatisfied).
+ * A text-only reply there can NEVER be the final answer — nothing was
+ * executed — so the reply is always a bounded nudge, then an honest
+ * failure. This is the loop-level backstop for providers that ignore
+ * tool_choice/"required" (e.g. a first-turn text-only QUALITY-marker
+ * reply with toolCalls:[] on gemini-2.5-flash).
  */
-export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCallResolution {
+export function resolveZeroToolCalls(
+  text: string,
+  nudgesUsed: number,
+  opts?: { requiredToolCallPending?: boolean },
+): ZeroCallResolution {
   // The prose approval-ask is the most specific signal and is checked
   // first: the model wants to perform a gated mutation but never emitted
   // the tool call, so no approval card exists.
@@ -605,6 +617,22 @@ export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCall
       failureMessage:
         "I couldn't apply the requested file change: I asked for approval in words instead of emitting the file tool call, " +
         "so no approval card was created and no files were changed. Nothing was modified — please try again.",
+    };
+  }
+  if (opts?.requiredToolCallPending) {
+    if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
+      return {
+        action: "nudge",
+        nudgeMessage:
+          "This request requires tool execution, but your reply contained no tool calls, so nothing was done. " +
+          "Do not answer in prose — emit the tool calls for the first build step now (e.g. `files.write` to create or modify project files).",
+      };
+    }
+    return {
+      action: "fail",
+      failureMessage:
+        "I couldn't start the requested work: the model replied in prose instead of emitting the required tool calls, " +
+        "so no files were changed and nothing was executed. Your project is preserved — please try again.",
     };
   }
   if (!announcesMoreWork(text)) return { action: "final" };
@@ -1480,6 +1508,12 @@ async function runAgentLoopV2Inner(
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
+  // True once the model has emitted at least one tool call this run. An
+  // execution-required run (requireToolCallOnFirstStep) holds the
+  // "required" tool choice until this flips — a provider that drops the
+  // constraint after step 1 must not get a second free prose turn, and a
+  // text-only reply before any call can never be a final answer.
+  let emittedToolCalls = false;
 
   // Early bounded capability guard (BUILD runs only, via
   // cfg.buildCapabilityGuard): consecutive steps where the model emitted
@@ -1526,7 +1560,7 @@ async function runAgentLoopV2Inner(
           model: requestedModel,
           temperature: 0.15,
           maxTokens: 4096,
-          toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
+          toolChoice: cfg.requireToolCallOnFirstStep && !emittedToolCalls ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -1633,7 +1667,9 @@ async function runAgentLoopV2Inner(
         continue;
       }
       const zeroCallText = llmResponse.text ?? "";
-      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges);
+      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
+        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+      });
       if (resolution.action === "nudge") {
         continuationNudges++;
         localProgress.emit({
@@ -1681,6 +1717,10 @@ async function runAgentLoopV2Inner(
       }
       break;
     }
+
+    // The model emitted tool calls — the required-first-call contract is
+    // satisfied and later steps run under "auto" tool choice.
+    emittedToolCalls = true;
 
     // Emit a reasoning summary for tool-calling steps (what LiTT is about to do)
     if (llmResponse.text) {
@@ -2939,6 +2979,10 @@ async function resumeAgentLoopV2Inner(
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
+  // A paused run exists BECAUSE the model emitted an approval-gated tool
+  // call — the required-first-call contract was satisfied pre-pause, so
+  // the resumed loop runs under "auto" tool choice throughout.
+  const emittedToolCalls = true;
 
   // Execute the approved/rejected tool FIRST, then continue the loop
   localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
@@ -3194,7 +3238,7 @@ async function resumeAgentLoopV2Inner(
           model: cfg.model,
           temperature: 0.15,
           maxTokens: 4096,
-          toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
+          toolChoice: cfg.requireToolCallOnFirstStep && !emittedToolCalls ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -3277,7 +3321,9 @@ async function resumeAgentLoopV2Inner(
         continue;
       }
       const zeroCallText = llmResponse.text ?? "";
-      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges);
+      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
+        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+      });
       if (resolution.action === "nudge") {
         continuationNudges++;
         localProgress.emit({
