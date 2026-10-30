@@ -14,7 +14,7 @@
 
 import "server-only";
 
-import { placeholderViolation } from "./patch-validation";
+import { placeholderViolation, tailwindViolation } from "./patch-validation";
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
 import type { WorkspaceTransport } from "./workspace-transport";
 
@@ -85,6 +85,12 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   // the filesystem, no matter which entry point invoked the handler.
   const badField = placeholderViolation(path, "path") ?? placeholderViolation(content, "content");
   if (badField) return { success: false, error: badField };
+  // Enforcement floor: the Tailwind v4 browser-build traps (any @import
+  // without tailwindcss, or a v3 config object inside @theme) compile ZERO
+  // utilities and leave the page silently unstyled — refuse them here too
+  // so a resumed approval can't bypass the loop's pre-approval validation.
+  const badTailwind = tailwindViolation(content, path);
+  if (badTailwind) return { success: false, error: badTailwind };
 
   try {
     await transport.writeFile(path, content);
@@ -247,7 +253,7 @@ export const handleTerminalExecute: ToolHandler = async (inputs, transport) => {
   // Enforcement floor: a shell command can write files too (heredoc,
   // `cat >`, `tee`), so placeholder tokens are rejected here as well —
   // the files.write guard alone does not close that bypass.
-  const badCommand = placeholderViolation(command, "command");
+  const badCommand = placeholderViolation(command, "command") ?? tailwindViolation(command, "the command");
   if (badCommand) return { success: false, error: badCommand };
 
   try {
@@ -425,7 +431,8 @@ export const handleApplyPatch: ToolHandler = async (inputs, transport) => {
     const p = rawPatches[i];
     const bad =
       placeholderViolation(p?.search, `patch ${i + 1} search`) ??
-      placeholderViolation(p?.replace, `patch ${i + 1} replace`);
+      placeholderViolation(p?.replace, `patch ${i + 1} replace`) ??
+      tailwindViolation(p?.replace, path);
     if (bad) return { success: false, error: bad };
   }
 

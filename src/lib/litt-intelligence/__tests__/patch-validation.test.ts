@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
 import type { WorkspaceTransport } from "../workspace-transport";
-import { buildPatchRecoveryMessage, findTailwindImportTrap, validateApplyPatchInputs, validateFilesWriteInputs } from "../patch-validation";
+import { buildPatchRecoveryMessage, findTailwindImportTrap, findTailwindThemeV3Config, validateApplyPatchInputs, validateFilesWriteInputs } from "../patch-validation";
 import { normalizeWorkspaceRelativePath } from "../workspace-path";
 
 /**
@@ -334,6 +334,76 @@ describe("mutation handlers — enforcement floor", () => {
     expect(res.error).toContain("[PERSON_NAME]");
     expect(t.exec).not.toHaveBeenCalled();
   });
+
+  // Tailwind v4 browser-build floor: the loop's pre-approval gate is not
+  // the only mutation path — /api/litt/tools/execute and resumed approvals
+  // reach these handlers directly. A v3 @theme or a bare @import compiles
+  // ZERO utilities (silently unstyled page), so the handlers must refuse.
+  it("files.write rejects a v3 config object inside @theme", async () => {
+    const { handleFilesWrite } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleFilesWrite(
+      {
+        path: "index.html",
+        content: `<style type="text/tailwindcss">@theme { colors: { primary: '#a8ff2f' } }</style>`,
+      },
+      t,
+    );
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("@theme");
+    expect(res.error).toContain("--color-primary");
+    expect(t.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("files.write rejects a fonts @import without tailwindcss", async () => {
+    const { handleFilesWrite } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleFilesWrite(
+      {
+        path: "index.html",
+        content: `<style type="text/tailwindcss">@import url("https://fonts.googleapis.com/css2?family=Inter");</style>`,
+      },
+      t,
+    );
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("tailwindcss");
+    expect(t.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("apply_patch rejects a v3 theme introduced in replace without touching the transport", async () => {
+    const { handleApplyPatch } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleApplyPatch(
+      {
+        path: "index.html",
+        patches: [
+          {
+            search: "<head>",
+            replace: `<head><style type="text/tailwindcss">@theme { extend: { colors: { primary: '#a8ff2f' } } }</style>`,
+          },
+        ],
+      },
+      t,
+    );
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("@theme");
+    expect(t.applyPatch).not.toHaveBeenCalled();
+  });
+
+  it("terminal.execute rejects a heredoc write carrying the v3 theme trap", async () => {
+    const { handleTerminalExecute } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleTerminalExecute(
+      {
+        command:
+          "cat > index.html <<'EOF'\n<style type=\"text/tailwindcss\">\n@theme { colors: { primary: '#a8ff2f' } }\n</style>\nEOF",
+      },
+      t,
+    );
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("@theme");
+    expect(t.exec).not.toHaveBeenCalled();
+  });
 });
 
 describe("findTailwindImportTrap — Tailwind v4 browser @import trap (P0)", () => {
@@ -420,5 +490,86 @@ describe("findTailwindImportTrap — Tailwind v4 browser @import trap (P0)", () 
       fakeTransport("<html><head></head></html>"),
     );
     expect(err).toBeNull();
+  });
+});
+
+describe("findTailwindThemeV3Config — v3 config object inside @theme (P0)", () => {
+  // Exact pattern observed in production: the model emitted a v3-style
+  // theme object inside @theme — the v4 browser compiler throws
+  // CssSyntaxError and compiles ZERO utilities (fully unstyled page).
+  const V3_THEME = `<style type="text/tailwindcss">
+@theme {
+    colors: {
+        primary: '#a8ff2f',
+        dark: '#03050a',
+    };
+    extend: {
+        fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+        },
+    }
+}
+.glass { backdrop-filter: blur(12px); }
+</style>`;
+
+  const V4_THEME = `<style type="text/tailwindcss">
+@theme {
+    --color-primary: #a8ff2f;
+    --color-dark: #03050a;
+    --font-sans: "Inter", sans-serif;
+}
+.glass { backdrop-filter: blur(12px); }
+</style>`;
+
+  const V4_THEME_KEYFRAMES = `<style type="text/tailwindcss">
+@theme {
+    --animate-pulse-slow: pulse-slow 3s infinite;
+    @keyframes pulse-slow {
+        to { opacity: 0.5; }
+    }
+}
+</style>`;
+
+  it("flags a v3 config object inside @theme", () => {
+    const offender = findTailwindThemeV3Config(V3_THEME);
+    expect(offender).not.toBeNull();
+    expect(offender).toContain("colors");
+  });
+
+  it("accepts valid v4 @theme custom properties", () => {
+    expect(findTailwindThemeV3Config(V4_THEME)).toBeNull();
+  });
+
+  it("does not false-positive on nested @keyframes inside @theme", () => {
+    expect(findTailwindThemeV3Config(V4_THEME_KEYFRAMES)).toBeNull();
+  });
+
+  it("flags v3 quoted-literal properties at the block's top level", () => {
+    const inline = `<style type="text/tailwindcss">@theme { primary: '#a8ff2f', }</style>`;
+    expect(findTailwindThemeV3Config(inline)).not.toBeNull();
+  });
+
+  it("ignores @theme in plain <style> blocks", () => {
+    const plain = `<style>@theme { colors: { primary: '#f00' } }</style>`;
+    expect(findTailwindThemeV3Config(plain)).toBeNull();
+  });
+
+  it("rejects a files.write containing the v3 theme trap with a remediation message", () => {
+    const err = validateFilesWriteInputs({ path: "index.html", content: V3_THEME });
+    expect(err).toContain("rejected");
+    expect(err).toContain("--color-primary");
+    expect(err).toContain("ZERO utilities");
+  });
+
+  it("rejects an apply_patch whose replace introduces the v3 theme trap", async () => {
+    const err = await validateApplyPatchInputs(
+      {
+        path: "index.html",
+        patches: [{ search: "<head>", replace: `<head>${V3_THEME}` }],
+      },
+      fakeTransport("<html><head></head></html>"),
+    );
+    expect(err).toContain("rejected");
+    expect(err).toContain("@theme");
   });
 });

@@ -112,6 +112,120 @@ export function tailwindImportTrapMessage(trap: string, path: string): string {
 }
 
 /**
+ * The Tailwind v3-theme-in-v4 trap (companion to the @import trap).
+ *
+ * @theme in the v4 browser build takes CSS custom properties
+ * (`--color-primary: #a8ff2f;`), NOT the v3 config object
+ * (`colors: { primary: '#a8ff2f' }, extend: { fontFamily: … }`). A block
+ * containing v3-style keys throws CssSyntaxError ("Invalid declaration")
+ * in the browser compiler and produces ZERO utilities — the same
+ * fully-unstyled page as the @import trap. Production evidence: the
+ * 2026-10-30 Grand Haven Roofing preview run.
+ *
+ * Detection: v3 config keys followed by `{`/`[` (object/array literal), or
+ * a quoted/array value line whose key does not start with `--` (v3 writes
+ * `primary: '#a8ff2f'` / `sans: ['Inter', 'sans-serif']`; v4 keys are all
+ * `--*` custom properties). @-rules (@media, @keyframes) are ignored —
+ * their lines never match the key shape.
+ */
+
+/** v3 theme/config keys that are invalid inside @theme when they open an
+    object or array literal. */
+const TAILWIND_V3_THEME_KEY_RE =
+  /(?:^|[\s{,])(colors|extend|fontFamily|fontWeight|fontSize|lineHeight|letterSpacing|screens|spacing|borderRadius|borderWidth|boxShadow|keyframes|animation|backgroundImage|backgroundSize|gridTemplateColumns|gridTemplateRows|zIndex|transitionDuration|transitionTimingFunction|container|flexGrow|flexShrink|maxWidth|minWidth|maxHeight|minHeight)\s*:\s*[{[]/i;
+
+/** v3-style property line: `key: 'value'` or `key: [...]` inside @theme
+    where v4 only allows `--*` keys and @-rules. */
+const TAILWIND_V3_THEME_PROP_RE = /^\s*[a-zA-Z][\w-]*\s*:\s*['"[]/m;
+
+/**
+ * Extract @theme blocks' inner text with brace matching, so nested rules
+ * (@media, @keyframes) stay intact for depth-aware scanning.
+ */
+function themeBlocks(content: string): string[] {
+  const blocks: string[] = [];
+  const re = /@theme\b[^{]*\{/g;
+  re.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    let depth = 1;
+    let i = m.index + m[0].length;
+    const start = i;
+    for (; i < content.length && depth > 0; i++) {
+      if (content[i] === "{") depth++;
+      else if (content[i] === "}") depth--;
+    }
+    blocks.push(content.slice(start, i - 1));
+    re.lastIndex = i;
+  }
+  return blocks;
+}
+
+/**
+ * Returns the offending v3-syntax fragment (truncated) when a
+ * <style type="text/tailwindcss"> block contains an @theme written as a
+ * v3 config object, else null.
+ *
+ * Lines are scanned with brace depth: v3 config keys are invalid at ANY
+ * depth, but the quoted-value property check only applies at the block's
+ * top level (depth 0) — declarations inside nested @keyframes/@media
+ * bodies are legitimate CSS and must not false-positive.
+ */
+export function findTailwindThemeV3Config(content: string): string | null {
+  if (typeof content !== "string") return null;
+  TAILWIND_STYLE_BLOCK_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = TAILWIND_STYLE_BLOCK_RE.exec(content)) !== null) {
+    for (const block of themeBlocks(m[1] ?? "")) {
+      let depth = 0;
+      for (const line of block.split("\n")) {
+        const keyMatch = line.match(TAILWIND_V3_THEME_KEY_RE);
+        if (keyMatch) return (keyMatch[0].trim()).slice(0, 120);
+        if (depth === 0) {
+          const propMatch = line.match(TAILWIND_V3_THEME_PROP_RE);
+          if (propMatch) return (propMatch[0].trim()).slice(0, 120);
+        }
+        for (const ch of line) {
+          if (ch === "{") depth++;
+          else if (ch === "}") depth--;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Model-facing remediation for the v3-theme trap. */
+export function tailwindThemeConfigMessage(offender: string, path: string): string {
+  return (
+    `rejected: ${path} contains a <style type="text/tailwindcss"> block whose @theme uses v3 config ` +
+    `syntax (${JSON.stringify(offender)}). The Tailwind v4 browser build takes CSS custom properties inside ` +
+    `@theme, not a config object — it throws CssSyntaxError and compiles ZERO utilities, so the page renders ` +
+    `completely unstyled. Write tokens as variables, e.g. @theme { --color-primary: #a8ff2f; ` +
+    `--font-sans: "Inter", sans-serif; }, then use them via utilities (bg-primary, font-sans). ` +
+    `Never use colors/extend/fontFamily objects inside @theme.`
+  );
+}
+
+/**
+ * Enforcement-floor guard for the two Tailwind v4 browser-build traps.
+ * Returns the model-facing error for the first trap found (import trap
+ * takes precedence — it suppresses the whole build including @theme),
+ * else null. Handler-level checks matter because the agent-loop gate is
+ * not the only path into a mutation — /api/litt/tools/execute and resumed
+ * approvals reach the same handlers without re-running the loop's
+ * pre-approval validation.
+ */
+export function tailwindViolation(value: unknown, label: string): string | null {
+  if (typeof value !== "string") return null;
+  const trap = findTailwindImportTrap(value);
+  if (trap) return tailwindImportTrapMessage(trap, label);
+  const v3Theme = findTailwindThemeV3Config(value);
+  if (v3Theme) return tailwindThemeConfigMessage(v3Theme, label);
+  return null;
+}
+
+/**
  * Enforcement-floor guard for mutation handlers. Returns an error string
  * when `value` carries an unresolved placeholder, else null. Handler-level
  * checks matter because the agent-loop gate is not the only path into a
@@ -200,11 +314,9 @@ export async function validateApplyPatchInputs(
   // 1b. Tailwind @import trap — a patch can introduce the trap just as
   //     easily as a full write, so replace text gets the same check.
   for (let i = 0; i < patches.length; i++) {
-    const replace = patches[i]?.replace;
-    if (typeof replace !== "string") continue;
-    const trap = findTailwindImportTrap(replace);
-    if (trap) {
-      return `apply_patch ${tailwindImportTrapMessage(trap, path)} (introduced by patch ${i + 1}).`;
+    const tailwind = tailwindViolation(patches[i]?.replace, path);
+    if (tailwind) {
+      return `apply_patch ${tailwind} (introduced by patch ${i + 1}).`;
     }
   }
   for (let i = 0; i < patches.length; i++) {
@@ -278,9 +390,9 @@ export function validateFilesWriteInputs(inputs: FilesWriteInputs): string | nul
     );
   }
 
-  const trap = findTailwindImportTrap(content);
-  if (trap) {
-    return `files.write ${tailwindImportTrapMessage(trap, path)}`;
+  const tailwind = tailwindViolation(content, path);
+  if (tailwind) {
+    return `files.write ${tailwind}`;
   }
 
   return null;
