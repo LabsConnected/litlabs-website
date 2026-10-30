@@ -1199,6 +1199,9 @@ async function runAgentLoopV2Inner(
           requireReliableFileWriting: cfg.buildCapabilityGuard != null,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
+          // Bounded same-model retries absorb transient 5xx/network spikes
+          // (e.g. Gemini 503 "high demand") before failover — never paid.
+          sameModelRetries: 2,
         },
       );
       const llmDurationMs = Date.now() - llmStartTime;
@@ -2776,6 +2779,7 @@ async function resumeAgentLoopV2Inner(
           requireReliableFileWriting: cfg.buildCapabilityGuard != null,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
+          sameModelRetries: 2,
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {

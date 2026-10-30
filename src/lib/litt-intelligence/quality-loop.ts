@@ -179,7 +179,18 @@ export function requiredStagesFor(
 ): readonly QualityStage[] {
   const base = REQUIRED_STAGES_BY_SCOPE[taskScope];
   if (opts?.isStaticWorkspace !== true) return base;
-  return base.filter((stage) => stage !== "inspect" && stage !== "critique");
+  return base.filter(
+    (stage) =>
+      stage !== "inspect" &&
+      stage !== "critique" &&
+      // The static lane has no test executor (no shell harness over a
+      // static site) and `design` has no machine-verifiable source there —
+      // the lane's contract is verified artifacts plus the served preview.
+      // Keeping them required made every full-scope static build fail the
+      // gate even after the artifact and live preview verified.
+      stage !== "design" &&
+      stage !== "test",
+  );
 }
 
 /**
