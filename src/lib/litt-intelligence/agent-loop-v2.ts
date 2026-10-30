@@ -146,6 +146,19 @@ export interface AgentLoopConfig {
   /** Require a structured tool call on the first model turn of an execution flow. */
   requireToolCallOnFirstStep?: boolean;
   /**
+   * Execution intent, kept separate from the first-call requirement:
+   * the turn was dispatched as an execution request (requiresExecution
+   * routing) with mutation tools available. `requireToolCallOnFirstStep`
+   * is only meaningful while zero tool calls have been emitted — after an
+   * approval pause that requirement is already satisfied — so it cannot
+   * carry this intent across a resume. The approval-resume path sets this
+   * flag directly so a post-approval reply that asks for approval (or
+   * defers work) in prose without emitting the gated tool call is nudged
+   * back to execution instead of being accepted as a final answer.
+   * Falls back to `requireToolCallOnFirstStep` when unset.
+   */
+  executionRequested?: boolean;
+  /**
    * Early bounded capability guard (BUILD runs): the loop tracks consecutive
    * steps in which the model emitted tool calls but ZERO file-writing calls
    * (files.write / apply_patch / edit). After maxStepsWithoutFileWrite such
@@ -1683,8 +1696,10 @@ async function runAgentLoopV2Inner(
         requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
-        // final answer, not a missing tool call.
-        executionRequested: cfg.requireToolCallOnFirstStep === true && cfg.executionMode !== "plan",
+        // final answer, not a missing tool call. Execution intent rides
+        // its own flag so it survives approval resumes — the first-call
+        // requirement is inert once any call has been emitted.
+        executionRequested: (cfg.executionRequested ?? cfg.requireToolCallOnFirstStep) === true && cfg.executionMode !== "plan",
       });
       if (resolution.action === "nudge") {
         continuationNudges++;
@@ -3341,8 +3356,10 @@ async function resumeAgentLoopV2Inner(
         requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
-        // final answer, not a missing tool call.
-        executionRequested: cfg.requireToolCallOnFirstStep === true && cfg.executionMode !== "plan",
+        // final answer, not a missing tool call. Execution intent rides
+        // its own flag so it survives approval resumes — the first-call
+        // requirement is inert once any call has been emitted.
+        executionRequested: (cfg.executionRequested ?? cfg.requireToolCallOnFirstStep) === true && cfg.executionMode !== "plan",
       });
       if (resolution.action === "nudge") {
         continuationNudges++;

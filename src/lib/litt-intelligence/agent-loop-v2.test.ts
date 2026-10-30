@@ -1482,6 +1482,135 @@ describe("BUILD resume completion evidence", () => {
   });
 });
 
+describe("resumeAgentLoopV2 — approval-resume execution intent", () => {
+  // Greptile P1 on PR #757 (round 2): the approvals route rebuilt the
+  // resume config without the execution intent — requireToolCallOnFirstStep
+  // is inert on resume (the gated call that caused the pause already
+  // satisfied it, and the resumed loop always counts a call as emitted) —
+  // so a post-approval reply asking for approval in prose with zero tool
+  // calls was accepted as the final answer and the requested work silently
+  // stopped. Execution intent now rides its own flag (executionRequested),
+  // carried through approval resumes.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const PROSE_ASK =
+    "The next step modifies workspace files, so I need your approval to write the next file. How does that sound?";
+
+  const execTransport = {
+    ...fakeTransport,
+    writeFile: vi.fn(async () => ({ saved: true })),
+    readFile: vi.fn(async () => ({ content: "<html><body>Built site</body></html>", size: 40 })),
+    listFiles: vi.fn(async () => ({ entries: [{ name: "index.html", type: "file" }] })),
+  } as unknown as WorkspaceTransport;
+
+  function writeResume(config?: Partial<ResumeInput["config"]>): ResumeInput {
+    return {
+      pausedMessages: [{ role: "user", content: "Build a roofing site" }],
+      toolId: "files.write",
+      toolCallId: "tc-write-1",
+      inputs: { projectId: "p-test", path: "index.html", content: "<html><body>Built site</body></html>" },
+      decision: "approved",
+      stepsUsedBeforePause: 1,
+      hadInterveningMutation: false,
+      config: {
+        systemPrompt: "You are LiTT.",
+        userId: "u-test",
+        executionMode: "act",
+        enableBuildFix: false,
+        isStaticWorkspace: true,
+        executionRequested: true,
+        ...config,
+      },
+    };
+  }
+
+  it("nudges a post-approval prose approval-ask back to execution — never 'final'", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({ text: PROSE_ASK, toolCalls: [], finishReason: "stop", model: "test" })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: "read-1", inputs: { projectId: "p-test", path: "index.html" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      })
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
+
+    const result = await resumeAgentLoopV2(writeResume(), execTransport);
+
+    // Without the carried intent the first reply resolved "final" and the
+    // run ended — the silent-resume bug. Now it nudges, the emitted call
+    // executes, and the run completes with the real answer.
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBeGreaterThanOrEqual(3);
+    const nudgedMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      nudgedMessages.some((m) => m.role === "user" && m.content.includes("don't create approval cards")),
+    ).toBe(true);
+    expect(result.finalText).toBe("Done.");
+    expect(result.failedHonestly).toBeUndefined();
+  });
+
+  it("fails honestly — never completes — when the post-approval model keeps asking in prose", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: PROSE_ASK,
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test",
+    });
+
+    const result = await resumeAgentLoopV2(writeResume(), execTransport);
+
+    // 1 initial + 2 bounded nudges, then an honest failure — the run can
+    // never report "Complete" for work that stopped on a prose ask.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    expect(result.failedHonestly).toContain("no approval card was created");
+    expect(result.finalText).toBe(result.failedHonestly);
+  });
+
+  it("keeps the guard on the requireToolCallOnFirstStep fallback path", async () => {
+    // Backward compat: callers that set only the legacy flag still get the
+    // prose-ask gate — it only ever came from requiresExecution dispatch.
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: PROSE_ASK,
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test",
+    });
+
+    const result = await resumeAgentLoopV2(
+      writeResume({ executionRequested: undefined, requireToolCallOnFirstStep: true }),
+      execTransport,
+    );
+
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBeGreaterThan(1);
+    expect(result.failedHonestly).toContain("no approval card was created");
+  });
+
+  it("keeps conversational check-ins final on a plan-mode resume", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Here is the plan for the landing page. How does that sound?",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test",
+    });
+
+    const result = await resumeAgentLoopV2(
+      writeResume({ executionMode: "plan" }),
+      execTransport,
+    );
+
+    // The plan-mode exclusion survives: check-in phrasing is a legitimate
+    // final answer, not a missing tool call.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
+    expect(result.finalText).toBe("Here is the plan for the landing page. How does that sound?");
+    expect(result.failedHonestly).toBeUndefined();
+  });
+});
+
 describe("runAgentLoopV2 — model routing evidence", () => {
   beforeEach(async () => {
     vi.mocked(callLLMWithTools).mockReset();
