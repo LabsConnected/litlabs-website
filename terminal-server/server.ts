@@ -91,6 +91,7 @@ import {
 import { findOnPath } from "./path-probe";
 import { respondIfHostExecBlocked, respondWithDispatch } from "./host-exec-http";
 
+import { fileErrorResponse } from "./file-errors";
 import { verifyClerkToken } from "./clerk-verify";
 import { resolveBindHost } from "./network-bind";
 import type { RemoteCommandRequest } from "@litt/agent-core";
@@ -1340,45 +1341,6 @@ function safePath(userId: string, filePath: string) {
   // Symlink-aware: rejects paths that escape via symlinked components,
   // including writes of new files through a symlinked parent directory.
   return resolveWorkspacePathSecure(workspace, filePath);
-}
-
-/** Path-validation failures from the workspace path resolvers → 400, not 500. */
-function isPathValidationError(msg: string): boolean {
-  return (
-    msg === "Invalid path" ||
-    msg === "Path too long" ||
-    msg === "Absolute or parent paths are not allowed" ||
-    msg === "Path escapes workspace root" ||
-    msg === "Symlink escapes workspace root"
-  );
-}
-
-/** Map file-endpoint errors to HTTP status codes. */
-function fileErrorStatus(msg: string): number {
-  if (msg === "Forbidden") return 403;
-  if (msg === "Workspace not found" || msg === "Path not found") return 404;
-  if (isPathValidationError(msg)) return 400;
-  return 500;
-}
-
-/**
- * Build the {status,error} a file endpoint returns for `err`.
- * ENOENT is a routine missing-file/directory — 404 with a clean message,
- * never a 500 and never the raw stat path.
- */
-function fileErrorResponse(
-  err: unknown,
-  fallback: string,
-  notFound = "File not found",
-): { status: number; error: string } {
-  const msg = err instanceof Error ? err.message : fallback;
-  if (
-    (err as { code?: string } | null)?.code === "ENOENT" ||
-    msg.startsWith("ENOENT")
-  ) {
-    return { status: 404, error: notFound };
-  }
-  return { status: fileErrorStatus(msg), error: msg };
 }
 
 function requireTerminalAuth(
