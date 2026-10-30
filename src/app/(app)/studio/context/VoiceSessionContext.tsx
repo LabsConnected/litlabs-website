@@ -877,20 +877,15 @@ export function VoiceSessionProvider({
 
       // ── Graceful degradation ──
       // Probe /api/voice/health once per session before starting the TTS
-      // chain. When the deployment has no voice provider configured, every
-      // step would fail (token 503 → endpoint 401/429 → speechSynthesis
-      // errors) producing console noise on each reply. Short-circuit
-      // quietly and surface truthful state instead.
-      if (!(await probeVoiceAvailability())) {
+      // chain. A negative answer only means the Inworld token path is
+      // unconfigured — the /api/voice/tts endpoint (OpenAI) and browser
+      // speechSynthesis are independent providers the health route does
+      // not check, so the probe gates the Inworld step alone, never the
+      // whole fallback chain. voiceAvailable still records the truthful
+      // deployment state for the mic/STT voice session.
+      const inworldAvailable = await probeVoiceAvailability();
+      if (!inworldAvailable) {
         setVoiceAvailable(false);
-        setVoiceOutputState("idle");
-        voiceOutputStateRef.current = "idle";
-        if (voiceStateRef.current === "assistant_speaking") {
-          setVoiceState("idle");
-          voiceStateRef.current = "idle";
-        }
-        updateDiagnostics({ provider: "none", voicePhase: voiceStateRef.current, outputState: "idle" });
-        return;
       }
 
       // ── Echo isolation: pause mic before TTS ──
@@ -903,7 +898,7 @@ export function VoiceSessionProvider({
       setVoiceState("assistant_speaking");
       voiceStateRef.current = "assistant_speaking";
       updateDiagnostics({
-        provider: "inworld",
+        provider: inworldAvailable ? "inworld" : "browser",
         voicePhase: "assistant_speaking",
         outputState: "speaking",
       });
@@ -944,38 +939,40 @@ export function VoiceSessionProvider({
       }
 
       // Primary: Inworld TTS (uses configured INWORLD_LITT_VOICE / INWORLD_SPARK_VOICE)
-      // Always try Inworld first — inworldSession.speakText auto-connects the
-      // transport if needed. This lets "Speak" work without first starting voice.
-      try {
-        console.debug("[Voice Pipeline] TTS request started", { textLength: spokenText.length, preview: spokenText.slice(0, 60) });
-        await inworldSession.speakText(spokenText);
-        // Mark transport as connected since speakText auto-connects
-        if (!inworldConnectedRef.current) {
-          inworldConnectedRef.current = true;
-          setVoiceTransportConnected(true);
-          updateDiagnostics({ transportConnected: true });
-        }
-        // Inworld TTS playback completion is handled by the
-        // onResponseComplete callback → finishSpeaking logic above.
-        // But also set a safety timeout in case the event is missed.
-        return;
-      } catch (err) {
-        console.warn("[Voice Pipeline] TTS failed (Inworld), falling back:", err);
-        // Mark transport as disconnected if it failed
-        if (inworldConnectedRef.current) {
-          inworldConnectedRef.current = false;
-          setVoiceTransportConnected(false);
-          updateDiagnostics({ transportConnected: false });
-        }
-        // ── Double-speak guard ──
-        // If Inworld played part of the reply before throwing, do NOT
-        // re-speak the whole text from the start via a fallback.
-        if (inworldSession.didLastTtsPlayAudio()) {
-          console.debug("[Voice Pipeline] partial Inworld audio already played — skipping fallback re-speak");
-          finishSpeaking();
+      // Only attempted when the health probe confirmed the token path —
+      // the fallbacks below still run when it didn't.
+      if (inworldAvailable) {
+        try {
+          console.debug("[Voice Pipeline] TTS request started", { textLength: spokenText.length, preview: spokenText.slice(0, 60) });
+          await inworldSession.speakText(spokenText);
+          // Mark transport as connected since speakText auto-connects
+          if (!inworldConnectedRef.current) {
+            inworldConnectedRef.current = true;
+            setVoiceTransportConnected(true);
+            updateDiagnostics({ transportConnected: true });
+          }
+          // Inworld TTS playback completion is handled by the
+          // onResponseComplete callback → finishSpeaking logic above.
+          // But also set a safety timeout in case the event is missed.
           return;
+        } catch (err) {
+          console.warn("[Voice Pipeline] TTS failed (Inworld), falling back:", err);
+          // Mark transport as disconnected if it failed
+          if (inworldConnectedRef.current) {
+            inworldConnectedRef.current = false;
+            setVoiceTransportConnected(false);
+            updateDiagnostics({ transportConnected: false });
+          }
+          // ── Double-speak guard ──
+          // If Inworld played part of the reply before throwing, do NOT
+          // re-speak the whole text from the start via a fallback.
+          if (inworldSession.didLastTtsPlayAudio()) {
+            console.debug("[Voice Pipeline] partial Inworld audio already played — skipping fallback re-speak");
+            finishSpeaking();
+            return;
+          }
+          updateDiagnostics({ provider: "browser", transportConnected: false });
         }
-        updateDiagnostics({ provider: "browser", transportConnected: false });
       }
 
       // Fallback 1: server-side OpenAI TTS (/api/voice/tts). Server-side

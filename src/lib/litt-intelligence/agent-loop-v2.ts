@@ -594,16 +594,28 @@ type ZeroCallResolution =
  * failure. This is the loop-level backstop for providers that ignore
  * tool_choice/"required" (e.g. a first-turn text-only QUALITY-marker
  * reply with toolCalls:[] on gemini-2.5-flash).
+ *
+ * `executionRequested` marks a turn dispatched as an execution request
+ * with mutation tools available (requiresExecution routing in a
+ * non-plan mode). The prose approval-ask check only applies there: the
+ * approval phrases also match legitimate final replies on ordinary
+ * chat turns ("I recommend a dark background. How does that sound?"),
+ * and nudging those would force a file-change request the user never
+ * made — repeated matches turn a normal conversation into a failed
+ * mutation run.
  */
 export function resolveZeroToolCalls(
   text: string,
   nudgesUsed: number,
-  opts?: { requiredToolCallPending?: boolean },
+  opts?: { requiredToolCallPending?: boolean; executionRequested?: boolean },
 ): ZeroCallResolution {
   // The prose approval-ask is the most specific signal and is checked
   // first: the model wants to perform a gated mutation but never emitted
-  // the tool call, so no approval card exists.
-  if (asksForApprovalInProse(text) || claimsOngoingWork(text)) {
+  // the tool call, so no approval card exists. Present-continuous work
+  // claims ("I'm updating the header") assert work is happening right
+  // now — a lie regardless of turn type, so they are always checked.
+  const executionRequested = opts?.executionRequested !== false;
+  if ((executionRequested && asksForApprovalInProse(text)) || claimsOngoingWork(text)) {
     if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
       return {
         action: "nudge",
@@ -1669,6 +1681,10 @@ async function runAgentLoopV2Inner(
       const zeroCallText = llmResponse.text ?? "";
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
         requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Prose approval-asks can only stall a turn that was dispatched
+        // to execute: on chat/plan turns the same wording is a valid
+        // final answer, not a missing tool call.
+        executionRequested: cfg.requireToolCallOnFirstStep === true && cfg.executionMode !== "plan",
       });
       if (resolution.action === "nudge") {
         continuationNudges++;
@@ -3323,6 +3339,10 @@ async function resumeAgentLoopV2Inner(
       const zeroCallText = llmResponse.text ?? "";
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
         requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Prose approval-asks can only stall a turn that was dispatched
+        // to execute: on chat/plan turns the same wording is a valid
+        // final answer, not a missing tool call.
+        executionRequested: cfg.requireToolCallOnFirstStep === true && cfg.executionMode !== "plan",
       });
       if (resolution.action === "nudge") {
         continuationNudges++;

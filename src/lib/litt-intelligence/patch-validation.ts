@@ -226,6 +226,35 @@ export function tailwindViolation(value: unknown, label: string): string | null 
 }
 
 /**
+ * Simulated applyPatch result — applies each search/replace to
+ * already-read content with the executor's semantics (ordered,
+ * first-match `String.replace`, every search must match the text left
+ * by the previous patch). Returns the resulting file text, or null when
+ * a search can't match — the executor throws before writing anything in
+ * that case, so there is no resulting file to check.
+ *
+ * Needed because tailwindViolation scans for complete
+ * <style type="text/tailwindcss"> blocks: a partial replace inside an
+ * EXISTING block never carries the block in its own text, so the
+ * per-replace scan can't see v3 syntax smuggled into @theme — only the
+ * post-patch file reveals it.
+ */
+export function simulatePatchResult(
+  content: string,
+  patches: Array<{ search?: unknown; replace?: unknown }>,
+): string | null {
+  let updated = content;
+  for (const patch of patches) {
+    const search = patch?.search;
+    const replace = patch?.replace;
+    if (typeof search !== "string" || typeof replace !== "string") return null;
+    if (!updated.includes(search)) return null;
+    updated = updated.replace(search, replace);
+  }
+  return updated;
+}
+
+/**
  * Enforcement-floor guard for mutation handlers. Returns an error string
  * when `value` carries an unresolved placeholder, else null. Handler-level
  * checks matter because the agent-loop gate is not the only path into a
@@ -354,6 +383,20 @@ export async function validateApplyPatchInputs(
         `(starts with ${JSON.stringify(search.slice(0, 80))}). The patch cannot apply as written — ` +
         `re-read ${path} to get the exact current content, then retry with the literal text.`
       );
+    }
+  }
+
+  // 3. Resulting-file Tailwind check — the per-replace scan above only
+  //    sees complete <style type="text/tailwindcss"> blocks inside the
+  //    patch text, so a partial edit inside an EXISTING block (e.g.
+  //    replacing `--color-primary: …` with `colors: { primary: … }`)
+  //    would slip v3 config syntax into @theme and leave the page
+  //    unstyled. Validate the file as it will exist after the patch.
+  const resulting = simulatePatchResult(content, patches);
+  if (resulting !== null) {
+    const tailwind = tailwindViolation(resulting, path);
+    if (tailwind) {
+      return `apply_patch ${tailwind}`;
     }
   }
 

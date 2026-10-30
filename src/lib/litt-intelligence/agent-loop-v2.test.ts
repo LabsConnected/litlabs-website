@@ -836,6 +836,36 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
     expect(resolveZeroToolCalls("Which file should I update?", 0).action).toBe("final");
   });
 
+  it("treats conversational check-ins as final on non-execution turns", () => {
+    // Greptile P1 on PR #757: the approval phrases also match legitimate
+    // final replies and clarification questions. On a turn that was not
+    // dispatched as an execution request, they must end the run — a
+    // nudge would force a file-change request the user never made, and
+    // repeated matches turn a normal conversation into a failed
+    // mutation run.
+    const finalReplies = [
+      "I recommend a dark background. How does that sound?",
+      "Here are a few palette directions — sound good?",
+      "Want me to proceed with any of these ideas?",
+      "If you're ready, we can look at the layout next.",
+    ];
+    for (const text of finalReplies) {
+      expect(resolveZeroToolCalls(text, 0, { executionRequested: false }).action, text).toBe("final");
+      expect(resolveZeroToolCalls(text, 2, { executionRequested: false }).action, text).toBe("final");
+    }
+    // The same wording on an execution turn stays a nudge — the model
+    // was asked to mutate and must emit the gated tool call.
+    expect(
+      resolveZeroToolCalls("Here's the plan for the landing page. Shall I proceed?", 0, {
+        executionRequested: true,
+      }).action,
+    ).toBe("nudge");
+    // Ongoing-work claims are lies regardless of turn type.
+    expect(
+      resolveZeroToolCalls("I'm updating the header styles now.", 0, { executionRequested: false }).action,
+    ).toBe("nudge");
+  });
+
   it("routes ACT-mode deferral phrasing to the nudge path (explicit build requests)", () => {
     // The 2026-10-30 Studio regression: an explicit "build my website"
     // request got a plan + a prose approval ask ("...then ask for your
@@ -871,6 +901,10 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
         executionMode: "act",
         enableBuildFix: false,
         maxSteps: 10,
+        // The kernel dispatches this explicit change request as an
+        // execution turn — the prose approval-ask guard only applies
+        // there (chat turns can legitimately end on a check-in).
+        requireToolCallOnFirstStep: true,
       },
     );
 
@@ -888,6 +922,34 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
     expect(
       secondCallMessages.some((m) => m.role === "user" && m.content.includes("files.write")),
     ).toBe(true);
+  });
+
+  it("accepts a design check-in as the final answer on a non-execution turn", async () => {
+    // Full-loop regression for the Greptile P1: a conversational reply
+    // must not be nudged into a file-write request when the turn was
+    // never an execution request.
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "I recommend a dark background. How does that sound?",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2(
+      "Which background color fits a coffee shop site?",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
+    expect(result.finalText).toBe("I recommend a dark background. How does that sound?");
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toBeUndefined();
   });
 });
 

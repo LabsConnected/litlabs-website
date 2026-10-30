@@ -220,9 +220,10 @@ describe("mutation handlers — enforcement floor", () => {
     return import("../tool-handlers-v2");
   }
 
-  function spyTransport() {
+  function spyTransport(fileContent?: string) {
     return {
       workspaceId: "ws-1",
+      readFile: vi.fn(async () => ({ content: fileContent ?? "", size: (fileContent ?? "").length })),
       writeFile: vi.fn(async () => {}),
       applyPatch: vi.fn(async () => {}),
       deleteFile: vi.fn(async () => {}),
@@ -404,6 +405,24 @@ describe("mutation handlers — enforcement floor", () => {
     expect(res.error).toContain("@theme");
     expect(t.exec).not.toHaveBeenCalled();
   });
+
+  it("apply_patch rejects a partial edit that writes v3 syntax into an existing @theme", async () => {
+    // The replace text carries no <style> block of its own — the v3
+    // config only becomes visible in the post-patch file.
+    const { handleApplyPatch } = await loadHandlers();
+    const styled = `<style type="text/tailwindcss">@theme {\n  --color-primary: #a8ff2f;\n}</style>`;
+    const t = spyTransport(styled);
+    const res = await handleApplyPatch(
+      {
+        path: "index.html",
+        patches: [{ search: "  --color-primary: #a8ff2f;", replace: "  colors: { primary: '#a8ff2f' }" }],
+      },
+      t,
+    );
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("@theme");
+    expect(t.applyPatch).not.toHaveBeenCalled();
+  });
 });
 
 describe("findTailwindImportTrap — Tailwind v4 browser @import trap (P0)", () => {
@@ -571,5 +590,69 @@ describe("findTailwindThemeV3Config — v3 config object inside @theme (P0)", ()
     );
     expect(err).toContain("rejected");
     expect(err).toContain("@theme");
+  });
+});
+
+describe("validateApplyPatchInputs — resulting-file Tailwind check (partial patches)", () => {
+  // Greptile P2 on PR #757: the per-replace scan only sees complete
+  // <style type="text/tailwindcss"> blocks inside the patch text. A
+  // partial edit inside an EXISTING block — e.g. swapping one
+  // --color-primary line for `colors: { primary: … }` — carried no
+  // block in the replace text, passed the gate, and left the page
+  // unstyled. The validator must check the post-patch file, not just
+  // the patch text.
+  const STYLED_FILE = `<html><head>
+<style type="text/tailwindcss">
+@theme {
+  --color-primary: #a8ff2f;
+  --font-sans: "Inter", sans-serif;
+}
+</style></head><body><h1>Hi</h1></body></html>`;
+
+  it("rejects a partial replace that writes v3 config syntax into @theme", async () => {
+    const err = await validateApplyPatchInputs(
+      {
+        path: "index.html",
+        patches: [{ search: "  --color-primary: #a8ff2f;", replace: "  colors: { primary: '#a8ff2f' }," }],
+      },
+      fakeTransport(STYLED_FILE),
+    );
+    expect(err).toContain("@theme");
+  });
+
+  it("rejects a partial replace that strips @import \"tailwindcss\" from a block with other imports", async () => {
+    // The resulting file keeps a fonts @import but loses the tailwindcss
+    // opt-out line — the browser build then compiles ZERO utilities.
+    const file = `<style type="text/tailwindcss">
+@import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Inter");
+</style>`;
+    const err = await validateApplyPatchInputs(
+      { path: "index.html", patches: [{ search: '@import "tailwindcss";\n', replace: "" }] },
+      fakeTransport(file),
+    );
+    expect(err).toContain("tailwindcss");
+  });
+
+  it("accepts a partial replace that keeps v4 custom-property syntax", async () => {
+    const err = await validateApplyPatchInputs(
+      {
+        path: "index.html",
+        patches: [{ search: "--color-primary: #a8ff2f;", replace: "--color-primary: #00ff88;" }],
+      },
+      fakeTransport(STYLED_FILE),
+    );
+    expect(err).toBeNull();
+  });
+
+  it("accepts edits outside the style block entirely", async () => {
+    const err = await validateApplyPatchInputs(
+      {
+        path: "index.html",
+        patches: [{ search: "<h1>Hi</h1>", replace: "<h1>Hello there</h1>" }],
+      },
+      fakeTransport(STYLED_FILE),
+    );
+    expect(err).toBeNull();
   });
 });
