@@ -1,0 +1,18 @@
+# Verified synthetic test-fixture fingerprints (gitleaks 8.x, --log-opts=--all).
+# Each entry reviewed against the literal at commit:file:line — all are
+# non-credential test fixtures. Self-matches inside .gitleaks.baseline /
+# .gitleaksignore are excluded via .gitleaks.toml allowlist.paths instead.
+904a6c05a7bfe1faaf08587ca66f4c24ee133128:tests/billing/billing-p0-recovery.test.ts:generic-api-key:25
+990e0bbe160343ad8c6725f2cb79592c8f939442:tests/billing/billing-p0-recovery.test.ts:generic-api-key:25
+dd8ce36dfe4b3487df7ec33e00d7dcee81d655e3:tests/stripe-webhook-local-db.test.ts:jwt:54
+dd8ce36dfe4b3487df7ec33e00d7dcee81d655e3:tests/stripe-webhook-local-db.test.ts:jwt:56
+7701ef40b605d13811050c42adb31aa92e236045:packages/litt-cli/src/__tests__/activity-stream-stage1.test.tsx:generic-api-key:58
+7701ef40b605d13811050c42adb31aa92e236045:packages/litt-cli/src/__tests__/activity-stream-stage1.test.tsx:generic-api-key:59
+ae1659f8ea936a4c3886ebf4423cc111f1bdc702:packages/litt-cli/src/__tests__/activity-stream-stage1.test.tsx:generic-api-key:58
+ae1659f8ea936a4c3886ebf4423cc111f1bdc702:packages/litt-cli/src/__tests__/activity-stream-stage1.test.tsx:generic-api-key:59
+c98961334e5a11830e5081100c6b9c41e4bb0ddb:packages/litt-agent-core/src/__tests__/workspace-confinement.test.ts:generic-api-key:234
+cf80a8f1c71e42c1d83daf42a55445a7b06d941e:packages/litt-cli/src/__tests__/dex-stage1a.test.ts:stripe-access-token:212
+14eb8f2536b68c8e683a0bf485d6d05e23530c4b:packages/litt-agent-core/src/__tests__/toolcall-debug-redaction.test.ts:jwt:37
+b596db3c67f60020cd5074ab1e87ca03adc30777:packages/litt-agent-core/src/__tests__/toolcall-debug-redaction.test.ts:jwt:37
+93ef380b4bc312e377c5647cf6f54db9cb7cf304:terminal-server/__tests__/preview-asset-pipeline.test.ts:generic-api-key:339
+93ef380b4bc312e377c5647cf6f54db9cb7cf304:terminal-server/__tests__/preview-asset-pipeline.test.ts:generic-api-key:388
