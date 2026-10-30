@@ -147,6 +147,75 @@ function countAffectedFiles(inputs?: Record<string, unknown>): number | null {
   return found ? count : null;
 }
 
+export interface AffectedFileEntry {
+  path: string;
+  /** Intended action when it can be determined (key name or entry field). */
+  action?: string;
+}
+
+/** Map an inputs key like "added"/"deleted"/"modified" to an action label. */
+function actionForKey(key: string): string | undefined {
+  const k = key.toLowerCase();
+  if (/creat|add|new|insert/.test(k)) return "create";
+  if (/delet|remov/.test(k)) return "delete";
+  if (/modif|chang|edit|updat|patch|rewrit|write/.test(k)) return "edit";
+  if (/renam|move/.test(k)) return "rename";
+  return undefined;
+}
+
+function actionForObject(obj: Record<string, unknown>, fallback?: string): string | undefined {
+  const raw = obj.action ?? obj.kind ?? obj.type ?? obj.operation;
+  if (typeof raw === "string") return actionForKey(raw) ?? raw.toLowerCase();
+  return fallback;
+}
+
+/**
+ * Enumerate the affected files for display — same shapes as
+ * countAffectedFiles, but returns the actual list (bounded to 24).
+ */
+function listAffectedFiles(inputs?: Record<string, unknown>): AffectedFileEntry[] {
+  if (!inputs) return [];
+  const out: AffectedFileEntry[] = [];
+  const push = (path: string, action?: string) => {
+    if (out.length < 24 && !out.some((e) => e.path === path)) out.push({ path, action });
+  };
+
+  for (const [key, value] of Object.entries(inputs)) {
+    const keyAction = FILE_LIKE_KEY.test(key) ? actionForKey(key) : undefined;
+    if (Array.isArray(value)) {
+      const strings = value.filter((i): i is string => typeof i === "string");
+      if (strings.length > 0 && (FILE_LIKE_KEY.test(key) || strings.every(looksLikePath))) {
+        for (const p of strings) push(p, keyAction);
+        continue;
+      }
+      for (const item of value) {
+        if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+        const obj = item as Record<string, unknown>;
+        const candidate = obj.path ?? obj.file ?? obj.filePath ?? obj.filename ?? obj.name;
+        if (typeof candidate === "string" && looksLikePath(candidate)) {
+          push(candidate, actionForObject(obj, keyAction));
+        }
+      }
+    } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      const nested = value as Record<string, unknown>;
+      for (const [nestedKey, nestedValue] of Object.entries(nested)) {
+        if (!FILE_LIKE_KEY.test(nestedKey)) continue;
+        const nestedAction = actionForKey(nestedKey);
+        if (Array.isArray(nestedValue)) {
+          for (const p of nestedValue) if (typeof p === "string") push(p, nestedAction);
+        } else if (typeof nestedValue === "string" && looksLikePath(nestedValue)) {
+          push(nestedValue, nestedAction);
+        } else if (typeof nestedValue === "object" && nestedValue !== null && !Array.isArray(nestedValue)) {
+          for (const p of Object.keys(nestedValue)) if (looksLikePath(p)) push(p, nestedAction);
+        }
+      }
+    } else if (typeof value === "string" && FILE_LIKE_KEY.test(key) && looksLikePath(value)) {
+      push(value, keyAction);
+    }
+  }
+  return out;
+}
+
 /** Keys whose string values are plausibly an image attached to the request. */
 const IMAGE_URL_KEY = /(image|picture|photo|thumbnail|download.?url|image.?url)$/i;
 
@@ -197,6 +266,8 @@ export function ApprovalCard({
 }: ApprovalCardProps) {
   const toolLabel = approval.toolId.replace(/_/g, " ");
   const affectedCount = countAffectedFiles(approval.inputs);
+  const affectedFiles = listAffectedFiles(approval.inputs);
+  const isBatch = affectedFiles.length > 1;
   const isImageRequest = approval.toolId === "image.generate";
   const imagePrompt =
     isImageRequest && typeof approval.inputs?.prompt === "string"
@@ -284,6 +355,45 @@ export function ApprovalCard({
           </div>
         )}
       </div>
+
+      {/* Affected files — the group being approved. One card decides the
+          whole set (Approve all / Reject), never silently per-file. */}
+      {affectedFiles.length > 0 && (
+        <div
+          data-testid="approval-file-list"
+          className="mb-2 max-h-28 overflow-y-auto rounded-lg border px-2 py-1.5"
+          style={{
+            borderColor: "rgba(255,255,255,0.08)",
+            backgroundColor: "rgba(255,255,255,0.03)",
+          }}
+        >
+          {affectedFiles.slice(0, 12).map((f) => (
+            <div
+              key={f.path}
+              className="flex items-center gap-1.5 py-0.5 font-mono text-[10px] leading-snug"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {f.action && (
+                <span
+                  className="shrink-0 rounded-full border px-1 py-px text-[8px] font-black uppercase tracking-wider"
+                  style={{
+                    borderColor: f.action === "delete" ? "#ef444466" : "rgba(255,255,255,0.12)",
+                    color: f.action === "delete" ? "#fca5a5" : "var(--text-muted)",
+                  }}
+                >
+                  {f.action}
+                </span>
+              )}
+              <span className="truncate" title={f.path}>{f.path}</span>
+            </div>
+          ))}
+          {affectedFiles.length > 12 && (
+            <div className="pt-0.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
+              +{affectedFiles.length - 12} more
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Image request — honest preview. A real attached image renders as
           a thumbnail; otherwise the prompt + params show instead of faked
@@ -432,7 +542,7 @@ export function ApprovalCard({
               disabled={buttonsDisabled}
               className="flex-1 rounded-lg border border-accent/40 bg-accent/10 px-2 py-1.5 text-[10px] font-bold text-accent transition hover:bg-accent/20 disabled:opacity-40"
             >
-              {phase === "submitting" ? "Submitting…" : phase === "executing" ? "Running…" : "Approve"}
+              {phase === "submitting" ? "Submitting…" : phase === "executing" ? "Running…" : isBatch ? "Approve all" : "Approve"}
             </button>
             {onEdit && !buttonsDisabled && (
               <button
@@ -461,7 +571,7 @@ export function ApprovalCard({
                 color: "#ef4444",
               }}
             >
-              Deny
+              {isBatch ? "Reject" : "Deny"}
             </button>
           </div>
         )

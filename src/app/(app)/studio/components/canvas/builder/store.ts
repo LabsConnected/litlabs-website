@@ -42,10 +42,11 @@ interface CanvasBuilderStore {
   leftPanelTab: "build" | "blocks" | "components" | "assets" | "layers";
   rightPanelTab: "properties" | "litt";
 
-  // Save state — truthful persistence tracking
-  saveState: "local" | "dirty" | "saving" | "saved" | "error";
+  // Save state — truthful persistence tracking ("conflict": server has
+  // newer content than the document being saved — write was refused)
+  saveState: "local" | "dirty" | "saving" | "saved" | "error" | "conflict";
   serverCanvasId: string | null;
-  setSaveState: (state: "local" | "dirty" | "saving" | "saved" | "error") => void;
+  setSaveState: (state: "local" | "dirty" | "saving" | "saved" | "error" | "conflict") => void;
   setServerCanvasId: (id: string | null) => void;
 
   // Project type system

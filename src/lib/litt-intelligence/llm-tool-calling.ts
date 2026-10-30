@@ -1375,6 +1375,12 @@ export async function callLLMWithTools(
      * OpenAI) are eligible as last-resort fallback.
      */
     allowLittPaidProviders?: boolean;
+    /**
+     * Extra bounded retries on the SAME model for transient provider-side
+     * failures (server_error 5xx, network) before failover. Default 0 —
+     * preserve the canonical one-attempt-per-candidate contract.
+     */
+    sameModelRetries?: number;
   },
 ): Promise<LLMToolCallResponse> {
   const requirements: RouteRequirements = {
@@ -1431,12 +1437,20 @@ export async function callLLMWithTools(
     const route = plan.providers[r];
     const nextProvider = plan.providers[r + 1]?.provider;
 
-    for (const model of route.models) {
+    modelLoop: for (const model of route.models) {
       if (isModelCoolingDown(route.provider, model)) {
         logRoute("model_skipped", { provider: route.provider, model, reason: "model_cooldown" });
         continue;
       }
 
+      // Bounded same-model retry (opt-in via sameModelRetries): a
+      // transient provider-side failure (server_error 5xx like Gemini's
+      // "high demand" 503, or a network blip) earns immediate retries
+      // before the failover chain moves on. Auth/validation/model-scope
+      // failures never retry; rate-limits go through the cooldown path;
+      // the shared deadline still bounds total wall time.
+      const maxModelAttempts = 1 + Math.max(0, options?.sameModelRetries ?? 0);
+      attemptLoop: for (let modelAttempt = 0; modelAttempt < maxModelAttempts; modelAttempt++) {
       // Bounded per-attempt timeout from the shared absolute deadline.
       const attemptTimeoutMs = computeAttemptTimeout(
         options?.deadlineMs,
@@ -1550,6 +1564,20 @@ export async function callLLMWithTools(
           );
         }
 
+        if (
+          (failure.class === "server_error" || failure.class === "network") &&
+          modelAttempt + 1 < maxModelAttempts
+        ) {
+          logRoute("attempt_retry", {
+            provider: route.provider,
+            model,
+            class: failure.class,
+            httpStatus: failure.httpStatus,
+            latencyMs,
+          });
+          continue attemptLoop;
+        }
+
         failures.push({
           provider: route.provider,
           model,
@@ -1614,14 +1642,16 @@ export async function callLLMWithTools(
           const hasMoreModels = route.models.indexOf(model) < route.models.length - 1;
           if (failure.class === "rate_limited" && hasMoreModels) {
             recordModelFailure(route.provider, model);
-            continue; // next model within the same provider
+            continue modelLoop; // next model within the same provider
           }
-          break; // next provider — no more models behind the same account
+          break modelLoop; // next provider — no more models behind the same account
         }
 
         // Model-scope failure — cool the model, try the provider's next model.
         recordModelFailure(route.provider, model);
         recordModelAttemptOutcome(route.provider, model, false, failure.class);
+        break; // next model — model-scope failures are never retried
+      }
       }
     }
   }
