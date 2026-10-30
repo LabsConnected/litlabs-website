@@ -38,9 +38,29 @@ describe("stripNetworkFlags", () => {
 });
 
 describe("resolveBindHost — LOCAL", () => {
-  it("default host is 127.0.0.1", () => {
+  it("default host is localhost (loopback-only; keeps initURL aligned with middleware req.url)", () => {
     const r = resolveBindHost({ argv: [], env: {}, findTailscaleAddress: NO_TAILSCALE });
-    expect(r).toEqual({ host: "127.0.0.1", reason: "default-local", isRailway: false });
+    expect(r).toEqual({ host: "localhost", reason: "default-local", isRailway: false });
+  });
+
+  it("HOST loopback literals normalize to localhost (numeric -H reintroduces the self-proxy ECONNRESET loop)", () => {
+    for (const HOST of ["127.0.0.1", "::1", "[::1]", "localhost", "LOCALHOST"]) {
+      const r = resolveBindHost({ argv: [], env: { HOST }, findTailscaleAddress: NO_TAILSCALE });
+      expect(r).toEqual({
+        host: "localhost",
+        reason: "explicit-host-loopback",
+        isRailway: false,
+      });
+    }
+  });
+
+  it("HOST non-loopback values pass through unchanged", () => {
+    const r = resolveBindHost({
+      argv: [],
+      env: { HOST: "192.168.1.50" },
+      findTailscaleAddress: NO_TAILSCALE,
+    });
+    expect(r).toEqual({ host: "192.168.1.50", reason: "explicit-host", isRailway: false });
   });
 
   it("--lan enables intentional LAN exposure", () => {
