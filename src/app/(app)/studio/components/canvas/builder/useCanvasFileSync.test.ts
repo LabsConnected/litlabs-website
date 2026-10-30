@@ -142,8 +142,11 @@ describe("useCanvasFileSync — per-project persistence contract", () => {
     rerender({ id: "p2" });
     await waitFor(() => expect(useCanvasBuilderStore.getState().document.projectId).toBe("p2"));
     await new Promise((r) => setTimeout(r, 1400));
-    // The p1 edit was never written to p2 (or anywhere — debounce dropped).
-    expect(api.writes).toHaveLength(0);
+    // The pending p1 edit is flushed to p1 on switch (navigation must not
+    // lose work) — and critically it is written ONLY to p1, never to p2.
+    expect(api.writes).toHaveLength(1);
+    expect(api.writes[0].project).toBe("p1");
+    expect(api.writes[0].content).toContain("p1-dirty");
     expect(api.readCalls).toContain("p2");
   });
 
