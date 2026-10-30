@@ -138,6 +138,25 @@ export interface LLMOptions {
    */
   signal?: AbortSignal;
   /**
+   * Bounded retries against the SAME provider for transient failures
+   * (429, 408, 5xx, timeouts, network errors) before failing over to the
+   * next chain entry. Default 0 — historical behavior (immediate failover).
+   * Capped at 3 retries (4 total attempts per provider).
+   *
+   * Retrying never widens the chain: cost-class filtering in defaultChain
+   * is untouched, so a pinned or paid-provider-denied chain can never reach
+   * a litt_paid provider through retry. Each attempt is metered/metriced
+   * individually (retrySequence keeps ordering). Non-retryable errors
+   * (4xx like 400/404) and caller aborts never retry.
+   */
+  providerRetries?: number;
+  /**
+   * Base delay (ms) for `providerRetries` backoff — doubled per retry,
+   * ±25% jitter, capped at 4s. Default 500. Honours `signal` (an abort
+   * during backoff cancels the wait and rejects the call).
+   */
+  providerRetryDelayMs?: number;
+  /**
    * Canonical metering context for this call. When set, the user action
    * emits one usage_events row, and each provider attempt (success or
    * failure) emits one cost_events row via the metering emitter. Routes
@@ -442,6 +461,46 @@ async function fetchWithTimeout(
   }
 }
 
+/** Hard ceiling on same-provider retries: providerRetries ≤ 3 (4 total attempts). */
+const MAX_SAME_PROVIDER_ATTEMPTS = 4;
+
+/**
+ * Backoff delay for same-provider retry index `retryIndex` (0-based):
+ * base × 2^retryIndex, ±25% jitter, capped at 4s.
+ */
+function providerRetryDelayMs(retryIndex: number, baseMsOpt?: number): number {
+  const base = Math.max(50, baseMsOpt ?? 500);
+  const exp = Math.min(4_000, base * 2 ** retryIndex);
+  return Math.round(exp * (0.75 + Math.random() * 0.5));
+}
+
+/**
+ * Sleep that honours a caller AbortSignal — an abort during backoff
+ * rejects immediately rather than letting a cancelled run proceed to the
+ * next provider attempt.
+ */
+function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(
+        signal.reason ?? new DOMException("The operation was aborted.", "AbortError"),
+      );
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(tid);
+      reject(
+        signal?.reason ?? new DOMException("The operation was aborted.", "AbortError"),
+      );
+    };
+    const tid = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /*  Provider implementations                                            */
 /* ------------------------------------------------------------------ */
@@ -452,9 +511,28 @@ interface GenerateParams {
   opts: LLMOptions;
 }
 
+/**
+ * Re-classify @google/generative-ai SDK failures as ProviderError. The SDK
+ * throws plain Errors whose message embeds the HTTP status
+ * ("[503 Service Unavailable]"), and AbortError-shaped failures when its
+ * requestOptions.timeout fires — neither is a ProviderError, so without this
+ * the retry gate treated every Gemini failure as non-retryable and a
+ * transient 503 failed the request instantly. A caller-side abort is handled
+ * upstream (options.signal.aborted check) before this classification
+ * matters, so mapping it here is safe.
+ */
+function toGeminiProviderError(err: unknown): ProviderError {
+  if (err instanceof ProviderError) return err;
+  const msg = err instanceof Error ? err.message : String(err);
+  const statusMatch = msg.match(/\[(\d{3})[\s\]]/);
+  const status = statusMatch ? Number(statusMatch[1]) : null;
+  return new ProviderError("gemini", status, msg);
+}
+
 async function generateViaGemini(
   p: GenerateParams,
   modelName: string,
+  timeoutMs: number,
 ): Promise<{ text: string; usage?: LLMUsage; model: string }> {
   const genAI = getGenAI();
   if (!genAI) throw new ProviderError("gemini", null, "GEMINI_API_KEY not set");
@@ -476,10 +554,21 @@ async function generateViaGemini(
     ? `${p.systemPrompt}\n\n${p.prompt}`
     : p.prompt;
 
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
-    generationConfig,
-  });
+  // requestOptions.timeout: unlike the fetch-based providers, the Gemini SDK
+  // had no bounded wait — a hung call ran forever (seen live during a Gemini
+  // overload: demo requests sat >2min with no resolution). The SDK timeout
+  // makes it abort into the retryable-provider-error path below.
+  const result = await model
+    .generateContent(
+      {
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        generationConfig,
+      },
+      { timeout: timeoutMs, signal: p.opts.signal },
+    )
+    .catch((err) => {
+      throw toGeminiProviderError(err);
+    });
   const text = result.response.text();
 
   const usageMd = result.response.usageMetadata;
@@ -746,11 +835,11 @@ async function dispatchProvider(
   if (provider === "gemini") {
     // Try the configured model first, then fall back to the lite variant
     try {
-      return await generateViaGemini(p, modelName);
+      return await generateViaGemini(p, modelName, timeoutMs);
     } catch (err) {
       if (err instanceof ProviderError && modelName !== GEMINI_FALLBACK_MODEL) {
         try {
-          return await generateViaGemini(p, GEMINI_FALLBACK_MODEL);
+          return await generateViaGemini(p, GEMINI_FALLBACK_MODEL, timeoutMs);
         } catch {
           throw err; // throw original
         }
@@ -785,130 +874,162 @@ export async function generateText(
   // Stable id for canonical metering: one usage_event per provider attempt.
   const meteringRequestId = newLlmRequestId();
 
+  // Bounded same-provider retry (opt-in via providerRetries): re-attempt the
+  // SAME provider a limited number of times on transient failures (503, 429,
+  // timeouts, network errors) before failing over to the next chain entry.
+  // The chain is already cost-class-filtered by defaultChain, so retrying
+  // can never reach a litt_paid provider the caller didn't authorize —
+  // e.g. a pinned free-tier demo provider retries on transient 503s without
+  // ever falling back to paid providers.
+  const sameProviderAttempts = Math.min(
+    MAX_SAME_PROVIDER_ATTEMPTS,
+    Math.max(1, (options.providerRetries ?? 0) + 1),
+  );
+
   let lastErr: unknown = null;
-  let attempted = 0;
+  let attempted = 0; // total provider dispatches (drives metering attemptIndex)
+  let providersAttempted = 0; // distinct providers dispatched (empty-response check)
   for (const provider of chain) {
     // Circuit breaker: skip models temporarily marked unavailable
     if (isModelInCooldown(provider)) {
       failover.push(provider);
       continue;
     }
-    attempted++;
-    const attemptStartedAt = new Date();
-    const attemptIndex = attempted - 1;
-    // Hard spend/runaway guard — per-attempt, fail-open. Kills retry storms
-    // before they burn the user's allowance or LiTT's margin.
-    if (options.metering) {
-      const guard = await checkRunawayGuards({
-        userId: options.metering.userId,
-        clerkId: options.metering.clerkId,
-        feature: String(options.metering.feature ?? "unknown"),
-        originalRequestId: meteringRequestId,
-        isByok: !!options.userApiKey,
-      });
-      if (!guard.allowed) {
-        throw new SpendGuardError(guard);
+    providersAttempted++;
+    for (let sameAttempt = 0; sameAttempt < sameProviderAttempts; sameAttempt++) {
+      attempted++;
+      const attemptStartedAt = new Date();
+      const attemptIndex = attempted - 1;
+      // Hard spend/runaway guard — per-attempt, fail-open. Kills retry storms
+      // before they burn the user's allowance or LiTT's margin.
+      if (options.metering) {
+        const guard = await checkRunawayGuards({
+          userId: options.metering.userId,
+          clerkId: options.metering.clerkId,
+          feature: String(options.metering.feature ?? "unknown"),
+          originalRequestId: meteringRequestId,
+          isByok: !!options.userApiKey,
+        });
+        if (!guard.allowed) {
+          throw new SpendGuardError(guard);
+        }
       }
-    }
-    try {
-      const r = await dispatchProvider(
-        provider,
-        { prompt, systemPrompt, task, opts: options },
-        timeoutMs,
-      );
-      if (!r.text.trim()) {
-        // A well-formed but empty completion is not a usable answer —
-        // classify it as a provider failure so the chain fails over.
-        emptyProviders.push(provider);
-        throw new EmptyProviderResponseError(provider, r.model);
-      }
-      const result = {
-        text: r.text,
-        provider,
-        model: r.model,
-        usage: r.usage,
-        latencyMs: Date.now() - t0,
-        failover,
-        // The successful attempt is the ONE billable event for this logical
-        // action. Charge paths must reuse its idempotency key.
-        metering: {
+      try {
+        const r = await dispatchProvider(
+          provider,
+          { prompt, systemPrompt, task, opts: options },
+          timeoutMs,
+        );
+        if (!r.text.trim()) {
+          // A well-formed but empty completion is not a usable answer —
+          // classify it as a provider failure so the chain fails over.
+          if (!emptyProviders.includes(provider)) emptyProviders.push(provider);
+          throw new EmptyProviderResponseError(provider, r.model);
+        }
+        const result = {
+          text: r.text,
+          provider,
+          model: r.model,
+          usage: r.usage,
+          latencyMs: Date.now() - t0,
+          failover,
+          // The successful attempt is the ONE billable event for this logical
+          // action. Charge paths must reuse its idempotency key.
+          metering: {
+            requestId: meteringRequestId,
+            billableIdempotencyKey: `metering:llm:${meteringRequestId}`,
+          },
+        };
+        logLLMCall({
+          prompt,
+          systemPrompt,
+          output: result.text,
+          provider: result.provider,
+          model: result.model,
+          latencyMs: result.latencyMs,
+          failover: result.failover,
+          usage: result.usage,
+          metadata: options.evalMetadata ?? {},
+        });
+        recordLLMCall({
+          provider,
+          model: r.model,
+          task,
+          status: "success",
+          latencyMs: result.latencyMs,
+          promptTokens: r.usage?.prompt,
+          completionTokens: r.usage?.completion,
+          failoverFrom: failover.length > 0 ? failover : undefined,
+        });
+        // Canonical metering: one event per successful provider attempt.
+        meterLlmAttempt({
+          options,
+          provider,
+          model: r.model,
+          status: "success",
+          promptTokens: r.usage?.prompt,
+          completionTokens: r.usage?.completion,
           requestId: meteringRequestId,
-          billableIdempotencyKey: `metering:llm:${meteringRequestId}`,
-        },
-      };
-      logLLMCall({
-        prompt,
-        systemPrompt,
-        output: result.text,
-        provider: result.provider,
-        model: result.model,
-        latencyMs: result.latencyMs,
-        failover: result.failover,
-        usage: result.usage,
-        metadata: options.evalMetadata ?? {},
-      });
-      recordLLMCall({
-        provider,
-        model: r.model,
-        task,
-        status: "success",
-        latencyMs: result.latencyMs,
-        promptTokens: r.usage?.prompt,
-        completionTokens: r.usage?.completion,
-        failoverFrom: failover.length > 0 ? failover : undefined,
-      });
-      // Canonical metering: one event per successful provider attempt.
-      meterLlmAttempt({
-        options,
-        provider,
-        model: r.model,
-        status: "success",
-        promptTokens: r.usage?.prompt,
-        completionTokens: r.usage?.completion,
-        requestId: meteringRequestId,
-        attemptIndex,
-        startedAt: attemptStartedAt,
-      });
-      return result;
-    } catch (err) {
-      lastErr = err;
-      const isProviderError = err instanceof ProviderError;
-      recordLLMCall({
-        provider,
-        model: "unknown",
-        task,
-        status: "error",
-        latencyMs: Date.now() - t0,
-        failoverFrom: failover.length > 0 ? failover : undefined,
-      });
-      // Canonical metering: failed attempts are recorded too (billable=false;
-      // LLM API 4xx/5xx failures are not provider-billed, but the attempt
-      // is visible for retry-waste analysis).
-      meterLlmAttempt({
-        options,
-        provider,
-        model: "unknown",
-        status: "failed",
-        requestId: meteringRequestId,
-        attemptIndex,
-        error: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
-        startedAt: attemptStartedAt,
-      });
-      // Mark model unavailable on 404 (model not found)
-      if (isProviderError && err.status === 404) {
-        markModelUnavailable(provider);
+          attemptIndex,
+          startedAt: attemptStartedAt,
+        });
+        return result;
+      } catch (err) {
+        // An explicit caller abort is not a provider failure — surface it
+        // immediately instead of retrying or failing over (same contract
+        // streamText enforces).
+        if (options.signal?.aborted) {
+          throw options.signal.reason instanceof Error
+            ? options.signal.reason
+            : new DOMException("The operation was aborted.", "AbortError");
+        }
+        lastErr = err;
+        const isProviderError = err instanceof ProviderError;
+        recordLLMCall({
+          provider,
+          model: "unknown",
+          task,
+          status: "error",
+          latencyMs: Date.now() - t0,
+          failoverFrom: failover.length > 0 ? failover : undefined,
+        });
+        // Canonical metering: failed attempts are recorded too (billable=false;
+        // LLM API 4xx/5xx failures are not provider-billed, but the attempt
+        // is visible for retry-waste analysis).
+        meterLlmAttempt({
+          options,
+          provider,
+          model: "unknown",
+          status: "failed",
+          requestId: meteringRequestId,
+          attemptIndex,
+          error: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
+          startedAt: attemptStartedAt,
+        });
+        // Mark model unavailable on 404 (model not found)
+        if (isProviderError && err.status === 404) {
+          markModelUnavailable(provider);
+        }
+        // Non-retryable errors (e.g. 400 bad request) — advance to the next
+        // provider; never burn a same-provider retry on them.
+        if (!isProviderError || !err.isRetryable) {
+          break;
+        }
+        // Retryable: retry the same provider while attempts remain, then
+        // fail over to the next chain entry.
+        if (sameAttempt + 1 < sameProviderAttempts && !options.signal?.aborted) {
+          await sleepWithAbort(
+            providerRetryDelayMs(sameAttempt, options.providerRetryDelayMs),
+            options.signal,
+          );
+          continue;
+        }
+        break;
       }
-      // Don't retry non-retryable errors (e.g. 400 bad request) — skip to next
-      if (!isProviderError || !err.isRetryable) {
-        // For non-retryable, skip to the next provider in the chain
-        failover.push(provider);
-        continue;
-      }
-      // Retryable: try the next provider
-      failover.push(provider);
     }
+    failover.push(provider);
   }
-  if (attempted > 0 && emptyProviders.length === attempted) {
+  if (providersAttempted > 0 && emptyProviders.length === providersAttempted) {
     throw new AllProvidersEmptyError(emptyProviders);
   }
   throw new Error(

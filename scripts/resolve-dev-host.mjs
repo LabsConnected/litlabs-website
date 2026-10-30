@@ -15,13 +15,38 @@
  *   2. --tailscale flag  -> the detected Tailscale interface IP. Throws if
  *      none is found — never silently falls back to 0.0.0.0 or 127.0.0.1.
  *   3. --lan flag        -> "0.0.0.0" (explicit, operator-requested).
- *   4. HOST env var      -> used as-is (explicit operator override).
- *   5. Nothing supplied  -> "127.0.0.1" (safe local default).
+ *   4. HOST env var      -> used as-is (explicit operator override);
+ *      loopback literals (127.0.0.1/::1/localhost) normalize to "localhost".
+ *   5. Nothing supplied  -> "localhost" (safe local default).
+ *
+ * Why "localhost" and not "127.0.0.1" as the default-local bind host: the
+ * `-H` value is used for TWO things in dev — the socket bind address AND
+ * `opts.hostname`, which Next's route resolver uses to build each request's
+ * `initURL` (`http://<opts.hostname>:<port>/`). Turbopack dev then runs
+ * middleware against a request URL built as `http://localhost:<port>/`
+ * (NextNodeServer falls back to `fetchHostname || 'localhost'`). Clerk's
+ * middleware turns every passthrough into an absolute-URL rewrite of
+ * `req.url` to inject auth headers. When `-H` is `127.0.0.1`, that rewrite
+ * (`http://localhost:3001/`) no longer matches `initURL`
+ * (`http://127.0.0.1:3001/`), so Next treats it as an EXTERNAL rewrite and
+ * proxies the request to `localhost:<port>` — where the inner request
+ * re-enters middleware, emits the same "external" rewrite, and self-proxies
+ * in an infinite loop until the socket resets (ECONNRESET → HTTP 500 on
+ * every page; 2026-10-30 RCA). Passing `-H localhost` aligns both URLs so
+ * the rewrite relativizes and renders in-process — no proxy, no loop.
+ * Combined with --dns-result-order=ipv4first (see dev-network.mjs), the
+ * `localhost` bind still lands on 127.0.0.1, so the loopback-only posture
+ * is preserved. Binding "::"/"0.0.0.0" also "fixes" the loop but listens
+ * on every interface (LAN exposure) — rejected deliberately.
  */
 
 import { networkInterfaces } from "node:os";
 
 const TAILSCALE_IFACE_PATTERN = /^tailscale/i;
+
+/** HOST values that resolve to a loopback address — normalized to "localhost"
+ * so Next's initURL and middleware request URLs share an origin. */
+const LOOPBACK_HOST_LITERALS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 /** 100.64.0.0/10 — Tailscale's documented CGNAT address range. */
 function isTailscaleCgnatAddress(ip) {
@@ -93,8 +118,16 @@ export function resolveBindHost(options = {}) {
   }
 
   if (env.HOST && env.HOST.trim()) {
-    return { host: env.HOST.trim(), reason: "explicit-host", isRailway: false };
+    const host = env.HOST.trim();
+    // A loopback IP literal re-introduces the initURL/middleware origin
+    // mismatch described above (external-rewrite self-proxy → ECONNRESET).
+    // "localhost" binds the same loopback address (via ipv4first ordering)
+    // while keeping Next's internal request URLs aligned, so normalize it.
+    if (LOOPBACK_HOST_LITERALS.has(host.toLowerCase())) {
+      return { host: "localhost", reason: "explicit-host-loopback", isRailway: false };
+    }
+    return { host, reason: "explicit-host", isRailway: false };
   }
 
-  return { host: "127.0.0.1", reason: "default-local", isRailway: false };
+  return { host: "localhost", reason: "default-local", isRailway: false };
 }

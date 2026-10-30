@@ -100,6 +100,24 @@ __smoke_*.*
 live-bundle.js
 page.html
 
+# Windows reserved device names — a stray file literally named nul/con/aux/etc.
+# (e.g. created by a misdirected `> nul` redirect) cannot be opened on Windows
+# and crashes Turbopack's filesystem walk (Tailwind source scan → panic → 500
+# on every page, 2026-10-30 RCA). Ignored at any depth so git status stays
+# clean and file-scanning tools that honor .gitignore skip them.
+**/[Nn][Uu][Ll]
+**/[Nn][Uu][Ll].*
+**/[Cc][Oo][Nn]
+**/[Cc][Oo][Nn].*
+**/[Aa][Uu][Xx]
+**/[Aa][Uu][Xx].*
+**/[Pp][Rr][Nn]
+**/[Pp][Rr][Nn].*
+**/[Cc][Oo][Mm][1-9]
+**/[Cc][Oo][Mm][1-9].*
+**/[Ll][Pp][Tt][1-9]
+**/[Ll][Pp][Tt][1-9].*
+
 # Local scratch / temporary files
 tmp.txt
 vercel-inspect.json

@@ -260,6 +260,16 @@ export async function POST(req: NextRequest) {
         maxTokens: cfg.maxTokens,
         temperature: 0.7,
         timeoutMs: 30_000,
+        // Bounded same-provider retry for transient provider failures —
+        // Gemini free-tier returns intermittent 503s under load; 2 retries
+        // (~500ms→1s backoff, abort-aware) ride through them without ever
+        // leaving the pinned provider. The chain is ["gemini"] alone and
+        // allowLittPaidProviders is unset, so retry can never reach a paid
+        // provider. Each attempt honors timeoutMs (the Gemini SDK enforces
+        // it via requestOptions.timeout) and may try the primary + fallback
+        // model internally, so the worst case is bounded at
+        // ~6 × timeoutMs + backoff before the truthful 502 below.
+        providerRetries: 2,
         // Canonical metering: llm.ts emits one usage_event per provider
         // attempt keyed to this feature. The demo is anonymous, so the
         // emitter skips the row (no resolvable user) — this is deliberate.
