@@ -87,4 +87,10 @@ describe("resolveTerminalBrowserBaseUrl", () => {
     expect(resolveTerminalBrowserBaseUrl("not a url", "localhost")).toBe("not a url");
     expect(resolveTerminalBrowserBaseUrl("http://127.0.0.1:4001", "")).toBe("http://127.0.0.1:4001");
   });
+
+  it("never emits a wildcard bind address as a dial target", () => {
+    // next dev -H 0.0.0.0 can surface the wildcard as the request host —
+    // the browser must keep the configured loopback literal instead.
+    expect(resolveTerminalBrowserBaseUrl("http://127.0.0.1:4001", "0.0.0.0")).toBe("http://127.0.0.1:4001");
+  });
 });

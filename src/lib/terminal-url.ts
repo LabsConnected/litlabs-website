@@ -49,6 +49,10 @@ export function getTerminalServerUrl(): string {
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
 
+/** Wildcard/unspecified bind addresses — never a valid dial target. A dev
+    server bound `-H 0.0.0.0` can surface the wildcard as the request host. */
+const WILDCARD_HOSTS = new Set(["0.0.0.0", "::", "[::]", "*", ""]);
+
 function isLoopbackHost(hostname: string): boolean {
   return LOOPBACK_HOSTS.has(hostname.toLowerCase());
 }
@@ -82,7 +86,7 @@ export function resolveTerminalBrowserBaseUrl(configured: string, requestHostnam
   }
   if (!isLoopbackHost(url.hostname)) return configured;
   const host = (requestHostname ?? "").trim().toLowerCase();
-  if (!host) return configured;
+  if (!host || WILDCARD_HOSTS.has(host)) return configured;
   url.hostname = host;
   return url.toString().replace(/\/$/, "");
 }
