@@ -99,4 +99,30 @@ describe("validateCaptureUrl", () => {
       /not allowed/i,
     );
   });
+
+  // Regression — security review finding: isBlockedIpv6() checks loopback
+  // (::1), unique-local (fc00::/7), and link-local (fe80::/10) by inspecting
+  // only the first hextet, but never special-cases IPv4-mapped (::ffff:a.b.c.d)
+  // or IPv4-compatible (::a.b.c.d) addresses. Those embed a blocked IPv4
+  // address in the low 32 bits while the first hextet stays 0, so they were
+  // never flagged. These tests verify that mapped and compatible blocked addresses
+  // are rejected and public mapped addresses are successfully allowed.
+  it("rejects IPv4-mapped and IPv4-compatible IPv6 literals embedding a blocked IPv4 address, and allows public ones", async () => {
+    // Blocked IPv4-mapped loopback & metadata
+    await expect(validateCaptureUrl("http://[::ffff:127.0.0.1]/")).rejects.toThrow(
+      /not allowed/i,
+    );
+    await expect(
+      validateCaptureUrl("http://[::ffff:169.254.169.254]/"),
+    ).rejects.toThrow(/not allowed/i);
+
+    // Blocked IPv4-compatible loopback
+    await expect(validateCaptureUrl("http://[::127.0.0.1]/")).rejects.toThrow(
+      /not allowed/i,
+    );
+
+    // Public IPv4-mapped address must remain allowed (URL parser normalizes IPv4 literal to hex representation)
+    const publicMapped = await validateCaptureUrl("http://[::ffff:93.184.216.34]/");
+    expect(publicMapped).toBe("http://[::ffff:5db8:d822]/");
+  });
 });

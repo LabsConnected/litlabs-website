@@ -233,6 +233,62 @@ describe("callLLMWithTools — provider selection", () => {
   });
 });
 
+describe("callLLMWithTools — Gemini tool-choice mapping", () => {
+  // Regression: attemptGemini silently dropped req.toolChoice — no
+  // toolConfig.functionCallingConfig was ever sent, so a "required" first
+  // step degraded to AUTO and gemini-2.5-flash could close the turn in
+  // prose (first-turn toolCalls:[] on execution-required Studio runs).
+  it("maps toolChoice 'required' to functionCallingConfig mode ANY", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch.mockResolvedValueOnce(
+      makeGeminiSuccessResponse("", [{ name: "write_file", args: { path: "index.html" } }]),
+    );
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "build it" }],
+      [WRITE_TOOL],
+      { toolChoice: "required" },
+    );
+
+    const body = lastBodyFor("generativelanguage");
+    const toolConfig = body.toolConfig as { functionCallingConfig?: { mode?: string } } | undefined;
+    expect(toolConfig?.functionCallingConfig?.mode).toBe("ANY");
+    expect(result.toolCalls).toHaveLength(1);
+  });
+
+  it("maps toolChoice 'none' to mode NONE and 'auto' to mode AUTO", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("no calls"))
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("auto reply"));
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL], { toolChoice: "none" });
+    let body = lastBodyFor("generativelanguage");
+    expect((body.toolConfig as { functionCallingConfig?: { mode?: string } })?.functionCallingConfig?.mode).toBe("NONE");
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL], { toolChoice: "auto" });
+    body = lastBodyFor("generativelanguage");
+    expect((body.toolConfig as { functionCallingConfig?: { mode?: string } })?.functionCallingConfig?.mode).toBe("AUTO");
+  });
+
+  it("omits toolConfig when toolChoice is unset or no tools are offered", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("plain"))
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("plain again"));
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(lastBodyFor("generativelanguage").toolConfig).toBeUndefined();
+
+    // No tools offered → 'required' cannot be honored; nothing is claimed.
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [], { toolChoice: "required" });
+    const body = lastBodyFor("generativelanguage");
+    expect(body.tools).toBeUndefined();
+    expect(body.toolConfig).toBeUndefined();
+  });
+});
+
 describe("callLLMWithTools — pseudo-tool text is never executable", () => {
   it("keeps inline function-looking text as text and produces no tool call", async () => {
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");

@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import { CANONICAL_REDIRECTS } from "./src/lib/canonical-redirects";
+import { PREVIEW_CONTENT_SECURITY_POLICY } from "./src/lib/projects/preview-csp";
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
@@ -271,15 +272,14 @@ const nextConfig: NextConfig = {
       // It must be frameable by Studio (same origin) and sandboxed so
       // untrusted scripts cannot access LiTT's cookies, storage, or APIs.
       //
-      // NOTE: default-src uses EXPLICIT origins, never bare 'self'. The
-      // preview iframe sandbox omits allow-same-origin, so the document gets
-      // an opaque origin — and per the CSP spec, 'self' never matches any
-      // subresource URL from an opaque origin, which would silently block
-      // relative assets (style.css, app.js, images). Scheme+host sources
-      // match on the subresource URL alone, so relative assets load while
-      // third-party exfiltration stays blocked.
-      // KEEP IN SYNC with src/app/api/preview/[projectId]/[[...path]]/route.ts
-      // (this config header wins over the route header in production).
+      // The CSP comes from src/lib/projects/preview-csp.ts — the single
+      // source of truth shared with the route handler (this config header
+      // wins over the route header in production, so they must not drift).
+      // Resource loads are intentionally unrestricted: generated sites are
+      // built on third-party CDNs an origin allowlist can never enumerate,
+      // and deployed user content (/sites/:path*) carries no resource
+      // restrictions either. The opaque-origin sandbox and the
+      // manifest-scoped preview token are the real security boundary.
       //
       // Keep this rule AFTER the global rule — later matching rule wins.
       {
@@ -287,11 +287,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Content-Security-Policy",
-            value:
-              "sandbox allow-scripts; " +
-              "default-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* data: blob:; " +
-              "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data:; " +
-              "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data: blob:;",
+            value: PREVIEW_CONTENT_SECURITY_POLICY,
           },
           {
             key: "X-Content-Type-Options",
