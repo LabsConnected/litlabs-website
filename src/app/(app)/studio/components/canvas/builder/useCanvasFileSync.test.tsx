@@ -70,7 +70,13 @@ describe("useCanvasFileSync", () => {
   });
 
   it("retries on content change after a failed write", async () => {
-    fetchMock.mockResolvedValue({ ok: false, json: async () => ({}) });
+    // Reads succeed (seed the project as empty); only writes fail — an
+    // unexplained read failure would block all writes by design.
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
+      ((init?.body as string) ?? "").includes('"write"')
+        ? { ok: false, json: async () => ({}) }
+        : { ok: true, json: async () => ({}) },
+    );
     const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
     await settleMount(fetchMock);
     await act(async () => {
@@ -89,7 +95,11 @@ describe("useCanvasFileSync", () => {
   });
 
   it("flushes unsaved content on unmount after a failed write", async () => {
-    fetchMock.mockResolvedValue({ ok: false, json: async () => ({}) });
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
+      ((init?.body as string) ?? "").includes('"write"')
+        ? { ok: false, json: async () => ({}) }
+        : { ok: true, json: async () => ({}) },
+    );
     const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
     await settleMount(fetchMock);
     await act(async () => {
