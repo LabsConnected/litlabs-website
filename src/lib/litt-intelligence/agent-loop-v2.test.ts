@@ -836,6 +836,24 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
     expect(resolveZeroToolCalls("Which file should I update?", 0).action).toBe("final");
   });
 
+  it("routes ACT-mode deferral phrasing to the nudge path (explicit build requests)", () => {
+    // The 2026-10-30 Studio regression: an explicit "build my website"
+    // request got a plan + a prose approval ask ("...then ask for your
+    // approval to write it to the project. How does that sound?") — no
+    // tool call, no approval card, run settled "Complete" untouched.
+    const deferrals = [
+      "I can't create the file on this turn, but if you're ready, I'll draft the initial index.html content with these sections and the base styling, then ask for your approval to write it to the project. How does that sound?",
+      "Here's the plan for the landing page. Shall I proceed?",
+      "I can write index.html for you — want me to go ahead?",
+      "Ready when you are — confirm and I'll create the file.",
+    ];
+    for (const text of deferrals) {
+      expect(resolveZeroToolCalls(text, 0).action, text).toBe("nudge");
+    }
+    // Exhausted nudges still fail honestly, never complete.
+    expect(resolveZeroToolCalls(deferrals[0], 2).action).toBe("fail");
+  });
+
   it("fails the run honestly when the model keeps asking for approval in prose", async () => {
     vi.mocked(callLLMWithTools).mockResolvedValue({
       text: APPROVAL_ASK,

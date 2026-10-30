@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { getVoiceServerUrl, resolveTerminalInternalUrl } from "./terminal-url";
+import { getVoiceServerUrl, resolveTerminalBrowserBaseUrl, resolveTerminalInternalUrl } from "./terminal-url";
 
 describe("getVoiceServerUrl", () => {
   const keys = ["VOICE_PUBLIC_URL", "NEXT_PUBLIC_VOICE_WS_URL"] as const;
@@ -68,5 +68,23 @@ describe("resolveTerminalInternalUrl", () => {
       url: "",
       source: "none",
     });
+  });
+});
+
+describe("resolveTerminalBrowserBaseUrl", () => {
+  it("rewrites a loopback WS URL to the page's origin host", () => {
+    expect(resolveTerminalBrowserBaseUrl("http://127.0.0.1:4001", "localhost")).toBe("http://localhost:4001");
+    expect(resolveTerminalBrowserBaseUrl("http://127.0.0.1:4001", "100.107.123.73")).toBe("http://100.107.123.73:4001");
+    expect(resolveTerminalBrowserBaseUrl("ws://localhost:4001", "devbox.local")).toBe("ws://devbox.local:4001");
+  });
+
+  it("leaves non-loopback configured URLs untouched", () => {
+    expect(resolveTerminalBrowserBaseUrl("wss://terminal.example.com", "localhost")).toBe("wss://terminal.example.com");
+  });
+
+  it("returns the configured value when empty, unparseable, or host is absent", () => {
+    expect(resolveTerminalBrowserBaseUrl("", "localhost")).toBe("");
+    expect(resolveTerminalBrowserBaseUrl("not a url", "localhost")).toBe("not a url");
+    expect(resolveTerminalBrowserBaseUrl("http://127.0.0.1:4001", "")).toBe("http://127.0.0.1:4001");
   });
 });

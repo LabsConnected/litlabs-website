@@ -138,6 +138,14 @@ export interface VoiceSessionCtx {
   timing: VoiceTimingMetrics;
   latencies: ReturnType<typeof computeLatencies>;
   ttsEnabled: boolean;
+  /**
+   * Server-reported voice availability (probed once per session via
+   * /api/voice/health). When false the deployment has no voice provider
+   * configured — TTS/STT calls short-circuit quietly instead of running
+   * the failing chain and spamming console errors. Truthful UI state
+   * (disable/hide voice controls) should key off this, not optimism.
+   */
+  voiceAvailable: boolean;
   /** Auto-send finalized transcript (default: false — show editable draft). */
   autoSendEnabled: boolean;
   diagnostics: VoiceDiagnostics;
@@ -177,6 +185,37 @@ let activeStream: MediaStream | null = null;
 
 const noop = () => {};
 
+// ---------------------------------------------------------------------------
+// Voice availability probe — one cheap health check per session.
+// /api/voice/health reports { configured, available, tokenService } without
+// minting a token. "false" only on an explicit unconfigured/unavailable
+// answer; transport errors resolve true (unknown → let the chain decide).
+// ---------------------------------------------------------------------------
+
+let voiceAvailabilityProbe: Promise<boolean> | null = null;
+
+function probeVoiceAvailability(): Promise<boolean> {
+  if (!voiceAvailabilityProbe) {
+    voiceAvailabilityProbe = fetch("/api/voice/health", {
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    })
+      .then(async (res) => {
+        if (!res.ok) return true; // unknown — do not permanently suppress
+        const body = (await res.json().catch(() => null)) as {
+          configured?: boolean;
+          available?: boolean;
+        } | null;
+        if (!body) return true;
+        if (body.configured === false || body.available === false) return false;
+        return true;
+      })
+      .catch(() => true);
+  }
+  return voiceAvailabilityProbe;
+}
+
 const defaultDiagnostics: VoiceDiagnostics = {
   provider: "inworld",
   transportConnected: false,
@@ -211,6 +250,7 @@ const defaultCtx: VoiceSessionCtx = {
   timing: createInitialTimingMetrics(),
   latencies: computeLatencies(createInitialTimingMetrics()),
   ttsEnabled: true,
+  voiceAvailable: true,
   autoSendEnabled: false,
   diagnostics: defaultDiagnostics,
   startVoice: noop,
@@ -272,6 +312,7 @@ export function VoiceSessionProvider({
     if (typeof window === "undefined") return VOICE_GATE_CONFIG.ptt.autoSendDefault;
     return localStorage.getItem(AUTO_SEND_PREF_KEY) === "1";
   });
+  const [voiceAvailable, setVoiceAvailable] = useState<boolean>(true);
   const [diagnostics, setDiagnostics] = useState<VoiceDiagnostics>(defaultDiagnostics);
   const [pendingTranscript, setPendingTranscriptState] = useState<string | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -834,6 +875,24 @@ export function VoiceSessionProvider({
       const sanitized = sanitizeSpeech(text);
       if (!sanitized) return;
 
+      // ── Graceful degradation ──
+      // Probe /api/voice/health once per session before starting the TTS
+      // chain. When the deployment has no voice provider configured, every
+      // step would fail (token 503 → endpoint 401/429 → speechSynthesis
+      // errors) producing console noise on each reply. Short-circuit
+      // quietly and surface truthful state instead.
+      if (!(await probeVoiceAvailability())) {
+        setVoiceAvailable(false);
+        setVoiceOutputState("idle");
+        voiceOutputStateRef.current = "idle";
+        if (voiceStateRef.current === "assistant_speaking") {
+          setVoiceState("idle");
+          voiceStateRef.current = "idle";
+        }
+        updateDiagnostics({ provider: "none", voicePhase: voiceStateRef.current, outputState: "idle" });
+        return;
+      }
+
       // ── Echo isolation: pause mic before TTS ──
       if (VOICE_GATE_CONFIG.echo.pauseMicDuringTts) {
         inworldSession.pauseMic();
@@ -1177,6 +1236,7 @@ export function VoiceSessionProvider({
       timing: voiceStore.timing,
       latencies,
       ttsEnabled,
+      voiceAvailable,
       autoSendEnabled,
       diagnostics,
       startVoice,
@@ -1200,7 +1260,7 @@ export function VoiceSessionProvider({
       voiceState, voiceOutputState, voiceInputState, voiceTransportConnected,
       transcript, pendingTranscript, micLevel, errorMessage, isMuted,
       selectedDeviceId, availableDevices, voiceMode, voiceStore.timing,
-      latencies, ttsEnabled, autoSendEnabled, diagnostics,
+      latencies, ttsEnabled, voiceAvailable, autoSendEnabled, diagnostics,
       startVoice, stopVoice, toggleMute, interrupt, speakText, stopSpeaking,
       selectDevice, setOnTurn, toggleTts, toggleAutoSend,
       submitTranscript, cancelRecording, clearPendingTranscript, setPendingTranscript,

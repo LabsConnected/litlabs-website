@@ -540,7 +540,14 @@ const APPROVAL_ASK_MARKERS: RegExp[] = [
   /please confirm/i,
   /give approval/i,
   /need your approval/i,
+  /ask for your approval/i,
   /confirm.*proceed/i,
+  /how does that sound/i,
+  /sound good\?/i,
+  /shall i (?:proceed|continue|go ahead|start)/i,
+  /confirm (?:and|to) i(?:'|’)ll/i,
+  /if you(?:'|’)re ready/i,
+  /want me to (?:proceed|continue|go ahead|start|build|create|write)/i,
 ];
 
 /**

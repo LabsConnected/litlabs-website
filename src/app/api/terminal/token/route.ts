@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { createTerminalToken } from "@/lib/terminal-auth";
+import { resolveTerminalBrowserBaseUrl } from "@/lib/terminal-url";
 import { verifyProjectWorkspace, updateProjectWorkspace } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { isFeatureEnabled } from "@/config/feature-flags";
@@ -38,7 +39,12 @@ export async function GET(request: NextRequest) {
   // The baseUrl is used by the browser to connect the WebSocket.
   // TERMINAL_SERVER_URL is the internal Railway URL (not browser-reachable).
   // NEXT_PUBLIC_TERMINAL_WS_URL is the public WebSocket URL the browser needs.
-  const baseUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || process.env.TERMINAL_SERVER_URL || "";
+  // A loopback literal only reaches the terminal server when browser and
+  // server share the device — follow the page origin so tunneled/mobile
+  // dev clients dial the same host the app came from (the socket auth
+  // token is unchanged either way).
+  const configuredBaseUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || process.env.TERMINAL_SERVER_URL || "";
+  const baseUrl = resolveTerminalBrowserBaseUrl(configuredBaseUrl, request.nextUrl.hostname);
 
   try {
     // If projectId is provided, the token MUST be bound to the project's
