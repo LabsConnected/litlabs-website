@@ -259,6 +259,14 @@ export function useCanvasFileSync(projectId: string | null) {
             expectedSha256: sync.lastSavedSha,
           }),
         });
+        // Stale-completion guard — mirrors the load path: a project switch
+        // (or a CAS block) landed while this write was in flight. The server
+        // write already went to the RIGHT project (the URL carries it); this
+        // completion must not stamp the NEW project's sync state — its
+        // lastSaved/lastSavedSha would poison the next CAS base and surface
+        // a false 409 conflict, and a stale apply/setSaveState would bleed
+        // the old project's state into the current one.
+        if (sync.projectId !== projectId || sync.phase !== "ready") return;
         if (resp.ok) {
           // Only a confirmed write may advance the saved marker — otherwise a
           // failed save would look persisted and never retry.
@@ -279,6 +287,7 @@ export function useCanvasFileSync(projectId: string | null) {
           setSaveState("error");
         }
       } catch {
+        if (sync.projectId !== projectId || sync.phase !== "ready") return;
         setSaveState("error");
       }
     },
@@ -334,4 +343,63 @@ export function useCanvasFileSync(projectId: string | null) {
     setCanvasServerFlush(flushNow);
     return () => setCanvasServerFlush(null);
   }, [flushNow]);
+
+  // Flush a pending write on unmount/pagehide so the server file never lags
+  // the last edit by the debounce window — the localStorage draft preserves
+  // the work either way, but publish/apply read the FILE. The live binding
+  // comes from syncRef (never a stale closure) and the document from the
+  // store, so the write always lands on the project that owns the content.
+  // keepalive is required for the unload path but capped at 64KB — the SPA
+  // unmount path uses a normal request. The write carries the same CAS
+  // (expectedSha256), so a file that changed on the server is still never
+  // clobbered. Project switches do NOT flush — the debounced write is
+  // dropped there by design (the namespaced localStorage draft is the
+  // recovery path), which is why this effect is mount-scoped, not
+  // projectId-scoped.
+  const flushUnsaved = useCallback((useKeepalive: boolean) => {
+    const sync = syncRef.current;
+    if (timerRef.current) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const pid = sync.projectId;
+    if (!pid || sync.phase !== "ready") return;
+    const store = useCanvasBuilderStore.getState();
+    // A save is already in flight for this project — a flush now would only
+    // race it through CAS (one side wins 200, the other eats a false 409).
+    if (store.saveState === "saving") return;
+    const serialized = JSON.stringify(store.document);
+    // Already persisted, or an identical write already failed — the explicit
+    // Save path is the retry channel, not unload.
+    if (serialized === sync.lastSaved || serialized === sync.lastAttempted) return;
+    void fetch(`/api/studio-projects/${pid}/files`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "write",
+        path: CANVAS_FILE,
+        content: serialized,
+        expectedSha256: sync.lastSavedSha,
+      }),
+      ...(useKeepalive ? { keepalive: true } : {}),
+    })
+      .then(async (resp) => {
+        if (!resp.ok) return;
+        // Same stale-completion rule as saveToFile.
+        if (sync.projectId !== pid || sync.phase !== "ready") return;
+        const data = (await resp.json().catch(() => ({}))) as { sha256?: string };
+        sync.lastSaved = serialized;
+        sync.lastSavedSha = data.sha256 ?? (await sha256Hex(serialized));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const onPageHide = () => flushUnsaved(true);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      flushUnsaved(false);
+    };
+  }, [flushUnsaved]);
 }

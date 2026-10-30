@@ -177,3 +177,129 @@ describe("useCanvasFileSync — per-project persistence contract", () => {
     expect(written.nodes["node-real-save"]).toBeTruthy();
   });
 });
+
+describe("useCanvasFileSync — in-flight completion + unload flush", () => {
+  beforeEach(resetStore);
+  afterEach(() => { vi.restoreAllMocks(); setCanvasServerFlush(null); });
+
+  interface RichWrite {
+    project: string;
+    content: string;
+    expectedSha256?: string;
+    keepalive?: boolean;
+  }
+
+  // A files-API stub whose write responses are held until resolveAll() —
+  // the only way to land an in-flight save AFTER a project switch.
+  function stubDeferredWrites(reads: Record<string, { status: number; content?: string }>) {
+    const writes: RichWrite[] = [];
+    const readCalls: string[] = [];
+    const pending: Array<() => void> = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const m = /\/api\/studio-projects\/([^/]+)\/files/.exec(url);
+      const body = JSON.parse((init?.body as string) ?? "{}") as {
+        action?: string;
+        path?: string;
+        content?: string;
+        expectedSha256?: string;
+      };
+      const project = m?.[1] ?? "?";
+      if (body.action === "read") {
+        readCalls.push(project);
+        const cfg = reads[project] ?? { status: 404 };
+        if (cfg.status !== 200) {
+          return Promise.resolve({ ok: false, status: cfg.status, json: async () => ({}) } as Response);
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ content: cfg.content }) } as Response);
+      }
+      if (body.action === "write") {
+        writes.push({
+          project,
+          content: body.content ?? "",
+          expectedSha256: body.expectedSha256,
+          keepalive: (init as RequestInit & { keepalive?: boolean } | undefined)?.keepalive,
+        });
+        return new Promise<Response>((resolve) => {
+          pending.push(() =>
+            resolve({ ok: true, status: 200, json: async () => ({ saved: true }) } as Response),
+          );
+        });
+      }
+      return Promise.resolve({ ok: false, status: 400, json: async () => ({}) } as Response);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return {
+      writes,
+      readCalls,
+      resolveAll: () => {
+        while (pending.length) pending.shift()!();
+      },
+    };
+  }
+
+  it("an in-flight save completing after a project switch does not poison the new project's CAS base", async () => {
+    const api = stubDeferredWrites({
+      p1: { status: 200, content: savedDoc("p1", "proj-a") },
+      p2: { status: 404 },
+    });
+    const { rerender } = renderHook(({ id }) => useCanvasFileSync(id), { initialProps: { id: "p1" } });
+    await waitFor(() => expect(useCanvasBuilderStore.getState().document.nodes["node-proj-a"]).toBeTruthy());
+    // p1 edit → write fired and now IN FLIGHT (response deferred).
+    editDocument("p1-dirty");
+    await waitFor(() => expect(api.writes.length).toBe(1), { timeout: 2500 });
+    // Switch to p2 while p1's write is still outstanding.
+    rerender({ id: "p2" });
+    await waitFor(() => expect(useCanvasBuilderStore.getState().document.projectId).toBe("p2"));
+    // p1's save resolves now — the server file went to p1 correctly, but
+    // the completion must NOT stamp p1's markers into p2's sync state.
+    api.resolveAll();
+    await new Promise((r) => setTimeout(r, 60));
+    // p2's first save must carry p2's CAS base (CAS_ABSENT — no saved
+    // canvas), not p1's sha — the poisoned base is what produced false
+    // 409 conflicts on the next save.
+    editDocument("p2-edit");
+    await waitFor(() => expect(api.writes.length).toBe(2), { timeout: 2500 });
+    expect(api.writes[1].project).toBe("p2");
+    expect(api.writes[1].expectedSha256).toBe("absent");
+  });
+
+  it("flushes the pending debounced write on unmount so the file never lags the last edit", async () => {
+    const api = stubDeferredWrites({ p1: { status: 200, content: savedDoc("p1", "proj-a") } });
+    const { unmount } = renderHook(() => useCanvasFileSync("p1"));
+    await waitFor(() => expect(useCanvasBuilderStore.getState().document.nodes["node-proj-a"]).toBeTruthy());
+    editDocument("last-edit");
+    // Unmount inside the debounce window — without the flush this write is dropped.
+    unmount();
+    await waitFor(() => expect(api.writes.length).toBe(1));
+    expect(api.writes[0].project).toBe("p1");
+    expect(api.writes[0].content).toContain("node-last-edit");
+    // SPA unmount uses a normal request — keepalive is only for real unload.
+    expect(api.writes[0].keepalive).toBeFalsy();
+  });
+
+  it("flushes the pending write with keepalive on pagehide", async () => {
+    const api = stubDeferredWrites({ p1: { status: 200, content: savedDoc("p1", "proj-a") } });
+    renderHook(() => useCanvasFileSync("p1"));
+    await waitFor(() => expect(useCanvasBuilderStore.getState().document.nodes["node-proj-a"]).toBeTruthy());
+    editDocument("pagehide-edit");
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    await waitFor(() => expect(api.writes.length).toBe(1));
+    expect(api.writes[0].content).toContain("node-pagehide-edit");
+    expect(api.writes[0].keepalive).toBe(true);
+  });
+
+  it("issues no unload write when the document is already persisted", async () => {
+    const api = stubDeferredWrites({ p1: { status: 200, content: savedDoc("p1", "proj-a") } });
+    const { unmount } = renderHook(() => useCanvasFileSync("p1"));
+    await waitFor(() => expect(useCanvasBuilderStore.getState().document.nodes["node-proj-a"]).toBeTruthy());
+    unmount();
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(api.writes).toHaveLength(0);
+  });
+});
