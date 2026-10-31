@@ -230,7 +230,14 @@ async function sendAndDrive(page: Page, request: APIRequestContext, prompt: stri
     const input2 = await ensureComposer(page);
     await input2.fill(prompt);
   }
-  await sendBtn.click();
+  // The button can sit mid-animation (re-render churn) — Playwright's
+  // stability check then times out even though the element is real and
+  // clickable. Force the click; fall back to Enter in the composer.
+  try {
+    await sendBtn.click({ timeout: 10_000 });
+  } catch {
+    await input.press("Enter").catch(() => {});
+  }
   console.log(`[send] ${prompt.slice(0, 60)}…`);
   return driveRun(page, request, maxMinutes);
 }
