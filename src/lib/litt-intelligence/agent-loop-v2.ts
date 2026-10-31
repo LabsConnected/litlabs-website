@@ -719,6 +719,58 @@ const SLIM_SAFE_FAMILIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Local small-model lane (approved lightweight-local-coding config):
+ * qwen2.5-coder:1.5b-class models at an 8k context. Detection is an
+ * explicit env flag OR a small-model name pattern in OLLAMA_MODEL —
+ * matches the litbi-LLC builds (coder, fast, ≤8k ctx variants).
+ */
+export function isLocalSmallLane(): boolean {
+  if (process.env.LITT_LOCAL_SMALL === "1") return true;
+  const m = process.env.OLLAMA_MODEL ?? "";
+  return /coder|fast|:(2|4|8)k$/i.test(m);
+}
+
+/**
+ * Minimal toolset for the small lane — the 8k ctx budget leaves room for
+ * roughly one screen of schemas; anything more crowds out history and
+ * output. Covers inspect / write / patch / preview-verify.
+ */
+const LOCAL_SMALL_TOOL_IDS = new Set([
+  "files.list",
+  "files.read",
+  "files.write",
+  "files.patch",
+  "apply_patch",
+  "files.delete",
+  "files.rename",
+  "files.mkdir",
+  "preview.start",
+  "preview.status",
+]);
+
+/**
+ * Compact system prompt for the small lane. The full orchestrator +
+ * quality-loop prompts (~10-15k tokens) exceed an 8k ctx — this teaches
+ * the TEXT tool-call format these models actually emit (native
+ * message.tool_calls is unreliable at 1.5B; the fenced/bare-JSON body is
+ * recovered by tool-call-markup). Completion is gated by the workspace-
+ * mutation evidence check instead of the full quality-loop verdict.
+ */
+const LOCAL_SMALL_LANE_PROMPT =
+  "## Local coding mode\n" +
+  "You are LiTT, a website-building agent. You act by emitting tool calls.\n" +
+  "This model has no native tool channel — emit EACH call as a fenced block:\n\n" +
+  "```tool_call\n" +
+  '{"name":"files.write","arguments":{"path":"index.html","content":"<!doctype html>..."}}\n' +
+  "```\n\n" +
+  "Rules:\n" +
+  "- Emit EVERY files.write the site needs in ONE response, then emit preview.start.\n" +
+  "- For a new site a single index.html with complete inline CSS/JS is enough.\n" +
+  "- Emit only tool_call blocks — no prose, no explanations.\n" +
+  "- To modify: files.read once, then files.write (or apply_patch) the updated file.\n" +
+  "- Available: files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.";
+
+/**
  * Narrow the offered tools to LOCAL_BUILD_TOOL_IDS when:
  *  - a local model is the configured route (OLLAMA_MODEL set), and
  *  - the capability plan needs nothing outside the workspace families.
@@ -729,6 +781,12 @@ function slimToolsForLocalBuild(
   tools: LiTTToolDefinition[],
   capabilityPlan: import("./capability-planner").CapabilityPlan | undefined,
 ): LiTTToolDefinition[] {
+  // Small lane (1.5B-class, 8k ctx): always the minimal toolset — schema
+  // size is the binding constraint, not capability intent.
+  if (isLocalSmallLane()) {
+    const minimal = tools.filter((t) => LOCAL_SMALL_TOOL_IDS.has(t.id));
+    return minimal.length > 0 ? minimal : tools;
+  }
   if (!process.env.OLLAMA_MODEL || !capabilityPlan) return tools;
   const planned = [
     ...capabilityPlan.requiredCapabilities,
@@ -1465,8 +1523,12 @@ async function runAgentLoopV2Inner(
   // Quality loop (opt-in): create the evidence session and teach the agent
   // the stage contract. All hooks below degrade gracefully — the gate
   // itself is enforced at finalize() time, never mid-run.
+  const localSmallLane = isLocalSmallLane();
   let qualitySession: QualityLoopSession | null = null;
-  if (cfg.qualityLoop?.enabled) {
+  // Small lane: the full quality-loop prompt does not fit an 8k ctx — the
+  // deterministic workspace-mutation evidence check is the completion
+  // gate instead. Session skipped so no stage markers are required.
+  if (cfg.qualityLoop?.enabled && !localSmallLane) {
     qualitySession = startQualityLoopSession({
       runId: cfg.qualityLoop.runId,
       projectId: cfg.qualityLoop.projectId,
@@ -1484,7 +1546,15 @@ async function runAgentLoopV2Inner(
   // model which of its real capabilities materially improve THIS goal.
   // Reference-match requests ("make mine look like this") trigger the
   // reference workflow instead of a generic build.
-  const capabilityPlan = applyOrchestratorPrompts(cfg, userMessage);
+  // Small lane: still compute the plan (it drives the slim-tool gate and
+  // observability) but skip the multi-paragraph orchestrator prompts —
+  // a compact local-mode prompt fits the 8k ctx instead.
+  const capabilityPlan = isLocalSmallLane()
+    ? planCapabilities(userMessage)
+    : applyOrchestratorPrompts(cfg, userMessage);
+  if (isLocalSmallLane()) {
+    cfg.systemPrompt += "\n\n" + LOCAL_SMALL_LANE_PROMPT;
+  }
 
   // ── Run observability (Part J) ──
   const runObs = startRunObservability({
@@ -3006,7 +3076,9 @@ async function resumeAgentLoopV2Inner(
   // before the approval pause. The paused messages are still re-harvested for
   // idempotency, but conversation text is not the source of machine evidence.
   let qualitySession: QualityLoopSession | null = null;
-  if (cfg.qualityLoop?.enabled) {
+  // Small lane: same as the initial run — the full quality prompt doesn't
+  // fit the 8k ctx; the workspace-mutation evidence check is the gate.
+  if (cfg.qualityLoop?.enabled && !isLocalSmallLane()) {
     qualitySession = startQualityLoopSession({
       runId: cfg.qualityLoop.runId,
       projectId: cfg.qualityLoop.projectId,
@@ -3027,8 +3099,12 @@ async function resumeAgentLoopV2Inner(
   // pause.
   const resumeUserMessage =
     resume.pausedMessages.find((m) => m.role === "user")?.content ?? "";
-  const resumeCapabilityPlan =
-    applyOrchestratorPrompts(cfg, resumeUserMessage);
+  const resumeCapabilityPlan = isLocalSmallLane()
+    ? planCapabilities(resumeUserMessage)
+    : applyOrchestratorPrompts(cfg, resumeUserMessage);
+  if (isLocalSmallLane()) {
+    cfg.systemPrompt += "\n\n" + LOCAL_SMALL_LANE_PROMPT;
+  }
 
   // ── Run observability on resume (Part J, D) ──
   // The approval pause breaks the original run's observability record
