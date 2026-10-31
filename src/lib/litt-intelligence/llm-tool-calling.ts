@@ -1848,6 +1848,11 @@ export async function callLLMWithTools(
           responseToolCalls: result.responseShape?.toolCalls.map((call) =>
             `${call.name || "<missing>"}:${call.argumentsJsonValid ? "valid" : "invalid"}`,
           ).join(","),
+          // Names of every parsed call including text-recovered ones — the
+          // responseShape only covers native calls, so small-lane text calls
+          // were invisible. Lets us see exactly which tool a local model
+          // tried to invoke when the loop drops it before execution.
+          allToolCallIds: result.toolCalls.map((c) => c.toolId).join(","),
           remainingBudgetMs: options?.deadlineMs
             ? Math.max(0, options.deadlineMs - Date.now())
             : undefined,
