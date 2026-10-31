@@ -770,6 +770,9 @@ const LOCAL_SMALL_LANE_PROMPT =
   "- To MODIFY an existing file: files.read it FIRST, then prefer apply_patch with a " +
   "search/replace for just the requested change — NEVER rewrite the whole file from " +
   "scratch. Keep all existing styling, classes, and structure unless the request asks to remove them.\n" +
+  "- Do EVERY part of a multi-part request: if asked to change the heading AND the theme, " +
+  "emit one apply_patch for EACH change in the SAME response. A request is not done until " +
+  "every requested change is applied.\n" +
   "- A files.write that strips an existing file's styling is refused — patch instead.\n" +
   "- Available: files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.";
 
