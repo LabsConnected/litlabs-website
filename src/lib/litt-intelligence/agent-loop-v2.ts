@@ -1827,6 +1827,48 @@ async function runAgentLoopV2Inner(
         }
       }
 
+      // Browser interaction tools need a live session. The model cannot
+      // know the session id — the server binds it at execute time — so a
+      // call arriving without one is only valid while a session is
+      // actually live for this conversation. When none is, the call can
+      // never succeed: surfacing an approval card for it burns a user
+      // approval on a guaranteed failure (confirmed e2e-live 2026-10-31:
+      // an approved browser.click failed with no session and ended the
+      // run). Return an actionable error instead so the model starts a
+      // session or picks a workspace tool.
+      if (
+        toolCall.toolId.startsWith("browser.") &&
+        toolCall.toolId !== "browser.start_session" &&
+        typeof toolCall.inputs.sessionId !== "string"
+      ) {
+        const browserUserId = cfg.userId ?? actionContextFrom(cfg)?.userId;
+        const liveSession = browserUserId
+          ? await import("./browser-agent")
+              .then((m) => m.getActiveSession(browserUserId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId))
+              .catch(() => null)
+          : null;
+        if (!liveSession) {
+          const noSession = `No active browser session — call browser.start_session first to create one (the server supplies the session id; you do not pass it). If the task does not need a live web page, use the file tools instead.`;
+          const result: ToolCallResult = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: null,
+            success: false,
+            error: noSession,
+          };
+          llmMessages.push(buildToolResultMessage(result));
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "no active browser session", mutating: false });
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: false,
+            summary: "No active browser session — start_session required first",
+            durationMs: 0,
+          });
+          continue;
+        }
+      }
+
       // Check permissions
       const permInfo = toPermissionInfo(toolDef);
       const permResult = permissionEngine.check(permInfo, toolCall.inputs, cfg.executionMode, availableCapabilities);

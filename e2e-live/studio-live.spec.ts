@@ -257,9 +257,16 @@ async function driveRun(page: Page, request: APIRequestContext, maxMinutes = 14)
       const status = ard?.projection?.run?.status ?? "";
       const activity = ard?.projection?.currentActivity ?? "";
       const pausedRef = ard?.projection?.run?.approvalReference;
+      const failure = ard?.projection?.failure ?? null;
       if (status !== lastStatus) {
         lastStatus = status;
         console.log(`[run] status=${status} activity=${activity}`);
+      }
+      if (status && !["working", "waiting_for_user", "queued", "pending"].includes(status)) {
+        if (failure) console.log(`[run.failure] code=${failure.code} message=${String(failure.message).slice(0, 400)}`);
+        const tools = ard?.projection?.tools;
+        if (tools) console.log(`[run.tools] started=${tools.started?.length} failed=${JSON.stringify(tools.failed ?? []).slice(0, 300)}`);
+        return { status, approvals, failure };
       }
       // Fallback: if the approval card never surfaces in the DOM, resolve
       // through the same endpoint the card's Approve button calls.

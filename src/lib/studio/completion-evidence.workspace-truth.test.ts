@@ -550,19 +550,24 @@ describe("completion verdict vs. actual workspace state", () => {
       expect(verdict.state).toBe("failed");
     });
 
-    it("preview.start is verified at the tool boundary — an unchanged diff cannot contradict it", () => {
+    it("preview.start is verified at the tool boundary — an unchanged diff cannot contradict it, but it is not workspace work", () => {
       // A preview produces no workspace diff by design: before the
       // capability split, a verified-unchanged diff reported this
-      // legitimate success as failed.
+      // legitimate success as failed. Since the workspace-mutation
+      // requirement, boundary work alone also cannot COMPLETE a build —
+      // it is verified work, never a contradiction, but a build request
+      // still needs a project-file change.
       const verdict = evaluateCompletion(
         BUILD,
         evidence([{ toolId: "preview.start", mutating: true, success: true }], unchanged),
       );
 
-      expect(verdict.state).toBe("complete");
+      expect(verdict.state).toBe("failed");
+      expect(verdict.reason).not.toMatch(/not supported by the actual workspace state/);
+      expect(verdict.missing).toContain("verified workspace file mutation");
     });
 
-    it("mutating browser.* claims are verified at the tool boundary on gitless runs", () => {
+    it("mutating browser.* claims are verified at the tool boundary on gitless runs — but cannot complete a build alone", () => {
       const verdict = evaluateCompletion(
         BUILD,
         evidence(
@@ -574,7 +579,11 @@ describe("completion verdict vs. actual workspace state", () => {
         ),
       );
 
-      expect(verdict.state).toBe("complete");
+      // Verified at the boundary, yes — but none of it touched project
+      // files, so the build requirement stays unmet (partial, unverifiable
+      // workspace state; never the old false "complete").
+      expect(verdict.state).toBe("partial");
+      expect(verdict.missing).toContain("verified workspace file mutation");
     });
 
     it("a contradicted status probe still vetoes a boundary claim (preview.start)", () => {

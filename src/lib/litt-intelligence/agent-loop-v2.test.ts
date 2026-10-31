@@ -2095,3 +2095,53 @@ describe("runAgentLoopV2 — sequential apply_patch read-back", () => {
     expect(patch?.persisted).toBe(false);
   });
 });
+
+describe("runAgentLoopV2 — browser interaction without a live session never reaches approval", () => {
+  // Regression (e2e-live 2026-10-31): a local model emitted browser.click
+  // for a theme edit with no browser session — it surfaced as an approval
+  // card, the user approved it, and the call failed at execution, ending
+  // the run failed. The no-session error must come back as a tool result
+  // instead: no approval card for a call that can never succeed.
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("returns a session-required tool error instead of an approval card", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          {
+            toolCallId: "tc-1",
+            toolId: "browser.click",
+            inputs: { selector: "#hero" },
+          },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "The browser was not needed — no files were changed.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2("click the hero", fakeTransport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "act",
+      enableBuildFix: false,
+    });
+
+    // No approval pause — the dead call never becomes a card.
+    expect(result.pendingApproval).toBeUndefined();
+    // The failure is recorded on the tool log as a non-mutating,
+    // session-level error the model can act on.
+    const click = result.toolCalls.find((t) => t.toolId === "browser.click");
+    expect(click).toBeDefined();
+    expect(click!.success).toBe(false);
+    expect(click!.mutating).toBe(false);
+    expect(click!.summary).toMatch(/browser session/i);
+  });
+});
