@@ -72,6 +72,68 @@ export const handleFilesRead: ToolHandler = async (inputs, transport) => {
   }
 };
 
+// ─── Destructive-rewrite guard (lightweight lane reliability) ─────
+// Small local models answer an edit request by rewriting the WHOLE file
+// — and drop existing styling in the process (confirmed live: a
+// heading+theme edit produced a bare page, losing classes, style blocks,
+// and layout). Before persisting a files.write to an EXISTING file,
+// compare structural styling signatures; a rewrite that strips them is
+// rejected with an actionable error so the model retries with
+// files.read + apply_patch (targeted change, existing markup preserved).
+
+/** True when the small-model lane is active — mirrors isLocalSmallLane()
+ *  in agent-loop-v2 (kept inline to avoid an import cycle). */
+function localSmallLaneActive(): boolean {
+  if (process.env.LITT_LOCAL_SMALL === "1") return true;
+  return /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "");
+}
+
+/**
+ * Structural styling markers — the SHAPE of the page's presentation
+ * (style blocks, stylesheet links, class/style attributes, media
+ * queries, fonts, semantic layout), not its VALUES. A legitimate
+ * theme change alters colors but keeps these; a destructive rewrite
+ * drops most of them.
+ */
+function stylingSignature(html: string): Set<string> {
+  const sig = new Set<string>();
+  const count = (re: RegExp) => (html.match(re) ?? []).length;
+  if (/<style[\s>]/i.test(html)) sig.add("style-tag");
+  if (/rel\s*=\s*["']?stylesheet/i.test(html)) sig.add("stylesheet-link");
+  if (count(/class\s*=/gi) >= 2) sig.add("class-attrs");
+  if (/style\s*=\s*["']/i.test(html)) sig.add("inline-style");
+  if (/@media/i.test(html)) sig.add("media-query");
+  if (/--[\w-]+\s*:/i.test(html)) sig.add("css-vars");
+  if (/font(-family)?\s*[:=]|font-(family|sans|serif|mono)/i.test(html)) sig.add("font");
+  if (/<script[\s>]/i.test(html)) sig.add("script");
+  if (/<(header|nav|main|section|footer|article|aside)[\s>]/i.test(html)) sig.add("semantic-layout");
+  if (/@tailwind|tailwind/i.test(html)) sig.add("tailwind");
+  return sig;
+}
+
+/**
+ * Returns a refusal message when `next` destructively rewrites `prev`
+ * (strips most of its structural styling), else null. Only meaningful
+ * when prev was actually styled — a signature below the floor is an
+ * already-plain file where rewriting is harmless.
+ */
+function destructiveRewriteViolation(prev: string, next: string): string | null {
+  const prevSig = stylingSignature(prev);
+  if (prevSig.size < 3) return null;
+  let kept = 0;
+  for (const marker of prevSig) {
+    if (stylingSignature(next).has(marker)) kept += 1;
+  }
+  const retention = kept / prevSig.size;
+  if (retention >= 0.4) return null;
+  const lost = [...prevSig].filter((m) => !stylingSignature(next).has(m)).join(", ");
+  return (
+    `Refusing this full-file rewrite: it removes the existing page structure/styling ` +
+    `(${lost}). The file already exists — emit files.read to see its content, then ` +
+    `apply_patch to change ONLY the requested part and preserve the rest.`
+  );
+}
+
 export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   const path = inputs.path as string;
   const content = inputs.content as string;
@@ -91,6 +153,19 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   // so a resumed approval can't bypass the loop's pre-approval validation.
   const badTailwind = tailwindViolation(content, path);
   if (badTailwind) return { success: false, error: badTailwind };
+
+  // Destructive-rewrite guard (small lane): a full rewrite that strips an
+  // existing file's structure/styling is rejected BEFORE it lands, with an
+  // actionable error so the model repairs via files.read + apply_patch.
+  if (localSmallLaneActive()) {
+    try {
+      const prev = await transport.readFile(path);
+      const violation = destructiveRewriteViolation(prev.content, content);
+      if (violation) return { success: false, error: violation };
+    } catch {
+      // Unreadable target = a new file — nothing to preserve.
+    }
+  }
 
   try {
     await transport.writeFile(path, content);

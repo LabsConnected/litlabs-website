@@ -765,9 +765,12 @@ const LOCAL_SMALL_LANE_PROMPT =
   "```\n\n" +
   "Rules:\n" +
   "- Emit EVERY files.write the site needs in ONE response, then emit preview.start.\n" +
-  "- For a new site a single index.html with complete inline CSS/JS is enough.\n" +
+  "- For a NEW site a single index.html with complete inline CSS/JS is enough.\n" +
   "- Emit only tool_call blocks — no prose, no explanations.\n" +
-  "- To modify: files.read once, then files.write (or apply_patch) the updated file.\n" +
+  "- To MODIFY an existing file: files.read it FIRST, then prefer apply_patch with a " +
+  "search/replace for just the requested change — NEVER rewrite the whole file from " +
+  "scratch. Keep all existing styling, classes, and structure unless the request asks to remove them.\n" +
+  "- A files.write that strips an existing file's styling is refused — patch instead.\n" +
   "- Available: files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.";
 
 /**
