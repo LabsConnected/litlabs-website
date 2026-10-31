@@ -38,6 +38,7 @@ import {
   AgentBudgetExhaustedError,
   AllRoutesFailedError,
   _setOllamaProbeForTests,
+  _resetOllamaWarmForTests,
   type GeminiPart,
 } from "./llm-tool-calling";
 import {
@@ -62,6 +63,8 @@ const PROVIDER_ENVS = [
   "OLLAMA_HOST_PC",
   "LITT_OLLAMA_URL",
   "OLLAMA_MODEL",
+  "OLLAMA_LOAD_TIMEOUT_MS",
+  "OLLAMA_TIMEOUT_MS",
   "OPENROUTER_MODEL",
   "GROQ_MODEL",
   "MISTRAL_MODEL",
@@ -146,6 +149,26 @@ function makeGeminiRawResponse(parts: GeminiPart[]) {
   };
 }
 
+/** GET /api/ps — which models Ollama currently holds in memory. */
+function makeOllamaPsResponse(loadedNames: string[]) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ models: loadedNames.map((name) => ({ name, model: name })) }),
+    text: async () => "",
+  };
+}
+
+/** POST /api/generate warm load — model resident after this resolves. */
+function makeOllamaWarmResponse() {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ response: "", done: true }),
+    text: async () => '{"response":"","done":true}',
+  };
+}
+
 const WRITE_TOOL = {
   id: "write_file",
   description: "Write a file",
@@ -157,6 +180,7 @@ beforeEach(() => {
   _resetProviderHealthForTests();
   _resetModelRegistryForTests();
   _setOllamaProbeForTests(null);
+  _resetOllamaWarmForTests();
   vi.unstubAllEnvs();
   clearProviderEnvs();
 });
@@ -165,6 +189,7 @@ afterEach(() => {
   _resetProviderHealthForTests();
   _resetModelRegistryForTests();
   _setOllamaProbeForTests(null);
+  _resetOllamaWarmForTests();
   vi.unstubAllEnvs();
 });
 
@@ -1239,6 +1264,10 @@ describe("callLLMWithTools — Ollama local route", () => {
     mockFetch
       .mockResolvedValueOnce(makeGeminiErrorResponse(500, "Gemini down"))
       .mockResolvedValueOnce(makeErrorResponse(402, "OpenRouter out of credits"))
+      // /api/ps — nothing loaded yet → cold start required
+      .mockResolvedValueOnce(makeOllamaPsResponse([]))
+      // /api/generate — warm load completes
+      .mockResolvedValueOnce(makeOllamaWarmResponse())
       .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "Local model handled it."));
 
     const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
@@ -1249,7 +1278,182 @@ describe("callLLMWithTools — Ollama local route", () => {
     // tool-capable model picked from the probe.
     const ollamaCalls = callsTo("localhost:11434/v1/chat/completions");
     expect(ollamaCalls).toHaveLength(1);
-    expect(lastBodyFor("localhost:11434").model).toBe("llama3.1:8b");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("llama3.1:8b");
+  });
+
+  it("warms a cold model via /api/generate with keep_alive before inference", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse([]))
+      .mockResolvedValueOnce(makeOllamaWarmResponse())
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "warm ok"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+
+    const warmCalls = callsTo("11434/api/generate");
+    expect(warmCalls).toHaveLength(1);
+    const warmBody = JSON.parse((warmCalls[0][1] as { body: string }).body);
+    expect(warmBody.model).toBe("llama3.1:8b");
+    expect(warmBody.keep_alive).toBeTruthy();
+    expect(warmBody.stream).toBe(false);
+    // Warm ran before the inference call.
+    expect(mockFetch.mock.invocationCallOrder[mockFetch.mock.calls.indexOf(warmCalls[0])]).toBeLessThan(
+      mockFetch.mock.invocationCallOrder[
+        mockFetch.mock.calls.indexOf(callsTo("11434/v1/chat/completions")[0])
+      ],
+    );
+  });
+
+  it("skips the warm load when /api/ps already has the model resident", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["llama3.1:8b"]))
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "already hot"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(callsTo("11434/api/generate")).toHaveLength(0);
+    expect(callsTo("11434/v1/chat/completions")).toHaveLength(1);
+  });
+
+  it("reuses the warm mark across attempts instead of re-loading", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse([]))
+      .mockResolvedValueOnce(makeOllamaWarmResponse())
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "one"))
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "two"));
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    await callLLMWithTools("sys", [{ role: "user", content: "hi again" }], [WRITE_TOOL]);
+
+    // Second attempt found the warm mark — no second ps/generate round-trip.
+    expect(callsTo("11434/api/generate")).toHaveLength(1);
+    expect(callsTo("11434/api/ps")).toHaveLength(1);
+    expect(callsTo("11434/v1/chat/completions")).toHaveLength(2);
+  });
+
+  it("prefers the smallest tool-capable model over a larger one", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => [
+      { name: "llama3.1:70b", sizeBytes: 40_000_000_000, families: ["llama"] },
+      { name: "llama3.1:8b", sizeBytes: 4_000_000_000, families: ["llama"] },
+    ]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["llama3.1:8b"]))
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "small ok"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("llama3.1:8b");
+  });
+
+  it("treats litt-* tool builds and arch families as tool-capable", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    // A custom Modelfile name matches no tag-name regex — the litt- prefix
+    // marks it as a LiTT tool build, and the llama family would too.
+    _setOllamaProbeForTests(async () => [
+      { name: "litt-hermes-fast:64k", sizeBytes: 1_300_000_000, families: ["llama"] },
+    ]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-hermes-fast:64k"]))
+      .mockResolvedValueOnce(makeSuccessResponse("litt-hermes-fast:64k", "litt build ok"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-hermes-fast:64k");
+  });
+
+  it("honours the OLLAMA_MODEL override without touching warm/probe order", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    vi.stubEnv("OLLAMA_MODEL", "litt-tools:4k");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-tools:4k"]))
+      .mockResolvedValueOnce(makeSuccessResponse("litt-tools:4k", "override ok"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-tools:4k");
+  });
+
+  it("bounds the cold load by OLLAMA_LOAD_TIMEOUT_MS, not the inference timeout", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    vi.stubEnv("OLLAMA_LOAD_TIMEOUT_MS", "25");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    mockFetch.mockImplementation((url) => {
+      const u = String(url);
+      if (u.includes("/api/ps")) return Promise.resolve(makeOllamaPsResponse([]));
+      if (u.includes("/api/generate")) return new Promise(() => {}); // cold load hangs
+      return Promise.resolve(makeSuccessResponse("llama3.1:8b", "unreachable"));
+    });
+
+    const err = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [WRITE_TOOL],
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(AllRoutesFailedError);
+    expect(callsTo("11434/api/generate")).toHaveLength(1);
+    // Inference was never attempted — the load died first.
+    expect(callsTo("11434/v1/chat/completions")).toHaveLength(0);
+    const failure = (err as AllRoutesFailedError).failures.find(
+      (f) => f.provider === "ollama",
+    );
+    expect(failure?.class).toBe("timeout");
+  });
+
+  it("serializes concurrent cold loads — only one /api/generate fires", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    let psCalls = 0;
+    let releaseWarm!: () => void;
+    const warmGate = new Promise<void>((r) => {
+      releaseWarm = r;
+    });
+    mockFetch.mockImplementation((url) => {
+      const u = String(url);
+      if (u.includes("/api/ps")) {
+        psCalls += 1;
+        // Only the load-serialized second caller observes a resident model —
+        // the first checked before the warm completed.
+        return Promise.resolve(makeOllamaPsResponse(psCalls > 1 ? ["llama3.1:8b"] : []));
+      }
+      if (u.includes("/api/generate")) {
+        return warmGate.then(() => makeOllamaWarmResponse());
+      }
+      return Promise.resolve(makeSuccessResponse("llama3.1:8b", "ok"));
+    });
+
+    const p1 = callLLMWithTools("sys", [{ role: "user", content: "one" }], [WRITE_TOOL]);
+    const p2 = callLLMWithTools("sys", [{ role: "user", content: "two" }], [WRITE_TOOL]);
+    await new Promise((r) => setTimeout(r, 50));
+    releaseWarm();
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.provider).toBe("ollama");
+    expect(r2.provider).toBe("ollama");
+    expect(callsTo("11434/api/generate")).toHaveLength(1);
+    expect(callsTo("11434/v1/chat/completions")).toHaveLength(2);
   });
 
   it("skips Ollama when no tool-capable local model is loaded", async () => {

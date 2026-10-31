@@ -579,6 +579,9 @@ interface AttemptContext {
   timeoutMs: number;
   signal?: AbortSignal;
   secrets: { userApiKey?: string; byokBaseUrl?: string };
+  /** Agent absolute deadline — local providers (Ollama) use it to bound
+   *  cold-start model loads separately from the inference attempt. */
+  deadlineMs?: number;
 }
 
 function toGeminiResponse(
@@ -1155,24 +1158,71 @@ async function attemptOpenAiCompatible(
 
 // ─── Ollama ───────────────────────────────────────────────────────
 
-/** Local model families with reliable structured tool calling. */
+/** Local model families with reliable structured tool calling (tag names). */
 const OLLAMA_TOOL_CAPABLE =
-  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss/i;
+  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss|hermes/i;
+
+/** /api/tags `details.families` entries that back tool-capable builds.
+ *  Coarser than tag names — a custom Modelfile build (e.g. `litt-hermes`)
+ *  inherits its base arch's family even when the name matches nothing in
+ *  OLLAMA_TOOL_CAPABLE. */
+const OLLAMA_TOOL_CAPABLE_FAMILY =
+  /llama|qwen|mistral|nemo|command|granite|phi|deepseek|devstral|gpt-oss|functionary|hermes/i;
+
+/** LiTT's own tool-tuned builds are always tool candidates — they are
+ *  installed for exactly this purpose. */
+const OLLAMA_LITT_BUILD = /^litt-/i;
+
+export interface OllamaModelInfo {
+  name: string;
+  /** Disk footprint in bytes from /api/tags — proxy for inference speed.
+   *  0 means the endpoint did not report a size (sorted last). */
+  sizeBytes: number;
+  /** Architecture families reported by /api/tags details. */
+  families: string[];
+}
 
 const OLLAMA_PROBE_TTL_MS = 5 * 60_000;
 const OLLAMA_PROBE_TIMEOUT_MS = 1_500;
-let _ollamaProbeCache: { at: number; models: string[] } | null = null;
+let _ollamaProbeCache: { at: number; models: OllamaModelInfo[] } | null = null;
+
+/** Keep the model hot server-side slightly longer than our warm cache so a
+ *  cached "warm" mark never outlives the actual loaded model. */
+const OLLAMA_KEEP_ALIVE = "10m";
+const OLLAMA_WARM_TTL_MS = 8 * 60_000;
+/** Default budget for a cold model load — separate from inference time. */
+const OLLAMA_LOAD_TIMEOUT_DEFAULT_MS = 120_000;
+const _ollamaWarmCache = new Map<string, number>(); // `${endpoint}|${model}` → warmedAt
+/** FIFO tail serializing model loads — concurrent cold loads on one Ollama
+ *  host exhaust RAM and kill both requests. */
+let _ollamaLoadTail: Promise<unknown> = Promise.resolve();
 
 /** Test seam: inject a probe result instead of calling /api/tags. */
-let _ollamaProbeOverride: (() => Promise<string[]>) | null = null;
+let _ollamaProbeOverride: (() => Promise<(OllamaModelInfo | string)[]>) | null = null;
 
 /** @internal Test-only seam to override the Ollama model probe. */
-export function _setOllamaProbeForTests(probe: (() => Promise<string[]>) | null): void {
+export function _setOllamaProbeForTests(
+  probe: (() => Promise<(OllamaModelInfo | string)[]>) | null,
+): void {
   _ollamaProbeOverride = probe;
 }
 
-async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise<string[]> {
-  if (_ollamaProbeOverride) return _ollamaProbeOverride();
+/** @internal Test-only seam to reset warm/load state. */
+export function _resetOllamaWarmForTests(): void {
+  _ollamaWarmCache.clear();
+  _ollamaLoadTail = Promise.resolve();
+}
+
+function ollamaLoadTimeoutMs(): number {
+  return Number(process.env.OLLAMA_LOAD_TIMEOUT_MS) || OLLAMA_LOAD_TIMEOUT_DEFAULT_MS;
+}
+
+function normalizeOllamaModelInfo(entry: OllamaModelInfo | string): OllamaModelInfo {
+  return typeof entry === "string" ? { name: entry, sizeBytes: 0, families: [] } : entry;
+}
+
+async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise<OllamaModelInfo[]> {
+  if (_ollamaProbeOverride) return (await _ollamaProbeOverride()).map(normalizeOllamaModelInfo);
   if (_ollamaProbeCache && Date.now() - _ollamaProbeCache.at < OLLAMA_PROBE_TTL_MS) {
     return _ollamaProbeCache.models;
   }
@@ -1191,23 +1241,165 @@ async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise
       classifyHttpFailure(res.status, txt, parseRetryAfterMs(res.headers, txt)),
     );
   }
-  const data = (await res.json()) as { models?: Array<{ name?: string }> };
-  const models = (data.models ?? [])
-    .map((m) => m.name)
-    .filter((n): n is string => !!n);
+  const data = (await res.json()) as {
+    models?: Array<Record<string, unknown>>;
+  };
+  const models: OllamaModelInfo[] = [];
+  for (const m of data.models ?? []) {
+    const name =
+      typeof m.name === "string" ? m.name : typeof m.model === "string" ? m.model : null;
+    if (!name) continue;
+    const details = (m.details ?? {}) as Record<string, unknown>;
+    const families: string[] = [];
+    if (typeof details.family === "string") families.push(details.family);
+    if (Array.isArray(details.families)) {
+      for (const f of details.families) if (typeof f === "string") families.push(f);
+    }
+    models.push({ name, sizeBytes: typeof m.size === "number" ? m.size : 0, families });
+  }
   _ollamaProbeCache = { at: Date.now(), models };
   return models;
 }
 
+function isOllamaToolCapable(m: OllamaModelInfo): boolean {
+  if (OLLAMA_LITT_BUILD.test(m.name)) return true;
+  if (OLLAMA_TOOL_CAPABLE.test(m.name)) return true;
+  return m.families.some((f) => OLLAMA_TOOL_CAPABLE_FAMILY.test(f));
+}
+
+/** Models whose size the endpoint did not report sort after known sizes —
+ *  an unknown footprint is not evidence of a fast model. */
+function ollamaSizeRank(m: OllamaModelInfo): number {
+  return m.sizeBytes > 0 ? m.sizeBytes : Number.MAX_SAFE_INTEGER;
+}
+
 /** Pick a local model. When the request requires tools, only tool-capable
  *  families are eligible — a model that cannot emit tool calls is never
- *  selected just because it is free. */
-function pickOllamaModel(available: string[], toolsRequired: boolean): string | null {
+ *  selected just because it is free. Among eligible candidates the smallest
+ *  footprint wins: local CPU inference latency scales with size, and a
+ *  smaller model also loads faster and leaves RAM headroom. */
+function pickOllamaModel(available: OllamaModelInfo[], toolsRequired: boolean): string | null {
   const override = process.env.OLLAMA_MODEL;
   if (override) return override;
   if (available.length === 0) return null;
-  if (!toolsRequired) return available[0];
-  return available.find((m) => OLLAMA_TOOL_CAPABLE.test(m)) ?? null;
+  const sorted = [...available].sort((a, b) => ollamaSizeRank(a) - ollamaSizeRank(b));
+  if (!toolsRequired) return sorted[0].name;
+  return sorted.find(isOllamaToolCapable)?.name ?? null;
+}
+
+/** Models Ollama currently holds in memory (GET /api/ps). Returns null when
+ *  the endpoint can't be asked — callers then warm unconditionally. */
+async function listLoadedOllamaModels(
+  endpoint: string,
+  ctx: AttemptContext,
+): Promise<Set<string> | null> {
+  try {
+    const res = await fetchWithTimeout(
+      `${endpoint}/api/ps`,
+      { method: "GET" },
+      Math.min(ctx.timeoutMs, OLLAMA_PROBE_TIMEOUT_MS),
+      "Ollama ps",
+      ctx.signal,
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { models?: Array<{ name?: string; model?: string }> };
+    return new Set(
+      (data.models ?? [])
+        .map((m) => m.name ?? m.model)
+        .filter((n): n is string => !!n),
+    );
+  } catch (err) {
+    if (err instanceof UpstreamAbortError) throw err;
+    return null;
+  }
+}
+
+/** Serialize model loads. A queued warmer that loses its own budget race
+ *  still lets the load finish server-side — the next caller finds a hot
+ *  model instead of a second concurrent load fighting for RAM. */
+function withOllamaLoadLock<T>(waitMs: number, fn: () => Promise<T>): Promise<T> {
+  const run = _ollamaLoadTail.then(fn);
+  _ollamaLoadTail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new ProviderTimeoutError("Ollama load queue", waitMs)), waitMs);
+  });
+  timeout.catch(() => {});
+  return Promise.race([run, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+/**
+ * Ensure `model` is resident before the inference attempt. Cold model
+ * loading is a separate budget from inference (`OLLAMA_LOAD_TIMEOUT_MS`,
+ * clipped by the agent deadline): folding a multi-GB load into the
+ * inference timeout meant every cold request timed out mid-load.
+ *
+ * Loads are serialized across this process; a model already resident
+ * (`/api/ps`) or recently warmed costs nothing.
+ */
+async function ensureOllamaModelWarm(
+  endpoint: string,
+  model: string,
+  ctx: AttemptContext,
+): Promise<void> {
+  const cacheKey = `${endpoint}|${model}`;
+  const warmedAt = _ollamaWarmCache.get(cacheKey);
+  if (warmedAt && Date.now() - warmedAt < OLLAMA_WARM_TTL_MS) return;
+
+  const loadBudgetMs = computeAttemptTimeout(ctx.deadlineMs, ollamaLoadTimeoutMs());
+  if (loadBudgetMs === null) {
+    throw new AgentBudgetExhaustedError(
+      ctx.deadlineMs ? Math.max(0, ctx.deadlineMs - Date.now()) : 0,
+      `ollama/${model} warm load cannot fit in remaining budget`,
+    );
+  }
+
+  try {
+    await withOllamaLoadLock(loadBudgetMs, async () => {
+      const warmedInside = _ollamaWarmCache.get(cacheKey);
+      if (warmedInside && Date.now() - warmedInside < OLLAMA_WARM_TTL_MS) return;
+      const loaded = await listLoadedOllamaModels(endpoint, ctx);
+      if (loaded?.has(model)) {
+        _ollamaWarmCache.set(cacheKey, Date.now());
+        return;
+      }
+      const res = await fetchWithTimeout(
+        `${endpoint}/api/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // Empty prompt + stream:false → Ollama loads the model and
+          // returns once it is resident; keep_alive holds it in RAM.
+          body: JSON.stringify({ model, prompt: "", keep_alive: OLLAMA_KEEP_ALIVE, stream: false }),
+        },
+        loadBudgetMs,
+        "Ollama warm",
+        ctx.signal,
+      );
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new ProviderAttemptError(
+          "ollama",
+          model,
+          classifyHttpFailure(res.status, txt, parseRetryAfterMs(res.headers, txt)),
+        );
+      }
+      await res.text().catch(() => "");
+      _ollamaWarmCache.set(cacheKey, Date.now());
+    });
+  } catch (err) {
+    if (
+      err instanceof ProviderAttemptError ||
+      err instanceof UpstreamAbortError ||
+      err instanceof AgentBudgetExhaustedError
+    ) {
+      throw err;
+    }
+    throw new ProviderAttemptError("ollama", model, classifyThrownFailure(err));
+  }
 }
 
 async function attemptOllama(
@@ -1217,7 +1409,7 @@ async function attemptOllama(
 ): Promise<LLMToolCallResponse> {
   const endpoint = resolveBasicOllamaEndpoint();
 
-  let available: string[];
+  let available: OllamaModelInfo[];
   try {
     available = await probeOllamaModels(endpoint, ctx);
   } catch (err) {
@@ -1236,17 +1428,31 @@ async function attemptOllama(
     });
   }
 
+  // Cold-start is bounded separately (OLLAMA_LOAD_TIMEOUT_MS); the agent
+  // deadline bounds both phases together.
+  await ensureOllamaModelWarm(endpoint, model, ctx);
+
+  // Re-clip inference to the budget actually left after any load.
+  const inferenceTimeoutMs = computeAttemptTimeout(ctx.deadlineMs, ctx.timeoutMs);
+  if (inferenceTimeoutMs === null) {
+    throw new AgentBudgetExhaustedError(
+      ctx.deadlineMs ? Math.max(0, ctx.deadlineMs - Date.now()) : 0,
+      `ollama/${model} inference cannot fit in remaining budget`,
+    );
+  }
+  const inferenceCtx: AttemptContext = { ...ctx, timeoutMs: inferenceTimeoutMs };
+
   const route: PlannedProvider = {
     provider: "ollama",
     adapter: "ollama",
     costClass: "LOCAL",
     capabilities: { tools: true, vision: false, structuredOutput: false, coding: true },
     models: [model],
-    timeoutMs: ctx.timeoutMs,
+    timeoutMs: inferenceTimeoutMs,
     health: "healthy",
     credentialState: "not_required",
   };
-  return attemptOpenAiCompatible(route, model, req, ctx, {
+  return attemptOpenAiCompatible(route, model, req, inferenceCtx, {
     baseUrl: `${endpoint}/v1`,
     headers: {},
   });
@@ -1415,6 +1621,7 @@ export async function callLLMWithTools(
     timeoutMs: 0, // per-attempt value set below
     signal: options?.signal,
     secrets: { userApiKey: options?.userApiKey, byokBaseUrl: options?.byokBaseUrl },
+    deadlineMs: options?.deadlineMs,
   };
 
   if (plan.providers.length === 0) {
