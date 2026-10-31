@@ -30,6 +30,7 @@ function makeRequest(path: string, opts: RequestInit = {}) {
       ...opts.headers,
     },
     ...opts,
+    signal: opts.signal ?? undefined,
   });
 }
 
