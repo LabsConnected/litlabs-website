@@ -4,8 +4,8 @@
       "/usr/bin/node",
       "/root/litt-canonical/node_modules/.pnpm/@playwright+test@1.62.0/node_modules/@playwright/test/cli.js",
       "test",
-      "--config=e2e-live/playwright.live.config.ts",
-      "--list"
+      "-c",
+      "e2e-live/playwright.live.config.ts"
     ],
     "configFile": "/root/litt-canonical/e2e-live/playwright.live.config.ts",
     "rootDir": "/root/litt-canonical/e2e-live",
@@ -18,14 +18,18 @@
     "grep": {},
     "grepInvert": null,
     "maxFailures": 0,
-    "metadata": {},
+    "metadata": {
+      "actualWorkers": 1
+    },
     "preserveOutput": "always",
     "projects": [
       {
         "outputDir": "/root/litt-canonical/e2e-live/test-results",
         "repeatEach": 1,
         "retries": 0,
-        "metadata": {},
+        "metadata": {
+          "actualWorkers": 1
+        },
         "id": "desktop",
         "name": "desktop",
         "testDir": "/root/litt-canonical/e2e-live",
@@ -79,13 +83,157 @@
               "expectedStatus": "passed",
               "projectId": "desktop",
               "projectName": "desktop",
-              "results": [],
-              "status": "skipped"
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 294982,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "[dotenv@17.2.2] injecting env (0) from .env.local,.env -- tip: 📡 observe env with Radar: https://dotenvx.com/radar\n"
+                    },
+                    {
+                      "text": "[auth] signed in as test-user-a-e2e@littree.dev (user_3HEuA6XZJH8GKz9TLpELpnKnbom)\n"
+                    },
+                    {
+                      "text": "[shot] 01-studio-loaded.png\n"
+                    },
+                    {
+                      "text": "[project] created ce2407cf-fe61-496a-b095-77aaf106a058\n"
+                    },
+                    {
+                      "text": "[shot] 02-project-open.png\n"
+                    },
+                    {
+                      "text": "[send] Build a single-page website for a coffee shop called Ember R…\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 403 (Forbidden)\n"
+                    },
+                    {
+                      "text": "[run] status=working activity=LiTT is working on the task\n"
+                    },
+                    {
+                      "text": "[approve:ui] #1\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 401 (Unauthorized)\n"
+                    },
+                    {
+                      "text": "[approve:ui] #2\n"
+                    },
+                    {
+                      "text": "[approve:ui] #3\n"
+                    },
+                    {
+                      "text": "[approve:ui] #4\n"
+                    },
+                    {
+                      "text": "[approve:ui] #5\n"
+                    },
+                    {
+                      "text": "[approve:ui] #6\n"
+                    },
+                    {
+                      "text": "[approve:ui] #7\n"
+                    },
+                    {
+                      "text": "[run] status=failed activity=Task failed\n"
+                    },
+                    {
+                      "text": "[verify] files=[\"index.html\",\"style.css\"] blocks=0\n"
+                    },
+                    {
+                      "text": "[shot] 03-after-build.png\n"
+                    },
+                    {
+                      "text": "[preview] 200 runtime=ready url=/api/preview/ce2407cf-fe61-496a-b095-77aaf106a058/index.html\n"
+                    },
+                    {
+                      "text": "[preview] GET /api/preview/ce2407cf-fe61-496a-b095-77aaf106a058/index.html → 200\n"
+                    },
+                    {
+                      "text": "[shot] 04-preview-visible.png\n"
+                    },
+                    {
+                      "text": "[send] Change the theme to a light cream palette and rename the her…\n"
+                    },
+                    {
+                      "text": "[run] status=working activity=LiTT is working on the task\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 401 (Unauthorized)\n"
+                    },
+                    {
+                      "text": "[approve:ui] #1\n"
+                    },
+                    {
+                      "text": "[approve:ui] #2\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[approve:ui] #3\n"
+                    },
+                    {
+                      "text": "[run] status=failed activity=Task failed\n"
+                    },
+                    {
+                      "text": "[verify] blocks 0 → 0\n"
+                    },
+                    {
+                      "text": "[shot] 05-after-modify.png\n"
+                    },
+                    {
+                      "text": "[shot] 06-reloaded.png\n"
+                    },
+                    {
+                      "text": "[terminal] capability → 200\n"
+                    },
+                    {
+                      "text": "[voice] health → 200\n"
+                    },
+                    {
+                      "text": "[shot] 07-mobile-studio.png\n"
+                    },
+                    {
+                      "text": "[export] 2 files → 1650B zip (index.html=true)\n"
+                    },
+                    {
+                      "text": "=== EVIDENCE ===\n"
+                    },
+                    {
+                      "text": "{\n  \"auth\": {\n    \"userId\": \"user_3HEuA6XZJH8GKz9TLpELpnKnbom\",\n    \"email\": \"test-user-a-e2e@littree.dev\"\n  },\n  \"entry\": \"composer\",\n  \"projectId\": \"ce2407cf-fe61-496a-b095-77aaf106a058\",\n  \"build\": {\n    \"status\": \"failed\",\n    \"approvals\": 7\n  },\n  \"afterBuild\": {\n    \"files\": [\n      \"index.html\",\n      \"style.css\"\n    ],\n    \"canvasId\": null,\n    \"blockCount\": 0\n  },\n  \"preview\": {\n    \"status\": 200,\n    \"runtimeStatus\": \"ready\",\n    \"url\": \"/api/preview/ce2407cf-fe61-496a-b095-77aaf106a058/index.html\",\n    \"http\": 200\n  },\n  \"modify\": {\n    \"status\": \"failed\",\n    \"approvals\": 3\n  },\n  \"afterModify\": {\n    \"files\": [\n      \"index.html\",\n      \"style.css\"\n    ],\n    \"blockCount\": 0\n  },\n  \"afterReload\": {\n    \"files\": [\n      \"index.html\",\n      \"style.css\"\n    ],\n    \"blockCount\": 0\n  },\n  \"terminal\": {\n    \"http\": 200,\n    \"body\": \"{\\\"id\\\":\\\"project-terminal\\\",\\\"status\\\":\\\"unavailable\\\",\\\"terminalStatus\\\":\\\"disconnected\\\",\\\"sessionId\\\":null,\\\"projectId\\\":null,\\\"workspaceId\\\":null,\\\"lastVerifiedAt\\\":\\\"2026-10-31T02:35:25.184Z\\\",\\\"error\\\":null,\\\"serverReachable\\\":true}\",\n    \"uiBadge\": false\n  },\n  \"voice\": {\n    \"http\": 200,\n    \"body\": \"{\\\"provider\\\":\\\"inworld\\\",\\\"configured\\\":false,\\\"tokenService\\\":\\\"error\\\",\\\"transport\\\":\\\"disconnected\\\",\\\"available\\\":false,\\\"errorCode\\\":\\\"VOICE_NOT_CONFIGURED\\\",\\\"message\\\":\\\"Voice is not configured. Missing: INWORLD_API_KEY, INWORLD_LITT_VOICE, VOICE_AUTH_SECRET.\\\",\\\"details\\\":{\\\"apiKey\\\":false,\\\"littVoice\\\":false,\\\"sparkVoic\"\n  },\n  \"export\": {\n    \"fileCount\": 2,\n    \"zipBytes\": 1650,\n    \"zipPath\": \"/root/litt-canonical/e2e-live/shots/project-export-ce2407cf-fe61-496a-b095-77aaf106a058.zip\",\n    \"hasIndexHtml\": true,\n    \"indexContainsModifiedHeading\": false\n  }\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-31T02:30:38.156Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
             }
           ],
           "id": "07fccb5c90444c5f1761-5308a5327504c9081445",
           "file": "studio-live.spec.ts",
-          "line": 295,
+          "line": 304,
           "column": 5
         }
       ]
@@ -93,10 +241,10 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-30T22:11:56.581Z",
-    "duration": 1239.9030000000002,
-    "expected": 0,
-    "skipped": 1,
+    "startTime": "2026-10-31T02:30:35.828Z",
+    "duration": 301844.20900000003,
+    "expected": 1,
+    "skipped": 0,
     "unexpected": 0,
     "flaky": 0
   }
