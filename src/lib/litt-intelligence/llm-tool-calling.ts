@@ -1109,7 +1109,7 @@ async function attemptOpenAiCompatible(
   model: string,
   req: AttemptRequest,
   ctx: AttemptContext,
-  endpoint: { baseUrl: string; headers: Record<string, string> },
+  endpoint: { baseUrl: string; headers: Record<string, string>; extraBody?: Record<string, unknown> },
 ): Promise<LLMToolCallResponse> {
   const openAiTools = toOpenRouterTools(req.tools);
   const body: Record<string, unknown> = {
@@ -1120,6 +1120,7 @@ async function attemptOpenAiCompatible(
       ...req.messages.map(toOpenRouterMessage),
     ],
     temperature: req.temperature ?? 0.15,
+    ...endpoint.extraBody,
   };
 
   if (req.maxTokens) body.max_tokens = req.maxTokens;
@@ -1273,6 +1274,30 @@ function ollamaSizeRank(m: OllamaModelInfo): number {
   return m.sizeBytes > 0 ? m.sizeBytes : Number.MAX_SAFE_INTEGER;
 }
 
+/** Context-window tag convention (`name:8k`) used by LiTT's local builds.
+ *  Between equal-size candidates the smaller window wins — a 64k KV/attention
+ *  budget on modest local hardware turns a 120s inference into a timeout.
+ *  Untagged models sort last (unknown, not proven-small). */
+function ollamaCtxRank(m: OllamaModelInfo): number {
+  const tag = m.name.match(/:(\d+)k$/i);
+  return tag ? Number(tag[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+/** Reasoning-model families Ollama can suppress via `think:false` — a
+ *  thinking model emits a long `reasoning` preamble before `content`/tool
+ *  calls, which burns the whole attempt budget before a single tool call
+ *  arrives. */
+const OLLAMA_REASONING_FAMILY = /qwen3|deepseek-r1|deepseek-v3\.1|gpt-oss|magistral/i;
+
+function isOllamaReasoningModel(m: OllamaModelInfo | undefined, name: string): boolean {
+  // LiTT's own tool builds are qwen3-based thinking models — the tag carries
+  // no family hint, so the prefix is the only signal when /api/tags details
+  // are unavailable (or the model came from the OLLAMA_MODEL override).
+  if (OLLAMA_LITT_BUILD.test(name)) return true;
+  if (OLLAMA_REASONING_FAMILY.test(name)) return true;
+  return !!m?.families.some((f) => OLLAMA_REASONING_FAMILY.test(f));
+}
+
 /** Pick a local model. When the request requires tools, only tool-capable
  *  families are eligible — a model that cannot emit tool calls is never
  *  selected just because it is free. Among eligible candidates the smallest
@@ -1282,7 +1307,9 @@ function pickOllamaModel(available: OllamaModelInfo[], toolsRequired: boolean): 
   const override = process.env.OLLAMA_MODEL;
   if (override) return override;
   if (available.length === 0) return null;
-  const sorted = [...available].sort((a, b) => ollamaSizeRank(a) - ollamaSizeRank(b));
+  const sorted = [...available].sort(
+    (a, b) => ollamaSizeRank(a) - ollamaSizeRank(b) || ollamaCtxRank(a) - ollamaCtxRank(b),
+  );
   if (!toolsRequired) return sorted[0].name;
   return sorted.find(isOllamaToolCapable)?.name ?? null;
 }
@@ -1452,9 +1479,16 @@ async function attemptOllama(
     health: "healthy",
     credentialState: "not_required",
   };
+  const modelInfo = available.find((m) => m.name === model);
   return attemptOpenAiCompatible(route, model, req, inferenceCtx, {
     baseUrl: `${endpoint}/v1`,
     headers: {},
+    // Reasoning-family builds (qwen3/deepseek/gpt-oss) emit a long
+    // `reasoning` preamble before content/tool calls — that preamble alone
+    // exhausted the attempt timeout on local hardware. think:false asks the
+    // model to answer directly; Ollama ignores it for non-thinking models
+    // only when the family advertises thinking, so gate on the metadata.
+    extraBody: isOllamaReasoningModel(modelInfo, model) ? { think: false } : undefined,
   });
 }
 

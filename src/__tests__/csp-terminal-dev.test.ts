@@ -20,10 +20,20 @@ import { devTerminalConnectSrcEntries } from "../lib/terminal-csp";
 describe("devTerminalConnectSrcEntries", () => {
   it("always includes the historical default port on every loopback host", () => {
     const entries = devTerminalConnectSrcEntries({});
-    for (const host of ["localhost", "127.0.0.1", "[::1]"]) {
+    for (const host of ["localhost", "127.0.0.1"]) {
       expect(entries).toContain(`ws://${host}:4001`);
       expect(entries).toContain(`http://${host}:4001`);
     }
+  });
+
+  it("never emits bracketed IPv6 — it is not a valid CSP source", () => {
+    const entries = devTerminalConnectSrcEntries({
+      NEXT_PUBLIC_TERMINAL_WS_URL: "ws://[::1]:4011",
+    });
+    expect(entries.some((e) => e.includes("["))).toBe(false);
+    // The ::1 configured port is still covered via the localhost entries.
+    expect(entries).toContain("ws://localhost:4011");
+    expect(entries).toContain("ws://127.0.0.1:4011");
   });
 
   it("derives the configured loopback terminal port (4011) for ws and http", () => {
@@ -31,7 +41,7 @@ describe("devTerminalConnectSrcEntries", () => {
       NEXT_PUBLIC_TERMINAL_WS_URL: "ws://127.0.0.1:4011",
       NEXT_PUBLIC_TERMINAL_HTTP_URL: "http://127.0.0.1:4011",
     });
-    for (const host of ["localhost", "127.0.0.1", "[::1]"]) {
+    for (const host of ["localhost", "127.0.0.1"]) {
       expect(entries).toContain(`ws://${host}:4011`);
       expect(entries).toContain(`http://${host}:4011`);
     }

@@ -28,8 +28,11 @@ export const TERMINAL_URL_ENV_VARS = [
 /** Ports emitted even when nothing is configured — the historical default. */
 const DEFAULT_TERMINAL_PORTS = ["4001"];
 
-/** Loopback hostnames the browser can dial after host substitution. */
-const LOOPBACK_DIAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"] as const;
+/** Loopback hostnames the browser can dial after host substitution.
+ *  Bracketed IPv6 (`ws://[::1]:port`) is NOT a valid CSP source — Chrome
+ *  drops it with a console error — and `localhost` already covers ::1
+ *  resolution, so only these two are emitted. */
+const LOOPBACK_DIAL_HOSTS = ["localhost", "127.0.0.1"] as const;
 
 const LOOPBACK_URL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 

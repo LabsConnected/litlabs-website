@@ -1393,6 +1393,57 @@ describe("callLLMWithTools — Ollama local route", () => {
     expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-tools:4k");
   });
 
+  it("sends think:false to reasoning-family builds so tool calls are not stalled", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => [
+      { name: "litt-hermes-fast:8k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
+    ]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-hermes-fast:8k"]))
+      .mockResolvedValueOnce(makeSuccessResponse("litt-hermes-fast:8k", "direct answer"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    // The litt-* builds are qwen3 reasoning models — without think:false the
+    // completion burns the budget on `reasoning` and `content` stays empty.
+    expect(lastBodyFor("11434/v1/chat/completions").think).toBe(false);
+  });
+
+  it("does not send think:false to non-reasoning local models", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => [
+      { name: "llama3.1:8b", sizeBytes: 4_000_000_000, families: ["llama"] },
+    ]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["llama3.1:8b"]))
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "plain"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(lastBodyFor("11434/v1/chat/completions").think).toBeUndefined();
+  });
+
+  it("prefers the smaller context tag between equal-size candidates", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => [
+      { name: "litt-hermes-fast:64k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
+      { name: "litt-hermes-fast:8k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
+    ]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-hermes-fast:8k"]))
+      .mockResolvedValueOnce(makeSuccessResponse("litt-hermes-fast:8k", "small ctx ok"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-hermes-fast:8k");
+  });
+
   it("bounds the cold load by OLLAMA_LOAD_TIMEOUT_MS, not the inference timeout", async () => {
     vi.stubEnv("LITT_DISABLE_OLLAMA", "");
     vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
