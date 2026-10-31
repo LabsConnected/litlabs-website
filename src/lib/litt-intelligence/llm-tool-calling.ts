@@ -952,6 +952,21 @@ function normalizeRecoveredInputs(
       delete out[key];
     }
   }
+  // Small models wrap scalar args in envelope objects —
+  // `content: {type:"text", text:"<html>…"}` or `path: {value:"…"}` —
+  // which then fail the registry's type validation at execution (the call
+  // never starts). Unwrap to the declared scalar type; only single-key or
+  // text-bearing envelopes so a genuinely complex arg is never mangled.
+  for (const key of Object.keys(out)) {
+    const declared = props[key] as { type?: string } | undefined;
+    if (!declared || declared.type !== "string") continue;
+    const v = out[key];
+    if (typeof v === "string" || !v || typeof v !== "object") continue;
+    const o = v as Record<string, unknown>;
+    if (typeof o.text === "string") out[key] = o.text;
+    else if (typeof o.value === "string") out[key] = o.value;
+    else if (typeof o.content === "string") out[key] = o.content;
+  }
   return out;
 }
 
