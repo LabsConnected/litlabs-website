@@ -13,10 +13,9 @@ const BASE = process.env.LIVE_BASE_URL ?? "http://localhost:3001";
 const SHOTS = path.join(__dirname, "shots");
 mkdirSync(SHOTS, { recursive: true });
 
-const PROMPT_BUILD =
-  "Build a single-page website for a coffee shop called Ember Roast. Hero section, a menu list with 3 items, contact footer, dark warm theme. Create the actual site files in the project.";
+const PROMPT_BUILD = "Build a modern responsive website.";
 const PROMPT_MODIFY =
-  "Change the theme to a light cream palette and rename the hero heading to 'Ember Roast Coffee House'.";
+  "Change the main heading to \"LiTT STUDIO VERIFIED\" and update the theme to purple.";
 
 async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
@@ -421,6 +420,26 @@ test("Studio live acceptance — full generate/modify/persist flow", async ({ pa
   const { blocks: blocks2 } = await listBlocks(request, page, projectId!);
   evidence.afterModify = { files: files2.map((f) => f.name), blockCount: blocks2.length };
   console.log(`[verify] blocks ${blocksBefore} → ${blocks2.length}`);
+
+  // On-disk verification (mission): read the actual index.html through the
+  // same raw endpoint the export uses — the heading and theme must have
+  // landed in the workspace file, not just in a tool's self-report.
+  const indexPath = files2.find((f) => /(^|\/)index\.html$/i.test(f.name))?.name;
+  let onDisk: { heading: boolean | null; purple: boolean | null } = {
+    heading: null,
+    purple: null,
+  };
+  if (indexPath) {
+    const html = (await fetchFileRaw(request, page, projectId!, indexPath)).toString("utf-8");
+    onDisk = {
+      heading: html.includes("LiTT STUDIO VERIFIED"),
+      purple: /purple|rebeccapurple|violet|indigo|lavender|plum|orchid|amethyst|mauve|fuchsia|magenta|#([0-9a-f]{2})?[89a-f][0-9a-f](00|0[0-9a-f])[89a-f][0-9a-f]{2}/i.test(
+        html,
+      ),
+    };
+    console.log(`[verify] on-disk heading=${onDisk.heading} purple=${onDisk.purple}`);
+  }
+  evidence.afterModify.onDisk = onDisk;
   await shot(page, "05-after-modify");
 
   // ── 9-10. Save + reload → persistence ──────────────────────────
@@ -468,7 +487,12 @@ test("Studio live acceptance — full generate/modify/persist flow", async ({ pa
     zipPath,
     hasIndexHtml: Boolean(indexEntry),
     indexContainsModifiedHeading: indexEntry
-      ? indexEntry.data.toString("utf-8").includes("Ember Roast Coffee House")
+      ? indexEntry.data.toString("utf-8").includes("LiTT STUDIO VERIFIED")
+      : null,
+    indexContainsPurpleTheme: indexEntry
+      ? /purple|rebeccapurple|violet|indigo|lavender|plum|orchid|amethyst|mauve|fuchsia|magenta|#([0-9a-f]{2})?[89a-f][0-9a-f](00|0[0-9a-f])[89a-f][0-9a-f]{2}/i.test(
+          indexEntry.data.toString("utf-8"),
+        )
       : null,
   };
   console.log(`[export] ${packed.length} files → ${zip.length}B zip (index.html=${Boolean(indexEntry)})`);

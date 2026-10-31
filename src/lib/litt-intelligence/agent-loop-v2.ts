@@ -674,6 +674,86 @@ export function resolveZeroToolCalls(
 
 // ─── Tool definition conversion ───────────────────────────────────
 
+/**
+ * Minimal website-building toolset offered to small local models
+ * (Local AI Optimization, Priority 1). Everything the agent needs to
+ * inspect, write, patch, and preview a static site — and nothing else.
+ * Browser tools are excluded until a turn genuinely needs live-page
+ * interaction; deterministic preview checks cover render verification.
+ */
+const LOCAL_BUILD_TOOL_IDS = new Set([
+  "files.list",
+  "files.read",
+  "files.write",
+  "files.patch",
+  "files.delete",
+  "files.rename",
+  "files.mkdir",
+  "apply_patch",
+  "search_code",
+  "project.scan",
+  "project.read_context",
+  "preview.start",
+  "preview.stop",
+  "preview.status",
+  "preview.open",
+  "checkpoint.create",
+]);
+
+/**
+ * Capability families that stay within the workspace when the plan
+ * calls for them. If a goal needs ANY family outside this set —
+ * terminal, deployment, web search/fetch, image generation — the task
+ * keeps the full catalog; the slim set is for file/preview work only.
+ * `browser` is listed because the planner marks visual builds as
+ * requiring it for verification — the slim set satisfies that with
+ * preview tools plus deterministic render checks instead.
+ */
+const SLIM_SAFE_FAMILIES: ReadonlySet<string> = new Set([
+  "project_inspection",
+  "filesystem",
+  "preview",
+  "browser",
+  "git",
+  "memory",
+]);
+
+/**
+ * Narrow the offered tools to LOCAL_BUILD_TOOL_IDS when:
+ *  - a local model is the configured route (OLLAMA_MODEL set), and
+ *  - the capability plan needs nothing outside the workspace families.
+ * Returns the ORIGINAL array (reference-equal) when slimming does not
+ * apply or would empty the set — callers distinguish by `!==`.
+ */
+function slimToolsForLocalBuild(
+  tools: LiTTToolDefinition[],
+  capabilityPlan: import("./capability-planner").CapabilityPlan | undefined,
+): LiTTToolDefinition[] {
+  if (!process.env.OLLAMA_MODEL || !capabilityPlan) return tools;
+  const planned = [
+    ...capabilityPlan.requiredCapabilities,
+    ...capabilityPlan.usefulCapabilities,
+  ];
+  if (!planned.every((c) => SLIM_SAFE_FAMILIES.has(c))) return tools;
+  const slim = tools.filter((t) => LOCAL_BUILD_TOOL_IDS.has(t.id));
+  return slim.length > 0 ? slim : tools;
+}
+
+/**
+ * Prompt note appended when the slim set is active. Teaches the small
+ * local model the batch-emit pattern (Priority 2): all writes in one
+ * response, minimal inspection turns — the only way CPU inference
+ * finishes inside the runtime budget.
+ */
+const LOCAL_BUILD_TOOL_NOTE =
+  "## Local build mode\n" +
+  "Only the file and preview tools above exist in this mode — there is no browser, terminal, " +
+  "deploy, search, or image tool. Work directly and efficiently:\n" +
+  "- Read what you need once; do not repeatedly inspect the workspace.\n" +
+  "- Emit EVERY files.write the site needs in ONE response — batch all writes together instead of one per turn.\n" +
+  "- For a new static site, a single files.write with complete inline-CSS HTML is acceptable and fastest.\n" +
+  "- Call preview.start when the files are written to verify the render.";
+
 function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
   return {
     id: tool.id,
@@ -1479,7 +1559,21 @@ async function runAgentLoopV2Inner(
   );
   const { offerable: offerableToolIds, degraded: degradedToolIds } =
     filterOfferableTools(toolHealthMap);
-  const offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  const healthCheckedTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  // ── Local-model tool slimming (Local AI Optimization, Priority 1) ──
+  // When the configured route is a small local model (OLLAMA_MODEL set),
+  // offering the full ~60-schema catalog burns the limited context window
+  // and CPU prefill budget on tools a site build never calls — and
+  // invites wrong-tool picks (confirmed live: browser.click for a theme
+  // edit). For workspace build/edit turns offer only the file + preview
+  // set. Every mutation still passes the SAME permission/approval gates
+  // (this only narrows what is OFFERED, never what is permitted), and
+  // tasks needing terminal/deploy/web/image keep the full catalog.
+  const offerableTools = slimToolsForLocalBuild(healthCheckedTools, capabilityPlan);
+  const toolsSlimmedForLocal = offerableTools !== healthCheckedTools;
+  if (toolsSlimmedForLocal) {
+    cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
+  }
   const healthNote = buildToolHealthPromptNote(toolHealthMap);
   if (healthNote) {
     cfg.systemPrompt += "\n\n" + healthNote;
@@ -3005,9 +3099,20 @@ async function resumeAgentLoopV2Inner(
     },
   );
   const { offerable: resumeOfferableIds } = filterOfferableTools(resumeToolHealthMap);
-  const resumeOfferableTools = availableTools.filter((t) =>
+  const resumeHealthCheckedTools = availableTools.filter((t) =>
     resumeOfferableIds.includes(t.id),
   );
+  // Same local-model slimming as the initial run (Priority 1): the
+  // resumed turn keeps the reduced file+preview set for workspace
+  // build/edit tasks so a post-approval continuation cannot suddenly
+  // re-advertise the ~60-tool catalog mid-run.
+  const resumeOfferableTools = slimToolsForLocalBuild(
+    resumeHealthCheckedTools,
+    resumeCapabilityPlan,
+  );
+  if (resumeOfferableTools !== resumeHealthCheckedTools) {
+    cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
+  }
   const resumeHealthNote = buildToolHealthPromptNote(resumeToolHealthMap);
   if (resumeHealthNote) {
     cfg.systemPrompt += "\n\n" + resumeHealthNote;
