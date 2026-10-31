@@ -88,11 +88,11 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 480919,
+                  "duration": 147781,
                   "errors": [],
                   "stdout": [
                     {
-                      "text": "[dotenv@17.2.2] injecting env (0) from .env.local,.env -- tip: ⚙️  suppress all logs with { quiet: true }\n"
+                      "text": "[dotenv@17.2.2] injecting env (0) from .env.local,.env -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild\n"
                     },
                     {
                       "text": "[auth] signed in as test-user-a-e2e@littree.dev (user_3HEuA6XZJH8GKz9TLpELpnKnbom)\n"
@@ -101,16 +101,10 @@
                       "text": "[shot] 01-studio-loaded.png\n"
                     },
                     {
-                      "text": "[project] created 771be451-c4da-4ec6-a328-33d90400f73c\n"
+                      "text": "[project] created 7acd5a4e-7f8d-4b1b-8d6b-b12f87b6a69c\n"
                     },
                     {
                       "text": "[shot] 02-project-open.png\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
                     },
                     {
                       "text": "[send] Build a single-page website for a coffee shop called Ember R…\n"
@@ -125,52 +119,19 @@
                       "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
                     },
                     {
+                      "text": "[run] status=failed activity=Task failed\n"
+                    },
+                    {
+                      "text": "[run.failure] code=TASK_FAILED message=LiTT couldn't complete this request because all currently available AI routes were unavailable or reached their limits. Your project and completed work are preserved — try again shortly, connect a local model, or use a personal provider key.\n"
+                    },
+                    {
+                      "text": "[run.tools] started=0 failed=[]\n"
+                    },
+                    {
                       "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
                     },
                     {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
                       "text": "[console.error] Failed to load resource: the server responded with a status of 403 (Forbidden)\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[run] status=working activity=LiTT is working on the task\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
                     },
                     {
                       "text": "[verify] files=[\"index.html\"] blocks=0\n"
@@ -179,52 +140,22 @@
                       "text": "[shot] 03-after-build.png\n"
                     },
                     {
-                      "text": "[preview] 200 runtime=ready url=/api/preview/771be451-c4da-4ec6-a328-33d90400f73c/index.html\n"
+                      "text": "[preview] 200 runtime=ready url=/api/preview/7acd5a4e-7f8d-4b1b-8d6b-b12f87b6a69c/index.html\n"
                     },
                     {
-                      "text": "[preview] GET /api/preview/771be451-c4da-4ec6-a328-33d90400f73c/index.html → 200\n"
-                    },
-                    {
-                      "text": "[shot] 04-preview-visible.png\n"
+                      "text": "[preview] GET /api/preview/7acd5a4e-7f8d-4b1b-8d6b-b12f87b6a69c/index.html → 200\n"
                     },
                     {
                       "text": "[send] Change the theme to a light cream palette and rename the her…\n"
                     },
                     {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
                       "text": "[run] status=working activity=LiTT is working on the task\n"
                     },
                     {
-                      "text": "[console.error] Failed to load resource: the server responded with a status of 401 (Unauthorized)\n"
+                      "text": "[run] status=cancelled activity=Task cancelled by user\n"
                     },
                     {
-                      "text": "[run] status=waiting_for_user activity=Approval required for browser.click\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[approve:api] #1 pausedRun=3693bc74-9493-4cd3-a800-e4a931c1e77a (card not rendered)\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[run] status=working activity=Approval granted for browser.click\n"
-                    },
-                    {
-                      "text": "[run] status=failed activity=Task failed\n"
-                    },
-                    {
-                      "text": "[run.failure] code=TASK_FAILED message=The approved workspace operation failed, so the project was not completed.\n"
-                    },
-                    {
-                      "text": "[run.tools] started=1 failed=[\"browser.click\"]\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
+                      "text": "[run.tools] started=0 failed=[]\n"
                     },
                     {
                       "text": "[verify] blocks 0 → 0\n"
@@ -239,12 +170,6 @@
                       "text": "[terminal] capability → 200\n"
                     },
                     {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
-                      "text": "[console.error] WebSocket connection to 'ws://127.0.0.1:4011/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED\n"
-                    },
-                    {
                       "text": "[voice] health → 200\n"
                     },
                     {
@@ -257,12 +182,12 @@
                       "text": "=== EVIDENCE ===\n"
                     },
                     {
-                      "text": "{\n  \"auth\": {\n    \"userId\": \"user_3HEuA6XZJH8GKz9TLpELpnKnbom\",\n    \"email\": \"test-user-a-e2e@littree.dev\"\n  },\n  \"entry\": \"composer\",\n  \"projectId\": \"771be451-c4da-4ec6-a328-33d90400f73c\",\n  \"build\": {\n    \"status\": \"failed\",\n    \"approvals\": 0,\n    \"content\": \"LiTT couldn't complete this request because all currently available AI routes were unavailable or reached their limits. Your project and completed work are preserved — try again shortly, connect a local model, or use a personal provider key.\"\n  },\n  \"afterBuild\": {\n    \"files\": [\n      \"index.html\"\n    ],\n    \"canvasId\": null,\n    \"blockCount\": 0\n  },\n  \"preview\": {\n    \"status\": 200,\n    \"runtimeStatus\": \"ready\",\n    \"url\": \"/api/preview/771be451-c4da-4ec6-a328-33d90400f73c/index.html\",\n    \"http\": 200\n  },\n  \"modify\": {\n    \"status\": \"failed\",\n    \"approvals\": 1,\n    \"failure\": {\n      \"code\": \"TASK_FAILED\",\n      \"message\": \"The approved workspace operation failed, so the project was not completed.\"\n    }\n  },\n  \"afterModify\": {\n    \"files\": [\n      \"index.html\"\n    ],\n    \"blockCount\": 0\n  },\n  \"afterReload\": {\n    \"files\": [\n      \"index.html\"\n    ],\n    \"blockCount\": 0\n  },\n  \"terminal\": {\n    \"http\": 200,\n    \"body\": \"{\\\"id\\\":\\\"project-terminal\\\",\\\"status\\\":\\\"unavailable\\\",\\\"terminalStatus\\\":\\\"disconnected\\\",\\\"sessionId\\\":null,\\\"projectId\\\":null,\\\"workspaceId\\\":null,\\\"lastVerifiedAt\\\":\\\"2026-10-31T02:52:56.003Z\\\",\\\"error\\\":null,\\\"serverReachable\\\":true}\",\n    \"uiBadge\": false\n  },\n  \"voice\": {\n    \"http\": 200,\n    \"body\": \"{\\\"provider\\\":\\\"inworld\\\",\\\"configured\\\":false,\\\"tokenService\\\":\\\"error\\\",\\\"transport\\\":\\\"disconnected\\\",\\\"available\\\":false,\\\"errorCode\\\":\\\"VOICE_NOT_CONFIGURED\\\",\\\"message\\\":\\\"Voice is not configured. Missing: INWORLD_API_KEY, INWORLD_LITT_VOICE, VOICE_AUTH_SECRET.\\\",\\\"details\\\":{\\\"apiKey\\\":false,\\\"littVoice\\\":false,\\\"sparkVoic\"\n  },\n  \"export\": {\n    \"fileCount\": 1,\n    \"zipBytes\": 9194,\n    \"zipPath\": \"/root/litt-canonical/e2e-live/shots/project-export-771be451-c4da-4ec6-a328-33d90400f73c.zip\",\n    \"hasIndexHtml\": true,\n    \"indexContainsModifiedHeading\": false\n  }\n}\n"
+                      "text": "{\n  \"auth\": {\n    \"userId\": \"user_3HEuA6XZJH8GKz9TLpELpnKnbom\",\n    \"email\": \"test-user-a-e2e@littree.dev\"\n  },\n  \"entry\": \"composer\",\n  \"projectId\": \"7acd5a4e-7f8d-4b1b-8d6b-b12f87b6a69c\",\n  \"build\": {\n    \"status\": \"failed\",\n    \"approvals\": 0,\n    \"failure\": {\n      \"code\": \"TASK_FAILED\",\n      \"message\": \"LiTT couldn't complete this request because all currently available AI routes were unavailable or reached their limits. Your project and completed work are preserved — try again shortly, connect a local model, or use a personal provider key.\"\n    }\n  },\n  \"afterBuild\": {\n    \"files\": [\n      \"index.html\"\n    ],\n    \"canvasId\": null,\n    \"blockCount\": 0\n  },\n  \"preview\": {\n    \"status\": 200,\n    \"runtimeStatus\": \"ready\",\n    \"url\": \"/api/preview/7acd5a4e-7f8d-4b1b-8d6b-b12f87b6a69c/index.html\",\n    \"http\": 200\n  },\n  \"modify\": {\n    \"status\": \"cancelled\",\n    \"approvals\": 0,\n    \"failure\": null\n  },\n  \"afterModify\": {\n    \"files\": [\n      \"index.html\"\n    ],\n    \"blockCount\": 0\n  },\n  \"afterReload\": {\n    \"files\": [\n      \"index.html\"\n    ],\n    \"blockCount\": 0\n  },\n  \"terminal\": {\n    \"http\": 200,\n    \"body\": \"{\\\"id\\\":\\\"project-terminal\\\",\\\"status\\\":\\\"unavailable\\\",\\\"terminalStatus\\\":\\\"disconnected\\\",\\\"sessionId\\\":null,\\\"projectId\\\":null,\\\"workspaceId\\\":null,\\\"lastVerifiedAt\\\":\\\"2026-10-31T03:57:08.829Z\\\",\\\"error\\\":null,\\\"serverReachable\\\":true}\",\n    \"uiBadge\": false\n  },\n  \"voice\": {\n    \"http\": 200,\n    \"body\": \"{\\\"provider\\\":\\\"inworld\\\",\\\"configured\\\":false,\\\"tokenService\\\":\\\"error\\\",\\\"transport\\\":\\\"disconnected\\\",\\\"available\\\":false,\\\"errorCode\\\":\\\"VOICE_NOT_CONFIGURED\\\",\\\"message\\\":\\\"Voice is not configured. Missing: INWORLD_API_KEY, INWORLD_LITT_VOICE, VOICE_AUTH_SECRET.\\\",\\\"details\\\":{\\\"apiKey\\\":false,\\\"littVoice\\\":false,\\\"sparkVoic\"\n  },\n  \"export\": {\n    \"fileCount\": 1,\n    \"zipBytes\": 9194,\n    \"zipPath\": \"/root/litt-canonical/e2e-live/shots/project-export-7acd5a4e-7f8d-4b1b-8d6b-b12f87b6a69c.zip\",\n    \"hasIndexHtml\": true,\n    \"indexContainsModifiedHeading\": false\n  }\n}\n"
                     }
                   ],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-31T02:45:03.488Z",
+                  "startTime": "2026-10-31T03:54:55.151Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -280,8 +205,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-31T02:45:00.480Z",
-    "duration": 490215.41099999996,
+    "startTime": "2026-10-31T03:54:52.807Z",
+    "duration": 154230.883,
     "expected": 1,
     "skipped": 0,
     "unexpected": 0,
