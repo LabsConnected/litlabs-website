@@ -1135,9 +1135,12 @@ async function attemptOpenAiCompatible(
 
 // ─── Ollama ───────────────────────────────────────────────────────
 
-/** Local model families with reliable structured tool calling. */
+/** Local model families with reliable structured tool calling. The
+ *  litt-hermes builds are Qwen3-based and litt-tools is the tool-tuned
+ *  variant — both advertise tool support even though their custom tags
+ *  don't match the upstream family names below. */
 const OLLAMA_TOOL_CAPABLE =
-  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss/i;
+  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss|litt-hermes|litt-tools/i;
 
 const OLLAMA_PROBE_TTL_MS = 5 * 60_000;
 const OLLAMA_PROBE_TIMEOUT_MS = 1_500;
@@ -1187,7 +1190,18 @@ function pickOllamaModel(available: string[], toolsRequired: boolean): string | 
   if (override) return override;
   if (available.length === 0) return null;
   if (!toolsRequired) return available[0];
-  return available.find((m) => OLLAMA_TOOL_CAPABLE.test(m)) ?? null;
+  const capable = available.filter((m) => OLLAMA_TOOL_CAPABLE.test(m));
+  // Prefer the fast local tool builds: on CPU-heavy dev hosts a full hermes
+  // variant measured >300s per call while litt-hermes-fast answered in ~73s,
+  // and both emit valid tool calls. The auto pick must be usable, not just
+  // nominally capable.
+  return (
+    capable.find((m) => /^litt-hermes-fast:8k/i.test(m)) ??
+    capable.find((m) => /^litt-hermes-fast/i.test(m)) ??
+    capable.find((m) => /^litt-hermes|^litt-tools/i.test(m)) ??
+    capable[0] ??
+    null
+  );
 }
 
 async function attemptOllama(

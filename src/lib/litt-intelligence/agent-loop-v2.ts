@@ -1097,7 +1097,14 @@ async function runAgentLoopV2Inner(
   );
   const { offerable: offerableToolIds, degraded: degradedToolIds } =
     filterOfferableTools(toolHealthMap);
-  const offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  const offerableTools = availableTools
+    .filter((t) => offerableToolIds.includes(t.id))
+    // Browser tools only make sense when this loop drives a browser session
+    // (cfg.browserSessionId). Offering them to a build/chat run invites the
+    // model to burn steps on browser_* calls it cannot usefully complete —
+    // measured failure: a website-build prompt picked browser_type, then a
+    // malformed browser.click, instead of files.write.
+    .filter((t) => cfg.browserSessionId || !t.id.startsWith("browser."));
   const healthNote = buildToolHealthPromptNote(toolHealthMap);
   if (healthNote) {
     cfg.systemPrompt += "\n\n" + healthNote;
@@ -2499,9 +2506,11 @@ async function resumeAgentLoopV2Inner(
     },
   );
   const { offerable: resumeOfferableIds } = filterOfferableTools(resumeToolHealthMap);
-  const resumeOfferableTools = availableTools.filter((t) =>
-    resumeOfferableIds.includes(t.id),
-  );
+  const resumeOfferableTools = availableTools
+    .filter((t) => resumeOfferableIds.includes(t.id))
+    // Same browser-tool scoping as the initial run: only a loop that owns a
+    // browser session may offer browser.* tools.
+    .filter((t) => cfg.browserSessionId || !t.id.startsWith("browser."));
   const resumeHealthNote = buildToolHealthPromptNote(resumeToolHealthMap);
   if (resumeHealthNote) {
     cfg.systemPrompt += "\n\n" + resumeHealthNote;
