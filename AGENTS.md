@@ -2,7 +2,12 @@
 
 ## Canonical Repository Root
 
-~/litt-canonical
+~/litt-canonical — the NATIVE Termux checkout at
+/data/data/com.termux/files/home/litt-canonical
+
+Inside the Ubuntu proot container, `~/litt-canonical` (`/root/litt-canonical`)
+resolves to a SEPARATE secondary clone — it is NOT canonical and must not be
+used as a source for new work (see its NOTICE-NON-CANONICAL.md).
 
 All LiTT CLI development, verification, builds, relinks, commits, and pushes
 must run from the canonical repository unless a task explicitly names another

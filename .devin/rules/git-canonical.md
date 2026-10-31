@@ -21,7 +21,8 @@ trigger: always_on
 
 ## Canonical repository
 
-- Treat `~/litt-canonical` as the canonical repository; it should normally remain on `main`.
+- Treat `~/litt-canonical` — the native Termux checkout at `/data/data/com.termux/files/home/litt-canonical` — as the canonical repository; it should normally remain on `main`.
+- Inside the proot container, `/root/litt-canonical` is a secondary clone, NOT canonical; do not start new work from it.
 - Feature work belongs in `~/litt-worktrees/...` or another dedicated worktree.
 - Never leave canonical `main` in the middle of a merge, rebase, or cherry-pick.
 - If canonical is dirty or mid-operation, diagnose it before starting new work.
