@@ -7,7 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: __dirname,
-  testMatch: /studio-live\.spec\.ts/,
+  testMatch: /(studio-live|cancel-repro)\.spec\.ts/,
   timeout: 30 * 60_000, // CPU inference is slow — whole-file budget
   fullyParallel: false,
   workers: 1,

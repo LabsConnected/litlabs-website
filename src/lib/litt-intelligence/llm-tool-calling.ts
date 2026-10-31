@@ -90,6 +90,14 @@ export interface LLMToolCallResponse {
   toolCalls: ToolCallRequest[];
   finishReason: string;
   model: string;
+  /** Provider-reported token usage (OpenAI `usage` block / Ollama eval
+   *  counts). Lets diagnostics separate prefill from generation cost. */
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    promptEvalMs?: number;
+    evalMs?: number;
+  };
   /** Provider that produced this response (e.g. "gemini", "openrouter"). */
   provider?: string;
   /** Redacted shape evidence for diagnosing provider/tool protocol failures. */
@@ -1101,11 +1109,23 @@ function parseOpenAiCompatibleResponse(
 
   const normalized = normalizeTextToolCalls({ text, toolCalls, finishReason }, tools, toolIdMap, route.provider, model);
 
+  const usage = data.usage as
+    | { prompt_tokens?: number; completion_tokens?: number; prompt_eval_duration?: number; eval_duration?: number }
+    | undefined;
+
   return {
     ...normalized,
     model: (data.model as string) ?? model,
     provider: route.provider,
     responseShape,
+    usage: usage
+      ? {
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+          promptEvalMs: typeof usage.prompt_eval_duration === "number" ? Math.round(usage.prompt_eval_duration / 1e6) : undefined,
+          evalMs: typeof usage.eval_duration === "number" ? Math.round(usage.eval_duration / 1e6) : undefined,
+        }
+      : undefined,
   };
 }
 
@@ -1771,6 +1791,10 @@ export async function callLLMWithTools(
           model: result.model,
           latencyMs,
           toolCalls: result.toolCalls.length,
+          promptTokens: result.usage?.promptTokens,
+          completionTokens: result.usage?.completionTokens,
+          promptEvalMs: result.usage?.promptEvalMs,
+          evalMs: result.usage?.evalMs,
           responseContentType: result.responseShape?.contentType,
           responseMessageKeys: result.responseShape?.messageKeys.join(","),
           responseToolCalls: result.responseShape?.toolCalls.map((call) =>
