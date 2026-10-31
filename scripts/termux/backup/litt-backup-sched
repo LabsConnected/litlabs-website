@@ -1,0 +1,70 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# litt-backup-sched — Termux-side scheduler daemon for litt-backup.
+# Runs due tiers serially (incremental 30m, gitsnap 6h, daily 04:17, verify Sun 05:42).
+# Start: litt-backup-sched start | install enables auto-revival mechanisms.
+set -uo pipefail
+
+TH=/data/data/com.termux/files/home
+PREFIX=/data/data/com.termux/files/usr
+LB=${LITT_BACKUP_BIN:-$TH/bin/litt-backup}
+STATE=${LITT_BACKUP_STATE:-$TH/litt-backup/state}
+PIDF=$STATE/sched.pid
+SLOG=$STATE/sched.log
+mkdir -p "$STATE"; export PATH="$PREFIX/bin:$PATH"
+
+due(){ # $1 marker-file $2 interval-seconds
+  local last; last=$(cat "$STATE/$1" 2>/dev/null)
+  [ -z "$last" ] && return 0
+  [ $(( $(date +%s) - $(date -d "$last" +%s 2>/dev/null || echo 0) )) -ge "$2" ] && return 0
+  return 1
+}
+
+tick(){
+  # serialized — litt-backup's flock also guards; one tier per wake to stay light
+  if due last_incremental 1740;   then "$LB" run incremental >>"$SLOG" 2>&1; sleep 5
+  elif due last_gitsnap 21600;    then "$LB" run gitsnap     >>"$SLOG" 2>&1; sleep 5
+  elif [ "$(date +%H%M)" -ge 0417 ] && due last_daily 79200; then "$LB" run daily >>"$SLOG" 2>&1; sleep 5
+  elif [ "$(date +%u)" = 7 ] && [ "$(date +%H%M)" -ge 0542 ] && due last_verify 561600; then
+    "$LB" verify >>"$SLOG" 2>&1
+  fi
+}
+
+case ${1:-} in
+  start)
+    if [ -f "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null; then
+      echo "litt-backup-sched already running (pid $(cat "$PIDF"))"; exit 0
+    fi
+    setsid nohup bash -c 'echo $$ > "'"$PIDF"'"; while true; do "'"$0"'" tick; sleep 60; done' >>"$SLOG" 2>&1 &
+    sleep 1; echo "litt-backup-sched started (pid $(cat "$PIDF" 2>/dev/null))"
+    ;;
+  tick)   tick ;;
+  stop)   [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null && rm -f "$PIDF" && echo stopped ;;
+  status)
+    [ -f "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null && echo "running (pid $(cat "$PIDF"))" || echo "not running"
+    tail -5 "$SLOG" 2>/dev/null ;;
+  install)
+    mkdir -p "$TH/.termux/boot" "$PREFIX/etc/sv/litt-backup" "$PREFIX/var/service"
+    # 1) Termux:Boot hook (active if the Termux:Boot app is installed)
+    cat > "$TH/.termux/boot/99-litt-backup" <<EOF
+#!/data/data/com.termux/files/usr/bin/sh
+$TH/bin/litt-backup-sched start
+EOF
+    chmod +x "$TH/.termux/boot/99-litt-backup"
+    # 2) termux-services definition (supervised auto-restart when runsvdir is used)
+    cat > "$PREFIX/etc/sv/litt-backup/run" <<EOF
+#!/data/data/com.termux/files/usr/bin/sh
+exec $TH/bin/litt-backup-sched tick-forever
+EOF
+    chmod +x "$PREFIX/etc/sv/litt-backup/run"
+    ln -sfn "$PREFIX/etc/sv/litt-backup" "$PREFIX/var/service/litt-backup"
+    # 3) .bashrc auto-revive (idempotent; revives on every interactive Termux shell)
+    if ! grep -q 'litt-backup-sched start' "$TH/.bashrc" 2>/dev/null; then
+      printf '\n# >>> litt-backup-sched (auto-revive; remove this block to disable) >>>\n%s\n# <<< litt-backup-sched <<<\n' \
+        'litt-backup-sched start >/dev/null 2>&1 &' >> "$TH/.bashrc"
+    fi
+    "$0" start
+    echo "installed: Termux:Boot hook + sv service + .bashrc revive + started now"
+    ;;
+  tick-forever) while true; do tick; sleep 60; done ;;
+  *) echo "usage: litt-backup-sched {start|stop|status|install|tick}" ;;
+esac

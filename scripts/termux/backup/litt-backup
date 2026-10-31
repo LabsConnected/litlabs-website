@@ -1,0 +1,377 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# litt-backup — automatic backup & recovery for the LiTT phone dev environment.
+# Tiers: incremental (30m) | gitsnap (6h) | daily | verify (weekly)
+# Layers: phone (restricted dir) -> PC (tailscale ssh) -> cloud (rclone, optional)
+set -uo pipefail
+
+TH=/data/data/com.termux/files/home
+PREFIX=/data/data/com.termux/files/usr
+CONF=${LITT_BACKUP_CONF:-$TH/litt-backup/config.env}
+[ -f "$CONF" ] && . "$CONF"
+
+CANON=${CANON:-$TH/litt-canonical}
+ROOT=${LITT_BACKUP_ROOT:-$TH/litt-backups/system}
+STATE=${LITT_BACKUP_STATE:-$TH/litt-backup/state}
+QUEUE=$STATE/queue
+LOCK=$STATE/lock
+LOG=$STATE/litt-backup.log
+PC_TARGET=${PC_TARGET:-litbi@100.107.123.73}
+PC_PORT=${PC_PORT:-2222}
+PC_KEY=${PC_KEY:-$TH/.ssh/litt_pc}
+PC_DIR=${PC_DIR:-litt-phone-backups}
+CLOUD_REMOTE=${CLOUD_REMOTE:-}
+MIN_FREE_GB=${MIN_FREE_GB:-3}
+KEEP_DAILY=${KEEP_DAILY:-7}
+KEEP_SNAP=${KEEP_SNAP:-4}
+KEEP_INCR=${KEEP_INCR:-48}
+PC_KEEP_DAILY=${PC_KEEP_DAILY:-14}
+PC_KEEP_WEEKLY=${PC_KEEP_WEEKLY:-4}
+TS=$(date +%Y%m%d-%H%M%S)
+DAY=$(date +%Y%m%d)
+
+mkdir -p "$ROOT"/{increments,git-snapshots,daily,verify} "$STATE" "$QUEUE"
+chmod 700 "$ROOT" "$STATE" 2>/dev/null
+export PATH="$PREFIX/bin:$PATH"
+
+log(){ echo "$(date '+%m-%d %H:%M:%S') $*" >> "$LOG"; }
+say(){ echo "$*"; log "$*"; }
+die(){ say "FAIL: $*"; exit 1; }
+
+with_lock(){
+  exec 9>"$LOCK"
+  flock -n 9 || { say "SKIP: another backup job holds the lock"; exit 0; }
+  "$@"
+}
+
+guard(){
+  local tier=$1
+  local avail
+  avail=$(df -k "$ROOT" | awk 'NR==2{print int($4/1048576)}')
+  [ "${avail:-0}" -lt "$MIN_FREE_GB" ] && die "low disk: ${avail}G free (< ${MIN_FREE_GB}G)"
+  # battery: only gate heavy tiers when a readable battery source says discharging-low
+  if [ "$tier" != incremental ]; then
+    for b in /sys/class/power_supply/battery /sys/class/power_supply/Battery; do
+      [ -r "$b/capacity" ] || continue
+      cap=$(cat "$b/capacity"); st=$(cat "$b/status" 2>/dev/null)
+      [ "$cap" -lt 15 ] && [ "$st" = "Discharging" ] && die "battery ${cap}% discharging — heavy tier paused"
+    done
+  fi
+}
+
+worktrees(){ git -C "$CANON" worktree list --porcelain | awk '/^worktree /{print $2}'; }
+
+# porcelain file list incl. whitelisted ignored files (.env*, *.local) minus heavy dirs
+dirty_files(){
+  local wt=$1
+  git -C "$wt" -c status.showUntrackedFiles=all status --porcelain -z --ignored=matching 2>/dev/null |
+  python3 -c "
+import sys
+d=sys.stdin.buffer.read().split(b'\0')
+out=[]; i=0
+while i<len(d):
+    e=d[i]
+    if not e: i+=1; continue
+    code=e[:2]; fn=e[3:]
+    if code[:1] in (b'R',b'C'): i+=1
+    i+=1
+    s=fn.decode('utf-8','replace')
+    if code==b'!!':
+        import re
+        if not re.search(r'\.env|\.local$|secrets?\.|\.key$|\.pem$',s): continue
+    if re := __import__('re'):
+        if re.search(r'node_modules/|\.next/|/dist/|/build/|coverage/|\.turbo/|__pycache__|\.tsbuildinfo$|\.ollama/models',s): continue
+    out.append(s)
+sys.stdout.write('\0'.join(out))
+"
+}
+
+stash_set(){ git -C "$CANON" rev-parse $(git -C "$CANON" stash list | sed 's/^\(stash@{[0-9]*}\).*/\1/' | tr '\n' ' ') 2>/dev/null; }
+unpushed(){ git -C "$CANON" rev-list --branches --not --remotes 2>/dev/null | sort; }
+
+# reflog syntax can't be bundled — pin each stash to refs/heads/backup/stash-N
+# (the backup/stash-* branch convention) and emit full ref paths as bundle args
+stash_refs(){
+  local i=0
+  while git -C "$CANON" rev-parse --verify -q "stash@{$i}" >/dev/null 2>&1; do
+    git -C "$CANON" update-ref "refs/heads/backup/stash-$(printf %02d $i)" "stash@{$i}"
+    printf 'refs/heads/backup/stash-%02d ' $i
+    i=$((i+1))
+  done
+}
+
+mk_tar(){ # wt files -> tar.gz at $2
+  local wt=$1 out=$2
+  dirty_files "$wt" | python3 -c "
+import sys,tarfile,os
+files=[f for f in sys.stdin.buffer.read().split(b'\0') if f]
+if not files: sys.exit(0)
+with tarfile.open('$out','w:gz') as t:
+    for f in files:
+        p=os.path.join('$wt',f.decode('utf-8','replace'))
+        if os.path.exists(p): t.add(p,arcname=f.decode('utf-8','replace'))
+"
+}
+
+run_incremental(){
+  guard incremental
+  local dst=$ROOT/increments/$TS; mkdir -p "$dst"; chmod 700 "$dst"
+  local n=0 h newshas=""
+  while IFS= read -r wt; do
+    [ -d "$wt" ] || continue
+    local name=$(basename "$wt") hf=$STATE/hashes-$(echo "$wt"|md5sum|cut -c1-8).tsv
+    # hash current dirty set; tar only changed-vs-last
+    local cf=$STATE/changed.$$.$n
+    dirty_files "$wt" | python3 -c "
+import sys,hashlib,os
+old={}
+try:
+    for l in open('$hf'): p,h=l.rstrip('\n').split('\t'); old[p]=h
+except FileNotFoundError: pass
+out=[]; new={}
+for f in sys.stdin.buffer.read().split(b'\0'):
+    if not f: continue
+    s=f.decode('utf-8','replace'); p=os.path.join('$wt',s)
+    if not os.path.isfile(p): continue
+    h=hashlib.sha256(open(p,'rb').read()).hexdigest()
+    new[s]=h
+    if old.get(s)!=h: out.append(s)
+open('$hf','w').write(''.join(f'{p}\t{h}\n' for p,h in new.items()))
+open('$cf','wb').write(b'\0'.join(x.encode() for x in out))
+"
+    [ -s "$cf" ] || { rm -f "$cf"; continue; }
+    python3 -c "
+import sys,tarfile,os
+with tarfile.open('$dst/${name}.tar.gz','w:gz') as t:
+    for f in open('$cf','rb').read().split(b'\0'):
+        if not f: continue
+        p=os.path.join('$wt',f.decode('utf-8','replace'))
+        if os.path.exists(p): t.add(p,arcname=f.decode('utf-8','replace'))
+"
+    rm -f "$cf"
+    n=$((n+1))
+  done < <(worktrees)
+  # new unpushed commits / new stash tips -> small incremental bundle
+  local cur; cur=$( (unpushed; stash_set) | sort | sha256sum | cut -d' ' -f1)
+  local last; last=$(cat $STATE/unpushed-hash 2>/dev/null)
+  if [ "$cur" != "$last" ]; then
+    git -C "$CANON" bundle create "$dst/git-inc.bundle" --branches --not --remotes >/dev/null 2>&1
+    git -C "$CANON" bundle create "$dst/stash-inc.bundle" $(stash_refs) --not --remotes >/dev/null 2>&1
+    echo "$cur" > $STATE/unpushed-hash
+  fi
+  if [ -z "$(ls -A "$dst" 2>/dev/null)" ]; then rmdir "$dst"; else
+    echo "$n worktrees" > "$dst/INFO"; echo "$(date -Iseconds)" >> "$dst/INFO"
+  fi
+  echo "$(date +%s)" > $STATE/last_incremental; echo 0 > $STATE/fail_incremental
+  say "incremental: $n worktrees captured -> ${dst#$ROOT/}"
+}
+
+run_gitsnap(){
+  guard gitsnap
+  local dst=$ROOT/git-snapshots/$TS; mkdir -p "$dst"; chmod 700 "$dst"
+  git -C "$CANON" bundle create "$dst/unpushed-branches.bundle" --branches --not --remotes 2>/dev/null
+  local ss; ss=$(stash_set | sha256sum | cut -d' ' -f1)
+  if [ "$ss" != "$(cat $STATE/stash-hash 2>/dev/null)" ]; then
+    git -C "$CANON" bundle create "$dst/stashes.bundle" $(stash_refs) --not --remotes >/dev/null 2>&1
+    echo "$ss" > $STATE/stash-hash
+  fi
+  while IFS= read -r wt; do
+    [ -d "$wt" ] || continue
+    mk_tar "$wt" "$dst/$(basename "$wt").tar.gz"
+  done < <(worktrees)
+  git -C "$CANON" stash list > "$dst/stash-list.txt"
+  (cd "$dst" && sha256sum * > CHECKSUMS.sha256 2>/dev/null)
+  echo "$(date +%s)" > $STATE/last_gitsnap
+  say "gitsnap: -> ${dst#$ROOT/}"
+}
+
+config_tar(){
+  local out=$1; shift
+  tar -czf "$out" --ignore-failed-read -C "$TH" \
+    --exclude='.ollama/models' --exclude='.ollama/history' --exclude='cache' \
+    .litt .config/litt .config/devin .config/gh .litt-env.sh .litt-functions .litt-install-path.sh \
+    .litt-startup.sh .ssh/litt_pc .ssh/litt_pc.pub .ssh/config .ssh/known_hosts \
+    private-agent/tune private-agent/*.env private-agent/*.py private-agent/*.md \
+    bin .termux/termux.properties litt-backup/config.env 2>/dev/null
+  mkdir -p "$(dirname "$out")/modelfiles"
+  for m in $(curl -s http://127.0.0.1:11434/api/tags 2>/dev/null | python3 -c "import json,sys;[print(m['name']) for m in json.load(sys.stdin)['models']]" 2>/dev/null); do
+    curl -s http://127.0.0.1:11434/api/show -d "{\"name\":\"$m\"}" | python3 -c "import json,sys;print(json.load(sys.stdin).get('modelfile',''))" > "$(dirname "$out")/modelfiles/$(echo "$m"|tr '/:' '__').modelfile" 2>/dev/null
+  done
+  tar -czf "$(dirname "$out")/modelfiles.tar.gz" -C "$(dirname "$out")" modelfiles 2>/dev/null; rm -rf "$(dirname "$out")/modelfiles"
+}
+
+run_daily(){
+  guard daily
+  local dst=$ROOT/daily/$DAY; mkdir -p "$dst"/{bundles,worktrees,configs}; chmod 700 "$dst"
+  git -C "$CANON" bundle create "$dst/bundles/all-refs.bundle" --all 2>/dev/null
+  git -C "$CANON" bundle create "$dst/bundles/stashes.bundle" $(stash_refs) --not --remotes >/dev/null 2>&1
+  git -C "$CANON" bundle create "$dst/bundles/unpushed.bundle" --branches --not --remotes 2>/dev/null
+  while IFS= read -r wt; do
+    [ -d "$wt" ] || continue
+    mk_tar "$wt" "$dst/worktrees/$(basename "$wt").tar.gz"
+  done < <(worktrees)
+  git -C "$CANON" stash list > "$dst/stash-list.txt"
+  git -C "$CANON" worktree list > "$dst/worktree-list.txt"
+  git -C "$CANON" for-each-ref --format='%(refname) %(objectname)' > "$dst/all-refs.txt"
+  config_tar "$dst/configs/config.tar.gz"
+  {
+    echo "# LiTT daily backup $DAY"; echo "created: $(date -Iseconds)"
+    echo "canon: $CANON"; echo "worktrees: $(worktrees|wc -l)"; echo "stashes: $(git -C "$CANON" stash list|wc -l)"
+    echo "unpushed commits: $(unpushed|wc -l)"; echo "secrets: restricted dir 0700; .env captured inside worktree archives — NEVER push"
+  } > "$dst/MANIFEST.md"
+  (cd "$dst" && find . -type f ! -name CHECKSUMS.sha256 -exec sha256sum {} + > CHECKSUMS.sha256)
+  echo "$(date +%s)" > $STATE/last_daily; echo 0 > $STATE/fail_daily
+  say "daily: -> ${dst#$ROOT/}"
+  enqueue "$DAY"
+}
+
+enqueue(){ # queue snapshot for off-device push
+  echo "{\"id\":\"$1\",\"path\":\"$ROOT/daily/$1\",\"queued\":\"$(date -Iseconds)\"}" > "$QUEUE/$1.json"
+  say "queued for off-device: $1"
+}
+
+pc_ok(){ timeout 12 ssh -o BatchMode=yes -o ConnectTimeout=8 -i "$PC_KEY" -p "$PC_PORT" "$PC_TARGET" "echo ok" 2>/dev/null | grep -q ok; }
+
+push_pc(){
+  local id=$1 src=$2 rc=0
+  pc_ok || { log "PC unreachable — $id stays queued"; return 1; }
+  ssh -i "$PC_KEY" -p "$PC_PORT" "$PC_TARGET" "powershell -Command \"New-Item -ItemType Directory -Force '$PC_DIR/daily/$id' | Out-Null\"" >/dev/null 2>&1
+  (cd "$src" && tar -cf - .) | ssh -i "$PC_KEY" -p "$PC_PORT" "$PC_TARGET" \
+    "powershell -Command \"& { \$in=[Console]::OpenStandardInput(); Set-Location '$PC_DIR/daily/$id'; tar -xf - }\" " >/dev/null 2>&1 \
+    || scp -r -i "$PC_KEY" -P "$PC_PORT" "$src" "$PC_TARGET:$PC_DIR/daily/" >/dev/null 2>&1
+  # integrity: compare each sha256 against PC certutil (Get-FileHash absent on this host)
+  local fail=0
+  while read -r sum file; do
+    remote=$(ssh -i "$PC_KEY" -p "$PC_PORT" "$PC_TARGET" \
+      "certutil -hashfile \"$PC_DIR/daily/$id/${file#./}\" SHA256" 2>/dev/null | sed -n '2p' | tr -d ' \r')
+    [ "$remote" != "$sum" ] && { log "PC checksum mismatch $file (remote=$remote)"; fail=1; break; }
+  done < "$src/CHECKSUMS.sha256"
+  [ $fail -eq 0 ] && { rm -f "$QUEUE/$id.json"; echo "$(date -Iseconds)" > $STATE/last_pc_sync; say "pc-sync: $id verified on LITREECEO"; pc_prune; return 0; }
+  return 1
+}
+
+# PC retention: keep PC_KEEP_DAILY newest daily dirs (weekly handled by name tag)
+pc_prune(){
+  [ "$(cat $STATE/verify_ok 2>/dev/null)" = "1" ] || return 0
+  ssh -i "$PC_KEY" -p "$PC_PORT" "$PC_TARGET" \
+    "powershell -Command \"\$d=Get-ChildItem -Directory '$PC_DIR/daily' | Sort-Object Name -Descending | Select-Object -Skip $PC_KEEP_DAILY; \$d | Remove-Item -Recurse -Force\"" >/dev/null 2>&1
+}
+
+push_cloud(){
+  local id=$1 src=$2
+  [ -z "$CLOUD_REMOTE" ] && { log "no CLOUD_REMOTE configured — cloud layer pending"; return 1; }
+  command -v rclone >/dev/null || return 1
+  rclone listremotes 2>/dev/null | grep -q "^${CLOUD_REMOTE}:" || { log "rclone remote $CLOUD_REMOTE missing"; return 1; }
+  rclone copy "$src" "$CLOUD_REMOTE:litt-phone-backups/$id" --transfers 2 --low-level-retries 3 >/dev/null 2>&1 \
+    && rclone check "$src" "$CLOUD_REMOTE:litt-phone-backups/$id" >/dev/null 2>&1 \
+    && { echo "$(date -Iseconds)" > $STATE/last_cloud_sync; say "cloud-sync: $id verified"; return 0; }
+  return 1
+}
+
+flush_queue(){
+  for q in "$QUEUE"/*.json; do
+    [ -f "$q" ] || continue
+    local id=$(python3 -c "import json;print(json.load(open('$q'))['id'])")
+    local src=$(python3 -c "import json;print(json.load(open('$q'))['path'])")
+    [ -d "$src" ] || { rm -f "$q"; continue; }
+    push_pc "$id" "$src" && push_cloud "$id" "$src"
+  done
+}
+
+run_verify(){
+  local snap=${1:-$(ls -1d "$ROOT"/daily/*/ 2>/dev/null | tail -1 | xargs basename 2>/dev/null)}
+  [ -n "$snap" ] || die "no daily snapshot to verify"
+  local dst=$ROOT/verify/$TS; mkdir -p "$dst"; chmod 700 "$dst"
+  local b=$ROOT/daily/$snap/bundles/all-refs.bundle ok=1
+  git bundle verify "$b" >/dev/null 2>&1 || { say "verify: bundle corrupt $snap"; ok=0; }
+  git clone -q "$b" "$dst/clone" 2>/dev/null || { say "verify: clone failed"; ok=0; }
+  (cd "$ROOT/daily/$snap" && sha256sum -c CHECKSUMS.sha256 >/dev/null 2>&1) || { say "verify: checksum mismatch"; ok=0; }
+  for t in "$ROOT/daily/$snap"/worktrees/*.tar.gz; do
+    [ -f "$t" ] || continue; tar -tzf "$t" >/dev/null 2>&1 || { say "verify: bad tar $t"; ok=0; }
+  done
+  [ $ok -eq 1 ] || die "verify FAILED for $snap"
+  rm -rf "$dst/clone"
+  echo "$(date -Iseconds) $snap" > $STATE/last_verify; echo 1 > $STATE/verify_ok
+  say "verify: $snap PASS"
+}
+
+prune(){
+  [ "$(cat $STATE/verify_ok 2>/dev/null)" = "1" ] || { log "retention skipped — no passing verify yet"; return; }
+  ls -1d "$ROOT"/daily/*/ 2>/dev/null | sort -r | tail -n +$((KEEP_DAILY+1)) | while read -r d; do
+    rm -f "$QUEUE/$(basename "$d").json"; rm -rf "$d"; done
+  ls -1d "$ROOT"/git-snapshots/*/ 2>/dev/null | sort -r | tail -n +$((KEEP_SNAP+1)) | xargs -r rm -rf
+  ls -1d "$ROOT"/increments/*/ 2>/dev/null | sort -r | tail -n +$((KEEP_INCR+1)) | xargs -r rm -rf
+}
+
+do_restore(){
+  local snap=$1 dest=$2
+  [ -d "$ROOT/daily/$snap" ] || die "snapshot $snap not found"
+  case "$dest" in
+    "$CANON"|"$CANON/"*|"$TH"/litt-worktrees/*|/root/litt-worktrees/*)
+      die "refusing to restore into live dev path — use a separate dir";;
+  esac
+  mkdir -p "$dest" || die "cannot create $dest"
+  [ "$(ls -A "$dest")" ] && [ "${3:-}" != "--yes" ] && \
+    die "$dest not empty — pass --yes to confirm"
+  git clone -q "$ROOT/daily/$snap/bundles/all-refs.bundle" "$dest/litt-canonical" || die "clone failed"
+  mkdir -p "$dest/worktrees"
+  for t in "$ROOT/daily/$snap"/worktrees/*.tar.gz; do
+    [ -f "$t" ] || continue
+    local n=$(basename "$t" .tar.gz); mkdir -p "$dest/worktrees/$n"; tar -xzf "$t" -C "$dest/worktrees/$n"
+  done
+  tar -tzf "$ROOT/daily/$snap/configs/config.tar.gz" >/dev/null 2>&1 && \
+    { mkdir -p "$dest/configs"; tar -xzf "$ROOT/daily/$snap/configs/config.tar.gz" -C "$dest/configs"; }
+  say "restored $snap -> $dest (canonical clone + worktree file sets + configs)"
+}
+
+fmt_marker(){
+  local f=$STATE/$1 v; v=$(cat "$f" 2>/dev/null)
+  [ -z "$v" ] && { echo never; return; }
+  case "$v" in *[!0-9]*) echo "$v";; *) date -d "@$v" '+%F %T' 2>/dev/null || echo "$v";; esac
+}
+
+status(){
+  local inc gs dy vf pcs="" cls="" pend=0
+  inc=$(fmt_marker last_incremental); gs=$(fmt_marker last_gitsnap)
+  dy=$(fmt_marker last_daily); vf=$(fmt_marker last_verify)
+  pcs=$(cat $STATE/last_pc_sync 2>/dev/null||echo "never"); cls=$(cat $STATE/last_cloud_sync 2>/dev/null||echo "not configured")
+  pend=$(ls "$QUEUE"/*.json 2>/dev/null|wc -l)
+  echo "LiTT backup status ($(date '+%F %T'))"
+  echo "  last incremental : $inc"
+  echo "  last git-snap    : $gs"
+  echo "  last daily       : $dy"
+  echo "  last verified    : $vf"
+  echo "  pc sync          : $pcs  ($(pc_ok && echo reachable || echo unreachable))"
+  echo "  cloud sync       : $cls"
+  echo "  phone storage    : $(du -sh "$ROOT" 2>/dev/null|cut -f1) used, $(df -h "$ROOT"|awk 'NR==2{print $4}') free"
+  echo "  pending queue    : $pend"
+  [ "$(cat $STATE/verify_ok 2>/dev/null)" = "1" ] || echo "  ALERT: no verified backup yet — retention disabled until first PASS"
+  [ "$pend" -gt 2 ] && echo "  ALERT: $pend snapshots pending off-device transfer"
+  local days_old=999
+  [ -f $STATE/last_pc_sync ] && days_old=$(( ($(date +%s)-$(date -d "$(cat $STATE/last_pc_sync)" +%s 2>/dev/null||echo 0))/86400 ))
+  [ "$days_old" -gt 1 ] && [ "$(cat $STATE/last_pc_sync 2>/dev/null||echo x)" != "x" ] && echo "  ALERT: no verified off-device backup in >24h"
+  [ "$(cat $STATE/last_pc_sync 2>/dev/null||echo x)" = "x" ] && echo "  ALERT: no off-device backup ever completed"
+}
+
+list_snaps(){
+  for tier in increments git-snapshots daily; do
+    echo "== $tier =="
+    ls -1d "$ROOT/$tier"/*/ 2>/dev/null | while read -r d; do
+      echo "  $(basename "$d")  $(du -sh "$d" 2>/dev/null|cut -f1)"
+    done | tail -10
+  done
+}
+
+cmd=${1:-status}; shift || true
+case $cmd in
+  run)        with_lock "run_$1"; flush_queue; prune ;;
+  now)        with_lock run_incremental; flush_queue ;;
+  daily)      with_lock run_daily; flush_queue; prune ;;
+  gitsnap)    with_lock run_gitsnap ;;
+  verify)     with_lock run_verify "$@" ;;
+  restore)    do_restore "$@" ;;
+  sync)       flush_queue ;;
+  status)     status ;;
+  list)       list_snaps ;;
+  queue)      ls -l "$QUEUE" 2>/dev/null; echo "pending: $(ls "$QUEUE"/*.json 2>/dev/null|wc -l)" ;;
+  *)          echo "usage: litt-backup {run <tier>|now|daily|gitsnap|status|list|verify|restore <id> <dest>|sync|queue}";;
+esac
