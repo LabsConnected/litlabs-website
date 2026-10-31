@@ -100,3 +100,53 @@ via OLLAMA_NUM_PARALLEL=1 / MAX_LOADED_MODELS=1 / KEEP_ALIVE=1m.
 Rollout recommendation per the approved plan: the lane is proven for generation
 + editing; keep Studio default as-is until theme-edit fidelity is acceptable, or
 gate the lane behind LITT_LOCAL_SMALL for lightweight coding tasks.
+
+## Lightweight reliability mission — 10-run result (litt-coder:8k)
+
+Verdict: FAIL vs 10/10 acceptance — honest measured outcome below.
+
+### Guard + prompt work (delivered, verified working)
+- Destructive-rewrite guard (5be18d5b): files.write to an existing file reads prev,
+  compares structural styling signatures (style blocks, stylesheet links, class/style
+  attrs, media queries, fonts, semantic layout, tailwind); <40% retention is refused
+  BEFORE persisting, with an actionable "read + apply_patch" error. Zero destructive
+  rewrites observed across the loop; zero false-positives on builds (template sig <3).
+- Small-lane prompt: files.read-first, apply_patch-preferred, emit ALL patches for
+  multi-part requests. Model now reaches for apply_patch instead of full rewrites.
+
+### 10-run results (health-gated loop, ~40min)
+| Run | Build | Edit | Heading | Purple | Failure mode |
+|-----|-------|------|---------|--------|--------------|
+| 1 | — | — | — | — | UI flake (composer fill timeout) |
+| 2 | failed | failed | F | F | transport write error |
+| 3 | completed | completed | T | F | theme patch not applied |
+| 4 | completed | completed | F | F | fidelity miss |
+| 5 | completed | completed | T | T | — FULL PASS |
+| 6 | completed | failed | F | F | edit failure |
+| 7–9 | failed | failed | F | F | transport outage (sustained) |
+| 10 | — | — | — | — | early fail (transport) |
+
+Full journey completed: 3/10 · Heading: 2/10 · Purple: 1/10 · Full pass: 1/10.
+No destructive rewrite in ANY run (guard objective met). No model concurrency
+(NUM_PARALLEL=1/MAX_LOADED=1 enforced throughout).
+
+### Root causes of the misses
+1. PC terminal-server Node process crashes on module load (CJS loader stack in
+   terminal-server.log), restarts, and files.write calls that land mid-crash fail —
+   sustained outage 12:20–12:42 killed runs 7–10. Health gate only checks at run start.
+2. 1.5B fidelity variance: heading lands ~30%, theme ~10–20% even with the
+   multi-part prompt — exact-match apply_patch + multi-part instruction following
+   are at the edge of this model's capability.
+3. Occasional UI flakes (composer stability).
+
+### Resources
+Model resident 1.3GB · PC free RAM 7.3–14.3GB · ~15s/call ~42tok/s · CPU temp
+UNAVAILABLE (MSAcpi_ThermalZoneTemperature n/a on this hardware) · CPU load ~85%.
+
+### Recommendation
+litt-hermes:16k stays Studio default — 10/10 is not achievable at 1.5B on this
+evidence, and the transport crash-looping needs a watchdog/root-cause fix before
+consecutive-run reliability is measurable. Keep the small lane behind
+LITT_LOCAL_SMALL for lightweight tasks; the guard + prompt hardening are
+worth keeping regardless (they cost nothing and proved effective).
+Rollback: unset LITT_LOCAL_SMALL / OLLAMA_MODEL — all models preserved.

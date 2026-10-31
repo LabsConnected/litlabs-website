@@ -172,3 +172,27 @@ DONE: PC .env.local OLLAMA_MODEL=litt-hermes:32k (was litt-hermes-fast:8k).
   NUM_PARALLEL=1 MAX_LOADED=1 enforced (single model serialized). CPU temp not instrumented.
 - Spec send-button stability flake fixed (force-click+Enter fallback) — not a product bug.
 - All fixes pushed on feat/studio-stabilization-20261029. Repo default unchanged (litt-hermes:16k).
+
+## Progress log 13 — Lightweight reliability mission (litt-coder:8k)
+- Deployed: destructive-rewrite guard (5be18d5b) — files.write to existing file reads prev,
+  compares structural styling signatures, refuses <40% retention with actionable error.
+  Prompt teaches files.read-first + apply_patch + emit ALL patches for multi-part requests.
+- Verified working: run1 model used apply_patch (no destructive rewrite) — heading landed;
+  purple missed because model emitted ONE patch then described theme in prose → prompt fixed.
+- Infra instability: PC dev server + terminal server both died mid-loop (ERR_EMPTY_RESPONSE);
+  restarted via dev-ctl + WMI term-launch2.cmd. 10-run loop relaunched WITH per-run health
+  gate (waits 3min for dev=200+term=200, marks SKIPPED if down instead of false-fail).
+- Env: OLLAMA_MODEL=litt-coder:8k, LITT_LOCAL_SMALL=1, NUM_PARALLEL=1/MAX_LOADED=1.
+- CPU temp: MSAcpi_ThermalZoneTemperature returns n/a on this PC — report as unavailable.
+- Loop logs: /tmp/r10-summary.log, /tmp/e2e-rep{N}.log
+
+## Progress log 14 — 10-run loop interim (gated)
+- Destructive-rewrite guard WORKING as designed: no destructive rewrites observed; model now
+  prefers apply_patch on edits. Template signature <3 markers → no false-positive on builds.
+- Results so far (new gated loop): RUN1 UI flake / RUN2 transport write failures /
+  RUN3 heading=T purple=F / RUN4 heading=F purple=F / RUN5 FULL PASS (heading+purple) /
+  RUN6 build-ok modify-fail / RUN7 double transport-fail / RUN8 double transport-fail.
+- Dominant residual failures: (a) PC terminal-server transport flapping mid-run —
+  files.write approved+started then fails at transport.writeFile; health gate only checks
+  at run start. (b) 1.5B fidelity variance — heading ~50%, purple ~20-30% even with
+  multi-part prompt. 10/10 is not achievable at this model size on this evidence.
