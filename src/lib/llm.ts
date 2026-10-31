@@ -52,6 +52,7 @@ export type LLMProvider =
   | "groq"
   | "groq-whisper"
   | "openai"
+  | "ollama"
   | "openrouter-free"
   | "openrouter-qwen"
   | "openrouter-deepseek"
@@ -79,6 +80,7 @@ export const PROVIDER_COST_CLASS: Record<LLMProvider, "included" | "litt_paid"> 
   groq: "included",
   "groq-whisper": "included",
   openai: "litt_paid",
+  ollama: "included",
   "openrouter-free": "included",
   "openrouter-qwen": "included",
   "openrouter-deepseek": "included",
@@ -208,6 +210,18 @@ const GROQ_BASE = "https://api.groq.com/openai/v1";
 const OPENAI_KEY = (process.env.OPENAI_API_KEY || "").trim();
 const OPENAI_BASE = "https://api.openai.com/v1";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+// Local Ollama — OpenAI-compatible /v1 endpoint, no key required.
+const OLLAMA_BASE = (
+  process.env.OLLAMA_BASE_URL ||
+  (process.env.OLLAMA_HOST
+    ? `http://${process.env.OLLAMA_HOST.replace(/^https?:\/\//, "")}`
+    : "")
+).replace(/\/+$/, "");
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5-coder:7b";
+/** True when a local Ollama endpoint is explicitly configured. */
+function ollamaConfigured(): boolean {
+  return !process.env.LITT_DISABLE_OLLAMA && OLLAMA_BASE.length > 0;
+}
 
 const GEMINI_PRIMARY_MODEL =
   process.env.GEMINI_PRIMARY_MODEL || "gemini-flash-latest";
@@ -219,6 +233,7 @@ export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   groq: "openai/gpt-oss-120b",
   "groq-whisper": "whisper-large-v3",
   openai: OPENAI_MODEL,
+  ollama: OLLAMA_MODEL,
   "openrouter-free": "google/gemma-4-31b-it:free",
   "openrouter-qwen": "nvidia/nemotron-3-super-120b-a12b:free",
   "openrouter-deepseek": "nvidia/nemotron-3-ultra-550b-a55b:free",
@@ -291,20 +306,23 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   const geminiDisabled = process.env.GEMINI_DISABLED === "true";
   const withoutGemini = geminiDisabled ? chain.filter((p) => p !== "gemini") : chain;
 
+  const withOllama = (c: LLMProvider[]): LLMProvider[] =>
+    ollamaConfigured() && !c.includes("ollama") ? [...c, "ollama"] : c;
+
   if (opts.allowLittPaidProviders) {
-    if (withoutGemini.length > 0) return withoutGemini;
+    if (withoutGemini.length > 0) return withOllama(withoutGemini);
     // The pinned provider was filtered out (e.g. GEMINI_DISABLED): the pin
     // cannot be honored, so drop it and route through the full entitled
     // chain (incl. LITT_PAID) instead of failing with zero attempts.
     const unpinned = rawDefaultChain(task, { ...opts, provider: undefined });
-    return geminiDisabled ? unpinned.filter((p) => p !== "gemini") : unpinned;
+    return withOllama(geminiDisabled ? unpinned.filter((p) => p !== "gemini") : unpinned);
   }
 
   const included = withoutGemini.filter((p) => !isLittPaidProvider(p));
-  if (included.length > 0) return included;
+  if (included.length > 0) return withOllama(included);
 
   // Every candidate was litt_paid (e.g. a forged provider: "openai").
-  return INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p) && (!geminiDisabled || p !== "gemini"));
+  return withOllama(INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p) && (!geminiDisabled || p !== "gemini")));
 }
 
 function rawDefaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
@@ -853,8 +871,71 @@ async function dispatchProvider(
   if (provider === "openai") {
     return generateViaOpenAI(p, modelName, timeoutMs);
   }
+  if (provider === "ollama") {
+    return generateViaOllama(p, modelName, timeoutMs);
+  }
   // All others are OpenRouter
   return generateViaOpenRouter(p, provider, modelName, timeoutMs);
+}
+
+/**
+ * Local Ollama — OpenAI-compatible /v1/chat/completions, no credential.
+ * Reachable only when OLLAMA_BASE_URL or OLLAMA_HOST is configured; the
+ * chain only ever appends it as a fallback, so a dead endpoint costs one
+ * fast connection refusal, never a stall.
+ */
+async function generateViaOllama(
+  p: GenerateParams,
+  modelName: string,
+  timeoutMs: number,
+): Promise<{ text: string; usage?: LLMUsage; model: string }> {
+  if (!ollamaConfigured()) {
+    throw new ProviderError("ollama", null, "Ollama endpoint not configured");
+  }
+  const body: Record<string, unknown> = {
+    model: modelName,
+    messages: [
+      ...(p.systemPrompt ? [{ role: "system", content: p.systemPrompt }] : []),
+      { role: "user", content: p.prompt },
+    ],
+  };
+  if (p.opts.maxTokens) body.max_tokens = p.opts.maxTokens;
+  if (p.opts.temperature !== undefined) body.temperature = p.opts.temperature;
+  else if (p.task === "creative") body.temperature = 0.9;
+  else if (p.task === "precise" || p.task === "json") body.temperature = 0.2;
+  else if (p.task === "code") body.temperature = 0.1;
+  else if (p.task === "chat") body.temperature = 0.7;
+  if (p.opts.stop) body.stop = p.opts.stop;
+
+  const res = await fetchWithTimeout(
+    `${OLLAMA_BASE}/v1/chat/completions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    timeoutMs,
+  );
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderError(
+      "ollama",
+      res.status,
+      `Ollama ${res.status}: ${txt.slice(0, 200)}`,
+    );
+  }
+  const data = await res.json();
+  const choice = data.choices?.[0];
+  const text: string = choice?.message?.content ?? "";
+  const usage: LLMUsage | undefined = data.usage
+    ? {
+      prompt: data.usage.prompt_tokens ?? 0,
+      completion: data.usage.completion_tokens ?? 0,
+      total: data.usage.total_tokens ?? 0,
+    }
+    : undefined;
+  return { text, usage, model: data.model ?? modelName };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1170,6 +1251,15 @@ export async function streamText(
       } else if (provider === "groq" || provider === "groq-whisper") {
         result = await streamViaGroq(
           provider,
+          { prompt, systemPrompt, task, opts: options },
+          wrappedOnChunk,
+          t0,
+          failover,
+          timeoutMs,
+          onReasoning,
+        );
+      } else if (provider === "ollama") {
+        result = await streamViaOllama(
           { prompt, systemPrompt, task, opts: options },
           wrappedOnChunk,
           t0,
@@ -1643,6 +1733,95 @@ async function streamViaGroq(
     throw new DOMException("The operation was aborted.", "AbortError");
   }
   return { provider, model: modelName, latencyMs: Date.now() - t0, failover, finishReason };
+}
+
+/** Streaming twin of generateViaOllama — same OpenAI-compatible SSE wire. */
+async function streamViaOllama(
+  p: GenerateParams,
+  onChunk: (text: string) => void,
+  t0: number,
+  failover: LLMProvider[],
+  timeoutMs: number,
+  onReasoning?: (text: string) => void,
+): Promise<{
+  provider: LLMProvider;
+  model: string;
+  latencyMs: number;
+  failover: LLMProvider[];
+  finishReason?: string;
+}> {
+  if (!ollamaConfigured())
+    throw new ProviderError("ollama", null, "Ollama endpoint not configured");
+  const modelName = p.opts.modelOverride?.ollama ?? DEFAULT_MODELS.ollama;
+  const body: Record<string, unknown> = {
+    model: modelName,
+    stream: true,
+    messages: [
+      ...(p.systemPrompt ? [{ role: "system", content: p.systemPrompt }] : []),
+      { role: "user", content: p.prompt },
+    ],
+  };
+  if (p.opts.maxTokens) body.max_tokens = p.opts.maxTokens;
+  if (p.opts.temperature !== undefined) body.temperature = p.opts.temperature;
+
+  const res = await fetchWithTimeout(
+    `${OLLAMA_BASE}/v1/chat/completions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    timeoutMs,
+    p.opts.signal,
+  );
+
+  if (!res.ok || !res.body) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderError(
+      "ollama",
+      res.status,
+      `Ollama stream ${res.status}: ${txt.slice(0, 200)}`,
+    );
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const abortReader = () => { void reader.cancel().catch(() => {}); };
+  if (p.opts.signal?.aborted) {
+    abortReader();
+  } else {
+    p.opts.signal?.addEventListener("abort", abortReader, { once: true });
+  }
+  let buffer = "";
+  let finishReason: string | undefined;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const json = JSON.parse(payload);
+        const choice = json.choices?.[0];
+        const delta = choice?.delta;
+        if (delta?.content) onChunk(delta.content);
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
+        if (onReasoning && delta?.reasoning) onReasoning(delta.reasoning);
+      } catch {
+        // ignore malformed chunk
+      }
+    }
+  }
+  p.opts.signal?.removeEventListener("abort", abortReader);
+  if (p.opts.signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+  return { provider: "ollama", model: modelName, latencyMs: Date.now() - t0, failover, finishReason };
 }
 
 /* ------------------------------------------------------------------ */
