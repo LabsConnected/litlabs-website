@@ -214,7 +214,23 @@ async function apiGet(request: APIRequestContext, url: string, headers: Record<s
 async function sendAndDrive(page: Page, request: APIRequestContext, prompt: string, maxMinutes = 14) {
   const input = await ensureComposer(page);
   await input.fill(prompt);
-  await page.getByTestId("studio-send-button").click();
+  // The send button doubles as Stop while the UI thinks a run streams
+  // (busy ? onCancel : submit). If a previous run's streaming flag is
+  // stuck, this click would fire the cancel endpoint with the run's own
+  // clientRequestId — confirmed live: a real POST /cancel killed the run.
+  // Reload first: a fresh mount reconciles canonical run state instead of
+  // sending a cancellation. The server run is unaffected by the reload.
+  const sendBtn = page.getByTestId("studio-send-button");
+  const label = await sendBtn.getAttribute("aria-label").catch(() => null);
+  console.log(`[send-btn] aria-label=${JSON.stringify(label)}`);
+  if (label && /cancel/i.test(label)) {
+    console.log(`[send-btn] busy/stale UI — reloading to clear instead of clicking Stop`);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(3000);
+    const input2 = await ensureComposer(page);
+    await input2.fill(prompt);
+  }
+  await sendBtn.click();
   console.log(`[send] ${prompt.slice(0, 60)}…`);
   return driveRun(page, request, maxMinutes);
 }
