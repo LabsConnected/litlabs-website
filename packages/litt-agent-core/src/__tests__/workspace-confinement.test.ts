@@ -25,6 +25,7 @@ import {
   classifyCommand,
   redactSecrets,
 } from "../index.js";
+import { buildChildEnv } from "../child-env.js";
 
 function makeTempDir(name: string): string {
   const tmp = path.join(
@@ -535,5 +536,374 @@ describe("Child env does not inherit host secrets", () => {
       else process.env.OPENAI_API_KEY = prevOpenAi;
       cleanup(ws);
     }
+  });
+});
+
+// ─── Grouped short options cannot hide path operands ─────────────
+//
+// PR #736 review: `grep -neMARKER /outside.secret` supplied the pattern
+// through a grouped `-e`, but the parser only inspected the group's first
+// option and then dropped the real operand as the presumed pattern.
+
+describe("Grouped short options (grep/rg)", () => {
+  it("rejects `grep -neMARKER /outside` — grouped -e supplies the pattern", async () => {
+    const ws = makeTempDir("ws-grep-grp");
+    const secret = path.join(path.dirname(ws), "grp-outside.secret");
+    fs.writeFileSync(secret, "GROUPED-SECRET-MARKER");
+    try {
+      const shell = createShellExecutor(ws);
+      // -e attached to a group tail, -e consuming the next token, and
+      // -f (a path-valued flag) attached to a group tail.
+      for (const argv of [
+        ["-neGROUPED-SECRET-MARKER", secret],
+        ["-ne", "GROUPED-SECRET-MARKER", secret],
+        ["-nf", secret],
+      ]) {
+        const result = await runCommandSecure(shell, "grep", argv, {
+          cwd: ws,
+          workspaceRoot: ws,
+        });
+        assert.equal(result.success, false, argv.join(" "));
+        assert.equal(result.data.code, "PATH_ARG_ESCAPE", argv.join(" "));
+        assert.doesNotMatch(String(result.data.stdout ?? ""), /GROUPED-SECRET-MARKER/);
+      }
+    } finally {
+      fs.rmSync(secret, { force: true });
+      cleanup(ws);
+    }
+  });
+
+  it("rejects `rg -nePATTERN /outside` the same way", async () => {
+    const ws = makeTempDir("ws-rg-grp");
+    const outside = makeTempDir("outside-rg-grp");
+    try {
+      const shell = createShellExecutor(ws);
+      const result = await runCommandSecure(shell, "rg", ["-nepat", outside], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.equal(result.data.code, "PATH_ARG_ESCAPE");
+    } finally {
+      cleanup(ws);
+      cleanup(outside);
+    }
+  });
+
+  it("keeps grouped boolean options working (`grep -in pat file`)", async () => {
+    const ws = makeTempDir("ws-grep-grp-ok");
+    fs.writeFileSync(path.join(ws, "file.txt"), "needle here\n");
+    try {
+      const shell = createShellExecutor(ws);
+      const result = await runCommandSecure(shell, "grep", ["-in", "needle", "file.txt"], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.notEqual(result.data.code, "PATH_ARG_ESCAPE");
+    } finally {
+      cleanup(ws);
+    }
+  });
+});
+
+// ─── Option values are not path operands ─────────────────────────
+//
+// PR #736 review: `cut -d / -f 1 x` checked the delimiter "/" as a path
+// and failed PATH_ARG_ESCAPE even though only "x" names a file.
+
+describe("Option values are not path operands", () => {
+  it("allows `cut -d / -f 1 <file>` — the delimiter is not a path", async () => {
+    const ws = makeTempDir("ws-cut-delim");
+    fs.writeFileSync(path.join(ws, "paths.txt"), "a/b/c\n");
+    try {
+      const shell = createShellExecutor(ws);
+      const result = await runCommandSecure(
+        shell,
+        "cut",
+        ["-d", "/", "-f", "1", "paths.txt"],
+        { cwd: ws, workspaceRoot: ws },
+      );
+      assert.notEqual(result.data.code, "PATH_ARG_ESCAPE");
+    } finally {
+      cleanup(ws);
+    }
+  });
+
+  it("still confines the real file operand after option values", async () => {
+    const ws = makeTempDir("ws-cut-escape");
+    const outside = makeTempDir("outside-cut");
+    const target = path.join(outside, "data.txt");
+    fs.writeFileSync(target, "a,b,c\n");
+    try {
+      const shell = createShellExecutor(ws);
+      for (const argv of [
+        ["-d", ",", "-f", "1", target],
+        ["-d", ",", "-f1", target],
+        ["--delimiter=/", "-f1", target],
+      ]) {
+        const result = await runCommandSecure(shell, "cut", argv, {
+          cwd: ws,
+          workspaceRoot: ws,
+        });
+        assert.equal(result.data.code, "PATH_ARG_ESCAPE", argv.join(" "));
+      }
+    } finally {
+      cleanup(ws);
+      cleanup(outside);
+    }
+  });
+
+  it("keeps `find . -name`/`find . -printf` working inside the workspace", async () => {
+    const ws = makeTempDir("ws-find-pred");
+    fs.writeFileSync(path.join(ws, "x.txt"), "hi");
+    try {
+      const shell = createShellExecutor(ws);
+      for (const argv of [
+        [".", "-name", "*.txt"],
+        [".", "-printf", "/%p\\n"],
+        [".", "-type", "f", "-name", "x*"],
+        [".", "-maxdepth", "1"],
+      ]) {
+        const result = await runCommandSecure(shell, "find", argv, {
+          cwd: ws,
+          workspaceRoot: ws,
+        });
+        assert.notEqual(result.data.code, "PATH_ARG_ESCAPE", argv.join(" "));
+      }
+    } finally {
+      cleanup(ws);
+    }
+  });
+
+  it("checks find's path-valued predicates (`-newer`, `-samefile`)", async () => {
+    const ws = makeTempDir("ws-find-ref");
+    const outside = makeTempDir("outside-ref");
+    const ref = path.join(outside, "ref.txt");
+    fs.writeFileSync(ref, "x");
+    try {
+      const shell = createShellExecutor(ws);
+      for (const argv of [
+        [".", "-newer", ref],
+        [".", "-samefile", ref],
+      ]) {
+        const result = await runCommandSecure(shell, "find", argv, {
+          cwd: ws,
+          workspaceRoot: ws,
+        });
+        assert.equal(result.data.code, "PATH_ARG_ESCAPE", argv.join(" "));
+      }
+    } finally {
+      cleanup(ws);
+      cleanup(outside);
+    }
+  });
+
+  it("does not confine `find -exec` argv — it belongs to the embedded command", async () => {
+    const ws = makeTempDir("ws-find-exec");
+    try {
+      const shell = createShellExecutor(ws);
+      // -exec is classified arbitrary_code, so approval is supplied;
+      // an absolute path inside the embedded command is not a find operand.
+      const result = await runCommandSecure(
+        shell,
+        "find",
+        [".", "-exec", "echo", "/tmp/x", "+"],
+        { cwd: ws, workspaceRoot: ws, approvalProvider: async () => true },
+      );
+      assert.notEqual(result.data.code, "PATH_ARG_ESCAPE");
+    } finally {
+      cleanup(ws);
+    }
+  });
+
+  it("checks the path operand before `-exec`, not the command after it", async () => {
+    const ws = makeTempDir("ws-find-exec-path");
+    try {
+      const shell = createShellExecutor(ws);
+      const result = await runCommandSecure(
+        shell,
+        "find",
+        ["/", "-exec", "echo", "{}", ";"],
+        { cwd: ws, workspaceRoot: ws, approvalProvider: async () => true },
+      );
+      assert.equal(result.data.code, "PATH_ARG_ESCAPE");
+    } finally {
+      cleanup(ws);
+    }
+  });
+
+  it("treats `head -c`/`tail -n`/`sort -t` values as option values", async () => {
+    const ws = makeTempDir("ws-num-vals");
+    fs.writeFileSync(path.join(ws, "f.txt"), "a\nb\n");
+    try {
+      const shell = createShellExecutor(ws);
+      for (const [cmd, argv] of [
+        ["sort", ["-t", "/", "-k", "1", "f.txt"]],
+        ["head", ["-n", "2", "f.txt"]],
+        ["tail", ["-n", "1", "f.txt"]],
+        ["uniq", ["-f", "1", "f.txt"]],
+        ["diff", ["-L", "a", "-L", "b", "f.txt", "f.txt"]],
+        ["stat", ["-c", "%s", "f.txt"]],
+      ] as const) {
+        const result = await runCommandSecure(shell, cmd, [...argv], {
+          cwd: ws,
+          workspaceRoot: ws,
+        });
+        assert.notEqual(result.data.code, "PATH_ARG_ESCAPE", `${cmd} ${argv.join(" ")}`);
+      }
+    } finally {
+      cleanup(ws);
+    }
+  });
+
+  it("checks getopt path-valued flags (`du -X`, `diff --from-file`, `sort -T`)", async () => {
+    const ws = makeTempDir("ws-path-flags");
+    const outside = makeTempDir("outside-pflag");
+    const ref = path.join(outside, "ref.txt");
+    fs.writeFileSync(ref, "x");
+    try {
+      const shell = createShellExecutor(ws);
+      for (const [cmd, argv] of [
+        ["du", ["-X", ref, "."]],
+        ["diff", ["--from-file", ref, "x"]],
+        ["sort", ["-T", outside, "x.txt"]],
+        ["wc", ["--files0-from", ref]],
+      ] as const) {
+        const result = await runCommandSecure(shell, cmd, [...argv], {
+          cwd: ws,
+          workspaceRoot: ws,
+        });
+        assert.equal(result.data.code, "PATH_ARG_ESCAPE", `${cmd} ${argv.join(" ")}`);
+      }
+    } finally {
+      cleanup(ws);
+      cleanup(outside);
+    }
+  });
+
+  it("treats findstr/dir/more `/` tokens as options, not root paths", async () => {
+    const ws = makeTempDir("ws-dos-flags");
+    fs.writeFileSync(path.join(ws, "file.txt"), "needle\n");
+    const outside = makeTempDir("outside-dos");
+    const listFile = path.join(outside, "list.txt");
+    fs.writeFileSync(listFile, "needle\n");
+    try {
+      const shell = createShellExecutor(ws);
+      // Options starting with "/" are flags, not path operands.
+      const ok = await runCommandSecure(shell, "findstr", ["/I", "/N", "needle", "file.txt"], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.notEqual(ok.data.code, "PATH_ARG_ESCAPE");
+      // /G:<file> reads a pattern file — confined like any operand.
+      const gFlag = await runCommandSecure(shell, "findstr", [`/G:${listFile}`, "file.txt"], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.equal(gFlag.data.code, "PATH_ARG_ESCAPE");
+      // A second file operand is still confined.
+      const fileOperand = await runCommandSecure(shell, "findstr", ["needle", listFile], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.equal(fileOperand.data.code, "PATH_ARG_ESCAPE");
+      // dir /B stays inside when the operand does.
+      const dirOk = await runCommandSecure(shell, "dir", ["/B", "."], {
+        cwd: ws,
+        workspaceRoot: ws,
+      });
+      assert.notEqual(dirOk.data.code, "PATH_ARG_ESCAPE");
+    } finally {
+      cleanup(ws);
+      cleanup(outside);
+    }
+  });
+});
+
+// ─── tree/less/sort write- and exec-flag classification ──────────
+
+describe("Pager/tree write flags and sort compress-program are not read-only", () => {
+  it("classifies `tree -o`/`less -o` as workspace_edit", () => {
+    for (const [cmd, argv] of [
+      ["tree", ["-o", "out.txt"]],
+      ["tree", ["--output=out.txt"]],
+      ["less", ["-o", "log.txt", "f.txt"]],
+      ["less", ["--log-file", "log.txt", "f.txt"]],
+    ] as const) {
+      assert.equal(
+        classifyCommand(cmd, [...argv]).capability,
+        "workspace_edit",
+        `${cmd} ${argv.join(" ")}`,
+      );
+    }
+  });
+
+  it("classifies `sort --compress-program` as arbitrary_code", () => {
+    assert.equal(
+      classifyCommand("sort", ["--compress-program=gzip", "f.txt"]).capability,
+      "arbitrary_code",
+    );
+    assert.equal(
+      classifyCommand("sort", ["--compress-program", "gzip", "f.txt"]).capability,
+      "arbitrary_code",
+    );
+  });
+
+  it("keeps plain `tree`/`less`/`sort` read_only", () => {
+    assert.equal(classifyCommand("tree", ["."], undefined).capability, "read_only");
+    assert.equal(classifyCommand("less", ["f.txt"], undefined).capability, "read_only");
+    assert.equal(classifyCommand("sort", ["f.txt"], undefined).capability, "read_only");
+  });
+});
+
+// ─── Operational env vars survive child-env filtering ────────────
+//
+// PR #736 review: buildChildEnv dropped SSH_AUTH_SOCK/JAVA_HOME along
+// with secrets, breaking approved `git push` and toolchain commands.
+
+describe("Child env preserves operational settings", () => {
+  it("forwards ssh-agent and toolchain vars while still dropping host secrets", () => {
+    const env = buildChildEnv(
+      {
+        PATH: "/usr/bin",
+        SSH_AUTH_SOCK: "/tmp/ssh-agent.sock",
+        SSH_AGENT_PID: "4242",
+        GPG_TTY: "/dev/tty1",
+        JAVA_HOME: "/opt/jdk",
+        GOROOT: "/usr/local/go",
+        EDITOR: "vim",
+        GIT_SSH_COMMAND: "ssh -i key",
+        TERMINAL_INTERNAL_SERVICE_KEY: "service-secret",
+        NPM_TOKEN: "npm-secret",
+        UNLISTED_HOST_VALUE: "unlisted-secret",
+      },
+      [],
+    );
+    assert.equal(env.SSH_AUTH_SOCK, "/tmp/ssh-agent.sock");
+    assert.equal(env.SSH_AGENT_PID, "4242");
+    assert.equal(env.GPG_TTY, "/dev/tty1");
+    assert.equal(env.JAVA_HOME, "/opt/jdk");
+    assert.equal(env.GOROOT, "/usr/local/go");
+    assert.equal(env.EDITOR, "vim");
+    assert.equal(env.GIT_SSH_COMMAND, "ssh -i key");
+    assert.equal(env.TERMINAL_INTERNAL_SERVICE_KEY, undefined);
+    assert.equal(env.NPM_TOKEN, undefined);
+    assert.equal(env.UNLISTED_HOST_VALUE, undefined);
+  });
+
+  it("does not let new allowlist entries shadow injection vectors", () => {
+    const env = buildChildEnv(
+      {
+        PATH: "/usr/bin",
+        JAVA_TOOL_OPTIONS: "-javaagent:/tmp/evil.jar",
+        MAVEN_OPTS: "-Xmx1g -javaagent:/tmp/evil.jar",
+        PYTHONHOME: "/tmp/fake-python",
+        LD_PRELOAD: "/tmp/evil.so",
+      },
+      [],
+    );
+    assert.equal(env.JAVA_TOOL_OPTIONS, undefined);
+    assert.equal(env.MAVEN_OPTS, undefined);
+    assert.equal(env.PYTHONHOME, undefined);
+    assert.equal(env.LD_PRELOAD, undefined);
   });
 });

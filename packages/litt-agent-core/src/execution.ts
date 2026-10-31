@@ -537,6 +537,20 @@ function classifyArgSensitive(cmd: string, args: string[]): RiskAssessment | nul
       return null;
     }
     case "sort": {
+      // --compress-program execs a program when sort spills to temp
+      // files — arbitrary code, not a file write.
+      if (
+        args.some(
+          (a) => a === "--compress-program" || a.startsWith("--compress-program="),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "arbitrary_code",
+          reason: "sort --compress-program runs an external program",
+          mutating: true,
+        };
+      }
       if (
         args.some(
           (a) =>
@@ -550,6 +564,45 @@ function classifyArgSensitive(cmd: string, args: string[]): RiskAssessment | nul
           level: "elevated",
           capability: "workspace_edit",
           reason: "sort -o/--output writes a file",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "tree": {
+      if (
+        args.some(
+          (a) =>
+            a === "-o" ||
+            a === "--output" ||
+            a.startsWith("--output=") ||
+            (a.startsWith("-o") && a.length > 2),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "tree -o/--output writes a file",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "less": {
+      if (
+        args.some(
+          (a) =>
+            a === "--log-file" ||
+            a.startsWith("--log-file=") ||
+            (!a.startsWith("--") &&
+              (a === "-o" || a === "-O" ||
+                ((a.startsWith("-o") || a.startsWith("-O")) && a.length > 2))),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "less -o/-O/--log-file writes a file",
           mutating: true,
         };
       }
@@ -1330,13 +1383,38 @@ function searchCommandPathOperands(cmd: "grep" | "rg", args: string[]): string[]
       note(name, flags.get(name), value, true);
       continue;
     }
-    if (!endOfFlags && arg.startsWith("-") && !arg.startsWith("--") && arg.length > 2) {
-      const short = arg.slice(0, 2);
-      const kind = flags.get(short);
-      if (kind) {
-        note(short, kind, arg.slice(2), true);
-        continue;
+    if (!endOfFlags && arg.startsWith("-") && !arg.startsWith("--") && arg.length > 1) {
+      // Grouped short options: `-neMARKER` is `-n -e MARKER` — the first
+      // option takes no value, so `-e` picks up "MARKER" as the pattern.
+      // Checking only arg.slice(0, 2) here skipped the group entirely when
+      // the first option was unknown, and the real operand was then dropped
+      // as the presumed pattern — letting `grep -neX /outside` read outside
+      // the workspace. Walk every option in the group; a value-taking
+      // option consumes the rest of the token, or the next argv token when
+      // nothing remains.
+      let j = 1;
+      while (j < arg.length) {
+        const name = `-${arg[j]}`;
+        const kind = flags.get(name);
+        if (kind === undefined) {
+          j++;
+          continue;
+        }
+        const attached = arg.slice(j + 1);
+        if (attached) {
+          note(name, kind, attached, true);
+        } else {
+          const value = args[i + 1];
+          if (value !== undefined) {
+            i++;
+            note(name, kind, value, true);
+          } else {
+            note(name, kind, undefined, false);
+          }
+        }
+        break;
       }
+      continue;
     }
     if (!endOfFlags && flags.has(arg)) {
       const kind = flags.get(arg);
@@ -1358,6 +1436,315 @@ function searchCommandPathOperands(cmd: "grep" | "rg", args: string[]): string[]
   return [...paths, ...pathPositionals];
 }
 
+/**
+ * Operand extraction for non-search confineOperands commands. Option
+ * *values* are not files: `cut -d / -f 1 x` uses "/" as a delimiter,
+ * `find -printf "%p"` a format string, `findstr /S` an option token.
+ * Checking every non-flag token as a path both false-rejects legitimate
+ * commands and — in the grouped-short case — shifts a real file operand
+ * into an unchecked slot.
+ *
+ * Three option grammars cover the confined commands:
+ *   - getopt: single-char options, groupable (`-sd`, `-n5`, `-d/`).
+ *   - word:   multi-char single-dash predicates that are not groupable
+ *     (`find -name`, `-printf`).
+ *   - dos:    Windows-style `/X[:value]` option tokens (findstr, dir,
+ *     more) — a leading "/" is an option prefix, not a path root.
+ *
+ * Only option kinds that take a REQUIRED separate-token value are listed;
+ * optional-value options (`ls --color`, `du --time`) keep the following
+ * token as an operand — the real tool treats it as one, so the confinement
+ * check must too. Unknown options fail closed the same way: their next
+ * token stays a checked operand.
+ */
+type OperandMode = "getopt" | "word" | "dos";
+
+interface OperandSpec {
+  mode: OperandMode;
+  /** Value is a string/number, never a file — skipped, unchecked. */
+  valueFlags?: ReadonlySet<string>;
+  /**
+   * Value IS a path — collected and checked. CommandSpec.pathArgs entries
+   * are merged in for getopt commands, so a flag declared once is confined
+   * both by validatePathArgs and by operand checking.
+   */
+  pathFlags?: ReadonlySet<string>;
+  /** Flag consumes the next TWO tokens (`find -fprintf FILE FORMAT`). */
+  twoValueFlags?: ReadonlySet<string>;
+  /** After this flag, everything through the next `;`/`+` is command argv. */
+  execFlags?: ReadonlySet<string>;
+  /** First positional is a pattern/string, not a file (findstr). */
+  firstIsPattern?: boolean;
+  /** DOS `/X:value` flags whose attached value is a path (findstr /G /F /D). */
+  dosPathFlags?: ReadonlySet<string>;
+}
+
+const OPERAND_SPECS: Record<string, OperandSpec> = {
+  stat: {
+    mode: "getopt",
+    valueFlags: new Set(["-c", "--format", "--printf"]),
+  },
+  file: {
+    mode: "getopt",
+    valueFlags: new Set(["-F", "--separator", "-e", "--exclude", "--exclude-quiet", "-P", "--parameter"]),
+    pathFlags: new Set(["-f", "--files-from", "-m", "--magic-file"]),
+  },
+  tree: {
+    mode: "getopt",
+    valueFlags: new Set(["-L", "-P", "-I", "-H", "--filelimit", "--charset", "--timefmt"]),
+    pathFlags: new Set(["-o", "--output"]),
+  },
+  du: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-B", "--block-size", "-d", "--max-depth", "-t", "--threshold",
+      "--time-style", "--exclude",
+    ]),
+    pathFlags: new Set(["-X", "--exclude-from", "--files0-from"]),
+  },
+  diff: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-L", "--label", "-I", "--ignore-matching-lines", "-x", "--exclude",
+      "-D", "--ifdef", "--unchanged-line-format", "--old-line-format",
+      "--new-line-format", "--unchanged-group-format", "--old-group-format",
+      "--new-group-format", "--changed-group-format", "--horizon-lines", "--width",
+    ]),
+    pathFlags: new Set([
+      "-S", "--starting-file", "-X", "--exclude-from", "--from-file",
+      "--to-file", "--old-file", "--new-file", "--unchanged-file",
+    ]),
+  },
+  cmp: {
+    mode: "getopt",
+    valueFlags: new Set(["-n", "--bytes", "-i", "--ignore-initial"]),
+  },
+  cut: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-d", "--delimiter", "-f", "--fields", "-b", "--bytes",
+      "-c", "--characters", "--complement", "--output-delimiter",
+    ]),
+  },
+  sort: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-k", "--key", "-t", "--field-separator", "-S", "--buffer-size",
+      "--parallel", "--batch-size", "--compress-program",
+    ]),
+    pathFlags: new Set(["-T", "--temporary-directory", "--random-source", "--files0-from"]),
+  },
+  uniq: {
+    mode: "getopt",
+    valueFlags: new Set(["-f", "--skip-fields", "-s", "--skip-chars", "-w", "--check-chars"]),
+  },
+  head: {
+    mode: "getopt",
+    valueFlags: new Set(["-n", "--lines", "-c", "--bytes"]),
+  },
+  tail: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-n", "--lines", "-c", "--bytes", "-s", "--sleep-interval",
+      "--pid", "--max-unchanged-stats",
+    ]),
+  },
+  wc: {
+    mode: "getopt",
+    pathFlags: new Set(["--files0-from"]),
+  },
+  ls: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-I", "--ignore", "--hide", "--sort", "--time", "--time-style",
+      "--format", "--block-size", "--quoting-style", "--indicator-style",
+      "-T", "--tabsize", "-w", "--width",
+    ]),
+  },
+  less: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-p", "--pattern", "-P", "--prompt", "-t", "--tag", "-x", "--tabs",
+      "-z", "--window", "-j", "--jump-target", '-"', "--quotes", "-#", "--shift",
+    ]),
+    pathFlags: new Set(["-o", "-O", "--log-file", "-k", "--lesskey-file", "--tag-file"]),
+  },
+  find: {
+    mode: "word",
+    valueFlags: new Set([
+      "-name", "-iname", "-lname", "-ilname", "-path", "-ipath",
+      "-regex", "-iregex", "-regextype", "-type", "-xtype", "-perm",
+      "-user", "-group", "-uid", "-gid", "-size", "-mtime", "-mmin",
+      "-atime", "-amin", "-ctime", "-cmin", "-used", "-maxdepth",
+      "-mindepth", "-printf", "-format", "-fstype", "-context", "-D",
+      "-newermt", "-newerat", "-newerct", "-newerBt",
+    ]),
+    pathFlags: new Set([
+      "-newer", "-anewer", "-cnewer", "-neweraa", "-newerac", "-neweram",
+      "-newerca", "-newercc", "-newercm", "-newerma", "-newermc", "-newermm",
+      "-newerBa", "-newerBc", "-newerBm", "-samefile",
+    ]),
+    twoValueFlags: new Set(["-fprintf"]),
+    execFlags: new Set(["-exec", "-execdir", "-ok", "-okdir"]),
+  },
+  findstr: {
+    mode: "dos",
+    firstIsPattern: true,
+    dosPathFlags: new Set(["/G", "/F", "/D"]),
+  },
+  dir: { mode: "dos" },
+  more: { mode: "dos" },
+};
+
+/**
+ * getopt grammar: `--flag=value` is self-contained, `--flag value` and
+ * grouped shorts (`-sd`, `-d/`) follow POSIX option-argument rules. Any
+ * `-` token we cannot fully classify is skipped as a flag; the tokens we
+ * return are the ones the command will actually open.
+ */
+function getoptPathOperands(
+  args: string[],
+  ospec: OperandSpec,
+  spec: CommandSpec,
+): string[] {
+  const skipValue = ospec.valueFlags ?? new Set<string>();
+  const pathValue = new Set([...(ospec.pathFlags ?? []), ...(spec.pathArgs ?? [])]);
+  const operands: string[] = [];
+  let endOfFlags = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!endOfFlags && arg === "--") {
+      endOfFlags = true;
+      continue;
+    }
+    if (!endOfFlags && arg.length > 1 && arg.startsWith("-")) {
+      if (arg.startsWith("--")) {
+        const eq = arg.indexOf("=");
+        const name = eq > 0 ? arg.slice(0, eq) : arg;
+        if (pathValue.has(name)) {
+          const v = eq > 0 ? arg.slice(eq + 1) : args[i + 1];
+          if (v !== undefined) {
+            operands.push(v);
+            if (eq < 0) i++;
+          }
+        } else if (eq < 0 && skipValue.has(name)) {
+          i++;
+        }
+        continue;
+      }
+      // Grouped shorts. An unknown char is treated as a boolean option —
+      // every value-taking short option for these commands is enumerated,
+      // so a group tail can only be reached after genuine booleans.
+      let j = 1;
+      while (j < arg.length) {
+        const name = `-${arg[j]}`;
+        if (pathValue.has(name)) {
+          const v = j + 1 < arg.length ? arg.slice(j + 1) : args[i + 1];
+          if (v !== undefined) {
+            operands.push(v);
+            if (j + 1 >= arg.length) i++;
+          }
+          break;
+        }
+        if (skipValue.has(name)) {
+          if (j + 1 >= arg.length && args[i + 1] !== undefined) i++;
+          break;
+        }
+        j++;
+      }
+      continue;
+    }
+    if (arg) operands.push(arg);
+  }
+  return operands;
+}
+
+/**
+ * word grammar (`find`): predicates are whole words (`-name`, `-newer`),
+ * never grouped chars. `-exec`/`-ok` run through to their `;`/`+`
+ * terminator — the arguments in between belong to the embedded command,
+ * which classification already reports as arbitrary_code, so confining
+ * them here would only false-reject an approved invocation.
+ */
+function wordPathOperands(args: string[], ospec: OperandSpec): string[] {
+  const operands: string[] = [];
+  let endOfFlags = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!endOfFlags && arg === "--") {
+      endOfFlags = true;
+      continue;
+    }
+    if (!endOfFlags && ospec.execFlags?.has(arg)) {
+      while (i + 1 < args.length && args[i + 1] !== ";" && args[i + 1] !== "+") i++;
+      i++; // consume the terminator itself (or the missing terminator's tail)
+      continue;
+    }
+    if (!endOfFlags && ospec.twoValueFlags?.has(arg)) {
+      i += 2; // -fprintf FILE FORMAT — the FILE is checked by validateExternalWritePaths
+      continue;
+    }
+    if (!endOfFlags && arg.length > 1 && arg.startsWith("-")) {
+      const eq = arg.indexOf("=");
+      const name = eq > 0 ? arg.slice(0, eq) : arg;
+      if (ospec.pathFlags?.has(name)) {
+        const v = eq > 0 ? arg.slice(eq + 1) : args[i + 1];
+        if (v !== undefined) {
+          operands.push(v);
+          if (eq < 0) i++;
+        }
+      } else if (eq < 0 && ospec.valueFlags?.has(name)) {
+        i++;
+      }
+      continue;
+    }
+    if (arg) operands.push(arg);
+  }
+  return operands;
+}
+
+/**
+ * dos grammar: `/X` option tokens (findstr, dir, more). A leading "/" is
+ * an option prefix — never a filesystem root — so it is never collected.
+ * `/X:value` forms are checked when the flag names a path-bearing option
+ * (findstr /G list-file, /F file-list, /D dirlist).
+ */
+function dosPathOperands(args: string[], ospec: OperandSpec): string[] {
+  const operands: string[] = [];
+  let seenFirst = false;
+  for (const arg of args) {
+    if (arg.length > 1 && arg.startsWith("/")) {
+      const colon = arg.indexOf(":");
+      if (colon > 0 && ospec.dosPathFlags?.has(arg.slice(0, colon).toUpperCase())) {
+        operands.push(arg.slice(colon + 1));
+      }
+      continue;
+    }
+    if (!arg) continue;
+    if (!seenFirst && ospec.firstIsPattern) {
+      seenFirst = true;
+      continue;
+    }
+    seenFirst = true;
+    operands.push(arg);
+  }
+  return operands;
+}
+
+function nonSearchPathOperands(
+  command: string,
+  spec: CommandSpec,
+  args: string[],
+): string[] {
+  const ospec = OPERAND_SPECS[command];
+  if (!ospec) {
+    return args.filter((arg) => arg && !(arg.length > 1 && arg.startsWith("-")));
+  }
+  if (ospec.mode === "dos") return dosPathOperands(args, ospec);
+  if (ospec.mode === "word") return wordPathOperands(args, ospec);
+  return getoptPathOperands(args, ospec, spec);
+}
+
 function validateOperandPaths(
   command: string,
   args: string[],
@@ -1370,7 +1757,7 @@ function validateOperandPaths(
   const operands =
     normalized === "grep" || normalized === "rg"
       ? searchCommandPathOperands(normalized, args)
-      : args.filter((arg) => arg && !(arg.length > 1 && arg.startsWith("-")));
+      : nonSearchPathOperands(normalized, spec, args);
   for (const arg of operands) {
     const resolved = path.resolve(cwd, arg);
     if (!isWithinWorkspace(resolved, workspaceRoot)) {

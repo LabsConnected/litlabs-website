@@ -128,6 +128,72 @@ const CHILD_ENV_ALLOWLIST = new Set([
   "OS",
   "COMPUTERNAME",
   "HOSTNAME",
+  // Agent / credential-helper connection points — socket paths and tty
+  // names, not secret values. Without SSH_AUTH_SOCK an approved
+  // `git push` cannot reach the user's ssh-agent; GPG_TTY is needed for
+  // commit signing. The socket grants signing only to a command that
+  // already passed classification and approval.
+  "SSH_AUTH_SOCK",
+  "SSH_AGENT_PID",
+  "GPG_TTY",
+  "GPG_AGENT_INFO",
+  "GIT_SSH_COMMAND",
+  "GIT_SSH",
+  "GIT_ASKPASS",
+  "SSH_ASKPASS",
+  // Commit identity and pager/editor settings — plain config strings.
+  "GIT_AUTHOR_NAME",
+  "GIT_AUTHOR_EMAIL",
+  "GIT_COMMITTER_NAME",
+  "GIT_COMMITTER_EMAIL",
+  "EDITOR",
+  "VISUAL",
+  "PAGER",
+  "MANPAGER",
+  // Toolchain home / cache directories. Paths only — never credential
+  // values. *OPTS/*_OPTIONS-style vars stay out on purpose: like
+  // NODE_OPTIONS they inject flags or code into every child invocation
+  // (JAVA_TOOL_OPTIONS -javaagent, MAVEN_OPTS, GOFLAGS, PYTHONHOME's
+  // stdlib override). GOPROXY-style URLs can embed credentials, so URL
+  // vars are excluded too.
+  "JAVA_HOME",
+  "JDK_HOME",
+  "JRE_HOME",
+  "ANDROID_HOME",
+  "ANDROID_SDK_ROOT",
+  "ANDROID_NDK_HOME",
+  "ANDROID_AVD_HOME",
+  "GRADLE_HOME",
+  "GRADLE_USER_HOME",
+  "M2_HOME",
+  "MAVEN_HOME",
+  "GOROOT",
+  "GOPATH",
+  "GOBIN",
+  "GOCACHE",
+  "GOMODCACHE",
+  "CARGO_HOME",
+  "RUSTUP_HOME",
+  "DOTNET_ROOT",
+  "DOTNET_CLI_HOME",
+  "NUGET_PACKAGES",
+  "DENO_DIR",
+  "DENO_INSTALL",
+  "BUN_INSTALL",
+  "FLUTTER_ROOT",
+  "VIRTUAL_ENV",
+  "PYENV_ROOT",
+  "CONDA_PREFIX",
+  "CONDA_DEFAULT_ENV",
+  "NVM_DIR",
+  "NVM_BIN",
+  "FNM_DIR",
+  "VOLTA_HOME",
+  "ASDF_DIR",
+  "ASDF_DATA_DIR",
+  "HOMEBREW_PREFIX",
+  "HOMEBREW_CELLAR",
+  "HOMEBREW_REPOSITORY",
 ]);
 
 export function isBlockedChildEnvKey(key: string): boolean {
