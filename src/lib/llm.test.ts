@@ -310,3 +310,139 @@ describe("generateText — entitled pinned-provider-filtered-out fallback", () =
     expect(urls.some((u) => u.includes(OPENAI_HOST))).toBe(false);
   });
 });
+
+/**
+ * P0 regression: local Ollama failover tail (Studio mission, 2026-10-30).
+ *
+ * With stale cloud credentials (OpenRouter 401 "User not found", Gemini
+ * billing depleted, no Groq key) Studio runs bricked with "All LLM
+ * streaming providers failed. Tried: gemini, groq, openrouter-free"
+ * even while three healthy litt-hermes models sat loaded in local
+ * Ollama. defaultChain now appends an "ollama" tail to the unprotected
+ * chains — purely additive, still LAST in trust order, and skipped for
+ * pinned providers / byok / vision / transcription.
+ */
+describe("streamText — local Ollama failover tail", () => {
+  function ollamaTags(models: string[]) {
+    return new Response(
+      JSON.stringify({ models: models.map((m) => ({ name: m })) }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  function ollamaContentSse(parts: string[]) {
+    const events = parts.map((part, i) =>
+      `data: ${JSON.stringify({
+        choices: [
+          {
+            delta: { content: part },
+            finish_reason: i === parts.length - 1 ? "stop" : null,
+          },
+        ],
+      })}\n\n`,
+    );
+    events.push("data: [DONE]\n\n");
+    return new Response(events.join(""), { status: 200 });
+  }
+
+  /** Re-import llm.ts under dead-cloud env — llm.ts snapshots GEMINI/GROQ/
+   *  OPENROUTER keys once at module load, exactly like the live incident. */
+  async function loadLlmUnderDeadCloudEnv(extraEnv: Record<string, string> = {}) {
+    for (const [key, value] of Object.entries(extraEnv)) vi.stubEnv(key, value);
+    vi.resetModules();
+    return await import("./llm");
+  }
+
+  beforeEach(() => {
+    // Cloud providers are all dead in this scenario, exactly like the
+    // live incident: no usable key on any managed free tier.
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("GOOGLE_API_KEY", "");
+    vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("GEMINI_DISABLED", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("dead cloud keys → the run completes on local Ollama instead of failing", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/api/tags")) {
+        return ollamaTags(["litt-hermes:16k", "litt-hermes-fast:8k", "litt-hermes-fast:32k"]);
+      }
+      if (u.includes("/v1/chat/completions")) {
+        return ollamaContentSse(["local ", "hello"]);
+      }
+      return new Response("dead cloud", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { streamText } = await loadLlmUnderDeadCloudEnv();
+    const chunks: string[] = [];
+    const result = await streamText("build me a page", (c) => chunks.push(c), { task: "chat" });
+
+    expect(chunks.join("")).toBe("local hello");
+    expect(result.provider).toBe("ollama");
+    // The fast local tool build wins the pick over the slower full variants.
+    expect(result.model).toBe("litt-hermes-fast:8k");
+    // Cloud attempts are recorded in failover order; the tail stayed LAST.
+    expect(result.failover).toEqual(["gemini", "groq", "openrouter-free"]);
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("/api/tags"))).toBe(true);
+    expect(urls.some((u) => u.includes("/v1/chat/completions"))).toBe(true);
+  });
+
+  it("LITT_DISABLE_OLLAMA=1 drops the tail — no local probe, truthful cloud-only failure", async () => {
+    const fetchMock = vi.fn(async (_url: unknown) => new Response("cloud 500", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { streamText } = await loadLlmUnderDeadCloudEnv({ LITT_DISABLE_OLLAMA: "1" });
+    const err = await streamText("hi", () => {}, { task: "chat" }).catch((e) => e);
+    expect(String(err.message)).toMatch(/All LLM streaming providers failed/i);
+    expect(String(err.message)).not.toMatch(/ollama/i);
+    expect(
+      fetchMock.mock.calls.map((c) => String(c[0])).some((u) => u.includes("11434")),
+    ).toBe(false);
+  });
+
+  it("a pinned provider is never extended with the ollama tail", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (String(url).includes("/api/tags")) {
+        return ollamaTags(["litt-hermes-fast:8k"]);
+      }
+      return new Response("dead", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { streamText } = await loadLlmUnderDeadCloudEnv();
+    await expect(
+      streamText("hi", () => {}, { task: "chat", provider: "openrouter-free" }),
+    ).rejects.toThrow(/All LLM streaming providers failed/i);
+    // An explicit pin must not silently resolve elsewhere.
+    expect(
+      fetchMock.mock.calls.map((c) => String(c[0])).some((u) => u.includes("11434")),
+    ).toBe(false);
+  });
+
+  it("vision and transcription tasks exclude the local tail", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (String(url).includes("/api/tags")) {
+        return ollamaTags(["litt-hermes-fast:8k"]);
+      }
+      return new Response("dead", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { streamText } = await loadLlmUnderDeadCloudEnv();
+    await expect(streamText("hi", () => {}, { task: "vision" })).rejects.toThrow();
+    await expect(streamText("hi", () => {}, { task: "transcription" })).rejects.toThrow();
+    expect(
+      fetchMock.mock.calls.map((c) => String(c[0])).some((u) => u.includes("11434")),
+    ).toBe(false);
+  });
+});

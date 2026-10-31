@@ -41,6 +41,10 @@ import {
   type MeteringStatus,
 } from "@/lib/metering";
 import { checkRunawayGuards, SpendGuardError } from "@/lib/spend-guards";
+import {
+  OLLAMA_ENDPOINT_ENV_VARS,
+  resolveOllamaEndpoint,
+} from "@litt/models";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -58,7 +62,8 @@ export type LLMProvider =
   | "openrouter-mistral"
   | "openrouter-llama"
   | "openrouter-trinity"
-  | "openrouter-vision";
+  | "openrouter-vision"
+  | "ollama";
 
 export type ModelCategory = "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
 
@@ -86,6 +91,8 @@ export const PROVIDER_COST_CLASS: Record<LLMProvider, "included" | "litt_paid"> 
   "openrouter-llama": "included",
   "openrouter-trinity": "included",
   "openrouter-vision": "included",
+  /** Local inference — zero marginal cost, LiTT pays nothing. */
+  ollama: "included",
 };
 
 /** True when calling this provider spends LiTT's own money. */
@@ -219,6 +226,9 @@ export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   groq: "openai/gpt-oss-120b",
   "groq-whisper": "whisper-large-v3",
   openai: OPENAI_MODEL,
+  /** Placeholder — the real model is picked live from /api/tags per call
+   *  (see generateViaOllama/streamViaOllama). OLLAMA_MODEL pins it. */
+  ollama: process.env.OLLAMA_MODEL || "local-auto",
   "openrouter-free": "google/gemma-4-31b-it:free",
   "openrouter-qwen": "nvidia/nemotron-3-super-120b-a12b:free",
   "openrouter-deepseek": "nvidia/nemotron-3-ultra-550b-a55b:free",
@@ -282,8 +292,53 @@ function markModelUnavailable(provider: string): void {
  * The v2 agent path (planBasicRoutes) already enforces this structurally;
  * this brings the v1 chat path in line with it.
  */
+/** Local Ollama route eligibility — mirrors planBasicRoutes' rule in
+ *  provider-registry.ts: include when explicitly configured via env, or
+ *  when running outside a deployed host (probing localhost on Railway/
+ *  Vercel is pointless). LITT_DISABLE_OLLAMA hard-disables. */
+function ollamaTailEligible(): boolean {
+  if (process.env.LITT_DISABLE_OLLAMA) return false;
+  if (OLLAMA_ENDPOINT_ENV_VARS.some((k) => !!process.env[k])) return true;
+  const deployed = !!(
+    process.env.RAILWAY_ENVIRONMENT ||
+    process.env.RAILWAY_PROJECT_ID ||
+    process.env.VERCEL
+  );
+  return !deployed;
+}
+
+/** Append the local OLLAMA failover tail as the LAST chain entry.
+ *
+ *  Rationale: with stale cloud keys (401 User not found, depleted billing)
+ *  a Studio run bricked with "All LLM streaming providers failed. Tried:
+ *  gemini, groq, openrouter-free" even while three healthy litt-hermes
+ *  models sat loaded in local Ollama. The tail is purely additive — it
+ *  never reorders or lands before a cloud provider, preserving the
+ *  failoverChain() trust-order invariant (LITT_LOCAL_ONLY contract).
+ *
+ *  Not eligible: pinned providers (explicit user choice must not silently
+ *  resolve elsewhere), byok (caller owns the chain), and tasks no local
+ *  model serves (vision/transcription). */
+function withOllamaTail(chain: LLMProvider[], task: LLMTask, opts: LLMOptions): LLMProvider[] {
+  const pinnedExplicitProvider =
+    !!opts.provider && opts.category !== "litt-alias";
+  if (
+    chain.length > 0 &&
+    chain[chain.length - 1] !== "ollama" &&
+    !pinnedExplicitProvider &&
+    ollamaTailEligible() &&
+    task !== "vision" &&
+    task !== "transcription" &&
+    opts.category !== "byok" &&
+    opts.category !== "vision"
+  ) {
+    return [...chain, "ollama"];
+  }
+  return chain;
+}
+
 function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
-  const chain = rawDefaultChain(task, opts);
+  const chain = withOllamaTail(rawDefaultChain(task, opts), task, opts);
 
   // P1 launch: Gemini billing is depleted (HTTP 402). Until credits are
   // restored, explicitly skip Gemini — do not rely on health checks or
@@ -296,7 +351,7 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
     // The pinned provider was filtered out (e.g. GEMINI_DISABLED): the pin
     // cannot be honored, so drop it and route through the full entitled
     // chain (incl. LITT_PAID) instead of failing with zero attempts.
-    const unpinned = rawDefaultChain(task, { ...opts, provider: undefined });
+    const unpinned = withOllamaTail(rawDefaultChain(task, { ...opts, provider: undefined }), task, { ...opts, provider: undefined });
     return geminiDisabled ? unpinned.filter((p) => p !== "gemini") : unpinned;
   }
 
@@ -304,7 +359,11 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   if (included.length > 0) return included;
 
   // Every candidate was litt_paid (e.g. a forged provider: "openai").
-  return INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p) && (!geminiDisabled || p !== "gemini"));
+  return withOllamaTail(
+    INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p) && (!geminiDisabled || p !== "gemini")),
+    task,
+    opts,
+  );
 }
 
 function rawDefaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
@@ -853,6 +912,11 @@ async function dispatchProvider(
   if (provider === "openai") {
     return generateViaOpenAI(p, modelName, timeoutMs);
   }
+  if (provider === "ollama") {
+    // The generic modelName above is just the DEFAULT_MODELS placeholder;
+    // the real model is resolved against live /api/tags inside these calls.
+    return generateViaOllama(p, timeoutMs);
+  }
   // All others are OpenRouter
   return generateViaOpenRouter(p, provider, modelName, timeoutMs);
 }
@@ -1177,6 +1241,14 @@ export async function streamText(
           timeoutMs,
           onReasoning,
         );
+      } else if (provider === "ollama") {
+        result = await streamViaOllama(
+          { prompt, systemPrompt, task, opts: options },
+          wrappedOnChunk,
+          t0,
+          failover,
+          timeoutMs,
+        );
       } else {
         result = await streamViaOpenRouter(
           provider,
@@ -1452,6 +1524,234 @@ async function streamViaOpenRouter(
     throw new DOMException("The operation was aborted.", "AbortError");
   }
   return { provider, model: modelName, latencyMs: Date.now() - t0, failover, finishReason };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Ollama (local) implementations                                      */
+/* ------------------------------------------------------------------ */
+
+/** Local model probe (5min TTL, 1.5s probe budget) — same policy as
+ *  llm-tool-calling.ts's probeOllamaModels so both routers agree. */
+const OLLAMA_PROBE_TTL_MS = 5 * 60_000;
+const OLLAMA_PROBE_TIMEOUT_MS = 1_500;
+let _llmOllamaProbeCache: { at: number; models: string[] } | null = null;
+
+/** Tool-capable local families — same policy as llm-tool-calling.ts's
+ *  OLLAMA_TOOL_CAPABLE (litt-hermes builds are Qwen3-based). */
+const LLM_OLLAMA_TOOL_CAPABLE =
+  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss|litt-hermes|litt-tools/i;
+
+async function probeLlmOllamaModels(
+  endpoint: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  if (_llmOllamaProbeCache && Date.now() - _llmOllamaProbeCache.at < OLLAMA_PROBE_TTL_MS) {
+    return _llmOllamaProbeCache.models;
+  }
+  const res = await fetchWithTimeout(
+    `${endpoint}/api/tags`,
+    { method: "GET" },
+    Math.min(timeoutMs, OLLAMA_PROBE_TIMEOUT_MS),
+    signal,
+  );
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderError("ollama", res.status, `Ollama /api/tags ${res.status}: ${txt.slice(0, 120)}`);
+  }
+  const data = (await res.json()) as { models?: Array<{ name?: string }> };
+  const models = (data.models ?? [])
+    .map((m) => m.name)
+    .filter((n): n is string => !!n);
+  _llmOllamaProbeCache = { at: Date.now(), models };
+  return models;
+}
+
+function pickLlmOllamaModel(available: string[], modelOverride?: string): string | null {
+  // The placeholder hints (default / DEFAULT_MODELS value) are advisory —
+  // resolve them against the live catalog rather than posting them as a
+  // model name Ollama doesn't have.
+  if (modelOverride && modelOverride !== "auto" && modelOverride !== DEFAULT_MODELS.ollama) {
+    return modelOverride;
+  }
+  const override = process.env.OLLAMA_MODEL;
+  if (override) return override;
+  const capable = available.filter((m) => LLM_OLLAMA_TOOL_CAPABLE.test(m));
+  // Prefer the fast local tool build: on CPU-heavy hosts a full hermes
+  // variant measured >300s per call while litt-hermes-fast answered in
+  // ~73s — the tail must pick a usable model, not just a nominally
+  // capable one (same priority order as pickOllamaModel).
+  return (
+    capable.find((m) => /^litt-hermes-fast:8k/i.test(m)) ??
+    capable.find((m) => /^litt-hermes-fast/i.test(m)) ??
+    capable.find((m) => /^litt-hermes|^litt-tools/i.test(m)) ??
+    capable[0] ??
+    available[0] ??
+    null
+  );
+}
+
+/** Local inference legitimately needs a much wider budget than the shared
+ *  60s stream default: a cold model load plus a real single-page build
+ *  measured ~117s on CPU-heavy hosts, and planBasicRoutes already allows
+ *  300s for this provider. Exceeding the caller's cloud timeout here is
+ *  deliberate — the tail must not silently lose to a cloud attempt that
+ *  would have died at timeout anyway (per-route cap only). */
+function ollamaAttemptTimeoutMs(timeoutMs: number): number {
+  return Math.max(timeoutMs, Number(process.env.OLLAMA_TIMEOUT_MS) || 300_000);
+}
+
+async function generateViaOllama(
+  p: GenerateParams,
+  timeoutMs: number,
+): Promise<{ text: string; usage?: LLMUsage; model: string }> {
+  const endpoint = resolveOllamaEndpoint((key) => process.env[key]);
+  const available = await probeLlmOllamaModels(endpoint, timeoutMs, p.opts.signal);
+  const modelName = pickLlmOllamaModel(available, p.opts.modelOverride?.ollama);
+  if (!modelName) {
+    throw new ProviderError("ollama", null, "No local models loaded in Ollama");
+  }
+
+  const res = await fetchWithTimeout(
+    `${endpoint}/api/chat`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: modelName,
+        stream: false,
+        messages: [
+          ...(p.systemPrompt ? [{ role: "system", content: p.systemPrompt }] : []),
+          { role: "user", content: p.prompt },
+        ],
+        options: {
+          ...(p.opts.maxTokens ? { num_predict: p.opts.maxTokens } : {}),
+          ...(p.opts.temperature !== undefined ? { temperature: p.opts.temperature } : {}),
+          ...(p.opts.stop?.length ? { stop: p.opts.stop } : {}),
+        },
+      }),
+    },
+    ollamaAttemptTimeoutMs(timeoutMs),
+    p.opts.signal,
+  );
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderError(
+      "ollama",
+      res.status,
+      `Ollama chat ${res.status}: ${txt.slice(0, 200)}`,
+    );
+  }
+  const data = (await res.json()) as {
+    message?: { content?: string };
+    prompt_eval_count?: number;
+    eval_count?: number;
+  };
+  const text = data.message?.content ?? "";
+  return {
+    text,
+    model: modelName,
+    usage: text
+      ? {
+          prompt: data.prompt_eval_count ?? 0,
+          completion: data.eval_count ?? 0,
+          total: (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0),
+        }
+      : undefined,
+  };
+}
+
+/** Stream from local Ollama via its OpenAI-compatible /v1 endpoint so the
+ *  same SSE parser as streamViaOpenRouter applies. No Authorization header:
+ *  Ollama is local and unauthenticated. */
+async function streamViaOllama(
+  p: GenerateParams,
+  onChunk: (text: string) => void,
+  t0: number,
+  failover: LLMProvider[],
+  timeoutMs: number,
+): Promise<{
+  provider: LLMProvider;
+  model: string;
+  latencyMs: number;
+  failover: LLMProvider[];
+  finishReason?: string;
+}> {
+  const endpoint = resolveOllamaEndpoint((key) => process.env[key]);
+  const available = await probeLlmOllamaModels(endpoint, timeoutMs, p.opts.signal);
+  const modelName = pickLlmOllamaModel(available, p.opts.modelOverride?.ollama);
+  if (!modelName) {
+    throw new ProviderError("ollama", null, "No local models loaded in Ollama");
+  }
+
+  const body: Record<string, unknown> = {
+    model: modelName,
+    stream: true,
+    messages: [
+      ...(p.systemPrompt ? [{ role: "system", content: p.systemPrompt }] : []),
+      { role: "user", content: p.prompt },
+    ],
+  };
+  if (p.opts.maxTokens) body.max_tokens = p.opts.maxTokens;
+  if (p.opts.temperature !== undefined) body.temperature = p.opts.temperature;
+
+  const res = await fetchWithTimeout(
+    `${endpoint}/v1/chat/completions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    ollamaAttemptTimeoutMs(timeoutMs),
+    p.opts.signal,
+  );
+
+  if (!res.ok || !res.body) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderError(
+      "ollama",
+      res.status,
+      `Ollama stream ${res.status}: ${txt.slice(0, 200)}`,
+    );
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const abortReader = () => { void reader.cancel().catch(() => {}); };
+  if (p.opts.signal?.aborted) {
+    abortReader();
+  } else {
+    p.opts.signal?.addEventListener("abort", abortReader, { once: true });
+  }
+  let buffer = "";
+  let finishReason: string | undefined;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const json = JSON.parse(payload);
+        const choice = json.choices?.[0];
+        const delta = choice?.delta;
+        if (delta?.content) onChunk(delta.content);
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
+      } catch {
+        // ignore malformed chunk
+      }
+    }
+  }
+  p.opts.signal?.removeEventListener("abort", abortReader);
+  if (p.opts.signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+  return { provider: "ollama", model: modelName, latencyMs: Date.now() - t0, failover, finishReason };
 }
 
 async function streamViaOpenAI(
