@@ -864,6 +864,12 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
   // An invalid-args call is still a protocol failure, not a guess.
   for (const call of recoveredCalls) {
     call.inputs = normalizeRecoveredInputs(call.inputs, tools.find((t) => t.id === call.toolId));
+    // Required-arg check exempts args the executor resolves from trusted
+    // server context (projectId from actionContext, sessionId from the
+    // server-owned browser session, …): a model can never know them, a
+    // model-supplied value is untrusted anyway, and native tool_calls skip
+    // this schema pass entirely — requiring them here killed every
+    // recovered files.write on the local small lane.
     const argError = validateToolCallArgs(
       call.toolId,
       call.inputs,
@@ -871,7 +877,7 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
         id: tool.id,
         name: tool.id,
         description: tool.description,
-        inputSchema: tool.inputSchema,
+        inputSchema: schemaWithoutServerResolvedRequired(tool.inputSchema),
         readOnly: true,
       })),
     );
@@ -896,6 +902,33 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
     toolCalls: [...parsed.toolCalls, ...recovered],
     finishReason: parsed.toolCalls.length + recovered.length > 0 ? "tool_calls" : parsed.finishReason,
   };
+}
+
+/**
+ * Args the executor resolves from trusted server context — never trusted
+ * from the model, so requiring them in recovered-call validation rejects
+ * calls that would execute correctly (native calls skip this pass anyway).
+ */
+const SERVER_RESOLVED_ARGS = new Set([
+  "projectId",
+  "sessionId",
+  "userId",
+  "workspaceId",
+  "conversationId",
+]);
+
+function schemaWithoutServerResolvedRequired(
+  schema: ToolDefinition["inputSchema"],
+): ToolDefinition["inputSchema"] {
+  const s = schema as Record<string, unknown> | undefined;
+  const required = s?.required;
+  if (!Array.isArray(required) || !required.some((r) => SERVER_RESOLVED_ARGS.has(String(r)))) {
+    return schema;
+  }
+  return {
+    ...s,
+    required: required.filter((r) => !SERVER_RESOLVED_ARGS.has(String(r))),
+  } as ToolDefinition["inputSchema"];
 }
 
 /**
