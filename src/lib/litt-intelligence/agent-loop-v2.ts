@@ -1951,6 +1951,26 @@ async function runAgentLoopV2Inner(
         continue;
       }
 
+      // Server-resolved context args: file/workspace tools declare
+      // projectId/conversationId/userId as required, but the executor
+      // resolves them from trusted run context — a model can never know
+      // them and a model-supplied value is untrusted anyway. Inject the
+      // run's own values so the schema check doesn't reject otherwise-
+      // valid calls (confirmed live: recovered files.write died here on
+      // the local small lane).
+      const requiredArgs = (toolDef.inputSchema?.required as string[] | undefined) ?? [];
+      const actionCtx = actionContextFrom(cfg);
+      const serverArgs: Record<string, string | undefined> = {
+        projectId: actionCtx?.projectId,
+        conversationId: cfg.conversationId ?? actionCtx?.conversationId,
+        userId: cfg.userId ?? actionCtx?.userId,
+      };
+      for (const arg of requiredArgs) {
+        if (arg in serverArgs && !(arg in toolCall.inputs) && serverArgs[arg]) {
+          toolCall.inputs = { ...toolCall.inputs, [arg]: serverArgs[arg] };
+        }
+      }
+
       // Validate inputs
       const validationError = toolRegistry.validateInputs(toolCall.toolId, toolCall.inputs);
       if (validationError) {
