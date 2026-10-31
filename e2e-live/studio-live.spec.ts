@@ -338,6 +338,16 @@ test("Studio live acceptance — full generate/modify/persist flow", async ({ pa
   const evidence: Record<string, unknown> = {};
   page.on("console", (m) => {
     if (m.type() === "error") console.log(`[console.error] ${m.text().slice(0, 200)}`);
+    if (m.text().includes("conv.cancel")) {
+      console.log(`[diag:cancel] ${m.text().slice(0, 800)}`);
+      // The third arg carries the captured stack — surface every frame.
+      m.args().forEach(async (a, i) => {
+        const v = await a.jsonValue().catch(() => null);
+        if (typeof v === "string" && v.length > 40) {
+          console.log(`[diag:cancel.stack] ${v.split("\\n").slice(0, 12).join(" | ").slice(0, 1200)}`);
+        }
+      });
+    }
   });
 
   // ── 1. Real authenticated test account ─────────────────────────
