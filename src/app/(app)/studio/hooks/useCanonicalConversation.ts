@@ -1878,6 +1878,14 @@ export function useCanonicalConversation({
   // while the server still reports the run active the UI shows "Stopping…".
   const cancel = useCallback(() => {
     const run = activeRunRef.current;
+    // Diagnose the ghost mid-run cancel (Local AI Optimization): capture the
+    // caller stack + the run identity so a non-Stop invocation is provable.
+    // A legitimate user Stop produces the same log — it is not suppressed.
+    console.warn(
+      "[conv.cancel] invoked",
+      { clientRequestId: run?.clientRequestId, conversationId: run?.conversationId },
+      new Error("cancel-stack").stack,
+    );
     explicitCancelRef.current = true;
     if (!run) {
       // No tracked server-side run — just release the local reader if one

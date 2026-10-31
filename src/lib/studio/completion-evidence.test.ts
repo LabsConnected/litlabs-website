@@ -314,3 +314,117 @@ describe("project.deploy is the deployment tool", () => {
     expect(verdict.missing).toContain("successful deployment");
   });
 });
+
+/* ── Boundary mutations never satisfy a file-work requirement ─────
+ *
+ * Regression (e2e-live 2026-10-31): a theme-edit run whose model called
+ * browser.click instead of a file tool. The click is a verified boundary
+ * mutation — real work — but the requested workspace change never
+ * happened. Before the workspace-mutation requirement, a successful
+ * boundary call could report "complete" with index.html untouched.
+ */
+describe("boundary mutations do not satisfy a build requirement", () => {
+  const buildReq = { mutation: true, deployment: false };
+
+  it("a successful browser.click with an unchanged workspace is failed, not complete", () => {
+    const verdict = evaluateCompletion(buildReq, {
+      toolCalls: [{ toolId: "browser.click", success: true, mutating: true }],
+      workspaceChange: { status: "unchanged" },
+    });
+    expect(verdict.state).toBe("failed");
+    expect(verdict.missing).toContain("verified workspace file mutation");
+  });
+
+  it("a successful browser.click with no workspace evidence is partial, not complete", () => {
+    const verdict = evaluateCompletion(buildReq, {
+      toolCalls: [{ toolId: "browser.click", success: true, mutating: true }],
+    });
+    expect(verdict.state).not.toBe("complete");
+    expect(verdict.missing).toContain("verified workspace file mutation");
+  });
+
+  it("boundary work plus a verified file write still completes", () => {
+    const verdict = evaluateCompletion(buildReq, {
+      toolCalls: [
+        { toolId: "browser.click", success: true, mutating: true },
+        { toolId: "files.write", success: true, mutating: true, paths: ["index.html"], persisted: true },
+      ],
+      workspaceChange: { status: "changed", files: ["index.html"] },
+    });
+    expect(verdict.state).toBe("complete");
+  });
+
+  it("preview.start alone does not complete a build", () => {
+    const verdict = evaluateCompletion(buildReq, {
+      toolCalls: [{ toolId: "preview.start", success: true, mutating: true }],
+      workspaceChange: { status: "unchanged" },
+    });
+    expect(verdict.state).toBe("failed");
+  });
+
+  it("a boundary mutator whose own evidence lands in the workspace counts (image.generate → diff)", () => {
+    const verdict = evaluateCompletion(buildReq, {
+      toolCalls: [
+        { toolId: "image.generate", success: true, mutating: true, paths: ["assets/hero.png"] },
+        { toolId: "files.write", success: true, mutating: true, paths: ["index.html"], persisted: true },
+      ],
+      workspaceChange: { status: "changed", files: ["index.html", "assets/hero.png"] },
+    });
+    expect(verdict.state).toBe("complete");
+  });
+});
+
+/* ── Partial writes, failed tools, interrupted runs ─────────────── */
+describe("partial writes, failed tools, interrupted runs", () => {
+  const buildReq = { mutation: true, deployment: false };
+
+  it("one failed write + one verified write → complete only via the verified claim", () => {
+    const verdict = evaluateCompletion(buildReq, {
+      toolCalls: [
+        { toolId: "files.write", success: false, mutating: true, paths: ["style.css"] },
+        { toolId: "files.write", success: true, mutating: true, paths: ["index.html"], persisted: true },
+      ],
+      workspaceChange: { status: "changed", files: ["index.html"] },
+    });
+    expect(verdict.state).toBe("complete");
+  });
+
+  it("a write that self-reported success but whose read-back contradicted is failed", () => {
+    const verdict = evaluateCompletion(buildReq, {
+      toolCalls: [
+        { toolId: "files.write", success: true, mutating: true, paths: ["index.html"], persisted: false },
+      ],
+      workspaceChange: { status: "unchanged" },
+    });
+    expect(verdict.state).toBe("failed");
+  });
+
+  it("an interrupted run that still landed a verified write is not 'not_started'", () => {
+    // The diff proving the write trumps the missing success flag — the
+    // workspace changed, so completion is judged on verified evidence.
+    const verdict = evaluateCompletion(buildReq, {
+      toolCalls: [],
+      workspaceChange: { status: "changed", files: ["index.html"] },
+    });
+    // No mutation claim succeeded, but the workspace provably changed:
+    // failed-after-changes, never a fake "nothing happened".
+    expect(verdict.state).toBe("failed");
+    expect(verdict.reason).toMatch(/workspace was changed/);
+  });
+
+  it("no calls and an unchanged workspace → not_started", () => {
+    const verdict = evaluateCompletion(buildReq, {
+      toolCalls: [],
+      workspaceChange: { status: "unchanged" },
+    });
+    expect(verdict.state).toBe("not_started");
+  });
+
+  it("a failed file write with unchanged workspace → failed before making changes", () => {
+    const verdict = evaluateCompletion(buildReq, {
+      toolCalls: [{ toolId: "files.write", success: false, mutating: true, paths: ["index.html"] }],
+      workspaceChange: { status: "unchanged" },
+    });
+    expect(verdict.state).toBe("failed");
+  });
+});

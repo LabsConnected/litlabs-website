@@ -836,6 +836,54 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
     expect(resolveZeroToolCalls("Which file should I update?", 0).action).toBe("final");
   });
 
+  it("treats conversational check-ins as final on non-execution turns", () => {
+    // Greptile P1 on PR #757: the approval phrases also match legitimate
+    // final replies and clarification questions. On a turn that was not
+    // dispatched as an execution request, they must end the run — a
+    // nudge would force a file-change request the user never made, and
+    // repeated matches turn a normal conversation into a failed
+    // mutation run.
+    const finalReplies = [
+      "I recommend a dark background. How does that sound?",
+      "Here are a few palette directions — sound good?",
+      "Want me to proceed with any of these ideas?",
+      "If you're ready, we can look at the layout next.",
+    ];
+    for (const text of finalReplies) {
+      expect(resolveZeroToolCalls(text, 0, { executionRequested: false }).action, text).toBe("final");
+      expect(resolveZeroToolCalls(text, 2, { executionRequested: false }).action, text).toBe("final");
+    }
+    // The same wording on an execution turn stays a nudge — the model
+    // was asked to mutate and must emit the gated tool call.
+    expect(
+      resolveZeroToolCalls("Here's the plan for the landing page. Shall I proceed?", 0, {
+        executionRequested: true,
+      }).action,
+    ).toBe("nudge");
+    // Ongoing-work claims are lies regardless of turn type.
+    expect(
+      resolveZeroToolCalls("I'm updating the header styles now.", 0, { executionRequested: false }).action,
+    ).toBe("nudge");
+  });
+
+  it("routes ACT-mode deferral phrasing to the nudge path (explicit build requests)", () => {
+    // The 2026-10-30 Studio regression: an explicit "build my website"
+    // request got a plan + a prose approval ask ("...then ask for your
+    // approval to write it to the project. How does that sound?") — no
+    // tool call, no approval card, run settled "Complete" untouched.
+    const deferrals = [
+      "I can't create the file on this turn, but if you're ready, I'll draft the initial index.html content with these sections and the base styling, then ask for your approval to write it to the project. How does that sound?",
+      "Here's the plan for the landing page. Shall I proceed?",
+      "I can write index.html for you — want me to go ahead?",
+      "Ready when you are — confirm and I'll create the file.",
+    ];
+    for (const text of deferrals) {
+      expect(resolveZeroToolCalls(text, 0).action, text).toBe("nudge");
+    }
+    // Exhausted nudges still fail honestly, never complete.
+    expect(resolveZeroToolCalls(deferrals[0], 2).action).toBe("fail");
+  });
+
   it("fails the run honestly when the model keeps asking for approval in prose", async () => {
     vi.mocked(callLLMWithTools).mockResolvedValue({
       text: APPROVAL_ASK,
@@ -853,6 +901,10 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
         executionMode: "act",
         enableBuildFix: false,
         maxSteps: 10,
+        // The kernel dispatches this explicit change request as an
+        // execution turn — the prose approval-ask guard only applies
+        // there (chat turns can legitimately end on a check-in).
+        requireToolCallOnFirstStep: true,
       },
     );
 
@@ -870,6 +922,177 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
     expect(
       secondCallMessages.some((m) => m.role === "user" && m.content.includes("files.write")),
     ).toBe(true);
+  });
+
+  it("accepts a design check-in as the final answer on a non-execution turn", async () => {
+    // Full-loop regression for the Greptile P1: a conversational reply
+    // must not be nudged into a file-write request when the turn was
+    // never an execution request.
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "I recommend a dark background. How does that sound?",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2(
+      "Which background color fits a coffee shop site?",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
+    expect(result.finalText).toBe("I recommend a dark background. How does that sound?");
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toBeUndefined();
+  });
+});
+
+describe("runAgentLoopV2 — required first tool call (immediate execution)", () => {
+  // Release-blocker regression (2026-10-29): an execution-required Studio
+  // build opened with a text-only QUALITY-marker reply and toolCalls:[] —
+  // the Gemini adapter never received the "required" tool choice, and the
+  // loop accepted the stage declaration as the final answer. The run must
+  // hold "required" until a tool call is actually emitted, and a
+  // text-only reply before the first call can never resolve "final".
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  const execCfg = {
+    model: "gemini-2.5-flash",
+    systemPrompt: "You are LiTT.",
+    executionMode: "auto" as const,
+    enableBuildFix: false,
+    requireToolCallOnFirstStep: true,
+  };
+
+  function callToolChoice(index: number): string | undefined {
+    const opts = vi.mocked(callLLMWithTools).mock.calls[index]?.[3] as
+      | { toolChoice?: string }
+      | undefined;
+    return opts?.toolChoice;
+  }
+
+  it("resolveZeroToolCalls: pending required call nudges then fails — never 'final'", () => {
+    expect(
+      resolveZeroToolCalls("QUALITY: understand — captured the brief.", 0, {
+        requiredToolCallPending: true,
+      }).action,
+    ).toBe("nudge");
+    expect(
+      resolveZeroToolCalls("Done — the site is complete.", 1, {
+        requiredToolCallPending: true,
+      }).action,
+    ).toBe("nudge");
+    const exhausted = resolveZeroToolCalls("Done.", 2, { requiredToolCallPending: true });
+    expect(exhausted.action).toBe("fail");
+    // Without the flag the same plain prose stays a final answer.
+    expect(resolveZeroToolCalls("Done.", 0).action).toBe("final");
+    expect(resolveZeroToolCalls("QUALITY: understand — noted.", 0).action).toBe("final");
+  });
+
+  it("a text-only QUALITY-marker first reply is nudged back to execution, then a real write lands", async () => {
+    const writeFile = vi.fn().mockResolvedValue(undefined);
+    const transport = {
+      ...fakeTransport,
+      writeFile,
+      readFile: vi.fn(async () => ({ content: "<html>Built.</html>", size: 18 })),
+      createCheckpointBeforeMutation: vi.fn().mockResolvedValue(null),
+    } as unknown as WorkspaceTransport;
+
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "QUALITY: understand — a landing page for the coffee brand.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "gemini-2.5-flash",
+      })
+      .mockResolvedValueOnce({
+        text: "QUALITY: build — writing index.html",
+        toolCalls: [{
+          toolCallId: "tc-exec-1",
+          toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "<html>Built.</html>" },
+        }],
+        finishReason: "tool_calls",
+        model: "gemini-2.5-flash",
+      })
+      .mockResolvedValueOnce({
+        text: "Built the landing page.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "gemini-2.5-flash",
+      });
+
+    const result = await runAgentLoopV2("build my coffee landing page", transport, execCfg);
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    // "required" is held until a tool call is actually emitted, then "auto".
+    expect(callToolChoice(0)).toBe("required");
+    expect(callToolChoice(1)).toBe("required");
+    expect(callToolChoice(2)).toBe("auto");
+
+    // The text-only reply produced a nudge, not a final answer.
+    const secondCallMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      secondCallMessages.some((m) => m.role === "user" && m.content.includes("emit the tool calls")),
+    ).toBe(true);
+
+    // One explicit build prompt → one real file write.
+    expect(writeFile).toHaveBeenCalledWith("index.html", "<html>Built.</html>");
+    expect(result.toolCalls.some((t) => t.toolId === "files.write" && t.success)).toBe(true);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.finalText).toBe("Built the landing page.");
+  });
+
+  it("fails honestly — never 'final' — when the model never emits a tool call", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "QUALITY: understand — planning the site structure.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "gemini-2.5-flash",
+    });
+
+    const result = await runAgentLoopV2("build my landing page", fakeTransport, {
+      ...execCfg,
+      maxSteps: 10,
+    });
+
+    // 1 initial + 2 bounded nudges, then an honest failure.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    for (let i = 0; i < 3; i++) expect(callToolChoice(i)).toBe("required");
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toContain("no files were changed");
+    expect(result.finalText).toBe(result.failedHonestly);
+  });
+
+  it("still accepts plain prose as final when the flag is off", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done — the site is complete.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2("build a tiny landing page", fakeTransport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "act",
+      enableBuildFix: false,
+    });
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
+    expect(callToolChoice(0)).toBe("auto");
+    expect(result.finalText).toBe("Done — the site is complete.");
   });
 });
 
@@ -1256,6 +1479,135 @@ describe("BUILD resume completion evidence", () => {
     const result = await resumeAgentLoopV2(resumeInput(), transport);
     expect(callLLMWithTools).toHaveBeenCalledTimes(3);
     expect(result.failedHonestly).toContain("3 steps");
+  });
+});
+
+describe("resumeAgentLoopV2 — approval-resume execution intent", () => {
+  // Greptile P1 on PR #757 (round 2): the approvals route rebuilt the
+  // resume config without the execution intent — requireToolCallOnFirstStep
+  // is inert on resume (the gated call that caused the pause already
+  // satisfied it, and the resumed loop always counts a call as emitted) —
+  // so a post-approval reply asking for approval in prose with zero tool
+  // calls was accepted as the final answer and the requested work silently
+  // stopped. Execution intent now rides its own flag (executionRequested),
+  // carried through approval resumes.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const PROSE_ASK =
+    "The next step modifies workspace files, so I need your approval to write the next file. How does that sound?";
+
+  const execTransport = {
+    ...fakeTransport,
+    writeFile: vi.fn(async () => ({ saved: true })),
+    readFile: vi.fn(async () => ({ content: "<html><body>Built site</body></html>", size: 40 })),
+    listFiles: vi.fn(async () => ({ entries: [{ name: "index.html", type: "file" }] })),
+  } as unknown as WorkspaceTransport;
+
+  function writeResume(config?: Partial<ResumeInput["config"]>): ResumeInput {
+    return {
+      pausedMessages: [{ role: "user", content: "Build a roofing site" }],
+      toolId: "files.write",
+      toolCallId: "tc-write-1",
+      inputs: { projectId: "p-test", path: "index.html", content: "<html><body>Built site</body></html>" },
+      decision: "approved",
+      stepsUsedBeforePause: 1,
+      hadInterveningMutation: false,
+      config: {
+        systemPrompt: "You are LiTT.",
+        userId: "u-test",
+        executionMode: "act",
+        enableBuildFix: false,
+        isStaticWorkspace: true,
+        executionRequested: true,
+        ...config,
+      },
+    };
+  }
+
+  it("nudges a post-approval prose approval-ask back to execution — never 'final'", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({ text: PROSE_ASK, toolCalls: [], finishReason: "stop", model: "test" })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: "read-1", inputs: { projectId: "p-test", path: "index.html" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      })
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
+
+    const result = await resumeAgentLoopV2(writeResume(), execTransport);
+
+    // Without the carried intent the first reply resolved "final" and the
+    // run ended — the silent-resume bug. Now it nudges, the emitted call
+    // executes, and the run completes with the real answer.
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBeGreaterThanOrEqual(3);
+    const nudgedMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      nudgedMessages.some((m) => m.role === "user" && m.content.includes("don't create approval cards")),
+    ).toBe(true);
+    expect(result.finalText).toBe("Done.");
+    expect(result.failedHonestly).toBeUndefined();
+  });
+
+  it("fails honestly — never completes — when the post-approval model keeps asking in prose", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: PROSE_ASK,
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test",
+    });
+
+    const result = await resumeAgentLoopV2(writeResume(), execTransport);
+
+    // 1 initial + 2 bounded nudges, then an honest failure — the run can
+    // never report "Complete" for work that stopped on a prose ask.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    expect(result.failedHonestly).toContain("no approval card was created");
+    expect(result.finalText).toBe(result.failedHonestly);
+  });
+
+  it("keeps the guard on the requireToolCallOnFirstStep fallback path", async () => {
+    // Backward compat: callers that set only the legacy flag still get the
+    // prose-ask gate — it only ever came from requiresExecution dispatch.
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: PROSE_ASK,
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test",
+    });
+
+    const result = await resumeAgentLoopV2(
+      writeResume({ executionRequested: undefined, requireToolCallOnFirstStep: true }),
+      execTransport,
+    );
+
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBeGreaterThan(1);
+    expect(result.failedHonestly).toContain("no approval card was created");
+  });
+
+  it("keeps conversational check-ins final on a plan-mode resume", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Here is the plan for the landing page. How does that sound?",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test",
+    });
+
+    const result = await resumeAgentLoopV2(
+      writeResume({ executionMode: "plan" }),
+      execTransport,
+    );
+
+    // The plan-mode exclusion survives: check-in phrasing is a legitimate
+    // final answer, not a missing tool call.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
+    expect(result.finalText).toBe("Here is the plan for the landing page. How does that sound?");
+    expect(result.failedHonestly).toBeUndefined();
   });
 });
 
@@ -1741,5 +2093,55 @@ describe("runAgentLoopV2 — sequential apply_patch read-back", () => {
 
     const patch = result.toolCalls.find((t) => t.toolId === "apply_patch");
     expect(patch?.persisted).toBe(false);
+  });
+});
+
+describe("runAgentLoopV2 — browser interaction without a live session never reaches approval", () => {
+  // Regression (e2e-live 2026-10-31): a local model emitted browser.click
+  // for a theme edit with no browser session — it surfaced as an approval
+  // card, the user approved it, and the call failed at execution, ending
+  // the run failed. The no-session error must come back as a tool result
+  // instead: no approval card for a call that can never succeed.
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("returns a session-required tool error instead of an approval card", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          {
+            toolCallId: "tc-1",
+            toolId: "browser.click",
+            inputs: { selector: "#hero" },
+          },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "The browser was not needed — no files were changed.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2("click the hero", fakeTransport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "act",
+      enableBuildFix: false,
+    });
+
+    // No approval pause — the dead call never becomes a card.
+    expect(result.pendingApproval).toBeUndefined();
+    // The failure is recorded on the tool log as a non-mutating,
+    // session-level error the model can act on.
+    const click = result.toolCalls.find((t) => t.toolId === "browser.click");
+    expect(click).toBeDefined();
+    expect(click!.success).toBe(false);
+    expect(click!.mutating).toBe(false);
+    expect(click!.summary).toMatch(/browser session/i);
   });
 });

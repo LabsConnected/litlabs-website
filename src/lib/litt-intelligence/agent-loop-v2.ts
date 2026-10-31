@@ -146,6 +146,19 @@ export interface AgentLoopConfig {
   /** Require a structured tool call on the first model turn of an execution flow. */
   requireToolCallOnFirstStep?: boolean;
   /**
+   * Execution intent, kept separate from the first-call requirement:
+   * the turn was dispatched as an execution request (requiresExecution
+   * routing) with mutation tools available. `requireToolCallOnFirstStep`
+   * is only meaningful while zero tool calls have been emitted — after an
+   * approval pause that requirement is already satisfied — so it cannot
+   * carry this intent across a resume. The approval-resume path sets this
+   * flag directly so a post-approval reply that asks for approval (or
+   * defers work) in prose without emitting the gated tool call is nudged
+   * back to execution instead of being accepted as a final answer.
+   * Falls back to `requireToolCallOnFirstStep` when unset.
+   */
+  executionRequested?: boolean;
+  /**
    * Early bounded capability guard (BUILD runs): the loop tracks consecutive
    * steps in which the model emitted tool calls but ZERO file-writing calls
    * (files.write / apply_patch / edit). After maxStepsWithoutFileWrite such
@@ -540,7 +553,14 @@ const APPROVAL_ASK_MARKERS: RegExp[] = [
   /please confirm/i,
   /give approval/i,
   /need your approval/i,
+  /ask for your approval/i,
   /confirm.*proceed/i,
+  /how does that sound/i,
+  /sound good\?/i,
+  /shall i (?:proceed|continue|go ahead|start)/i,
+  /confirm (?:and|to) i(?:'|’)ll/i,
+  /if you(?:'|’)re ready/i,
+  /want me to (?:proceed|continue|go ahead|start|build|create|write)/i,
 ];
 
 /**
@@ -579,12 +599,36 @@ type ZeroCallResolution =
  * approval (or claims work is happening) without emitting the tool call
  * gets a targeted nudge to emit the call; on exhaustion the run fails
  * honestly — no approval card was ever created, so completing would lie.
+ *
+ * `requiredToolCallPending` marks an execution-required run that has not
+ * emitted a single tool call yet (requireToolCallOnFirstStep, unsatisfied).
+ * A text-only reply there can NEVER be the final answer — nothing was
+ * executed — so the reply is always a bounded nudge, then an honest
+ * failure. This is the loop-level backstop for providers that ignore
+ * tool_choice/"required" (e.g. a first-turn text-only QUALITY-marker
+ * reply with toolCalls:[] on gemini-2.5-flash).
+ *
+ * `executionRequested` marks a turn dispatched as an execution request
+ * with mutation tools available (requiresExecution routing in a
+ * non-plan mode). The prose approval-ask check only applies there: the
+ * approval phrases also match legitimate final replies on ordinary
+ * chat turns ("I recommend a dark background. How does that sound?"),
+ * and nudging those would force a file-change request the user never
+ * made — repeated matches turn a normal conversation into a failed
+ * mutation run.
  */
-export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCallResolution {
+export function resolveZeroToolCalls(
+  text: string,
+  nudgesUsed: number,
+  opts?: { requiredToolCallPending?: boolean; executionRequested?: boolean },
+): ZeroCallResolution {
   // The prose approval-ask is the most specific signal and is checked
   // first: the model wants to perform a gated mutation but never emitted
-  // the tool call, so no approval card exists.
-  if (asksForApprovalInProse(text) || claimsOngoingWork(text)) {
+  // the tool call, so no approval card exists. Present-continuous work
+  // claims ("I'm updating the header") assert work is happening right
+  // now — a lie regardless of turn type, so they are always checked.
+  const executionRequested = opts?.executionRequested !== false;
+  if ((executionRequested && asksForApprovalInProse(text)) || claimsOngoingWork(text)) {
     if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
       return {
         action: "nudge",
@@ -600,6 +644,22 @@ export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCall
         "so no approval card was created and no files were changed. Nothing was modified — please try again.",
     };
   }
+  if (opts?.requiredToolCallPending) {
+    if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
+      return {
+        action: "nudge",
+        nudgeMessage:
+          "This request requires tool execution, but your reply contained no tool calls, so nothing was done. " +
+          "Do not answer in prose — emit the tool calls for the first build step now (e.g. `files.write` to create or modify project files).",
+      };
+    }
+    return {
+      action: "fail",
+      failureMessage:
+        "I couldn't start the requested work: the model replied in prose instead of emitting the required tool calls, " +
+        "so no files were changed and nothing was executed. Your project is preserved — please try again.",
+    };
+  }
   if (!announcesMoreWork(text)) return { action: "final" };
   if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
     return {
@@ -613,6 +673,144 @@ export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCall
 }
 
 // ─── Tool definition conversion ───────────────────────────────────
+
+/**
+ * Minimal website-building toolset offered to small local models
+ * (Local AI Optimization, Priority 1). Everything the agent needs to
+ * inspect, write, patch, and preview a static site — and nothing else.
+ * Browser tools are excluded until a turn genuinely needs live-page
+ * interaction; deterministic preview checks cover render verification.
+ */
+const LOCAL_BUILD_TOOL_IDS = new Set([
+  "files.list",
+  "files.read",
+  "files.write",
+  "files.patch",
+  "files.delete",
+  "files.rename",
+  "files.mkdir",
+  "apply_patch",
+  "search_code",
+  "project.scan",
+  "project.read_context",
+  "preview.start",
+  "preview.stop",
+  "preview.status",
+  "preview.open",
+  "checkpoint.create",
+]);
+
+/**
+ * Capability families that stay within the workspace when the plan
+ * calls for them. If a goal needs ANY family outside this set —
+ * terminal, deployment, web search/fetch, image generation — the task
+ * keeps the full catalog; the slim set is for file/preview work only.
+ * `browser` is listed because the planner marks visual builds as
+ * requiring it for verification — the slim set satisfies that with
+ * preview tools plus deterministic render checks instead.
+ */
+const SLIM_SAFE_FAMILIES: ReadonlySet<string> = new Set([
+  "project_inspection",
+  "filesystem",
+  "preview",
+  "browser",
+  "git",
+  "memory",
+]);
+
+/**
+ * Local small-model lane (approved lightweight-local-coding config):
+ * qwen2.5-coder:1.5b-class models at an 8k context. Detection is an
+ * explicit env flag OR a small-model name pattern in OLLAMA_MODEL —
+ * matches the litbi-LLC builds (coder, fast, ≤8k ctx variants).
+ */
+export function isLocalSmallLane(): boolean {
+  if (process.env.LITT_LOCAL_SMALL === "1") return true;
+  const m = process.env.OLLAMA_MODEL ?? "";
+  return /coder|fast|:(2|4|8)k$/i.test(m);
+}
+
+/**
+ * Minimal toolset for the small lane — the 8k ctx budget leaves room for
+ * roughly one screen of schemas; anything more crowds out history and
+ * output. Covers inspect / write / patch / preview-verify.
+ */
+const LOCAL_SMALL_TOOL_IDS = new Set([
+  "files.list",
+  "files.read",
+  "files.write",
+  "files.patch",
+  "apply_patch",
+  "files.delete",
+  "files.rename",
+  "files.mkdir",
+  "preview.start",
+  "preview.status",
+]);
+
+/**
+ * Compact system prompt for the small lane. The full orchestrator +
+ * quality-loop prompts (~10-15k tokens) exceed an 8k ctx — this teaches
+ * the TEXT tool-call format these models actually emit (native
+ * message.tool_calls is unreliable at 1.5B; the fenced/bare-JSON body is
+ * recovered by tool-call-markup). Completion is gated by the workspace-
+ * mutation evidence check instead of the full quality-loop verdict.
+ */
+const LOCAL_SMALL_LANE_PROMPT =
+  "## Local coding mode\n" +
+  "You are LiTT, a website-building agent. You act by emitting tool calls.\n" +
+  "This model has no native tool channel — emit EACH call as a fenced block:\n\n" +
+  "```tool_call\n" +
+  '{"name":"files.write","arguments":{"path":"index.html","content":"<!doctype html>..."}}\n' +
+  "```\n\n" +
+  "Rules:\n" +
+  "- Emit EVERY files.write the site needs in ONE response, then emit preview.start.\n" +
+  "- For a new site a single index.html with complete inline CSS/JS is enough.\n" +
+  "- Emit only tool_call blocks — no prose, no explanations.\n" +
+  "- To modify: files.read once, then files.write (or apply_patch) the updated file.\n" +
+  "- Available: files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.";
+
+/**
+ * Narrow the offered tools to LOCAL_BUILD_TOOL_IDS when:
+ *  - a local model is the configured route (OLLAMA_MODEL set), and
+ *  - the capability plan needs nothing outside the workspace families.
+ * Returns the ORIGINAL array (reference-equal) when slimming does not
+ * apply or would empty the set — callers distinguish by `!==`.
+ */
+function slimToolsForLocalBuild(
+  tools: LiTTToolDefinition[],
+  capabilityPlan: import("./capability-planner").CapabilityPlan | undefined,
+): LiTTToolDefinition[] {
+  // Small lane (1.5B-class, 8k ctx): always the minimal toolset — schema
+  // size is the binding constraint, not capability intent.
+  if (isLocalSmallLane()) {
+    const minimal = tools.filter((t) => LOCAL_SMALL_TOOL_IDS.has(t.id));
+    return minimal.length > 0 ? minimal : tools;
+  }
+  if (!process.env.OLLAMA_MODEL || !capabilityPlan) return tools;
+  const planned = [
+    ...capabilityPlan.requiredCapabilities,
+    ...capabilityPlan.usefulCapabilities,
+  ];
+  if (!planned.every((c) => SLIM_SAFE_FAMILIES.has(c))) return tools;
+  const slim = tools.filter((t) => LOCAL_BUILD_TOOL_IDS.has(t.id));
+  return slim.length > 0 ? slim : tools;
+}
+
+/**
+ * Prompt note appended when the slim set is active. Teaches the small
+ * local model the batch-emit pattern (Priority 2): all writes in one
+ * response, minimal inspection turns — the only way CPU inference
+ * finishes inside the runtime budget.
+ */
+const LOCAL_BUILD_TOOL_NOTE =
+  "## Local build mode\n" +
+  "Only the file and preview tools above exist in this mode — there is no browser, terminal, " +
+  "deploy, search, or image tool. Work directly and efficiently:\n" +
+  "- Read what you need once; do not repeatedly inspect the workspace.\n" +
+  "- Emit EVERY files.write the site needs in ONE response — batch all writes together instead of one per turn.\n" +
+  "- For a new static site, a single files.write with complete inline-CSS HTML is acceptable and fastest.\n" +
+  "- Call preview.start when the files are written to verify the render.";
 
 function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
   return {
@@ -1325,8 +1523,12 @@ async function runAgentLoopV2Inner(
   // Quality loop (opt-in): create the evidence session and teach the agent
   // the stage contract. All hooks below degrade gracefully — the gate
   // itself is enforced at finalize() time, never mid-run.
+  const localSmallLane = isLocalSmallLane();
   let qualitySession: QualityLoopSession | null = null;
-  if (cfg.qualityLoop?.enabled) {
+  // Small lane: the full quality-loop prompt does not fit an 8k ctx — the
+  // deterministic workspace-mutation evidence check is the completion
+  // gate instead. Session skipped so no stage markers are required.
+  if (cfg.qualityLoop?.enabled && !localSmallLane) {
     qualitySession = startQualityLoopSession({
       runId: cfg.qualityLoop.runId,
       projectId: cfg.qualityLoop.projectId,
@@ -1344,7 +1546,15 @@ async function runAgentLoopV2Inner(
   // model which of its real capabilities materially improve THIS goal.
   // Reference-match requests ("make mine look like this") trigger the
   // reference workflow instead of a generic build.
-  const capabilityPlan = applyOrchestratorPrompts(cfg, userMessage);
+  // Small lane: still compute the plan (it drives the slim-tool gate and
+  // observability) but skip the multi-paragraph orchestrator prompts —
+  // a compact local-mode prompt fits the 8k ctx instead.
+  const capabilityPlan = isLocalSmallLane()
+    ? planCapabilities(userMessage)
+    : applyOrchestratorPrompts(cfg, userMessage);
+  if (isLocalSmallLane()) {
+    cfg.systemPrompt += "\n\n" + LOCAL_SMALL_LANE_PROMPT;
+  }
 
   // ── Run observability (Part J) ──
   const runObs = startRunObservability({
@@ -1419,7 +1629,21 @@ async function runAgentLoopV2Inner(
   );
   const { offerable: offerableToolIds, degraded: degradedToolIds } =
     filterOfferableTools(toolHealthMap);
-  const offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  const healthCheckedTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  // ── Local-model tool slimming (Local AI Optimization, Priority 1) ──
+  // When the configured route is a small local model (OLLAMA_MODEL set),
+  // offering the full ~60-schema catalog burns the limited context window
+  // and CPU prefill budget on tools a site build never calls — and
+  // invites wrong-tool picks (confirmed live: browser.click for a theme
+  // edit). For workspace build/edit turns offer only the file + preview
+  // set. Every mutation still passes the SAME permission/approval gates
+  // (this only narrows what is OFFERED, never what is permitted), and
+  // tasks needing terminal/deploy/web/image keep the full catalog.
+  const offerableTools = slimToolsForLocalBuild(healthCheckedTools, capabilityPlan);
+  const toolsSlimmedForLocal = offerableTools !== healthCheckedTools;
+  if (toolsSlimmedForLocal) {
+    cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
+  }
   const healthNote = buildToolHealthPromptNote(toolHealthMap);
   if (healthNote) {
     cfg.systemPrompt += "\n\n" + healthNote;
@@ -1473,6 +1697,12 @@ async function runAgentLoopV2Inner(
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
+  // True once the model has emitted at least one tool call this run. An
+  // execution-required run (requireToolCallOnFirstStep) holds the
+  // "required" tool choice until this flips — a provider that drops the
+  // constraint after step 1 must not get a second free prose turn, and a
+  // text-only reply before any call can never be a final answer.
+  let emittedToolCalls = false;
 
   // Early bounded capability guard (BUILD runs only, via
   // cfg.buildCapabilityGuard): consecutive steps where the model emitted
@@ -1519,7 +1749,7 @@ async function runAgentLoopV2Inner(
           model: requestedModel,
           temperature: 0.15,
           maxTokens: 4096,
-          toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
+          toolChoice: cfg.requireToolCallOnFirstStep && !emittedToolCalls ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -1626,7 +1856,15 @@ async function runAgentLoopV2Inner(
         continue;
       }
       const zeroCallText = llmResponse.text ?? "";
-      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges);
+      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
+        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Prose approval-asks can only stall a turn that was dispatched
+        // to execute: on chat/plan turns the same wording is a valid
+        // final answer, not a missing tool call. Execution intent rides
+        // its own flag so it survives approval resumes — the first-call
+        // requirement is inert once any call has been emitted.
+        executionRequested: (cfg.executionRequested ?? cfg.requireToolCallOnFirstStep) === true && cfg.executionMode !== "plan",
+      });
       if (resolution.action === "nudge") {
         continuationNudges++;
         localProgress.emit({
@@ -1675,6 +1913,10 @@ async function runAgentLoopV2Inner(
       break;
     }
 
+    // The model emitted tool calls — the required-first-call contract is
+    // satisfied and later steps run under "auto" tool choice.
+    emittedToolCalls = true;
+
     // Emit a reasoning summary for tool-calling steps (what LiTT is about to do)
     if (llmResponse.text) {
       localProgress.emit({
@@ -1707,6 +1949,26 @@ async function runAgentLoopV2Inner(
         };
         llmMessages.push(buildToolResultMessage(result));
         continue;
+      }
+
+      // Server-resolved context args: file/workspace tools declare
+      // projectId/conversationId/userId as required, but the executor
+      // resolves them from trusted run context — a model can never know
+      // them and a model-supplied value is untrusted anyway. Inject the
+      // run's own values so the schema check doesn't reject otherwise-
+      // valid calls (confirmed live: recovered files.write died here on
+      // the local small lane).
+      const requiredArgs = (toolDef.inputSchema?.required as string[] | undefined) ?? [];
+      const actionCtx = actionContextFrom(cfg);
+      const serverArgs: Record<string, string | undefined> = {
+        projectId: actionCtx?.projectId,
+        conversationId: cfg.conversationId ?? actionCtx?.conversationId,
+        userId: cfg.userId ?? actionCtx?.userId,
+      };
+      for (const arg of requiredArgs) {
+        if (arg in serverArgs && !(arg in toolCall.inputs) && serverArgs[arg]) {
+          toolCall.inputs = { ...toolCall.inputs, [arg]: serverArgs[arg] };
+        }
       }
 
       // Validate inputs
@@ -1743,6 +2005,48 @@ async function runAgentLoopV2Inner(
             toolId: toolCall.toolId,
             success: true,
             summary: "skipped — already executed",
+            durationMs: 0,
+          });
+          continue;
+        }
+      }
+
+      // Browser interaction tools need a live session. The model cannot
+      // know the session id — the server binds it at execute time — so a
+      // call arriving without one is only valid while a session is
+      // actually live for this conversation. When none is, the call can
+      // never succeed: surfacing an approval card for it burns a user
+      // approval on a guaranteed failure (confirmed e2e-live 2026-10-31:
+      // an approved browser.click failed with no session and ended the
+      // run). Return an actionable error instead so the model starts a
+      // session or picks a workspace tool.
+      if (
+        toolCall.toolId.startsWith("browser.") &&
+        toolCall.toolId !== "browser.start_session" &&
+        typeof toolCall.inputs.sessionId !== "string"
+      ) {
+        const browserUserId = cfg.userId ?? actionContextFrom(cfg)?.userId;
+        const liveSession = browserUserId
+          ? await import("./browser-agent")
+              .then((m) => m.getActiveSession(browserUserId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId))
+              .catch(() => null)
+          : null;
+        if (!liveSession) {
+          const noSession = `No active browser session — call browser.start_session first to create one (the server supplies the session id; you do not pass it). If the task does not need a live web page, use the file tools instead.`;
+          const result: ToolCallResult = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: null,
+            success: false,
+            error: noSession,
+          };
+          llmMessages.push(buildToolResultMessage(result));
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "no active browser session", mutating: false });
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: false,
+            summary: "No active browser session — start_session required first",
             durationMs: 0,
           });
           continue;
@@ -2792,7 +3096,9 @@ async function resumeAgentLoopV2Inner(
   // before the approval pause. The paused messages are still re-harvested for
   // idempotency, but conversation text is not the source of machine evidence.
   let qualitySession: QualityLoopSession | null = null;
-  if (cfg.qualityLoop?.enabled) {
+  // Small lane: same as the initial run — the full quality prompt doesn't
+  // fit the 8k ctx; the workspace-mutation evidence check is the gate.
+  if (cfg.qualityLoop?.enabled && !isLocalSmallLane()) {
     qualitySession = startQualityLoopSession({
       runId: cfg.qualityLoop.runId,
       projectId: cfg.qualityLoop.projectId,
@@ -2813,8 +3119,12 @@ async function resumeAgentLoopV2Inner(
   // pause.
   const resumeUserMessage =
     resume.pausedMessages.find((m) => m.role === "user")?.content ?? "";
-  const resumeCapabilityPlan =
-    applyOrchestratorPrompts(cfg, resumeUserMessage);
+  const resumeCapabilityPlan = isLocalSmallLane()
+    ? planCapabilities(resumeUserMessage)
+    : applyOrchestratorPrompts(cfg, resumeUserMessage);
+  if (isLocalSmallLane()) {
+    cfg.systemPrompt += "\n\n" + LOCAL_SMALL_LANE_PROMPT;
+  }
 
   // ── Run observability on resume (Part J, D) ──
   // The approval pause breaks the original run's observability record
@@ -2885,9 +3195,20 @@ async function resumeAgentLoopV2Inner(
     },
   );
   const { offerable: resumeOfferableIds } = filterOfferableTools(resumeToolHealthMap);
-  const resumeOfferableTools = availableTools.filter((t) =>
+  const resumeHealthCheckedTools = availableTools.filter((t) =>
     resumeOfferableIds.includes(t.id),
   );
+  // Same local-model slimming as the initial run (Priority 1): the
+  // resumed turn keeps the reduced file+preview set for workspace
+  // build/edit tasks so a post-approval continuation cannot suddenly
+  // re-advertise the ~60-tool catalog mid-run.
+  const resumeOfferableTools = slimToolsForLocalBuild(
+    resumeHealthCheckedTools,
+    resumeCapabilityPlan,
+  );
+  if (resumeOfferableTools !== resumeHealthCheckedTools) {
+    cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
+  }
   const resumeHealthNote = buildToolHealthPromptNote(resumeToolHealthMap);
   if (resumeHealthNote) {
     cfg.systemPrompt += "\n\n" + resumeHealthNote;
@@ -2932,6 +3253,10 @@ async function resumeAgentLoopV2Inner(
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
+  // A paused run exists BECAUSE the model emitted an approval-gated tool
+  // call — the required-first-call contract was satisfied pre-pause, so
+  // the resumed loop runs under "auto" tool choice throughout.
+  const emittedToolCalls = true;
 
   // Execute the approved/rejected tool FIRST, then continue the loop
   localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
@@ -3187,7 +3512,7 @@ async function resumeAgentLoopV2Inner(
           model: cfg.model,
           temperature: 0.15,
           maxTokens: 4096,
-          toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
+          toolChoice: cfg.requireToolCallOnFirstStep && !emittedToolCalls ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -3270,7 +3595,15 @@ async function resumeAgentLoopV2Inner(
         continue;
       }
       const zeroCallText = llmResponse.text ?? "";
-      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges);
+      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
+        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Prose approval-asks can only stall a turn that was dispatched
+        // to execute: on chat/plan turns the same wording is a valid
+        // final answer, not a missing tool call. Execution intent rides
+        // its own flag so it survives approval resumes — the first-call
+        // requirement is inert once any call has been emitted.
+        executionRequested: (cfg.executionRequested ?? cfg.requireToolCallOnFirstStep) === true && cfg.executionMode !== "plan",
+      });
       if (resolution.action === "nudge") {
         continuationNudges++;
         localProgress.emit({

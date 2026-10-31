@@ -14,7 +14,7 @@
 
 import "server-only";
 
-import { placeholderViolation } from "./patch-validation";
+import { placeholderViolation, simulatePatchResult, tailwindViolation } from "./patch-validation";
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
 import type { WorkspaceTransport } from "./workspace-transport";
 
@@ -85,6 +85,12 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   // the filesystem, no matter which entry point invoked the handler.
   const badField = placeholderViolation(path, "path") ?? placeholderViolation(content, "content");
   if (badField) return { success: false, error: badField };
+  // Enforcement floor: the Tailwind v4 browser-build traps (any @import
+  // without tailwindcss, or a v3 config object inside @theme) compile ZERO
+  // utilities and leave the page silently unstyled — refuse them here too
+  // so a resumed approval can't bypass the loop's pre-approval validation.
+  const badTailwind = tailwindViolation(content, path);
+  if (badTailwind) return { success: false, error: badTailwind };
 
   try {
     await transport.writeFile(path, content);
@@ -247,7 +253,7 @@ export const handleTerminalExecute: ToolHandler = async (inputs, transport) => {
   // Enforcement floor: a shell command can write files too (heredoc,
   // `cat >`, `tee`), so placeholder tokens are rejected here as well —
   // the files.write guard alone does not close that bypass.
-  const badCommand = placeholderViolation(command, "command");
+  const badCommand = placeholderViolation(command, "command") ?? tailwindViolation(command, "the command");
   if (badCommand) return { success: false, error: badCommand };
 
   try {
@@ -425,8 +431,26 @@ export const handleApplyPatch: ToolHandler = async (inputs, transport) => {
     const p = rawPatches[i];
     const bad =
       placeholderViolation(p?.search, `patch ${i + 1} search`) ??
-      placeholderViolation(p?.replace, `patch ${i + 1} replace`);
+      placeholderViolation(p?.replace, `patch ${i + 1} replace`) ??
+      tailwindViolation(p?.replace, path);
     if (bad) return { success: false, error: bad };
+  }
+
+  // Resulting-file Tailwind floor: a partial edit inside an existing
+  // <style type="text/tailwindcss"> block never carries the block in its
+  // own replace text, so the per-patch scan above can't see v3 syntax
+  // smuggled into @theme — only the post-patch file reveals it. When the
+  // read fails the executor fails on the same read below and reports its
+  // own error, so there is nothing to check here.
+  try {
+    const { content } = await transport.readFile(path);
+    const resulting = simulatePatchResult(content, rawPatches);
+    if (resulting !== null) {
+      const bad = tailwindViolation(resulting, path);
+      if (bad) return { success: false, error: bad };
+    }
+  } catch {
+    // Unreadable target — applyPatch reports the read failure itself.
   }
 
   const patches = rawPatches.map((p) => ({ type: "search_replace" as const, search: p.search, replace: p.replace }));

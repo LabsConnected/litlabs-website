@@ -23,7 +23,14 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import StudioPreviewPanel from "../StudioPreviewPanel";
 import { StudioFilePreview } from "../StudioFilePreview";
 
-const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.default), { ssr: false });
+const MonacoEditor = dynamic(
+  () =>
+    Promise.all([import("@monaco-editor/react"), import("@/lib/monaco/setup")]).then(([m, s]) => {
+      s.configureBundledMonaco();
+      return m.default;
+    }),
+  { ssr: false },
+);
 
 // ─── Types ────────────────────────────────────────────────────────
 
