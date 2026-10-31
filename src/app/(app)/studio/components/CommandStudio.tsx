@@ -15,6 +15,7 @@ import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
+import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
@@ -1269,6 +1270,11 @@ function CommandStudioContent() {
   useEffect(() => {
     const conversationId = conversation.selectedConversationId;
     if (!capabilities.projectId || !conversationId || studioTasks.loading) return;
+    // Optimistic send placeholders ("pending_<req>") are client-only ids —
+    // the server has no conversation row to bind yet, so adopting here is a
+    // guaranteed 403. The canonical id replaces the selection when the
+    // conversation POST resolves, and this effect re-runs for it.
+    if (isOptimisticConversationId(conversationId)) return;
     if (studioTasks.tasks.some((task) => task.conversationId === conversationId)) return;
     if (taskSeededRef.current === conversationId) return;
     taskSeededRef.current = conversationId;

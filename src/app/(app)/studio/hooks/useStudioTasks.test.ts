@@ -92,3 +92,70 @@ describe("useStudioTasks.renameTask", () => {
     );
   });
 });
+
+describe("useStudioTasks.createTask", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("does not POST when conversationId is an optimistic pending_* id", async () => {
+    // Optimistic send placeholders are client-only — the server has no
+    // conversation row to bind, so the request was a guaranteed 403.
+    const fetchMock = mockFetch((url) => {
+      if (url === LIST_URL) return { tasks: [], closedTasks: [] };
+      return {};
+    });
+    const { result } = renderHook(() => useStudioTasks("proj-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let created: unknown = "not-null";
+    await act(async () => {
+      created = await result.current.createTask({
+        title: "Adopted task",
+        taskType: "general",
+        conversationId: "pending_req_123_abc",
+      });
+    });
+
+    expect(created).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/studio/tasks",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("POSTs normally for a canonical conversation id", async () => {
+    const fetchMock = mockFetch((url, init) => {
+      if (url === LIST_URL) return { tasks: [], closedTasks: [] };
+      if (url === "/api/studio/tasks" && init?.method === "POST") {
+        return { task: { ...baseTask, conversationId: "conv-real-1" } };
+      }
+      return {};
+    });
+    const { result } = renderHook(() => useStudioTasks("proj-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let created: unknown = null;
+    await act(async () => {
+      created = await result.current.createTask({
+        title: "Adopted task",
+        taskType: "general",
+        conversationId: "conv-real-1",
+      });
+    });
+
+    expect(created).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/studio/tasks",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          projectId: "proj-1",
+          title: "Adopted task",
+          taskType: "general",
+          conversationId: "conv-real-1",
+        }),
+      }),
+    );
+  });
+});
