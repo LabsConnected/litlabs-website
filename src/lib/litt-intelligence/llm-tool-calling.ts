@@ -1444,11 +1444,27 @@ async function attemptOllama(
   const endpoint = resolveBasicOllamaEndpoint();
 
   let available: OllamaModelInfo[];
+  const override = process.env.OLLAMA_MODEL;
   try {
     available = await probeOllamaModels(endpoint, ctx);
   } catch (err) {
-    if (err instanceof ProviderAttemptError || err instanceof UpstreamAbortError) throw err;
-    throw new ProviderAttemptError("ollama", "auto", classifyThrownFailure(err));
+    if (err instanceof UpstreamAbortError) throw err;
+    // A busy Ollama — mid model-load, serialized to one model — can stall
+    // /api/tags past the 1500ms probe budget. That is liveness ambiguity,
+    // not proof the route is dead; treating it as fatal makes the ONLY
+    // working route disappear the moment Ollama is loading (confirmed live:
+    // 16k probe timed out while a 2.5GB model unloaded → cloud-only →
+    // all-routes-failed). With an explicit OLLAMA_MODEL the tag list is
+    // only needed for auto-selection, so fall through to a synthetic
+    // candidate and let the warm-load/inference calls decide liveness.
+    // Without an override the probe failure stands.
+    if (override) {
+      available = [normalizeOllamaModelInfo(override)];
+    } else if (err instanceof ProviderAttemptError) {
+      throw err;
+    } else {
+      throw new ProviderAttemptError("ollama", "auto", classifyThrownFailure(err));
+    }
   }
 
   const model = pickOllamaModel(available, req.tools.length > 0);
