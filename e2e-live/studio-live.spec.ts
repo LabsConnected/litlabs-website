@@ -243,6 +243,16 @@ async function driveRun(page: Page, request: APIRequestContext, maxMinutes = 14)
   let lastStatus = "";
   let cardAbsentSince: number | null = null;
 
+  // Diagnose the ghost cancel: a real POST /cancel arrived with the run's
+  // own clientRequestId (only the UI knows it). Record any cancel POST this
+  // page issues so we can distinguish a UI-fired cancel() from another
+  // client or a stale pending-cancel stamp.
+  page.on("request", (req) => {
+    if (req.method() === "POST" && /\/conversations\/[^/]+\/cancel/.test(req.url())) {
+      console.log(`[diag] page POSTed ${req.url()}`);
+    }
+  });
+
   while (Date.now() < deadline) {
     // The approval card lives inside the LiTT transcript — the panel can
     // auto-collapse to another surface, so expand it before checking.
