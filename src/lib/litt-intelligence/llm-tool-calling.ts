@@ -1083,8 +1083,15 @@ function parseOpenAiCompatibleResponse(
   // A well-formed completion with neither text nor tool calls is an empty
   // provider payload — a model failure, not a final answer. Failing over to
   // the next model/provider beats handing "" to the agent loop as if the
-  // model had concluded.
+  // model had concluded. EXCEPT the single-model local route: Ollama has
+  // nothing to fail over to, so a transient empty completion only burned
+  // the sole candidate's model cooldown and killed every subsequent call
+  // for 10 minutes — a model that stops with no text and no tool calls has
+  // simply concluded its turn; let the agent loop see that.
   if (!text.trim() && toolCalls.length === 0) {
+    if (route.provider === "ollama") {
+      return { text: "", toolCalls: [], finishReason, model: (data.model as string) ?? model, provider: route.provider, responseShape };
+    }
     throw new ProviderAttemptError(route.provider, model, {
       class: "bad_response",
       scope: "model",
@@ -1729,7 +1736,9 @@ export async function callLLMWithTools(
         // A completion whose text was ONLY in-text tool-call markup is a
         // malformed tool attempt, not a final answer — fail over like the
         // empty-completion case instead of handing "" to the agent loop.
-        if (!normalized.text.trim() && normalized.toolCalls.length === 0) {
+        // The single-model local route has nothing to fail over to: an
+        // empty/markup-only turn ends the model's turn, not the run.
+        if (!normalized.text.trim() && normalized.toolCalls.length === 0 && route.provider !== "ollama") {
           throw new ProviderAttemptError(route.provider, model, {
             class: "bad_response",
             scope: "model",
