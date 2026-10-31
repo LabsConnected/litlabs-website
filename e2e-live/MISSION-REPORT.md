@@ -82,3 +82,21 @@ cuts prefill → ~2–3× faster calls → fewer timeouts AND fewer wrong-tool p
 flow on a working cloud route or faster local hardware.
 
 **Production remains HOLD. No deployment authorized or performed.**
+
+## Small-lane result (qwen2.5-coder:1.5b @ 8k ctx) — FUNCTIONAL, fidelity caveat
+
+The lightweight local lane WORKS end-to-end: 3 consecutive acceptance runs each
+completed PROMPT→GENERATE→APPROVE→PREVIEW→EDIT→APPROVE→RELOAD→EXPORT on local
+inference in ~4min (vs unachievable at 288s/call on litt-hermes:16k).
+
+Acceptance: 2/3 FULL PASS (heading+purple theme verified on disk + in export);
+1/3 structural pass with theme-edit MISS (model rewrote file bare — 1.5B
+instruction-following variance, not an orchestration defect). Heading landed 3/3.
+
+Metrics: 1.3GB resident model, 14.3GB free PC RAM, ~15s/call, ~42 tok/s,
+prompt ~5.5-6.7k tokens (fits 8k). Serialization + single residency enforced
+via OLLAMA_NUM_PARALLEL=1 / MAX_LOADED_MODELS=1 / KEEP_ALIVE=1m.
+
+Rollout recommendation per the approved plan: the lane is proven for generation
++ editing; keep Studio default as-is until theme-edit fidelity is acceptable, or
+gate the lane behind LITT_LOCAL_SMALL for lightweight coding tasks.
