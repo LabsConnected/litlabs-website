@@ -3,9 +3,12 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useCanvasBuilderStore } from "./store";
 import type { CanvasDocument } from "./types";
-import { CANVAS_DOC_FILE, readWorkspaceFile } from "./canvas-site-export";
+import { CANVAS_DOC_FILE } from "./canvas-site-export";
 
 const DEBOUNCE_MS = 1200;
+
+/** Sentinel CAS revision: "the file must not exist". */
+const CAS_ABSENT = "absent";
 
 /** True when the document holds user content — any node with children. */
 function hasCanvasContent(doc: CanvasDocument): boolean {
@@ -14,21 +17,66 @@ function hasCanvasContent(doc: CanvasDocument): boolean {
   );
 }
 
-async function writeCanvasFile(
-  projectId: string,
-  serialized: string,
-  keepalive = false,
-): Promise<boolean> {
+interface CanvasRead {
+  /** HTTP status of the files read (404 = confirmed absent). */
+  status: number;
+  content: string | null;
+  /** sha256 revision reported by the terminal (null = older terminal). */
+  sha256: string | null;
+}
+
+async function readCanvasFile(projectId: string): Promise<CanvasRead> {
   try {
     const resp = await fetch(`/api/studio-projects/${projectId}/files`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "write", path: CANVAS_DOC_FILE, content: serialized }),
-      keepalive,
+      body: JSON.stringify({ action: "read", path: CANVAS_DOC_FILE }),
     });
-    return resp.ok;
+    const data = (await resp.json().catch(() => ({}))) as {
+      content?: unknown;
+      sha256?: unknown;
+    };
+    return {
+      status: resp.status,
+      content: typeof data.content === "string" ? data.content : null,
+      sha256: typeof data.sha256 === "string" ? data.sha256 : null,
+    };
   } catch {
-    return false;
+    return { status: 0, content: null, sha256: null };
+  }
+}
+
+interface CanvasWriteResult {
+  ok: boolean;
+  status: number;
+  sha256: string | null;
+}
+
+async function writeCanvasFile(
+  projectId: string,
+  serialized: string,
+  opts: { keepalive?: boolean; expectedSha256?: string } = {},
+): Promise<CanvasWriteResult> {
+  try {
+    const resp = await fetch(`/api/studio-projects/${projectId}/files`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "write",
+        path: CANVAS_DOC_FILE,
+        content: serialized,
+        ...(opts.expectedSha256 ? { expectedSha256: opts.expectedSha256 } : {}),
+      }),
+      ...(opts.keepalive ? { keepalive: true } : {}),
+    });
+    const data = (await resp.json().catch(() => ({}))) as { sha256?: unknown };
+    return {
+      ok: resp.ok,
+      status: resp.status,
+      sha256: typeof data.sha256 === "string" ? data.sha256 : null,
+    };
+  } catch {
+    return { ok: false, status: 0, sha256: null };
   }
 }
 
@@ -44,26 +92,33 @@ async function writeCanvasFile(
  * carrying the previous project's document forward.
  *
  * Read outcomes (same contract as htmlProjectSyncPolicy.fetchServerFile):
- * - valid canvas        → server-wins: adopted unconditionally.
- * - missing file        → 404 or a 2xx without content = confirmed-empty: real
- *                         local work is first-synced into the workspace; an
- *                         untouched empty doc is baseline-adopted instead so
- *                         it is never persisted as a blank canvas.
+ * - valid canvas        → server-wins: adopted unconditionally; its sha256
+ *                         becomes the compare-and-swap baseline.
+ * - missing file        → 404 = confirmed-absent: real local work is
+ *                         first-synced into the workspace; an untouched
+ *                         empty doc is baseline-adopted instead so it is
+ *                         never persisted as a blank canvas. Baseline is
+ *                         the CAS sentinel "absent".
  * - anything else       → 5xx/401/403/network/malformed = unverified server
- *                         state: the local doc is baseline-adopted and never
- *                         auto-written over content we could not inspect.
+ *                         state: the local doc is baseline-adopted (sha
+ *                         unknown) and never auto-written over content we
+ *                         could not inspect.
  *
  * Durable-persistence guards:
- *   - revision check before every write: if the server's canvas.json no
- *     longer matches the content we last confirmed persisted (another
- *     tab/client won the race), the write is refused and saveState becomes
- *     "conflict" instead of silently reverting newer content.
+ *   - compare-and-swap writes: every write carries `expectedSha256`, the
+ *     sha256 of the revision we last confirmed (or "absent"). If the server
+ *     file changed since then — another tab, another device — the write is
+ *     rejected (409 REVISION_CONFLICT) and saveState becomes "conflict"
+ *     instead of silently reverting newer content.
+ *   - unverified baselines fail closed: when the load could not verify the
+ *     server revision, a save first re-reads; anything that isn't exactly
+ *     our adopted baseline is a "conflict", never an overwrite.
  *   - stale-completion guard: an in-flight save resolving after a project
  *     switch stamps nothing into the new project's sync state.
  *   - unmount/pagehide flush: a pending debounced save is sent (keepalive on
- *     unload) so navigation doesn't silently drop the last edit — but only
- *     while the bound project is still the loaded one; a flush never fires
- *     into a project we haven't finished loading.
+ *     unload) so navigation doesn't silently drop the last edit — CAS-
+ *     guarded like any other write, and only while the bound project is
+ *     still the loaded one.
  */
 export function useCanvasFileSync(projectId: string | null) {
   const document = useCanvasBuilderStore((s) => s.document);
@@ -74,10 +129,12 @@ export function useCanvasFileSync(projectId: string | null) {
   const loadedForRef = useRef<string | null>(null);
   const timerRef = useRef<number | null>(null);
   const lastSavedRef = useRef<string>("");
-  /** True when the canvas read proved the server file does not exist —
-   *  the CAS baseline for first writes. Distinct from lastSavedRef: a
-   *  serialized empty document is NOT the same baseline as an absent file. */
-  const baselineAbsentRef = useRef<boolean>(false);
+  /**
+   * CAS baseline: sha256 of the revision we last confirmed persisted for the
+   * current project, "absent" when the file was verified missing, or null
+   * when the server revision is unverified (read failed at load).
+   */
+  const lastSavedShaRef = useRef<string | null>(null);
   const lastAttemptedRef = useRef<string>("");
   const pendingRef = useRef<{ projectId: string; serialized: string } | null>(null);
 
@@ -94,35 +151,48 @@ export function useCanvasFileSync(projectId: string | null) {
       lastAttemptedRef.current = serialized;
       setSaveState("saving");
 
-      // Revision check: refuse to overwrite a server document that no longer
-      // matches our last confirmed baseline — a concurrent writer won. The
-      // baseline is tri-state: confirmed-absent (file verified missing),
-      // confirmed content (adopted/written by us), or unverifiable (read
-      // failed at load — any mismatch fails closed to "conflict").
-      const serverContent = await readWorkspaceFile(pid, CANVAS_DOC_FILE);
-      // Stale-completion guard: the project may have switched while the read
-      // was in flight. Touch nothing — markers, saveState, and the pending
-      // schedule all belong to the now-current project.
-      if (loadedForRef.current !== pid) return;
-      const serverMatchesBaseline = baselineAbsentRef.current
-        ? serverContent == null || serverContent === ""
-        : serverContent === lastSavedRef.current;
-      if (!serverMatchesBaseline) {
-        setSaveState("conflict");
-        return;
+      let expectedSha = lastSavedShaRef.current;
+      if (expectedSha == null) {
+        // Unverified baseline: re-read to learn the server's real revision.
+        // A file that is exactly our adopted baseline can be advanced with
+        // its learned sha; a confirmed-absent file can be created under the
+        // "absent" sentinel; anything else fails closed to "conflict".
+        const probe = await readCanvasFile(pid);
+        // Stale-completion guard: the project may have switched while the
+        // probe was in flight — touch nothing that belongs to the new one.
+        if (loadedForRef.current !== pid) return;
+        if (probe.status === 404) {
+          expectedSha = CAS_ABSENT;
+        } else if (probe.status === 200 && probe.content === lastSavedRef.current) {
+          expectedSha = probe.sha256;
+        } else if (probe.status === 200) {
+          setSaveState("conflict");
+          return;
+        } else {
+          // Still unverifiable — not a conflict we can prove, a real failure.
+          setSaveState("error");
+          return;
+        }
       }
 
-      const ok = await writeCanvasFile(pid, serialized);
-      // Same stale-completion guard after the write: the write itself landed
-      // on the right project (the pid is bound in the URL), but only the
+      const res = await writeCanvasFile(pid, serialized, {
+        expectedSha256: expectedSha ?? undefined,
+      });
+      // Stale-completion guard after the write: the write itself landed on
+      // the right project (the pid is bound in the URL), but only the
       // still-current project may advance its saved markers.
       if (loadedForRef.current !== pid) return;
-      if (ok) {
+      if (res.ok) {
         lastSavedRef.current = serialized;
-        baselineAbsentRef.current = false;
+        // A write response without sha256 (older terminal) leaves the
+        // revision unverified — the next save re-probes instead of CAS-ing
+        // against a stale baseline.
+        lastSavedShaRef.current = res.sha256;
         pendingRef.current = null;
+        setSaveState("saved");
+      } else {
+        setSaveState(res.status === 409 ? "conflict" : "error");
       }
-      setSaveState(ok ? "saved" : "error");
     },
     [setSaveState],
   );
@@ -143,80 +213,71 @@ export function useCanvasFileSync(projectId: string | null) {
     }
     pendingRef.current = null;
     lastSavedRef.current = "";
-    baselineAbsentRef.current = false;
+    lastSavedShaRef.current = null;
     lastAttemptedRef.current = "";
 
     (async () => {
       let settled: "adopted" | "empty" | "unknown";
       let content: string | null = null;
-      try {
-        const resp = await fetch(`/api/studio-projects/${projectId}/files`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "read", path: CANVAS_DOC_FILE }),
-        });
-        if (cancelled) return;
+      let sha256: string | null = null;
+      const read = await readCanvasFile(projectId);
+      if (cancelled) return;
 
-        if (resp.status === 404) {
-          settled = "empty";
-        } else if (!resp.ok) {
-          settled = "unknown";
-        } else {
-          const data = (await resp.json()) as { content?: unknown };
-          if (cancelled) return;
-          const c = data.content;
-          if (c == null || c === "") {
-            settled = "empty";
-          } else if (typeof c !== "string") {
-            // Response contract violation — cannot verify server state.
-            settled = "unknown";
-          } else {
-            content = c;
-            try {
-              const parsed = JSON.parse(c) as CanvasDocument;
-              // Server-wins unconditionally: a valid saved canvas replaces
-              // the local document. A fresh (empty/newer-timestamped) local
-              // doc must never beat real saved work.
-              if (parsed.nodes && parsed.rootNodeIds) {
-                setDocument(parsed);
-                setSaveState("saved");
-                settled = "adopted";
-              } else {
-                settled = "unknown";
-              }
-            } catch {
-              // Malformed canvas file — unverified content, not "empty".
-              settled = "unknown";
-            }
-          }
-        }
-      } catch {
+      if (read.status === 404) {
+        settled = "empty";
+      } else if (read.status !== 200) {
         settled = "unknown";
+      } else if (read.content == null || read.content === "") {
+        settled = "empty";
+      } else {
+        try {
+          const parsed = JSON.parse(read.content) as CanvasDocument;
+          // Server-wins unconditionally: a valid saved canvas replaces the
+          // local document. A fresh (empty/newer-timestamped) local doc must
+          // never beat real saved work.
+          if (parsed.nodes && parsed.rootNodeIds) {
+            content = read.content;
+            sha256 = read.sha256;
+            setDocument(parsed);
+            setSaveState("saved");
+            settled = "adopted";
+          } else {
+            settled = "unknown";
+          }
+        } catch {
+          // Malformed canvas file — unverified content, not "empty".
+          settled = "unknown";
+        }
       }
 
       if (cancelled) return;
       if (settled === "adopted") {
         lastSavedRef.current = content ?? "";
-        baselineAbsentRef.current = false;
+        lastSavedShaRef.current = sha256;
       } else if (settled === "empty") {
         // The server confirmed it holds no canvas. Local work is real user
         // content (project-less building, restored session) — first-sync it
         // into the workspace now that the read has settled.
-        baselineAbsentRef.current = true;
+        lastSavedShaRef.current = CAS_ABSENT;
         const local = useCanvasBuilderStore.getState().document;
         if (hasCanvasContent(local)) {
           loadedForRef.current = projectId;
           void saveToFile(local, projectId);
         } else {
           lastSavedRef.current = JSON.stringify(local);
+          // A "saving" state left behind by the previous project's in-flight
+          // write would block this project's debounce forever — reset to the
+          // truthful local-only state.
+          setSaveState("local");
         }
       } else {
         // Server state could not be verified — never auto-write over it.
-        // Baseline-adopt the local doc so only explicit edits persist; any
-        // later divergence fails closed to "conflict" at the revision check.
+        // Baseline-adopt the local doc with an unknown sha so any later
+        // divergence fails closed to "conflict" at the CAS check.
         lastSavedRef.current = JSON.stringify(
           useCanvasBuilderStore.getState().document,
         );
+        setSaveState("error");
       }
       loadedForRef.current = projectId;
     })();
@@ -251,11 +312,17 @@ export function useCanvasFileSync(projectId: string | null) {
 
   // Flush unsaved content when the component unmounts (SPA navigation) or
   // the page unloads. keepalive is required for the unload path. The flush
-  // fires only while the bound project is still the loaded one, so a
-  // teardown can never write a stale document into a different project.
+  // is CAS-guarded like any write — a file changed on the server is never
+  // clobbered — and fires only while the bound project is still the loaded
+  // one, so teardown can never write a stale document into another project.
   useEffect(() => {
     const flush = (keepalive: boolean) => {
       if (!projectId || loadedForRef.current !== projectId) return;
+      const expectedSha = lastSavedShaRef.current;
+      // Unverified baseline — we cannot prove this write won't clobber
+      // newer server content, so it must not fire. The draft survives in
+      // localStorage and reconciles on the next load.
+      if (expectedSha == null) return;
       const pending = pendingRef.current;
       const serialized =
         pending && pending.projectId === projectId
@@ -266,12 +333,10 @@ export function useCanvasFileSync(projectId: string | null) {
       // flush must not double-write alongside the reload-time load.
       lastSavedRef.current = serialized;
       pendingRef.current = null;
-      void fetch(`/api/studio-projects/${projectId}/files`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "write", path: CANVAS_DOC_FILE, content: serialized }),
-        ...(keepalive ? { keepalive: true } : {}),
-      }).catch(() => {});
+      void writeCanvasFile(projectId, serialized, {
+        keepalive,
+        expectedSha256: expectedSha,
+      });
     };
     const onPageHide = () => flush(true);
     window.addEventListener("pagehide", onPageHide);

@@ -30,10 +30,48 @@ function makeContentDoc(marker: string): CanvasDocument {
   return doc;
 }
 
-function writesTo(fetchMock: ReturnType<typeof vi.fn>) {
+function resp(status: number, json: Record<string, unknown> = {}) {
+  return { ok: status >= 200 && status < 300, status, json: async () => json } as Response;
+}
+
+/**
+ * Action-aware files API stub. `reads` maps projectId → read outcome;
+ * `writes` controls the write outcome (default: 200 with a fresh sha).
+ */
+function stubFilesApi(
+  reads: Record<string, { status: number; content?: string; sha256?: string }> = {},
+  writeResp: { status: number; json?: Record<string, unknown> } = {
+    status: 200,
+    json: { saved: true, sha256: "sha-written" },
+  },
+) {
+  return vi.fn(async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse((init?.body as string) ?? "{}") as { action?: string; path?: string };
+    const project = /\/api\/studio-projects\/([^/]+)\/files/.exec(_url)?.[1] ?? "?";
+    if (body.action === "read") {
+      const cfg = reads[project] ?? { status: 200 };
+      if (cfg.status !== 200) return resp(cfg.status);
+      return resp(200, { content: cfg.content, sha256: cfg.sha256 });
+    }
+    if (body.action === "write") {
+      return resp(writeResp.status, writeResp.json ?? {});
+    }
+    return resp(400);
+  });
+}
+
+function calls(fetchMock: ReturnType<typeof vi.fn>, action: string) {
   return fetchMock.mock.calls
     .map((c) => ({ url: c[0] as string, init: (c[1] ?? {}) as RequestInit }))
-    .filter((c) => (c.init.body as string)?.includes('"write"'));
+    .filter((c) => (c.init.body as string)?.includes(`"${action}"`));
+}
+
+function writesTo(fetchMock: ReturnType<typeof vi.fn>) {
+  return calls(fetchMock, "write");
+}
+
+function writeBodies(fetchMock: ReturnType<typeof vi.fn>) {
+  return writesTo(fetchMock).map((c) => JSON.parse(c.init.body as string));
 }
 
 /** Let the hook's mount-time load + any initial-doc write settle, then clear the mock. */
@@ -47,7 +85,7 @@ describe("useCanvasFileSync", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    fetchMock = stubFilesApi();
     vi.stubGlobal("fetch", fetchMock);
     useCanvasBuilderStore.setState({ document: createEmptyDocument(), saveState: "local" });
   });
@@ -88,7 +126,8 @@ describe("useCanvasFileSync", () => {
   });
 
   it("retries on content change after a failed write", async () => {
-    fetchMock.mockResolvedValue({ ok: false, json: async () => ({}) });
+    fetchMock = stubFilesApi({}, { status: 500 });
+    vi.stubGlobal("fetch", fetchMock);
     const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
     await settleMount(fetchMock);
     await act(async () => {
@@ -107,7 +146,8 @@ describe("useCanvasFileSync", () => {
   });
 
   it("flushes unsaved content on unmount after a failed write", async () => {
-    fetchMock.mockResolvedValue({ ok: false, json: async () => ({}) });
+    fetchMock = stubFilesApi({}, { status: 500 });
+    vi.stubGlobal("fetch", fetchMock);
     const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
     await settleMount(fetchMock);
     await act(async () => {
@@ -145,10 +185,10 @@ describe("useCanvasFileSync", () => {
     // a newer updatedAt, so the old timestamp comparison let it overwrite
     // real saved work.
     const savedDoc = { ...makeDoc("server-canvas"), updatedAt: 1 };
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({ content: JSON.stringify(savedDoc) }),
+    fetchMock = stubFilesApi({
+      [PROJECT_ID]: { status: 200, content: JSON.stringify(savedDoc), sha256: "sha-server" },
     });
+    vi.stubGlobal("fetch", fetchMock);
     const local = { ...makeDoc("fresh-local"), updatedAt: Date.now() };
     useCanvasBuilderStore.setState({ document: local });
 
@@ -165,8 +205,16 @@ describe("useCanvasFileSync", () => {
     // Regression (Greptile 4374230809): a save timer could fire before the
     // load completed and overwrite the saved canvas.
     let resolveRead!: (v: unknown) => void;
+    let firstCall = true;
     fetchMock.mockImplementation(
-      () => new Promise((res) => { resolveRead = res; }),
+      () => {
+        if (firstCall) {
+          firstCall = false;
+          return new Promise((res) => { resolveRead = res; });
+        }
+        // After the (failed) initial read, probes see a confirmed-absent file.
+        return Promise.resolve(resp(404));
+      },
     );
     const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
 
@@ -177,14 +225,17 @@ describe("useCanvasFileSync", () => {
     expect(writesTo(fetchMock).length).toBe(0);
 
     await act(async () => {
-      resolveRead({ ok: false, json: async () => ({}) });
+      resolveRead(resp(500));
       await vi.runAllTimersAsync();
     });
     await act(async () => {
       useCanvasBuilderStore.setState({ document: makeDoc("after-load") });
       await vi.runAllTimersAsync();
     });
-    expect(writesTo(fetchMock).length).toBe(1);
+    // The unverified baseline re-probes; the probe sees 404 → CAS "absent".
+    const bodies = writeBodies(fetchMock);
+    expect(bodies.length).toBe(1);
+    expect(bodies[0].expectedSha256).toBe("absent");
     unmount();
   });
 
@@ -194,11 +245,11 @@ describe("useCanvasFileSync", () => {
     const PROJECT_B = "99999999-8888-7777-6666-555555555555";
     const docA = makeDoc("project-a-canvas");
     const docB = makeDoc("project-b-canvas");
-    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse((init?.body as string) ?? "{}");
-      if (body.action === "read") return { ok: false, json: async () => ({}) };
-      return { ok: true, json: async () => ({}) };
+    fetchMock = stubFilesApi({
+      [PROJECT_ID]: { status: 404 },
+      [PROJECT_B]: { status: 200, content: JSON.stringify(docB), sha256: "sha-b" },
     });
+    vi.stubGlobal("fetch", fetchMock);
 
     const { rerender, unmount } = renderHook(
       (id: string) => useCanvasFileSync(id),
@@ -211,14 +262,6 @@ describe("useCanvasFileSync", () => {
     });
     fetchMock.mockClear();
 
-    // Switch to B mid-flight — B must issue its own read and adopt its doc.
-    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse((init?.body as string) ?? "{}");
-      if (body.action === "read") {
-        return { ok: true, json: async () => ({ content: JSON.stringify(docB) }) };
-      }
-      return { ok: true, json: async () => ({}) };
-    });
     rerender(PROJECT_B);
     await act(async () => { await vi.runAllTimersAsync(); });
     expect(useCanvasBuilderStore.getState().document.route).toBe("project-b-canvas");
@@ -234,35 +277,158 @@ describe("useCanvasFileSync", () => {
     unmount();
   });
 
+  it("an in-flight save completing after a project switch stamps nothing into the new project", async () => {
+    // Regression (4f1cd688): saveToFile had no post-await stale-project
+    // guard, so a resolving save could stamp the old project's CAS baseline
+    // into the new project's sync state.
+    const PROJECT_B = "99999999-8888-7777-6666-555555555555";
+    const docA = makeDoc("a-doc");
+    let resolveWrite!: (v: unknown) => void;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const project = /\/api\/studio-projects\/([^/]+)\/files/.exec(url)?.[1];
+      const body = JSON.parse((init?.body as string) ?? "{}") as { action?: string };
+      if (body.action === "read") {
+        return project === PROJECT_B
+          ? resp(404) // B's canvas is confirmed absent
+          : resp(200, { content: JSON.stringify(docA), sha256: "sha-a" });
+      }
+      if (body.action === "write") {
+        // Hold A's write in flight until after the switch.
+        return new Promise((res) => { resolveWrite = res; });
+      }
+      return resp(400);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender, unmount } = renderHook(
+      (id: string) => useCanvasFileSync(id),
+      { initialProps: PROJECT_ID },
+    );
+    await settleMount(fetchMock);
+
+    // Start an A save and switch to B while it is in flight.
+    await act(async () => {
+      useCanvasBuilderStore.setState({ document: makeDoc("a-edit") });
+    });
+    await act(async () => { await vi.runAllTimersAsync(); });
+    rerender(PROJECT_B);
+    await act(async () => { await vi.runAllTimersAsync(); });
+    fetchMock.mockClear();
+
+    // A's write resolves late — its sha must NOT become B's CAS baseline.
+    await act(async () => {
+      resolveWrite(resp(200, { saved: true, sha256: "sha-a2" }));
+      await vi.runAllTimersAsync();
+    });
+    await act(async () => {
+      useCanvasBuilderStore.setState({ document: makeDoc("b-edit") });
+      await vi.runAllTimersAsync();
+    });
+    const bodies = writeBodies(fetchMock);
+    expect(bodies.length).toBe(1);
+    // B's baseline is still "absent" — A's resolved write leaked nothing.
+    expect(bodies[0].expectedSha256).toBe("absent");
+    unmount();
+  });
+
   it("first-syncs real local work into a workspace with no canvas file (404)", async () => {
     // Regression (run 40967251750): a missing canvas file must write the
     // local document — baseline-adopting it left the workspace empty and
     // the Create→Save journey timed out waiting for a write that never came.
-    fetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+    fetchMock = stubFilesApi({ [PROJECT_ID]: { status: 404 } });
+    vi.stubGlobal("fetch", fetchMock);
     useCanvasBuilderStore.setState({ document: makeContentDoc("seeded-work") });
     const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
     await act(async () => { await vi.runAllTimersAsync(); });
-    const writes = writesTo(fetchMock);
-    expect(writes.length).toBe(1);
-    expect(writes[0].init.body).toContain("seeded-work");
+    const bodies = writeBodies(fetchMock);
+    expect(bodies.length).toBe(1);
+    expect(bodies[0].content).toContain("seeded-work");
+    expect(bodies[0].expectedSha256).toBe("absent");
     unmount();
   });
 
   it("does not write an untouched empty doc into an empty workspace", async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+    fetchMock = stubFilesApi({ [PROJECT_ID]: { status: 404 } });
+    vi.stubGlobal("fetch", fetchMock);
     const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
     await act(async () => { await vi.runAllTimersAsync(); });
     expect(writesTo(fetchMock).length).toBe(0);
     unmount();
   });
 
-  it("does not auto-write when the read fails and the server state is unverified", async () => {
+  it("fails closed when the read fails and the server state is unverified", async () => {
     // A 5xx read cannot confirm the workspace is empty — auto-writing the
-    // local doc could clobber real saved work. Only explicit edits persist.
-    fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    // local doc could clobber real saved work. Saves probe first; a still-
+    // failing probe is an error, never a write.
+    fetchMock = stubFilesApi({ [PROJECT_ID]: { status: 500 } });
+    vi.stubGlobal("fetch", fetchMock);
     useCanvasBuilderStore.setState({ document: makeContentDoc("risky-local") });
     const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
     await act(async () => { await vi.runAllTimersAsync(); });
+    expect(writesTo(fetchMock).length).toBe(0);
+    await act(async () => {
+      useCanvasBuilderStore.setState({ document: makeDoc("explicit-edit") });
+      await vi.runAllTimersAsync();
+    });
+    expect(writesTo(fetchMock).length).toBe(0);
+    expect(useCanvasBuilderStore.getState().saveState).toBe("error");
+    unmount();
+  });
+
+  it("surfaces a conflict when the server file moved since our baseline", async () => {
+    // Concurrent-save detection: another writer changed canvas.json after
+    // we adopted sha-a — the CAS write is rejected (409) and surfaced as
+    // "conflict", never a silent overwrite.
+    const docA = makeDoc("a-doc");
+    fetchMock = stubFilesApi(
+      { [PROJECT_ID]: { status: 200, content: JSON.stringify(docA), sha256: "sha-a" } },
+      { status: 409, json: { code: "REVISION_CONFLICT", currentSha256: "sha-other" } },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
+    await settleMount(fetchMock);
+    await act(async () => {
+      useCanvasBuilderStore.setState({ document: makeDoc("racing-edit") });
+      await vi.runAllTimersAsync();
+    });
+    const bodies = writeBodies(fetchMock);
+    expect(bodies.length).toBe(1);
+    expect(bodies[0].expectedSha256).toBe("sha-a");
+    expect(useCanvasBuilderStore.getState().saveState).toBe("conflict");
+    unmount();
+  });
+
+  it("guards the unload flush with the CAS revision — newer server content is never clobbered", async () => {
+    // 4f1cd688: the pagehide/unmount flush carries expectedSha256 so a file
+    // changed on the server rejects instead of being silently overwritten.
+    const docA = makeDoc("a-doc");
+    fetchMock = stubFilesApi({
+      [PROJECT_ID]: { status: 200, content: JSON.stringify(docA), sha256: "sha-a" },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
+    await settleMount(fetchMock);
+    await act(async () => {
+      useCanvasBuilderStore.setState({ document: makeDoc("unload-edit") });
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    const bodies = writeBodies(fetchMock);
+    expect(bodies.length).toBe(1);
+    expect(bodies[0].expectedSha256).toBe("sha-a");
+    unmount();
+  });
+
+  it("never flush-writes when the server revision was never verified", async () => {
+    fetchMock = stubFilesApi({ [PROJECT_ID]: { status: 500 } });
+    vi.stubGlobal("fetch", fetchMock);
+    useCanvasBuilderStore.setState({ document: makeContentDoc("local-draft") });
+    const { unmount } = renderHook(() => useCanvasFileSync(PROJECT_ID));
+    await act(async () => { await vi.runAllTimersAsync(); });
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
     expect(writesTo(fetchMock).length).toBe(0);
     unmount();
   });
@@ -280,10 +446,13 @@ describe("useCanvasFileSync", () => {
     // store document must not trigger a redundant second write.
     const flushed = writesTo(fetchMock)[0].init.body as string;
     const content = JSON.parse(JSON.parse(flushed).content as string);
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ content: JSON.stringify(content) }) });
+    fetchMock = stubFilesApi({
+      [PROJECT_ID]: { status: 200, content: JSON.stringify(content), sha256: "sha-nav" },
+    });
+    vi.stubGlobal("fetch", fetchMock);
     const second = renderHook(() => useCanvasFileSync(PROJECT_ID));
     await act(async () => { await vi.runAllTimersAsync(); });
-    expect(writesTo(fetchMock).length).toBe(1);
+    expect(writesTo(fetchMock).length).toBe(0);
     second.unmount();
   });
 });

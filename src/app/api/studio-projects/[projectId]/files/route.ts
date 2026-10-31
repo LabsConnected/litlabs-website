@@ -153,7 +153,7 @@ export async function POST(
 
   const { projectId } = await params;
 
-  let body: { action?: string; path?: string; newPath?: string; content?: string; encoding?: string };
+  let body: { action?: string; path?: string; newPath?: string; content?: string; encoding?: string; expectedSha256?: string };
   try {
     body = await request.json();
   } catch {
@@ -211,7 +211,7 @@ export async function POST(
         Authorization: `Bearer ${token.token}`,
         "X-Workspace-Id": workspaceId,
       },
-      body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content, encoding: body.encoding }),
+      body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content, encoding: body.encoding, expectedSha256: body.expectedSha256 }),
     });
 
     // Stale workspace recovery for POST operations — workspace-level 404
@@ -229,7 +229,7 @@ export async function POST(
               Authorization: `Bearer ${token.token}`,
               "X-Workspace-Id": workspaceId,
             },
-            body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content, encoding: body.encoding }),
+            body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content, encoding: body.encoding, expectedSha256: body.expectedSha256 }),
           });
         }
       } catch (recoveryErr) {
@@ -256,8 +256,29 @@ export async function POST(
     }
 
     if (!ok) {
+      // A CAS revision conflict is a JSON decision, not a text error —
+      // pass it through with the machine-readable fields intact.
+      if (resp.status === 409) {
+        const data = (await resp.json().catch(() => null)) as
+          | { error?: string; code?: string; currentSha256?: string | null }
+          | null;
+        if (data?.code === "REVISION_CONFLICT") {
+          return NextResponse.json(
+            {
+              error: data.error ?? "Revision conflict",
+              code: "REVISION_CONFLICT",
+              currentSha256: data.currentSha256 ?? null,
+            },
+            { status: 409 },
+          );
+        }
+        // Body already consumed — surface the parsed message if any.
+        if (data?.error) {
+          return NextResponse.json({ error: normalizeFileError(data.error) }, { status: 409 });
+        }
+      }
       const text = await resp.text().catch(() => "Unknown error");
-      return NextResponse.json({ error: normalizeFileError(text) }, { status: resp.status });
+      return NextResponse.json({ error: normalizeFileError(text || "Unknown error") }, { status: resp.status });
     }
 
     return NextResponse.json(await resp.json());
