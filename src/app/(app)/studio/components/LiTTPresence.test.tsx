@@ -60,8 +60,6 @@ describe("LiTTPresence", () => {
 });
 
 describe("LiTTPresence — F1 brand consolidation (slice B)", () => {
-  const BRAND_ALT = "LiTTree LabStudios Logo";
-
   it.each([
     ["chat-avatar", "thinking", "md"],
     ["terminal", "working", "sm"],
@@ -70,9 +68,8 @@ describe("LiTTPresence — F1 brand consolidation (slice B)", () => {
     const { container } = render(
       <LiTTPresence state={state} variant={variant} size={size} />,
     );
-    const logo = container.querySelector(`img[alt="${BRAND_ALT}"]`);
+    const logo = container.querySelector('img[src*="littree-orbit-tree.svg"]');
     expect(logo).not.toBeNull();
-    expect(logo?.getAttribute("src")).toContain("litt-robot");
   });
 
   it.each([
