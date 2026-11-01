@@ -364,6 +364,7 @@ describe("StudioPreviewPanel", () => {
       const btn = toolbar.querySelector(`[data-testid="${testid}"]`);
       expect(btn, testid).toBeTruthy();
       expect(btn!.className).toContain("shrink-0");
+      expect(btn!.className).toContain("min-h-9");
     }
   });
 
