@@ -139,18 +139,19 @@ async function main() {
   for (let i = 1; i <= RUNS_PER_ROUTE; i++) {
     results.runs.push(await runOnce(`tailscale#${i} (order tailscale,lan,local)`, "tailscale,lan,local"));
   }
-  // The PR's headline order: tailscale first with LAN dead → must fall
-  // through to Tailscale (the phone-off-Wi-Fi case).
+  // True fall-through: the FIRST tier in the order is dead, so the
+  // probe must record a failed attempt and select the next tier.
+  //   tailscale dead → LAN must serve (the task's headline scenario)
   results.runs.push(await runOnce(
-    "tailscale-fallback (order tailscale,lan,local; LAN dead)",
+    "ts-dead→lan (order tailscale,lan,local; tailscale dead)",
     "tailscale,lan,local",
-    { OLLAMA_LAN_URL: ENDPOINTS.localDead },
-  ));
-  // And the reverse: LAN first with Tailscale dead → must select LAN.
-  results.runs.push(await runOnce(
-    "lan-fallback (order lan,tailscale,local; tailscale dead)",
-    "lan,tailscale,local",
     { OLLAMA_TAILSCALE_URL: ENDPOINTS.localDead },
+  ));
+  //   LAN dead → Tailscale must serve (the phone-off-Wi-Fi case)
+  results.runs.push(await runOnce(
+    "lan-dead→ts (order lan,tailscale,local; LAN dead)",
+    "lan,tailscale,local",
+    { OLLAMA_LAN_URL: ENDPOINTS.localDead },
   ));
 
   results.finishedAt = new Date().toISOString();
@@ -160,7 +161,7 @@ async function main() {
     if (!r.ok) return `FAIL tier=${r.tier ?? "-"} reason=${r.failure}`;
     const g = r.generation;
     return (
-      `${r.tier.padEnd(9)} ${r.endpoint} probe=${r.probeMs}ms ` +
+      `${r.tier.padEnd(9)} ${r.endpoint} attempts=${r.attempts.length} probe=${r.probeMs}ms ` +
       `gen=${g.wallMs}ms tok/s=${g.tokPerSec} model=${g.servedModel} ` +
       `pinned=${r.endpointHasPinnedModel}`
     );

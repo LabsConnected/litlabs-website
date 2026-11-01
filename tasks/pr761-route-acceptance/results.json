@@ -1,11 +1,11 @@
 {
-  "startedAt": "2026-11-01T03:32:00.056Z",
+  "startedAt": "2026-11-01T03:44:21.002Z",
   "model": "litt-fast:2k",
   "runs": [
     {
       "scenario": "lan#1 (order lan,tailscale,local)",
       "routeOrderEnv": "lan,tailscale,local",
-      "probeMs": 78.8,
+      "probeMs": 68,
       "attempts": [
         {
           "tier": "lan",
@@ -33,20 +33,20 @@
       ],
       "generation": {
         "ok": true,
-        "wallMs": 808.1,
+        "wallMs": 811.8,
         "servedModel": "litt-fast:2k",
         "evalCount": 32,
-        "evalDurationNs": 746696000,
-        "loadDurationNs": 5102500,
-        "totalDurationNs": 803715600,
-        "tokPerSec": 42.86,
+        "evalDurationNs": 754642000,
+        "loadDurationNs": 4386800,
+        "totalDurationNs": 809043300,
+        "tokPerSec": 42.4,
         "reply": ""
       }
     },
     {
       "scenario": "lan#2 (order lan,tailscale,local)",
       "routeOrderEnv": "lan,tailscale,local",
-      "probeMs": 99.5,
+      "probeMs": 72.8,
       "attempts": [
         {
           "tier": "lan",
@@ -74,20 +74,20 @@
       ],
       "generation": {
         "ok": true,
-        "wallMs": 781.6,
+        "wallMs": 787.6,
         "servedModel": "litt-fast:2k",
         "evalCount": 32,
-        "evalDurationNs": 740150000,
-        "loadDurationNs": 6777700,
-        "totalDurationNs": 780382800,
-        "tokPerSec": 43.23,
+        "evalDurationNs": 745709000,
+        "loadDurationNs": 5918300,
+        "totalDurationNs": 784432900,
+        "tokPerSec": 42.91,
         "reply": ""
       }
     },
     {
       "scenario": "lan#3 (order lan,tailscale,local)",
       "routeOrderEnv": "lan,tailscale,local",
-      "probeMs": 61.5,
+      "probeMs": 61.8,
       "attempts": [
         {
           "tier": "lan",
@@ -115,61 +115,20 @@
       ],
       "generation": {
         "ok": true,
-        "wallMs": 773.9,
+        "wallMs": 780.5,
         "servedModel": "litt-fast:2k",
         "evalCount": 32,
-        "evalDurationNs": 739964000,
-        "loadDurationNs": 5055400,
-        "totalDurationNs": 773913800,
-        "tokPerSec": 43.25,
+        "evalDurationNs": 742718000,
+        "loadDurationNs": 7213000,
+        "totalDurationNs": 778470200,
+        "tokPerSec": 43.08,
         "reply": ""
       }
     },
     {
       "scenario": "tailscale#1 (order tailscale,lan,local)",
       "routeOrderEnv": "tailscale,lan,local",
-      "probeMs": 61.6,
-      "attempts": [
-        {
-          "tier": "tailscale",
-          "endpoint": "http://100.107.123.73:11434",
-          "ok": true,
-          "error": null
-        }
-      ],
-      "ok": true,
-      "tier": "tailscale",
-      "endpoint": "http://100.107.123.73:11434",
-      "endpointHasPinnedModel": true,
-      "models": [
-        "litt-coder:8k",
-        "qwen2.5-coder:1.5b",
-        "litt-hermes:16k",
-        "litt-hermes-fast:8k",
-        "litt-hermes:32k",
-        "litt-hermes:4k",
-        "litt-hermes-fast:4k",
-        "litt-tools:4k",
-        "litt-fast:2k",
-        "litt-hermes-fast:64k",
-        "litt-hermes:64k"
-      ],
-      "generation": {
-        "ok": true,
-        "wallMs": 776.8,
-        "servedModel": "litt-fast:2k",
-        "evalCount": 32,
-        "evalDurationNs": 740965000,
-        "loadDurationNs": 4982600,
-        "totalDurationNs": 773587400,
-        "tokPerSec": 43.19,
-        "reply": ""
-      }
-    },
-    {
-      "scenario": "tailscale#2 (order tailscale,lan,local)",
-      "routeOrderEnv": "tailscale,lan,local",
-      "probeMs": 64.1,
+      "probeMs": 61.4,
       "attempts": [
         {
           "tier": "tailscale",
@@ -200,9 +159,50 @@
         "wallMs": 778,
         "servedModel": "litt-fast:2k",
         "evalCount": 32,
-        "evalDurationNs": 740983000,
-        "loadDurationNs": 6205700,
-        "totalDurationNs": 776188500,
+        "evalDurationNs": 742566000,
+        "loadDurationNs": 5179400,
+        "totalDurationNs": 774939500,
+        "tokPerSec": 43.09,
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "tailscale#2 (order tailscale,lan,local)",
+      "routeOrderEnv": "tailscale,lan,local",
+      "probeMs": 59.3,
+      "attempts": [
+        {
+          "tier": "tailscale",
+          "endpoint": "http://100.107.123.73:11434",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "ok": true,
+      "tier": "tailscale",
+      "endpoint": "http://100.107.123.73:11434",
+      "endpointHasPinnedModel": true,
+      "models": [
+        "litt-coder:8k",
+        "qwen2.5-coder:1.5b",
+        "litt-hermes:16k",
+        "litt-hermes-fast:8k",
+        "litt-hermes:32k",
+        "litt-hermes:4k",
+        "litt-hermes-fast:4k",
+        "litt-tools:4k",
+        "litt-fast:2k",
+        "litt-hermes-fast:64k",
+        "litt-hermes:64k"
+      ],
+      "generation": {
+        "ok": true,
+        "wallMs": 776,
+        "servedModel": "litt-fast:2k",
+        "evalCount": 32,
+        "evalDurationNs": 740849000,
+        "loadDurationNs": 4173700,
+        "totalDurationNs": 773691700,
         "tokPerSec": 43.19,
         "reply": ""
       }
@@ -210,7 +210,7 @@
     {
       "scenario": "tailscale#3 (order tailscale,lan,local)",
       "routeOrderEnv": "tailscale,lan,local",
-      "probeMs": 58.4,
+      "probeMs": 59.9,
       "attempts": [
         {
           "tier": "tailscale",
@@ -238,62 +238,27 @@
       ],
       "generation": {
         "ok": true,
-        "wallMs": 778.1,
+        "wallMs": 786.8,
         "servedModel": "litt-fast:2k",
         "evalCount": 32,
-        "evalDurationNs": 744580000,
-        "loadDurationNs": 4096300,
-        "totalDurationNs": 776381500,
-        "tokPerSec": 42.98,
+        "evalDurationNs": 751738000,
+        "loadDurationNs": 4946400,
+        "totalDurationNs": 784997200,
+        "tokPerSec": 42.57,
         "reply": ""
       }
     },
     {
-      "scenario": "tailscale-fallback (order tailscale,lan,local; LAN dead)",
+      "scenario": "ts-dead→lan (order tailscale,lan,local; tailscale dead)",
       "routeOrderEnv": "tailscale,lan,local",
-      "probeMs": 58,
+      "probeMs": 66.1,
       "attempts": [
         {
           "tier": "tailscale",
-          "endpoint": "http://100.107.123.73:11434",
-          "ok": true,
-          "error": null
-        }
-      ],
-      "ok": true,
-      "tier": "tailscale",
-      "endpoint": "http://100.107.123.73:11434",
-      "endpointHasPinnedModel": true,
-      "models": [
-        "litt-coder:8k",
-        "qwen2.5-coder:1.5b",
-        "litt-hermes:16k",
-        "litt-hermes-fast:8k",
-        "litt-hermes:32k",
-        "litt-hermes:4k",
-        "litt-hermes-fast:4k",
-        "litt-tools:4k",
-        "litt-fast:2k",
-        "litt-hermes-fast:64k",
-        "litt-hermes:64k"
-      ],
-      "generation": {
-        "ok": true,
-        "wallMs": 772.5,
-        "servedModel": "litt-fast:2k",
-        "evalCount": 32,
-        "evalDurationNs": 737494000,
-        "loadDurationNs": 1058500,
-        "totalDurationNs": 770354600,
-        "tokPerSec": 43.39,
-        "reply": ""
-      }
-    },
-    {
-      "scenario": "lan-fallback (order lan,tailscale,local; tailscale dead)",
-      "routeOrderEnv": "lan,tailscale,local",
-      "probeMs": 58.8,
-      "attempts": [
+          "endpoint": "http://127.0.0.1:9",
+          "ok": false,
+          "error": "fetch failed"
+        },
         {
           "tier": "lan",
           "endpoint": "http://192.168.0.112:11434",
@@ -320,16 +285,63 @@
       ],
       "generation": {
         "ok": true,
-        "wallMs": 773.7,
+        "wallMs": 782.4,
         "servedModel": "litt-fast:2k",
         "evalCount": 32,
-        "evalDurationNs": 739543000,
-        "loadDurationNs": 12224200,
-        "totalDurationNs": 779647900,
-        "tokPerSec": 43.27,
+        "evalDurationNs": 747783000,
+        "loadDurationNs": 4165000,
+        "totalDurationNs": 780467000,
+        "tokPerSec": 42.79,
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "lan-dead→ts (order lan,tailscale,local; LAN dead)",
+      "routeOrderEnv": "lan,tailscale,local",
+      "probeMs": 60.3,
+      "attempts": [
+        {
+          "tier": "lan",
+          "endpoint": "http://127.0.0.1:9",
+          "ok": false,
+          "error": "fetch failed"
+        },
+        {
+          "tier": "tailscale",
+          "endpoint": "http://100.107.123.73:11434",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "ok": true,
+      "tier": "tailscale",
+      "endpoint": "http://100.107.123.73:11434",
+      "endpointHasPinnedModel": true,
+      "models": [
+        "litt-coder:8k",
+        "qwen2.5-coder:1.5b",
+        "litt-hermes:16k",
+        "litt-hermes-fast:8k",
+        "litt-hermes:32k",
+        "litt-hermes:4k",
+        "litt-hermes-fast:4k",
+        "litt-tools:4k",
+        "litt-fast:2k",
+        "litt-hermes-fast:64k",
+        "litt-hermes:64k"
+      ],
+      "generation": {
+        "ok": true,
+        "wallMs": 779.5,
+        "servedModel": "litt-fast:2k",
+        "evalCount": 32,
+        "evalDurationNs": 744688000,
+        "loadDurationNs": 4020800,
+        "totalDurationNs": 777786700,
+        "tokPerSec": 42.97,
         "reply": ""
       }
     }
   ],
-  "finishedAt": "2026-11-01T03:32:15.853Z"
+  "finishedAt": "2026-11-01T03:44:32.077Z"
 }
