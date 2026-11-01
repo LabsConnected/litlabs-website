@@ -188,3 +188,61 @@ describe("AI file-write path (real handler dispatch)", () => {
     expect(plan.allowed).toBe(false);
   });
 });
+
+describe("handleFilesWrite — LITT-WELCOME-SCREEN scaffold exemption", () => {
+  /**
+   * P1 fix: the small-lane destructive-rewrite guard refused the model's
+   * first files.write to index.html on every fresh project — the scaffold
+   * is fully styled (sig >= 3) so the 1.5B's replacement HTML failed the
+   * 40% retention floor, the approved mutation failed, and the run died
+   * with "approved workspace operation failed". The scaffold's own marker
+   * declares it MUST be replaced — the guard now exempts it. Real styled
+   * user files still get the full guard.
+   */
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "litt-ws-welcome-"));
+    process.env.LITT_LOCAL_SMALL = "1";
+  });
+  afterEach(() => {
+    delete process.env.LITT_LOCAL_SMALL;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const STYLED_SCAFFOLD = `<!-- LITT-WELCOME-SCREEN: blank-state of the LiTT builder. Not a project, not project content.
+     The agent MUST replace this file with the user's real project files as soon as it starts building. -->
+<!DOCTYPE html><html><head><style>
+:root { color-scheme: dark; } * { box-sizing: border-box; }
+body { font-family: ui-sans-serif, system-ui, sans-serif; color: #e8eef7; }
+.litt-welcome { position: relative; max-width: 660px; text-align: center; }
+</style></head><body><div class="litt-welcome"><h1>Welcome</h1></div></body></html>`;
+
+  const PLAIN_USER_HTML = `<!DOCTYPE html><html><body><h1>My Site</h1><p>hello</p></body></html>`;
+
+  it("allows a full rewrite of the welcome-screen scaffold", async () => {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(root, "index.html"), STYLED_SCAFFOLD);
+    const transport = makeTestTransport(root);
+    const result = await handleFilesWrite(
+      { path: "index.html", content: PLAIN_USER_HTML },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    expect(readFileSync(join(root, "index.html"), "utf-8")).toBe(PLAIN_USER_HTML);
+  });
+
+  it("still refuses a destructive rewrite of a real styled user file", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const styledUserFile = STYLED_SCAFFOLD.replace("LITT-WELCOME-SCREEN", "MY-PAGE");
+    writeFileSync(join(root, "index.html"), styledUserFile);
+    const transport = makeTestTransport(root);
+    const result = await handleFilesWrite(
+      { path: "index.html", content: PLAIN_USER_HTML },
+      transport,
+    );
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toContain("full-file rewrite");
+    // The user's file is untouched.
+    expect(readFileSync(join(root, "index.html"), "utf-8")).toBe(styledUserFile);
+  });
+});

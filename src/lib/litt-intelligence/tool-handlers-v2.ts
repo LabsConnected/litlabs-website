@@ -160,8 +160,17 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   if (localSmallLaneActive()) {
     try {
       const prev = await transport.readFile(path);
-      const violation = destructiveRewriteViolation(prev.content, content);
-      if (violation) return { success: false, error: violation };
+      // The LITT-WELCOME-SCREEN scaffold is styled boilerplate that exists
+      // precisely to be replaced — its own marker says the agent MUST
+      // replace it. Without this exemption every first files.write to
+      // index.html on a fresh project is refused, the approved mutation
+      // fails, and the run dies with "approved workspace operation failed"
+      // before the model ever got to build. Real user files (no marker)
+      // still get the full guard.
+      if (!prev.content.includes("LITT-WELCOME-SCREEN")) {
+        const violation = destructiveRewriteViolation(prev.content, content);
+        if (violation) return { success: false, error: violation };
+      }
     } catch {
       // Unreadable target = a new file — nothing to preserve.
     }
