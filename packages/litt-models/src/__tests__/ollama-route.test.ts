@@ -335,6 +335,126 @@ describe("probeOllamaRoute — malformed configuration", () => {
   });
 });
 
+// ─── probeOllamaRoute — OLLAMA_ROUTE_ORDER acceptance ────────────────
+//
+// PR #761 acceptance: OLLAMA_ROUTE_ORDER=tailscale,lan,local must drive
+// the real probe sequence (not just the resolved candidate list), a
+// failed higher-priority tier must fall through to the next one, and the
+// winning endpoint's reported model list is what the caller validates
+// the pinned model (ollama:litt-fast:2k) against.
+
+describe("probeOllamaRoute — OLLAMA_ROUTE_ORDER (tailscale,lan,local)", () => {
+  const ORDER_ENV = {
+    OLLAMA_LOCAL_URL: "127.0.0.1:11434",
+    OLLAMA_LAN_URL: "192.168.0.112:11434",
+    OLLAMA_TAILSCALE_URL: "100.107.123.73:11434",
+    OLLAMA_ROUTE_ORDER: "tailscale,lan,local",
+  };
+
+  /** A fetch that records every probed URL in call order. */
+  function recordingFetch(script: Record<string, () => Promise<Response>>) {
+    const calls: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      calls.push(url);
+      const endpoint = url.replace(/\/api\/tags$/, "");
+      const handler = script[endpoint];
+      if (!handler) throw new Error(`unscripted fetch: ${endpoint}`);
+      return handler();
+    }) as typeof fetch;
+    return { calls, fetchImpl };
+  }
+
+  it("probes candidates in the exact overridden order: tailscale → lan → local", async () => {
+    const fail = async (): Promise<Response> => {
+      throw new Error("ECONNREFUSED");
+    };
+    const { calls, fetchImpl } = recordingFetch({
+      "http://127.0.0.1:11434": fail,
+      "http://192.168.0.112:11434": fail,
+      "http://100.107.123.73:11434": fail,
+    });
+    const result = await probeOllamaRoute({ getEnv: envFromMap(ORDER_ENV), fetchImpl });
+    assert.equal(result.ok, false);
+    assert.deepEqual(calls, [
+      "http://100.107.123.73:11434/api/tags",
+      "http://192.168.0.112:11434/api/tags",
+      "http://127.0.0.1:11434/api/tags",
+    ]);
+    assert.deepEqual(
+      result.attempts.map((a) => a.tier),
+      ["tailscale", "lan", "local"],
+    );
+  });
+
+  it("Tailscale failing → LAN selected; probing stops at the first success", async () => {
+    const { calls, fetchImpl } = recordingFetch({
+      "http://100.107.123.73:11434": async () => {
+        throw new Error("connect ETIMEDOUT");
+      },
+      "http://192.168.0.112:11434": async () =>
+        fakeTagsResponse(["litt-fast:2k", "qwen3:4b"]),
+      "http://127.0.0.1:11434": async () =>
+        fakeTagsResponse(["litt-fast:2k"]),
+    });
+    const result = await probeOllamaRoute({ getEnv: envFromMap(ORDER_ENV), fetchImpl });
+    assert.equal(result.ok, true);
+    assert.equal(result.tier, "lan");
+    assert.equal(result.label, "LAN OLLAMA");
+    assert.equal(result.endpoint, "http://192.168.0.112:11434");
+    // Exact probe order: tailscale attempted first, LAN second; local
+    // is never reached once a tier answers.
+    assert.deepEqual(calls, [
+      "http://100.107.123.73:11434/api/tags",
+      "http://192.168.0.112:11434/api/tags",
+    ]);
+    assert.deepEqual(
+      result.attempts.map((a) => [a.tier, a.ok]),
+      [
+        ["tailscale", false],
+        ["lan", true],
+      ],
+    );
+    // The chosen endpoint's model list is what the caller validates the
+    // pinned model against — it must report the actual installed tags,
+    // not merely "some model exists".
+    assert.ok(result.models.includes("litt-fast:2k"));
+  });
+
+  it("Tailscale reachable → wins with exactly one probe (local and LAN never tried)", async () => {
+    const { calls, fetchImpl } = recordingFetch({
+      "http://100.107.123.73:11434": async () => fakeTagsResponse(["litt-fast:2k"]),
+      "http://192.168.0.112:11434": async () => {
+        throw new Error("must not be probed");
+      },
+      "http://127.0.0.1:11434": async () => {
+        throw new Error("must not be probed");
+      },
+    });
+    const result = await probeOllamaRoute({ getEnv: envFromMap(ORDER_ENV), fetchImpl });
+    assert.equal(result.ok, true);
+    assert.equal(result.tier, "tailscale");
+    assert.equal(result.endpoint, "http://100.107.123.73:11434");
+    assert.deepEqual(calls, ["http://100.107.123.73:11434/api/tags"]);
+  });
+
+  it("a reachable tier with no models fails over even under the overridden order", async () => {
+    const { calls, fetchImpl } = recordingFetch({
+      "http://100.107.123.73:11434": async () => fakeTagsResponse([]),
+      "http://192.168.0.112:11434": async () => fakeTagsResponse(["litt-fast:2k"]),
+      "http://127.0.0.1:11434": async () => fakeTagsResponse(["litt-fast:2k"]),
+    });
+    const result = await probeOllamaRoute({ getEnv: envFromMap(ORDER_ENV), fetchImpl });
+    assert.equal(result.ok, true);
+    assert.equal(result.tier, "lan");
+    assert.deepEqual(calls, [
+      "http://100.107.123.73:11434/api/tags",
+      "http://192.168.0.112:11434/api/tags",
+    ]);
+    assert.match(result.attempts[0].error ?? "", /no models installed/);
+  });
+});
+
 describe("probeOllamaRoute — timeout behavior", () => {
   it("aborts a hung candidate after the configured timeout and falls through", async () => {
     const candidates: OllamaRouteCandidate[] = [
