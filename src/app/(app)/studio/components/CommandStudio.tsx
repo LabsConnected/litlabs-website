@@ -3064,14 +3064,20 @@ const [chatDock, setChatDock] = useState<"left" | "bottom">(() => {
                       : new Set([...mountedSurfaces, stageSurface]),
                   ).map((surface) => {
                     const active = surface === stageSurface;
-                    if (surface === "preview" && docked) {
-                      // `display:contents` keeps the host mounted without
-                      // consuming stage flow; the Preview tab shows a
-                      // truthful empty state while docked.
+                    if (surface === "preview") {
+                      // The host stays mounted for EVERY placement — `stage`
+                      // included — so the preview iframe is never reparented.
+                      // Docked placements use `display:contents` (the host is
+                      // positioned out of flow); `stage` participates in the
+                      // normal surface show/hide so the panel fills the tab.
                       return (
                         <div
                           key={surface}
-                          className="contents"
+                          className={docked
+                            ? "contents"
+                            : active
+                              ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                              : "hidden"}
                           data-testid={`stage-surface-${surface}`}
                           data-active={active ? "true" : "false"}
                         >
@@ -3098,9 +3104,9 @@ const [chatDock, setChatDock] = useState<"left" | "bottom">(() => {
                           >
                             {renderStageSurface(surface, true)}
                           </PreviewDockHost>
-                          {active ? (
+                          {docked && active ? (
                             <div
-                              className="flex min-h-0 min-w-0 flex-1 items-center justify-center text-center"
+                              className="pointer-events-none flex min-h-0 min-w-0 flex-1 items-center justify-center text-center"
                               data-testid="stage-preview-docked-hint"
                             >
                               <p className="px-6 text-[12px]" style={{ color: "var(--text-muted)" }}>

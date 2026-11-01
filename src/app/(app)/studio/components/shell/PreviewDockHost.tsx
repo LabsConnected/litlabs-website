@@ -2,10 +2,13 @@
 
 /**
  * PreviewDockHost — the positioning wrapper for the single preview
- * instance in every non-`stage` placement. The host keeps a fixed DOM
- * position inside the stage render tree; only its computed rect changes
- * per mode, so the StudioPreviewPanel subtree (and its iframe) is never
- * reparented or remounted.
+ * instance in EVERY placement, including `stage`. The host renders one
+ * stable DOM tree and changes only computed style/visibility per mode,
+ * so the StudioPreviewPanel subtree (and its iframe) is never reparented
+ * or remounted across placement transitions. Conditional siblings before
+ * the iframe would shift its child index and force a remount — every
+ * structural node below is therefore rendered unconditionally and shown
+ * or hidden purely via style/className.
  *
  * Modes:
  *   right/left  — absolute strip along the stage edge, resizable via the
@@ -18,6 +21,8 @@
  *                 scroll capture); expandable to a taller card.
  *   fullscreen  — fixed inset-0 overlay (same as the panel's legacy
  *                 `maximized`, now driven by placement).
+ *   stage       — static fill of the preview stage slot (the panel's
+ *                 original home); still the same DOM subtree.
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Minus, PictureInPicture2, X } from "lucide-react";
@@ -187,89 +192,100 @@ export default function PreviewDockHost({
     window.addEventListener("pointerup", onUp);
   };
 
-  if (placement === "right" || placement === "left") {
-    const style: CSSProperties = {
-      position: "absolute",
-      top: 0,
-      bottom: 0,
-      [placement === "right" ? "right" : "left"]: 0,
-      width: dockWidth,
-      zIndex: 10,
-    };
-    return (
-      <div className="flex min-h-0 flex-col border-l" style={{ ...style, borderColor: "var(--studio-border)" }} data-testid="preview-dock-host" data-placement={placement}>
-        <div
-          className="absolute bottom-0 top-0 z-10 w-1.5 cursor-col-resize hover:bg-white/10"
-          style={{ [placement === "right" ? "left" : "right"]: -3, touchAction: "none" }}
-          onPointerDown={onDockEdgeDrag}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize preview panel"
-          data-testid="preview-dock-resize"
-        />
-        {children}
-      </div>
-    );
-  }
+  // ── Single stable tree: every node renders unconditionally; placement
+  // switches only styles so React never reparents the iframe. ────────────
+  const isEdge = placement === "right" || placement === "left";
+  const isSplit = placement === "split";
+  const isEdgeLike = isEdge || isSplit;
+  const isFloat = placement === "float";
+  const isChat = placement === "chat";
+  const isFullscreen = placement === "fullscreen";
+  const isStage = placement === "stage";
+  const showBar = isFloat || isChat || isFullscreen;
 
-  if (placement === "split") {
-    const w = Math.round(viewport.w * splitFraction);
-    return (
-      <div
-        className="flex min-h-0 flex-col border-l"
-        style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: w, zIndex: 10, borderColor: "var(--studio-border)" }}
-        data-testid="preview-dock-host"
-        data-placement="split"
-      >
-        <div
-          className="absolute bottom-0 left-[-3px] top-0 z-10 w-1.5 cursor-col-resize hover:bg-white/10"
-          style={{ touchAction: "none" }}
-          onPointerDown={onDockEdgeDrag}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize preview panel"
-          data-testid="preview-dock-resize"
-        />
-        {children}
-      </div>
-    );
-  }
+  const hostStyle: CSSProperties = isStage
+    ? { position: "relative", display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, flex: 1, overflow: "hidden" }
+    : isFullscreen
+      ? { position: "fixed", inset: 0, zIndex: 300, backgroundColor: "rgba(13,9,22,0.98)", padding: 12 }
+      : isFloat
+        ? {
+            position: "fixed",
+            left: floatRect.x,
+            top: floatRect.y,
+            width: floatRect.w,
+            height: floatMinimized ? PREVIEW_FLOAT_MINIMIZED_H : floatRect.h,
+            zIndex: 220,
+            borderColor: "var(--studio-border)",
+            backgroundColor: "var(--studio-card)",
+          }
+        : isChat
+          ? (() => {
+              const base = chatRect ?? { left: 64, top: 96, width: Math.min(480, viewport.w - 96) };
+              return {
+                position: "fixed",
+                left: base.left,
+                top: base.top,
+                width: base.width,
+                height: chatExpanded ? PREVIEW_CHAT_CARD_EXPANDED_H : PREVIEW_CHAT_CARD_H,
+                zIndex: 220,
+                borderColor: "var(--studio-border)",
+                backgroundColor: "var(--studio-card)",
+              } as CSSProperties;
+            })()
+          : {
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              [isSplit ? "right" : placement === "right" ? "right" : "left"]: 0,
+              width: isSplit ? Math.round(viewport.w * splitFraction) : dockWidth,
+              zIndex: 10,
+            };
 
-  if (placement === "fullscreen") {
-    return (
-      <div
-        className="flex min-h-0 flex-col p-3"
-        style={{ position: "fixed", inset: 0, zIndex: 300, backgroundColor: "rgba(13,9,22,0.98)" }}
-        data-testid="preview-dock-host"
-        data-placement="fullscreen"
-      >
-        {chrome ? <div className="flex shrink-0 justify-end pb-1">{chrome}</div> : null}
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-      </div>
-    );
-  }
+  const hostClass = isStage
+    ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+    : isFullscreen
+      ? "flex min-h-0 flex-col"
+      : isFloat || isChat
+        ? "glass-shell flex flex-col overflow-hidden rounded-xl border shadow-2xl"
+        : "flex min-h-0 flex-col border-l";
 
-  if (placement === "chat") {
-    const base = chatRect ?? { left: 64, top: 96, width: Math.min(480, viewport.w - 96) };
-    const h = chatExpanded ? PREVIEW_CHAT_CARD_EXPANDED_H : PREVIEW_CHAT_CARD_H;
-    return (
+  return (
+    <div
+      className={hostClass}
+      style={{ ...hostStyle, borderColor: "var(--studio-border)" }}
+      data-testid="preview-dock-host"
+      data-placement={placement}
+      data-minimized={isFloat && floatMinimized ? "true" : "false"}
+      data-expanded={isChat && chatExpanded ? "true" : "false"}
+    >
+      {/* ── Chrome bar — index 0, always rendered; display:none in modes
+          that use the panel's own header chrome. Its buttons differ per
+          mode but live inside this stable wrapper, so the body/iframe
+          subtree (index 1) never shifts position. ── */}
       <div
-        className="glass-shell flex flex-col overflow-hidden rounded-xl border shadow-2xl"
-        style={{ position: "fixed", left: base.left, top: base.top, width: base.width, height: h, zIndex: 220, borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}
-        data-testid="preview-dock-host"
-        data-placement="chat"
-        data-expanded={chatExpanded ? "true" : "false"}
+        className="shrink-0 items-center justify-between gap-1 border-b px-2 py-1"
+        style={{
+          borderColor: "var(--studio-border)",
+          touchAction: isFloat ? "none" : undefined,
+          display: showBar ? "flex" : "none",
+          justifyContent: isFullscreen ? "flex-end" : "space-between",
+          cursor: isFloat ? "move" : undefined,
+          userSelect: isFloat ? "none" : undefined,
+        }}
+        onPointerDown={isFloat ? onGripPointerDown("move") : undefined}
+        role={isFloat ? "toolbar" : undefined}
+        aria-label={isFloat ? "Move preview window" : undefined}
+        data-testid={isFloat ? "preview-float-grip" : isChat ? "preview-chat-card-bar" : "preview-fullscreen-bar"}
       >
-        <div
-          className="flex shrink-0 items-center justify-between gap-1 border-b px-2 py-1"
-          style={{ borderColor: "var(--studio-border)" }}
-          data-testid="preview-chat-card-bar"
+        <span
+          className="truncate text-[10px] font-bold"
+          style={{ color: "var(--text-muted)", display: isFullscreen ? "none" : undefined }}
         >
-          <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-muted)" }}>
-            Website preview
-          </span>
-          <div className="flex items-center gap-0.5">
-            {chrome}
+          Website preview
+        </span>
+        <div className="flex items-center gap-0.5" onPointerDown={isFloat ? (e) => e.stopPropagation() : undefined}>
+          {chrome}
+          {isChat ? (
             <button
               type="button"
               onClick={() => onChatExpandedChange(!chatExpanded)}
@@ -280,76 +296,69 @@ export default function PreviewDockHost({
             >
               <PictureInPicture2 size={12} className="pointer-events-none" style={{ color: "var(--text-muted)" }} />
             </button>
-          </div>
+          ) : null}
+          {isFloat ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onFloatMinimizedChange(!floatMinimized)}
+                className="grid min-h-9 min-w-9 place-items-center rounded-md hover:bg-white/10"
+                aria-label={floatMinimized ? "Restore preview window" : "Minimize preview window"}
+                title={floatMinimized ? "Restore" : "Minimize"}
+                data-testid="preview-float-minimize"
+              >
+                <Minus size={12} className="pointer-events-none" style={{ color: "var(--text-muted)" }} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onPlacementChange("right")}
+                className="grid min-h-9 min-w-9 place-items-center rounded-md hover:bg-white/10"
+                aria-label="Dock preview right"
+                title="Dock right"
+                data-testid="preview-float-dock"
+              >
+                <X size={12} className="pointer-events-none" style={{ color: "var(--text-muted)" }} />
+              </button>
+            </>
+          ) : null}
         </div>
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
       </div>
-    );
-  }
 
-  // float
-  const h = floatMinimized ? PREVIEW_FLOAT_MINIMIZED_H : floatRect.h;
-  return (
-    <div
-      className="glass-shell flex flex-col overflow-hidden rounded-xl border shadow-2xl"
-      style={{ position: "fixed", left: floatRect.x, top: floatRect.y, width: floatRect.w, height: h, zIndex: 220, borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}
-      data-testid="preview-dock-host"
-      data-placement="float"
-      data-minimized={floatMinimized ? "true" : "false"}
-    >
+      {/* ── Body — index 1, always rendered. Keep children mounted while
+          float-minimized — unmounting the iframe subtree would reload the
+          preview on restore. ── */}
       <div
-        className="flex shrink-0 cursor-move select-none items-center justify-between gap-1 border-b px-2 py-1"
-        style={{ borderColor: "var(--studio-border)", touchAction: "none" }}
-        onPointerDown={onGripPointerDown("move")}
-        role="toolbar"
-        aria-label="Move preview window"
-        data-testid="preview-float-grip"
-      >
-        <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-muted)" }}>
-          Website preview
-        </span>
-        <div className="flex items-center gap-0.5" onPointerDown={(e) => e.stopPropagation()}>
-          {chrome}
-          <button
-            type="button"
-            onClick={() => onFloatMinimizedChange(!floatMinimized)}
-            className="grid min-h-9 min-w-9 place-items-center rounded-md hover:bg-white/10"
-            aria-label={floatMinimized ? "Restore preview window" : "Minimize preview window"}
-            title={floatMinimized ? "Restore" : "Minimize"}
-            data-testid="preview-float-minimize"
-          >
-            <Minus size={12} className="pointer-events-none" style={{ color: "var(--text-muted)" }} />
-          </button>
-          <button
-            type="button"
-            onClick={() => onPlacementChange("right")}
-            className="grid min-h-9 min-w-9 place-items-center rounded-md hover:bg-white/10"
-            aria-label="Dock preview right"
-            title="Dock right"
-            data-testid="preview-float-dock"
-          >
-            <X size={12} className="pointer-events-none" style={{ color: "var(--text-muted)" }} />
-          </button>
-        </div>
-      </div>
-      {/* Keep children mounted while minimized — unmounting the iframe
-          subtree would reload the preview on restore. */}
-      <div
-        className={floatMinimized ? "hidden" : "flex min-h-0 flex-1 flex-col"}
+        className={isFloat && floatMinimized ? "hidden" : "flex min-h-0 flex-1 flex-col"}
         data-testid="preview-float-body"
       >
         {children}
       </div>
-      {!floatMinimized && (
-        <div
-          className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"
-          style={{ touchAction: "none" }}
-          onPointerDown={onGripPointerDown("resize")}
-          role="separator"
-          aria-label="Resize preview window"
-          data-testid="preview-float-resize"
-        />
-      )}
+
+      {/* ── Edge resize grip — index 2, style-only toggle. Grip sits on
+          the inward edge: left for right-dock/split, right for left-dock. ── */}
+      <div
+        className="absolute bottom-0 top-0 z-10 w-1.5 cursor-col-resize hover:bg-white/10"
+        style={{
+          touchAction: "none",
+          display: isEdgeLike ? undefined : "none",
+          ...(isEdgeLike ? { [isSplit || placement === "right" ? "left" : "right"]: -3 } : {}),
+        }}
+        onPointerDown={isEdgeLike ? onDockEdgeDrag : undefined}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize preview panel"
+        data-testid="preview-dock-resize"
+      />
+
+      {/* ── Float corner resize grip — index 3, style-only toggle. ── */}
+      <div
+        className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"
+        style={{ touchAction: "none", display: isFloat && !floatMinimized ? undefined : "none" }}
+        onPointerDown={isFloat && !floatMinimized ? onGripPointerDown("resize") : undefined}
+        role="separator"
+        aria-label="Resize preview window"
+        data-testid="preview-float-resize"
+      />
     </div>
   );
 }
