@@ -314,3 +314,37 @@ describe("project.deploy is the deployment tool", () => {
     expect(verdict.missing).toContain("successful deployment");
   });
 });
+
+/* ── deploy.execute / deploy.verify are recognised deploy evidence ── */
+
+describe("deploy.execute deploy evidence", () => {
+  it("completes a ship request on its own — it verifies the URL internally", () => {
+    // runDeployFlow fetches the production URL before reporting success.
+    const toolCalls = [
+      { toolId: "files.write", success: true },
+      { toolId: "deploy.execute", success: true },
+    ];
+    const verdict = evaluateCompletion(requirementForMode("ship"), {
+      toolCalls: toolCalls.map((c) => ({ ...c, mutating: true })),
+      deployment: deploymentEvidenceFrom(toolCalls),
+    });
+    expect(verdict.state).toBe("complete");
+  });
+
+  it("treats deploy.verify after a non-self-verifying deploy as URL verification", () => {
+    const evidence = deploymentEvidenceFrom([
+      { toolId: "deploy", success: true },
+      { toolId: "deploy.verify", success: true },
+    ]);
+    expect(evidence?.urlVerified).toBe(true);
+  });
+
+  it("reports a failed deploy.execute as started but not succeeded", () => {
+    const evidence = deploymentEvidenceFrom([
+      { toolId: "deploy.execute", success: false },
+    ]);
+    expect(evidence).toEqual({
+      started: true, succeeded: false, url: null, urlVerified: false,
+    });
+  });
+});

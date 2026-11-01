@@ -559,8 +559,28 @@ function evaluateCompletionState(
     }
   }
 
+  // A mutating tool reported success, but success flags describe what the
+  // model was TOLD — not what persisted. When the checkpoint diff actually
+  // ran and found the workspace unchanged, the claimed mutation did not
+  // happen; reporting "complete" would be a false success. ("unknown"
+  // cannot block completion: static workspaces have no checkpoint, so the
+  // diff is simply unavailable there.)
+  const change = evidence.workspaceChange ?? null;
+  if (change?.status === "unchanged") {
+    missing.push("persisted workspace change");
+    return {
+      ...base,
+      ...changeFields(change),
+      state: "failed",
+      missing,
+      reason:
+        "A mutating tool call reported success but the workspace is verified unchanged — the claimed file mutation did not persist.",
+    };
+  }
+
   return {
     ...base,
+    ...changeFields(change),
     state: "complete",
     missing,
     reason: requirement.deployment
@@ -601,6 +621,7 @@ export function workLogLabel(verdict: CompletionVerdict): string | null {
  */
 const DEPLOY_TOOL_IDS = new Set([
   "project.deploy",
+  "deploy.execute",
   "deploy",
   "deploy.run",
   "deployment.create",
@@ -617,10 +638,11 @@ const DEPLOY_TOOL_IDS = new Set([
  * separate verification call is required. Every other deploy tool still
  * needs an explicit check afterwards.
  */
-const SELF_VERIFYING_DEPLOY_TOOLS = new Set(["project.deploy"]);
+const SELF_VERIFYING_DEPLOY_TOOLS = new Set(["project.deploy", "deploy.execute"]);
 
 /** Tool ids that can verify a live URL actually serves. */
 const URL_VERIFY_TOOL_IDS = new Set([
+  "deploy.verify",
   "browser.navigate",
   "browser.snapshot",
   "web.fetch",
