@@ -2201,7 +2201,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
   });
 
   it("a non-write pause carries accumulated no-write steps forward", async () => {
-    // read (+1) then a gated non-write tool pauses → counter persists at 1.
+    // read (+1) then a gated non-write mutation pauses → counter persists at 1.
     vi.mocked(callLLMWithTools)
       .mockResolvedValueOnce({
         text: "",
@@ -2211,12 +2211,12 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
       })
       .mockResolvedValueOnce({
         text: "",
-        toolCalls: [{ toolId: "preview.start", toolCallId: "pv1", inputs: { projectId: "p-test" } }],
+        toolCalls: [{ toolId: "files.delete", toolCallId: "d1", inputs: { projectId: "p-test", path: "stale.html" } }],
         finishReason: "tool_calls",
         model: "test",
       });
     const result = await resumeAgentLoopV2(approvedWriteResume(), writeTransport);
-    expect(result.pendingApproval?.toolId).toBe("preview.start");
+    expect(result.pendingApproval?.toolId).toBe("files.delete");
     expect(result.pendingApproval?.zeroWriteStepsAtPause).toBe(1);
   });
 
