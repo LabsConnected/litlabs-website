@@ -74,6 +74,8 @@ test("API-only run — ghost cancel repro + latency probe", async ({ page, reque
     data: {
       message: "Build a modern responsive website.",
       clientRequestId: reqId,
+      // Fresh conversation — server requires expectedRevision >= 1.
+      expectedRevision: 1,
       projectId,
       executionMode: "act",
     },
