@@ -143,7 +143,7 @@ export async function getStudioTask(userId: string, taskId: string): Promise<Stu
  * check fully server-authoritative — the row is still validated when it
  * lands — while eliminating the transient rejection.
  */
-async function readWithGrace<T>(read: () => Promise<T | null>): Promise<T | null> {
+export async function readWithGrace<T>(read: () => Promise<T | null>): Promise<T | null> {
   let value = await read();
   for (let attempt = 0; !value && attempt < 3; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 200));
