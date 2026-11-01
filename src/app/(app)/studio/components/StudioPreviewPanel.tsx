@@ -7,6 +7,8 @@ import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
 import StudioPublishControls from "./StudioPublishControls";
+import PreviewDockChrome from "./shell/PreviewDockChrome";
+import type { PreviewPlacement } from "../lib/preview-dock";
 
 /**
  * Preview states — the five canonical states the UI explicitly supports.
@@ -230,6 +232,9 @@ export default function StudioPreviewPanel({
   versionControl = "none",
   refreshKey = 0,
   onSelectionChange,
+  placement,
+  onPlacementChange,
+  onResetLayout,
 }: {
   projectId: string | null;
   projectName: string | null;
@@ -245,6 +250,12 @@ export default function StudioPreviewPanel({
   versionControl?: "git" | "none";
   refreshKey?: number;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
+  /** Dockable placement — provided by CommandStudio's usePreviewDock. When
+      absent (tests, classic embeds) the panel keeps its internal
+      `maximized` overlay and hides the placement menu. */
+  placement?: PreviewPlacement;
+  onPlacementChange?: (p: PreviewPlacement) => void;
+  onResetLayout?: () => void;
 }) {
   const { getToken } = useClerkAuth();
   const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_started");
@@ -1134,14 +1145,30 @@ export default function StudioPreviewPanel({
         {isLive && (
           <button
             type="button"
-            onClick={() => setMaximized((v) => !v)}
+            onClick={() => {
+              if (onPlacementChange) {
+                onPlacementChange(placement === "fullscreen" ? "right" : "fullscreen");
+              } else {
+                setMaximized((v) => !v);
+              }
+            }}
             className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
-            aria-label={maximized ? "Exit fullscreen" : "Maximize preview"}
-            title={maximized ? "Exit fullscreen" : "Maximize"}
+            aria-label={maximized || placement === "fullscreen" ? "Exit fullscreen" : "Maximize preview"}
+            title={maximized || placement === "fullscreen" ? "Exit fullscreen" : "Maximize"}
             data-testid="preview-maximize"
           >
-            {maximized ? <span className="text-[12px]">⤓</span> : <span className="text-[12px]">⤢</span>}
+            {maximized || placement === "fullscreen" ? <span className="text-[12px]">⤓</span> : <span className="text-[12px]">⤢</span>}
           </button>
+        )}
+        {/* Placement menu — dock right/left, float, in-chat, fullscreen,
+            code+preview. Single preview instance; only its host rect
+            changes. */}
+        {onPlacementChange && placement && (
+          <PreviewDockChrome
+            placement={placement}
+            onChange={onPlacementChange}
+            onResetLayout={onResetLayout}
+          />
         )}
       </div>
       {/* Project secrets section — collapsible, above the preview surface */}

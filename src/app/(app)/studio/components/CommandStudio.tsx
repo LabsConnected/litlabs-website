@@ -78,6 +78,9 @@ import WorkspaceRail from "./shell/WorkspaceRail";
 import ContextInspector from "./shell/ContextInspector";
 import LiTTCommandLayer from "./shell/LiTTCommandLayer";
 import ResizeHandle from "./shell/ResizeHandle";
+import PreviewDockHost from "./shell/PreviewDockHost";
+import PreviewDockChrome from "./shell/PreviewDockChrome";
+import { usePreviewDock } from "../hooks/usePreviewDock";
 import StudioDeploySurface from "./shell/StudioDeploySurface";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ElementInspectorPanel from "./shell/ElementInspectorPanel";
@@ -685,7 +688,12 @@ function CommandStudioContent() {
   // "bottom" (today's bottom command layer). Default "left" per the spec;
   // any stored value other than "bottom" falls back to "left".
   const CHAT_DOCK_KEY = "littree:studio:chat-dock";
-  const [chatDock, setChatDock] = useState<"left" | "bottom">(() => {
+  // Dockable preview placement — the single StudioPreviewPanel host keeps
+// its DOM position in the stage tree; only its CSS rect changes per mode
+// (right/left dock, float, in-chat card, fullscreen, code+preview split),
+// so the iframe + inspector bridge survive every placement change.
+const previewDock = usePreviewDock();
+const [chatDock, setChatDock] = useState<"left" | "bottom">(() => {
     if (typeof window === "undefined") return "left";
     try {
       return localStorage.getItem(CHAT_DOCK_KEY) === "bottom" ? "bottom" : "left";
@@ -2603,6 +2611,10 @@ function CommandStudioContent() {
   // via littChatContent = transcript + composer.
   const littTranscript = (
     <>
+      {/* In-chat preview anchor — the PreviewDockHost tracks this rect and
+          overlays the single preview instance as an expandable card when
+          placement === "chat". Zero-height so it costs no layout space. */}
+      <div data-preview-chat-anchor className="h-0 w-full shrink-0" />
       {/* Mission cards — compact pinned intelligence above the chat.
           The Plan workspace tab's live summary, folded into collapsible
           cards: mission · checkpoints · next actions. All data comes from
@@ -2797,6 +2809,9 @@ function CommandStudioContent() {
             versionControl={capabilities.versionControl}
             workspaceStatus={capabilities.workspaceStatus ?? null}
             onSelectionChange={setPreviewSelection}
+            placement={previewDock.placement}
+            onPlacementChange={previewDock.setPlacement}
+            onResetLayout={previewDock.reset}
           />
         );
       case "browser":
@@ -3024,31 +3039,97 @@ function CommandStudioContent() {
                 onSelect={openStageSurface}
               />
             }
-            stage={
-              <>
-                {Array.from(
-                  mountedSurfaces.has(stageSurface)
-                    ? mountedSurfaces
-                    : new Set([...mountedSurfaces, stageSurface]),
-                ).map((surface) => {
-                  const active = surface === stageSurface;
-                  return (
-                    <div
-                      key={surface}
-                      // `hidden` attribute would lose to Tailwind's `flex`
-                      // display utility — toggle the class instead.
-                      className={active
-                        ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-                        : "hidden"}
-                      data-testid={`stage-surface-${surface}`}
-                      data-active={active ? "true" : "false"}
-                    >
-                      {renderStageSurface(surface, active)}
-                    </div>
-                  );
-                })}
-              </>
-            }
+            stage={(() => {
+              // On narrow/mobile viewports, edge docks would consume the
+              // whole stage — degrade to the movable float window instead.
+              const placement = isMobileLitt && (previewDock.placement === "right" || previewDock.placement === "left" || previewDock.placement === "split")
+                ? "float"
+                : previewDock.placement;
+              const docked = placement !== "stage";
+              // Reserve stage space for edge-docked previews via padding on
+              // the relative stage wrapper; the host overlays that padding
+              // absolutely, so the iframe host never changes DOM position.
+              const padRight = placement === "right" ? previewDock.dockWidth
+                : placement === "split" ? `${Math.round(previewDock.splitFraction * 100)}%` : 0;
+              const padLeft = placement === "left" ? previewDock.dockWidth : 0;
+              return (
+                <div
+                  className="relative flex min-h-0 min-w-0 flex-1"
+                  style={{ paddingRight: padRight, paddingLeft: padLeft }}
+                  data-testid="stage-dock-frame"
+                >
+                  {Array.from(
+                    mountedSurfaces.has(stageSurface)
+                      ? mountedSurfaces
+                      : new Set([...mountedSurfaces, stageSurface]),
+                  ).map((surface) => {
+                    const active = surface === stageSurface;
+                    if (surface === "preview" && docked) {
+                      // `display:contents` keeps the host mounted without
+                      // consuming stage flow; the Preview tab shows a
+                      // truthful empty state while docked.
+                      return (
+                        <div
+                          key={surface}
+                          className="contents"
+                          data-testid={`stage-surface-${surface}`}
+                          data-active={active ? "true" : "false"}
+                        >
+                          <PreviewDockHost
+                            placement={placement}
+                            dockWidth={previewDock.dockWidth}
+                            splitFraction={previewDock.splitFraction}
+                            onDockWidthChange={previewDock.setDockWidth}
+                            onSplitFractionChange={previewDock.setSplitFraction}
+                            floatRect={previewDock.floatRect}
+                            floatMinimized={previewDock.floatMinimized}
+                            chatExpanded={previewDock.chatExpanded}
+                            onFloatRectChange={previewDock.setFloatRect}
+                            onFloatMinimizedChange={previewDock.setFloatMinimized}
+                            onChatExpandedChange={previewDock.setChatExpanded}
+                            onPlacementChange={previewDock.setPlacement}
+                            chrome={
+                              <PreviewDockChrome
+                                placement={placement}
+                                onChange={previewDock.setPlacement}
+                                onResetLayout={previewDock.reset}
+                              />
+                            }
+                          >
+                            {renderStageSurface(surface, true)}
+                          </PreviewDockHost>
+                          {active ? (
+                            <div
+                              className="flex min-h-0 min-w-0 flex-1 items-center justify-center text-center"
+                              data-testid="stage-preview-docked-hint"
+                            >
+                              <p className="px-6 text-[12px]" style={{ color: "var(--text-muted)" }}>
+                                Preview is docked. Choose a workspace surface, or use the
+                                preview placement menu to return it to the stage.
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div
+                        key={surface}
+                        // `hidden` attribute would lose to Tailwind's `flex`
+                        // display utility — toggle the class instead.
+                        className={active
+                          ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                          : "hidden"}
+                        data-testid={`stage-surface-${surface}`}
+                        data-active={active ? "true" : "false"}
+                      >
+                        {renderStageSurface(surface, active)}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
             inspector={
               <ContextInspector
                 open={inspectorOpen}
