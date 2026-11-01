@@ -555,41 +555,40 @@ export default function StudioPreviewPanel({
   // first build/edit unblocks auto-start. Fails safe: any error, non-OK
   // response, or unreadable payload leaves truth at "no_content", which keeps
   // auto-start blocked rather than booting a default/welcome preview.
-  useEffect(() => {
+  const refreshWorkspaceTruth = useCallback(async () => {
     if (!projectId) {
       setWorkspaceTruth("no_content");
       return;
     }
-    let cancelled = false;
-    setWorkspaceTruth("unknown");
-    (async () => {
-      try {
-        const res = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace-state`, {
-          cache: "no-store",
-          credentials: "include",
-          headers: await authHeaders(),
-          signal: AbortSignal.timeout(8000),
-        });
-        if (cancelled) return;
-        if (!res.ok) {
-          setWorkspaceTruth("no_content");
-          return;
-        }
-        const payload = await res.json().catch(() => null) as { scaffolded?: unknown; touched?: unknown } | null;
-        if (cancelled || !payload) {
-          setWorkspaceTruth("no_content");
-          return;
-        }
-        // Same signal CommandStudio uses: a second git commit or a consumed
-        // scaffold manifest both mean real content exists.
-        const hasContent = payload.touched === true || payload.scaffolded === false;
-        setWorkspaceTruth(hasContent ? "has_content" : "no_content");
-      } catch {
-        if (!cancelled) setWorkspaceTruth("no_content");
+    try {
+      const res = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace-state`, {
+        cache: "no-store",
+        credentials: "include",
+        headers: await authHeaders(),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) {
+        setWorkspaceTruth("no_content");
+        return;
       }
-    })();
-    return () => { cancelled = true; };
-  }, [projectId, refreshKey, authHeaders]);
+      const payload = await res.json().catch(() => null) as { scaffolded?: unknown; touched?: unknown } | null;
+      if (!payload) {
+        setWorkspaceTruth("no_content");
+        return;
+      }
+      // Same signal CommandStudio uses: a second git commit or a consumed
+      // scaffold manifest both mean real content exists.
+      const hasContent = payload.touched === true || payload.scaffolded === false;
+      setWorkspaceTruth(hasContent ? "has_content" : "no_content");
+    } catch {
+      setWorkspaceTruth("no_content");
+    }
+  }, [projectId, authHeaders]);
+
+  useEffect(() => {
+    setWorkspaceTruth(projectId ? "unknown" : "no_content");
+    void refreshWorkspaceTruth();
+  }, [refreshWorkspaceTruth, refreshKey]);
 
   // Refresh when refreshKey prop changes (used by CodeWorkspace split view
   // and the permanent preview column's workspaceRevision prop)
@@ -740,9 +739,15 @@ export default function StudioPreviewPanel({
         return;
       }
       void loadStatus(true);
+      // While idle at not_started, also re-check the workspace truth every
+      // ~12s: generation or a first edit landing after the initial fetch is
+      // what unblocks auto-start.
+      if (awaitingRuntime && startPollAttemptsRef.current % 4 === 0) {
+        void refreshWorkspaceTruth();
+      }
     }, 3000);
     return () => clearInterval(interval);
-  }, [state, loadStatus, workspaceTruth]);
+  }, [state, loadStatus, workspaceTruth, refreshWorkspaceTruth]);
 
   // Health check while ready. A dev server that dies AFTER reaching ready
   // must not keep the green "Preview ready" dot over a dead iframe.
