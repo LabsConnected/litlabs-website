@@ -709,7 +709,14 @@ export default function StudioPreviewPanel({
   // spinner. The counter resets whenever the panel leaves the polling set
   // (e.g. reaching ready) or the project changes.
   useEffect(() => {
-    if (state !== "starting" && state !== "restarting" && state !== "loading") {
+    // Poll while the runtime is coming up — and while it *should* be coming
+    // up. A `not_started` state with real workspace content means auto-start
+    // either already fired (preparePreview in flight or spent) or never got
+    // to run; either way the panel must keep observing the runtime until it
+    // flips to ready, otherwise "Preparing automatically" sits forever over a
+    // runtime that already became ready.
+    const awaitingRuntime = state === "not_started" && workspaceTruth === "has_content";
+    if (state !== "starting" && state !== "restarting" && state !== "loading" && !awaitingRuntime) {
       startPollAttemptsRef.current = 0;
       return;
     }
@@ -718,6 +725,13 @@ export default function StudioPreviewPanel({
       if (startPollAttemptsRef.current >= MAX_START_POLL_ATTEMPTS) {
         clearInterval(interval);
         statusSeqRef.current++;
+        if (awaitingRuntime) {
+          // Auto-start never produced a live runtime — stay honest in
+          // not_started (the empty state offers the manual start/retry path)
+          // rather than pretending the runtime failed mid-start.
+          startPollAttemptsRef.current = 0;
+          return;
+        }
         setState("failed");
         setStartPhase(null);
         setError("The preview took too long to start. The dev server may have crashed during startup — check the logs, then try restarting.");
@@ -727,7 +741,7 @@ export default function StudioPreviewPanel({
       void loadStatus(true);
     }, 3000);
     return () => clearInterval(interval);
-  }, [state, loadStatus]);
+  }, [state, loadStatus, workspaceTruth]);
 
   // Health check while ready. A dev server that dies AFTER reaching ready
   // must not keep the green "Preview ready" dot over a dead iframe.
