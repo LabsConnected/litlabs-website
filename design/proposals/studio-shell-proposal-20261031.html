@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DESIGN PROPOSAL — Studio shell v1</title>
+<style>
+:root{
+  --bg:#070913; --s1:#0c101d; --s2:#111627; --line:#232a41; --line-soft:#1a2036;
+  --tx:#e9edf7; --tx2:#9aa7c2; --tx3:#6b7892;
+  --lime:#a3e635; --lime-dim:#3f6212;
+  --vio:#8b5cf6; --vio2:#a78bfa; --cyan:#22d3ee;
+  --warn:#fbbf24; --err:#f87171;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left}
+svg{display:block}
+
+/* ── design proposal banner ─────────────────────────────── */
+.proposal-tag{position:fixed;bottom:34px;right:14px;z-index:99;background:#2a1e04;border:1px solid #7c5c10;color:#fde68a;font-size:11px;font-weight:700;letter-spacing:.14em;padding:4px 10px;border-radius:6px;text-transform:uppercase}
+
+/* ── 1. compact global nav ──────────────────────────────── */
+.gnav{height:46px;flex:0 0 46px;display:flex;align-items:center;gap:18px;padding:0 16px;background:var(--s1);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:9px;min-width:0}
+.brand .mark{width:30px;height:30px;filter:drop-shadow(0 0 6px #8b5cf640)}
+.brand .wm{line-height:1.05}
+.brand .wm b{font-size:15px;font-weight:800;letter-spacing:-.02em}
+.brand .wm b i{font-style:normal;background:linear-gradient(90deg,#c4b5fd,#67e8f9);-webkit-background-clip:text;background-clip:text;color:transparent}
+.brand .wm span{display:block;font-size:10.5px;font-weight:600;color:var(--vio2);letter-spacing:.02em}
+.gnav nav{display:flex;align-items:center;gap:2px;margin-left:6px}
+.gnav nav a{padding:6px 11px;border-radius:8px;font-size:13px;font-weight:600;color:var(--tx2)}
+.gnav nav a.on{background:#1b2440;color:var(--tx)}
+.gnav nav a:hover{color:var(--tx)}
+.gnav .sp{flex:1}
+.kbtn{display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:8px;color:var(--tx3);font-size:12.5px}
+.kbtn kbd{font:600 10px/1 system-ui;background:#1a2136;border:1px solid var(--line);border-radius:4px;padding:2px 5px;color:var(--tx2)}
+.bits{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:#d9f99d}
+.bits i{width:7px;height:7px;border-radius:50%;background:var(--lime);display:inline-block}
+.avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#22d3ee);display:grid;place-items:center;font-size:11px;font-weight:800;color:#fff}
+
+/* ── 2. one project toolbar ─────────────────────────────── */
+.ptb{height:44px;flex:0 0 44px;display:flex;align-items:center;gap:14px;padding:0 14px;background:var(--s2);border-bottom:1px solid var(--line)}
+.proj{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;min-width:0}
+.proj .chev{color:var(--tx3);font-size:11px}
+.save{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#86efac}
+.save i{width:7px;height:7px;border-radius:50%;background:#4ade80}
+.seg{display:flex;background:#0b0f1c;border:1px solid var(--line);border-radius:9px;padding:3px}
+.seg button{padding:5px 14px;border-radius:6px;font-size:12.5px;font-weight:700;color:var(--tx2)}
+.seg button.on{background:var(--lime);color:#0b0f1c}
+.tbtn{display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;font-weight:600;color:var(--tx2)}
+.tbtn:hover{color:var(--tx);border-color:#3a4568}
+.tbtn.off{color:var(--tx3)}
+.tbtn .hint{color:#8d96ad;font-size:11px;font-weight:500}
+.ptb .sp{flex:1}
+.termchip{display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;border:1px solid #4a2d2d;background:#1f1414;border-radius:8px;font-size:12px;font-weight:600;color:#fca5a5}
+.termchip i{width:7px;height:7px;border-radius:50%;background:var(--err)}
+.termchip .fix{color:#c98686;font-weight:500;font-size:11.5px}
+.menuwrap{position:relative}
+.menu{position:absolute;top:34px;right:0;width:230px;background:#12172a;border:1px solid #2b3452;border-radius:10px;padding:6px;box-shadow:0 14px 40px #000a;z-index:50}
+.menu .mh{font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--tx3);padding:6px 9px 4px}
+.menu button{display:flex;width:100%;align-items:center;gap:9px;padding:7px 9px;border-radius:7px;font-size:12.5px;font-weight:600;color:var(--tx)}
+.menu button:hover{background:#1b2440}
+.menu button .k{margin-left:auto;font-size:10.5px;color:var(--tx3)}
+.menu hr{border:none;border-top:1px solid var(--line-soft);margin:5px 4px}
+.menu .off{color:var(--tx3)}
+
+/* ── 3. workspace body ──────────────────────────────────── */
+.body{flex:1;display:flex;min-height:0}
+.chat{width:380px;flex:0 0 380px;display:flex;flex-direction:column;background:var(--s1);border-right:1px solid var(--line);min-width:300px}
+.grip{width:5px;flex:0 0 5px;cursor:col-resize;background:transparent}
+.grip:hover{background:#2b3452}
+
+.conv{padding:10px 12px 8px;border-bottom:1px solid var(--line-soft)}
+.conv .cur{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}
+.conv .cur .pill{font-size:10px;font-weight:700;background:#1b2440;color:var(--tx2);border-radius:99px;padding:2px 8px}
+.recent{margin-top:8px}
+.recent .rh{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--tx3)}
+.recent ul{list-style:none;margin-top:5px}
+.recent li{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--tx2);padding:5px 6px;border-radius:7px}
+.recent li:hover{background:#141a2e;color:var(--tx)}
+.recent li .d{width:6px;height:6px;border-radius:50%;background:#2f3a5c;flex:0 0 6px}
+.recent li.on{color:var(--tx);background:#16203a}
+.recent li.on .d{background:var(--cyan)}
+
+.chatscroll{flex:1;overflow-y:auto;padding:18px 14px}
+.onb .h{font-size:19px;font-weight:800;letter-spacing:-.02em}
+.onb .s{margin-top:6px;font-size:13px;color:var(--tx2)}
+.starts{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.starts button{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0f1526;font-size:13px;font-weight:600;color:var(--tx)}
+.starts button:hover{border-color:#3a4568;background:#131b31}
+.starts button .ic{width:22px;height:22px;border-radius:6px;background:#1b2440;display:grid;place-items:center;color:var(--vio2);font-size:12px}
+
+.composer{flex:0 0 auto;border-top:1px solid var(--line);padding:10px 12px 11px;background:var(--s1)}
+.composer .box{display:flex;align-items:flex-end;gap:8px;border:1px solid #3a4568;border-radius:12px;background:#0b0f1c;padding:9px 10px;box-shadow:0 0 0 3px #22d3ee18}
+.composer textarea{flex:1;background:none;border:none;outline:none;resize:none;color:var(--tx);font:inherit;font-size:13px;max-height:90px}
+.composer textarea::placeholder{color:var(--tx3)}
+.crow{display:flex;align-items:center;gap:6px;margin-top:8px}
+.model{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:var(--tx2);border:1px solid var(--line);border-radius:99px;padding:4px 9px}
+.model i{width:7px;height:7px;border-radius:50%;background:var(--vio)}
+.cicon{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--tx3);border:1px solid transparent}
+.cicon:hover{color:var(--tx);border-color:var(--line)}
+.send{margin-left:auto;width:32px;height:32px;border-radius:9px;background:var(--lime);color:#0b0f1c;display:grid;place-items:center;font-weight:900}
+.state{margin-top:7px;font-size:11px;color:var(--tx3);display:flex;gap:6px;align-items:center}
+.state i{width:6px;height:6px;border-radius:50%;background:#64748b}
+
+/* ── preview ────────────────────────────────────────────── */
+.canvas{flex:1;display:flex;flex-direction:column;min-width:0;background:#05070f}
+.pvtb{height:40px;flex:0 0 40px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--line-soft);background:var(--s1)}
+.devs{display:flex;background:#0b0f1c;border:1px solid var(--line);border-radius:8px;padding:3px}
+.devs button{width:30px;height:26px;border-radius:6px;display:grid;place-items:center;color:var(--tx3)}
+.devs button.on{background:#1b2440;color:var(--tx)}
+.pvbtn{width:32px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--tx2);position:relative}
+.pvbtn:hover{background:#141a2e;color:var(--tx)}
+.pvbtn.dis{color:#525d77;cursor:not-allowed}
+.pvbtn.dis .tip{position:absolute;top:34px;left:0;width:210px;background:#12172a;border:1px solid #2b3452;border-radius:8px;padding:7px 9px;font-size:11.5px;font-weight:500;color:var(--tx2);text-align:left;z-index:40;box-shadow:0 10px 28px #000a;white-space:normal}
+.pvbtn.dis .tip b{color:var(--tx)}
+.pv .sp{flex:1}
+.pvframe{flex:1;overflow:auto;display:flex;justify-content:center;background:#05070f}
+.pvframe .shot{width:100%;max-width:1060px}
+.pvframe img{width:100%;display:block}
+.pvstatus{height:26px;flex:0 0 26px;display:flex;align-items:center;gap:7px;padding:0 12px;border-top:1px solid var(--line-soft);background:var(--s1);font-size:11px;color:var(--tx3)}
+.pvstatus .ok{color:#86efac}
+.pvstatus i{width:6px;height:6px;border-radius:50%;background:#4ade80}
+
+/* right inspector collapsed rail note */
+.rail{position:absolute;right:10px;top:50%;transform:translateY(-50%)}
+</style>
+</head>
+<body>
+<div class="proposal-tag">Design proposal — not implemented</div>
+
+<!-- 1 · compact global nav -->
+<header class="gnav">
+  <div class="brand">
+    <span class="mark"><svg viewBox="0 0 256 256" fill="none"><ellipse cx="126" cy="125" rx="109" ry="93" transform="rotate(-24 126 125)" stroke="url(#og)" stroke-width="12" opacity=".4"/><path d="M122 148c0-16-1-29-7-44-7-18-21-26-32-36m39 79c1-27 6-42 22-63 11-15 20-24 30-32m-46 82c-19-15-38-22-63-24m75 13c15-20 30-24 50-25M111 107c-7-18-6-30-6-46m30 35c2-17-1-29-7-42" stroke="url(#rg)" stroke-width="10" stroke-linecap="round"/><path d="m128 141 57 31v47l-57 31-57-31v-47z" fill="#0b0f1c" stroke="url(#cg)" stroke-width="9"/><path d="M91 175v48h29v-9h-19v-39z" fill="#d9a8ff"/><path d="M114 175h49v10h-19v38h-11v-38h-19z" fill="#61eaff"/><defs><linearGradient id="og" x1="16" y1="206" x2="237" y2="35"><stop stop-color="#d946ef"/><stop offset=".5" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient><linearGradient id="rg" x1="66" y1="120" x2="198" y2="27"><stop stop-color="#b34aff"/><stop offset=".5" stop-color="#d1a2ff"/><stop offset=".6" stop-color="#41dfff"/><stop offset="1" stop-color="#00dfff"/></linearGradient><linearGradient id="cg" x1="79" y1="148" x2="174" y2="223"><stop stop-color="#7c3aed"/><stop offset=".5" stop-color="#f0abfc"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs></svg></span>
+    <span class="wm"><b>LiT<i>Tree</i></b><span>LabStudios</span></span>
+  </div>
+  <nav>
+    <a>Home</a><a class="on">Studio</a><a>Assets</a><a>Agents</a><a>Missions</a><a>More ▾</a>
+  </nav>
+  <div class="sp"></div>
+  <button class="kbtn">Search <kbd>⌘K</kbd></button>
+  <span class="bits"><i></i>1,496</span>
+  <span class="avatar">T</span>
+</header>
+
+<!-- 2 · project toolbar -->
+<div class="ptb">
+  <button class="proj">Preview Acceptance Test <span class="chev">▾</span></button>
+  <span class="save"><i></i>Saved · 2m ago</span>
+  <div class="seg"><button>Design</button><button>Code</button><button class="on">Preview</button></div>
+  <button class="tbtn">⇩ Export</button>
+  <button class="tbtn off">Publish <span class="hint">— set up hosting in Settings</span></button>
+  <div class="sp"></div>
+  <button class="termchip"><i></i>Terminal · error <span class="fix">— open for cause &amp; retry</span></button>
+  <div class="menuwrap">
+    <button class="tbtn">Layout ▾</button>
+    <div class="menu">
+      <div class="mh">Layout</div>
+      <button>Inspector <span class="k">hidden</span></button>
+      <button>Terminal drawer <span class="k">hidden</span></button>
+      <hr>
+      <button>Focus chat <span class="k">⌘1</span></button>
+      <button>Focus canvas <span class="k">⌘2</span></button>
+      <hr>
+      <button class="off">Reset layout</button>
+    </div>
+  </div>
+</div>
+
+<!-- 3 · body -->
+<div class="body">
+  <!-- chat 380px -->
+  <section class="chat">
+    <div class="conv">
+      <div class="cur">New conversation <span class="pill">LiTT</span></div>
+      <div class="recent">
+        <button class="rh">▾ Recent conversations</button>
+        <ul>
+          <li class="on"><span class="d"></span>New conversation — now</li>
+          <li><span class="d"></span>Bakery landing tweaks — 1h</li>
+          <li><span class="d"></span>Deploy checklist — Tue</li>
+        </ul>
+      </div>
+    </div>
+    <div class="chatscroll">
+      <div class="onb">
+        <div class="h">What do you want LiTT to build?</div>
+        <div class="s">Describe it in plain words — LiTT opens the right workspace and gets to work.</div>
+        <div class="starts">
+          <button><span class="ic">⌂</span>Build a business website</button>
+          <button><span class="ic">✚</span>Fix something broken</button>
+          <button><span class="ic">✦</span>Improve my existing site</button>
+        </div>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="box"><textarea rows="1" placeholder="Ask LiTT anything…"></textarea></div>
+      <div class="crow">
+        <button class="model"><i></i>LiTT Auto ▾</button>
+        <button class="cicon">🎤</button>
+        <button class="cicon">📷</button>
+        <button class="send">➤</button>
+      </div>
+      <div class="state"><i></i>Idle — waiting for your instruction</div>
+    </div>
+  </section>
+  <div class="grip" title="Resize chat"></div>
+
+  <!-- preview canvas -->
+  <section class="canvas">
+    <div class="pvtb">
+      <div class="devs"><button class="on">🖥</button><button>▯</button><button>▯▯</button></div>
+      <button class="pvbtn">⟳</button>
+      <button class="pvbtn">↗</button>
+      <button class="pvbtn dis">⇧<span class="tip"><b>Element selection</b> — unavailable for this static preview. Available on projects served by the Studio dev server.</span></button>
+      <div class="sp"></div>
+    </div>
+    <div class="pvframe"><div class="shot"><img src="_assets/bakery-preview.png" alt="Preview Acceptance Test — bakery site preview"></div></div>
+    <div class="pvstatus"><i></i><span class="ok">Preview ready</span> · matches saved files · updated just now</div>
+  </section>
+</div>
+</body>
+</html>
