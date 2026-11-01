@@ -78,3 +78,56 @@ describe("requireOwnerAccess", () => {
     await expect(requireOwnerAccess()).rejects.toThrow(/404/);
   });
 });
+
+// Fail-closed deployment guard (src/lib/env.ts): a deployed production
+// environment with no owner identity var fails env validation so the
+// release gate blocks the deploy; local dev only warns so `pnpm dev`
+// still starts without the owner configured.
+describe("owner-identity deploy guard", () => {
+  const saved = {
+    NODE_ENV: process.env.NODE_ENV,
+    RAILWAY_ENVIRONMENT: process.env.RAILWAY_ENVIRONMENT,
+    RAILWAY_PROJECT_ID: process.env.RAILWAY_PROJECT_ID,
+    VERCEL: process.env.VERCEL,
+  };
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("local dev warns but stays valid when no owner var is set", async () => {
+    const { validateEnv } = await import("@/lib/env");
+    vi.stubEnv("NODE_ENV", "development");
+    delete process.env.RAILWAY_ENVIRONMENT;
+    delete process.env.RAILWAY_PROJECT_ID;
+    delete process.env.VERCEL;
+    delete process.env.LITTLABS_VAPI_OWNER_CLERK_ID;
+    delete process.env.ADMIN_CLERK_IDS;
+    const admin = validateEnv().find((r) => r.category === "admin")!;
+    expect(admin.valid).toBe(true);
+    expect(admin.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("deployed production fails closed when no owner var is set", async () => {
+    const { validateEnv } = await import("@/lib/env");
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.RAILWAY_ENVIRONMENT = "production";
+    delete process.env.LITTLABS_VAPI_OWNER_CLERK_ID;
+    delete process.env.ADMIN_CLERK_IDS;
+    const admin = validateEnv().find((r) => r.category === "admin")!;
+    expect(admin.valid).toBe(false);
+    expect(admin.errors.length).toBeGreaterThan(0);
+  });
+
+  it("deployed production passes with LITTLABS_VAPI_OWNER_CLERK_ID", async () => {
+    const { validateEnv } = await import("@/lib/env");
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.RAILWAY_ENVIRONMENT = "production";
+    process.env.LITTLABS_VAPI_OWNER_CLERK_ID = OWNER_ID;
+    const admin = validateEnv().find((r) => r.category === "admin")!;
+    expect(admin.valid).toBe(true);
+    expect(admin.errors).toHaveLength(0);
+  });
+});

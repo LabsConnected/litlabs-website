@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { resolveSystemHealth } from "@/lib/system-health";
+import { isOwnerClerkId } from "@/lib/owner-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,10 +39,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "")
-    .split(",")
-    .filter(Boolean);
-  const isOwner = ADMIN_CLERK_IDS.includes(userId);
+  const isOwner = isOwnerClerkId(userId);
 
   try {
     const health = await resolveSystemHealth(client, userId, isOwner);
