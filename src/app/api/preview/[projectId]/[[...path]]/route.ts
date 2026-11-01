@@ -86,11 +86,11 @@ const PREVIEW_SECURITY_HEADERS: Record<string, string> = {
   // Everything else (fetch/XHR/frames/forms to third parties) stays blocked.
   "Content-Security-Policy":
     "sandbox allow-scripts; " +
-    "default-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* data: blob:; " +
-    "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://fonts.googleapis.com 'unsafe-inline' data:; " +
-    "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://cdn.jsdelivr.net/npm/@tailwindcss/ 'unsafe-inline' data: blob:; " +
-    "font-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://fonts.gstatic.com data:; " +
-    "img-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://images.unsplash.com data: blob:;",
+    "default-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* http://127.0.0.1:* data: blob:; " +
+    "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* http://127.0.0.1:* https://fonts.googleapis.com 'unsafe-inline' data:; " +
+    "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* http://127.0.0.1:* https://cdn.jsdelivr.net/npm/@tailwindcss/ 'unsafe-inline' data: blob:; " +
+    "font-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* http://127.0.0.1:* https://fonts.gstatic.com data:; " +
+    "img-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* http://127.0.0.1:* https://images.unsplash.com data: blob:;",
   "X-Content-Type-Options": "nosniff",
   // No referrer leakage to third parties embedded in user content.
   "Referrer-Policy": "no-referrer",

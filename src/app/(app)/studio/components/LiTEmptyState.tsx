@@ -10,8 +10,6 @@ import {
   Globe,
   Loader2,
   Palette,
-  Plus,
-  Wand2,
   Wrench,
 } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
@@ -42,10 +40,8 @@ const FACT_META: Record<
  */
 const STARTER_CHIPS: { label: string; prompt: string; icon: typeof Globe }[] = [
   { label: "Build my business website", prompt: "Build a website for my business", icon: Globe },
-  { label: "Fix something broken", prompt: "Something on my site is broken — help me find and fix it", icon: Wrench },
   { label: "Make my site look better", prompt: "Make my site look better", icon: Palette },
-  { label: "Create something new", prompt: "I want to create something new", icon: Plus },
-  { label: "Surprise me", prompt: "Surprise me — build something cool", icon: Wand2 },
+  { label: "Fix something broken", prompt: "Something on my site is broken — help me find and fix it", icon: Wrench },
 ];
 
 function primeComposer(prompt: string) {
@@ -81,6 +77,7 @@ export default function LiTEmptyState({
   hideDescribeBox?: boolean;
 }) {
   const [showChecks, setShowChecks] = useState(false);
+  const [showRecents, setShowRecents] = useState(false);
   const greetingName = displayName?.trim();
   const action = launchpadState.primaryAction;
   const isBlocked = launchpadState.key === "blocked";
@@ -115,7 +112,7 @@ export default function LiTEmptyState({
               color: "var(--glass-green)",
             }}
           >
-            LiTT · Operating
+            LiTT · Idle
           </span>
         </div>
 
@@ -320,10 +317,31 @@ export default function LiTEmptyState({
         </div>
 
         {onSelectConversation && (
-          <section className="glass-panel w-full p-4" aria-label="Recent conversations">
-            <div className="glass-section-header mb-3">Or resume a real conversation</div>
-            <RecentConversations onSelect={onSelectConversation} />
-          </section>
+          <div className="flex w-full max-w-md flex-col items-center">
+            <button
+              type="button"
+              onClick={() => setShowRecents((v) => !v)}
+              aria-expanded={showRecents}
+              className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-bold transition hover:opacity-80"
+              style={{
+                borderColor: "var(--studio-border-strong)",
+                color: "var(--text-secondary)",
+              }}
+              data-testid="first-mission-recents-toggle"
+            >
+              Recent conversations
+              <ChevronDown
+                size={11}
+                aria-hidden
+                className={`transition-transform ${showRecents ? "rotate-180" : ""}`}
+              />
+            </button>
+            {showRecents && (
+              <section className="glass-panel mt-2 w-full p-4" aria-label="Recent conversations">
+                <RecentConversations onSelect={onSelectConversation} />
+              </section>
+            )}
+          </div>
         )}
       </div>
     </div>

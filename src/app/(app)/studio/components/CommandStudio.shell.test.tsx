@@ -447,10 +447,13 @@ describe("StudioShell — desktop operating shell", () => {
     });
   });
 
-  it("mounts rail + stage + collapsed inspector + left-docked LiTT panel by default", async () => {
+  it("mounts stage + collapsed inspector + left-docked LiTT panel by default", async () => {
     await renderStudioShell();
     expect(screen.getByTestId("studio-shell")).toBeTruthy();
-    expect(screen.getByTestId("studio-workspace-rail")).toBeTruthy();
+    // v1: the icon rail is gone — surface switching lives in the toolbar
+    // seg control and the Layout menu.
+    expect(screen.queryByTestId("studio-workspace-rail")).toBeNull();
+    expect(screen.getByTestId("surface-switch")).toBeTruthy();
     expect(screen.getByTestId("studio-stage")).toBeTruthy();
     expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
     // Default chatDock is "left": the chat lives in the left panel and the
@@ -486,10 +489,10 @@ describe("StudioShell — desktop operating shell", () => {
     });
   });
 
-  it("rail switches the stage surface and keeps visited surfaces mounted", async () => {
+  it("surface seg switches the stage surface and keeps visited surfaces mounted", async () => {
     const { user } = await renderStudioShell();
     await waitFor(() => screen.getByTestId("studio-preview-panel"));
-    await user.click(screen.getByTestId("workspace-rail-design"));
+    await user.click(screen.getByTestId("surface-seg-design"));
     await waitFor(() => {
       expect(screen.getByTestId("stage-surface-design")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("visual-canvas-builder")).toBeTruthy();
@@ -765,7 +768,9 @@ describe("StudioShell — left chat dock", () => {
 describe("MissionCards — shell center activity stage surface", () => {
   it("renders the mission cards once in the center activity surface (shell mode has no bottom dock)", async () => {
     const { user } = await renderStudioShell();
-    await user.click(screen.getByTestId("workspace-rail-activity"));
+    // v1: secondary surfaces open via the Layout menu's "Open" section.
+    await user.click(screen.getByTestId("layout-menu-trigger"));
+    await user.click(screen.getByTestId("layout-surface-activity"));
     await waitFor(() => {
       expect(screen.getByTestId("stage-surface-activity")).toHaveAttribute("data-active", "true");
     });

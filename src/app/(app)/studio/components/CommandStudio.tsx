@@ -3,7 +3,7 @@
 import { terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Image as ImageIcon } from "lucide-react";
+import { Image as ImageIcon, X } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
@@ -75,8 +75,9 @@ import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
 import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult } from "../lib/approval-polling";
 import { StudioActivityPanel, StudioInspector } from "./StudioWorkspaceFrame";
-import StudioShell from "./shell/StudioShell";
-import WorkspaceRail from "./shell/WorkspaceRail";
+import StudioShell, { type StudioShellControls } from "./shell/StudioShell";
+import type { StudioLayoutCommand } from "./CommandStudioHeader";
+import { useStudioSaveLabel, notifyStudioSaved } from "../lib/save-events";
 import ContextInspector from "./shell/ContextInspector";
 import LiTTCommandLayer from "./shell/LiTTCommandLayer";
 import ResizeHandle from "./shell/ResizeHandle";
@@ -464,6 +465,14 @@ function CommandStudioContent() {
   // available, but do not make it compete with Chat and Preview before the
   // project has useful state to inspect.
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  // Shell mode: terminal lives in a bottom drawer (closed by default),
+  // mounted on first open so the PTY/session survives close→reopen.
+  const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
+  const [terminalDrawerMounted, setTerminalDrawerMounted] = useState(false);
+  const openTerminalDrawer = useCallback(() => {
+    setTerminalDrawerMounted(true);
+    setTerminalDrawerOpen(true);
+  }, []);
   // A real preview/builder selection is useful inspector state. Open it on
   // demand while keeping the clean first-run shell calm.
   useEffect(() => {
@@ -510,6 +519,11 @@ function CommandStudioContent() {
   }, [studioShellActive, openStageSurface]);
   const handleOpenDockTab = useCallback((tab: StudioDockTab) => {
     if (studioShellActive) {
+      if (tab === "terminal") {
+        // Shell mode: the terminal is a bottom drawer, not a stage surface.
+        openTerminalDrawer();
+        return;
+      }
       if (tab === "inspector") {
         setInspectorOpen(true);
       } else {
@@ -520,7 +534,25 @@ function CommandStudioContent() {
     }
     setDockTab(tab);
     setDockOpen(true);
-  }, [studioShellActive, openStageSurface]);
+  }, [studioShellActive, openStageSurface, openTerminalDrawer]);
+
+  // ── v1 shell: consolidated layout commands (Layout menu in the
+  //    project toolbar) + truthful save label ──
+  const [shellControls, setShellControls] = useState<StudioShellControls | null>(null);
+  const saveState = useStudioSaveLabel(capabilities.projectId);
+
+  // Project export — the real workspace ZIP endpoint; the browser handles
+  // the attachment download. Availability is computed in the header from
+  // capabilities (project + connected terminal required).
+  const handleExportProject = useCallback(() => {
+    if (!capabilities.projectId) return;
+    const anchor = document.createElement("a");
+    anchor.href = `/api/studio-projects/${encodeURIComponent(capabilities.projectId)}/export`;
+    anchor.download = "";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }, [capabilities.projectId]);
 
   // The query string written by the state→URL effect on its last pass —
   // used by URL→state to recognize (and skip) our own echoes.
@@ -703,6 +735,29 @@ function CommandStudioContent() {
       // ignore
     }
   }, [chatDock]);
+
+  const handleLayoutCommand = useCallback((command: StudioLayoutCommand) => {
+    switch (command) {
+      case "focus-chat":
+        setChatDock("left");
+        setLittCollapsed(false);
+        break;
+      case "focus-canvas":
+        setLittCollapsed(true);
+        setInspectorOpen(false);
+        break;
+      case "toggle-inspector":
+        setInspectorOpen((v) => !v);
+        break;
+      case "toggle-dock":
+        setTerminalDrawerMounted(true);
+        setTerminalDrawerOpen((v) => !v);
+        break;
+      case "open-terminal":
+        openTerminalDrawer();
+        break;
+    }
+  }, [openTerminalDrawer]);
 
   // Canonical LiTT active tab — single source of truth shared by the
   // desktop rail, the mobile sheet, and header/activity actions.
@@ -1583,7 +1638,7 @@ function CommandStudioContent() {
       }
       return { accepted: false, persisted: false, errorKind: "network" as const };
     }
-  }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt, studioShellActive, openStageSurface, studioTasks]);
+  }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt, studioShellActive, openStageSurface, studioTasks, setLittCollapsed, setLittExpanded]);
 
   // Approval decisions resume the SAME paused server-side execution — never
   // a new run. The approval lifecycle only settles when the resumed run
@@ -2966,7 +3021,7 @@ function CommandStudioContent() {
           onPreviewAction={handlePreview}
           onToggleDockAction={handleToggleDock}
           onOpenDockTabAction={handleOpenDockTab}
-          dockOpen={dockOpen}
+          dockOpen={studioShellActive ? terminalDrawerOpen : dockOpen}
           onProjectSelectAction={handleSelectProject}
           onCreateProjectAction={openProjectNameDialog}
           onDeleteProjectAction={handleDeleteProject}
@@ -2993,6 +3048,14 @@ function CommandStudioContent() {
           approvalPending={Boolean(pendingApproval)}
           executionMode={executionMode}
           onExecutionModeChange={setExecutionMode}
+          surface={studioShellActive ? stageSurface : undefined}
+          onSurfaceChange={studioShellActive ? openStageSurface : undefined}
+          saveLabel={saveState.label}
+          saveTone={saveState.tone}
+          onExportAction={handleExportProject}
+          onLayoutCommand={studioShellActive ? handleLayoutCommand : undefined}
+          inspectorOpen={inspectorOpen}
+          shellControls={studioShellActive ? shellControls : null}
         />
 
         {/* Body: LiTT rail | Workspace — canvas-first 2-zone layout.
@@ -3009,29 +3072,11 @@ function CommandStudioContent() {
             overlay, LiTTPanel is a mobile sheet, Preview is a workspace tab. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-studio-body>
         {studioShellActive ? (
+          <>
           <StudioShell
-            taskbar={
-              /* Durable worktabs — task identity, never layout. */
-              <WorktabBar
-                tabs={worktabTabs}
-                activeId={activeWorktabId}
-                badges={worktabBadges}
-                onSwitch={handleSwitchWorktab}
-                onClose={(id) => { void handleCloseWorktab(id); }}
-                onNew={() => { void handleNewWorktab(); }}
-                closedTabs={studioTasks.closedTasks.map((t) => ({
-                  id: t.id,
-                  title: displayWorktabTitle(t.title, projectDisplayName),
-                }))}
-                onReopen={(id) => { void handleReopenWorktab(id); }}
-              />
-            }
-            rail={
-              <WorkspaceRail
-                active={stageSurface}
-                onSelect={openStageSurface}
-              />
-            }
+            taskbar={null}
+            rail={null}
+            onRegisterControls={setShellControls}
             stage={
               <>
                 {Array.from(
@@ -3144,7 +3189,10 @@ function CommandStudioContent() {
                       conversationId: conversation.selectedConversationId,
                       workspaceRevision,
                       healthRunTrigger,
-                      onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
+                      onFilesSaved: () => {
+                        if (capabilities.projectId) notifyStudioSaved(capabilities.projectId);
+                        setWorkspaceRevision((value) => value + 1);
+                      },
                       onWorkspacePrepared: () => { void refreshCapabilities(); },
                     }}
                   />
@@ -3153,22 +3201,41 @@ function CommandStudioContent() {
             }
             leftPanel={
               chatDock === "left" ? (
-                <LiTTPanel
-                  overlay={false}
-                  collapsed={littCollapsed}
-                  onCollapse={() => setLittCollapsed(true)}
-                  onExpand={() => setLittCollapsed(false)}
-                  activeTab={littActiveTab}
-                  onTabChange={setLittActiveTab}
-                  voiceConnected={liveSession.isLive}
-                  microphoneStatus={liveSession.indicators.microphone}
-                  chatContent={littLeftPanelContent}
-                  liveContent={littLiveContent}
-                  expandedWidth={littDockResize.width}
-                  expandedMaxWidth="500px"
-                  dockPosition="left"
-                  onDockPositionChange={setChatDock}
-                />
+                <div className="flex h-full min-h-0 flex-col">
+                  {/* Conversation/task tabs live at the top of the chat
+                      column — task identity scoped to the chat lane. */}
+                  <WorktabBar
+                    tabs={worktabTabs}
+                    activeId={activeWorktabId}
+                    badges={worktabBadges}
+                    onSwitch={handleSwitchWorktab}
+                    onClose={(id) => { void handleCloseWorktab(id); }}
+                    onNew={() => { void handleNewWorktab(); }}
+                    closedTabs={studioTasks.closedTasks.map((t) => ({
+                      id: t.id,
+                      title: displayWorktabTitle(t.title, projectDisplayName),
+                    }))}
+                    onReopen={(id) => { void handleReopenWorktab(id); }}
+                  />
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <LiTTPanel
+                      overlay={false}
+                      collapsed={littCollapsed}
+                      onCollapse={() => setLittCollapsed(true)}
+                      onExpand={() => setLittCollapsed(false)}
+                      activeTab={littActiveTab}
+                      onTabChange={setLittActiveTab}
+                      voiceConnected={liveSession.isLive}
+                      microphoneStatus={liveSession.indicators.microphone}
+                      chatContent={littLeftPanelContent}
+                      liveContent={littLiveContent}
+                      expandedWidth={littDockResize.width}
+                      expandedMaxWidth="500px"
+                      dockPosition="left"
+                      onDockPositionChange={setChatDock}
+                    />
+                  </div>
+                </div>
               ) : null
             }
             dockHandle={
@@ -3199,6 +3266,51 @@ function CommandStudioContent() {
               )
             }
           />
+
+          {/* Terminal bottom drawer — closed by default, opened from the
+              toolbar's Terminal chip or the Layout menu. Mounted once, then
+              kept alive so the PTY session survives close→reopen. */}
+          {studioShellActive && terminalDrawerMounted && (
+            <div
+              className="absolute inset-x-0 bottom-0 z-40 flex h-[300px] flex-col border-t shadow-2xl"
+              style={{
+                display: terminalDrawerOpen ? "flex" : "none",
+                borderColor: "rgba(255,255,255,0.09)",
+                backgroundColor: "#0c0a14",
+              }}
+              role="region"
+              aria-label="Terminal drawer"
+              data-testid="terminal-bottom-drawer"
+            >
+              <div
+                className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5"
+                style={{ borderColor: "rgba(255,255,255,0.07)" }}
+              >
+                <span className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>
+                  Terminal
+                </span>
+                <div className="flex-1" />
+                <button
+                  type="button"
+                  onClick={() => setTerminalDrawerOpen(false)}
+                  className="grid min-h-8 min-w-8 place-items-center rounded-md transition hover:bg-white/10"
+                  aria-label="Close terminal drawer"
+                  title="Close terminal"
+                >
+                  <X size={13} className="pointer-events-none" style={{ color: "var(--text-muted)" }} />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <StudioTerminalDrawer
+                  projectId={capabilities.projectId}
+                  repositoryName={capabilities.repositoryName}
+                  branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+                  visible={terminalDrawerOpen}
+                />
+              </div>
+            </div>
+          )}
+          </>
         ) : (
           <>
             {/* Desktop ContextDrawer removed (P2): Files, Inspector, Activity,

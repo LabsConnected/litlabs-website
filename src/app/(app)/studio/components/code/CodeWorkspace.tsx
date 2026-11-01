@@ -22,6 +22,13 @@ import {
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import StudioPreviewPanel from "../StudioPreviewPanel";
 import { StudioFilePreview } from "../StudioFilePreview";
+import {
+  notifyStudioClean,
+  notifyStudioDirty,
+  notifyStudioSaveFailed,
+  notifyStudioSaved,
+  notifyStudioSaving,
+} from "../../lib/save-events";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.default), { ssr: false });
 
@@ -278,12 +285,21 @@ export function CodeWorkspace({
     }
   }, [projectId, requestJson, openTabs, findFileEntry]);
 
+  // Report unsaved-edit state to the project toolbar's save label.
+  const anyDirty = openTabs.some((t) => t.content !== t.original);
+  useEffect(() => {
+    if (!projectId) return;
+    if (anyDirty) notifyStudioDirty(projectId);
+    else notifyStudioClean(projectId);
+  }, [anyDirty, projectId]);
+
   // Save file
   const saveFile = useCallback(async (path: string) => {
     if (!projectId || !writeAccess) return;
     const tab = openTabs.find((t) => t.path === path);
     if (!tab) return;
     setSaving(true);
+    if (projectId) notifyStudioSaving(projectId);
     try {
       await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files`, {
         method: "POST",
@@ -296,8 +312,10 @@ export function CodeWorkspace({
       // the tab we just saved (a reload racing the user's next keystroke
       // could discard it).
       window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path, source: "code-save" } }));
+      if (projectId) notifyStudioSaved(projectId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save file");
+      if (projectId) notifyStudioSaveFailed(projectId);
     } finally {
       setSaving(false);
     }

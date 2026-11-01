@@ -100,17 +100,17 @@ describe("CommandStudioHeader — truthful status", () => {
     mockProviderHealth = {};
   });
 
-  it("keeps execution mode contextual while showing branding and dock toggle", () => {
-    const onToggleDock = vi.fn();
+  it("keeps execution mode contextual while exposing the layout menu", () => {
+    const onLayoutCommand = vi.fn();
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
-        onToggleDockAction={onToggleDock}
         runtime={noProjectRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}
         executionMode="act"
         onExecutionModeChange={vi.fn()}
+        onLayoutCommand={onLayoutCommand}
       />,
     );
 
@@ -122,9 +122,13 @@ describe("CommandStudioHeader — truthful status", () => {
     expect(segmented.textContent).toContain("AUTO");
     // The permanent mode-description strip is gone (chrome-stacking fix)
     expect(screen.queryByTestId("execution-mode-guide")).toBeNull();
-    expect(screen.getByTestId("studio-brand")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("studio-dock-toggle"));
-    expect(onToggleDock).toHaveBeenCalledTimes(1);
+    // v1 shell: no repeated brand tile in the project toolbar — the
+    // global nav above owns branding.
+    expect(screen.queryByTestId("studio-brand")).toBeNull();
+    // Docking/layout controls consolidated into the single Layout menu.
+    fireEvent.click(screen.getByTestId("layout-menu-trigger"));
+    fireEvent.click(screen.getByTestId("layout-toggle-dock"));
+    expect(onLayoutCommand).toHaveBeenCalledWith("toggle-dock");
   });
 
   it("reports checking while runtime is loading", () => {
@@ -228,7 +232,8 @@ describe("CommandStudioHeader — truthful status", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
-    const terminalBtn = screen.getByRole("button", { name: /terminal/i });
+    // Exact name — the toolbar's Terminal chip also matches /terminal/i.
+    const terminalBtn = screen.getByRole("button", { name: "Terminal" });
     fireEvent.click(terminalBtn);
     expect(onOpenDockTab).toHaveBeenCalledWith("terminal");
   });
@@ -313,16 +318,17 @@ describe("CommandStudioHeader — mobile scroll affordance (Phase 1 #1)", () => 
     expect(header.className).toContain("sm:overflow-hidden");
   });
 
-  it("keeps the dock toggle and overflow menu mounted in the header", () => {
+  it("keeps the layout menu and overflow menu mounted in the header", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
         runtime={noProjectRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}
+        onLayoutCommand={vi.fn()}
       />,
     );
-    expect(screen.getByTestId("studio-dock-toggle")).toBeTruthy();
+    expect(screen.getByTestId("layout-menu-trigger")).toBeTruthy();
     expect(screen.getByLabelText("More actions")).toBeTruthy();
   });
 });

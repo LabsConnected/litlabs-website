@@ -201,7 +201,9 @@ describe("StudioPreviewPanel recovery", () => {
     const urls = spy.mock.calls.map(([url]) => String(url));
     expect(urls.some((url) => url.includes("/api/studio-projects/e7db6424/preview"))).toBe(true);
     expect(urls.some((url) => /My%20new%20project|My new project/.test(url))).toBe(false);
-    expect(screen.getByText("My new project")).toHaveAttribute("title", "My new project · e7db6424");
+    // The project toolbar owns the project name now — the preview header
+    // only renders it while maximized (no name in the embedded toolbar).
+    expect(screen.queryByText("My new project")).toBeNull();
   });
 
   it("preview state depends only on the preview API, never on terminal/PTY endpoints", async () => {

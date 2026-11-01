@@ -275,7 +275,6 @@ export default function StudioPreviewPanel({
   const [selectionMode, setSelectionMode] = useState(true);
   const [selectedElement, setSelectedElement] = useState<PreviewSelection | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [startPhase, setStartPhase] = useState<StartPhase>(null);
   // Content truth gates auto-start. Starts as "unknown" (blocking) so the
   // very first render can never auto-start on an unresolved truth.
@@ -283,7 +282,6 @@ export default function StudioPreviewPanel({
   // Project secrets editor (Clerk keys for the preview runtime). Toggled
   // from the toolbar; auto-opened from the auth-config error CTA.
   const [secretsOpen, setSecretsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const selectionCleanupRef = useRef<(() => void) | null>(null);
   const selectedElementRef = useRef<PreviewSelection | null>(null);
@@ -1129,7 +1127,14 @@ export default function StudioPreviewPanel({
         />
         <div className="min-w-[96px] flex-1">
           <div className="flex items-center gap-1">
-            <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }} title={projectId ? `${projectName ?? "Project"} · ${projectId}` : undefined}>{projectName ?? "Project preview"}</span>
+            {/*
+              The project toolbar above already shows the project name —
+              repeating it here was redundant chrome. Keep it only in
+              maximized mode, where the toolbar is no longer visible.
+            */}
+            {maximized && (
+              <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }} title={projectId ? `${projectName ?? "Project"} · ${projectId}` : undefined}>{projectName ?? "Project preview"}</span>
+            )}
             {/*
               `framework` is the RUNTIME technology (static, nextjs, vite,
               expo) — never source ownership. Titled so that "STATIC"
@@ -1175,7 +1180,9 @@ export default function StudioPreviewPanel({
             ))}
           </div>
         )}
-        {/* Lightweight visual selection — the preview remains the source of truth. */}
+        {/* Lightweight visual selection — the preview remains the source of truth.
+            Unsupported-selection messaging lives on the control itself
+            (tooltip + muted style), not a permanent warning strip. */}
         {isLive && (
           <button
             type="button"
@@ -1192,11 +1199,11 @@ export default function StudioPreviewPanel({
             className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             style={{
               backgroundColor: selectionMode ? "rgba(155,77,255,0.14)" : "transparent",
-              color: selectionMode ? "#c4b5fd" : "var(--text-muted)",
+              color: selectionError ? "#e3b341" : selectionMode ? "#c4b5fd" : "var(--text-muted)",
             }}
-            aria-label={selectionMode ? "Disable preview element selection" : "Select an element in the preview"}
+            aria-label={selectionError ?? (selectionMode ? "Disable preview element selection" : "Select an element in the preview")}
             aria-pressed={selectionMode}
-            title={selectionMode ? "Element selection on" : "Select an element in the preview"}
+            title={selectionError ?? (selectionMode ? "Element selection on" : "Select an element in the preview")}
             data-testid="preview-select"
           >
             <MousePointer2 size={13} className="pointer-events-none" />
@@ -1323,11 +1330,8 @@ export default function StudioPreviewPanel({
           </button>
         </div>
       )}
-      {selectionError && selectionMode && (
-        <div className="shrink-0 border-b px-2.5 py-1 text-[9px]" style={{ borderColor: "rgba(227,179,65,0.2)", color: "#e3b341" }} role="status">
-          {selectionError}
-        </div>
-      )}
+      {/* Selection-unavailable messaging lives on the selection control's
+          tooltip/style — no permanent warning strip. */}
 
       {/* Preview surface */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>

@@ -19,7 +19,9 @@ import {
   CircleCheck,
   CircleDot,
   Bell,
-  PanelBottom,
+  PanelRight,
+  MessageSquare,
+  SquareTerminal,
   MoreHorizontal,
   Plus,
   Terminal,
@@ -28,12 +30,23 @@ import {
   Download,
   Eraser,
   Settings,
+  LayoutGrid,
+  ChevronDown,
+  RotateCcw,
+  ExternalLink,
+  Maximize2,
 } from "lucide-react";
 import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
 import {
   runtimePhaseLabel,
   type ProjectRuntimeState,
 } from "@/lib/projects/runtime-state";
+import {
+  STAGE_SURFACE_META,
+  type StudioStageSurface,
+} from "./shell/stage-surfaces";
+import type { StudioShellControls } from "./shell/StudioShell";
+import type { StudioSaveTone } from "../lib/save-events";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
   available: { color: "#72f238", label: "Available" },
@@ -44,6 +57,27 @@ const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
 
 export type StudioTopBarMode = "plan" | "act" | "auto";
 export type StudioTopBarDockTab = "activity" | "files" | "terminal" | "inspector" | "media";
+
+/** Commands handled by the parent for the consolidated Layout menu. */
+export type StudioLayoutCommand =
+  | "focus-chat"
+  | "focus-canvas"
+  | "toggle-inspector"
+  | "toggle-dock"
+  | "open-terminal";
+
+/** Primary surfaces rendered as the toolbar seg control (approved v1
+    order). Remaining surfaces are reachable through the Layout menu. */
+const SEG_SURFACES: StudioStageSurface[] = ["design", "code", "preview"];
+/** Secondary surfaces — listed in the Layout menu's "Open" section. */
+const SECONDARY_SURFACES: StudioStageSurface[] = [
+  "files",
+  "browser",
+  "images",
+  "assets",
+  "deploy",
+  "activity",
+];
 
 const MODE_META: { id: StudioTopBarMode; label: string; desc: string; color: string; tint: string; border: string }[] = [
   { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "#3b82f6", tint: "rgba(59,130,246,0.12)", border: "rgba(59,130,246,0.35)" },
@@ -65,7 +99,6 @@ const MODE_META: { id: StudioTopBarMode; label: string; desc: string; color: str
  */
 export default function CommandStudioHeader({
   onPreviewAction,
-  onToggleDockAction,
   onOpenDockTabAction,
   dockOpen = false,
   onProjectSelectAction,
@@ -87,6 +120,14 @@ export default function CommandStudioHeader({
   approvalPending = false,
   executionMode = "auto",
   onExecutionModeChange,
+  surface,
+  onSurfaceChange,
+  saveLabel = null,
+  saveTone = null,
+  onExportAction,
+  onLayoutCommand,
+  inspectorOpen = false,
+  shellControls = null,
 }: {
   onPreviewAction?: () => void;
   /** Toggles the bottom dock (Activity/Files/Terminal/Inspector/Media). */
@@ -122,6 +163,19 @@ export default function CommandStudioHeader({
   /** Execution mode — shown as a segmented PLAN/ACT/AUTO control. */
   executionMode?: StudioTopBarMode;
   onExecutionModeChange?: (mode: StudioTopBarMode) => void;
+  /** Active stage surface — renders the Preview/Code/Design seg control. */
+  surface?: StudioStageSurface;
+  onSurfaceChange?: (surface: StudioStageSurface) => void;
+  /** Truthful save label from useStudioSaveLabel — null renders nothing. */
+  saveLabel?: string | null;
+  saveTone?: StudioSaveTone | null;
+  /** Project export (ZIP) — downloads the real workspace archive. */
+  onExportAction?: () => void;
+  /** Consolidated layout menu commands (focus, dock, reset, …). */
+  onLayoutCommand?: (command: StudioLayoutCommand) => void;
+  inspectorOpen?: boolean;
+  /** Docking controls exposed by StudioShell for the Layout menu. */
+  shellControls?: StudioShellControls | null;
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
@@ -130,11 +184,14 @@ export default function CommandStudioHeader({
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [layoutOpen, setLayoutOpen] = useState(false);
   const [notifCount, setNotifCount] = useState<number | null>(null);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   const overflowTriggerRef = useRef<HTMLButtonElement>(null);
+  const layoutTriggerRef = useRef<HTMLButtonElement>(null);
   const [statusRect, setStatusRect] = useState<DOMRect | null>(null);
   const [overflowRect, setOverflowRect] = useState<DOMRect | null>(null);
+  const [layoutRect, setLayoutRect] = useState<DOMRect | null>(null);
 
   const updateRect = useCallback(() => {
     if (statusTriggerRef.current) {
@@ -142,6 +199,9 @@ export default function CommandStudioHeader({
     }
     if (overflowTriggerRef.current) {
       setOverflowRect(overflowTriggerRef.current.getBoundingClientRect());
+    }
+    if (layoutTriggerRef.current) {
+      setLayoutRect(layoutTriggerRef.current.getBoundingClientRect());
     }
   }, []);
 
@@ -164,7 +224,7 @@ export default function CommandStudioHeader({
   }, []);
 
   useEffect(() => {
-    if (!statusOpen && !overflowOpen) return;
+    if (!statusOpen && !overflowOpen && !layoutOpen) return;
     updateRect();
     window.addEventListener("scroll", updateRect, true);
     window.addEventListener("resize", updateRect);
@@ -172,7 +232,7 @@ export default function CommandStudioHeader({
       window.removeEventListener("scroll", updateRect, true);
       window.removeEventListener("resize", updateRect);
     };
-  }, [statusOpen, overflowOpen, updateRect]);
+  }, [statusOpen, overflowOpen, layoutOpen, updateRect]);
 
   const writesAllowed = capabilities.writeAccess;
   const modelHealth = resolveSelectedModelHealth(selectedModel, providerHealth);
@@ -227,6 +287,37 @@ export default function CommandStudioHeader({
           color: statusColor,
           pulse: false,
         };
+  // Ambient "everything is fine" is not a badge — but the status details
+  // stay reachable, so the control collapses to a minimal dot rather than
+  // disappearing entirely.
+  const ambientReady = !approvalPending && !busy && pill.short === "Ready";
+
+  const terminalHealth = terminalHealthOf(capabilities);
+  const saveToneColor =
+    saveTone === "error" ? "#ef4444"
+    : saveTone === "saving" || saveTone === "dirty" ? "#e3b341"
+    : "var(--text-muted)";
+
+  // Honest action availability — computed from real capability state,
+  // never optimistic. Export needs a connected workspace terminal (the
+  // endpoint archives the live workspace); Publish needs a project,
+  // write access, mutations allowed, and a verified-ready runtime.
+  const exportAvailable = Boolean(
+    capabilities.projectId && capabilities.terminalStatus === "connected",
+  );
+  const exportHint = !capabilities.projectId
+    ? "Select a project first"
+    : "Export needs the workspace terminal connected — it isn't connected yet";
+  const publishAvailable = Boolean(
+    capabilities.projectId && writesAllowed && mutationActionsAllowed && runtimeReady,
+  );
+  const publishHint = !capabilities.projectId
+    ? "Select a project first"
+    : !writesAllowed
+      ? "Publishing requires write access on this account"
+      : !runtimeReady
+        ? "The workspace isn't ready yet — open Preview and let it start"
+        : "Publishing is unavailable for this account";
 
   return (
     <header
@@ -238,24 +329,8 @@ export default function CommandStudioHeader({
       }}
       data-testid="studio-header"
     >
-      {/* Brand */}
-      <div className="flex shrink-0 items-center gap-2 pr-1" data-testid="studio-brand">
-        <div
-          className="grid h-7 w-7 place-items-center rounded-lg"
-          style={{
-            background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 25%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
-            border: "1px solid color-mix(in srgb, var(--color-accent) 35%, transparent)",
-            boxShadow: "0 0 12px color-mix(in srgb, var(--color-accent) 25%, transparent)",
-          }}
-          aria-hidden="true"
-        >
-          <span className="text-[11px] font-black text-accent">L</span>
-        </div>
-        <span className="hidden text-[13px] font-bold tracking-tight text-white md:inline">
-          LiTT <span className="text-accent">Studio</span>
-        </span>
-      </div>
-
+      {/* Project identity — the global nav above owns branding, so no
+          repeated logo or app name lives here. */}
       <StudioProjectPicker
         projectId={capabilities.projectId}
         projectName={capabilities.projectName}
@@ -265,21 +340,82 @@ export default function CommandStudioHeader({
         onProjectRenamed={(projectId, name) => onProjectRenamedAction?.(projectId, name)}
       />
 
+      {/* Truthful save state — rendered only while a real save signal
+          exists (saving / unsaved / failed / confirmed save time). */}
+      {saveLabel && (
+        <span
+          className="hidden shrink-0 items-center gap-1 text-[11px] font-medium md:flex"
+          style={{ color: saveToneColor }}
+          role="status"
+          data-testid="project-save-state"
+        >
+          {saveTone === "saving" && (
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" aria-hidden />
+          )}
+          {saveLabel}
+        </span>
+      )}
+
       {/* Global LiTT — persistent operator, separate from ordinary projects */}
       <GlobalLittStudioEntry />
 
-      {/* Agent-status pill — truthful: working / approval needed / ambient runtime.
-          Clicking opens the full workspace-status popover. */}
+      {/* Surface switch — Preview / Code / Design per the approved shell.
+          Secondary surfaces live in the Layout menu. */}
+      {surface && onSurfaceChange && (
+        <div
+          className="ml-1 hidden shrink-0 items-center gap-0.5 rounded-lg border p-0.5 md:flex"
+          style={{ borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(0,0,0,0.25)" }}
+          role="group"
+          aria-label="Workspace surface"
+          data-testid="surface-switch"
+        >
+          {SEG_SURFACES.map((id) => {
+            const meta = STAGE_SURFACE_META[id];
+            const Icon = meta.icon;
+            const active = surface === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onSurfaceChange(id)}
+                aria-pressed={active}
+                title={meta.hint}
+                className="flex min-h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-bold transition-colors"
+                style={{
+                  backgroundColor: active ? "var(--color-accent)" : "transparent",
+                  color: active ? "var(--color-on-accent, #0b0f1c)" : "var(--text-secondary)",
+                }}
+                data-testid={`surface-seg-${id}`}
+              >
+                <Icon size={12} className="pointer-events-none" aria-hidden />
+                {meta.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Agent-status — transient states render the pill; ambient
+          "verified" collapses to a quiet dot that still opens the full
+          workspace-status popover. No "Ready" badge. */}
       <button
         ref={statusTriggerRef}
         type="button"
         onClick={() => setStatusOpen((v) => !v)}
-        className="flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95"
-        style={{
-          borderColor: `${pill.color}45`,
-          backgroundColor: `${pill.color}0f`,
-          color: pill.color,
-        }}
+        className={
+          ambientReady
+            ? "grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-all hover:bg-white/5"
+            : "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95"
+        }
+        style={
+          ambientReady
+            ? undefined
+            : {
+                borderColor: `${pill.color}45`,
+                backgroundColor: `${pill.color}0f`,
+                color: pill.color,
+              }
+        }
         aria-label={pill.label}
         aria-expanded={statusOpen}
         title={pill.label}
@@ -290,7 +426,7 @@ export default function CommandStudioHeader({
           aria-hidden
           style={{ backgroundColor: pill.color, boxShadow: `0 0 6px ${pill.color}` }}
         />
-        <span className="hidden sm:inline">{pill.short}</span>
+        {!ambientReady && <span className="hidden sm:inline">{pill.short}</span>}
       </button>
       {statusOpen && statusRect &&
         createPortal(
@@ -314,32 +450,59 @@ export default function CommandStudioHeader({
 
       <div className="flex-1" />
 
-      {/* Preview quick action — only when the runtime is actually verified. */}
-      {mutationActionsAllowed && runtimeReady && (
-        <button
-          type="button"
-          onClick={onPreviewAction}
-          className="hidden shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-[11px] font-bold text-on-accent shadow-accent-glow transition-all hover:bg-accent-strong active:scale-95 sm:flex"
-          title="Open the live preview"
-          aria-label="Preview"
-          data-testid="preview-quick-action"
-        >
-          <Eye size={12} className="pointer-events-none" />
-          <span className="pointer-events-none">Preview</span>
-        </button>
-      )}
-
-      {/* New chat */}
+      {/* Export — the real workspace ZIP endpoint. Disabled honestly when
+          unavailable; never a fake action. */}
       <button
         type="button"
-        onClick={onNewChatAction}
-        disabled={busy}
-        className="flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1.5 text-[11px] font-bold text-accent transition-all hover:bg-accent/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-        aria-label="New chat"
-        title="Start a new chat"
+        onClick={onExportAction}
+        disabled={!exportAvailable}
+        className="flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
+        style={{ borderColor: "rgba(255,255,255,0.08)", color: "var(--text-secondary)" }}
+        title={exportAvailable ? "Download the project as a ZIP" : exportHint ?? "Export unavailable"}
+        aria-label="Export project"
+        data-testid="export-action"
       >
-        <Plus size={13} aria-hidden />
-        <span className="hidden lg:inline">New Chat</span>
+        <Download size={12} className="pointer-events-none" aria-hidden />
+        <span className="hidden lg:inline">Export</span>
+      </button>
+
+      {/* Publish — availability is explicit; when unavailable the title
+          states the single next step. */}
+      <button
+        type="button"
+        onClick={publishAvailable ? onDeployAction : undefined}
+        disabled={!publishAvailable}
+        className="flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+        style={{
+          backgroundColor: publishAvailable ? "var(--color-accent)" : "rgba(255,255,255,0.05)",
+          color: publishAvailable ? "var(--color-on-accent, #0b0f1c)" : "var(--text-muted)",
+          boxShadow: publishAvailable ? "var(--shadow-accent-glow, 0 0 12px rgba(114,242,56,0.25))" : "none",
+        }}
+        title={publishAvailable ? "Publish this project" : publishHint ?? "Publishing is unavailable"}
+        aria-label="Publish project"
+        data-testid="publish-action"
+      >
+        <Rocket size={12} className="pointer-events-none" aria-hidden />
+        <span className="hidden lg:inline">Publish</span>
+      </button>
+
+      {/* Terminal — shows the real connection state with the canonical
+          label; opens the terminal dock tab on click. */}
+      <button
+        type="button"
+        onClick={() => onOpenDockTabAction?.("terminal")}
+        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95"
+        style={{
+          borderColor: terminalHealth.level === "red" ? "rgba(239,68,68,0.3)" : "rgba(255,255,255,0.07)",
+          color: terminalHealth.level === "green" ? "var(--text-secondary)"
+            : terminalHealth.level === "yellow" ? "#e3b341" : "#ef4444",
+        }}
+        title={terminalHealth.detail ? `${terminalHealth.label} — ${terminalHealth.detail}` : terminalHealth.label}
+        aria-label={`Terminal: ${terminalHealth.label}`}
+        data-testid="terminal-chip"
+      >
+        <SquareTerminal size={13} className="pointer-events-none" aria-hidden />
+        <span className="hidden xl:inline">{terminalHealth.label}</span>
       </button>
 
       {/* Notifications — wired to /api/notifications/count */}
@@ -361,24 +524,44 @@ export default function CommandStudioHeader({
         ) : null}
       </Link>
 
-      {/* Dock toggle — the single entry point to Activity/Files/Terminal/Inspector/Media */}
-      <button
-        type="button"
-        onClick={onToggleDockAction}
-        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95"
-        style={{
-          borderColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.07)",
-          color: dockOpen ? "var(--color-accent)" : "var(--text-secondary)",
-          backgroundColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent",
-        }}
-        title="Toggle the dock — activity, files, terminal, inspector, media"
-        aria-label={dockOpen ? "Close dock" : "Open dock"}
-        aria-pressed={dockOpen}
-        data-testid="studio-dock-toggle"
-      >
-        <PanelBottom size={14} className="pointer-events-none" />
-        <span className="hidden lg:inline">Dock</span>
-      </button>
+      {/* Layout — the single menu for every layout control (focus modes,
+          inspector, dock/terminal, float/popout, reset, surfaces). */}
+      {onLayoutCommand && (
+        <button
+          ref={layoutTriggerRef}
+          type="button"
+          onClick={() => setLayoutOpen((v) => !v)}
+          className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95"
+          style={{
+            borderColor: layoutOpen ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.07)",
+            color: layoutOpen ? "var(--color-accent)" : "var(--text-secondary)",
+            backgroundColor: layoutOpen ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent",
+          }}
+          title="Layout controls"
+          aria-label="Layout controls"
+          aria-expanded={layoutOpen}
+          aria-haspopup="menu"
+          data-testid="layout-menu-trigger"
+        >
+          <LayoutGrid size={14} className="pointer-events-none" aria-hidden />
+          <span className="hidden lg:inline">Layout</span>
+          <ChevronDown size={11} className="pointer-events-none" aria-hidden />
+        </button>
+      )}
+      {layoutOpen && layoutRect && onLayoutCommand &&
+        createPortal(
+          <LayoutMenu
+            rect={layoutRect}
+            onClose={() => setLayoutOpen(false)}
+            onCommand={onLayoutCommand}
+            onSurfaceChange={onSurfaceChange}
+            surface={surface}
+            inspectorOpen={inspectorOpen}
+            dockOpen={dockOpen}
+            shellControls={shellControls}
+          />,
+          document.body,
+        )}
 
       {/* Overflow — conversation actions, deploy, terminal, settings */}
       <button
@@ -819,6 +1002,139 @@ function OverflowMenu({
         <Settings size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Settings
       </Link>
+    </div>
+  );
+}
+
+/* ── Layout menu — the single consolidated layout control ────────── */
+function LayoutMenuItem({
+  icon: Icon,
+  label,
+  checked,
+  disabled,
+  onClick,
+  testId,
+}: {
+  icon: React.ComponentType<{ size?: number | string; className?: string; style?: React.CSSProperties }>;
+  label: string;
+  checked?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  testId?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+      style={{ color: "var(--text-primary)" }}
+      data-testid={testId}
+    >
+      <Icon size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+      <span className="min-w-0 flex-1">{label}</span>
+      {checked !== undefined && (
+        <span
+          className="h-1.5 w-1.5 shrink-0 rounded-full"
+          aria-hidden
+          style={{ backgroundColor: checked ? "var(--color-accent)" : "rgba(255,255,255,0.18)" }}
+        />
+      )}
+    </button>
+  );
+}
+
+function LayoutMenu({
+  rect,
+  onClose,
+  onCommand,
+  onSurfaceChange,
+  surface,
+  inspectorOpen,
+  dockOpen,
+  shellControls,
+}: {
+  rect: DOMRect;
+  onClose: () => void;
+  onCommand: (command: StudioLayoutCommand) => void;
+  onSurfaceChange?: (surface: StudioStageSurface) => void;
+  surface?: StudioStageSurface;
+  inspectorOpen: boolean;
+  dockOpen: boolean;
+  shellControls: StudioShellControls | null;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const run = (fn: () => void) => () => { fn(); onClose(); };
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      aria-label="Layout controls"
+      className="fixed z-[300] w-56 rounded-xl border py-1 shadow-2xl"
+      style={{
+        top: rect.bottom + 6,
+        left: Math.max(8, rect.right - 224),
+        backgroundColor: "#120e1e",
+        borderColor: "rgba(255,255,255,0.10)",
+      }}
+      data-testid="layout-menu"
+    >
+      <LayoutMenuItem icon={MessageSquare} label="Focus chat" onClick={run(() => onCommand("focus-chat"))} testId="layout-focus-chat" />
+      <LayoutMenuItem icon={Maximize2} label="Focus canvas" onClick={run(() => onCommand("focus-canvas"))} testId="layout-focus-canvas" />
+      <LayoutMenuItem icon={PanelRight} label="Inspector" checked={inspectorOpen} onClick={run(() => onCommand("toggle-inspector"))} testId="layout-toggle-inspector" />
+      <LayoutMenuItem icon={SquareTerminal} label="Terminal drawer" checked={dockOpen} onClick={run(() => onCommand("toggle-dock"))} testId="layout-toggle-dock" />
+
+      {shellControls && (
+        <>
+          <div className="mx-3 my-1 h-px" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
+          <LayoutMenuItem
+            icon={PanelRight}
+            label={shellControls.inspectorFloating ? "Dock inspector" : "Float inspector"}
+            checked={shellControls.inspectorFloating}
+            onClick={run(shellControls.toggleInspectorFloat)}
+            testId="layout-float-inspector"
+          />
+          <LayoutMenuItem icon={ExternalLink} label="Pop out inspector" onClick={run(shellControls.popoutInspector)} testId="layout-popout-inspector" />
+          <LayoutMenuItem icon={RotateCcw} label="Reset layout" onClick={run(shellControls.resetLayout)} testId="layout-reset" />
+        </>
+      )}
+
+      {onSurfaceChange && (
+        <>
+          <div className="mx-3 my-1 h-px" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
+          <div className="px-3 py-1 text-[9px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
+            Open
+          </div>
+          {SECONDARY_SURFACES.map((id) => {
+            const meta = STAGE_SURFACE_META[id];
+            return (
+              <LayoutMenuItem
+                key={id}
+                icon={meta.icon}
+                label={meta.label}
+                checked={surface === id}
+                onClick={run(() => onSurfaceChange(id))}
+                testId={`layout-surface-${id}`}
+              />
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }

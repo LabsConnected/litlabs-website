@@ -227,16 +227,14 @@ describe("LiTEmptyState first-run first screen", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders all five starter chips", () => {
+  it("renders the three starter chips", () => {
     renderReady();
     const group = screen.getByTestId("first-mission-starter-chips");
     expect(group).toBeInTheDocument();
     for (const label of [
       "Build my business website",
-      "Fix something broken",
       "Make my site look better",
-      "Create something new",
-      "Surprise me",
+      "Fix something broken",
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
@@ -281,13 +279,13 @@ describe("LiTEmptyState first-run first screen", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Surprise me" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make my site look better" }));
 
     expect(onPrimaryAction).not.toHaveBeenCalled();
     expect(dispatchSpy).toHaveBeenCalledOnce();
     const event = dispatchSpy.mock.calls[0][0] as CustomEvent;
     expect(event.type).toBe("studio:ask-litt");
-    expect(event.detail.prompt).toBe("Surprise me — build something cool");
+    expect(event.detail.prompt).toBe("Make my site look better");
     dispatchSpy.mockRestore();
   });
 

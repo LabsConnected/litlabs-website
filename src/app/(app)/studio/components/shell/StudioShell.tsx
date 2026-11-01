@@ -28,6 +28,22 @@
  */
 import { type ReactNode, useState, useEffect, useCallback, useRef } from "react";
 
+/** Controls the shell exposes to the project toolbar's Layout menu —
+    the docking controls live there instead of a dedicated toolbar row. */
+export interface StudioShellControls {
+  resetLayout: () => void;
+  toggleInspectorFloat: () => void;
+  popoutInspector: () => void;
+  inspectorFloating: boolean;
+}
+
+const LEFT_DEFAULT = 380;
+const LEFT_MIN = 280;
+const LEFT_MAX = 560;
+const INSPECTOR_DEFAULT = 320;
+const INSPECTOR_MIN = 240;
+const INSPECTOR_MAX = 480;
+
 export default function StudioShell({
   taskbar,
   rail,
@@ -36,10 +52,11 @@ export default function StudioShell({
   littLayer,
   leftPanel,
   dockHandle,
+  onRegisterControls,
 }: {
-  /** Task strip — the durable task tabs (WorktabBar). */
+  /** Task strip — the durable task tabs (WorktabBar). Null omits the row. */
   taskbar: ReactNode;
-  /** Left workspace rail. */
+  /** Left workspace rail. Null removes the rail column. */
   rail: ReactNode;
   /** Central stage — the active workspace surface. */
   stage: ReactNode;
@@ -51,29 +68,31 @@ export default function StudioShell({
   leftPanel?: ReactNode;
   /** Resize handle between the left panel and the rail. */
   dockHandle?: ReactNode;
+  /** Receives the docking controls for the toolbar Layout menu. */
+  onRegisterControls?: (controls: StudioShellControls | null) => void;
 }) {
   const [floating, setFloating] = useState<string | null>(null);
-  const leftWidthRef = useRef(280);
-  const inspectorWidthRef = useRef(320);
+  const leftWidthRef = useRef(LEFT_DEFAULT);
+  const inspectorWidthRef = useRef(INSPECTOR_DEFAULT);
   const [leftWidth, setLeftWidth] = useState(() => {
     try {
       const v = localStorage.getItem("litt-studio-layout");
       if (v) {
         const j = JSON.parse(v);
-        if (typeof j.left === "number") return j.left;
+        if (typeof j.left === "number") return Math.max(LEFT_MIN, Math.min(LEFT_MAX, j.left));
       }
     } catch {}
-    return 280;
+    return LEFT_DEFAULT;
   });
   const [inspectorWidth, setInspectorWidth] = useState(() => {
     try {
       const v = localStorage.getItem("litt-studio-layout");
       if (v) {
         const j = JSON.parse(v);
-        if (typeof j.inspector === "number") return j.inspector;
+        if (typeof j.inspector === "number") return Math.max(INSPECTOR_MIN, Math.min(INSPECTOR_MAX, j.inspector));
       }
     } catch {}
-    return 320;
+    return INSPECTOR_DEFAULT;
   });
 
   // Persist layout
@@ -97,8 +116,8 @@ export default function StudioShell({
     localStorage.removeItem("litt-studio-layout");
     sessionStorage.removeItem("littree:studio:litt-collapsed");
     localStorage.removeItem("littree:studio:litt-collapsed");
-    setLeftWidth(280);
-    setInspectorWidth(320);
+    setLeftWidth(LEFT_DEFAULT);
+    setInspectorWidth(INSPECTOR_DEFAULT);
     // Don't reload — let React reconcile so test can observe reset without navigation
   }, []);
 
@@ -127,16 +146,16 @@ export default function StudioShell({
     (e: React.KeyboardEvent) => {
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        setLeftWidth((v: number) => Math.max(200, v - 10));
+        setLeftWidth((v: number) => Math.max(LEFT_MIN, v - 10));
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        setLeftWidth((v: number) => Math.min(420, v + 10));
+        setLeftWidth((v: number) => Math.min(LEFT_MAX, v + 10));
       } else if (e.key === "Home") {
         e.preventDefault();
-        setLeftWidth(200);
+        setLeftWidth(LEFT_MIN);
       } else if (e.key === "End") {
         e.preventDefault();
-        setLeftWidth(420);
+        setLeftWidth(LEFT_MAX);
       }
     },
     [],
@@ -146,16 +165,16 @@ export default function StudioShell({
     (e: React.KeyboardEvent) => {
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        setInspectorWidth((v: number) => Math.min(480, v + 10));
+        setInspectorWidth((v: number) => Math.min(INSPECTOR_MAX, v + 10));
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        setInspectorWidth((v: number) => Math.max(240, v - 10));
+        setInspectorWidth((v: number) => Math.max(INSPECTOR_MIN, v - 10));
       } else if (e.key === "Home") {
         e.preventDefault();
-        setInspectorWidth(480);
+        setInspectorWidth(INSPECTOR_MAX);
       } else if (e.key === "End") {
         e.preventDefault();
-        setInspectorWidth(240);
+        setInspectorWidth(INSPECTOR_MIN);
       }
     },
     [],
@@ -169,7 +188,7 @@ export default function StudioShell({
       const startW = leftWidthRef.current;
       const onMove = (ev: MouseEvent) => {
         const delta = ev.clientX - startX;
-        const next = Math.max(200, Math.min(420, startW + delta));
+        const next = Math.max(LEFT_MIN, Math.min(LEFT_MAX, startW + delta));
         leftWidthRef.current = next;
         setLeftWidth(next);
       };
@@ -197,7 +216,7 @@ export default function StudioShell({
       const startW = inspectorWidthRef.current;
       const onMove = (ev: MouseEvent) => {
         const delta = startX - ev.clientX;
-        const next = Math.max(240, Math.min(480, startW + delta));
+        const next = Math.max(INSPECTOR_MIN, Math.min(INSPECTOR_MAX, startW + delta));
         inspectorWidthRef.current = next;
         setInspectorWidth(next);
       };
@@ -215,6 +234,20 @@ export default function StudioShell({
   const hasInspector = Boolean(inspector);
   const isFloating = floating === "inspector";
 
+  // Expose docking controls to the toolbar Layout menu (the controls used
+  // to have their own toolbar row — the spec consolidates them into the
+  // project toolbar's single Layout menu).
+  useEffect(() => {
+    if (!onRegisterControls) return;
+    onRegisterControls({
+      resetLayout: handleReset,
+      toggleInspectorFloat: () => setFloating((v) => (v ? null : "inspector")),
+      popoutInspector: () => handlePopout("inspector", "Inspector"),
+      inspectorFloating: floating === "inspector",
+    });
+    return () => onRegisterControls(null);
+  }, [onRegisterControls, handleReset, handlePopout, floating]);
+
   return (
     <div
       className="studio-shell flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
@@ -223,49 +256,16 @@ export default function StudioShell({
       aria-label="Studio workspace"
     >
       {taskbar}
-      <div
-        role="toolbar"
-        aria-label="Docking controls"
-        className="flex items-center gap-1 border-b px-2 py-1"
-        style={{ borderColor: "var(--studio-border, rgba(255,255,255,0.08))" }}
-      >
-        <button
-          type="button"
-          onClick={() => setFloating(floating ? null : "inspector")}
-          aria-pressed={floating === "inspector"}
-          aria-label={floating === "inspector" ? "Dock inspector" : "Float inspector"}
-          className="rounded px-2 py-1 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
-          data-testid="dock-float-toggle"
-        >
-          {floating === "inspector" ? "Dock" : "Float"}
-        </button>
-        <button
-          type="button"
-          onClick={() => hasInspector && handlePopout("inspector", "Inspector")}
-          aria-label="Pop out inspector"
-          className="rounded px-2 py-1 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
-          data-testid="dock-popout"
-        >
-          Popout
-        </button>
-        <button
-          type="button"
-          onClick={handleReset}
-          aria-label="Reset layout"
-          className="rounded px-2 py-1 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
-          data-testid="dock-reset"
-        >
-          Reset
-        </button>
-        <span data-testid="dock-persistence" data-layout-saved={hasLeft || hasInspector ? "true" : "false"} className="sr-only">
-          layout
-        </span>
-      </div>
+      {/* Docking controls moved into the project toolbar's Layout menu
+          (exposed via onRegisterControls) — no dedicated row here. */}
+      <span data-testid="dock-persistence" data-layout-saved={hasLeft || hasInspector ? "true" : "false"} className="sr-only">
+        layout
+      </span>
 
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {hasLeft && !isFloating && (
           <>
-            <div style={{ width: leftWidth, minWidth: 200, maxWidth: 420 }} className="shrink-0 overflow-hidden">
+            <div style={{ width: leftWidth, minWidth: LEFT_MIN, maxWidth: LEFT_MAX }} className="shrink-0 overflow-hidden">
               {leftPanel}
             </div>
             <div
@@ -284,9 +284,11 @@ export default function StudioShell({
         )}
 
         {dockHandle}
-        <div className="flex h-14 shrink-0 flex-col overflow-hidden" style={{ minWidth: 56, width: 56 }}>
-          {rail}
-        </div>
+        {rail && (
+          <div className="flex h-14 shrink-0 flex-col overflow-hidden" style={{ minWidth: 56, width: 56 }}>
+            {rail}
+          </div>
+        )}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-testid="studio-stage">
           {stage}
