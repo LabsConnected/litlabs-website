@@ -422,7 +422,7 @@ export async function recordActionActivity(
 export async function listActionEvents(
   runId: string,
   userId: string,
-  options: { afterSequence?: string; limit?: number } = {},
+  options: { afterSequence?: string; limit?: number; descending?: boolean } = {},
 ): Promise<ActionEvent[]> {
   const owned = await getOwnedRunRow(runId, userId);
   if (!owned) return [];
@@ -432,7 +432,7 @@ export async function listActionEvents(
     .select("id, sequence:sequence::text, run_id, user_id, type, created_at, payload")
     .eq("run_id", runId)
     .eq("user_id", userId)
-    .order("sequence", { ascending: true })
+    .order("sequence", { ascending: !options.descending })
     .limit(limit);
   if (options.afterSequence) query = query.gt("sequence", options.afterSequence);
   const { data, error } = await query;

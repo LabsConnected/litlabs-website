@@ -50,6 +50,7 @@ import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
 import { deploymentEvidenceFrom, evaluateCompletion } from "@/lib/studio/completion-evidence";
 import {
+  appendActionEvent,
   createActionRun,
   requestActionRunCancellation,
   transitionActionRun,
@@ -753,28 +754,45 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let reservationId: string | null = null;
   let actionRun: ActionRun | null = null;
   let actionContext: ActionExecutionContext | null = null;
-  if (runtimeAgent?.agentInstanceId && clerkId) {
+  // Metered work covers custom agent runs AND Studio builds: a successful
+  // execution-bound build that debits zero is a defect (approved metering
+  // policy — no silent debits and no silent giveaways). Runs without a
+  // runtimeAgent reserve under the "studio-build" capability name.
+  const metersRun = clerkId && (runtimeAgent?.agentInstanceId || built.kernelResult.decision.routing.requiresExecution);
+  if (metersRun) {
     // Estimate the maximum cost: per-run fee + estimated tokens
     const estimatedTokens = Math.ceil(finalPrompt.length / 4) + 2048; // prompt + max output
     const estimatedCost = estimateCredits(estimatedTokens, 0, 1, 1);
     const reserveResult = await reserveCredits(
       {
         clerkId,
-        agentInstanceId: runtimeAgent.agentInstanceId,
-        agentId: runtimeAgent.agentId,
-        agentVersionId: runtimeAgent.agentVersionId,
+        agentInstanceId: runtimeAgent?.agentInstanceId ?? "studio-build",
+        agentId: runtimeAgent?.agentId ?? null,
+        agentVersionId: runtimeAgent?.agentVersionId ?? null,
         conversationId: conversation.id,
         messageId: assistantMessage.id,
         idempotencyKey: clientRequestId,
-        model: runtimeAgent.model,
+        model: runtimeAgent?.model,
       },
       estimatedCost,
     );
 
     if (!reserveResult.ok) {
-      // Insufficient balance — abort BEFORE the model call. Persist the
-      // reason so a reload shows what actually happened, not an empty
-      // failed bubble.
+      // Insufficient balance — abort BEFORE the model call with the EXACT
+      // shortfall (approved metering policy: told before work starts, never
+      // a mid-build failure or a negative balance). Persist the reason so a
+      // reload shows what actually happened, not an empty failed bubble.
+      let shortfallDetail = "Purchase credits in your wallet.";
+      if (reserveResult.status === 402) {
+        try {
+          const { getCreditBalances } = await import("@/lib/wallet-ledger");
+          const balances = await getCreditBalances(clerkId!);
+          const shortfall = Math.max(0, estimatedCost - balances.total);
+          shortfallDetail =
+            `Estimated cost: ${estimatedCost} LiTTBits · balance: ${balances.total} · ` +
+            `shortfall: ${shortfall}. Purchase credits to continue.`;
+        } catch { /* balance lookup failed — keep the generic detail */ }
+      }
       await updateMessageStatus(
         assistantMessage.id,
         userId,
@@ -784,7 +802,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       return NextResponse.json(
         {
           error: reserveResult.error || "Insufficient LiTTBits balance",
-          detail: "This agent requires LiTTBits to run. Purchase credits in your wallet.",
+          detail: shortfallDetail,
           userMessage,
           assistantMessage: { ...assistantMessage, status: "failed" as const },
           revision: conversation.revision,
@@ -793,6 +811,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       );
     }
 
+    // Disclose the canonical estimate on the approval card — the same
+    // number the reservation held (no invented prices).
+    if (v2Config) v2Config.billingEstimateBits = estimatedCost;
     agentRunId = reserveResult.runId;
     reservedCredits = reserveResult.reservedCredits;
     reservationId = reserveResult.reservationId;
@@ -967,6 +988,21 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       };
       const safeEvent = (payload: Record<string, unknown>): boolean =>
         safeEnqueue(event(payload));
+
+      // Approved-quote disclosure on EVERY metered path — the approval
+      // card only reaches runs that pause; a build that never pauses must
+      // still show its quote before execution. `status` events render in
+      // the live activity feed; the structured field lets richer
+      // surfaces render it without re-parsing the text.
+      if (agentRunId) {
+        safeEvent({
+          type: "status",
+          summary: reservedCredits > 0
+            ? `Estimated cost: ${reservedCredits} LiTTBits — debited once on success; failed or cancelled work debits zero.`
+            : "Estimated cost: 0 LiTTBits — billing-exempt run (audit record kept).",
+          billingQuote: { estimatedBits: reservedCredits },
+        });
+      }
 
       // Heartbeat — emits SSE comments every 15s to prevent proxy idle timeouts
       // (Cloudflare/Railway close connections after ~100s of inactivity)
@@ -1373,6 +1409,22 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               failureCode: finalMessageStatus === "failed" ? "TASK_FAILED" : null,
               failureMessage: finalMessageStatus === "failed" ? assistantText.slice(0, 500) : null,
             });
+            // Write the canonical run.completed/run.failed outcome event
+            // carrying the quality verdict — publish reads this same
+            // evidence the gate uses, not a parallel flag.
+            if (finalMessageStatus === "completed" || finalMessageStatus === "failed") {
+              await appendActionEvent({
+                runId: actionContext.actionRunId,
+                userId: actionContext.userId,
+                type: finalMessageStatus === "completed" ? "run.completed" : "run.failed",
+                payload: {
+                  result: {
+                    finalText: assistantText,
+                    qualityLoop: v2Result?.qualityLoop ?? undefined,
+                  },
+                },
+              });
+            }
           } catch (settleErr) {
             actionRunPersistenceFailed = true;
             studioLog("message:action_run_settle_failed", {
@@ -1415,8 +1467,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           });
         }
         if (agentRunId) {
-          const actualCredits = runtimeAgent
-            ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
+          // Metered Studio builds (metersRun) settle the estimated amount —
+          // a successful build debiting zero is a defect. Cap at the
+          // reservation so a long output can never settle above the quote
+          // the user approved (settle_bits rejects overage → zero debit).
+          const actualCredits = metersRun
+            ? Math.min(
+                estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1),
+                reservedCredits,
+              )
             : 0;
           settleRun(agentRunId, {
             inputTokens: Math.ceil(finalPrompt.length / 4),
@@ -1687,8 +1746,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                       : undefined),
           );
           if (agentRunId) {
-            const actualCredits = runtimeAgent
-              ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
+            // Same cap as the v2 path: settle never exceeds the reserved
+            // quote (overage would be rejected → completed run debits zero).
+            const actualCredits = metersRun
+              ? Math.min(
+                  estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1),
+                  reservedCredits,
+                )
               : 0;
             settleRun(agentRunId, {
               inputTokens: Math.ceil(finalPrompt.length / 4),

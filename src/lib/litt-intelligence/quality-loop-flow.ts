@@ -241,11 +241,10 @@ const MACHINE_EVIDENCE_STAGES: ReadonlySet<QualityStage> = new Set([
 ]);
 
 function hasMachineEvidence(
-  state: QualityLoopState,
-  stage: QualityStage,
+  evidence: StageEvidence[],
   predicate?: (detail: Record<string, unknown> | undefined) => boolean,
 ): boolean {
-  return state.stages[stage].evidence.some((e) => {
+  return evidence.some((e) => {
     if (e.by === "agent") return false;
     return predicate ? predicate(e.detail) : true;
   });
@@ -262,16 +261,21 @@ function hasMachineEvidence(
  * and demanding one would stall every trivial task forever. The agent's
  * word alone still never suffices (by !== "agent" is required).
  */
-function stagePassable(
+export function stagePassable(
   state: QualityLoopState,
   stage: QualityStage,
   taskScope: QualityTaskScope = "full",
 ): boolean {
   const s = state.stages[stage];
-  if (s.evidence.length === 0) return false;
+  // Stale-evidence guard at the gate: evidence recorded before the stage
+  // began cannot authorize a pass. Evidence filed while a future stage was
+  // still pending predates its startedAt and does not count — it must be
+  // re-recorded after activation.
+  const valid = s.startedAt ? s.evidence.filter((e) => e.at >= s.startedAt!) : s.evidence;
+  if (valid.length === 0) return false;
   if (blockedReason(state, stage)) return false;
   if (taskScope === "trivial" && stage === "build") {
-    return s.evidence.some((e) => e.by !== "agent");
+    return valid.some((e) => e.by !== "agent");
   }
   if (MACHINE_EVIDENCE_STAGES.has(stage)) {
     // Targeted work (trivial/standard scope) is verified at the scale of the
@@ -289,7 +293,7 @@ function stagePassable(
       deploy: (detail) => detail?.deploymentVerified === true,
       verify: (detail) => detail?.passed === true && detail?.httpStatus === 200,
     };
-    if (!hasMachineEvidence(state, stage, predicates[stage])) return false;
+    if (!hasMachineEvidence(valid, predicates[stage])) return false;
   }
   return true;
 }
@@ -399,27 +403,33 @@ export { MAX_DESIGN_PASSES };
 const IMPLICATION_SKIPPABLE: ReadonlySet<QualityStage> = new Set(["research", "polish"]);
 
 /**
- * Move pending observations for the current-or-earlier stages into the
- * evidence ledger. Returns true when anything was filed.
+ * Move pending observations into the evidence ledger. Observations are
+ * machine/agent facts about work the run already did, so they file for
+ * ANY stage — not just current-or-earlier. The old current-or-earlier
+ * restriction starved the ledger: when an early required stage (e.g.
+ * understand, which relies on agent-declared markers) never produced
+ * evidence, real build/run/test observations stayed buffered forever and
+ * the verdict reported every required stage "pending" even though the
+ * work provably happened. Filing is not passing — stage advancement still
+ * enforces order; the gate stays honest about which stages lack evidence.
+ * Returns true when anything was filed.
  */
 function fileDueObservations(session: QualityLoopSession): boolean {
   const state = session.state;
-  const current = currentStage(state);
-  const currentIdx = current ? QUALITY_STAGES.indexOf(current) : QUALITY_STAGES.length;
   let filed = false;
   for (let i = session.observations.length - 1; i >= 0; i--) {
     const obs = session.observations[i];
-    if (QUALITY_STAGES.indexOf(obs.stage) <= currentIdx) {
-      try {
-        recordEvidence(state, obs.stage, obs.evidence);
-      } catch {
-        // Engine rejected it (shouldn't happen for current-or-earlier,
-        // but never let the gate crash the run).
-        continue;
-      }
-      session.observations.splice(i, 1);
-      filed = true;
+    try {
+      recordEvidence(state, obs.stage, obs.evidence);
+    } catch {
+      // Engine rejected it (e.g. stale evidence predating the stage's
+      // activation). Keep it buffered so the finale counts it as unfiled
+      // evidence rather than silently losing the observation — never let
+      // the gate crash the run.
+      continue;
     }
+    session.observations.splice(i, 1);
+    filed = true;
   }
   return filed;
 }
@@ -1107,6 +1117,11 @@ export const QUALITY_LOOP_PROMPT_SECTION = [
   "You may not claim the work is done unless every stage that applies has its evidence",
   "declared. Your closing summary must report what each stage established — never claim",
   "a result (a deletion, a deployment, a passing check) that did not actually happen.",
+  "Never ask the user for permission in prose before editing or running a gated action —",
+  "emit the tool call directly; the approval gate pauses the run and shows the approval",
+  "card itself. A prose permission request creates no card and changes nothing.",
+  "Never report \"Done\" when no files were changed — a zero-change run is a no-op,",
+  "not a success.",
 ].join("\n");
 
 /**

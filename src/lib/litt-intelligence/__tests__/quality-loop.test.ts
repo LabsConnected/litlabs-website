@@ -54,9 +54,16 @@ describe("stage ordering", () => {
     expect(state.stages.understand.status).toBe("active");
   });
 
-  it("refuses evidence for a future stage", () => {
+  it("records evidence for a future stage without activating it", () => {
+    // Out-of-order filing is a fact, not a transition: build evidence
+    // lands even while "understand" is unfinished, but the stage stays
+    // pending and still cannot pass out of order.
     const state = makeLoop();
-    expect(() => recordEvidence(state, "build", evidence())).toThrow(StageGateError);
+    recordEvidence(state, "build", evidence());
+    expect(state.stages.build.evidence).toHaveLength(1);
+    expect(state.stages.build.status).toBe("pending");
+    expect(currentStage(state)).toBe("understand");
+    expect(() => passStage(state, "build")).toThrow(StageGateError);
   });
 
   it("allows evidence for the current and earlier stages", () => {

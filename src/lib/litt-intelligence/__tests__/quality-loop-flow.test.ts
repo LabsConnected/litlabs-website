@@ -104,8 +104,9 @@ describe("harvestStageMarkers", () => {
     const msg = [{ role: "assistant" as const, content: "QUALITY: design — Two-column layout." }];
     expect(harvestStageMarkers(s, msg)).toBe(1);
     expect(harvestStageMarkers(s, msg)).toBe(0);
-    // Still pending (understand is current), but recorded exactly once.
-    expect(s.observations.filter((o) => o.stage === "design")).toHaveLength(1);
+    // Recorded exactly once — filed directly into the stage ledger.
+    expect(s.state.stages.design.evidence).toHaveLength(1);
+    expect(s.state.stages.design.status).toBe("pending");
   });
 });
 
@@ -118,9 +119,10 @@ describe("noteToolResult — machine evidence", () => {
       { success: true, result: {}, mutating: true, summary: "wrote index.html" },
       "ws-1",
     );
-    // build is a future stage while understand is current: held as observation
-    expect(s.observations.some((o) => o.stage === "build")).toBe(true);
-    expect(s.state.stages.build.evidence).toHaveLength(0);
+    // build is a future stage while understand is current: evidence files
+    // immediately (recording is not passing — the stage stays pending).
+    expect(s.state.stages.build.evidence).toHaveLength(1);
+    expect(s.state.stages.build.status).toBe("pending");
   });
 
   it("records nothing for failed or read-only tool calls", () => {
@@ -149,7 +151,7 @@ describe("noteToolResult — machine evidence", () => {
       "ws-9",
     );
     expect(s.previewUrl).toBe("https://preview.test/ws-9");
-    expect(s.observations.some((o) => o.stage === "run")).toBe(true);
+    expect(s.state.stages.run.evidence).toHaveLength(1);
   });
 
   it("does not record RUN evidence when the preview is not ready", () => {
@@ -205,7 +207,7 @@ describe("implied stage advancement", () => {
     const finale = finalizeQualityLoop(s, { deployRequested: false });
     expect(finale.verdict.ok).toBe(false);
     expect(finale.verdict.missing).toContain("understand");
-    expect(finale.unfiledObservations).toBeGreaterThan(0);
+    expect(finale.unfiledObservations).toBe(0);
   });
 });
 
@@ -254,8 +256,8 @@ describe("noteBuildFix / noteDeployment", () => {
   it("does not pass TEST when a run claims success without executed checks", () => {
     const s = makeSession();
     noteBuildFix(s, { allPassed: true, results: [] });
-    expect(s.state.stages.test.evidence).toHaveLength(0);
-    expect(s.observations[0]?.evidence.detail).toEqual({
+    // Failed checks file as failed evidence — TEST is blocked, not passed.
+    expect(s.state.stages.test.evidence[0]?.detail).toEqual({
       passed: false,
       executedChecks: false,
       reason: "No checks were executed",
@@ -266,7 +268,7 @@ describe("noteBuildFix / noteDeployment", () => {
     const s = makeSession();
     noteDeployment(s, "https://example.com");
     expect(s.deployedUrl).toBe("https://example.com");
-    expect(s.observations.some((o) => o.stage === "deploy")).toBe(true);
+    expect(s.state.stages.deploy.evidence).toHaveLength(1);
   });
 });
 
