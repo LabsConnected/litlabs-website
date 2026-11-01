@@ -146,6 +146,9 @@ export default function PreviewDockHost({
   const onGripPointerDown = useCallback(
     (mode: "move" | "resize") => (e: ReactPointerEvent<HTMLDivElement>) => {
       e.preventDefault();
+      // Pointer capture retargets move/up to the grip so drags survive
+      // crossing the embedded iframe (which would otherwise swallow events).
+      e.currentTarget.setPointerCapture?.(e.pointerId);
       dragRef.current = { mode, startX: e.clientX, startY: e.clientY, rect: { ...floatRect } };
       const onMove = (ev: PointerEvent) => {
         const d = dragRef.current;
@@ -173,6 +176,7 @@ export default function PreviewDockHost({
 
   const onDockEdgeDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     const startX = e.clientX;
     const startW = dockWidth;
     const startF = splitFraction;
