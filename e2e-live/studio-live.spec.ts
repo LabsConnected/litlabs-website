@@ -89,7 +89,13 @@ import { inflateRawSync } from "zlib";
 
 /** Parse a ZIP's central directory and inflate every entry. */
 function unzipToMap(buf: Buffer): Map<string, Buffer> {
-  const eocdAt = buf.lastIndexOf(0x06054b50);
+  // Scan BACKWARD for the real EOCD signature. A numeric lastIndexOf only
+  // matches the low byte (0x50 = 'P') and lands inside the EOCD's own
+  // fields on archives whose cdOffset contains that byte.
+  let eocdAt = -1;
+  for (let i = buf.length - 22; i >= 0; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocdAt = i; break; }
+  }
   if (eocdAt < 0) throw new Error("not a zip: no EOCD");
   const count = buf.readUInt16LE(eocdAt + 10);
   let ptr = buf.readUInt32LE(eocdAt + 16);
