@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" role="img" aria-labelledby="title desc">
+<title id="title">LiTTree cyber tree LT emblem</title><desc id="desc">A luminous violet and cyan digital tree grows from an LT crest inside a glowing orbital ring.</desc>
+<defs>
+<linearGradient id="orbit" x1="16" y1="206" x2="237" y2="35" gradientUnits="userSpaceOnUse"><stop stop-color="#d946ef"/><stop offset=".48" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient>
+<linearGradient id="roots" x1="66" y1="120" x2="198" y2="27" gradientUnits="userSpaceOnUse"><stop stop-color="#b34aff"/><stop offset=".48" stop-color="#d1a2ff"/><stop offset=".52" stop-color="#41dfff"/><stop offset="1" stop-color="#00dfff"/></linearGradient>
+<linearGradient id="crest" x1="79" y1="148" x2="174" y2="223" gradientUnits="userSpaceOnUse"><stop stop-color="#7c3aed"/><stop offset=".47" stop-color="#f0abfc"/><stop offset="1" stop-color="#22d3ee"/></linearGradient>
+<filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter></defs>
+<ellipse cx="126" cy="125" rx="109" ry="93" transform="rotate(-24 126 125)" stroke="url(#orbit)" stroke-width="9" opacity=".3" filter="url(#glow)"/>
+<ellipse cx="126" cy="125" rx="109" ry="93" transform="rotate(-24 126 125)" stroke="url(#orbit)" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="510 140"/>
+<path d="M122 148c0-16-1-29-7-44-7-18-21-26-32-36m39 79c1-27 6-42 22-63 11-15 20-24 30-32m-46 82c-19-15-38-22-63-24m75 13c15-20 30-24 50-25M111 107c-7-18-6-30-6-46m30 35c2-17-1-29-7-42" stroke="url(#roots)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".45" filter="url(#glow)"/>
+<path d="M122 148c0-16-1-29-7-44-7-18-21-26-32-36m39 79c1-27 6-42 22-63 11-15 20-24 30-32m-46 82c-19-15-38-22-63-24m75 13c15-20 30-24 50-25M111 107c-7-18-6-30-6-46m30 35c2-17-1-29-7-42" stroke="url(#roots)" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/>
+<g stroke="url(#roots)" stroke-width="2.3" stroke-linecap="round"><path d="M83 68 70 55H51m54 6-17-18V30m40 24 10-19h16m20 17 13-17h18m-140 75-12-15H33m157 3 17-14h18"/></g>
+<g fill="#22d3ee"><circle cx="174" cy="52" r="5.5"/><circle cx="190" cy="98" r="4"/><circle cx="128" cy="54" r="4"/><circle cx="205" cy="35" r="4"/></g>
+<g fill="#c084fc"><circle cx="83" cy="68" r="5.5"/><circle cx="105" cy="61" r="4"/><circle cx="65" cy="110" r="4"/><circle cx="51" cy="55" r="4"/><circle cx="88" cy="30" r="4"/></g>
+<path d="m128 141 57 31v47l-57 31-57-31v-47z" fill="#070b1d" stroke="url(#crest)" stroke-width="4"/><path d="m128 150 47 26v37l-47 26-47-26v-37z" stroke="#22d3ee" stroke-opacity=".24"/>
+<path d="M91 175v48h29v-9h-19v-39z" fill="#d9a8ff"/><path d="M114 175h49v10h-19v38h-11v-38h-19z" fill="#61eaff"/>
+<circle cx="205" cy="37" r="2.5" fill="white"/><path d="M205 23v28M191 37h28" stroke="#bc8dff" stroke-width="1.6" stroke-linecap="round"/>
+</svg>
