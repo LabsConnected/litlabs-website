@@ -52,6 +52,12 @@ function scheduleFlush(): void {
 
 async function flush(): Promise<void> {
   if (QUEUE.length === 0) return;
+  // Consent can be withdrawn during the debounce window. Never send queued
+  // analytics events after withdrawal, even if they were queued earlier.
+  if (!hasConsent("analytics")) {
+    QUEUE.length = 0;
+    return;
+  }
   const batch = QUEUE.splice(0, QUEUE.length);
   try {
     if (typeof navigator !== "undefined" && navigator.sendBeacon) {

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 import { SafeEmailText } from "@/components/SafeEmail";
+import CookiePreferencesButton from "@/components/CookiePreferencesButton";
 
 export const metadata: Metadata = buildMetadata({
   title: "Cookie Policy",
@@ -16,7 +17,7 @@ export default function CookiesPage() {
         <div className="lit-box p-6 mb-8" style={{ borderColor: "var(--border-color)", backgroundColor: "var(--bg-card)" }}>
           <div className="lit-header -mx-6 -mt-6 mb-4" style={{ color: "white" }}>🍪 Cookie Policy</div>
           <p className="text-[10px] opacity-60 uppercase tracking-widest">
-            Last Updated: June 5, 2026 · Transparency First
+            Last Updated: October 10, 2026 · Transparency First
           </p>
         </div>
 
@@ -48,10 +49,20 @@ export default function CookiesPage() {
               <div className="border p-3" style={{ borderColor: "var(--border-color)" }}>
                 <h3 className="font-bold text-xs mb-1" style={{ color: "var(--link-color)" }}>📊 Analytics</h3>
                 <p className="opacity-80">
-                  We may use Vercel Analytics to collect basic, anonymous usage
-                  metrics (page views, performance). Vercel Analytics does not
-                  use cross-site tracking cookies. No advertising or marketing
-                  cookies are used.
+                  With your permission, we collect limited first-party
+                  analytics events to understand the signup and project-building
+                  journey. Our analytics code checks your consent before sending
+                  optional events.
+                </p>
+              </div>
+              <div className="border p-3" style={{ borderColor: "var(--border-color)" }}>
+                <h3 className="font-bold text-xs mb-1" style={{ color: "var(--link-color)" }}>Affiliate Attribution</h3>
+                <p className="opacity-80">
+                  If you opt in to affiliate tracking, our referral partner
+                  HighLevel (LeadConnector) may use attribution identifiers and
+                  cookies to credit referrals and eligible signups. Its tracking
+                  script is not requested until you enable this category.
+                  You may withdraw that permission using the button below.
                 </p>
               </div>
             </div>
@@ -75,6 +86,7 @@ export default function CookiesPage() {
             <p className="opacity-80">
               Most browsers allow you to refuse to accept cookies and to delete cookies. The methods for doing so vary from browser to browser. Please consult your browser&apos;s help documentation for more information.
             </p>
+            <CookiePreferencesButton />
           </section>
 
           <section>
