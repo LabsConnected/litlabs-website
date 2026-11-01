@@ -157,7 +157,8 @@ export async function createStudioTask(userId: string, input: CreateStudioTaskIn
   if (!project) return null;
   let conversationId = input.conversationId ?? null;
   if (conversationId) {
-    const conversation = await readWithGrace(() => getConversation(conversationId, userId));
+    const boundConversationId = conversationId;
+    const conversation = await readWithGrace(() => getConversation(boundConversationId, userId));
     if (!conversation || conversation.projectId !== input.projectId) return null;
     // Idempotent adoption: a conversation already bound to an open task
     // returns that task instead of creating a duplicate worktab.

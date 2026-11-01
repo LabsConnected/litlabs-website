@@ -2739,6 +2739,14 @@ export interface ResumeInput {
    * compatibility — resume falls back to resolving fresh when absent.
    */
   availableCapabilities?: string[];
+  /**
+   * No-successful-write step count at the moment the run paused. Carried
+   * through resume so approval pauses and resume bookkeeping never count
+   * as unsuccessful model steps; a pause taken FOR a file-writing tool
+   * carries 0 (a write was in flight), and a verified post-approval write
+   * resets the resumed counter.
+   */
+  zeroWriteStepsAtPause?: number;
 }
 
 /**
