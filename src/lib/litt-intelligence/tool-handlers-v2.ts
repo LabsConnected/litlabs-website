@@ -129,8 +129,11 @@ function destructiveRewriteViolation(prev: string, next: string): string | null 
   const lost = [...prevSig].filter((m) => !stylingSignature(next).has(m)).join(", ");
   return (
     `Refusing this full-file rewrite: it removes the existing page structure/styling ` +
-    `(${lost}). The file already exists — emit files.read to see its content, then ` +
-    `apply_patch to change ONLY the requested part and preserve the rest.`
+    `(${lost}). The file already exists — do NOT emit files.write for it. ` +
+    `Your next response MUST emit exactly one apply_patch tool call (no prose) shaped ` +
+    `like {"path": "<this file>", "patches": [{"search": "<exact existing text>", ` +
+    `"replace": "<new text>"}]}, changing ONLY the requested part and preserving ` +
+    `the rest of the file.`
   );
 }
 
