@@ -130,16 +130,62 @@ function destructiveRewriteViolation(prev: string, next: string): string | null 
   return (
     `Refusing this full-file rewrite: it removes the existing page structure/styling ` +
     `(${lost}). The file already exists — do NOT emit files.write for it. ` +
-    `Your next response MUST emit exactly one apply_patch tool call (no prose) shaped ` +
-    `like {"path": "<this file>", "patches": [{"search": "<exact existing text>", ` +
-    `"replace": "<new text>"}]}, changing ONLY the requested part and preserving ` +
-    `the rest of the file.`
+    `Emit apply_patch instead: set path to this file and patches to a list of ` +
+    `{search, replace} pairs where each search is an exact substring copied ` +
+    `verbatim from the current file content and replace is that same substring ` +
+    `with only the requested change applied.`
   );
+}
+
+/**
+ * External resource references in a document head — stylesheet links and
+ * src'd scripts (framework CDNs, font loads). These are the markers a
+ * weak model most often drops when it regenerates a file from scratch,
+ * and they are mechanically re-insertable without altering the model's
+ * requested content changes.
+ */
+function externalHeadRefs(html: string): string[] {
+  const refs: string[] = [];
+  const re = /<(link|script)\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const tag = m[0];
+    const isLinkStylesheet = /<link\b[^>]*rel\s*=\s*["']?stylesheet/i.test(tag);
+    const isSrcScript = /<script\b[^>]*\bsrc\s*=/i.test(tag);
+    if (isLinkStylesheet || isSrcScript) refs.push(tag);
+  }
+  return refs;
+}
+
+/**
+ * Repair a rewrite that dropped external head resources: re-inject the
+ * missing <link>/<script src> tags from `prev` into `next`'s head. The
+ * model's requested content changes land; the resources the user never
+ * asked to remove survive. Returns null when nothing was dropped or the
+ * next document has no head to merge into.
+ */
+function preserveExternalHeadRefs(prev: string, next: string): string | null {
+  const dropped = externalHeadRefs(prev).filter(
+    (tag) => !next.includes(tag),
+  );
+  if (dropped.length === 0) return null;
+  const injection = dropped.join("\n    ");
+  const headClose = /<\/head>/i.exec(next);
+  if (headClose) {
+    return next.slice(0, headClose.index) + "    " + injection + "\n  " + next.slice(headClose.index);
+  }
+  // No </head> — put the refs before <body> (still inside document flow);
+  // if neither exists, prepend before <html> content.
+  const bodyOpen = /<body[^>]*>/i.exec(next);
+  if (bodyOpen) return next.slice(0, bodyOpen.index) + "<head>\n    " + injection + "\n  </head>\n  " + next.slice(bodyOpen.index);
+  const htmlOpen = /<html[^>]*>/i.exec(next);
+  if (htmlOpen) return next.slice(0, htmlOpen.index + htmlOpen[0].length) + "\n<head>\n    " + injection + "\n  </head>" + next.slice(htmlOpen.index + htmlOpen[0].length);
+  return null;
 }
 
 export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   const path = inputs.path as string;
-  const content = inputs.content as string;
+  let content = inputs.content as string;
   if (!path || content === undefined) {
     return { success: false, error: "path and content are required" };
   }
@@ -172,7 +218,23 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
       // still get the full guard.
       if (!prev.content.includes("LITT-WELCOME-SCREEN")) {
         const violation = destructiveRewriteViolation(prev.content, content);
-        if (violation) return { success: false, error: violation };
+        if (violation) {
+          // Before refusing, repair mechanically: re-inject the external
+          // head resources (stylesheet links, CDN scripts) the rewrite
+          // dropped. The 1.5B-class models this guard protects against
+          // cannot produce valid apply_patch calls (verified: they paste
+          // the instruction's placeholder template verbatim) — so a
+          // refusal here was effectively a dead end and every modify run
+          // died with "approved workspace operation failed". If the
+          // repaired content passes retention, land it; only a still-
+          // destructive rewrite is refused.
+          const merged = preserveExternalHeadRefs(prev.content, content);
+          if (merged && !destructiveRewriteViolation(prev.content, merged)) {
+            content = merged;
+          } else {
+            return { success: false, error: violation };
+          }
+        }
       }
     } catch {
       // Unreadable target = a new file — nothing to preserve.

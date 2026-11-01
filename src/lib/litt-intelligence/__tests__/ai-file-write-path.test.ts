@@ -251,3 +251,60 @@ body { font-family: ui-sans-serif, system-ui, sans-serif; color: #e8eef7; }
     expect(readFileSync(join(root, "index.html"), "utf-8")).toBe(styledUserFile);
   });
 });
+
+describe("handleFilesWrite — preserving merge repairs destructive rewrites", () => {
+  /**
+   * P1 fix: the destructive-rewrite guard refused the 1.5B's modify
+   * rewrites, and the refusal's apply_patch directive was a dead end —
+   * the model pasted the instruction's placeholder template verbatim
+   * (observed live: patches=[{search:"<existing text>"}]). Instead of
+   * asking the model to repair its own rewrite, the handler now
+   * mechanically re-injects the dropped external head resources
+   * (stylesheet links, CDN scripts) and lands the repaired content.
+   */
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "litt-ws-merge-"));
+    process.env.LITT_LOCAL_SMALL = "1";
+  });
+  afterEach(() => {
+    delete process.env.LITT_LOCAL_SMALL;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const GENERATED_SITE = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>My Website</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4/dist/tailwind.min.css">
+<style>body { font-family: sans-serif; } @media (max-width:600px){.a{display:none}} :root{--a:#fff}</style>
+</head><body class="bg-gray-100 text-gray-900"><main class="a"><h1>Welcome</h1></main></body></html>`;
+
+  it("re-injects dropped external head refs instead of refusing", async () => {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(root, "index.html"), GENERATED_SITE);
+    const transport = makeTestTransport(root);
+    // The model's rewrite: new heading + purple theme, but drops the
+    // tailwind script + stylesheet link (the live refusal case).
+    const rewrite = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>LiTT STUDIO VERIFIED</title><style>body{background:#333;color:#fff;font-family:'Inter',sans-serif}</style></head><body><h1>LiTT STUDIO VERIFIED</h1></body></html>`;
+    const result = await handleFilesWrite({ path: "index.html", content: rewrite }, transport);
+    expect(result.success).toBe(true);
+    const landed = readFileSync(join(root, "index.html"), "utf-8");
+    // The requested change landed...
+    expect(landed).toContain("LiTT STUDIO VERIFIED");
+    // ...AND the dropped external resources were preserved.
+    expect(landed).toContain("@tailwindcss/browser@4");
+    expect(landed).toContain("tailwind.min.css");
+  });
+
+  it("still refuses when repair is impossible (no head in rewrite)", async () => {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(root, "index.html"), GENERATED_SITE);
+    const transport = makeTestTransport(root);
+    const result = await handleFilesWrite(
+      { path: "index.html", content: "plain text, no html at all" },
+      transport,
+    );
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toContain("full-file rewrite");
+  });
+});
