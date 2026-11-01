@@ -1141,18 +1141,34 @@ const OLLAMA_TOOL_CAPABLE =
 
 const OLLAMA_PROBE_TTL_MS = 5 * 60_000;
 const OLLAMA_PROBE_TIMEOUT_MS = 1_500;
-let _ollamaProbeCache: { at: number; models: string[] } | null = null;
 
-/** Test seam: inject a probe result instead of calling /api/tags. */
-let _ollamaProbeOverride: (() => Promise<string[]>) | null = null;
+/** One installed model plus Ollama's own declared capabilities. */
+export interface OllamaModelInfo {
+  name: string;
+  /** Capability strings from /api/tags (e.g. "completion","tools"). null when absent. */
+  capabilities: string[] | null;
+}
+
+let _ollamaProbeCache: { at: number; models: OllamaModelInfo[] } | null = null;
+
+/** Test seam: inject a probe result instead of calling /api/tags.
+ *  Plain string[] results carry no capability data — the name-family
+ *  fallback in pickOllamaModel applies to them. */
+let _ollamaProbeOverride: (() => Promise<(string | OllamaModelInfo)[]>) | null = null;
 
 /** @internal Test-only seam to override the Ollama model probe. */
-export function _setOllamaProbeForTests(probe: (() => Promise<string[]>) | null): void {
+export function _setOllamaProbeForTests(
+  probe: (() => Promise<(string | OllamaModelInfo)[]>) | null,
+): void {
   _ollamaProbeOverride = probe;
 }
 
-async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise<string[]> {
-  if (_ollamaProbeOverride) return _ollamaProbeOverride();
+function toModelInfo(entry: string | OllamaModelInfo): OllamaModelInfo {
+  return typeof entry === "string" ? { name: entry, capabilities: null } : entry;
+}
+
+async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise<OllamaModelInfo[]> {
+  if (_ollamaProbeOverride) return (await _ollamaProbeOverride()).map(toModelInfo);
   if (_ollamaProbeCache && Date.now() - _ollamaProbeCache.at < OLLAMA_PROBE_TTL_MS) {
     return _ollamaProbeCache.models;
   }
@@ -1171,23 +1187,58 @@ async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise
       classifyHttpFailure(res.status, txt, parseRetryAfterMs(res.headers, txt)),
     );
   }
-  const data = (await res.json()) as { models?: Array<{ name?: string }> };
-  const models = (data.models ?? [])
-    .map((m) => m.name)
-    .filter((n): n is string => !!n);
+  const data = (await res.json()) as {
+    models?: Array<{ name?: string; capabilities?: unknown }>;
+  };
+  const models: OllamaModelInfo[] = (data.models ?? [])
+    .map((m) => {
+      // An explicitly empty capabilities array carries no information —
+      // treat it the same as absent so older daemons keep the fallback.
+      const caps = Array.isArray(m.capabilities)
+        ? m.capabilities.filter((c): c is string => typeof c === "string")
+        : null;
+      return { name: m.name, capabilities: caps && caps.length ? caps : null };
+    })
+    .filter((m): m is OllamaModelInfo => !!m.name);
   _ollamaProbeCache = { at: Date.now(), models };
   return models;
 }
 
-/** Pick a local model. When the request requires tools, only tool-capable
- *  families are eligible — a model that cannot emit tool calls is never
- *  selected just because it is free. */
-function pickOllamaModel(available: string[], toolsRequired: boolean): string | null {
+/** Preference order for low-risk fast/chat local requests. */
+const OLLAMA_FAST_PREFERENCE = ["litt-fast", "litt-tools", "qwen3:1.7b"];
+/** Preference order for tool-required (coding/technical) requests. */
+const OLLAMA_TOOL_PREFERENCE = ["litt-coder", "litt-tools", "qwen", "devstral"];
+
+function firstByPreference(available: OllamaModelInfo[], preference: string[]): string | null {
+  for (const pref of preference) {
+    const hit = available.find((m) => m.name === pref || m.name.startsWith(`${pref}:`));
+    if (hit) return hit.name;
+  }
+  return null;
+}
+
+/** Pick a local model. When the request requires tools, only models Ollama
+ *  reports as tools-capable are eligible — a model that cannot emit tool
+ *  calls is never selected just because it is free. Where the daemon does
+ *  not report capabilities (older Ollama), the known-family name pattern
+ *  is the fallback. */
+export function pickOllamaModel(
+  available: OllamaModelInfo[],
+  toolsRequired: boolean,
+): string | null {
   const override = process.env.OLLAMA_MODEL;
   if (override) return override;
   if (available.length === 0) return null;
-  if (!toolsRequired) return available[0];
-  return available.find((m) => OLLAMA_TOOL_CAPABLE.test(m)) ?? null;
+  if (!toolsRequired) {
+    return firstByPreference(available, OLLAMA_FAST_PREFERENCE) ?? available[0].name;
+  }
+  const toolCapable = available.filter((m) =>
+    m.capabilities === null
+      ? OLLAMA_TOOL_CAPABLE.test(m.name)
+      : m.capabilities.includes("tools"),
+  );
+  if (toolCapable.length === 0) return null;
+  return firstByPreference(toolCapable, OLLAMA_TOOL_PREFERENCE) ?? toolCapable[0].name;
 }
 
 async function attemptOllama(
@@ -1197,7 +1248,7 @@ async function attemptOllama(
 ): Promise<LLMToolCallResponse> {
   const endpoint = resolveBasicOllamaEndpoint();
 
-  let available: string[];
+  let available: OllamaModelInfo[];
   try {
     available = await probeOllamaModels(endpoint, ctx);
   } catch (err) {

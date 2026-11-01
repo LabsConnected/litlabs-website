@@ -188,14 +188,28 @@ function singleCandidateReason(attempts: { endpoint: string; error: string | nul
 }
 
 /**
- * Pick the model to serve a local request, preferring LiTT's own coder
- * build, then a general local worker, then whatever is installed.
+ * Task shape a local request is being routed for. "coder" = technical
+ * reasoning / code work; "fast" = low-risk chat, classification, and
+ * summaries where latency matters more than depth. The default remains
+ * "coder" — LiTT's local lane exists for engineering work.
+ */
+export type LocalModelKind = "fast" | "coder";
+
+/**
+ * Pick the model to serve a local request, preferring LiTT's own builds
+ * for the requested kind, then a general local worker, then whatever is
+ * installed.
  *
  * Returns null when nothing is installed.
  */
-export function selectLocalModel(models: string[], preferred?: string): string | null {
+export function selectLocalModel(
+  models: string[],
+  preferred?: string,
+  kind: LocalModelKind = "coder",
+): string | null {
   if (preferred && models.includes(preferred)) return preferred;
-  for (const candidate of LOCAL_MODEL_PREFERENCE) {
+  const order = kind === "fast" ? LOCAL_MODEL_PREFERENCE_FAST : LOCAL_MODEL_PREFERENCE;
+  for (const candidate of order) {
     const hit = models.find((m) => m === candidate || m.startsWith(`${candidate}:`));
     if (hit) return hit;
   }
@@ -203,17 +217,29 @@ export function selectLocalModel(models: string[], preferred?: string): string |
 }
 
 /**
- * Preference order for the local lane. litt-coder first: it is the build
- * tuned for this tool, so when the operator has installed it they meant
- * for LiTT to use it.
+ * Preference order for the local lane's coding/technical path.
+ * litt-coder first: it is the build tuned for this tool, so when the
+ * operator has installed it they meant for LiTT to use it.
  */
 const LOCAL_MODEL_PREFERENCE = [
+  "litt-coder:latest",
   "litt-coder:fast",
   "litt-coder:3b",
   "qwen2.5-coder:3b",
   "qwen3:4b",
   "qwen3:4b-instruct",
   "litt-oc-phone:1.7b-8k",
+];
+
+/**
+ * Preference order for low-risk fast/chat/classification work: small
+ * resident models that answer quickly and leave VRAM headroom.
+ */
+const LOCAL_MODEL_PREFERENCE_FAST = [
+  "litt-fast:2k",
+  "litt-tools:4k",
+  "qwen3:1.7b",
+  "qwen2.5-coder:3b",
 ];
 
 /** Drop the cached probe result (tests, and after an explicit /local). */
