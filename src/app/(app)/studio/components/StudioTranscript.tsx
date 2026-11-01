@@ -33,6 +33,7 @@ import {
   conversationToMarkdown,
   markdownToPlainText,
 } from "@/lib/studio/message-copy";
+import ConversationActivityCards from "./ConversationActivityCards";
 
 /**
  * Derive the work-log line from execution evidence only.
@@ -730,6 +731,7 @@ export default function StudioTranscript({
                       AI
                     </span>
                   )}
+                  {!isUser && <ConversationActivityCards activity={message.toolActivity} messageStatus={message.status} />}
                 </div>
                 {!isUser && command && (
                   <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
