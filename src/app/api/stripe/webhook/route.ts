@@ -78,7 +78,9 @@ async function grantSubscriptionCredits(
   const plan = PLANS[planId];
   if (!plan || plan.monthlyCredits <= 0) return;
   try {
-    await sb.rpc("grant_credits", {
+    // Supabase rpc() returns { data, error } — it does NOT throw on a
+    // database error. Both must be treated as failures.
+    const { error: rpcError } = await sb.rpc("grant_credits", {
       p_user_id: userId,
       p_amount: plan.monthlyCredits,
       p_category: "subscription_grant",
@@ -88,7 +90,19 @@ async function grantSubscriptionCredits(
       p_reference_type: "subscription",
       p_expires_at: expiresAt ?? undefined,
     });
-  } catch (_err) {
+    if (rpcError) {
+      throw new Error(`grant_credits RPC error: ${rpcError.message}`);
+    }
+  } catch (err) {
+    // Log AND propagate: a failed grant must surface as HTTP 500 so Stripe
+    // retries. The per-invoice idempotency key makes retries safe (the RPC
+    // returns granted=false instead of double-granting). Swallowing here
+    // would permanently leave the customer without purchased credits.
+    console.error(
+      `[stripe] grantSubscriptionCredits failed for user ${userId} plan ${planId}:`,
+      err,
+    );
+    throw err;
   }
 }
 
@@ -400,33 +414,141 @@ export async function POST(req: NextRequest) {
         if (!sb) break;
         const inv = event.data.object as Stripe.Invoice;
         const invSubId = inv.parent?.subscription_details?.subscription;
-        if (invSubId && typeof invSubId === "string") {
-          const { data: invMatch } = await sb
+        if (typeof invSubId !== "string" || !invSubId) {
+          // Malformed event: fail loudly so Stripe retries and we see it,
+          // rather than silently dropping a paid invoice.
+          throw new Error(
+            `[stripe] invoice.paid ${event.id}: missing parent subscription id`,
+          );
+        }
+        // The customer.subscription.created event is usually still in flight
+        // when invoice.paid arrives: it performs a multi-query upsert while
+        // this handler does a single SELECT, so without a wait the lookup
+        // systematically misses.
+        //
+        // Timeout budget (guaranteed, not estimated): 5 sleeps × 2s = 10s
+        // + Stripe API fallback (hard 8s timeout above) + DB ops ≈ 20s max.
+        // Stays under Stripe's 30s webhook timeout even if every
+        // dependency is slow.
+        let invMatch: { user_id: string; plan: string } | null = null;
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const { data } = await sb
             .from("subscriptions")
             .select("user_id, plan")
             .eq("stripe_subscription_id", invSubId)
             .single();
-          if (invMatch) {
-            await sb
-              .from("subscriptions")
-              .update({
-                status: "active",
-                updated_at: new Date().toISOString(),
-              })
-              .eq("user_id", invMatch.user_id);
-            // Invoice payment is the only source of subscription grants. This
-            // prevents the first billing period from being granted twice.
-            const planId = (invMatch.plan as PlanId) || "creator_beta";
-            const periodEnd = inv.lines.data[0]?.period?.end;
-            await grantSubscriptionCredits(
-              sb,
-              invMatch.user_id,
-              planId,
-              `invoice_grant_${inv.id}`,
-              periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+          if (data) {
+            invMatch = data;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+        // Self-healing fallback: if the subscription.created event was lost
+        // or is still delayed, reconstruct the row from the Stripe API
+        // instead of leaving the customer without credits.
+        if (!invMatch) {
+          console.warn(
+            `[stripe] invoice.paid ${event.id}: subscription row missing after retries, resolving via Stripe API`,
+          );
+          try {
+            // Bounded: 8s max for the Stripe API call. Combined with the
+            // 10s retry loop, the worst case stays under Stripe's 30s
+            // webhook timeout even if the API hangs.
+            const fullSub = await stripe.subscriptions.retrieve(invSubId, undefined, {
+              timeout: 8000,
+            });
+            // Resolve the user from the subscription's own metadata — no guessing.
+            const clerkId: string | undefined =
+              typeof fullSub.metadata?.clerk_id === "string"
+                ? fullSub.metadata.clerk_id
+                : undefined;
+            if (clerkId) {
+              const { data: u } = await sb
+                .from("users")
+                .select("id")
+                .eq("clerk_id", clerkId)
+                .single();
+              if (u) {
+                const planId: PlanId =
+                  (fullSub.metadata?.plan_id as PlanId) || "creator_beta";
+                const { error: fallbackUpsertError } = await sb
+                  .from("subscriptions")
+                  .upsert(
+                    {
+                      user_id: u.id,
+                      stripe_customer_id:
+                        typeof inv.customer === "string"
+                          ? inv.customer
+                          : inv.customer?.id ?? null,
+                      stripe_subscription_id: invSubId,
+                      plan: planId,
+                      status: fullSub.status,
+                      current_period_start: fullSub.items?.data?.[0]?.current_period_start
+                        ? new Date(
+                            fullSub.items.data[0].current_period_start * 1000,
+                          ).toISOString()
+                        : null,
+                      current_period_end: fullSub.items?.data?.[0]?.current_period_end
+                        ? new Date(
+                            fullSub.items.data[0].current_period_end * 1000,
+                          ).toISOString()
+                        : null,
+                      updated_at: new Date().toISOString(),
+                    },
+                    { onConflict: "stripe_subscription_id", ignoreDuplicates: false },
+                  );
+                if (fallbackUpsertError) {
+                  // Do NOT proceed to grant: the row wasn't reconstructed.
+                  // Throw so Stripe retries (recoverable, not silently dropped).
+                  throw new Error(
+                    `[stripe] invoice.paid ${event.id}: fallback upsert failed: ${fallbackUpsertError.message}`,
+                  );
+                }
+                invMatch = { user_id: u.id, plan: planId };
+              }
+            }
+          } catch (fallbackErr) {
+            console.error(
+              `[stripe] invoice.paid ${event.id}: Stripe API fallback failed`,
+              fallbackErr,
             );
           }
         }
+        if (!invMatch) {
+          // Do NOT return 200: Stripe must retry. The event is not marked
+          // processed, so a retry will re-attempt the grant. Idempotency
+          // (per-invoice key) prevents double-granting on retry.
+          throw new Error(
+            `[stripe] invoice.paid ${event.id}: no subscription row for ${invSubId} after retries+fallback`,
+          );
+        }
+        // Status update is checked: a silent failure here would leave the
+        // subscription row stale. Throw → 500 → Stripe retries (idempotent).
+        const { error: statusUpdateError } = await sb
+          .from("subscriptions")
+          .update({
+            status: "active",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", invMatch.user_id);
+        if (statusUpdateError) {
+          throw new Error(
+            `[stripe] invoice.paid ${event.id}: status update failed: ${statusUpdateError.message}`,
+          );
+        }
+        // Invoice payment is the only source of subscription grants. This
+        // prevents the first billing period from being granted twice.
+        // If the grant throws, the error propagates → HTTP 500 → Stripe
+        // retries. The per-invoice idempotency key makes retries safe.
+        const planId = (invMatch.plan as PlanId) || "creator_beta";
+        const periodEnd = inv.lines.data[0]?.period?.end;
+        await grantSubscriptionCredits(
+          sb,
+          invMatch.user_id,
+          planId,
+          `invoice_grant_${inv.id}`,
+          periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+        );
         break;
       }
 
