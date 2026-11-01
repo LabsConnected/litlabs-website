@@ -2145,3 +2145,179 @@ describe("runAgentLoopV2 — browser interaction without a live session never re
     expect(click!.summary).toMatch(/browser session/i);
   });
 });
+
+describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
+  /**
+   * P1 fix (e9e86189): the resumed-build no-write counter must measure
+   * consecutive unproductive MODEL steps across approval cycles — approval
+   * pauses and resume transitions are not model steps, a pause FOR a file
+   * write is write intent in flight (resets to 0), and writes completed
+   * after approval reset accumulated debt. Genuinely stuck runs still die.
+   */
+  beforeEach(() => vi.clearAllMocks());
+
+  const writeTransport = {
+    ...fakeTransport,
+    writeFile: vi.fn(async () => ({ saved: true })),
+    readFile: vi.fn(async () => ({ content: "<html/>", size: 7 })),
+    listFiles: vi.fn(async () => ({ entries: [{ name: "index.html", type: "file" }] })),
+  } as unknown as WorkspaceTransport;
+
+  function approvedWriteResume(extra?: Partial<ResumeInput>): ResumeInput {
+    return {
+      pausedMessages: [{ role: "user", content: "Build a site" }],
+      toolId: "files.write",
+      toolCallId: "tc-w1",
+      inputs: { projectId: "p-test", path: "index.html", content: "<html/>" },
+      decision: "approved",
+      stepsUsedBeforePause: 1,
+      hadInterveningMutation: false,
+      priorToolCalls: [],
+      config: {
+        systemPrompt: "You are LiTT.",
+        userId: "u-test",
+        executionMode: "act",
+        enableBuildFix: false,
+        isStaticWorkspace: true,
+        buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+        executionRequested: true,
+      },
+      ...extra,
+    };
+  }
+
+  it("pausing FOR a file write stores zeroWriteStepsAtPause=0", async () => {
+    // Resumed model emits another gated write → pause → the pause record
+    // must carry 0, not whatever the segment accumulated.
+    vi.mocked(callLLMWithTools).mockResolvedValueOnce({
+      text: "",
+      toolCalls: [{ toolId: "files.write", toolCallId: "tc-w2", inputs: { projectId: "p-test", path: "b.html", content: "<b/>" } }],
+      finishReason: "tool_calls",
+      model: "test",
+    });
+    const result = await resumeAgentLoopV2(approvedWriteResume(), writeTransport);
+    expect(result.pendingApproval?.toolId).toBe("files.write");
+    expect(result.pendingApproval?.zeroWriteStepsAtPause).toBe(0);
+  });
+
+  it("a non-write pause carries accumulated no-write steps forward", async () => {
+    // read (+1) then a gated non-write tool pauses → counter persists at 1.
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: "r1", inputs: { projectId: "p-test", path: "index.html" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "preview.start", toolCallId: "pv1", inputs: { projectId: "p-test" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      });
+    const result = await resumeAgentLoopV2(approvedWriteResume(), writeTransport);
+    expect(result.pendingApproval?.toolId).toBe("preview.start");
+    expect(result.pendingApproval?.zeroWriteStepsAtPause).toBe(1);
+  });
+
+  it("a write completed after approval resets previously accumulated steps", async () => {
+    // Resume carrying debt=2 with an approved files.write: the approved
+    // write executes first (verified progress) → counter resets → two
+    // subsequent read batches must NOT kill the run (0+1+1 < 3).
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: "r1", inputs: { projectId: "p-test", path: "a.html" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: "r2", inputs: { projectId: "p-test", path: "b.html" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      })
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
+    const result = await resumeAgentLoopV2(
+      approvedWriteResume({ zeroWriteStepsAtPause: 2 }),
+      writeTransport,
+    );
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.finalText).toBe("Done.");
+  });
+
+  it("multiple sequential write approvals keep the build alive", async () => {
+    // approve write1 → resume emits write2 (pauses, counter 0) → approve
+    // → resume emits write3 (pauses) → approve → completes. Without the
+    // persisted reset a mid-segment read tail could kill a healthy run.
+    const second = {
+      text: "",
+      toolCalls: [{ toolId: "files.write", toolCallId: "tc-w2", inputs: { projectId: "p-test", path: "b.html", content: "<b/>" } }],
+      finishReason: "tool_calls" as const,
+      model: "test",
+    };
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(second)
+      .mockResolvedValueOnce(second)
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
+    const r1 = await resumeAgentLoopV2(approvedWriteResume(), writeTransport);
+    expect(r1.pendingApproval?.toolId).toBe("files.write");
+    const r2 = await resumeAgentLoopV2(
+      approvedWriteResume({
+        toolId: r1.pendingApproval!.toolId,
+        toolCallId: r1.pendingApproval!.toolCallId,
+        inputs: r1.pendingApproval!.inputs,
+        pausedMessages: r1.pendingApproval!.pausedMessages,
+        priorToolCalls: r1.pendingApproval!.priorToolCalls,
+        zeroWriteStepsAtPause: r1.pendingApproval!.zeroWriteStepsAtPause,
+      }),
+      writeTransport,
+    );
+    expect(r2.pendingApproval?.toolId).toBe("files.write");
+    expect(r2.pendingApproval?.zeroWriteStepsAtPause).toBe(0);
+    const r3 = await resumeAgentLoopV2(
+      approvedWriteResume({
+        toolId: r2.pendingApproval!.toolId,
+        toolCallId: r2.pendingApproval!.toolCallId,
+        inputs: r2.pendingApproval!.inputs,
+        pausedMessages: r2.pendingApproval!.pausedMessages,
+        priorToolCalls: r2.pendingApproval!.priorToolCalls,
+        zeroWriteStepsAtPause: r2.pendingApproval!.zeroWriteStepsAtPause,
+      }),
+      writeTransport,
+    );
+    expect(r3.finalText).toBe("Done.");
+    expect(r3.failedHonestly).toBeUndefined();
+  });
+
+  it("still terminates a genuinely stuck resumed run", async () => {
+    // Three consecutive completed batches with no write and no write gate.
+    let step = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => ({
+      text: "",
+      toolCalls: [{ toolId: "files.read", toolCallId: `r-${++step}`, inputs: { projectId: "p-test", path: `p-${step}` } }],
+      finishReason: "tool_calls",
+      model: "test",
+    }));
+    const result = await resumeAgentLoopV2(approvedWriteResume(), writeTransport);
+    expect(callLLMWithTools).toHaveBeenCalledTimes(3);
+    expect(result.failedHonestly).toContain("3 steps");
+  });
+
+  it("a rejected write approval keeps counting — no free progress", async () => {
+    // REJECTED write: no execution, no progress. Read steps after the
+    // rejection still accumulate toward the bound.
+    let step = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => ({
+      text: "",
+      toolCalls: [{ toolId: "files.read", toolCallId: `r-${++step}`, inputs: { projectId: "p-test", path: `p-${step}` } }],
+      finishReason: "tool_calls",
+      model: "test",
+    }));
+    const result = await resumeAgentLoopV2(
+      approvedWriteResume({ decision: "rejected", rejectionReason: "not now" }),
+      writeTransport,
+    );
+    expect(result.failedHonestly).toContain("3 steps");
+  });
+});
