@@ -354,9 +354,12 @@ export default function PreviewDockHost({
         data-testid="preview-dock-resize"
       />
 
-      {/* ── Float corner resize grip — index 3, style-only toggle. ── */}
+      {/* ── Float corner resize grip — index 3, style-only toggle. Inset
+          8px: the host's 28px rounded corner is clipped by overflow:hidden,
+          and Chromium hit-tests against the clipped shape — a grip flush in
+          the corner is unreachable. ── */}
       <div
-        className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"
+        className="absolute bottom-2 right-2 h-4 w-4 cursor-nwse-resize"
         style={{ touchAction: "none", display: isFloat && !floatMinimized ? undefined : "none" }}
         onPointerDown={isFloat && !floatMinimized ? onGripPointerDown("resize") : undefined}
         role="separator"

@@ -710,12 +710,13 @@ export default function StudioPreviewPanel({
   // (e.g. reaching ready) or the project changes.
   useEffect(() => {
     // Poll while the runtime is coming up — and while it *should* be coming
-    // up. A `not_started` state with real workspace content means auto-start
-    // either already fired (preparePreview in flight or spent) or never got
-    // to run; either way the panel must keep observing the runtime until it
-    // flips to ready, otherwise "Preparing automatically" sits forever over a
-    // runtime that already became ready.
-    const awaitingRuntime = state === "not_started" && workspaceTruth === "has_content";
+    // up. `not_started` always polls: auto-start either already fired
+    // (preparePreview in flight or spent) or never got to run, and the
+    // workspace-truth fetch itself may have resolved before the first file
+    // landed. Either way the panel must keep observing the runtime until it
+    // flips to ready, otherwise an empty state sits forever over a runtime
+    // that already became ready.
+    const awaitingRuntime = state === "not_started";
     if (state !== "starting" && state !== "restarting" && state !== "loading" && !awaitingRuntime) {
       startPollAttemptsRef.current = 0;
       return;
