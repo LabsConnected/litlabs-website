@@ -138,6 +138,14 @@ export interface VoiceSessionCtx {
   timing: VoiceTimingMetrics;
   latencies: ReturnType<typeof computeLatencies>;
   ttsEnabled: boolean;
+  /**
+   * Server-reported voice availability (probed once per session via
+   * /api/voice/health). When false the deployment has no voice provider
+   * configured — TTS/STT calls short-circuit quietly instead of running
+   * the failing chain and spamming console errors. Truthful UI state
+   * (disable/hide voice controls) should key off this, not optimism.
+   */
+  voiceAvailable: boolean;
   /** Auto-send finalized transcript (default: false — show editable draft). */
   autoSendEnabled: boolean;
   diagnostics: VoiceDiagnostics;
@@ -177,6 +185,37 @@ let activeStream: MediaStream | null = null;
 
 const noop = () => {};
 
+// ---------------------------------------------------------------------------
+// Voice availability probe — one cheap health check per session.
+// /api/voice/health reports { configured, available, tokenService } without
+// minting a token. "false" only on an explicit unconfigured/unavailable
+// answer; transport errors resolve true (unknown → let the chain decide).
+// ---------------------------------------------------------------------------
+
+let voiceAvailabilityProbe: Promise<boolean> | null = null;
+
+function probeVoiceAvailability(): Promise<boolean> {
+  if (!voiceAvailabilityProbe) {
+    voiceAvailabilityProbe = fetch("/api/voice/health", {
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    })
+      .then(async (res) => {
+        if (!res.ok) return true; // unknown — do not permanently suppress
+        const body = (await res.json().catch(() => null)) as {
+          configured?: boolean;
+          available?: boolean;
+        } | null;
+        if (!body) return true;
+        if (body.configured === false || body.available === false) return false;
+        return true;
+      })
+      .catch(() => true);
+  }
+  return voiceAvailabilityProbe;
+}
+
 const defaultDiagnostics: VoiceDiagnostics = {
   provider: "inworld",
   transportConnected: false,
@@ -211,6 +250,7 @@ const defaultCtx: VoiceSessionCtx = {
   timing: createInitialTimingMetrics(),
   latencies: computeLatencies(createInitialTimingMetrics()),
   ttsEnabled: true,
+  voiceAvailable: true,
   autoSendEnabled: false,
   diagnostics: defaultDiagnostics,
   startVoice: noop,
@@ -272,6 +312,7 @@ export function VoiceSessionProvider({
     if (typeof window === "undefined") return VOICE_GATE_CONFIG.ptt.autoSendDefault;
     return localStorage.getItem(AUTO_SEND_PREF_KEY) === "1";
   });
+  const [voiceAvailable, setVoiceAvailable] = useState<boolean>(true);
   const [diagnostics, setDiagnostics] = useState<VoiceDiagnostics>(defaultDiagnostics);
   const [pendingTranscript, setPendingTranscriptState] = useState<string | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -834,6 +875,19 @@ export function VoiceSessionProvider({
       const sanitized = sanitizeSpeech(text);
       if (!sanitized) return;
 
+      // ── Graceful degradation ──
+      // Probe /api/voice/health once per session before starting the TTS
+      // chain. A negative answer only means the Inworld token path is
+      // unconfigured — the /api/voice/tts endpoint (OpenAI) and browser
+      // speechSynthesis are independent providers the health route does
+      // not check, so the probe gates the Inworld step alone, never the
+      // whole fallback chain. voiceAvailable still records the truthful
+      // deployment state for the mic/STT voice session.
+      const inworldAvailable = await probeVoiceAvailability();
+      if (!inworldAvailable) {
+        setVoiceAvailable(false);
+      }
+
       // ── Echo isolation: pause mic before TTS ──
       if (VOICE_GATE_CONFIG.echo.pauseMicDuringTts) {
         inworldSession.pauseMic();
@@ -844,7 +898,7 @@ export function VoiceSessionProvider({
       setVoiceState("assistant_speaking");
       voiceStateRef.current = "assistant_speaking";
       updateDiagnostics({
-        provider: "inworld",
+        provider: inworldAvailable ? "inworld" : "browser",
         voicePhase: "assistant_speaking",
         outputState: "speaking",
       });
@@ -885,38 +939,40 @@ export function VoiceSessionProvider({
       }
 
       // Primary: Inworld TTS (uses configured INWORLD_LITT_VOICE / INWORLD_SPARK_VOICE)
-      // Always try Inworld first — inworldSession.speakText auto-connects the
-      // transport if needed. This lets "Speak" work without first starting voice.
-      try {
-        console.debug("[Voice Pipeline] TTS request started", { textLength: spokenText.length, preview: spokenText.slice(0, 60) });
-        await inworldSession.speakText(spokenText);
-        // Mark transport as connected since speakText auto-connects
-        if (!inworldConnectedRef.current) {
-          inworldConnectedRef.current = true;
-          setVoiceTransportConnected(true);
-          updateDiagnostics({ transportConnected: true });
-        }
-        // Inworld TTS playback completion is handled by the
-        // onResponseComplete callback → finishSpeaking logic above.
-        // But also set a safety timeout in case the event is missed.
-        return;
-      } catch (err) {
-        console.warn("[Voice Pipeline] TTS failed (Inworld), falling back:", err);
-        // Mark transport as disconnected if it failed
-        if (inworldConnectedRef.current) {
-          inworldConnectedRef.current = false;
-          setVoiceTransportConnected(false);
-          updateDiagnostics({ transportConnected: false });
-        }
-        // ── Double-speak guard ──
-        // If Inworld played part of the reply before throwing, do NOT
-        // re-speak the whole text from the start via a fallback.
-        if (inworldSession.didLastTtsPlayAudio()) {
-          console.debug("[Voice Pipeline] partial Inworld audio already played — skipping fallback re-speak");
-          finishSpeaking();
+      // Only attempted when the health probe confirmed the token path —
+      // the fallbacks below still run when it didn't.
+      if (inworldAvailable) {
+        try {
+          console.debug("[Voice Pipeline] TTS request started", { textLength: spokenText.length, preview: spokenText.slice(0, 60) });
+          await inworldSession.speakText(spokenText);
+          // Mark transport as connected since speakText auto-connects
+          if (!inworldConnectedRef.current) {
+            inworldConnectedRef.current = true;
+            setVoiceTransportConnected(true);
+            updateDiagnostics({ transportConnected: true });
+          }
+          // Inworld TTS playback completion is handled by the
+          // onResponseComplete callback → finishSpeaking logic above.
+          // But also set a safety timeout in case the event is missed.
           return;
+        } catch (err) {
+          console.warn("[Voice Pipeline] TTS failed (Inworld), falling back:", err);
+          // Mark transport as disconnected if it failed
+          if (inworldConnectedRef.current) {
+            inworldConnectedRef.current = false;
+            setVoiceTransportConnected(false);
+            updateDiagnostics({ transportConnected: false });
+          }
+          // ── Double-speak guard ──
+          // If Inworld played part of the reply before throwing, do NOT
+          // re-speak the whole text from the start via a fallback.
+          if (inworldSession.didLastTtsPlayAudio()) {
+            console.debug("[Voice Pipeline] partial Inworld audio already played — skipping fallback re-speak");
+            finishSpeaking();
+            return;
+          }
+          updateDiagnostics({ provider: "browser", transportConnected: false });
         }
-        updateDiagnostics({ provider: "browser", transportConnected: false });
       }
 
       // Fallback 1: server-side OpenAI TTS (/api/voice/tts). Server-side
@@ -1177,6 +1233,7 @@ export function VoiceSessionProvider({
       timing: voiceStore.timing,
       latencies,
       ttsEnabled,
+      voiceAvailable,
       autoSendEnabled,
       diagnostics,
       startVoice,
@@ -1200,7 +1257,7 @@ export function VoiceSessionProvider({
       voiceState, voiceOutputState, voiceInputState, voiceTransportConnected,
       transcript, pendingTranscript, micLevel, errorMessage, isMuted,
       selectedDeviceId, availableDevices, voiceMode, voiceStore.timing,
-      latencies, ttsEnabled, autoSendEnabled, diagnostics,
+      latencies, ttsEnabled, voiceAvailable, autoSendEnabled, diagnostics,
       startVoice, stopVoice, toggleMute, interrupt, speakText, stopSpeaking,
       selectDevice, setOnTurn, toggleTts, toggleAutoSend,
       submitTranscript, cancelRecording, clearPendingTranscript, setPendingTranscript,

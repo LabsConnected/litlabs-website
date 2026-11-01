@@ -276,9 +276,16 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
         "STYLING CONTRACT (Tailwind browser CDN): when a static page uses the Tailwind CSS browser build, the <head> MUST follow this exact pattern: " +
         '<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>, fonts via <link> tags (preconnect + stylesheet), ' +
         "and custom CSS in <style type=\"text/tailwindcss\"> (use @theme for design tokens). " +
+        "@theme takes CSS custom properties, NEVER a v3 config object: write @theme { --color-primary: #a8ff2f; --font-sans: \"Inter\", sans-serif; } " +
+        "— keys like colors:, extend:, fontFamily: or quoted literal values ('#hex', ['a','b']) inside @theme throw CssSyntaxError and compile ZERO utilities. " +
         "NEVER put an @import line inside <style type=\"text/tailwindcss\"> unless the block also contains @import \"tailwindcss\"; as its first line — " +
         "the Tailwind v4 browser build silently compiles ZERO utilities when it sees any @import without tailwindcss, leaving the page completely unstyled with no error. " +
-        "Load Google Fonts with <link>, never with @import.",
+        "Load Google Fonts with <link>, never with @import. " +
+        "LAYOUT RULE: a fixed/sticky header (fixed top-0) MUST be paired with matching top padding on the following content " +
+        "(e.g. pt-16/pt-20 on the first section or main) — never let fixed navigation overlap the hero or headings. " +
+        "DESIGN QUALITY (LiTT Black Label): default to a premium dark aesthetic — near-black background, ONE accent color, " +
+        "generous whitespace, restrained borders (white/5-white/10), soft glass surfaces, consistent spacing rhythm, " +
+        "responsive stacking below md. Avoid template-looking centered walls of text; use real headings, hierarchy, and section padding.",
       );
     }
   }
@@ -328,7 +335,12 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
   }
 
   if (ctx.executionMode === "act") {
-    lines.push("APPROVAL: You are in ACT mode. Mutations (file writes, commands) require explicit user approval. When you need to mutate, tell the user what you want to do and wait for approval.");
+    lines.push(
+      "APPROVAL: You are in ACT mode. Mutations (file writes, commands) require explicit user approval — " +
+      "the approval gate pauses the run and shows the user an Approve/Reject card automatically when you emit a mutating tool call. " +
+      "When the user explicitly asks you to build, create, write, or apply a change, EMIT THE TOOL CALL NOW. " +
+      "Do NOT describe the plan and ask for approval in prose — a prose ask creates no card and stalls the run with nothing executed.",
+    );
   } else if (ctx.executionMode === "auto") {
     lines.push("APPROVAL: You are in AUTO mode. Safe workspace operations (file reads, writes, patches, git commit, builds) are auto-approved. Sensitive actions (force push, delete, rebase) still require approval.");
   } else {

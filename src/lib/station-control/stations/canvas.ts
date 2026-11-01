@@ -29,6 +29,7 @@ import {
 } from "./creator-helpers";
 import {
   addBlocks,
+  createCanvas,
   deleteBlock,
   getCanvas,
   listBlocks,
@@ -79,6 +80,7 @@ const contentSchemas: Record<string, z.ZodType> = {
 
 async function resolveCanvasId(
   ctx: StationExecutionContext,
+  opts?: { createIfMissing?: boolean },
 ): Promise<{ canvasId: string } | StationResult> {
   const canvases = await listCanvases(ctx.userId, {
     ...(ctx.projectId ? { projectId: ctx.projectId } : {}),
@@ -86,10 +88,32 @@ async function resolveCanvasId(
   });
   const active = canvases.find((c) => c.status !== "archived") ?? canvases[0];
   if (!active) {
-    return fail(
-      "No canvas exists for this project/conversation yet. Create one in Studio first, then retry.",
-      "not_implemented",
-    );
+    if (!opts?.createIfMissing) {
+      return fail(
+        "No canvas exists for this project/conversation yet. Create one in Studio first, then retry.",
+        "not_implemented",
+      );
+    }
+    // addNode is a creation-path action: the agent asking to place a block
+    // implies the canvas it belongs on. Lazily create it instead of
+    // dead-ending the run — every other action still fails fast.
+    try {
+      const { canvas } = await createCanvas(
+        {
+          userId: ctx.userId,
+          projectId: ctx.projectId ?? null,
+          conversationId: ctx.conversationId ?? null,
+          title: "LiTT Canvas",
+        },
+        "litt",
+      );
+      return { canvasId: canvas.id };
+    } catch (err) {
+      return fail(
+        err instanceof Error ? err.message : "Failed to create canvas",
+        "execution_failed",
+      );
+    }
   }
   return { canvasId: active.id };
 }
@@ -132,7 +156,7 @@ defineAction({
   resultType: stationResultSchema,
   mutating: true,
   execute: async (args, ctx): Promise<StationResult> => {
-    const resolved = await resolveCanvasId(ctx);
+    const resolved = await resolveCanvasId(ctx, { createIfMissing: true });
     if ("success" in resolved && !resolved.success) return resolved;
     const canvasId = (resolved as { canvasId: string }).canvasId;
     const denied = await checkOwnership(ctx, canvasId);

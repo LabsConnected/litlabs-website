@@ -226,6 +226,45 @@ const BOUNDARY_VERIFIED_MUTATORS = new Set([
 ]);
 
 /**
+ * Mutating tools whose effect IS a workspace-file change — the only kind
+ * that can satisfy a `mutation` (build) requirement. Their success is
+ * verified by read-back or the checkpoint diff, exactly as
+ * mutationIsVerified already requires. Everything in
+ * BOUNDARY_VERIFIED_MUTATORS is excluded by construction; the set below
+ * exists to document intent and to make the workspace-vs-boundary split
+ * explicit for callers, not to be enumerated exhaustively — the decisive
+ * test is {@link isWorkspaceMutationClaim}.
+ */
+const BOUNDARY_ONLY_MUTATORS = BOUNDARY_VERIFIED_MUTATORS;
+
+/**
+ * Does this successful mutation claim represent a change to the workspace
+ * itself — the thing a build/edit request actually demands?
+ *
+ * Boundary mutators (browser.*, preview.*, memory.store, deploy tools)
+ * mutate something real — a remote page, a preview process, a memory
+ * record — but NOT the project files. A run asked to "change the heading"
+ * that only clicked a browser element did not satisfy the request, even
+ * though the tool succeeded. Without this split such a run reported
+ * "complete" while the file on disk was untouched.
+ *
+ * A boundary-mutator claim still counts when its own evidence ties it to
+ * the workspace — a confirmed read-back (`persisted === true`) or a
+ * declared path the diff names (e.g. image.generate landing an asset
+ * file). Absent that link, it is boundary work only.
+ */
+function isWorkspaceMutationClaim(call: ToolCallEvidence, change: WorkspaceChangeEvidence | null): boolean {
+  if (!BOUNDARY_ONLY_MUTATORS.has(call.toolId)) return true;
+  if (call.persisted === true) return true;
+  const declared = (call.paths ?? []).map(normalizeEvidencePath);
+  if (declared.length > 0 && change?.status === "changed") {
+    const changedFiles = new Set((change.files ?? []).map(normalizeEvidencePath));
+    if (declaredPathMatched(declared, changedFiles)) return true;
+  }
+  return false;
+}
+
+/**
  * Do any of the claim's declared paths appear in the diff? A declared
  * directory also matches a changed file inside it — git diffs enumerate
  * files, never the directories that contain them.
@@ -536,6 +575,40 @@ function evaluateCompletionState(
           `A tool reported a successful mutation, but the workspace could not be checked to confirm ` +
           `the change persisted` +
           `${change?.unknownReason ? ` (${change.unknownReason})` : ""}.`,
+      };
+    }
+
+    // The mutations that were verified must include a real WORKSPACE
+    // change — the files the build/edit request asked to create or
+    // modify. Boundary-only work (a browser click, a preview start, a
+    // memory write) is real work but not the requested file change; a
+    // run that did only that must not be reported complete. Confirmed
+    // live (e2e-live 2026-10-31): an approved browser.click succeeded
+    // while index.html stayed untouched — previously "complete".
+    const workspaceVerified = claimedMutations.filter(
+      (c, i) => verified[i] && isWorkspaceMutationClaim(c, change),
+    );
+    if (workspaceVerified.length === 0) {
+      missing.push("verified workspace file mutation");
+      if (change?.status === "unchanged") {
+        return {
+          ...base,
+          ...changeFields(change),
+          state: "failed",
+          missing,
+          reason:
+            "The run performed actions but did not change any project file — the workspace diff confirms nothing was written. " +
+            "The requested file change did not happen.",
+        };
+      }
+      return {
+        ...base,
+        ...changeFields(change),
+        state: "partial",
+        missing,
+        reason:
+          "The run performed actions but none is verified as a workspace file mutation — " +
+          "the requested file change cannot be confirmed.",
       };
     }
   }
