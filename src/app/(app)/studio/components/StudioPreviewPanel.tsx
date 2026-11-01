@@ -719,9 +719,12 @@ export default function StudioPreviewPanel({
   // spinner. The counter resets whenever the panel leaves the polling set
   // (e.g. reaching ready) or the project changes.
   useEffect(() => {
-    // Only a start in progress is polled. "loading" is a single bounded request
-    // (15s timeout -> unreachable); polling it re-issued the request every 3s.
-    if (state !== "starting" && state !== "restarting") {
+    // Poll while a start is in flight — and while `not_started`, since
+    // auto-start may already be spent/in-flight while the runtime flips
+    // ready server-side. A not_started poll that never resolves stays
+    // honest (idle empty state) rather than failing.
+    const awaitingRuntime = state === "not_started";
+    if (state !== "starting" && state !== "restarting" && !awaitingRuntime) {
       startPollAttemptsRef.current = 0;
       return;
     }
@@ -732,6 +735,10 @@ export default function StudioPreviewPanel({
         clearInterval(interval);
         statusSeqRef.current++;
         statusInFlightRef.current = false;
+        if (awaitingRuntime) {
+          startPollAttemptsRef.current = 0;
+          return;
+        }
         setState("failed");
         setStartPhase(null);
         setError("The preview took too long to start. The dev server may have crashed during startup — check the logs, then try restarting.");
