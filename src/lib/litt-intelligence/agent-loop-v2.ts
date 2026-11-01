@@ -278,6 +278,14 @@ export interface PendingApproval {
   stepsUsedAtPause?: number;
   hadInterveningMutationAtPause?: boolean;
   /**
+   * Resumed-build no-write counter at pause time. A pause for a
+   * file-writing tool stores 0 — pending write intent is progress, and
+   * the approved write executes on the next segment. Persisted so the
+   * stall guard measures consecutive unproductive MODEL steps across
+   * approval cycles instead of truncating at every resume boundary.
+   */
+  zeroWriteStepsAtPause?: number;
+  /**
    * Calls that already executed before this pause — INCLUDING declared
    * paths and read-back persisted flags. Persisted on the paused-run record
    * and seeded back into the resumed run's evidence log so completion
@@ -3433,6 +3441,12 @@ async function resumeAgentLoopV2Inner(
     llmMessages.push(buildToolResultMessage(result));
   }
 
+  // Resumed-build stall accounting: consecutive MODEL steps that complete
+  // with no successful file write. Approval pauses and resume bookkeeping
+  // are not model steps and never count; the counter persists across
+  // approval cycles via pendingApproval.zeroWriteStepsAtPause.
+  let resumeZeroWriteSteps = resume.zeroWriteStepsAtPause ?? 0;
+
   // Re-inject the deferred remainder of the batch that hit the approval
   // gate: these calls were never executed before the pause, and approving
   // the gated tool must not silently drop them. Deferred mutations that
@@ -3481,6 +3495,10 @@ async function resumeAgentLoopV2Inner(
     completedDeployment = deferredState.completedDeployment;
 
     if (deferredResult.nestedApproval) {
+      // A nested gate on a file-writing tool carries 0 — write intent is
+      // in flight; any other pause carries the counter forward unchanged.
+      deferredResult.nestedApproval.zeroWriteStepsAtPause =
+        isFileWritingTool(deferredResult.nestedApproval.toolId) ? 0 : resumeZeroWriteSteps;
       return {
         finalText: `I need your approval to run \`${deferredResult.nestedApproval.toolId}\`. ${deferredResult.nestedApproval.reason}`,
         stepsUsed,
@@ -3495,8 +3513,19 @@ async function resumeAgentLoopV2Inner(
     }
   }
 
+  // Writes completed after approval — the gated call itself or a deferred
+  // batch-mate executed during this resume's approval phase — are verified
+  // progress and reset the stall counter.
+  if (
+    resumeZeroWriteSteps > 0 &&
+    toolCallLog
+      .slice(resume.priorToolCalls?.length ?? 0)
+      .some((call) => call.success && isFileWritingTool(call.toolId))
+  ) {
+    resumeZeroWriteSteps = 0;
+  }
+
   // Continue the loop
-  let resumeZeroWriteSteps = 0;
   while (stepsUsed < cfg.maxSteps && !cancelled) {
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
@@ -3771,6 +3800,9 @@ async function resumeAgentLoopV2Inner(
             stepsUsedAtPause: stepsUsed,
             hadInterveningMutationAtPause: hasInterveningMutation,
             priorToolCalls: [...toolCallLog],
+            // Pausing FOR a file write is write intent in flight — reset
+            // the stall counter so the resumed segment starts clean.
+            zeroWriteStepsAtPause: isFileWritingTool(toolCall.toolId) ? 0 : resumeZeroWriteSteps,
           },
         };
       }
