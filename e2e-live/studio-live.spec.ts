@@ -64,33 +64,6 @@ async function listBlocks(request: APIRequestContext, page: Page, projectId: str
   return { canvasId: canvas.id as string, blocks: (bd.blocks ?? []) as unknown[] };
 }
 
-/** Recursive workspace file list — /files?path=. returns one level. */
-async function walkFiles(
-  request: APIRequestContext,
-  page: Page,
-  projectId: string,
-  dir = ".",
-  depth = 0,
-): Promise<string[]> {
-  if (depth > 6) return [];
-  const r = await request.get(
-    `${BASE}/api/studio-projects/${projectId}/files?path=${encodeURIComponent(dir)}`,
-    { headers: await bearer(page) },
-  );
-  if (!r.ok()) return [];
-  const d = await r.json();
-  const out: string[] = [];
-  for (const e of (d.entries ?? []) as Array<{ name: string; type: string }>) {
-    const rel = dir === "." ? e.name : `${dir}/${e.name}`;
-    if (e.type === "directory" || e.type === "dir") {
-      out.push(...(await walkFiles(request, page, projectId, rel, depth + 1)));
-    } else {
-      out.push(rel);
-    }
-  }
-  return out;
-}
-
 /** Fetch one file's real content through the same raw endpoint the UI uses. */
 async function fetchFileRaw(
   request: APIRequestContext,
@@ -110,57 +83,34 @@ async function fetchFileRaw(
   return Buffer.from(await r.body());
 }
 
-// Minimal store-method ZIP packer — validates that project content exports
-// byte-for-byte. (The product has no native project-ZIP endpoint today.)
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    t[n] = c >>> 0;
+// The product now owns project export (GET /export → real ZIP). The test
+// only parses the downloaded archive to verify its contents — no packing.
+import { inflateRawSync } from "zlib";
+
+/** Parse a ZIP's central directory and inflate every entry. */
+function unzipToMap(buf: Buffer): Map<string, Buffer> {
+  const eocdAt = buf.lastIndexOf(0x06054b50);
+  if (eocdAt < 0) throw new Error("not a zip: no EOCD");
+  const count = buf.readUInt16LE(eocdAt + 10);
+  let ptr = buf.readUInt32LE(eocdAt + 16);
+  const out = new Map<string, Buffer>();
+  for (let i = 0; i < count; i++) {
+    if (buf.readUInt32LE(ptr) !== 0x02014b50) throw new Error("bad central header");
+    const method = buf.readUInt16LE(ptr + 10);
+    const compressed = buf.readUInt32LE(ptr + 20);
+    const nameLen = buf.readUInt16LE(ptr + 28);
+    const extraLen = buf.readUInt16LE(ptr + 30);
+    const commentLen = buf.readUInt16LE(ptr + 32);
+    const localAt = buf.readUInt32LE(ptr + 42);
+    const name = buf.subarray(ptr + 46, ptr + 46 + nameLen).toString("utf-8");
+    const lNameLen = buf.readUInt16LE(localAt + 26);
+    const lExtraLen = buf.readUInt16LE(localAt + 28);
+    const dataStart = localAt + 30 + lNameLen + lExtraLen;
+    const stored = buf.subarray(dataStart, dataStart + compressed);
+    out.set(name, method === 8 ? inflateRawSync(stored) : stored);
+    ptr += 46 + nameLen + extraLen + commentLen;
   }
-  return t;
-})();
-function crc32(buf: Buffer): number {
-  let c = 0xffffffff;
-  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-function buildZip(files: Array<{ name: string; data: Buffer }>): Buffer {
-  const chunks: Buffer[] = [];
-  const central: Buffer[] = [];
-  let offset = 0;
-  for (const f of files) {
-    const nameBuf = Buffer.from(f.name, "utf-8");
-    const crc = crc32(f.data);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(f.data.length, 18);
-    local.writeUInt32LE(f.data.length, 22);
-    local.writeUInt16LE(nameBuf.length, 26);
-    chunks.push(local, nameBuf, f.data);
-    const cen = Buffer.alloc(46);
-    cen.writeUInt32LE(0x02014b50, 0);
-    cen.writeUInt16LE(20, 4);
-    cen.writeUInt16LE(20, 6);
-    cen.writeUInt32LE(crc, 16);
-    cen.writeUInt32LE(f.data.length, 20);
-    cen.writeUInt32LE(f.data.length, 24);
-    cen.writeUInt16LE(nameBuf.length, 28);
-    cen.writeUInt32LE(offset, 42);
-    central.push(cen, nameBuf);
-    offset += 30 + nameBuf.length + f.data.length;
-  }
-  const centralBuf = Buffer.concat(central);
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(files.length, 8);
-  eocd.writeUInt16LE(files.length, 10);
-  eocd.writeUInt32LE(centralBuf.length, 12);
-  eocd.writeUInt32LE(offset, 16);
-  return Buffer.concat([...chunks, centralBuf, eocd]);
+  return out;
 }
 
 /**
@@ -428,6 +378,9 @@ test("Studio live acceptance — full generate/modify/persist flow", async ({ pa
     r1 = await sendAndDrive(page, request, PROMPT_BUILD);
   }
   evidence.build = r1;
+  // The build run must actually complete — template scaffold files alone
+  // do not prove generation worked (masked an all-routes failure before).
+  expect(r1.status, `build run status=${r1.status}`).toBe("completed");
   const files1 = await listFiles(request, page, projectId!);
   const { canvasId, blocks } = await listBlocks(request, page, projectId!);
   evidence.afterBuild = { files: files1.map((f) => f.name), canvasId, blockCount: blocks.length };
@@ -459,6 +412,9 @@ test("Studio live acceptance — full generate/modify/persist flow", async ({ pa
   const blocksBefore = blocks.length;
   const r2 = await sendAndDrive(page, request, PROMPT_MODIFY);
   evidence.modify = r2;
+  // The modify run itself must complete — a scaffolded file must never
+  // mask a failed run the way template files masked all-route failures.
+  expect(r2.status, `modify run status=${r2.status}`).toBe("completed");
   const files2 = await listFiles(request, page, projectId!);
   const { blocks: blocks2 } = await listBlocks(request, page, projectId!);
   evidence.afterModify = { files: files2.map((f) => f.name), blockCount: blocks2.length };
@@ -492,6 +448,14 @@ test("Studio live acceptance — full generate/modify/persist flow", async ({ pa
   const { blocks: blocks3 } = await listBlocks(request, page, projectId!);
   evidence.afterReload = { files: files3.map((f) => f.name), blockCount: blocks3.length };
   expect(files3.length).toBe(files2.length);
+  // The modified content must survive the reload — re-read the file fresh.
+  if (indexPath) {
+    const html3 = (await fetchFileRaw(request, page, projectId!, indexPath)).toString("utf-8");
+    (evidence.afterReload as Record<string, unknown>).onDisk = {
+      heading: html3.includes("LiTT STUDIO VERIFIED"),
+    };
+    console.log(`[verify] post-reload heading=${html3.includes("LiTT STUDIO VERIFIED")}`);
+  }
   await shot(page, "06-reloaded");
 
   // ── 11. Terminal + voice surfaces ──────────────────────────────
@@ -513,33 +477,38 @@ test("Studio live acceptance — full generate/modify/persist flow", async ({ pa
   await page.waitForTimeout(1500);
   await shot(page, "07-mobile-studio");
 
-  // ── Export: pull every workspace file via the raw endpoint and pack
-  //    a real ZIP (store method) that survives external open+read. ──
-  const allPaths = await walkFiles(request, page, projectId!);
-  const packed: Array<{ name: string; data: Buffer }> = [];
-  for (const p of allPaths) {
-    packed.push({ name: p, data: await fetchFileRaw(request, page, projectId!, p) });
-  }
-  const zip = buildZip(packed);
+  // ── Export: real product ZIP download — the server packs the workspace,
+  //    the test only verifies the downloaded archive. ──
+  const zipResp = await apiGet(
+    request,
+    `${BASE}/api/studio-projects/${projectId}/export`,
+    await bearer(page),
+  );
+  expect(zipResp.status(), `export status ${zipResp.status()}`).toBe(200);
+  expect(zipResp.headers()["content-type"]).toContain("application/zip");
+  const zip = Buffer.from(await zipResp.body());
   const zipPath = path.join(SHOTS, `project-export-${projectId}.zip`);
   writeFileSync(zipPath, zip);
-  const indexEntry = packed.find((f) => /(^|\/)index\.html$/i.test(f.name));
+  const zipEntries = unzipToMap(zip);
+  const indexEntry = [...zipEntries.entries()].find(([n]) => /(^|\/)index\.html$/i.test(n));
   evidence.export = {
-    fileCount: packed.length,
+    fileCount: zipEntries.size,
     zipBytes: zip.length,
     zipPath,
+    contentDisposition: zipResp.headers()["content-disposition"],
+    skipped: Number(zipResp.headers()["x-export-skipped"] ?? 0),
     hasIndexHtml: Boolean(indexEntry),
     indexContainsModifiedHeading: indexEntry
-      ? indexEntry.data.toString("utf-8").includes("LiTT STUDIO VERIFIED")
+      ? indexEntry[1].toString("utf-8").includes("LiTT STUDIO VERIFIED")
       : null,
     indexContainsPurpleTheme: indexEntry
       ? /purple|rebeccapurple|violet|indigo|lavender|plum|orchid|amethyst|mauve|fuchsia|magenta|#([0-9a-f]{2})?[89a-f][0-9a-f](00|0[0-9a-f])[89a-f][0-9a-f]{2}/i.test(
-          indexEntry.data.toString("utf-8"),
+          indexEntry[1].toString("utf-8"),
         )
       : null,
   };
-  console.log(`[export] ${packed.length} files → ${zip.length}B zip (index.html=${Boolean(indexEntry)})`);
-  expect(packed.length, "export returned files").toBeGreaterThan(0);
+  console.log(`[export] ${zipEntries.size} files → ${zip.length}B zip (index.html=${Boolean(indexEntry)})`);
+  expect(zipEntries.size, "export returned files").toBeGreaterThan(0);
 
   console.log("=== EVIDENCE ===");
   console.log(JSON.stringify(evidence, null, 2));
