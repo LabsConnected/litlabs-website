@@ -2,17 +2,37 @@
 
 ## Canonical Repository Root
 
-~/litt-canonical
+Platform-specific canonical paths (same repo: LabsConnected/litlabs-website):
+
+- Windows (this machine): C:\LiTT\Canonical-2026
+- Linux / WSL / Android: ~/litt-canonical
 
 All LiTT CLI development, verification, builds, relinks, commits, and pushes
-must run from the canonical repository unless a task explicitly names another
-worktree. Feature work belongs in dedicated worktrees (e.g. ~/litt-worktrees/...).
+must run from the canonical repository for the current platform unless a task
+explicitly names another worktree. Feature work belongs in dedicated
+worktrees (e.g. C:\LiTT\Worktrees\... on Windows, ~/litt-worktrees/... on POSIX).
+
+In every command below, substitute the platform canonical path for
+`~/litt-canonical` (i.e. C:\LiTT\Canonical-2026 on this Windows machine).
 
 Do NOT use retired copies or stale clones as canonical sources.
 
+## Workspace Coordination
+
+- Authoritative worktree inventory and KEEP/REVIEW/ARCHIVE routing:
+  .devin/workspace-registry.md
+- One dev stack only: the canonical workspace owns Next.js :3001 and the
+  terminal server :4001. Do NOT start duplicate dev servers in other worktrees.
+- Before editing any non-canonical worktree, check the registry. Never modify a
+  worktree owned by an active agent session (Devin/Codex/Claude/Qwen).
+- Coordinate through branches and PRs; do not hand-copy files between
+  worktrees, and do not overwrite another agent's uncommitted work.
+
 ## Current Branch
 
-main on LabsConnected/litlabs-website
+main tracks LabsConnected/litlabs-website (remote: origin).
+The Windows canonical checkout currently sits on fix/studio-mission-20261030.
+See .devin/workspace-registry.md for the live branch map.
 
 ## Build and Relink
 

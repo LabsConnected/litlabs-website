@@ -132,6 +132,16 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
     // images) and render multi-file sites unstyled/broken.
     expect(csp).toContain("https://www.litlabs.net");
     expect(csp).not.toMatch(/default-src 'self'/);
+    // Generated sites render styled: Tailwind browser build, Google Fonts and
+    // Unsplash images are allowed, each only in the directive that needs it.
+    expect(csp).toMatch(/script-src [^;]*https:\/\/cdn\.jsdelivr\.net\/npm\/@tailwindcss\//);
+    expect(csp).toMatch(/style-src [^;]*https:\/\/fonts\.googleapis\.com/);
+    expect(csp).toMatch(/font-src [^;]*https:\/\/fonts\.gstatic\.com/);
+    expect(csp).toMatch(/img-src [^;]*https:\/\/images\.unsplash\.com/);
+    // ...and nothing broader: no bare https:, no wildcard, no third-party connect/frame.
+    expect(csp).not.toMatch(/(^|[ ;])(https:|\*)([ ;]|$)/);
+    expect(csp).not.toContain("connect-src");
+    expect(csp).not.toContain("frame-src");
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     assertZeroSubprocesses();
   });

@@ -47,7 +47,18 @@ import {
   type ProviderFailure,
   type RouteRequirements,
 } from "./provider-registry";
+import { ensureOllamaModelResident } from "@litt/models";
 import { recordModelAttemptOutcome } from "./model-registry";
+import {
+  preferredLocalToolModel,
+  preferredLocalChatModel,
+  ollamaKeepAliveSetting,
+  ollamaContextTokens,
+  ollamaOutputTokenBudget,
+  estimateOllamaPromptTokens,
+  compactToolDescription,
+  OLLAMA_SMALL_CONTEXT_MAX,
+} from "./ollama-shared";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -874,6 +885,19 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
  * camelCase target exists in the schema and is not already set — no
  * guessing, no overwriting real values.
  */
+/** Common alias names small models use instead of the declared schema
+ *  prop (e.g. `{"file": "index.html"}` for a schema requiring `path`).
+ *  Applied only when the key is not itself a schema prop and the target
+ *  prop is missing — a best-effort normalization of the SAME intent. */
+const RECOVERED_ARG_ALIASES: Record<string, string[]> = {
+  path: ["file", "filename", "fileName", "filePath", "file_path", "filepath"],
+  targetPath: ["file", "filename", "fileName", "filePath", "file_path", "filepath", "path"],
+  filePath: ["file", "filename", "fileName", "path", "filepath", "file_path"],
+  content: ["body", "text", "data", "fileContent", "file_content", "contents"],
+  command: ["cmd", "shell", "exec", "script"],
+  name: ["fileName", "filename", "file"],
+};
+
 function normalizeRecoveredInputs(
   inputs: Record<string, unknown>,
   def: ToolDefinition | undefined,
@@ -881,11 +905,22 @@ function normalizeRecoveredInputs(
   const props = (def?.inputSchema?.properties ?? {}) as Record<string, unknown>;
   const out: Record<string, unknown> = { ...inputs };
   for (const key of Object.keys(inputs)) {
-    if (key in props || !key.includes("_")) continue;
-    const camel = key.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
-    if (camel !== key && camel in props && !(camel in out)) {
-      out[camel] = out[key];
-      delete out[key];
+    if (key in props) continue;
+    if (key.includes("_")) {
+      const camel = key.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
+      if (camel !== key && camel in props && !(camel in out)) {
+        out[camel] = out[key];
+        delete out[key];
+        continue;
+      }
+    }
+    // Alias remap: find a schema prop whose alias list names this key.
+    for (const [prop, aliases] of Object.entries(RECOVERED_ARG_ALIASES)) {
+      if (prop in props && !(prop in out) && aliases.includes(key)) {
+        out[prop] = out[key];
+        delete out[key];
+        break;
+      }
     }
   }
   return out;
@@ -1104,6 +1139,11 @@ async function attemptOpenAiCompatible(
     body.tools = openAiTools;
     body.tool_choice = req.toolChoice ?? "auto";
   }
+  if (route.provider === "ollama") {
+    // Keep the local model resident between agent steps — Ollama's default
+    // ~5m unload forced a multi-GB reload on every build turn.
+    body.keep_alive = ollamaKeepAliveSetting();
+  }
 
   const res = await fetchWithTimeout(
     `${endpoint.baseUrl}/chat/completions`,
@@ -1135,15 +1175,13 @@ async function attemptOpenAiCompatible(
 
 // ─── Ollama ───────────────────────────────────────────────────────
 
-/** Local model families with reliable structured tool calling. The
- *  litt-hermes builds are Qwen3-based and litt-tools is the tool-tuned
- *  variant — both advertise tool support even though their custom tags
- *  don't match the upstream family names below. */
-const OLLAMA_TOOL_CAPABLE =
-  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss|litt-hermes|litt-tools/i;
-
 const OLLAMA_PROBE_TTL_MS = 5 * 60_000;
-const OLLAMA_PROBE_TIMEOUT_MS = 1_500;
+/** Probe budget for /api/tags. Tags is cheap on a warm Ollama but a cold
+ *  service on a loaded dev box can exceed 1.5s — a false timeout marks the
+ *  WHOLE provider failed for the run (provider-scope) and, on repeat,
+ *  cools it down for a minute. 4s keeps deployed-env probing bounded while
+ *  tolerating local cold-start jitter. */
+const OLLAMA_PROBE_TIMEOUT_MS = 4_000;
 let _ollamaProbeCache: { at: number; models: string[] } | null = null;
 
 /** Test seam: inject a probe result instead of calling /api/tags. */
@@ -1184,24 +1222,24 @@ async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise
 
 /** Pick a local model. When the request requires tools, only tool-capable
  *  families are eligible — a model that cannot emit tool calls is never
- *  selected just because it is free. */
-function pickOllamaModel(available: string[], toolsRequired: boolean): string | null {
+ *  selected just because it is free. The preferred order (fast tool builds
+ *  first — a full hermes variant measured >300s/call on CPU-heavy hosts
+ *  while litt-hermes-fast answered in ~73s) is shared with the V1 lane via
+ *  preferredLocalToolModel in ./ollama-shared. */
+/** Response tokens reserved when sizing a local context for a tool run —
+ *  matches ollama-shared's quarter-window policy at 8K. */
+const OLLAMA_OUTPUT_RESERVE_TOKENS = 2_048;
+
+/** Tool families a small-context local lane needs to build a site:
+ *  file ops + project state. Everything else is dropped for ≤8K picks. */
+const OLLAMA_SMALL_CTX_ESSENTIAL_TOOLS = /^files\./i;
+
+function pickOllamaModel(available: string[], toolsRequired: boolean, neededCtxTokens = 0): string | null {
   const override = process.env.OLLAMA_MODEL;
   if (override) return override;
   if (available.length === 0) return null;
-  if (!toolsRequired) return available[0];
-  const capable = available.filter((m) => OLLAMA_TOOL_CAPABLE.test(m));
-  // Prefer the fast local tool builds: on CPU-heavy dev hosts a full hermes
-  // variant measured >300s per call while litt-hermes-fast answered in ~73s,
-  // and both emit valid tool calls. The auto pick must be usable, not just
-  // nominally capable.
-  return (
-    capable.find((m) => /^litt-hermes-fast:8k/i.test(m)) ??
-    capable.find((m) => /^litt-hermes-fast/i.test(m)) ??
-    capable.find((m) => /^litt-hermes|^litt-tools/i.test(m)) ??
-    capable[0] ??
-    null
-  );
+  if (!toolsRequired) return preferredLocalChatModel(available) ?? available[0];
+  return preferredLocalToolModel(available, neededCtxTokens) ?? null;
 }
 
 async function attemptOllama(
@@ -1219,15 +1257,98 @@ async function attemptOllama(
     throw new ProviderAttemptError("ollama", "auto", classifyThrownFailure(err));
   }
 
-  const model = pickOllamaModel(available, req.tools.length > 0);
-  if (!model) {
-    throw new ProviderAttemptError("ollama", "auto", {
-      class: "model_unavailable",
-      scope: "provider",
-      message: req.tools.length > 0
-        ? "No tool-capable local model loaded in Ollama"
-        : "No local models loaded in Ollama",
-    });
+  let model: string | null;
+  if (_model !== "auto") {
+    // Explicit pin (an "ollama/<tag>" model hint or the OLLAMA_MODEL def
+    // entry): honored verbatim — but only when Ollama actually has the tag
+    // loaded. A pin that isn't loaded is PROVIDER-scope: an explicit user
+    // selection must not silently swap onto a different local model — the
+    // failure is recorded truthfully and routing moves on.
+    if (!available.includes(_model)) {
+      throw new ProviderAttemptError("ollama", _model, {
+        class: "model_unavailable",
+        scope: "provider",
+        message: `Pinned local model ${_model} is not loaded in Ollama`,
+      });
+    }
+    model = _model;
+  } else {
+    // Estimate the real request before choosing the local model — a tag
+    // whose ":Nk" window is smaller than system prompt + tools +
+    // transcript + response reserve is a guaranteed truncated turn.
+    // neededCtx flows into preferredLocalToolModel, which escalates to a
+    // bigger-context tag (":16k"/":64k") when the small lane can't fit.
+    const neededCtxTokens =
+      estimateOllamaPromptTokens(req.systemPrompt, req.messages, toOpenRouterTools(req.tools)) +
+      OLLAMA_OUTPUT_RESERVE_TOKENS;
+    model = pickOllamaModel(available, req.tools.length > 0, neededCtxTokens);
+    if (!model) {
+      throw new ProviderAttemptError("ollama", "auto", {
+        class: "model_unavailable",
+        scope: "provider",
+        message: req.tools.length > 0
+          ? "No tool-capable local model loaded in Ollama"
+          : "No local models loaded in Ollama",
+      });
+    }
+  }
+
+  // Serialize model loads across every LiTT process on this host — a cold
+  // request otherwise lets each agent trigger its own multi-GB load, which
+  // evicts the other model under OLLAMA_MAX_LOADED_MODELS=1 and stalls the
+  // CPU. Warm path costs one cheap /api/ps; cold path takes a lockfile.
+  await ensureOllamaModelResident(endpoint, model, {
+    keepAlive: ollamaKeepAliveSetting(),
+    loadTimeoutMs: ctx.timeoutMs,
+    signal: ctx.signal,
+    onNote: (state, detail) => logRoute("ollama_load_gate", { model, state, detail }),
+  });
+
+  // Small-context lane (":Nk" tags, N ≤ 8K): the system prompt, tool
+  // schemas, transcript, AND the response must share one window. Compact
+  // the tool descriptions (names + schemas stay intact) and give the
+  // response a quarter of the window when the caller didn't set a budget.
+  const ctxTokens = ollamaContextTokens(model);
+  let adaptedReq = req;
+  if (ctxTokens && ctxTokens <= OLLAMA_SMALL_CONTEXT_MAX) {
+    // Small-context lane: build-essential tool families only. The full
+    // Studio catalog (assets, browser, business, deploy, voice, ...) is
+    // several KB of schema an 8K window cannot carry — and stripping it
+    // removes the hallucination surface entirely (a tool the model can't
+    // see is a tool it can't mis-call, e.g. the litt-welcome asset call).
+    const essential = req.tools.filter((t) => OLLAMA_SMALL_CTX_ESSENTIAL_TOOLS.test(t.id));
+    if (essential.length > 0 && essential.length !== req.tools.length) {
+      logRoute("ollama_tool_schema_trimmed", {
+        model,
+        kept: essential.length,
+        dropped: req.tools.length - essential.length,
+      });
+    }
+    const tools = (essential.length > 0 ? essential : req.tools).map((t) => ({
+      ...t,
+      description: compactToolDescription(t.description),
+    }));
+    const bounded = Math.min(
+      req.maxTokens ?? Infinity,
+      ollamaOutputTokenBudget(model) ?? Infinity,
+    );
+    const maxTokens = bounded === Infinity ? undefined : bounded;
+    const promptTokens = estimateOllamaPromptTokens(
+      req.systemPrompt,
+      req.messages,
+      toOpenRouterTools(tools),
+    );
+    if (maxTokens !== undefined && promptTokens + maxTokens > ctxTokens) {
+      // Truthful visibility instead of silent truncation: the request still
+      // goes out (the budget is best-effort) but the overflow is logged.
+      logRoute("ollama_prompt_over_budget", {
+        model,
+        ctxTokens,
+        estPromptTokens: promptTokens,
+        maxTokens,
+      });
+    }
+    adaptedReq = { ...req, tools, maxTokens };
   }
 
   const route: PlannedProvider = {
@@ -1240,7 +1361,7 @@ async function attemptOllama(
     health: "healthy",
     credentialState: "not_required",
   };
-  return attemptOpenAiCompatible(route, model, req, ctx, {
+  return attemptOpenAiCompatible(route, model, adaptedReq, ctx, {
     baseUrl: `${endpoint}/v1`,
     headers: {},
   });

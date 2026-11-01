@@ -34,6 +34,7 @@ import {
   type StudioSelectionPayload,
 } from "../context/StudioContext";
 import { mobileDiag } from "../lib/mobileDiagnostics";
+import { OPTIMISTIC_CONVERSATION_ID_PREFIX } from "../lib/optimistic-conversation";
 import {
   reconcileRunState,
   reconciledAssistantStatus,
@@ -73,7 +74,6 @@ export interface SendResult {
 }
 
 const ACTIVE_PROJECT_KEY_PREFIX = "litt:active-project-id";
-const OPTIMISTIC_CONVERSATION_ID_PREFIX = "pending_";
 
 // Slow re-poll cadence for non-terminal reconciles: covers long builds and
 // mobile-backgrounded tabs without a manual reload, while staying cheap.

@@ -14,7 +14,9 @@ import { useStudioAgentStore, AGENT_META } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
+import { resolveSelectedModelHealth } from "../lib/model-health";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
+import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
@@ -238,9 +240,10 @@ function CommandStudioContent() {
   const executionMode = useStudioAgentStore((s) => s.executionMode);
   const setExecutionMode = useStudioAgentStore((s) => s.setExecutionMode);
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
-  // Look up health by provider first, then fall back to apiProvider
-  // (e.g. "Auto" models route to "gemini" under the hood).
-  const modelHealth = providerHealth[selectedModel.provider] ?? providerHealth[selectedModel.apiProvider ?? ""];
+  // Truthful health for the selected model — LiTT-routed models resolve to
+  // the whole-chain "Auto" roll-up (incl. the local Ollama tail), explicit
+  // provider picks to that provider's own health.
+  const modelHealth = resolveSelectedModelHealth(selectedModel, providerHealth);
   const modelLabel = selectedModel.label;
   // Resolve initial destination from legacy ?tool= query.
   // There is no user-facing mode choice: the router always behaves as
@@ -1269,6 +1272,11 @@ function CommandStudioContent() {
   useEffect(() => {
     const conversationId = conversation.selectedConversationId;
     if (!capabilities.projectId || !conversationId || studioTasks.loading) return;
+    // Optimistic send placeholders ("pending_<req>") are client-only ids —
+    // the server has no conversation row to bind yet, so adopting here is a
+    // guaranteed 403. The canonical id replaces the selection when the
+    // conversation POST resolves, and this effect re-runs for it.
+    if (isOptimisticConversationId(conversationId)) return;
     if (studioTasks.tasks.some((task) => task.conversationId === conversationId)) return;
     if (taskSeededRef.current === conversationId) return;
     taskSeededRef.current = conversationId;

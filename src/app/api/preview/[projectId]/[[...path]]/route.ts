@@ -79,11 +79,18 @@ const PREVIEW_SECURITY_HEADERS: Record<string, string> = {
   // Scheme+host sources match on the subresource URL alone, so relative
   // assets load while third-party exfiltration stays blocked.
   // KEEP IN SYNC with next.config.ts /api/preview/:path* (config wins in prod).
+  //
+  // Third-party allowances are limited to what generated sites are told to use
+  // (see canonical-runtime-context.ts / visual-builds/qa.ts): Tailwind browser
+  // build from jsDelivr, Google Fonts CSS + font files, and Unsplash images.
+  // Everything else (fetch/XHR/frames/forms to third parties) stays blocked.
   "Content-Security-Policy":
     "sandbox allow-scripts; " +
     "default-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* data: blob:; " +
-    "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data:; " +
-    "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data: blob:;",
+    "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://fonts.googleapis.com 'unsafe-inline' data:; " +
+    "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://cdn.jsdelivr.net/npm/@tailwindcss/ 'unsafe-inline' data: blob:; " +
+    "font-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://fonts.gstatic.com data:; " +
+    "img-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://images.unsplash.com data: blob:;",
   "X-Content-Type-Options": "nosniff",
   // No referrer leakage to third parties embedded in user content.
   "Referrer-Policy": "no-referrer",

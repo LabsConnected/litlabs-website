@@ -5,11 +5,17 @@ import fs from "fs";
 // Load .env.local first, then .env
 const envLocalPath = path.resolve(process.cwd(), ".env.local");
 if (fs.existsSync(envLocalPath)) {
-  dotenv.config({ path: envLocalPath });
+  // override:true — the project's own env files are authoritative for this
+  // service's auth material (TERMINAL_AUTH_SECRET etc.). Reloads after an
+  // env/secret rotation otherwise keep a stale exported value from a parent
+  // shell indefinitely (dotenv never overrides pre-set vars), which
+  // silently rejects every token minted from the updated project config.
+  dotenv.config({ path: envLocalPath, override: true });
 }
+
 const envPath = path.resolve(process.cwd(), ".env");
 if (fs.existsSync(envPath)) {
-  dotenv.config({ path: envPath });
+  dotenv.config({ path: envPath, override: true });
 }
 
 import express from "express";

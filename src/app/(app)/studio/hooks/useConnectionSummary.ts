@@ -120,18 +120,30 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
  */
 export function parseLlmProviderHealth(
   data: unknown,
-): { gemini: boolean; groq: boolean; openrouter: boolean } | null {
+): { gemini: boolean; groq: boolean; openrouter: boolean; ollama: boolean } | null {
   if (!data || typeof data !== "object") return null;
   const d = data as {
     gemini?: { available?: unknown };
     groq?: { available?: unknown };
     openrouter?: { available?: unknown };
+    providers?: { ollama?: { available?: unknown } };
+    local?: { reachable?: unknown };
   };
-  if (d.gemini === undefined && d.groq === undefined && d.openrouter === undefined) return null;
+  const hasCloud = d.gemini !== undefined || d.groq !== undefined || d.openrouter !== undefined;
+  const hasLocal = d.providers?.ollama !== undefined || d.local !== undefined;
+  if (!hasCloud && !hasLocal) return null;
   return {
     gemini: !!d.gemini?.available,
     groq: !!d.groq?.available,
     openrouter: !!d.openrouter?.available,
+    // The local route's folded truth as the health route computes it:
+    // routing-eligible + reachable + breaker-ok. `local.reachable` alone is
+    // the fallback for payloads that predate the providers map — reachability
+    // without breaker state is still evidence the route can serve.
+    ollama:
+      d.providers?.ollama?.available !== undefined
+        ? !!d.providers.ollama.available
+        : d.local?.reachable === true,
   };
 }
 
@@ -240,8 +252,18 @@ export function useConnectionSummary(options?: { disabled?: boolean }) {
           setProviderHealth("gemini", providers.gemini ? "available" : "unavailable");
           setProviderHealth("groq", providers.groq ? "available" : "unavailable");
           setProviderHealth("openrouter", providers.openrouter ? "available" : "unavailable");
-          // "Auto" models route to whichever provider is available (prefer Gemini).
-          setProviderHealth("Auto", providers.gemini || providers.groq || providers.openrouter ? "available" : "unavailable");
+          setProviderHealth("ollama", providers.ollama ? "available" : "unavailable");
+          // "Auto"/litt-alias models traverse the whole fallback chain —
+          // including the local Ollama tail (llm.ts withOllamaTail). Any one
+          // usable route means Auto can still answer. When ONLY the local
+          // tail remains, report "degraded": the run would complete, but the
+          // preferred managed routes are down — a real limitation, surfaced
+          // honestly instead of as success or total outage.
+          const anyCloud = providers.gemini || providers.groq || providers.openrouter;
+          setProviderHealth(
+            "Auto",
+            anyCloud ? "available" : providers.ollama ? "degraded" : "unavailable",
+          );
         }
         // else: no provider fields in the payload — leave previous state.
         // Unknown stays unknown (the UI shows an honest "checking"), and the

@@ -77,10 +77,15 @@ const longEntry: ActivityEntry = {
 };
 
 describe("ActivityStream — Stage 1", () => {
-  it("renders real timestamps (HH:MM:SS)", async () => {
+  it("renders the semantic glyph + tool tag (no timestamps)", async () => {
     const s = mountStream({ entries: [secretEntry], width: 120 });
     expect(await s.waitFrame()).toBe(true);
-    expect(s.frame()).toMatch(/\d{2}:\d{2}:\d{2}/);
+    const f = s.frame();
+    // tool.completed → ✓ + PASS tag; timestamps were removed in the
+    // conversation-first redesign (the turn owns its events).
+    expect(f).toContain("✓");
+    expect(f).toContain("PASS");
+    expect(f).not.toMatch(/\d{2}:\d{2}:\d{2}/);
     s.unmount();
   });
   it("redacts secrets in collapsed rows", async () => {

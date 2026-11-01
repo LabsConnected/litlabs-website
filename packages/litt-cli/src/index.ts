@@ -68,6 +68,9 @@ import { stripeSandboxCommand } from "./commands/stripe-sandbox.js";
 import { deployVerifyCommand } from "./commands/deploy-verify.js";
 import { studioAcceptanceCommand } from "./commands/studio-acceptance.js";
 import { productionFinishCommand } from "./commands/production-finish.js";
+import { pcStatusCommand } from "./commands/pc-status.js";
+import { pcPerfCommand } from "./commands/pc-perf.js";
+import { pcTasksCommand } from "./commands/pc-tasks.js";
 import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
 import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
 import { executeCommand } from "./lib/command-execution.js";
@@ -159,6 +162,10 @@ const COMMANDS: Record<string, CommandHandler> = {
   "stripe-sandbox": stripeSandboxCommand,
   "deploy-verify": deployVerifyCommand,
   "studio-acceptance": studioAcceptanceCommand,
+  // PC performance controller (nested: litt pc status / perf / tasks)
+  "pc-status": pcStatusCommand,
+  "pc-perf": pcPerfCommand,
+  "pc-tasks": pcTasksCommand,
   // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
@@ -191,6 +198,11 @@ const NESTED_COMMANDS: Record<string, Record<string, string>> = {
   studio: {
     acceptance: "studio-acceptance",
   },
+  pc: {
+    status: "pc-status",
+    perf: "pc-perf",
+    tasks: "pc-tasks",
+  },
 };
 
 /** All valid nested group names (for help routing). */
@@ -221,7 +233,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * features remain auth-gated at the provider level (resolveModelProvider
  * and awaitRemoteReady enforce this at call time, not at the gate).
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "pc", "pc-status", "pc-perf", "pc-tasks"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
@@ -761,10 +773,21 @@ function printNestedHelp(group: string): void {
     "stripe-sandbox": "Real Stripe TEST-mode E2E (never live)",
     "deploy-verify": "Watch deploy + verify production health",
     "studio-acceptance": "Pre-flight + owner browser acceptance",
+    "pc-status": "Workstation health snapshot (RAM/CPU/GPU/AI/Dex)",
+    "pc-perf": "Switch performance mode: light | dev | max",
+    "pc-tasks": "Scheduled-task health: state, results, live process truth",
+  };
+
+  const taglines: Record<string, string> = {
+    production: "production operator",
+    stripe: "production operator",
+    deploy: "production operator",
+    studio: "production operator",
+    pc: "workstation performance",
   };
 
   console.log(`
-LiTT ${group} — production operator
+LiTT ${group} — ${taglines[group] ?? "command group"}
 
 Usage: litt ${group} <subcommand> [options]
 
@@ -824,6 +847,11 @@ Production operator commands:
   litt stripe sandbox        Real Stripe TEST-mode E2E (never live)
   litt deploy verify         Watch deploy + verify production health
   litt studio acceptance     Pre-flight + owner browser acceptance
+
+Workstation performance:
+  litt pc status             Workstation health snapshot (RAM/CPU/GPU/AI/Dex)
+  litt pc perf <mode>        Switch mode: light | dev | max (--dry-run, --yes, --preload)
+  litt pc tasks              Scheduled-task health: state, results, live process truth
 
   (legacy hyphen aliases also work: litt production-doctor, etc.)
 

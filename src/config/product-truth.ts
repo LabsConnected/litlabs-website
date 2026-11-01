@@ -112,12 +112,18 @@ export const INTERNAL_SPECIALISTS: SpecialistDefinition[] = [
 // Plans
 // ---------------------------------------------------------------------------
 
-export type PlanId = "starter" | "creator_beta" | "pro_builder_beta" | "founder";
+export type PlanId =
+  | "starter"
+  | "creator_lite"
+  | "creator_beta"
+  | "pro_builder_beta"
+  | "founder";
 export type BillingType = "free" | "subscription" | "one_time";
 export type CreditCategory = "starter" | "monthly" | "purchased" | "promotional";
 
 export const PLAN_RANK: Record<PlanId, number> = {
   starter: 0,
+  creator_lite: 0, // TBD — paid but sub-Creator until owner decides access tier
   creator_beta: 1,
   founder: 1, // Founder = permanent Creator-level
   pro_builder_beta: 2,
@@ -272,9 +278,15 @@ export const POLICY_STATUSES = {
  * nothing can resolve a new checkout against it.
  */
 export const VERIFIED_STRIPE_PLANS = {
+  creator_lite: {
+    stripeStatus: "exists",
+    priceCents: 999,
+    priceMode: "recurring" as const,
+    envVar: "STRIPE_PRICE_CREATOR_LITE",
+  },
   creator_beta: {
     stripeStatus: "exists",
-    priceCents: 1500,
+    priceCents: 1999,
     priceMode: "recurring" as const,
     envVar: "STRIPE_PRICE_CREATOR_BETA",
   },

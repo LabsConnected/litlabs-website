@@ -745,6 +745,7 @@ function planCoversAgent(plan: PlanId, agent: AgentDefinition): boolean {
   // Owner has full access to all agents.
   const rank: Record<PlanId, number> = {
     starter: 0,
+    creator_lite: 0, // TBD — sub-Creator until owner decides its agent-access tier
     creator_beta: 1,
     founder: 1,
     pro_builder_beta: 2,

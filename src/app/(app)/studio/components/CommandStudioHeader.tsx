@@ -11,6 +11,7 @@ import {
   useStudioModelStore,
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
+import { resolveSelectedModelHealth } from "../lib/model-health";
 import {
   Eye,
   Rocket,
@@ -174,8 +175,7 @@ export default function CommandStudioHeader({
   }, [statusOpen, overflowOpen, updateRect]);
 
   const writesAllowed = capabilities.writeAccess;
-  const modelHealth = providerHealth[selectedModel.provider]
-    ?? providerHealth[selectedModel.apiProvider ?? ""];
+  const modelHealth = resolveSelectedModelHealth(selectedModel, providerHealth);
   const hasAi = modelHealth === "available" || modelHealth === "degraded";
   const providerCount = hasAi ? 1 : 0;
 
@@ -483,7 +483,8 @@ function WorkspaceStatusPopover({
   ptyState: string;
   writesAllowed: boolean;
   modelLabel: string;
-  modelHealth: ProviderHealth;
+  /** Undefined while provider health is unverified — renders "Checking". */
+  modelHealth: ProviderHealth | undefined;
   fallbackNotice: string | null;
   walletBalance: number | null;
   connectionSummary: string;
@@ -553,7 +554,7 @@ function WorkspaceStatusPopover({
           value={modelLabel}
           ok={modelHealth === "available"}
           warn={modelHealth === "degraded" || modelHealth === "locked"}
-          detail={fallbackNotice ?? HEALTH_DOT[modelHealth].label}
+          detail={fallbackNotice ?? (modelHealth ? HEALTH_DOT[modelHealth].label : "Checking")}
         />
         <StatusRow
           label="Repository"

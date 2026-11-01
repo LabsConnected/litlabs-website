@@ -118,8 +118,8 @@ export interface RepoStateBadgeProps {
 }
 
 /** Repository dirty/clean indicator. Clean is subtle, dirty is warning.
- *  Explicitly prefixed with "Git" so repo state is never confused with
- *  mission/verification state — "Git clean" ≠ "task complete". */
+ *  Explicit wording — "N changed files", never the ambiguous "Git +N" —
+ *  so repo state is never confused with insertions or mission state. */
 export function RepoStateBadge({ modified, untracked }: RepoStateBadgeProps): React.ReactElement {
   const total = modified + untracked;
   if (total === 0) {
@@ -127,7 +127,7 @@ export function RepoStateBadge({ modified, untracked }: RepoStateBadgeProps): Re
   }
   return (
     <Text>
-      <Text color={COLORS.warning} dimColor> Git +{total}</Text>
+      <Text color={COLORS.warning} dimColor> {total} changed file{total === 1 ? "" : "s"}</Text>
     </Text>
   );
 }

@@ -21,14 +21,16 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveDispatch } from "../lib/dispatch.js";
 import { cockpitRuntimeSessionOptions } from "../commands/cockpit.js";
 import { createRuntimeSession } from "../lib/runtime-session.js";
 
-const SCRATCH = join(tmpdir(), "litt-cockpit-mode-scratch");
+// Unique per-process scratch dir — a fixed name can be deleted by a
+// parallel test file's cleanup while this file is still executing.
+const SCRATCH = mkdtempSync(join(tmpdir(), "litt-cockpit-mode-scratch-"));
 
 function makeSession(mode: "plan" | "act" | "auto" | undefined) {
   return createRuntimeSession(
