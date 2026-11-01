@@ -299,15 +299,16 @@ export default function CommandStudioHeader({
     : "var(--text-muted)";
 
   // Honest action availability — computed from real capability state,
-  // never optimistic. Export needs a connected workspace terminal (the
-  // endpoint archives the live workspace); Publish needs a project,
-  // write access, mutations allowed, and a verified-ready runtime.
-  const exportAvailable = Boolean(
-    capabilities.projectId && capabilities.terminalStatus === "connected",
-  );
+  // never optimistic. Export archives the live workspace through the
+  // terminal file service server-side (no interactive PTY needed), so
+  // its truthful gate is "runtime ready" — the same signal that already
+  // proves the workspace is mounted and the terminal server reachable.
+  // Publish needs a project, write access, mutations allowed, and a
+  // verified-ready runtime.
+  const exportAvailable = Boolean(capabilities.projectId && runtimeReady);
   const exportHint = !capabilities.projectId
     ? "Select a project first"
-    : "Export needs the workspace terminal connected — it isn't connected yet";
+    : "Export needs the workspace ready — open Preview and let it start";
   const publishAvailable = Boolean(
     capabilities.projectId && writesAllowed && mutationActionsAllowed && runtimeReady,
   );
