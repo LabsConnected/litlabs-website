@@ -12,7 +12,8 @@
  * failures (probe attempts), probe latency, generation latency, and
  * tokens/second from Ollama's own eval counters.
  *
- * Usage: node run-live.cjs [--runs 3] [--out results.json]
+ * Usage: node scripts/pr761-route-acceptance.cjs [--runs 3] [--out <path>]
+ * Evidence lands in tasks/pr761-route-acceptance/results.json by default.
  */
 "use strict";
 
@@ -20,7 +21,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 const { probeOllamaRoute } = require(
-  path.resolve(__dirname, "../../packages/litt-models/dist/ollama-route.js"),
+  path.resolve(__dirname, "../packages/litt-models/dist/ollama-route.js"),
 );
 
 const MODEL = "litt-fast:2k";
@@ -30,7 +31,9 @@ const RUNS_PER_ROUTE = (() => {
 })();
 const OUT_PATH = (() => {
   const i = process.argv.indexOf("--out");
-  return i > -1 ? process.argv[i + 1] : path.join(__dirname, "results.json");
+  return i > -1
+    ? process.argv[i + 1]
+    : path.join(__dirname, "../tasks/pr761-route-acceptance/results.json");
 })();
 
 /** This PC's endpoints, exactly as the phone sees them. */
