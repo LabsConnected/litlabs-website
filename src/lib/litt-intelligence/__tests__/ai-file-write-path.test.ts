@@ -233,7 +233,12 @@ body { font-family: ui-sans-serif, system-ui, sans-serif; color: #e8eef7; }
 
   it("still refuses a destructive rewrite of a real styled user file", async () => {
     const { writeFileSync } = await import("node:fs");
-    const styledUserFile = STYLED_SCAFFOLD.replace("LITT-WELCOME-SCREEN", "MY-PAGE");
+    // Signature >= 3 markers so the guard engages: style-tag, class-attrs,
+    // font, css-vars, semantic-layout, media-query.
+    const styledUserFile = `<!DOCTYPE html><html><head><style>
+:root { --accent: #0af; } body { font-family: sans-serif; }
+@media (max-width: 600px) { .a { display: none; } }
+</style></head><body><main class="a"><section class="b"><h1>Site</h1></section></main></body></html>`;
     writeFileSync(join(root, "index.html"), styledUserFile);
     const transport = makeTestTransport(root);
     const result = await handleFilesWrite(
