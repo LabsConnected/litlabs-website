@@ -1,0 +1,263 @@
+{
+  "config": {
+    "argv": [
+      "/usr/bin/node",
+      "/root/litt-canonical/node_modules/.pnpm/@playwright+test@1.62.0/node_modules/@playwright/test/cli.js",
+      "test",
+      "-c",
+      "e2e-live/playwright.live.config.ts"
+    ],
+    "configFile": "/root/litt-canonical/e2e-live/playwright.live.config.ts",
+    "rootDir": "/root/litt-canonical/e2e-live",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/root/litt-canonical/e2e-live/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop",
+        "name": "desktop",
+        "testDir": "/root/litt-canonical/e2e-live",
+        "testIgnore": [],
+        "testMatch": [
+          "/studio-live\\.spec\\.ts/"
+        ],
+        "timeout": 1800000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.62.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "studio-live.spec.ts",
+      "file": "studio-live.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "Studio live acceptance — full generate/modify/persist flow",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 1800000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop",
+              "projectName": "desktop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1037707,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "[dotenv@17.2.2] injecting env (0) from .env.local,.env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }\n"
+                    },
+                    {
+                      "text": "[auth] signed in as test-user-a-e2e@littree.dev (user_3HEuA6XZJH8GKz9TLpELpnKnbom)\n"
+                    },
+                    {
+                      "text": "[shot] 01-studio-loaded.png\n"
+                    },
+                    {
+                      "text": "[project] created af46985c-3dc0-4e49-86a6-237192811f8f\n"
+                    },
+                    {
+                      "text": "[shot] 02-project-open.png\n"
+                    },
+                    {
+                      "text": "[send-btn] aria-label=\"Send message\"\n"
+                    },
+                    {
+                      "text": "[send] Build a modern responsive website.…\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 403 (Forbidden)\n"
+                    },
+                    {
+                      "text": "[run] status=cancelled activity=Task cancelled by user\n"
+                    },
+                    {
+                      "text": "[run.tools] started=0 failed=[]\n"
+                    },
+                    {
+                      "text": "[verify] files=[\"index.html\"] blocks=0\n"
+                    },
+                    {
+                      "text": "[shot] 03-after-build.png\n"
+                    },
+                    {
+                      "text": "[preview] 200 runtime=ready url=/api/preview/af46985c-3dc0-4e49-86a6-237192811f8f/index.html\n"
+                    },
+                    {
+                      "text": "[preview] GET /api/preview/af46985c-3dc0-4e49-86a6-237192811f8f/index.html → 200\n"
+                    },
+                    {
+                      "text": "[send-btn] aria-label=\"Cancel response\"\n"
+                    },
+                    {
+                      "text": "[send-btn] busy/stale UI — reloading to clear instead of clicking Stop\n"
+                    },
+                    {
+                      "text": "[send] Change the main heading to \"LiTT STUDIO VERIFIED\" and update…\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[run] status=working activity=LiTT is working on the task\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[run] status= activity=\n"
+                    },
+                    {
+                      "text": "[run] status=working activity=LiTT is working on the task\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 401 (Unauthorized)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n"
+                    },
+                    {
+                      "text": "[verify] blocks 0 → 0\n"
+                    },
+                    {
+                      "text": "[verify] on-disk heading=false purple=false\n"
+                    },
+                    {
+                      "text": "[shot] 05-after-modify.png\n"
+                    },
+                    {
+                      "text": "[shot] 06-reloaded.png\n"
+                    },
+                    {
+                      "text": "[terminal] capability → 200\n"
+                    },
+                    {
+                      "text": "[voice] health → 200\n"
+                    },
+                    {
+                      "text": "[shot] 07-mobile-studio.png\n"
+                    },
+                    {
+                      "text": "[export] 1 files → 9194B zip (index.html=true)\n"
+                    },
+                    {
+                      "text": "=== EVIDENCE ===\n"
+                    },
+                    {
+                      "text": "{\n  \"auth\": {\n    \"userId\": \"user_3HEuA6XZJH8GKz9TLpELpnKnbom\",\n    \"email\": \"test-user-a-e2e@littree.dev\"\n  },\n  \"entry\": \"composer\",\n  \"projectId\": \"af46985c-3dc0-4e49-86a6-237192811f8f\",\n  \"build\": {\n    \"status\": \"cancelled\",\n    \"approvals\": 0,\n    \"failure\": null\n  },\n  \"afterBuild\": {\n    \"files\": [\n      \"index.html\"\n    ],\n    \"canvasId\": null,\n    \"blockCount\": 0\n  },\n  \"preview\": {\n    \"status\": 200,\n    \"runtimeStatus\": \"ready\",\n    \"url\": \"/api/preview/af46985c-3dc0-4e49-86a6-237192811f8f/index.html\",\n    \"http\": 200\n  },\n  \"modify\": {\n    \"status\": \"timeout\",\n    \"approvals\": 0\n  },\n  \"afterModify\": {\n    \"files\": [\n      \"index.html\"\n    ],\n    \"blockCount\": 0,\n    \"onDisk\": {\n      \"heading\": false,\n      \"purple\": false\n    }\n  },\n  \"afterReload\": {\n    \"files\": [\n      \"index.html\"\n    ],\n    \"blockCount\": 0\n  },\n  \"terminal\": {\n    \"http\": 200,\n    \"body\": \"{\\\"id\\\":\\\"project-terminal\\\",\\\"status\\\":\\\"unavailable\\\",\\\"terminalStatus\\\":\\\"disconnected\\\",\\\"sessionId\\\":null,\\\"projectId\\\":null,\\\"workspaceId\\\":null,\\\"lastVerifiedAt\\\":\\\"2026-10-31T04:36:37.860Z\\\",\\\"error\\\":null,\\\"serverReachable\\\":true}\",\n    \"uiBadge\": false\n  },\n  \"voice\": {\n    \"http\": 200,\n    \"body\": \"{\\\"provider\\\":\\\"inworld\\\",\\\"configured\\\":false,\\\"tokenService\\\":\\\"error\\\",\\\"transport\\\":\\\"disconnected\\\",\\\"available\\\":false,\\\"errorCode\\\":\\\"VOICE_NOT_CONFIGURED\\\",\\\"message\\\":\\\"Voice is not configured. Missing: INWORLD_API_KEY, INWORLD_LITT_VOICE, VOICE_AUTH_SECRET.\\\",\\\"details\\\":{\\\"apiKey\\\":false,\\\"littVoice\\\":false,\\\"sparkVoic\"\n  },\n  \"export\": {\n    \"fileCount\": 1,\n    \"zipBytes\": 9194,\n    \"zipPath\": \"/root/litt-canonical/e2e-live/shots/project-export-af46985c-3dc0-4e49-86a6-237192811f8f.zip\",\n    \"hasIndexHtml\": true,\n    \"indexContainsModifiedHeading\": false,\n    \"indexContainsPurpleTheme\": false\n  }\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-31T04:19:32.797Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "07fccb5c90444c5f1761-5308a5327504c9081445",
+          "file": "studio-live.spec.ts",
+          "line": 326,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-31T04:19:29.868Z",
+    "duration": 1054133.2349999999,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

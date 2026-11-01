@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import { CANONICAL_REDIRECTS } from "./src/lib/canonical-redirects";
+import { PREVIEW_CONTENT_SECURITY_POLICY } from "./src/lib/projects/preview-csp";
+import { devTerminalConnectSrcEntries } from "./src/lib/terminal-csp";
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
@@ -199,7 +201,7 @@ const nextConfig: NextConfig = {
               "style-src-elem 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
               "img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://cdn.emulatorjs.org https://v8.js-dos.com https://thumbnails.libretro.com",
               "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
-              `connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://clerk-telemetry.com https://clerk.litlabs.net https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.litlabs.net wss://*.litlabs.net https://*.up.railway.app wss://*.up.railway.app wss://*.pusher.com https://*.pusher.com https://cdn.emulatorjs.org https://v8.js-dos.com https://cdn.dos.zone https://backend.leadconnectorhq.com https://link.msgsndr.com https://generativelanguage.googleapis.com wss://generativelanguage.googleapis.com https://*.livekit.cloud wss://*.livekit.cloud${process.env.NODE_ENV === "development" ? " ws://localhost:4001 http://localhost:4001 ws://127.0.0.1:4001 http://127.0.0.1:4001" : ""}`,
+              `connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://clerk-telemetry.com https://clerk.litlabs.net https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.litlabs.net wss://*.litlabs.net https://*.up.railway.app wss://*.up.railway.app wss://*.pusher.com https://*.pusher.com https://cdn.emulatorjs.org https://v8.js-dos.com https://cdn.dos.zone https://backend.leadconnectorhq.com https://link.msgsndr.com https://generativelanguage.googleapis.com wss://generativelanguage.googleapis.com https://*.livekit.cloud wss://*.livekit.cloud${process.env.NODE_ENV === "development" ? ` ${devTerminalConnectSrcEntries().join(" ")}` : ""}`,
               "frame-src 'self' blob: data: https://open.spotify.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://clerk.litlabs.net https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io https://*.browserbase.com https://www.browserbase.com https://terminal.litlabs.net https://litlabs-terminal-server-production-0be1.up.railway.app https://terminal-server-production-68ac.up.railway.app",
               "worker-src 'self' blob: https://litlabs.net https://www.litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com",
               "media-src 'self' blob: data:",
@@ -212,7 +214,13 @@ const nextConfig: NextConfig = {
               // without this the browser silently drops the redirect and the CLI
               // callback server never receives the authorization code.
               "form-action 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev https://clerk.litlabs.net http://127.0.0.1:*",
-              "upgrade-insecure-requests",
+              // upgrade-insecure-requests only applies in production: on an
+              // http dev server bound to a LAN/Tailscale address it upgrades
+              // every subresource to https and fails (no TLS in dev). It
+              // would also rewrite ws:// terminal dials to wss://.
+              ...(process.env.NODE_ENV === "production"
+                ? ["upgrade-insecure-requests"]
+                : []),
             ].join("; "),
           },
           {
@@ -271,15 +279,14 @@ const nextConfig: NextConfig = {
       // It must be frameable by Studio (same origin) and sandboxed so
       // untrusted scripts cannot access LiTT's cookies, storage, or APIs.
       //
-      // NOTE: default-src uses EXPLICIT origins, never bare 'self'. The
-      // preview iframe sandbox omits allow-same-origin, so the document gets
-      // an opaque origin — and per the CSP spec, 'self' never matches any
-      // subresource URL from an opaque origin, which would silently block
-      // relative assets (style.css, app.js, images). Scheme+host sources
-      // match on the subresource URL alone, so relative assets load while
-      // third-party exfiltration stays blocked.
-      // KEEP IN SYNC with src/app/api/preview/[projectId]/[[...path]]/route.ts
-      // (this config header wins over the route header in production).
+      // The CSP comes from src/lib/projects/preview-csp.ts — the single
+      // source of truth shared with the route handler (this config header
+      // wins over the route header in production, so they must not drift).
+      // Resource loads are intentionally unrestricted: generated sites are
+      // built on third-party CDNs an origin allowlist can never enumerate,
+      // and deployed user content (/sites/:path*) carries no resource
+      // restrictions either. The opaque-origin sandbox and the
+      // manifest-scoped preview token are the real security boundary.
       //
       // Keep this rule AFTER the global rule — later matching rule wins.
       {
@@ -287,11 +294,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Content-Security-Policy",
-            value:
-              "sandbox allow-scripts; " +
-              "default-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* data: blob:; " +
-              "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data:; " +
-              "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data: blob:;",
+            value: PREVIEW_CONTENT_SECURITY_POLICY,
           },
           {
             key: "X-Content-Type-Options",

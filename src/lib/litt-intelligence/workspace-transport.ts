@@ -190,6 +190,35 @@ function terminalBase(): string {
   return requireTerminalBaseUrl();
 }
 
+// ─── Deterministic-ownership validation ───────────────────────────
+// A terminal server on the configured URL may be a FOREIGN instance —
+// another stack's leftover process with a different TERMINAL_AUTH_SECRET
+// (every token minted by this app then 401s: the failure class that
+// killed Studio file writes on 2026-11-01). Verify once per process
+// that the served fingerprint matches this app's own env; a mismatch is
+// logged loudly so file-op 401s are diagnosable instead of silent.
+let _ownershipCheck: Promise<{ ok: boolean; detail: string }> | null = null;
+export async function verifyTerminalOwnership(): Promise<{ ok: boolean; detail: string }> {
+  if (_ownershipCheck) return _ownershipCheck;
+  _ownershipCheck = (async () => {
+    try {
+      const res = await fetch(`${terminalBase()}/health`, { signal: AbortSignal.timeout(4_000) });
+      if (!res.ok) return { ok: false, detail: `/health returned ${res.status}` };
+      const fp = (await res.json())?.fingerprint;
+      if (!fp?.secretSha) return { ok: true, detail: "no fingerprint (pre-fingerprint server)" };
+      const { createHash } = await import("crypto");
+      const own = createHash("sha256").update(process.env.TERMINAL_AUTH_SECRET ?? "").digest("hex").slice(0, 12);
+      if (fp.secretSha !== own) {
+        return { ok: false, detail: `secretSha ${fp.secretSha} != own ${own} — foreign terminal-server instance` };
+      }
+      return { ok: true, detail: `secretSha ${own} matches` };
+    } catch (err) {
+      return { ok: false, detail: `health probe failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  })();
+  return _ownershipCheck;
+}
+
 function internalServiceKey(): string {
   return process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
 }
@@ -223,6 +252,19 @@ export async function createWorkspaceTransport(
   // the model "file operations are failing" instead of claiming
   // "Write permission: allowed".
   transport.fileOpsReachable = await transport.probeReachable(REACHABILITY_PROBE_TIMEOUT_MS);
+
+  // Ownership probe — non-blocking. A foreign instance (different secret)
+  // is the silent-401 failure class; log it once per process so the
+  // transport's 401s are diagnosable instead of mysterious.
+  void verifyTerminalOwnership().then((v) => {
+    if (!v.ok) {
+      console.error(
+        `[workspace-transport] TERMINAL SERVER OWNERSHIP MISMATCH: ${v.detail}. ` +
+          `Every file op will 401 — point the app at its own terminal-server instance.`,
+      );
+      transport.fileOpsReachable = false;
+    }
+  });
 
   return transport;
 }

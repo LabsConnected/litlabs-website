@@ -170,7 +170,7 @@ const MODE_PATTERNS: ModePattern[] = [
       // routing them to text-only chat silently drops the requested mutation.
       // redesign/revamp/restyle/overhaul and fix/repair are the same family:
       // "redesign my homepage", "fix the header on my site" are mutations.
-      /\b(edit|update|change|modify|rename|replace|delete|redesign|revamp|restyle|overhaul|fix|repair)\b.*\b(site|website|web ?app|homepage|landing page|footer|header|nav|menu|section)\b/i,
+      /\b(edit|update|change|modify|rename|replace|delete|redesign|revamp|restyle|overhaul|fix|repair)\b.*\b(site|website|web ?app|homepage|landing page|footer|header|nav|menu|section|theme|palette|colou?r|font|heading|headline|hero|banner|layout|background|tagline|copy)\b/i,
       // Placement commands use everyday verbs rather than edit-vocabulary —
       // "put this image on my homepage", "add that picture to the hero",
       // "insert the image into this page". Without this they fell into
