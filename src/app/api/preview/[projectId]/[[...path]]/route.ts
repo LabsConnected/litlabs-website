@@ -120,20 +120,20 @@ export async function GET(
 
   const segments = pathSegments ?? [];
 
-  // Identity resolution. A session always wins and keeps its exact legacy
-  // semantics (the segments are then a plain file path). Only a request
-  // WITHOUT a session may present a capability token, in the path prefix
-  // `t/<token>`; this is the shape subresource requests from the
-  // opaque-origin preview iframe arrive in, because they cannot carry the
-  // session cookie.
+  // Identity resolution. A valid capability token in the `t/<token>` path
+  // prefix wins even when a session cookie is present — same-origin iframes
+  // (sandboxed with allow-same-origin) DO send cookies, so session-first
+  // would misread `t/<token>` as a literal file path and 404. The token is
+  // already the capability: project/workspace binding and the signed asset
+  // manifest are enforced below regardless of session state. Without a token
+  // prefix, a session keeps its exact legacy semantics (segments are a plain
+  // file path).
   let userId: string | null = null;
   let presentedToken: string | null = null;
   let tokenWorkspaceId: string | null = null;
   let tokenAssets: string[] | null = null;
-  const { userId: sessionUserId } = await auth(_req);
-  if (sessionUserId) {
-    userId = sessionUserId;
-  } else if (segments[0] === "t" && segments[1]) {
+  let tokenRejected: string | null = null;
+  if (segments[0] === "t" && segments[1]) {
     try {
       const claims = verifyPreviewToken(segments[1]);
       if (claims.projectId !== projectId) {
@@ -144,7 +144,15 @@ export async function GET(
       tokenWorkspaceId = claims.workspaceId;
       tokenAssets = claims.assets;
     } catch {
-      return NextResponse.json({ error: "Invalid or expired preview token" }, { status: 401 });
+      tokenRejected = "Invalid or expired preview token";
+    }
+  }
+  if (!userId) {
+    const { userId: sessionUserId } = await auth(_req);
+    if (sessionUserId) {
+      userId = sessionUserId;
+    } else if (tokenRejected) {
+      return NextResponse.json({ error: tokenRejected }, { status: 401 });
     }
   }
   if (!userId) {
