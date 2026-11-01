@@ -8,11 +8,22 @@
  * slim local toolset.
  */
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
-import { clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwright";
+import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwright";
 
 const BASE = process.env.LIVE_BASE_URL ?? "http://localhost:3001";
 
 async function bearer(page: Page): Promise<Record<string, string>> {
+  // The testing token only seeds the FAPI token endpoint — a session still
+  // requires an actual sign-in. Without clerk.signIn() the wait below
+  // times out at 60s (the ghost-cancel probe's prior flake signature).
+  await page.waitForFunction(
+    () => Boolean((window as Window & { Clerk?: { loaded?: boolean } }).Clerk?.loaded),
+    undefined,
+    { timeout: 60_000 },
+  );
+  const email = process.env.CLERK_TEST_USER_A_EMAIL;
+  expect(email, "CLERK_TEST_USER_A_EMAIL must be set").toBeTruthy();
+  await clerk.signIn({ page, emailAddress: email! });
   await page.waitForFunction(
     () => {
       const c = (window as Window & { Clerk?: { loaded?: boolean; session?: unknown } }).Clerk;
