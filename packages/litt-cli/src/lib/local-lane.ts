@@ -203,11 +203,17 @@ export function selectLocalModel(models: string[], preferred?: string): string |
 }
 
 /**
- * Preference order for the local lane. litt-coder first: it is the build
- * tuned for this tool, so when the operator has installed it they meant
- * for LiTT to use it.
+ * Preference order for the local lane. litt-hermes first: it is the
+ * dedicated PC build the Dex (Android) lane is meant to reach — when the
+ * probe lands on a host that serves it (LAN/Tailscale PC), the 32k
+ * everyday config wins, then the 64k large-task config. litt-coder is
+ * the older tuned build and still outranks generic models where it is
+ * installed. This list only orders models a single daemon already has;
+ * it never decides WHICH daemon answers — that is the probe's job.
  */
 const LOCAL_MODEL_PREFERENCE = [
+  "litt-hermes:32k",
+  "litt-hermes:64k",
   "litt-coder:8k",
   "litt-coder:fast",
   "litt-coder:3b",

@@ -110,6 +110,35 @@ litt_local_main() {
     LITT_WORK_MODE="FEATURE / DEV"
   fi
 
+  # ── Dex route: prefer the Nitro 5 PC (Hermes), fall back to the
+  # on-device daemon when the PC is unreachable, and let the CLI's own
+  # multi-route probe re-pick automatically mid-session.
+  #
+  # Candidate tiers are defined in ~/.config/litt/ollama-routes.env
+  # (canonical — .bashrc sources it for every shell; source it here too
+  # so non-interactive launches get the same routes). OLLAMA_ROUTE_ORDER
+  # selects probe priority — "tailscale,lan,local" puts the reachable-
+  # anywhere PC endpoint first, the home-LAN PC address second, and this
+  # phone's own daemon last as the offline fallback.
+  #
+  # Because the probe re-runs per request (short cache), a PC that goes
+  # away mid-session automatically drops requests to the phone daemon,
+  # and a PC that comes back is picked up again with no restart.
+  [ -f "$HOME/.config/litt/ollama-routes.env" ] && . "$HOME/.config/litt/ollama-routes.env"
+  export OLLAMA_ROUTE_ORDER="${OLLAMA_ROUTE_ORDER:-tailscale,lan,local}"
+
+  PHONE_OLLAMA="${LITT_OLLAMA_DEVICE:-${OLLAMA_LOCAL_URL:-http://localhost:11434}}"
+  DEVICE_MODEL="${LITT_DEVICE_MODEL:-litt-oc-phone:1.7b-8k}"
+
+  # The on-device daemon is the offline fallback — best-effort start via
+  # dex-ctl (which launches `ollama serve` with the tuned env) when it
+  # exists and the daemon isn't already answering.
+  if ! curl --max-time 2 -fsS "$PHONE_OLLAMA/api/tags" >/dev/null 2>&1; then
+    if [ -x "$HOME/private-agent/tune/dex-ctl" ]; then
+      "$HOME/private-agent/tune/dex-ctl" start >/dev/null 2>&1 || true
+    fi
+  fi
+
   if curl --max-time 2 -fsS "$LITT_OLLAMA_LAN/api/tags" >/dev/null 2>&1; then
     OLLAMA="$LITT_OLLAMA_LAN"
     CONNECTION="LAN"
@@ -117,45 +146,67 @@ litt_local_main() {
     OLLAMA="$LITT_OLLAMA_TAILSCALE"
     CONNECTION="TAILSCALE"
   else
-    echo "❌ Ollama PC is unreachable."
-    echo
-    echo "LAN:"
-    echo "  $LITT_OLLAMA_LAN"
-    echo
-    echo "Tailscale:"
-    echo "  $LITT_OLLAMA_TAILSCALE"
-    exit 1
+    OLLAMA=""
+    CONNECTION="DEVICE"
   fi
 
   export LITT_LOCAL_MODE=1
-  export OLLAMA_HOST_PC="$OLLAMA"
-  export OLLAMA_HOST="$OLLAMA"
+
+  if [ -n "$OLLAMA" ]; then
+    # Legacy single-shot resolvers (discovery, diagnostics) — same PC host.
+    export OLLAMA_HOST_PC="$OLLAMA"
+    export OLLAMA_HOST="$OLLAMA"
+  else
+    # PC is down: legacy resolvers must not point at a dead host.
+    unset OLLAMA_HOST_PC OLLAMA_HOST
+  fi
 
   echo
   echo "◬ LiTT LOCAL"
   echo "────────────────────────────────────────"
   echo "Repo:    $RUN_REPO"
   echo "Branch:  $BRANCH"
-  echo "Ollama:  $OLLAMA ($CONNECTION)"
-  echo "Model:   $LITT_LOCAL_MODEL"
+  if [ -n "$OLLAMA" ]; then
+    echo "Ollama:  $OLLAMA ($CONNECTION) — preferred"
+    echo "Device:  $PHONE_OLLAMA — standby fallback"
+    echo "Model:   $LITT_LOCAL_MODEL"
+    WARM_HOST="$OLLAMA"
+    WARM_MODEL="$LITT_LOCAL_MODEL"
+  else
+    echo "Ollama:  PC unreachable (LAN: $LITT_OLLAMA_LAN / Tailscale: $LITT_OLLAMA_TAILSCALE)"
+    echo "Device:  $PHONE_OLLAMA — fallback active"
+    echo "Model:   $DEVICE_MODEL"
+    if curl --max-time 2 -fsS "$PHONE_OLLAMA/api/tags" >/dev/null 2>&1; then
+      WARM_HOST="$PHONE_OLLAMA"
+      WARM_MODEL="$DEVICE_MODEL"
+    else
+      echo "⚠️  On-device daemon is also unreachable — LiTT will report 'no local model' until one comes up."
+      WARM_HOST=""
+      WARM_MODEL=""
+    fi
+  fi
   echo "Git:     $(git status --porcelain | wc -l | tr -d ' ') changed file(s)"
   echo "────────────────────────────────────────"
   echo
 
+  if [ -z "$WARM_HOST" ]; then
+    MODEL_LOADED="skip"
+  else
   MODEL_LOADED="$(
-    curl --max-time 3 -fsS "$OLLAMA/api/ps" 2>/dev/null |
-      jq -r --arg model "$LITT_LOCAL_MODEL" \
+    curl --max-time 3 -fsS "$WARM_HOST/api/ps" 2>/dev/null |
+      jq -r --arg model "$WARM_MODEL" \
         '[.models[]? | select(.name == $model or .model == $model)] | length' \
         2>/dev/null || echo 0
   )"
+  fi
 
   if [ "$MODEL_LOADED" = "0" ]; then
-    echo "🔥 Warming $LITT_LOCAL_MODEL..."
+    echo "🔥 Warming $WARM_MODEL..."
 
-    curl --max-time 30 -fsS "$OLLAMA/api/chat" \
+    curl --max-time 30 -fsS "$WARM_HOST/api/chat" \
       -H 'Content-Type: application/json' \
       -d "{
-        \"model\":\"$LITT_LOCAL_MODEL\",
+        \"model\":\"$WARM_MODEL\",
         \"stream\":false,
         \"keep_alive\":\"30m\",
         \"options\":{
@@ -169,8 +220,8 @@ litt_local_main() {
       }" >/dev/null || {
         echo "⚠️ Model warm-up did not finish, starting LiTT anyway."
       }
-  else
-    echo "✅ $LITT_LOCAL_MODEL already warm"
+  elif [ "$MODEL_LOADED" != "skip" ]; then
+    echo "✅ $WARM_MODEL already warm"
   fi
 
   echo
