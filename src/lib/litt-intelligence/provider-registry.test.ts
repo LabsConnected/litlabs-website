@@ -474,6 +474,46 @@ describe("provider registry — failure classification", () => {
     expect(parseRetryAfterMs(null, '{"retryDelay":"12s"}')).toBe(12_000);
   });
 
+  it("parses Google's compound 'retry in XhYmZs' quota hint", () => {
+    const body =
+      '{"error":{"code":429,"message":"Quota exceeded ... Please retry in 9h48m52.106458201s."}}';
+    const parsed = parseRetryAfterMs(null, body);
+    expect(parsed).toBeCloseTo((9 * 3600 + 48 * 60 + 52.106458) * 1000, 0);
+    // Single-unit forms also parse.
+    expect(parseRetryAfterMs(null, "Please retry in 45.5s")).toBeCloseTo(45_500, -2);
+  });
+
+  it("honours a provider-stated multi-hour 429 delay instead of the 10-minute cap", () => {
+    const statedMs = (9 * 3600 + 48 * 60) * 1000;
+    recordProviderFailure("gemini", {
+      class: "rate_limited",
+      scope: "provider",
+      retryAfterMs: statedMs,
+      message: "quota",
+    });
+    const h = getProviderHealth("gemini");
+    expect(h.state).toBe("cooldown");
+    expect(h.cooldownUntil).toBeGreaterThan(Date.now() + statedMs - 5_000);
+    // …but an absurd stated delay is still bounded at one day.
+    recordProviderFailure("gemini", {
+      class: "rate_limited",
+      scope: "provider",
+      retryAfterMs: 7 * 24 * 60 * 60_000,
+      message: "quota",
+    });
+    expect(getProviderHealth("gemini").cooldownUntil).toBeLessThanOrEqual(
+      Date.now() + 24 * 60 * 60_000 + 1_000,
+    );
+  });
+
+  it("extracts the multi-hour retry hint from thrown 429 errors", () => {
+    const f = classifyThrownFailure(
+      new Error("HTTP 429: quota exceeded. Please retry in 9h48m52.106458201s"),
+    );
+    expect(f.class).toBe("rate_limited");
+    expect(f.retryAfterMs).toBeGreaterThan(35_000_000);
+  });
+
   it("classifies thrown errors: timeout, 429-in-message, 5xx-in-message, network", () => {
     expect(classifyThrownFailure(new Error("Gemini direct request timed out after 30000ms")).class).toBe("timeout");
     expect(classifyThrownFailure(new Error("429 Too Many Requests")).class).toBe("rate_limited");

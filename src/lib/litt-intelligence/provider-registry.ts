@@ -423,6 +423,11 @@ const DISABLE_COOLDOWN_MS = 30 * 60_000;
 /** 429 without a Retry-After hint. */
 const RATE_LIMIT_DEFAULT_MS = 60_000;
 const RATE_LIMIT_MAX_MS = 10 * 60_000;
+/** Provider-stated retry delays are authoritative (Google daily-quota 429s
+ *  carry "retry in 9h48m…" hints). Honour them up to one day so an exhausted
+ *  quota isn't re-probed every few minutes — a longer silence would just
+ *  make the provider look dead with no recovery probe at all. */
+const RATE_LIMIT_STATED_MAX_MS = 24 * 60 * 60_000;
 /** Repeated transient failures (timeout/network/5xx). */
 const TRANSIENT_COOLDOWN_MS = 60_000;
 /** A single transient failure degrades; a second consecutive one cools down. */
@@ -497,7 +502,9 @@ export function recordProviderFailure(provider: string, failure: ProviderFailure
       }
       break;
     case "rate_limited": {
-      const wait = Math.min(failure.retryAfterMs ?? RATE_LIMIT_DEFAULT_MS, RATE_LIMIT_MAX_MS);
+      const wait = failure.retryAfterMs !== undefined
+        ? Math.min(failure.retryAfterMs, RATE_LIMIT_STATED_MAX_MS)
+        : Math.min(RATE_LIMIT_DEFAULT_MS, RATE_LIMIT_MAX_MS);
       next.state = "cooldown";
       next.cooldownUntil = now + wait;
       break;
@@ -590,7 +597,20 @@ export function parseRetryAfterMs(headers: Headers | null | undefined, bodyText:
     const secs = Number(m[1]);
     if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
   }
-  return undefined;
+  return parseRetryInDurationMs(bodyText);
+}
+
+/** Google quota bodies say "Please retry in 9h48m52.106458201s" — a compound
+ *  h/m/s duration that the Retry-After patterns above don't match. Also used
+ *  for thrown-error messages that embed the same text. */
+function parseRetryInDurationMs(text: string): number | undefined {
+  const m = text.match(/retry\s+in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*([\d.]+)s/i);
+  if (!m) return undefined;
+  const h = m[1] ? Number(m[1]) : 0;
+  const min = m[2] ? Number(m[2]) : 0;
+  const s = Number(m[3]);
+  if (![h, min, s].every(Number.isFinite)) return undefined;
+  return Math.max(0, (h * 3600 + min * 60 + s) * 1000);
 }
 
 export function classifyHttpFailure(
@@ -679,11 +699,12 @@ export function classifyThrownFailure(err: unknown): ProviderFailure {
     return { class: "timeout", scope: "provider", message: sanitizeBody(msg) };
   }
   if (/429|too many requests|rate.?limit/i.test(msg)) {
+    const hinted = parseRetryAfterMs(null, msg);
     const m = msg.match(/(\d+)\s*s(?:econds?)?/i);
     return {
       class: "rate_limited",
       scope: "provider",
-      retryAfterMs: m ? Number(m[1]) * 1000 : undefined,
+      retryAfterMs: hinted ?? (m ? Number(m[1]) * 1000 : undefined),
       message: sanitizeBody(msg),
     };
   }
