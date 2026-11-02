@@ -14,7 +14,9 @@ import { useStudioAgentStore, AGENT_META } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
+import { resolveSelectedModelHealth } from "../lib/model-health";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
+import { downloadProjectExport } from "../lib/export-project";
 import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 import { useConversationStore } from "../stores/useConversationStore";
 import {
@@ -239,9 +241,10 @@ function CommandStudioContent() {
   const executionMode = useStudioAgentStore((s) => s.executionMode);
   const setExecutionMode = useStudioAgentStore((s) => s.setExecutionMode);
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
-  // Look up health by provider first, then fall back to apiProvider
-  // (e.g. "Auto" models route to "gemini" under the hood).
-  const modelHealth = providerHealth[selectedModel.provider] ?? providerHealth[selectedModel.apiProvider ?? ""];
+  // Truthful health for the selected model — LiTT-routed models resolve to
+  // the whole-chain "Auto" roll-up (incl. the local Ollama tail), explicit
+  // provider picks to that provider's own health.
+  const modelHealth = resolveSelectedModelHealth(selectedModel, providerHealth);
   const modelLabel = selectedModel.label;
   // Resolve initial destination from legacy ?tool= query.
   // There is no user-facing mode choice: the router always behaves as
@@ -2896,6 +2899,22 @@ function CommandStudioContent() {
     }
   };
 
+  // Project source-export (ZIP) — single-flight; the toast reports the
+  // server's real outcome (filename / error), never a fake success.
+  const [exportJob, setExportJob] = useState<{ status: "idle" | "working" | "done" | "error"; text?: string }>({ status: "idle" });
+  const handleExportProject = useCallback(async () => {
+    const pid = capabilities.projectId;
+    if (!pid || exportJob.status === "working") return;
+    setExportJob({ status: "working" });
+    const result = await downloadProjectExport(pid, getToken);
+    if (result.ok) {
+      setExportJob({ status: "done", text: `Exported ${result.filename}${result.fileCount !== null ? ` (${result.fileCount} files)` : ""}${result.truncated ? " — truncated" : ""}` });
+      window.setTimeout(() => setExportJob((j) => (j.status === "done" ? { status: "idle" } : j)), 6000);
+    } else {
+      setExportJob({ status: "error", text: result.error });
+    }
+  }, [capabilities.projectId, getToken, exportJob.status]);
+
   // ── Phase D.1: canonical StudioContext (controlled props) ─────────
   // The four authoritative values are controlled props — the provider
   // does NOT mirror them. workspaceMode is INDEPENDENT from creator:
@@ -2993,6 +3012,8 @@ function CommandStudioContent() {
             if (title) void conversation.renameConversation(title);
           }}
           onExportChatAction={() => conversation.exportConversation()}
+          onExportProjectAction={capabilities.projectId ? () => { void handleExportProject(); } : undefined}
+          exportBusy={exportJob.status === "working"}
           hasConversation={Boolean(conversation.selectedConversationId)}
           runtime={runtimeState}
           runtimeLoading={runtime ? runtime.loading || capabilitiesLoading : true}
@@ -3003,6 +3024,36 @@ function CommandStudioContent() {
           executionMode={executionMode}
           onExecutionModeChange={setExecutionMode}
         />
+
+        {/* Export result toast — reports the server's real outcome. */}
+        {exportJob.status !== "idle" && (
+          <div
+            role="status"
+            aria-live="polite"
+            data-testid="export-project-toast"
+            className="fixed bottom-4 right-4 z-[250] flex max-w-sm items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-[12px] font-bold shadow-2xl"
+            style={{
+              borderColor: exportJob.status === "error" ? "rgba(239,68,68,0.4)" : "rgba(114,242,56,0.3)",
+              backgroundColor: "rgba(24,18,38,0.97)",
+              color: exportJob.status === "error" ? "#fca5a5" : "var(--text-primary)",
+            }}
+          >
+            <span className="min-w-0 flex-1">
+              {exportJob.status === "working" ? "Exporting project…" : exportJob.text}
+            </span>
+            {exportJob.status !== "working" && (
+              <button
+                type="button"
+                onClick={() => setExportJob({ status: "idle" })}
+                className="shrink-0 rounded px-1.5 py-0.5 text-[10px] hover:bg-white/10"
+                style={{ color: "var(--text-muted)" }}
+                aria-label="Dismiss export result"
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Body: LiTT rail | Workspace — canvas-first 2-zone layout.
             - LiTTPanel never reserves a permanent desktop column (F1):
