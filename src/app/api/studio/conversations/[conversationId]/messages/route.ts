@@ -33,6 +33,10 @@ import { findToolCallMarkup, stripToolCallMarkupText } from "@/lib/litt-intellig
 import { withV1NoToolsDirective } from "@/lib/litt-intelligence/text-lane-guard";
 import { sanitizeTextLaneHistory } from "@/lib/litt-intelligence/toolless-lane-guard";
 import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/launch-flow";
+import {
+  isDeterministicCodegenModel,
+  runDeterministicBuildLane,
+} from "@/lib/litt-intelligence/deterministic-codegen";
 import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
@@ -610,9 +614,20 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // This fallback is marked for eventual removal once all chat paths require
   // a verified workspace.
 
+  // An explicit deterministicCodegen pin (litt-coder:8k) in AUTO mode must
+  // always reach the lane — the kernel's requiresExecution classifier can
+  // false-negative on plain-worded edit requests, and the V1 text path can
+  // only *describe* the change, never apply it. The pin means "answer by
+  // generating files"; silently chatting instead is a false success.
+  const detcodegenPinned =
+    isDeterministicCodegenModel(typeof body.model === "string" ? body.model : undefined)
+    && canonicalCtx.executionMode === "auto";
+  const executionRequired =
+    !!built.kernelResult.decision.routing.requiresExecution || detcodegenPinned;
+
   const useV2 = canonicalCtx.workspaceExecutionAvailable
     && !!conversation.projectId
-    && !!built.kernelResult.decision.routing.requiresExecution;
+    && executionRequired;
 
   let v2Result: Awaited<ReturnType<typeof runAgentLoopV2>> | null = null;
   let launchFlowResult: LaunchFlowResult | null = null;
@@ -657,7 +672,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // Execution-required turns must never fall through to the read-only V1
   // inspection + text-only stream. That path cannot execute mutations and
   // would expose model pseudo-tool markup as if it were an answer.
-  if (built.kernelResult.decision.routing.requiresExecution && !(useV2 && v2Transport)) {
+  if (executionRequired && !(useV2 && v2Transport)) {
     studioLog("message:tool_execution_unavailable", {
       conversationId: conversation.id,
       projectId: conversation.projectId,
@@ -1014,7 +1029,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       ): Promise<void> => {
         const effectiveRequiresExecution = rerouted
           ? true
-          : built.kernelResult.decision.routing.requiresExecution;
+          : executionRequired;
         // ── V2 path: run agent loop INSIDE the stream with real-time events ──
         // The ProgressEmitter streams events to the SSE controller as they
         // happen, so the user can watch LiTT work in real-time.
@@ -1138,6 +1153,23 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               userId: actionContext.userId,
             })
           : undefined;
+        // Phase 2 deterministic codegen lane (tasks/litt-coder-lane): an
+        // explicit pin of a deterministicCodegen model (litt-coder:8k) in
+        // AUTO mode runs the strict-JSON pipeline instead of the native
+        // tool-calling loop — Studio validates output, performs the writes
+        // through the same verified transport, and read-back-verifies.
+        // AUTO-only by design: files.write is already a no-approval safe op
+        // there, so the lane cannot weaken ACT/PLAN approval gates.
+        const useDeterministicLane =
+          isDeterministicCodegenModel(cfg.model) && cfg.executionMode === "auto";
+        const laneProgress = useDeterministicLane
+          ? new ProgressEmitter((evt: ProgressEvent) => {
+              streamProgress.emit(evt);
+              if (persistProgressEvent) {
+                void Promise.resolve(persistProgressEvent(evt)).catch(() => {});
+              }
+            })
+          : streamProgress;
         launchFlowResult = await runWithMeteringContext(
           // Canonical metering (P0): thread identity + feature into the
           // agent run. The v2 loop's per-step emission reads this context
@@ -1151,7 +1183,18 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             runId: agentRunId ?? undefined,
             feature: "studio-chat",
           },
-          () => runLaunchFlow({
+          () => useDeterministicLane
+            ? runDeterministicBuildLane({
+                userMessage: resolvedMessage,
+                projectId: conversation.projectId ?? "",
+                userId,
+                transport,
+                model: cfg.model ?? "",
+                isStaticWorkspace: cfg.isStaticWorkspace,
+                signal: executionAbort.signal,
+                progress: laneProgress,
+              })
+            : runLaunchFlow({
           userMessage: resolvedMessage,
           projectId: conversation.projectId ?? "",
           userId,

@@ -8,6 +8,7 @@ import {
 } from "../stores/useExecutionStore";
 import type { ActionRunDisplayState } from "../components/ActionRunStatusPanel";
 import type { Worktab } from "../hooks/useServerWorktabs";
+import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 
 /* ── F1: per-worktab status badges ────────────────────────────────────
    Badges derive ONLY from machine evidence:
@@ -67,7 +68,9 @@ export function useWorktabBadges(tabs: Worktab[]): Record<string, WorktabBadge> 
     let cancelled = false;
     const ids = tabs
       .map((t) => t.conversationId)
-      .filter((id): id is string => !!id);
+      // Optimistic "pending_*" ids have no server row — polling their
+      // action-run endpoint is a guaranteed 404 on every cycle.
+      .filter((id): id is string => !!id && !isOptimisticConversationId(id));
     if (ids.length === 0) {
       setProjections({});
       return;

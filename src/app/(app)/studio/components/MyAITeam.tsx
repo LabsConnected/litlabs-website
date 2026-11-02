@@ -325,8 +325,9 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
 
 function planLabel(plan: string): string {
   switch (plan) {
-    case "creator_beta": return "Creator Beta";
-    case "pro_builder_beta": return "Pro Builder Beta";
+    case "creator_lite": return "Creator Lite";
+    case "creator_beta": return "Creator";
+    case "pro_builder_beta": return "Pro Builder";
     case "founder": return "Founding Member";
     default: return plan;
   }

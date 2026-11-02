@@ -1,0 +1,53 @@
+{
+  "name": "LiTTree — Dex Outbound Call Request Review",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dex-call-request",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-dex-call",
+      "name": "Dex Call Request Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "dex-call-request"
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = $input.first().json.body || $input.first().json;\nreturn [{ json: { phone: body.phone, requestedBy: body.requestedBy, providerCallId: body.providerCallId, allowed: body.allowed, reason: body.reason } }];"
+      },
+      "id": "func-parse-call",
+      "name": "Parse Call Request",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "channel": "general",
+        "text": "=Dex requested an outbound call to {{ $json.phone }} (requested by {{ $json.requestedBy }}). Decision: {{ $json.allowed ? \"ALLOWED (mock, no real dial)\" : \"DENIED — \" + $json.reason }}. Review before anything goes live.",
+        "otherOptions": {}
+      },
+      "id": "slack-notify",
+      "name": "Notify Larry (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "Dex Call Request Webhook": {
+      "main": [[{ "node": "Parse Call Request", "type": "main", "index": 0 }]]
+    },
+    "Parse Call Request": {
+      "main": [[{ "node": "Notify Larry (Slack)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false,
+  "tags": [{ "name": "voice" }, { "name": "dex" }, { "name": "outbound-calling" }]
+}

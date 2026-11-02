@@ -497,6 +497,21 @@ main {
   }
 }
 
+/* Studio chrome touch targets: the mobile base font drops to 13px, which
+   shrinks every rem-based spacing utility by ~19% (h-11 renders 35.75px).
+   Enforce real 44px minimums for interactive controls inside the Studio
+   shell and the portaled mobile LiTT sheet. */
+@media (max-width: 768px) {
+  .studio-shell button,
+  .studio-shell [role="button"],
+  .studio-shell a,
+  [data-testid="litt-mobile-sheet"] button,
+  [data-testid="litt-mobile-sheet"] [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
 /* html scroll-behavior removed - was causing scroll-to-bottom on page refresh */
 
 body {
@@ -2154,13 +2169,12 @@ main {
     padding: 16px;
   }
 
-  /* Studio chrome — intentional compact targets on coarse pointers.
-     36px keeps the 52px header and the operator bar tappable without the
-     44px distortion. min-width is left alone (dot-only status pill). */
+  /* Studio chrome — primary touch controls get the full 44px target.
+     min-width is left alone (dot-only status pill). */
   [data-studio-chrome] [data-testid="execution-mode-segmented"] button,
   [data-studio-chrome] [data-testid="agent-status-pill"],
   [data-studio-chrome] [data-testid="studio-operator-bar"] button {
-    min-height: 36px;
+    min-height: 44px;
   }
 }
 

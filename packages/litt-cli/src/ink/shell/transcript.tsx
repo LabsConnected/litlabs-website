@@ -19,10 +19,9 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { COLORS } from "../colors.js";
 import { ChatMessageView } from "../chat-transcript.js";
 import { layoutTranscript, computeViewport, SCROLL_INDICATOR_ROWS, type ViewportResult } from "../scroll-model.js";
-import type { ActivityEntry, ChatMessage, MissionState, ActivitySemantic, CanonicalMissionProjection } from "../cockpit-store.js";
+import type { ActivityEntry, ChatMessage, MissionState, CanonicalMissionProjection } from "../cockpit-store.js";
 import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 import type { WorkstreamSnapshot } from "../workstream-store.js";
 import type { ExecutionTarget } from "../../lib/execution-target.js";
@@ -34,55 +33,10 @@ import {
   estimateSummaryHeight,
 } from "../observability-project.js";
 
-/** Tiny-vocabulary glyphs. */
-export const SEMANTIC_GLYPH: Record<ActivitySemantic, { glyph: string; color: string }> = {
-  working: { glyph: "→", color: COLORS.working },
-  success: { glyph: "✓", color: COLORS.success },
-  warning: { glyph: "!", color: COLORS.warning },
-  failed: { glyph: "×", color: COLORS.error },
-  decision: { glyph: "◆", color: COLORS.brand },
-};
-
-/** Derive the semantic class from the entry when not explicitly set. */
-export function semanticOf(entry: ActivityEntry): ActivitySemantic {
-  if (entry.semantic) return entry.semantic;
-  // Plan-mode denials are DECISIONS, not failures: the policy did its
-  // job (a mutation was blocked on purpose). Surface as ◆ — never a
-  // scary red error. "Switch to Act" guidance lives in the message.
-  if (/^PLAN mode rejects/i.test(entry.text)) return "decision";
-  switch (entry.type) {
-    case "run.completed":
-    case "tool.completed":
-    case "mission.step_passed":
-    case "mission.completed":
-    case "verification.passed":
-    case "agent.complete":
-    case "approval.granted":
-      return "success";
-    case "run.failed":
-    case "tool.failed":
-    case "mission.step_failed":
-    case "mission.failed":
-    case "verification.failed":
-    case "agent.stopped":
-    case "approval.denied":
-    case "error":
-      return "failed";
-    case "tool.timeout":
-    case "approval.required":
-      return "warning";
-    case "model.changed":
-    case "mode":
-      return "decision";
-    case "tool.started":
-    case "mission.step_started":
-    case "agent.request":
-    case "run.started":
-      return "working";
-    default:
-      return "working";
-  }
-}
+/** Tiny-vocabulary glyphs + semantic classifier — the canonical
+ *  definitions live in activity-stream.tsx (the renderer that owns the
+ *  feed rows); re-exported here for back-compat. */
+export { SEMANTIC_GLYPH, semanticOf } from "../activity-stream.js";
 
 export interface FitResult {
   messages: ChatMessage[];
@@ -316,9 +270,7 @@ export function estimateActivityFeedHeight(
   if (visible.length === 0) return 0;
   const compact = width < 60;
   const msgMax = Math.max(10, width - (compact ? 22 : 26));
-  const borderRows = 0; // border removed — compact chrome
-  const headerRows = compact ? 0 : 1;
-  let rows = borderRows + headerRows + visible.length;
+  let rows = visible.length; // bare rows — no border, no header
   if (details) {
     for (const entry of visible) {
       if (entry.fullText && entry.fullText.length > entry.text.length) {

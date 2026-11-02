@@ -87,6 +87,7 @@ export function getOwnerClerkId(): string | null {
 export type SimulatedPlan =
   | "owner"
   | "starter"
+  | "creator_lite"
   | "creator_beta"
   | "pro_builder_beta"
   | "zero_bits";
@@ -95,8 +96,9 @@ export type SimulatedPlan =
 export const SIMULATION_OPTIONS: { value: SimulatedPlan; label: string; description: string }[] = [
   { value: "owner", label: "OWNER", description: "Full owner access — all features, unlimited projects" },
   { value: "starter", label: "Starter", description: "1 project, 1,500 LiTTBits (one-time), no terminal/voice/premium" },
-  { value: "creator_beta", label: "Creator Beta", description: "5 projects, 7.5K LiTTBits/mo, voice + GitHub" },
-  { value: "pro_builder_beta", label: "Pro Builder Beta", description: "25 projects, 18K LiTTBits/mo, terminal + premium models" },
+  { value: "creator_lite", label: "Creator Lite", description: "3 projects, LiTTBits TBD, private projects" },
+  { value: "creator_beta", label: "Creator", description: "5 projects, 7.5K LiTTBits/mo, voice + GitHub" },
+  { value: "pro_builder_beta", label: "Pro Builder", description: "25 projects, 18K LiTTBits/mo, terminal + premium models" },
   { value: "zero_bits", label: "Zero-LiTTBits Test", description: "Owner access but balance treated as 0 — tests insufficient-credit behavior" },
 ];
 
@@ -111,6 +113,8 @@ export function simulationToPlanId(sim: SimulatedPlan): PlanId {
   switch (sim) {
     case "starter":
       return "starter";
+    case "creator_lite":
+      return "creator_lite";
     case "creator_beta":
       return "creator_beta";
     case "pro_builder_beta":

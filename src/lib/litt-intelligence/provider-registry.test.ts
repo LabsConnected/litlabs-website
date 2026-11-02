@@ -277,6 +277,24 @@ describe("provider registry — model hints", () => {
       expect(plan.providers[0].provider).toBe("gemini");
     }
   });
+
+  it("routes an explicit ollama/<tag> hint to the local provider with the bare tag", () => {
+    // Studio's picker emits "ollama/<tag>" for the Local section. The hint
+    // must pin the local provider first with the bare tag Ollama expects.
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    const plan = planBasicRoutes(TOOL_REQ, { model: "ollama/litt-hermes-fast:8k" });
+    expect(plan.droppedModelHint).toBeUndefined();
+    expect(plan.providers[0].provider).toBe("ollama");
+    expect(plan.providers[0].models[0]).toBe("litt-hermes-fast:8k");
+  });
+
+  it("keeps the ollama pin first even with cloud credentials present", () => {
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("GROQ_API_KEY", "x");
+    const plan = planBasicRoutes(TOOL_REQ, { model: "ollama/litt-hermes-fast:8k" });
+    expect(plan.providers[0].provider).toBe("ollama");
+  });
 });
 
 describe("provider registry — openrouter auto-router tool exclusion", () => {

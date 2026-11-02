@@ -1643,7 +1643,14 @@ async function runAgentLoopV2Inner(
   );
   const { offerable: offerableToolIds, degraded: degradedToolIds } =
     filterOfferableTools(toolHealthMap);
-  const healthCheckedTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  const healthCheckedTools = availableTools
+    .filter((t) => offerableToolIds.includes(t.id))
+    // Browser tools only make sense when this loop drives a browser session
+    // (cfg.browserSessionId). Offering them to a build/chat run invites the
+    // model to burn steps on browser_* calls it cannot usefully complete —
+    // measured failure: a website-build prompt picked browser_type, then a
+    // malformed browser.click, instead of files.write.
+    .filter((t) => cfg.browserSessionId || !t.id.startsWith("browser."));
   // ── Local-model tool slimming (Local AI Optimization, Priority 1) ──
   // When the configured route is a small local model (OLLAMA_MODEL set),
   // offering the full ~60-schema catalog burns the limited context window
@@ -1951,6 +1958,50 @@ async function runAgentLoopV2Inner(
     const toolCallLogLenBeforeBatch = toolCallLog.length;
 
     for (const toolCall of llmResponse.toolCalls) {
+      // Browser interaction tools need a live session. The model cannot
+      // know the session id — the server binds it at execute time — so a
+      // call arriving without one is only valid while a session is
+      // actually live for this conversation. When none is, the call can
+      // never succeed: surfacing an approval card for it burns a user
+      // approval on a guaranteed failure (confirmed e2e-live 2026-10-31:
+      // an approved browser.click failed with no session and ended the
+      // run). This check runs BEFORE the offered-tool lookup because
+      // browser.* is slimmed out of the offered set when no session is
+      // bound — a hallucinated call still deserves the actionable
+      // session-required error, not a misleading "Unknown tool".
+      if (
+        toolCall.toolId.startsWith("browser.") &&
+        toolCall.toolId !== "browser.start_session" &&
+        typeof toolCall.inputs.sessionId !== "string"
+      ) {
+        const browserUserId = cfg.userId ?? actionContextFrom(cfg)?.userId;
+        const liveSession = browserUserId
+          ? await import("./browser-agent")
+              .then((m) => m.getActiveSession(browserUserId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId))
+              .catch(() => null)
+          : null;
+        if (!liveSession) {
+          const noSession = `No active browser session — call browser.start_session first to create one (the server supplies the session id; you do not pass it). If the task does not need a live web page, use the file tools instead.`;
+          const result: ToolCallResult = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: null,
+            success: false,
+            error: noSession,
+          };
+          llmMessages.push(buildToolResultMessage(result));
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "no active browser session", mutating: false });
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: false,
+            summary: "No active browser session — start_session required first",
+            durationMs: 0,
+          });
+          continue;
+        }
+      }
+
       const toolDef = offerableTools.find((t) => t.id === toolCall.toolId);
 
       if (!toolDef) {
@@ -2019,48 +2070,6 @@ async function runAgentLoopV2Inner(
             toolId: toolCall.toolId,
             success: true,
             summary: "skipped — already executed",
-            durationMs: 0,
-          });
-          continue;
-        }
-      }
-
-      // Browser interaction tools need a live session. The model cannot
-      // know the session id — the server binds it at execute time — so a
-      // call arriving without one is only valid while a session is
-      // actually live for this conversation. When none is, the call can
-      // never succeed: surfacing an approval card for it burns a user
-      // approval on a guaranteed failure (confirmed e2e-live 2026-10-31:
-      // an approved browser.click failed with no session and ended the
-      // run). Return an actionable error instead so the model starts a
-      // session or picks a workspace tool.
-      if (
-        toolCall.toolId.startsWith("browser.") &&
-        toolCall.toolId !== "browser.start_session" &&
-        typeof toolCall.inputs.sessionId !== "string"
-      ) {
-        const browserUserId = cfg.userId ?? actionContextFrom(cfg)?.userId;
-        const liveSession = browserUserId
-          ? await import("./browser-agent")
-              .then((m) => m.getActiveSession(browserUserId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId))
-              .catch(() => null)
-          : null;
-        if (!liveSession) {
-          const noSession = `No active browser session — call browser.start_session first to create one (the server supplies the session id; you do not pass it). If the task does not need a live web page, use the file tools instead.`;
-          const result: ToolCallResult = {
-            toolCallId: toolCall.toolCallId,
-            toolId: toolCall.toolId,
-            result: null,
-            success: false,
-            error: noSession,
-          };
-          llmMessages.push(buildToolResultMessage(result));
-          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "no active browser session", mutating: false });
-          localProgress.emit({
-            type: "tool_result",
-            toolId: toolCall.toolId,
-            success: false,
-            summary: "No active browser session — start_session required first",
             durationMs: 0,
           });
           continue;
@@ -3217,9 +3226,11 @@ async function resumeAgentLoopV2Inner(
     },
   );
   const { offerable: resumeOfferableIds } = filterOfferableTools(resumeToolHealthMap);
-  const resumeHealthCheckedTools = availableTools.filter((t) =>
-    resumeOfferableIds.includes(t.id),
-  );
+  const resumeHealthCheckedTools = availableTools
+    .filter((t) => resumeOfferableIds.includes(t.id))
+    // Same browser-tool scoping as the initial run: only a loop that owns a
+    // browser session may offer browser.* tools.
+    .filter((t) => cfg.browserSessionId || !t.id.startsWith("browser."));
   // Same local-model slimming as the initial run (Priority 1): the
   // resumed turn keeps the reduced file+preview set for workspace
   // build/edit tasks so a post-approval continuation cannot suddenly

@@ -22,10 +22,11 @@ afterEach(() => {
 });
 
 describe("terminal owner allowlist (web-app view)", () => {
-  it("defaults to the workspace owner when env is unset", () => {
+  it("is empty when env is unset — owner access denied to everyone", () => {
     delete process.env[ENV_KEY];
-    expect(getTerminalOwnerIds()).toEqual(["user_3GsAlPRx3ihYhftgAQ8Owr1uxzF"]);
-    expect(isTerminalOwnerUser("user_3GsAlPRx3ihYhftgAQ8Owr1uxzF")).toBe(true);
+    expect(getTerminalOwnerIds()).toEqual([]);
+    // The previous hardcoded default ID must NOT be implicitly allowed.
+    expect(isTerminalOwnerUser("user_3GsAlPRx3ihYhftgAQ8Owr1uxzF")).toBe(false);
     expect(isTerminalOwnerUser("user_testaccount")).toBe(false);
   });
 

@@ -333,8 +333,8 @@ export default function PricingClient() {
         <p className={styles.heroCopy}>
           One workspace with LiTT, your project operator and creative partner —
           sharing one runtime and one memory. Start free, then unlock research,
-          writing, and marketing skills with Creator Beta — or add coding and
-          analytics skills with Pro Builder Beta.
+          writing, and marketing skills with Creator — or add coding and
+          analytics skills with Pro Builder.
         </p>
 
         <div className={styles.heroMeta}>
