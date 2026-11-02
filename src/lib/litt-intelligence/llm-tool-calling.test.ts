@@ -312,6 +312,66 @@ describe("callLLMWithTools — Gemini tool-choice mapping", () => {
     expect(body.tools).toBeUndefined();
     expect(body.toolConfig).toBeUndefined();
   });
+
+  // Regression: gemini-2.5-flash empty-completes with
+  // finishReason=MALFORMED_FUNCTION_CALL on mode:ANY with large tool sets
+  // (production 2026-11-02 — every build request). The retry must re-issue
+  // once with mode:AUTO; a prose-only retry still fails over honestly.
+  it("retries once with mode AUTO on MALFORMED_FUNCTION_CALL for required toolChoice", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{ content: { parts: [] }, finishReason: "MALFORMED_FUNCTION_CALL" }],
+        }),
+        text: async () => "",
+      })
+      .mockResolvedValueOnce(
+        makeGeminiSuccessResponse("", [{ name: "write_file", args: { path: "index.html", content: "<h1>x</h1>" } }]),
+      );
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "build it" }],
+      [WRITE_TOOL],
+      { toolChoice: "required" },
+    );
+
+    const geminiCalls = callsTo("generativelanguage");
+    expect(geminiCalls).toHaveLength(2);
+    const secondBody = JSON.parse((geminiCalls[1][1] as { body: string }).body);
+    expect(
+      (secondBody.toolConfig as { functionCallingConfig?: { mode?: string } })?.functionCallingConfig?.mode,
+    ).toBe("AUTO");
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]?.toolId).toBe("write_file");
+  });
+
+  it("does not retry on other empty-completions for required toolChoice", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{ content: { parts: [] }, finishReason: "MAX_TOKENS" }],
+      }),
+      text: async () => "",
+    });
+
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "build it" }], [WRITE_TOOL], { toolChoice: "required" }),
+    ).rejects.toThrow();
+    // The AUTO retry is specific to MALFORMED_FUNCTION_CALL — a MAX_TOKENS
+    // empty completion must fail over without any mode:AUTO re-issue.
+    for (const call of callsTo("generativelanguage")) {
+      const body = JSON.parse((call[1] as { body: string }).body);
+      expect(
+        (body.toolConfig as { functionCallingConfig?: { mode?: string } })?.functionCallingConfig?.mode,
+      ).not.toBe("AUTO");
+    }
+  });
 });
 
 describe("callLLMWithTools — pseudo-tool text is never executable", () => {
