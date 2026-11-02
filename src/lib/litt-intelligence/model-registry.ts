@@ -152,14 +152,15 @@ function seedRecords(): Map<string, ModelRecord> {
         structuredOutput: true,
         toolCalling: true,
         // Stronger instruction-following than 2.5-flash on heavy tool
-        // prompts; marked reliable so it can serve as the primary route
-        // when flash emits prose instead of structured calls (observed
-        // 2026-11-02 prod golden: gemini-2.5-flash → bad_response prose).
+        // prompts — kept as an ENV-selectable escape route (observed
+        // 2026-11-02 prod golden: gemini-2.5-flash → bad_response prose),
+        // never the default pick: priority below flash so it is only
+        // reached via GEMINI_PRIMARY_MODEL/GEMINI_FALLBACK_MODEL.
         reliableFileWriting: true,
         vision: true,
         contextWindow: 1_048_576,
       },
-      priority: 15,
+      priority: 30,
       healthState: "unknown",
     },
     {

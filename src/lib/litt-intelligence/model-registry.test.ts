@@ -51,6 +51,7 @@ describe("model registry — eligibility", () => {
     expect(vision.map((m) => m.canonicalId)).toEqual([
       "gemini-flash",
       "gemini-2.5-flash",
+      "gemini-2.5-pro",
       "openai-gpt-4o",
     ]);
   });
@@ -112,6 +113,7 @@ describe("model registry — eligibility", () => {
       "openrouter-laguna-s-2.1",
       "openrouter-nemotron-3-ultra",
       "openrouter-gemma-4-31b",
+      "gemini-2.5-pro",
     ]);
     expect(none).toBeNull();
   });
@@ -135,6 +137,7 @@ describe("model registry — eligibility", () => {
       "openrouter-laguna-s-2.1",
       "openrouter-nemotron-3-ultra",
       "openrouter-gemma-4-31b",
+      "gemini-2.5-pro",
     ]);
     expect(none).toBeNull();
   });

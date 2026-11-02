@@ -116,16 +116,16 @@ function toPermissionInfoMirror(tool: LiTTToolDefinition) {
 }
 
 describe("registration (index import only — no advertisement yet)", () => {
-  it("registers all 14 station modules' actions (61 total)", () => {
+  it("registers all 14 station modules' actions (60 total)", () => {
     const actions = listStationActions();
-    expect(actions.length).toBe(61);
+    expect(actions.length).toBe(60);
     const byStation: Record<string, number> = {};
     for (const a of actions) byStation[a.station] = (byStation[a.station] ?? 0) + 1;
     expect(byStation).toEqual({
       code: 4,
       files: 4,
       git: 4,
-      deploy: 3,
+      deploy: 2,
       checks: 4,
       terminal: 1,
       browser: 8,
