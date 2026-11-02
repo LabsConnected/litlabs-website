@@ -1294,7 +1294,7 @@ describe("runAgentLoopV2 — build capability guard", () => {
     expect(result.modelFailed).toBe("NO_BUILD_CAPABLE_MODEL");
     expect(result.modelFailureText).toContain("No build-capable model is available");
     // Chain: north-mini-code → gemini-flash → gemini-2.5-flash →
-    // nemotron-3-super → laguna-s-2.1 → nemotron-3-ultra → gemma-4-31b →
+    // nemotron-3-super → gemma-4-26b → nemotron-3-ultra → gemma-4-31b →
     // gemini-2.5-pro → exhausted. 8 windows × 3 steps = 24 calls, bounded
     // far below maxSteps. (qwen3.8-27b:free is tool-capable but not
     // run-proven as a file writer, so it never enters the build chain.)
