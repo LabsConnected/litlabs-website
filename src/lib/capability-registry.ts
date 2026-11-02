@@ -1,6 +1,12 @@
 export type CapabilityAssistant = "litt" | "spark" | "both";
 
+import type { CanonicalCapabilityState } from "./capability-shared";
+import { legacyToCanonical, canonicalToLegacy } from "./capability-shared";
+
 export type CapabilityStatus = "available" | "unavailable" | "misconfigured";
+// Re-export canonical contract for consumers that need the shared vocabulary.
+export type { CanonicalCapabilityState } from "./capability-shared";
+export { legacyToCanonical as toCanonicalState, canonicalToLegacy as fromCanonicalState };
 
 export type CapabilityExecutor = (input: Record<string, unknown>) => Promise<{ success: boolean; output?: string; error?: string }>;
 
