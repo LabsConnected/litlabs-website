@@ -325,7 +325,7 @@ describe("shell ANSI-grid regression", () => {
           // takes priority over the raw dirty count in the status bar.
           // (Pre-redesign the sentinel was "! failed"; the runtime-state
           // consolidation renamed it to the shared glyph vocabulary.)
-          footer: ["Plan", "Act", "× Failed"],
+          footer: ["Act", "× Failed"],
           body: [
             "Web search failed (status 200)",
             // Tail line of the long answer — historically shredded first.
@@ -353,7 +353,7 @@ describe("shell ANSI-grid regression", () => {
           // COMPLETE missions show "✓ Complete" — terminal state now takes
           // precedence over the raw git dirty count ("+2"), mirroring the
           // FAILED-over-dirty precedence the overflow scenario asserts.
-          footer: ["Plan", "Act", "✓ Complete"],
+          footer: ["Act", "✓ Complete"],
           body: ["COMPLETE", "tests passed"],
         });
       } finally {
@@ -369,22 +369,25 @@ describe("shell ANSI-grid regression", () => {
       { stdout: out, stdin: makeStdin(), exitOnCtrlC: false, patchConsole: false, interactive: true },
     );
     try {
+      // The emulator is a persistent SCREEN — no byte resets between
+      // phases. Ink diffs frames and skips unchanged rows (the borderless
+      // composer row is identical across widths, so it is not re-emitted);
+      // a real terminal keeps those rows exactly as the accumulated
+      // stream describes.
       // Phase 1: small
       await waitForBytes(() => out.bytes, "Act");
       await new Promise((r) => setTimeout(r, 150));
       assertCleanFrame(emulate(out.bytes), 80, {
-        footer: ["Plan", "Act"],
+        footer: ["Act"],
         body: ["I did not verify the project as fully healthy."],
       });
-      out.reset();
 
       // Phase 2: grow
       out.resize(120, 36);
       await new Promise((r) => setTimeout(r, 300));
       assertCleanFrame(emulate(out.bytes), 120, {
-        footer: ["Plan", "Act", "× Failed"],
+        footer: ["Act", "× Failed"],
       });
-      out.reset();
 
       // Phase 3: shrink back
       out.resize(80, 24);
@@ -392,7 +395,7 @@ describe("shell ANSI-grid regression", () => {
       inst.unmount();
       await new Promise((r) => setTimeout(r, 100));
       assertCleanFrame(emulate(out.bytes), 80, {
-        footer: ["Plan", "Act", "× Failed"],
+        footer: ["Act", "× Failed"],
         body: ["I did not verify the project as fully healthy."],
       });
     } finally {

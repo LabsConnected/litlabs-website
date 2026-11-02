@@ -5,17 +5,15 @@
  * status bar) is subordinate to this. Structure per turn:
  *
  * ```
- *   You
- *   What's slowing down my PC?
+ *   › What's slowing down my PC?
  *
- *   LiTT
- *   I'm checking the processes using the most CPU and memory.
- *   GPT-5.6 Luna · 9.0s
+ *   ◈ I'm checking the processes using the most CPU and memory.
+ *     GPT-5.6 Luna · 9.0s
  * ```
  *
  * Rendering rules:
- *   - Speaker labels ("You" / "LiTT") are bold but small; "LiTT" is the
- *     one permitted brand accent per message (the identity mark).
+ *   - Speaker markers are the compact identity per turn: "›" leads a
+ *     user turn, "◈" (the LiTT shard) leads an assistant turn.
  *   - User text: bright warm white. Assistant body: near-white.
  *   - Assistant body is word-wrapped to the content measure (never the
  *     full terminal width on wide screens).
@@ -67,23 +65,32 @@ export function routingFooter(msg: ChatMessage): string | null {
  * region (the composer never moves).
  */
 export function estimateMessageHeight(msg: ChatMessage, width: number): number {
+  // Marker-led layout: the ◈/› marker shares the first body line, so no
+  // separate label row exists. Body wraps at width-2 (marker + space).
+  const bodyWidth = Math.max(8, width - 2);
   if (msg.role === "user") {
-    const lines = Math.max(1, wrapText(singleLine(msg.content), width).length);
-    return 1 + lines; // label + body
+    return Math.max(1, wrapText(singleLine(msg.content), bodyWidth).length);
   }
-  const bodyLines = msg.content.length === 0 ? 0 : wrapText(msg.content, width).length;
-  const label = 1;
+  const bodyLines = msg.content.length === 0 ? 1 : wrapText(msg.content, bodyWidth).length;
   const footer = routingFooter(msg) ? 1 : 0;
-  return label + bodyLines + footer;
+  return bodyLines + footer;
 }
 
+/**
+ * Speaker marker — the compact identity per turn.
+ *   "◈" (LiTT shard, brand violet) for assistant turns
+ *   "›" (prompt chevron) for user turns
+ * The marker sits inline before the first body line; wrapped lines
+ * align under the text, not the marker.
+ */
 function AssistantMessage({ msg, width }: { msg: ChatMessage; width: number }): React.ReactElement {
   const isStreaming = msg.status === "streaming";
   const isError = msg.status === "error";
   const bodyColor = isError ? COLORS.error : COLORS.text;
+  const bodyWidth = Math.max(8, width - 2);
   const lines = msg.content.length === 0
     ? []
-    : wrapText(msg.content, width);
+    : wrapText(msg.content, bodyWidth);
   const footer = routingFooter(msg);
 
   // Render the body as styled markdown segments per line (code-fence
@@ -97,6 +104,7 @@ function AssistantMessage({ msg, width }: { msg: ChatMessage; width: number }): 
       inCode = res.inCode;
       return (
         <Text key={i} color={bodyColor}>
+          {i === 0 ? null : "  "}
           {res.segments.map((seg, j) => (
             <StyledSegment key={j} seg={seg} />
           ))}
@@ -107,25 +115,28 @@ function AssistantMessage({ msg, width }: { msg: ChatMessage; width: number }): 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msg.content, width, isStreaming, isError]);
 
+  const plainBody = isError || rendered === null;
   return (
     <Box flexDirection="column">
-      <Text bold color={COLORS.brand}>LiTT</Text>
-      {isError || rendered === null || lines.length === 0 ? (
-        lines.length === 0 ? (
-          <Text color={bodyColor} dimColor={!isError}>…</Text>
-        ) : (
-          lines.map((line, i) => (
-            <Text key={i} color={bodyColor}>
-              {line}
-              {isStreaming && i === lines.length - 1 ? "▋" : ""}
-            </Text>
-          ))
-        )
-      ) : (
-        rendered
-      )}
+      <Box flexDirection="row">
+        <Text bold color={COLORS.brand}>◈ </Text>
+        <Box flexDirection="column" flexGrow={1}>
+          {lines.length === 0 ? (
+            <Text color={bodyColor} dimColor={!isError}>…{isStreaming ? "▋" : ""}</Text>
+          ) : plainBody ? (
+            lines.map((line, i) => (
+              <Text key={i} color={bodyColor}>
+                {line}
+                {isStreaming && i === lines.length - 1 ? "▋" : ""}
+              </Text>
+            ))
+          ) : (
+            rendered
+          )}
+        </Box>
+      </Box>
       {footer && (
-        <Text dimColor>{footer}</Text>
+        <Text dimColor>{"  "}{footer}</Text>
       )}
     </Box>
   );
@@ -143,15 +154,17 @@ function StyledSegment({ seg }: { seg: MarkdownSegment }): React.ReactElement {
 
 function UserMessage({ msg, width }: { msg: ChatMessage; width: number }): React.ReactElement {
   // User messages echo single-line (collapse newlines), wrapped to the
-  // same measure as assistant content.
+  // same measure as assistant content, led by the › prompt marker.
   const single = singleLine(msg.content);
-  const lines = wrapText(single, width);
+  const lines = wrapText(single, Math.max(8, width - 2));
   return (
-    <Box flexDirection="column">
-      <Text bold color={COLORS.secondary}>You</Text>
-      {lines.map((line, i) => (
-        <Text key={i} color={COLORS.textBright}>{line}</Text>
-      ))}
+    <Box flexDirection="row">
+      <Text bold color={COLORS.brand}>› </Text>
+      <Box flexDirection="column" flexGrow={1}>
+        {lines.map((line, i) => (
+          <Text key={i} color={COLORS.textBright}>{line}</Text>
+        ))}
+      </Box>
     </Box>
   );
 }

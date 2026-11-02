@@ -44,6 +44,12 @@ export interface ModelCapabilities {
   /** CRITICAL: proven to emit file-writing tool calls. Chat-only models
    *  (e.g. north-mini-code) have this FALSE and are never BUILD models. */
   reliableFileWriting: boolean;
+  /**
+   * The model participates in the deterministic codegen lane: Studio asks
+   * for a strict-JSON files payload, validates it, and performs the writes
+   * itself — no native tool calling required (see deterministic-codegen.ts).
+   */
+  deterministicCodegen?: boolean;
   vision: boolean;
   contextWindow: number;
 }
@@ -300,6 +306,75 @@ function seedRecords(): Map<string, ModelRecord> {
       // learns: a later success flips it back to healthy).
       healthState: "unhealthy",
     },
+    {
+      // Local Ollama (LiTT Studio build, Oct 2026): the fast hermes variant
+      // is the measured-fast local tool model (~73s/call on CPU hosts where
+      // full hermes exceeds 300s). PROVEN file writer — a live run emitted a
+      // native write_file tool call with valid {path,content} args
+      // (tasks/mission-devin-20261030/ollama-probe-results.json). Registered
+      // so an explicit ollama/<tag> pin survives the BUILD
+      // reliableFileWriting gate instead of being silently downgraded to
+      // auto-pick. Only honored when the tag is actually loaded — the
+      // adapter verifies against live /api/tags.
+      provider: "ollama",
+      canonicalId: "ollama-litt-hermes-fast-8k",
+      providerModelId: "litt-hermes-fast:8k",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        reliableFileWriting: true,
+        vision: false,
+        contextWindow: 8_192,
+      },
+      priority: 10,
+      healthState: "unknown",
+    },
+    {
+      // Tool-tuned local variant — tool-capable per /api/tags, not yet
+      // run-proven as a file writer, so reliableFileWriting stays FALSE
+      // (evidence-based doctrine: promote only after a real build run).
+      provider: "ollama",
+      canonicalId: "ollama-litt-tools-4k",
+      providerModelId: "litt-tools:4k",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        reliableFileWriting: false,
+        vision: false,
+        contextWindow: 4_096,
+      },
+      priority: 20,
+      healthState: "unknown",
+    },
+    {
+      // Lightweight local coding lane (Oct 2026): qwen2.5-coder:1.5b built
+      // as litt-coder:8k (num_ctx 8192) for thermally constrained CPU hosts —
+      // ~1GB resident vs the 2.4GB hermes builds. /api/tags advertises
+      // "tools" (verified via `ollama show`). reliableFileWriting starts
+      // FALSE per the evidence doctrine — promote to true only after a real
+      // build run proves file writes (see tasks/litt-coder-lane).
+      provider: "ollama",
+      canonicalId: "ollama-litt-coder-8k",
+      providerModelId: "litt-coder:8k",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        reliableFileWriting: false,
+        vision: false,
+        contextWindow: 8_192,
+        // Phase 2 (tasks/litt-coder-lane): the lane produces files through
+        // the deterministic JSON pipeline, not tool calls.
+        deterministicCodegen: true,
+      },
+      priority: 30,
+      healthState: "unknown",
+    },
   ];
 
   const map = new Map<string, ModelRecord>();
@@ -364,13 +439,32 @@ function meetsRequirements(r: ModelRecord, required: CapabilityRequirements): bo
 }
 
 /**
+ * Providers whose models are host-conditional: an ollama record describes a
+ * model on THIS machine's daemon, which the registry cannot verify. Such a
+ * record can therefore never qualify as a proven file writer for build
+ * selection — local models enter builds only through an explicit pin,
+ * where attemptOllama verifies live /api/tags first.
+ */
+export const HOST_CONDITIONAL_PROVIDERS: ReadonlySet<string> = new Set(["ollama"]);
+
+/**
  * Enabled models with the required capabilities that are not unhealthy,
  * sorted by priority (lower first). Unhealthy models are excluded until a
  * success is recorded via recordHealthOutcome.
+ *
+ * When `reliableFileWriting` is required (the build-model query),
+ * host-conditional providers are excluded regardless of what their record
+ * claims — availability cannot be proven from the registry alone.
  */
 export function getEligibleModels(required: CapabilityRequirements): ModelRecord[] {
   return [...records.values()]
-    .filter((r) => r.enabled && r.health.state !== "unhealthy" && meetsRequirements(r, required))
+    .filter(
+      (r) =>
+        r.enabled &&
+        r.health.state !== "unhealthy" &&
+        meetsRequirements(r, required) &&
+        (!required.reliableFileWriting || !HOST_CONDITIONAL_PROVIDERS.has(r.provider)),
+    )
     .sort((a, b) => a.priority - b.priority)
     .map(snapshot);
 }

@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -37,7 +37,9 @@ import { createRuntimeSession } from "../lib/runtime-session.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
 import { driveApprovalBridgeFromTty } from "../commands/ask.js";
 
-const SCRATCH = join(tmpdir(), "litt-m1-scratch");
+// Unique per-process scratch dir — a fixed name can be deleted by a
+// parallel test file's cleanup while this file is still executing.
+const SCRATCH = mkdtempSync(join(tmpdir(), "litt-m1-scratch-"));
 
 interface Harness {
   gateway: ExecutionGateway;
@@ -68,6 +70,19 @@ function makeHarness(): Harness {
   return { gateway, bridge, approvalCallbacks };
 }
 
+/**
+ * Cross-platform "touch": run Node itself to create the marker file.
+ * `touch` has no Windows executable, and the real spawn path (no shell)
+ * would ENOENT — the approval assertions must exercise a command that
+ * can actually succeed on every platform.
+ */
+function markerCommand(marker: string): { command: string; args: string[] } {
+  return {
+    command: process.execPath,
+    args: ["-e", "require('fs').writeFileSync(process.argv[1],'')", marker],
+  };
+}
+
 function touchRequest(
   mode: "plan" | "act" | "auto",
   interaction: "interactive" | "headless",
@@ -75,7 +90,7 @@ function touchRequest(
 ): ExecutionRequest {
   return {
     toolId: "project.run",
-    inputs: { command: "touch", args: [marker] },
+    inputs: markerCommand(marker),
     cwd: SCRATCH,
     mode,
     identity: {
@@ -203,7 +218,7 @@ describe("driveApprovalBridgeFromTty (milestone 1 review)", () => {
   function makeRequest(toolId = "project.run"): ExecutionRequest {
     return {
       toolId,
-      inputs: { command: "touch", args: ["x"] },
+      inputs: markerCommand("x"),
       cwd: SCRATCH,
       mode: "act",
       identity: {

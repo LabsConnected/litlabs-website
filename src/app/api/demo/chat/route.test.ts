@@ -88,10 +88,17 @@ describe("POST /api/demo/chat", () => {
     expect(generateTextMock).toHaveBeenCalledTimes(1);
     const [, options] = generateTextMock.mock.calls[0] as [
       string,
-      { provider: string; maxTokens: number; allowLittPaidProviders?: boolean },
+      {
+        provider: string;
+        maxTokens: number;
+        allowLittPaidProviders?: boolean;
+        providerRetries?: number;
+      },
     ];
     expect(options.provider).toBe("openrouter-free");
     expect(options.allowLittPaidProviders).toBeUndefined();
+    // Bounded same-provider retry for transient 503s — never a paid fallback.
+    expect(options.providerRetries).toBe(2);
   });
 
   it("enforces the message ceiling: N succeed, N+1 returns the limit response", async () => {

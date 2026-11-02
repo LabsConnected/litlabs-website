@@ -232,6 +232,9 @@ const GUARDED_FILES: Record<string, RegExp[]> = {
   "src/lib/litt-intelligence/project-scanner.ts": [/isHostExecutionPermitted\(\)/],
   "src/lib/visual-builds/capture.ts": [/assertHostExecutionPermitted\("visual-builds\/capture"\)/],
   "src/lib/terminal-v1/github-clone.ts": [/assertHostExecutionPermitted\("terminal-v1\/github-clone"\)/],
+  // Operator-only RAM watchdog CLI backend: PowerShell probes are gated by a
+  // module-load assert; nothing under src/app imports it.
+  "src/lib/ram-watchdog/core.ts": [/assertHostExecutionPermitted\("ram-watchdog\/core"\)/],
 };
 
 /**

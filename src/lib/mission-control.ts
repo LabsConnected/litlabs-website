@@ -517,8 +517,9 @@ export async function resolveBilling(
   if (sub && sub.status === "active") {
     const planMap: Record<string, string> = {
       starter: "Starter",
-      creator_beta: "Creator Beta",
-      pro_builder_beta: "Pro Builder Beta",
+      creator_lite: "Creator Lite",
+      creator_beta: "Creator",
+      pro_builder_beta: "Pro Builder",
       founder: "Founding Member",
     };
     planName = planMap[sub.plan] || sub.plan;

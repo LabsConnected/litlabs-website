@@ -13,7 +13,7 @@ export type SelectedModel = {
   description?: string;
   apiModel?: string;
   apiProvider?: string;
-  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias" | "advanced";
+  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias" | "advanced" | "local";
   bitsLabel?: string;
 };
 

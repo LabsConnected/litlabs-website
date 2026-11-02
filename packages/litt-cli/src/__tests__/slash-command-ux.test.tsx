@@ -330,15 +330,15 @@ describe("slash-command UX: Welcome stays visible while typing", () => {
       },
     );
     try {
-      // Welcome has a ~300ms reveal timer — poll until the tagline shows.
+      // Welcome has a ~300ms reveal timer — poll until the prompt shows.
       await expect.poll(
-        () => stripAnsi(text()).includes("BUILD · SHIP · CREATE"),
+        () => stripAnsi(text()).includes("What do you want to build?"),
         { timeout: 10_000, interval: 40 },
       ).toBe(true);
       const frame = stripAnsi(text());
-      // Welcome identity + project context stay on screen…
+      // Welcome identity stays on screen (project context now lives in
+      // the identity bar, rendered by the app above the shell)…
       expect(frame).toContain("What do you want to build?");
-      expect(frame).toContain("litlabs-website");
       // …AND the composer shows the slash draft in the same frame.
       expect(frame).toContain("/doctor");
     } finally {

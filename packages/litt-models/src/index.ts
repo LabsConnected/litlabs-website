@@ -65,6 +65,27 @@ export {
   probeOllamaRoute,
 } from "./ollama-route";
 
+// ─── Ollama model-load gate (one load at a time, host-wide) ──────
+export {
+  OLLAMA_LOAD_LOCK_ENV_VAR,
+  OLLAMA_LOAD_LOCK_STALE_MS,
+  OLLAMA_LOAD_LOCK_WAIT_MS,
+  OllamaLoadLockTimeout,
+  defaultOllamaLoadLockPath,
+  listResidentOllamaModels,
+  acquireOllamaLoadLock,
+  withOllamaModelLoadLock,
+  ensureOllamaModelResident,
+} from "./ollama-load-gate";
+export type {
+  OllamaResidentModel,
+  OllamaLoadLock,
+  OllamaLoadLockOptions,
+  OllamaEnsureState,
+  OllamaEnsureResult,
+  EnsureOllamaModelOptions,
+} from "./ollama-load-gate";
+
 export { ModelRegistry, shouldFallback } from "./registry";
 
 export {

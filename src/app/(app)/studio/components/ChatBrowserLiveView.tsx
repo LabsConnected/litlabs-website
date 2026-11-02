@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBrowserSessionStatus } from "../hooks/useBrowserSessionStatus";
+import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 import {
   LIVE_VIEW_DISCONNECTED_COPY,
   LIVE_VIEW_REASON_COPY,
@@ -93,6 +94,9 @@ export function ChatBrowserLiveView({ conversationId }: { conversationId: string
   const busy = controlBusy || stopping;
 
   const fetchProbe = useCallback(async () => {
+    // Optimistic "pending_*" ids have no server session — probing one is
+    // a guaranteed miss. The probe starts when the canonical id arrives.
+    if (isOptimisticConversationId(conversationId)) return;
     try {
       const res = await fetch(
         `/api/litt/browser/session/live-view?conversationId=${encodeURIComponent(conversationId)}`,

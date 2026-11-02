@@ -14,7 +14,8 @@
  *   5. Green  = success
  *   6. Red    = failure
  *
- * Near-black background (#09090B — the terminal's own) pairs with clean
+ * Near-black background (#090711 — the "LiTT Black Label" terminal
+ * scheme in Windows Terminal) pairs with clean
  * neutral text — no warm tint, no pure bright-white-on-pure-black.
  *
  * | Meaning   | Value     | Role                                   |

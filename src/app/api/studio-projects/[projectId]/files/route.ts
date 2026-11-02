@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { auth } from "@/lib/auth";
 import { verifyProjectWorkspace, getProject } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
@@ -19,6 +20,79 @@ import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/ter
 const TERMINAL_BASE = () => requireTerminalBaseUrl();
 
 /**
+ * True when the terminal-server 404 means the WORKSPACE itself is gone —
+ * only that justifies re-provisioning. A file-level miss ("File not found",
+ * "Path not found") is a routine not-found and must pass through untouched.
+ */
+async function isWorkspaceMissingResponse(resp: Response): Promise<boolean> {
+  const body = (await resp
+    .clone()
+    .json()
+    .catch(() => null)) as { error?: string } | null;
+  return body?.error === "Workspace not found";
+}
+
+/**
+ * Bounded upstream call: one attempt + one retry, only for transport-level
+ * failures (socket reset / terminal hang). Timeout-bounded so a hung terminal
+ * connection cannot stack unbounded in-flight requests on the dev/prod
+ * server — the demonstrated source of cascading 500s under polling.
+ * HTTP error statuses are NOT retried: they are meaningful responses.
+ * The Authorization header is never deserialized into error text or logs.
+ */
+const UPSTREAM_TIMEOUT_MS = 30_000;
+async function upstreamTerminalFetch(url: string, init: RequestInit): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+    } catch (err) {
+      lastErr = err;
+      if (attempt === 1) await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+  throw lastErr;
+}
+
+/** Sanitize an upstream/transport error for client + audit trail (no tokens). */
+function sanitizedUpstreamError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return raw.replace(/bearer\s+[A-Za-z0-9._-]+/gi, "bearer [redacted]");
+}
+
+/**
+ * Transport-level failure response with correlation ID + sanitized trace.
+ * Logs { correlationId, op, workspaceId, upstream URL, status "transport-failed",
+ * sanitized error } — never the Authorization header or token.
+ */
+function terminalUnavailableResponse(
+  correlationId: string,
+  op: string,
+  workspaceId: string,
+  upstreamUrl: string,
+  upstreamErr: unknown,
+): NextResponse {
+  console.error(
+    JSON.stringify({
+      correlationId,
+      op,
+      workspaceId,
+      upstream: upstreamUrl,
+      upstreamStatus: "transport-failed",
+      error: sanitizedUpstreamError(upstreamErr),
+    }),
+  );
+  return NextResponse.json(
+    {
+      error: "File service is temporarily unavailable (terminal connection failed)",
+      code: "TERMINAL_UNAVAILABLE",
+      correlationId,
+    },
+    { status: 503, headers: { "x-correlation-id": correlationId } },
+  );
+}
+
+/**
  * GET /api/studio-projects/[projectId]/files?path=...
  * List directory contents in the project workspace.
  * Auto-recovers if the terminal server lost the workspace.
@@ -27,6 +101,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
+  const correlationId = randomUUID();
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const terminalUnavailable = terminalNotConfiguredResponse();
@@ -68,49 +143,70 @@ export async function GET(
     const { workspaceId } = verified;
     const path = request.nextUrl.searchParams.get("path") || ".";
     const { token } = createTerminalToken(userId);
+    const upstreamPath = `/ws-files?path=${encodeURIComponent(path)}`;
+    const upstreamUrl = new URL(upstreamPath, TERMINAL_BASE()).href;
 
-    let resp = await fetch(
-      `${TERMINAL_BASE()}/ws-files?path=${encodeURIComponent(path)}`,
-      {
+    let resp: Response;
+    try {
+      resp = await upstreamTerminalFetch(upstreamUrl, {
         headers: {
           Authorization: `Bearer ${token}`,
           "X-Workspace-Id": workspaceId,
         },
-      },
-    );
+      });
+    } catch (upstreamErr) {
+      return terminalUnavailableResponse(correlationId, "files.list", workspaceId, upstreamUrl, upstreamErr);
+    }
 
     // Stale workspace recovery: if the terminal server says the workspace
     // doesn't exist (even though DB says ready), re-provision and retry once.
-    if (resp.status === 404) {
+    // A file-level 404 is not a workspace failure — skip recovery for it.
+    if (resp.status === 404 && (await isWorkspaceMissingResponse(resp))) {
       try {
         const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
         if (recovered.reprepared) {
           const newToken = createTerminalToken(userId);
-          resp = await fetch(
-            `${TERMINAL_BASE()}/ws-files?path=${encodeURIComponent(path)}`,
-            {
-              headers: {
-                Authorization: `Bearer ${newToken.token}`,
-                "X-Workspace-Id": recovered.workspaceId,
-              },
+          resp = await upstreamTerminalFetch(upstreamUrl, {
+            headers: {
+              Authorization: `Bearer ${newToken.token}`,
+              "X-Workspace-Id": recovered.workspaceId,
             },
-          );
+          });
         }
       } catch (recoveryErr) {
         const msg = recoveryErr instanceof Error ? recoveryErr.message : "Workspace recovery failed";
-        return NextResponse.json({ error: msg }, { status: 503 });
+        console.error(JSON.stringify({
+          correlationId,
+          op: "files.list",
+          workspaceId,
+          upstream: upstreamUrl,
+          upstreamStatus: "recovery-failed",
+          error: sanitizedUpstreamError(recoveryErr),
+        }));
+        return NextResponse.json({ error: msg, code: "WORKSPACE_RECOVERY_FAILED", correlationId }, { status: 503, headers: { "x-correlation-id": correlationId } });
       }
     }
 
     if (!resp.ok) {
       const text = await resp.text().catch(() => "Unknown error");
-      return NextResponse.json({ error: normalizeFileError(text) }, { status: resp.status });
+      console.error(JSON.stringify({
+        correlationId,
+        op: "files.list",
+        workspaceId,
+        upstream: upstreamUrl,
+        upstreamStatus: resp.status,
+        error: normalizeFileError(text),
+      }));
+      return NextResponse.json(
+        { error: normalizeFileError(text), correlationId },
+        { status: resp.status, headers: { "x-correlation-id": correlationId } },
+      );
     }
 
-    return NextResponse.json(await resp.json());
+    return NextResponse.json(await resp.json(), { headers: { "x-correlation-id": correlationId } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to list files";
-    const code = (err as { code?: string }).code;
+    const code = (err as { code?: string }).code ?? null;
     // Map known workspace errors to proper status codes instead of 500
     const status =
       code === "PROJECT_NOT_FOUND" ? 404 :
@@ -119,7 +215,13 @@ export async function GET(
       msg.includes("not found") ? 404 :
       msg.includes("Forbidden") ? 403 :
       500;
-    return NextResponse.json({ error: msg, code: code ?? null }, { status });
+    console.error(JSON.stringify({
+      correlationId,
+      op: "files.list",
+      upstreamStatus: "handler-error",
+      error: sanitizedUpstreamError(err),
+    }));
+    return NextResponse.json({ error: msg, code, correlationId }, { status, headers: { "x-correlation-id": correlationId } });
   }
 }
 
@@ -131,6 +233,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
+  const correlationId = randomUUID();
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const terminalUnavailable = terminalNotConfiguredResponse();
@@ -168,9 +271,9 @@ export async function POST(
     return NextResponse.json({ error: "Invalid workspace path" }, { status: 400 });
   }
 
+  let workspaceId = "unknown";
   try {
     // Auto-provision if workspace is not ready (same recovery as GET)
-    let workspaceId: string;
     try {
       workspaceId = (await verifyProjectWorkspace(projectId, userId)).workspaceId;
     } catch (verifyErr) {
@@ -188,37 +291,60 @@ export async function POST(
       }
     }
     let token = createTerminalToken(userId);
+    const upstreamPath = `/ws-files/${action}`;
+    const upstreamUrl = new URL(upstreamPath, TERMINAL_BASE()).href;
 
-    let resp = await fetch(`${TERMINAL_BASE()}/ws-files/${action}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token.token}`,
-        "X-Workspace-Id": workspaceId,
-      },
-      body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content, encoding: body.encoding }),
+    const forwardBody = JSON.stringify({
+      path,
+      newPath: action === "rename" ? newPath : undefined,
+      content: body.content,
+      encoding: body.encoding,
     });
 
-    // Stale workspace recovery for POST operations
-    if (resp.status === 404) {
+    let resp: Response;
+    try {
+      resp = await upstreamTerminalFetch(upstreamUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token.token}`,
+          "X-Workspace-Id": workspaceId,
+        },
+        body: forwardBody,
+      });
+    } catch (upstreamErr) {
+      return terminalUnavailableResponse(correlationId, `files.${action}`, workspaceId, upstreamUrl, upstreamErr);
+    }
+
+    // Stale workspace recovery for POST operations — workspace-level 404
+    // only; a missing file is a normal not-found result, not a lost workspace.
+    if (resp.status === 404 && (await isWorkspaceMissingResponse(resp))) {
       try {
         const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
         if (recovered.reprepared) {
           workspaceId = recovered.workspaceId;
           token = createTerminalToken(userId);
-          resp = await fetch(`${TERMINAL_BASE()}/ws-files/${action}`, {
+          resp = await upstreamTerminalFetch(upstreamUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${token.token}`,
               "X-Workspace-Id": workspaceId,
             },
-            body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content, encoding: body.encoding }),
+            body: forwardBody,
           });
         }
       } catch (recoveryErr) {
         const msg = recoveryErr instanceof Error ? recoveryErr.message : "Workspace recovery failed";
-        return NextResponse.json({ error: msg }, { status: 503 });
+        console.error(JSON.stringify({
+          correlationId,
+          op: `files.${action}`,
+          workspaceId,
+          upstream: upstreamUrl,
+          upstreamStatus: "recovery-failed",
+          error: sanitizedUpstreamError(recoveryErr),
+        }));
+        return NextResponse.json({ error: msg, code: "WORKSPACE_RECOVERY_FAILED", correlationId }, { status: 503, headers: { "x-correlation-id": correlationId } });
       }
     }
 
@@ -241,10 +367,21 @@ export async function POST(
 
     if (!ok) {
       const text = await resp.text().catch(() => "Unknown error");
-      return NextResponse.json({ error: normalizeFileError(text) }, { status: resp.status });
+      console.error(JSON.stringify({
+        correlationId,
+        op: `files.${action}`,
+        workspaceId,
+        upstream: upstreamUrl,
+        upstreamStatus: resp.status,
+        error: normalizeFileError(text),
+      }));
+      return NextResponse.json(
+        { error: normalizeFileError(text), correlationId },
+        { status: resp.status, headers: { "x-correlation-id": correlationId } },
+      );
     }
 
-    return NextResponse.json(await resp.json());
+    return NextResponse.json(await resp.json(), { headers: { "x-correlation-id": correlationId } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "File operation failed";
 
@@ -253,7 +390,7 @@ export async function POST(
       await logFileOperation({
         userId,
         projectId,
-        workspaceId: "unknown",
+        workspaceId: workspaceId === "unknown" ? "unknown" : workspaceId,
         action: action as "write" | "delete" | "mkdir" | "rename",
         path: action === "rename" ? `${path} -> ${newPath}` : path,
         contentLength: action === "write" ? (body.content?.length ?? 0) : undefined,
@@ -263,7 +400,7 @@ export async function POST(
       }).catch(() => {});
     }
 
-    const code = (err as { code?: string }).code;
+    const code = (err as { code?: string }).code ?? null;
     const status =
       code === "PROJECT_NOT_FOUND" ? 404 :
       code === "FORBIDDEN" ? 403 :
@@ -271,6 +408,12 @@ export async function POST(
       msg.includes("not found") ? 404 :
       msg.includes("Forbidden") ? 403 :
       500;
-    return NextResponse.json({ error: msg, code: code ?? null }, { status });
+    console.error(JSON.stringify({
+      correlationId,
+      op: `files.${action}`,
+      upstreamStatus: "handler-error",
+      error: sanitizedUpstreamError(err),
+    }));
+    return NextResponse.json({ error: msg, code, correlationId }, { status, headers: { "x-correlation-id": correlationId } });
   }
 }

@@ -378,8 +378,9 @@ describe("narrow 55-col rendering", () => {
 describe("scroll behavior while blocks update", () => {
   const WIDTH = 96;
   const ROWS = 30;
-  const CHROME_ROWS = 6;
-  const CONTENT_ROWS = Math.max(8, ROWS - 1 - CHROME_ROWS); // 23
+  const HEADER_ROWS = 3;
+  const CHROME_ROWS = 5;
+  const CONTENT_ROWS = Math.max(8, ROWS - HEADER_ROWS - CHROME_ROWS); // 22
 
   it("extra content is reserved in live mode so the viewport never overflows", () => {
     const messages = [userMsg(0), asstMsg(1), userMsg(2), asstMsg(3)];

@@ -1259,7 +1259,12 @@ export interface OllamaModelInfo {
 }
 
 const OLLAMA_PROBE_TTL_MS = 5 * 60_000;
-const OLLAMA_PROBE_TIMEOUT_MS = 1_500;
+/** Probe budget for /api/tags. Tags is cheap on a warm Ollama but a cold
+ *  service on a loaded dev box can exceed 1.5s — a false timeout marks the
+ *  WHOLE provider failed for the run (provider-scope) and, on repeat,
+ *  cools it down for a minute. 4s keeps deployed-env probing bounded while
+ *  tolerating local cold-start jitter. */
+const OLLAMA_PROBE_TIMEOUT_MS = 4_000;
 let _ollamaProbeCache: { at: number; models: OllamaModelInfo[] } | null = null;
 
 /** Keep the model hot server-side slightly longer than our warm cache so a

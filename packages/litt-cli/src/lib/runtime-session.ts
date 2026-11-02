@@ -294,6 +294,7 @@ export class RuntimeSession {
       store: this._store,
       projectId: this._cwd,
       onApprovalRequired: this._onApprovalRequired,
+      emitter: (event) => this._handleEvent(event),
     });
     return this._gateway;
   }
