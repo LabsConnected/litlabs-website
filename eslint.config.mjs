@@ -58,6 +58,7 @@ const eslintConfig = defineConfig([
     // CommonJS scripts — require() is correct in .cjs and .js files
     "scripts/**/*.cjs",
     "scripts/**/*.js",
+    "tasks/**/*.cjs",
     // Root level JS scripts and debug artifacts
     "*.js",
     "scripts/__smoke*.mjs",
