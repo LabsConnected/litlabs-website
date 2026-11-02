@@ -3,23 +3,23 @@ import { PLANS, PLAN_LIST, PLAN_RANK, getPlanById, hasPlanAccess, formatPrice, f
 
 describe("Pricing contract — single source of truth", () => {
   describe("Plan catalog integrity", () => {
-    it("has exactly 4 customer plans + 1 internal owner plan", () => {
+    it("has exactly 5 customer plans + 1 internal owner plan", () => {
       // PLANS includes the internal "owner" tier (enabled: false, not purchasable)
       expect(Object.keys(PLANS).sort()).toEqual(
-        ["starter", "creator_beta", "pro_builder_beta", "founder", "owner"].sort(),
+        ["starter", "creator_lite", "creator_beta", "pro_builder_beta", "founder", "owner"].sort(),
       );
     });
 
-    it("publishes exactly 3 purchasable plans: starter, creator_beta, pro_builder_beta", () => {
+    it("publishes exactly 4 purchasable plans: starter, creator_lite, creator_beta, pro_builder_beta", () => {
       // founder is retired from sale, so it is no longer published even though
       // it remains defined in PLANS for existing Founding Members.
       expect(PLAN_LIST.map((plan) => plan.id).sort()).toEqual(
-        ["starter", "creator_beta", "pro_builder_beta"].sort(),
+        ["starter", "creator_lite", "creator_beta", "pro_builder_beta"].sort(),
       );
     });
 
     it("PLAN_LIST excludes the internal owner plan and the retired founder plan", () => {
-      expect(PLAN_LIST.length).toBe(3);
+      expect(PLAN_LIST.length).toBe(4);
       expect(PLAN_LIST.every((p) => PLANS[p.id] === p)).toBe(true);
       expect(PLAN_LIST.find((p) => p.id === "owner")).toBeUndefined();
       expect(PLAN_LIST.find((p) => p.id === "founder")).toBeUndefined();
@@ -53,9 +53,15 @@ describe("Pricing contract — single source of truth", () => {
       expect(PLANS.starter.monthlyCredits).toBe(1500);
     });
 
-    it("Creator Beta is $15/month", () => {
+    it("Creator Lite is $9.99/month", () => {
+      expect(PLANS.creator_lite.billingType).toBe("subscription");
+      expect(PLANS.creator_lite.monthlyPriceCents).toBe(999);
+      expect(PLANS.creator_lite.activeProjectLimit).toBe(3);
+    });
+
+    it("Creator is $19.99/month", () => {
       expect(PLANS.creator_beta.billingType).toBe("subscription");
-      expect(PLANS.creator_beta.monthlyPriceCents).toBe(1500);
+      expect(PLANS.creator_beta.monthlyPriceCents).toBe(1999);
       expect(PLANS.creator_beta.monthlyCredits).toBe(7500);
     });
 
@@ -78,8 +84,11 @@ describe("Pricing contract — single source of truth", () => {
   });
 
   describe("Plan ranking", () => {
-    it("starter < creator_beta = founder < pro_builder_beta", () => {
+    it("starter = creator_lite < creator_beta = founder < pro_builder_beta", () => {
       expect(PLAN_RANK.starter).toBe(0);
+      // creator_lite is a paid tier but ranks with starter until the owner
+      // decides its agent-access tier (documented in plans.ts PLAN_RANK).
+      expect(PLAN_RANK.creator_lite).toBe(0);
       expect(PLAN_RANK.creator_beta).toBe(1);
       expect(PLAN_RANK.founder).toBe(1);
       expect(PLAN_RANK.pro_builder_beta).toBe(2);
@@ -139,9 +148,9 @@ describe("Pricing contract — single source of truth", () => {
       expect(PLANS.founder.stripePriceIdEnv).toBeUndefined();
     });
 
-    it("Only creator_beta and pro_builder_beta are purchasable", () => {
+    it("Only the paid subscription tiers are purchasable", () => {
       const enabledPlans = PLAN_LIST.filter((p) => p.enabled && p.billingType !== "free");
-      expect(enabledPlans.map((p) => p.id).sort()).toEqual(["creator_beta", "pro_builder_beta"]);
+      expect(enabledPlans.map((p) => p.id).sort()).toEqual(["creator_beta", "creator_lite", "pro_builder_beta"]);
     });
   });
 });

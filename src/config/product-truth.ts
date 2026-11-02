@@ -266,11 +266,16 @@ export const POLICY_STATUSES = {
 // ---------------------------------------------------------------------------
 
 /**
- * The three official plan products already exist in Stripe at the correct
- * prices. They need to be wired to environment variables — do NOT create
- * new Stripe products for these.
+ * This is an inventory of Stripe state, not of what LiTT sells.
  *
- * This is an inventory of what exists in STRIPE, not of what LiTT sells.
+ * pro_builder_beta ($39) and founder ($149) exist in LIVE Stripe at the
+ * recorded prices. creator_lite ($9.99) and the repriced creator_beta
+ * ($19.99) exist only in Stripe TEST mode (catalog created 2026-10-31);
+ * their live price objects and the STRIPE_PRICE_CREATOR_LITE env var are
+ * still pending owner provisioning — stripeStatus reflects that so no
+ * report reads them as live-verified. The live creator_beta price object
+ * still bills $15 until it is repointed.
+ *
  * The founder entry is retained deliberately: the $149 price object still
  * exists and still backs historical purchases, so it must not be deleted.
  * What changed is that LiTT no longer offers it — PLANS.founder has no
@@ -279,13 +284,13 @@ export const POLICY_STATUSES = {
  */
 export const VERIFIED_STRIPE_PLANS = {
   creator_lite: {
-    stripeStatus: "exists",
+    stripeStatus: "test_mode_pending_live",
     priceCents: 999,
     priceMode: "recurring" as const,
     envVar: "STRIPE_PRICE_CREATOR_LITE",
   },
   creator_beta: {
-    stripeStatus: "exists",
+    stripeStatus: "test_mode_pending_live",
     priceCents: 1999,
     priceMode: "recurring" as const,
     envVar: "STRIPE_PRICE_CREATOR_BETA",

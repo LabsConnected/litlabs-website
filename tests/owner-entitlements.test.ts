@@ -299,10 +299,12 @@ describe("8. Stripe subscription state is never modified", () => {
     expect(simulationToPlanId("zero_bits")).toBe("owner");
   });
 
-  it("PLANS canonical definitions are unchanged (no price/feature modifications)", () => {
-    // Verify the canonical plans still have their original values
+  it("PLANS canonical definitions match the committed catalog", () => {
+    // Verify the canonical plans keep their committed catalog values
+    // (creator repriced to $19.99 and creator_lite $9.99 added 2026-10-31).
     expect(PLANS.starter.monthlyPriceCents).toBe(0);
-    expect(PLANS.creator_beta.monthlyPriceCents).toBe(1500);
+    expect(PLANS.creator_lite.monthlyPriceCents).toBe(999);
+    expect(PLANS.creator_beta.monthlyPriceCents).toBe(1999);
     expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3900);
     expect(PLANS.founder.monthlyPriceCents).toBe(14900);
   });
