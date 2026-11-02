@@ -12,6 +12,8 @@ import {
   stopPreviewInternal,
   buildPreviewProxyUrl,
 } from "@/lib/terminal-internal-client";
+import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
+import { createPreviewToken } from "@/lib/projects/preview-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -91,9 +93,18 @@ export async function GET(
         logs: [],
       });
     }
+
+    const manifest = await collectPreviewAssetManifest("index.html", "<html></html>", async () => null);
+    const token = createPreviewToken(userId, {
+      projectId,
+      workspaceId: project.workspaceId,
+      assets: manifest.assets,
+    });
     return NextResponse.json({
       runtimeStatus: "ready",
-      previewUrl: `/api/preview/${encodeURIComponent(projectId)}/index.html`,
+      previewUrl: `/api/preview/${encodeURIComponent(projectId)}/t/${token.token}/index.html`,
+      previewToken: token.token,
+      previewTokenExpiresAt: token.expiresAt,
       runtimeError: null,
       framework: "static",
       developmentCommand: null,
