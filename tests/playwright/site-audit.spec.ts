@@ -257,12 +257,34 @@ test.describe("Site Audit — API Health @public", () => {
 
 test.describe("Site Audit — Navigation Links @public", () => {
   test("Homepage internal links resolve to 200 or 307", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForLoadState("domcontentloaded");
+    const homepageResponse = await page.goto("/", {
+      waitUntil: "domcontentloaded",
+    });
+
+    // Guard the count: a transient error boundary or an auth redirect renders
+    // exactly one anchor (app/error.tsx, global-error.tsx, /sign-in), which a
+    // bare count would misreport as "the homepage lost its links". Assert the
+    // response really is the homepage before counting.
+    const homepageStatus = homepageResponse?.status() ?? 0;
+    expect(
+      homepageStatus === 200 || homepageStatus === 307 || homepageStatus === 302,
+      `Homepage should return 200 or redirect, got ${homepageStatus}`,
+    ).toBe(true);
+    expect(
+      new URL(page.url()).pathname,
+      `Expected to land on / but landed on ${page.url()}`,
+    ).toBe("/");
 
     const links = page.locator("a[href]");
+    // Poll rather than sample once — domcontentloaded can fire while
+    // streaming SSR/hydration is still emitting anchors.
+    await expect
+      .poll(() => links.count(), {
+        message: "Homepage should render links",
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(5);
     const count = await links.count();
-    expect(count, "Homepage should have links").toBeGreaterThan(5);
 
     const hrefs = new Set<string>();
     for (let i = 0; i < count; i++) {
