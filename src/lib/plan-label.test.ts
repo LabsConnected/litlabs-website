@@ -16,8 +16,9 @@ describe("planDisplayLabel", () => {
   });
 
   it("gives paying plans honest labels", () => {
-    expect(planDisplayLabel("pro_builder_beta")).toBe("Pro Builder Beta");
-    expect(planDisplayLabel("creator_beta")).toBe("Creator Beta");
+    expect(planDisplayLabel("pro_builder_beta")).toBe("Pro Builder");
+    expect(planDisplayLabel("creator_lite")).toBe("Creator Lite");
+    expect(planDisplayLabel("creator_beta")).toBe("Creator");
     expect(planDisplayLabel("founder")).toBe("Founding Member");
     expect(planDisplayLabel("owner")).toBe("Owner");
     expect(planDisplayLabel("starter")).toBe("Starter");
