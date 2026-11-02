@@ -41,6 +41,7 @@ import {
   type RuntimeState,
 } from "./runtime-state.js";
 import { SectionDivider, RepoStateBadge, ModeToggle } from "./ui-primitives.js";
+import { useSystemMetrics, MetricsRow, hasAnyMetric } from "./system-metrics.js";
 
 export interface StatusBarProps {
   project: string;
@@ -63,6 +64,8 @@ export interface StatusBarProps {
   /** Total approvals pending (1 = just this one). */
   approvalCount: number;
   missionState: MissionState | null;
+  /** True when the active mission was restored from disk on startup. */
+  missionRestored?: boolean;
   gitModified: number;
   gitUntracked: number;
 }
@@ -70,10 +73,14 @@ export interface StatusBarProps {
 export function StatusBar({
   project, branch, localRuntime, remoteRuntime = "offline", holoState, brain, activeModel, activeProvider,
   mode, isProcessing, busySince, approvalSince = null, approvalAccumMs = 0, approvalCount = 0, missionState,
-  gitModified, gitUntracked,
+  missionRestored = false, gitModified, gitUntracked,
 }: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
+
+  // Device vitals — cheap file probes on a slow interval. On Android the
+  // operator can't see RAM/LMK pressure or a dying battery otherwise.
+  const metrics = useSystemMetrics(process.cwd());
 
   // ── ONE authoritative runtime state — never a self-derived status ──
   // Approval, working, and terminal states are decided by the shared
@@ -219,6 +226,14 @@ export function StatusBar({
         {left2}
         {right}
       </Box>
+      {hasAnyMetric(metrics) && (
+        <Box justifyContent="space-between">
+          <MetricsRow metrics={metrics} maxWidth={Math.max(16, width - (missionRestored ? 14 : 2))} />
+          {missionRestored && (
+            <Text color={COLORS.secondary} dimColor>{"↻ restored"}</Text>
+          )}
+        </Box>
+      )}
     </Box>
   );
 }
