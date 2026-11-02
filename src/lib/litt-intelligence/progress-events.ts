@@ -52,6 +52,7 @@ export type AgentLoopPhase =
   | "preview"
   | "deploy"
   | "quality_redesign"
+  | "quality_stage_declaration"
   | "finished"
   | "cancelled";
 
