@@ -120,28 +120,30 @@ describe("routingFooter", () => {
 // ─── estimateMessageHeight ──────────────────────────────────────────
 
 describe("estimateMessageHeight", () => {
-  it("user message: label + wrapped body lines", () => {
+  it("user message: marker line shares the wrapped body", () => {
     const msg: ChatMessage = { id: "1", role: "user", content: "hello", ts: 0, status: "complete" };
-    expect(estimateMessageHeight(msg, 40)).toBe(2);
+    // Marker-led layout: "› hello" is ONE row (no separate label row).
+    expect(estimateMessageHeight(msg, 40)).toBe(1);
   });
 
-  it("assistant message: label + wrapped body + footer", () => {
+  it("assistant message: wrapped body + footer (marker shares first line)", () => {
     const msg: ChatMessage = {
       id: "1", role: "assistant", content: "line one\nline two", ts: 0, status: "complete",
       resolvedModel: "GPT-5.6 Luna", durationMs: 9000,
     };
-    // label(1) + body(2) + footer(1)
-    expect(estimateMessageHeight(msg, 40)).toBe(4);
+    // body(2) + footer(1) — the ◈ marker shares the first body line.
+    expect(estimateMessageHeight(msg, 40)).toBe(3);
   });
 
-  it("multi-line body counts wrapped lines", () => {
+  it("multi-line body counts wrapped lines at marker-indented width", () => {
     const msg: ChatMessage = {
       id: "1", role: "assistant",
-      content: "a ".repeat(60) + "b ".repeat(60), // wraps at 40 → many lines
+      content: "a ".repeat(60) + "b ".repeat(60), // wraps at 38 → many lines
       ts: 0, status: "complete",
     };
-    const wrapped = wrapText(msg.content, 40).length;
-    expect(estimateMessageHeight(msg, 40)).toBe(1 + wrapped);
+    // Body wraps at width-2 (marker + space prefix).
+    const wrapped = wrapText(msg.content, 38).length;
+    expect(estimateMessageHeight(msg, 40)).toBe(wrapped);
   });
 });
 
@@ -184,11 +186,11 @@ describe("fitContent", () => {
   });
 
   it("drops events when the conversation fills the region exactly", () => {
-    // One turn = 6 rows at width 40 (user 2 + margin 1 + assistant 3).
-    // A region of exactly 6 leaves no room for events.
+    // One turn = 4 rows at width 40 (user 1 + margin 1 + assistant 2).
+    // A region of exactly 4 leaves no room for events.
     const messages = [userMsg(0), asstMsg(0)];
     const events = [event(0)];
-    const fit = fitContent(messages, events, 6, 40);
+    const fit = fitContent(messages, events, 4, 40);
     expect(fit.fits).toBe(true);
     expect(fit.events.length).toBe(0);
   });

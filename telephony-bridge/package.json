@@ -1,0 +1,11 @@
+{
+  "name": "litlabs-telephony-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Prepared, not-yet-deployed Dex telephony bridge. Health check only in Phase 2A — no Twilio or Inworld wiring yet.",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

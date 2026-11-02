@@ -12,6 +12,7 @@
 import React, { useEffect } from "react";
 import { Box, Text, useApp } from "ink";
 import { restoreTerminal } from "../lib/terminal-teardown.js";
+import { COLORS } from "./colors.js";
 
 export interface CockpitErrorBoundaryProps {
   children: React.ReactNode;
@@ -60,11 +61,11 @@ function CrashView({ message }: { message: string }): React.ReactElement {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text bold color="red">{"LiTT cockpit encountered an error."}</Text>
-      <Text color="red">{shortMsg}</Text>
+      <Text bold color={COLORS.error}>{"LiTT cockpit encountered an error."}</Text>
+      <Text color={COLORS.error}>{shortMsg}</Text>
       <Text dimColor>{""}</Text>
       <Text dimColor>{"Run:"}</Text>
-      <Text color="cyan">{"  litt doctor"}</Text>
+      <Text color={COLORS.info}>{"  litt doctor"}</Text>
     </Box>
   );
 }

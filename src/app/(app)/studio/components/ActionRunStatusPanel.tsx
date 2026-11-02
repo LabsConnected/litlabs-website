@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExecutionDetailsExpander, type ExecutionDetailRecord } from "./ExecutionBlock";
+import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 
 interface ActionRunProjectionResponse {
   run: {
@@ -103,6 +104,14 @@ export function ActionRunStatusPanel({
   const [unavailable, setUnavailable] = useState(false);
 
   const load = useCallback(async () => {
+    // Optimistic send placeholders ("pending_<req>") have no server row —
+    // the action-run lookup is a guaranteed 404, and the run cannot exist
+    // yet anyway. Stay on the empty projection until the canonical id
+    // replaces the selection when the conversation POST resolves.
+    if (isOptimisticConversationId(conversationId)) {
+      setProjection(null);
+      return;
+    }
     try {
       const response = await fetch(
         `/api/studio/conversations/${encodeURIComponent(conversationId)}/action-run`,

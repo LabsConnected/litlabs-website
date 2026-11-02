@@ -311,13 +311,17 @@ describe("interactive LOCAL cockpit — signed out, Ollama reachable", () => {
     }
   }, 30000);
 
-  it("REQUIREMENT E3: the header reports LOCAL and SIGNED OUT", async () => {
+  it("REQUIREMENT E3: the identity bar reports the local lane", async () => {
     const c = await mountCockpit();
     try {
-      await c.waitFor((o) => o.includes("LOCAL"));
+      // New identity bar: "{model} · Ollama · local" — the lane is the
+      // permanent surface; account state moved to /whoami and /status.
+      await c.waitFor((o) => o.includes("Ollama"));
       const out = c.output();
-      expect(out).toContain("LOCAL");
-      expect(out.toUpperCase()).toContain("SIGNED OUT");
+      expect(out).toContain("Ollama");
+      expect(out.toLowerCase()).toContain("local");
+      // The badge cluster is gone — no SIGNED OUT chrome in the bar.
+      expect(out.toUpperCase()).not.toContain("SIGNED OUT");
     } finally {
       c.cleanup();
     }

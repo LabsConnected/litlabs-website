@@ -27,7 +27,10 @@ import {
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "../auth.js";
 import type { AuthenticatedRequest } from "../internal-auth.js";
 
-const OWNER_ID = "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF"; // Larry — default allowlist
+// A Clerk user id used as the configured owner in tests. There is NO
+// hardcoded default owner — this id only passes when the test sets
+// TERMINAL_OWNER_CLERK_IDS to include it.
+const OWNER_ID = "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF";
 const INTRUDER_ID = "user_9xIntruder00000000000000000";
 const VALID_SECRET = "s".repeat(32);
 
@@ -68,9 +71,9 @@ afterEach(() => {
 // ─── Allowlist parsing (real code) ──────────────────────────────────
 
 describe("getTerminalOwnerIds", () => {
-  it("defaults to the workspace owner when the env var is unset", () => {
+  it("is empty when the env var is unset — no implicit owner (fail closed)", () => {
     delete process.env.TERMINAL_OWNER_CLERK_IDS;
-    expect(getTerminalOwnerIds()).toEqual([OWNER_ID]);
+    expect(getTerminalOwnerIds()).toEqual([]);
   });
 
   it("parses a comma-separated env var, trimming whitespace and dropping empties", () => {
@@ -85,13 +88,14 @@ describe("getTerminalOwnerIds", () => {
 });
 
 describe("isTerminalOwner", () => {
-  it("allows the default owner", () => {
-    delete process.env.TERMINAL_OWNER_CLERK_IDS;
+  it("allows a configured owner", () => {
+    process.env.TERMINAL_OWNER_CLERK_IDS = OWNER_ID;
     expect(isTerminalOwner(OWNER_ID)).toBe(true);
   });
 
-  it("denies any other Clerk identity by default", () => {
+  it("denies EVERY Clerk identity when unconfigured — including the former default id", () => {
     delete process.env.TERMINAL_OWNER_CLERK_IDS;
+    expect(isTerminalOwner(OWNER_ID)).toBe(false);
     expect(isTerminalOwner(INTRUDER_ID)).toBe(false);
     expect(isTerminalOwner("user_alice")).toBe(false);
   });
@@ -194,7 +198,7 @@ describe("/api/token-exchange owner gate", () => {
   });
 
   it("the owner gets a terminal JWT whose sub is the owner", async () => {
-    delete process.env.TERMINAL_OWNER_CLERK_IDS;
+    process.env.TERMINAL_OWNER_CLERK_IDS = OWNER_ID;
     const app = createGatedExchangeApp();
     const res = await request(app)
       .post("/api/token-exchange")
@@ -252,13 +256,13 @@ describe("Socket.IO auth owner gate", () => {
   }
 
   it("accepts a terminal JWT minted for the owner", () => {
-    delete process.env.TERMINAL_OWNER_CLERK_IDS;
+    process.env.TERMINAL_OWNER_CLERK_IDS = OWNER_ID;
     const token = mintTerminalToken(OWNER_ID, 300);
     expect(socketAuthDecision(token)).toBe("accept");
   });
 
   it("rejects a terminal JWT minted for a non-owner (pre-gate 5-min window token)", () => {
-    delete process.env.TERMINAL_OWNER_CLERK_IDS;
+    process.env.TERMINAL_OWNER_CLERK_IDS = OWNER_ID;
     // This token is cryptographically VALID — minted by the server before
     // the gate deployed. The socket gate must still refuse it.
     const token = mintTerminalToken(INTRUDER_ID, 300);

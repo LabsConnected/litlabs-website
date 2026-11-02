@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { dedupeTasksByConversation, type StudioTask, type UpdateStudioTaskInput } from "@/lib/studio/task-types";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 
 export function useStudioTasks(projectId: string | null) {
   const { getToken } = useClerkAuth();
@@ -61,6 +62,10 @@ export function useStudioTasks(projectId: string | null) {
     conversationId?: string | null;
   }) => {
     if (!projectId) return null;
+    // Optimistic send placeholders have no server row — POSTing one is a
+    // guaranteed 403. The canonical conversation id arrives when the
+    // conversation POST resolves; callers retry then.
+    if (isOptimisticConversationId(input.conversationId)) return null;
     let res: Response;
     try {
       res = await fetch("/api/studio/tasks", {

@@ -21,7 +21,7 @@ import { CockpitApp } from "../ink/app.js";
 import { CockpitErrorBoundary } from "../ink/cockpit-error-boundary.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
 import { SessionEventBridge } from "../ink/session-event-bridge.js";
-import { createRuntimeSession } from "../lib/runtime-session.js";
+import { createRuntimeSession, type RuntimeSession } from "../lib/runtime-session.js";
 import { RuntimeClient } from "../lib/runtime-client.js";
 import { ensureConfig } from "../lib/config.js";
 import { detectProject, fail, header, c, resolveProjectCwd } from "../lib/utils.js";
@@ -32,7 +32,40 @@ import { launchShellWindow, currentCliCommand } from "../lib/window-launcher.js"
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { installTerminalTeardown, restoreTerminal } from "../lib/terminal-teardown.js";
 
-export async function cockpitCommand(args: string[]): Promise<number> {
+import type { RuntimeSessionOptions } from "../lib/runtime-session.js";
+
+/**
+ * Options for the cockpit's RuntimeSession.
+ *
+ * The explicit launch mode (--mode plan|act|auto) arrives via the
+ * dispatch context from index.ts and is authoritative — "act" is only
+ * the fallback when nothing was passed. Everything downstream (mission
+ * mode, ExecutionGateway policy, the cockpit footer) reads
+ * session.getMode(), so seeding it correctly is the whole contract.
+ * Exported for regression tests of the argv → session propagation seam.
+ */
+export function cockpitRuntimeSessionOptions(
+  projectRoot: string,
+  context: { mode?: "plan" | "act" | "auto" } | undefined,
+  bridges: Pick<
+    RuntimeSessionOptions,
+    "onApprovalRequired" | "onEvent" | "onStream"
+  >,
+): RuntimeSessionOptions {
+  return {
+    cwd: projectRoot,
+    mode: context?.mode ?? "act",
+    onApprovalRequired: bridges.onApprovalRequired,
+    onEvent: bridges.onEvent,
+    onStream: bridges.onStream,
+  };
+}
+
+export async function cockpitCommand(
+  args: string[],
+  _session?: RuntimeSession,
+  context?: { mode?: "plan" | "act" | "auto" },
+): Promise<number> {
   // Terminal state is process-external: whatever LiTT leaves enabled
   // leaks into the parent shell. installTerminalTeardown() hooks every
   // exit path (normal exit, process.exit, SIGTERM/SIGHUP/SIGBREAK,
@@ -49,7 +82,13 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     // Default (useSizing omitted): dedicated WT window at the user's
     // native size — no hard dependency on `--size`. The 118×36 sized
     // vector stays available for visual acceptance via useSizing:true.
-    const result = launchShellWindow(process.cwd(), currentCliCommand(["shell"]));
+    // An explicit --mode must survive the re-launch: the spawned window
+    // is a new process, so forward it on argv rather than relying on
+    // inherited state.
+    const relaunchArgs = context?.mode
+      ? ["--mode", context.mode, "shell"]
+      : ["shell"];
+    const result = launchShellWindow(process.cwd(), currentCliCommand(relaunchArgs));
     if (!result.ok) {
       fail("Could not open a LiTT window. Run 'litt shell' inside a terminal instead.");
       return 1;
@@ -128,13 +167,13 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   // Create the RuntimeSession — owns the gateway, executor, store.
   // Wire both bridges: approval callbacks → ApprovalBridge,
   // runtime events → SessionEventBridge (for local event flow).
-  const session = createRuntimeSession({
-    cwd: projectRoot,
-    mode: "act",
-    onApprovalRequired: (request, risk) => approvalBridge.request(request, risk),
-    onEvent: (event) => sessionBridge.onEvent(event),
-    onStream: (chunk) => sessionBridge.onStream(chunk),
-  });
+  const session = createRuntimeSession(
+    cockpitRuntimeSessionOptions(projectRoot, context, {
+      onApprovalRequired: (request, risk) => approvalBridge.request(request, risk),
+      onEvent: (event) => sessionBridge.onEvent(event),
+      onStream: (chunk) => sessionBridge.onStream(chunk),
+    }),
+  );
   session.installSigintHandler();
 
   // ─── Startup recovery ───

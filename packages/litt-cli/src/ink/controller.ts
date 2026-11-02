@@ -1600,6 +1600,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       act(store, `Project: ${store.state.project}`, "info", undefined, "STATUS");
       act(store, `Branch: ${store.state.branch}`, "info", undefined, "STATUS");
       act(store, `Mode: ${store.state.mode.toUpperCase()}`, "info", undefined, "STATUS");
+      act(store, `Routing: ${store.state.routingMode.toUpperCase()}`, "info", "decision", "STATUS");
+      act(store, `Selected: ${store.state.selectedModel ?? "auto (no pinned model)"}`, "info", "decision", "STATUS");
+      act(store, `Active: ${store.state.activeModel ?? "none yet — confirmed after first run"}${store.state.activeProvider ? ` · ${store.state.activeProvider}` : ""}`, "info", "decision", "STATUS");
       act(store, `Brain: ${modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel)}`, "info", "decision", "STATUS");
       act(store, `Execution: ${store.state.executionTarget.toUpperCase()} (model) · Tools: local · Transport: ${store.state.remoteRuntime}`, "info", undefined, "STATUS");
       return;
@@ -1677,6 +1680,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
     if (input === "/models") {
+      // Alias for /model — open the picker directly on the model list.
+      store.actions.setOverlay("model-picker");
+      return;
+    }
+    if (input === "/routing") {
+      // Routing settings (policy + provider truth) — direct, no picker first.
       store.actions.setOverlay("model-center");
       return;
     }
@@ -2840,12 +2849,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             });
           }
           const seconds = (result.durationMs / 1000).toFixed(1);
-          // Single concise DONE event — not raw response body
+          // Single concise DONE event — not raw response body. Tagged
+          // DONE (not CHAT) so the live feed keeps the completion marker
+          // while the user-prompt echo stays filtered out.
           store.actions.addActivity({
             id: `act_${Date.now()}_done`,
             ts: Date.now(),
             type: result.termination === "complete" ? "agent.complete" : "agent.stopped",
-            tag: "CHAT",
+            tag: "DONE",
             text: `LiTT responded · ${seconds}s${chatToolCallCount > 0 ? ` · ${chatToolCallCount} tools` : ""}`,
           });
           // CHAT complete — the tool events above pushed holoState to

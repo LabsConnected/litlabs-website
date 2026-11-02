@@ -360,21 +360,10 @@ export function Composer({
   };
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box
-        flexDirection="row"
-        borderStyle="single"
-        borderTop={false}
-        borderBottom={false}
-        borderLeft
-        borderRight
-        borderLeftColor={copy?.gold ? COLORS.gold : value.startsWith("/") ? COLORS.info : value.startsWith("@") ? COLORS.secondaryBright : COLORS.brand}
-        borderRightColor={COLORS.secondaryDim}
-        paddingLeft={1}
-        paddingRight={1}
-      >
+    <Box flexDirection="column">
+      <Box flexDirection="row">
         <Box flexGrow={1}>
-          <Text bold color={copy?.gold ? COLORS.gold : COLORS.brand}>› </Text>
+          <Text bold color={copy?.gold ? COLORS.gold : value.startsWith("/") ? COLORS.info : value.startsWith("@") ? COLORS.secondaryBright : COLORS.brand}>› </Text>
           {renderInput()}
         </Box>
         {copy?.hint && (

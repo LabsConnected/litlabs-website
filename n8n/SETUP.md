@@ -34,7 +34,7 @@ All requests from the LiTTree app to n8n use a structured, signed payload.
   "missionId": null,
   "eventType": "lead.created",
   "approvedAction": "send_welcome_email",
-  "callbackUrl": "https://litlabs.ai/api/n8n/callback",
+  "callbackUrl": "https://www.litlabs.net/api/n8n/callback",
   "idempotencyKey": "uuid-v4",
   "data": { "email": "newuser@example.com", "name": "Jane" }
 }

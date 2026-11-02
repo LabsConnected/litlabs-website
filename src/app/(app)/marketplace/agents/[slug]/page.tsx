@@ -40,19 +40,23 @@ export default async function AgentDetailPage({
   }
 
   const planLabel =
-    agent.minimumPlan === "creator_beta"
-      ? "Creator Beta"
-      : agent.minimumPlan === "pro_builder_beta"
-        ? "Pro Builder Beta"
-        : agent.minimumPlan === "founder"
-          ? "Founding Member"
-          : "Free";
+    agent.minimumPlan === "creator_lite"
+      ? "Creator Lite"
+      : agent.minimumPlan === "creator_beta"
+        ? "Creator"
+        : agent.minimumPlan === "pro_builder_beta"
+          ? "Pro Builder"
+          : agent.minimumPlan === "founder"
+            ? "Founding Member"
+            : "Free";
 
   const planPrice =
-    agent.minimumPlan === "creator_beta"
-      ? "$15/month"
-      : agent.minimumPlan === "pro_builder_beta"
-        ? "$39/month"
+    agent.minimumPlan === "creator_lite"
+      ? "$9.99/month"
+      : agent.minimumPlan === "creator_beta"
+        ? "$19.99/month"
+        : agent.minimumPlan === "pro_builder_beta"
+          ? "$39/month"
         : agent.minimumPlan === "founder"
           ? "$149 one-time"
           : "Free";

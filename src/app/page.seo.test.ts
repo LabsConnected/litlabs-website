@@ -78,21 +78,30 @@ const homeSchema = {
         },
         {
           "@type": "Offer",
-          name: "Creator Beta",
-          price: "15",
+          name: "Creator Lite",
+          price: "9.99",
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Beta pricing. Research, write, and market with AI agents. 7,500 AI credits monthly, 5 active projects.",
+            "Entry paid tier — creator tools at a lower price. 3 active projects.",
         },
         {
           "@type": "Offer",
-          name: "Pro Builder Beta",
+          name: "Creator",
+          price: "19.99",
+          priceCurrency: "USD",
+          url: absoluteUrl("/pricing"),
+          description:
+            "Research, write, and market with AI agents. 7,500 AI credits monthly, 5 active projects.",
+        },
+        {
+          "@type": "Offer",
+          name: "Pro Builder",
           price: "39",
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Beta pricing. Build, debug, and deploy with full AI tooling. 18,000 AI credits monthly, 25 active projects.",
+            "Build, debug, and deploy with full AI tooling. 18,000 AI credits monthly, 25 active projects.",
         },
       ],
     },
@@ -201,16 +210,17 @@ describe("Homepage structured data (JSON-LD)", () => {
     expect(publisher["@id"]).toBe(`${SITE_URL}/#organization`);
   });
 
-  it("SoftwareApplication lists the three real plan offers", () => {
+  it("SoftwareApplication lists the real plan offers", () => {
     const app = (homeSchema["@graph"] as Array<Record<string, unknown>>)[2];
     const offers = app.offers as Array<Record<string, string>>;
-    expect(offers).toHaveLength(3);
+    expect(offers).toHaveLength(4);
     expect(offers.map((o) => o.name)).toEqual([
       "Starter",
-      "Creator Beta",
-      "Pro Builder Beta",
+      "Creator Lite",
+      "Creator",
+      "Pro Builder",
     ]);
-    expect(offers.map((o) => o.price)).toEqual(["0", "15", "39"]);
+    expect(offers.map((o) => o.price)).toEqual(["0", "9.99", "19.99", "39"]);
     offers.forEach((o) => {
       expect(o["@type"]).toBe("Offer");
       expect(o.priceCurrency).toBe("USD");
