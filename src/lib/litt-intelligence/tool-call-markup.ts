@@ -431,9 +431,23 @@ function parseJsonEnvelope(raw: string): { name: string; inputs: Record<string, 
     return { name: fn.name, inputs: args && typeof args === "object" ? (args as Record<string, unknown>) : {} };
   }
 
+  // Wrapped carriers: `{"tool_call": {name, arguments}}` /
+  // `{"function_call": {…}}` — small models nest the envelope one level
+  // deep. Unwrap and recurse once so the inner object is normalized.
+  const wrapper = parsed.tool_call ?? parsed.function_call;
+  if (wrapper && typeof wrapper === "object" && !Array.isArray(wrapper)) {
+    const inner = parseJsonEnvelope(JSON.stringify(wrapper));
+    if (inner) return inner;
+  }
+
   const direct = parsed.name ?? parsed.tool ?? parsed.action ?? parsed.tool_name;
   if (typeof direct !== "string" || !direct) return null;
-  const named = parsed.arguments ?? parsed.parameters ?? parsed.inputs;
+  let named = parsed.arguments ?? parsed.parameters ?? parsed.inputs;
+  // Small local models emit `arguments` as a serialized-JSON string —
+  // the same tolerance the `function` carrier above already applies.
+  if (typeof named === "string") {
+    try { named = JSON.parse(named); } catch { /* leave as string */ }
+  }
   if (named && typeof named === "object") {
     return { name: direct, inputs: named as Record<string, unknown> };
   }

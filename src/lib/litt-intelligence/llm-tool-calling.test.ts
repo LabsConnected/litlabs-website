@@ -105,6 +105,16 @@ function makeSuccessResponse(model: string, text: string, toolCalls: unknown[] =
   };
 }
 
+/** /api/ps response — reports `models` as currently resident in Ollama. */
+function makeOllamaPsResponse(models: string[]) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ models: models.map((name) => ({ name })) }),
+    text: async () => "",
+  };
+}
+
 function makeErrorResponse(status: number, message: string, headers?: Record<string, string>) {
   return {
     ok: false,
@@ -1183,6 +1193,8 @@ describe("callLLMWithTools — Ollama local route", () => {
     mockFetch
       .mockResolvedValueOnce(makeGeminiErrorResponse(500, "Gemini down"))
       .mockResolvedValueOnce(makeErrorResponse(402, "OpenRouter out of credits"))
+      // Load gate: model already resident → straight through to chat.
+      .mockResolvedValueOnce(makeOllamaPsResponse(["llama3.1:8b"]))
       .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "Local model handled it."));
 
     const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
@@ -1211,6 +1223,66 @@ describe("callLLMWithTools — Ollama local route", () => {
     ).rejects.toThrow(AllRoutesFailedError);
     // Ollama never got a chat call — probe found no tool-capable model.
     expect(callsTo("localhost:11434/v1")).toHaveLength(0);
+  });
+
+  it("honours an explicit ollama/<tag> pin only when the model is loaded", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_KEEP_ALIVE", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["litt-hermes-fast:8k", "llama3.1:8b"]);
+
+    mockFetch
+      // Load gate: pinned model already resident → no warm-load needed.
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-hermes-fast:8k"]))
+      .mockResolvedValueOnce(
+        makeSuccessResponse("litt-hermes-fast:8k", "pinned reply"),
+      );
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [WRITE_TOOL],
+      { model: "ollama/litt-hermes-fast:8k" },
+    );
+
+    expect(result.provider).toBe("ollama");
+    const body = lastBodyFor("localhost:11434");
+    // Bare tag sent to Ollama (the "ollama/" wire prefix is routing-only)…
+    expect(body.model).toBe("litt-hermes-fast:8k");
+    // …and the request keeps the model resident between Studio agent steps
+    // instead of paying a multi-GB reload on every turn.
+    expect(body.keep_alive).toBe("30m");
+  });
+
+  it("fails the run with model_unavailable when the pinned ollama model is absent", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]); // pin not loaded
+
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL], {
+        model: "ollama/miss-no-such:7b",
+      }),
+    ).rejects.toThrow(/model_unavailable|All .* routes? failed/);
+    // No chat call to the local endpoint — the pin must not silently swap
+    // onto another model.
+    expect(callsTo("localhost:11434/v1/chat/completions")).toHaveLength(0);
+  });
+
+  it("auto-pick prefers the measured-fast litt-hermes-fast:8k", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b", "litt-hermes-fast:8k", "litt-hermes:latest"]);
+
+    mockFetch
+      // Load gate: auto-picked model already resident.
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-hermes-fast:8k"]))
+      .mockResolvedValueOnce(
+        makeSuccessResponse("litt-hermes-fast:8k", "auto reply"),
+      );
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(lastBodyFor("localhost:11434").model).toBe("litt-hermes-fast:8k");
   });
 });
 

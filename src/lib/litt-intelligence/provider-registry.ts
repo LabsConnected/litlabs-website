@@ -30,7 +30,8 @@
 
 import "server-only";
 
-import { resolveOllamaEndpoint, OLLAMA_ENDPOINT_ENV_VARS } from "@litt/models";
+import { resolveOllamaEndpoint } from "@litt/models";
+import { ollamaRouteEligible } from "./ollama-shared";
 import {
   findModelRecord,
   getEligibleModels,
@@ -408,16 +409,11 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
 // Local Ollama is a legitimate zero-cost route when connected, but probing
 // localhost on every request of a deployed web server is pointless. Include it
 // when explicitly configured, or when running outside a deployed environment.
+// The rule itself lives in ./ollama-shared (ollamaRouteEligible) — shared
+// with the V1 chain and the health endpoint.
 
 function ollamaIncluded(): boolean {
-  if (process.env.LITT_DISABLE_OLLAMA) return false;
-  if (OLLAMA_ENDPOINT_ENV_VARS.some((k) => !!process.env[k])) return true;
-  const deployed = !!(
-    process.env.RAILWAY_ENVIRONMENT ||
-    process.env.RAILWAY_PROJECT_ID ||
-    process.env.VERCEL
-  );
-  return !deployed;
+  return ollamaRouteEligible();
 }
 
 // ─── Health store (process-local circuit breaker) ─────────────────
@@ -711,6 +707,13 @@ function resolveModelHint(model: string | undefined): ModelHint {
   if (!model) return null;
   const m = model.trim();
   if (!m || m === "auto" || m.startsWith("litt-")) return null; // LiTT aliases → auto
+  // Explicit local pin: "ollama/<tag>" (the Studio picker's Local section).
+  // The tag is passed verbatim — attemptOllama validates it against the
+  // live /api/tags probe and fails model-scoped when it isn't loaded.
+  if (m.startsWith("ollama/")) {
+    const tag = m.slice("ollama/".length).trim();
+    return tag ? { kind: "route", provider: "ollama", model: tag } : null;
+  }
   if (m === "openrouter/free" || m.endsWith(":free")) return { kind: "route", provider: "openrouter", model: m };
   if (m.startsWith("@cf/")) return { kind: "route", provider: "cloudflare", model: m };
   if (m.startsWith("gemini") && !m.includes("/")) return { kind: "route", provider: "gemini", model: m };

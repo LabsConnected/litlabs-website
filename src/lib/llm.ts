@@ -41,10 +41,8 @@ import {
   type MeteringStatus,
 } from "@/lib/metering";
 import { checkRunawayGuards, SpendGuardError } from "@/lib/spend-guards";
-import {
-  OLLAMA_ENDPOINT_ENV_VARS,
-  resolveOllamaEndpoint,
-} from "@litt/models";
+import { resolveOllamaEndpoint, ensureOllamaModelResident } from "@litt/models";
+import { preferredLocalToolModel, ollamaKeepAliveSetting, ollamaRouteEligible, ollamaOutputTokenBudget } from "./litt-intelligence/ollama-shared";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -65,7 +63,7 @@ export type LLMProvider =
   | "openrouter-vision"
   | "ollama";
 
-export type ModelCategory = "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
+export type ModelCategory = "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias" | "local";
 
 /**
  * Which account pays for each provider.
@@ -292,19 +290,12 @@ function markModelUnavailable(provider: string): void {
  * The v2 agent path (planBasicRoutes) already enforces this structurally;
  * this brings the v1 chat path in line with it.
  */
-/** Local Ollama route eligibility — mirrors planBasicRoutes' rule in
- *  provider-registry.ts: include when explicitly configured via env, or
- *  when running outside a deployed host (probing localhost on Railway/
- *  Vercel is pointless). LITT_DISABLE_OLLAMA hard-disables. */
+/** Local Ollama route eligibility — shared rule in
+ *  ./litt-intelligence/ollama-shared (same as planBasicRoutes': include
+ *  when explicitly configured via env, or when running outside a deployed
+ *  host; LITT_DISABLE_OLLAMA hard-disables). */
 function ollamaTailEligible(): boolean {
-  if (process.env.LITT_DISABLE_OLLAMA) return false;
-  if (OLLAMA_ENDPOINT_ENV_VARS.some((k) => !!process.env[k])) return true;
-  const deployed = !!(
-    process.env.RAILWAY_ENVIRONMENT ||
-    process.env.RAILWAY_PROJECT_ID ||
-    process.env.VERCEL
-  );
-  return !deployed;
+  return ollamaRouteEligible();
 }
 
 /** Append the local OLLAMA failover tail as the LAST chain entry.
@@ -1530,16 +1521,13 @@ async function streamViaOpenRouter(
 /*  Ollama (local) implementations                                      */
 /* ------------------------------------------------------------------ */
 
-/** Local model probe (5min TTL, 1.5s probe budget) — same policy as
- *  llm-tool-calling.ts's probeOllamaModels so both routers agree. */
+/** Local model probe (5min TTL, 4s probe budget) — same policy as
+ *  llm-tool-calling.ts's probeOllamaModels so both routers agree. The
+ *  tool-capable family rule + preferred pick order live in
+ *  ./litt-intelligence/ollama-shared. */
 const OLLAMA_PROBE_TTL_MS = 5 * 60_000;
-const OLLAMA_PROBE_TIMEOUT_MS = 1_500;
+const OLLAMA_PROBE_TIMEOUT_MS = 4_000;
 let _llmOllamaProbeCache: { at: number; models: string[] } | null = null;
-
-/** Tool-capable local families — same policy as llm-tool-calling.ts's
- *  OLLAMA_TOOL_CAPABLE (litt-hermes builds are Qwen3-based). */
-const LLM_OLLAMA_TOOL_CAPABLE =
-  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss|litt-hermes|litt-tools/i;
 
 async function probeLlmOllamaModels(
   endpoint: string,
@@ -1570,25 +1558,32 @@ async function probeLlmOllamaModels(
 function pickLlmOllamaModel(available: string[], modelOverride?: string): string | null {
   // The placeholder hints (default / DEFAULT_MODELS value) are advisory —
   // resolve them against the live catalog rather than posting them as a
-  // model name Ollama doesn't have.
+  // model name Ollama doesn't have. An explicit pin travels on the wire as
+  // "ollama/<tag>" — strip the prefix; Ollama only knows bare tags.
   if (modelOverride && modelOverride !== "auto" && modelOverride !== DEFAULT_MODELS.ollama) {
-    return modelOverride;
+    // Honour the pin only when /api/tags actually reports it — never
+    // silently swap a requested local model onto another one (same rule
+    // as the V2 router's model_unavailable path).
+    const tag = modelOverride.replace(/^ollama\//, "");
+    return available.includes(tag) ? tag : null;
   }
   const override = process.env.OLLAMA_MODEL;
   if (override) return override;
-  const capable = available.filter((m) => LLM_OLLAMA_TOOL_CAPABLE.test(m));
   // Prefer the fast local tool build: on CPU-heavy hosts a full hermes
   // variant measured >300s per call while litt-hermes-fast answered in
   // ~73s — the tail must pick a usable model, not just a nominally
   // capable one (same priority order as pickOllamaModel).
-  return (
-    capable.find((m) => /^litt-hermes-fast:8k/i.test(m)) ??
-    capable.find((m) => /^litt-hermes-fast/i.test(m)) ??
-    capable.find((m) => /^litt-hermes|^litt-tools/i.test(m)) ??
-    capable[0] ??
-    available[0] ??
-    null
-  );
+  return preferredLocalToolModel(available) ?? available[0] ?? null;
+}
+
+/** Honest distinction between "Ollama has no models" and "the pinned model
+ *  isn't loaded" — the two failures need different user recovery paths. */
+function ollamaNoModelMessage(available: string[], modelOverride?: string): string {
+  const pin = modelOverride?.replace(/^ollama\//, "");
+  if (pin && pin !== "auto" && available.length > 0 && !available.includes(pin)) {
+    return `Pinned local model not loaded in Ollama: ${pin}`;
+  }
+  return "No local models loaded in Ollama";
 }
 
 /** Local inference legitimately needs a much wider budget than the shared
@@ -1609,8 +1604,20 @@ async function generateViaOllama(
   const available = await probeLlmOllamaModels(endpoint, timeoutMs, p.opts.signal);
   const modelName = pickLlmOllamaModel(available, p.opts.modelOverride?.ollama);
   if (!modelName) {
-    throw new ProviderError("ollama", null, "No local models loaded in Ollama");
+    throw new ProviderError("ollama", null, ollamaNoModelMessage(available, p.opts.modelOverride?.ollama));
   }
+
+  // Serialize model loads across every LiTT process on this host (cold
+  // path only — warm path is a single cheap /api/ps). See @litt/models.
+  await ensureOllamaModelResident(endpoint, modelName, {
+    keepAlive: ollamaKeepAliveSetting(),
+    signal: p.opts.signal,
+  });
+
+  // Small-context budget: on ":Nk" models (N ≤ 8K) cap the response at a
+  // quarter of the window when the caller didn't set max_tokens, so
+  // prompt + tools + transcript + output share one window.
+  const numPredict = p.opts.maxTokens ?? ollamaOutputTokenBudget(modelName) ?? undefined;
 
   const res = await fetchWithTimeout(
     `${endpoint}/api/chat`,
@@ -1620,12 +1627,15 @@ async function generateViaOllama(
       body: JSON.stringify({
         model: modelName,
         stream: false,
+        // Keep the local model resident between chat turns — Ollama's
+        // default ~5m unload forced a multi-GB reload on every step.
+        keep_alive: ollamaKeepAliveSetting(),
         messages: [
           ...(p.systemPrompt ? [{ role: "system", content: p.systemPrompt }] : []),
           { role: "user", content: p.prompt },
         ],
         options: {
-          ...(p.opts.maxTokens ? { num_predict: p.opts.maxTokens } : {}),
+          ...(numPredict ? { num_predict: numPredict } : {}),
           ...(p.opts.temperature !== undefined ? { temperature: p.opts.temperature } : {}),
           ...(p.opts.stop?.length ? { stop: p.opts.stop } : {}),
         },
@@ -1681,18 +1691,30 @@ async function streamViaOllama(
   const available = await probeLlmOllamaModels(endpoint, timeoutMs, p.opts.signal);
   const modelName = pickLlmOllamaModel(available, p.opts.modelOverride?.ollama);
   if (!modelName) {
-    throw new ProviderError("ollama", null, "No local models loaded in Ollama");
+    throw new ProviderError("ollama", null, ollamaNoModelMessage(available, p.opts.modelOverride?.ollama));
   }
+
+  // Serialize model loads across LiTT processes (same gate as
+  // generateViaOllama and the V2 tool-calling lane).
+  await ensureOllamaModelResident(endpoint, modelName, {
+    keepAlive: ollamaKeepAliveSetting(),
+    signal: p.opts.signal,
+  });
 
   const body: Record<string, unknown> = {
     model: modelName,
     stream: true,
+    // Keep the local model resident between chat turns (same policy as
+    // generateViaOllama / the V2 tool-calling lane).
+    keep_alive: ollamaKeepAliveSetting(),
     messages: [
       ...(p.systemPrompt ? [{ role: "system", content: p.systemPrompt }] : []),
       { role: "user", content: p.prompt },
     ],
   };
-  if (p.opts.maxTokens) body.max_tokens = p.opts.maxTokens;
+  // Small-context response budget — same policy as generateViaOllama.
+  const maxTokens = p.opts.maxTokens ?? ollamaOutputTokenBudget(modelName) ?? undefined;
+  if (maxTokens) body.max_tokens = maxTokens;
   if (p.opts.temperature !== undefined) body.temperature = p.opts.temperature;
 
   const res = await fetchWithTimeout(

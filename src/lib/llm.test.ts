@@ -445,4 +445,50 @@ describe("streamText — local Ollama failover tail", () => {
       fetchMock.mock.calls.map((c) => String(c[0])).some((u) => u.includes("11434")),
     ).toBe(false);
   });
+
+  it("local requests send keep_alive so models stay resident between steps", async () => {
+    let chatBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/api/tags")) return ollamaTags(["litt-hermes-fast:8k"]);
+      if (u.includes("/v1/chat/completions")) {
+        chatBody = JSON.parse(String(init?.body ?? "{}"));
+        return ollamaContentSse(["ok"]);
+      }
+      return new Response("dead cloud", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { streamText } = await loadLlmUnderDeadCloudEnv({ OLLAMA_KEEP_ALIVE: "" });
+    await streamText("hi", () => {}, { task: "chat" });
+    // Ollama's ~5m default unload forced a multi-GB reload every agent step;
+    // an explicit keep_alive keeps the model resident for the session.
+    // (OLLAMA_KEEP_ALIVE stubbed empty here — the env override is honored.)
+    expect(chatBody).not.toBeNull();
+    expect(chatBody!.keep_alive).toBe("30m");
+  });
+
+  it("an explicit ollama/<tag> model override reaches Ollama as the bare tag", async () => {
+    let chatBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/api/tags")) return ollamaTags(["litt-hermes:16k", "litt-hermes-fast:8k"]);
+      if (u.includes("/v1/chat/completions")) {
+        chatBody = JSON.parse(String(init?.body ?? "{}"));
+        return ollamaContentSse(["ok"]);
+      }
+      return new Response("dead cloud", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { streamText } = await loadLlmUnderDeadCloudEnv();
+    // The picker's "ollama/<tag>" id is a wire convention — the bare tag is
+    // what Ollama's /api/tags actually reports.
+    const result = await streamText("hi", () => {}, {
+      task: "chat",
+      modelOverride: { ollama: "ollama/litt-hermes:16k" },
+    });
+    expect(chatBody!.model).toBe("litt-hermes:16k");
+    expect(result.model).toBe("litt-hermes:16k");
+  });
 });
