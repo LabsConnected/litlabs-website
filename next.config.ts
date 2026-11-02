@@ -290,8 +290,10 @@ const nextConfig: NextConfig = {
             value:
               "sandbox allow-scripts; " +
               "default-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* data: blob:; " +
-              "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data:; " +
-              "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data: blob:;",
+              "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://fonts.googleapis.com 'unsafe-inline' data:; " +
+              "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://cdn.jsdelivr.net/npm/@tailwindcss/ 'unsafe-inline' data: blob:; " +
+              "font-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://fonts.gstatic.com data:; " +
+              "img-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* https://images.unsplash.com data: blob:;",
           },
           {
             key: "X-Content-Type-Options",
