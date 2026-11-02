@@ -51,17 +51,30 @@ const git = (...args: string[]): string =>
   spawnSync("git", args, { cwd: repoDir, encoding: "utf8" }).stdout.trim();
 
 /** Stub ONLY the HTTP transport boundary: run the exact command the
- *  production code sent, for real, inside the temp repo. */
+ *  production code sent, for real, inside the temp repo.
+ *
+ *  `shell: true` lets Node pick a shell that actually exists on the host
+ *  (/bin/sh on POSIX, cmd.exe on Windows) instead of hardcoding "sh", which
+ *  is absent on plain Windows installs. The production command strings
+ *  (including `&&` chaining and `--file=-` stdin piping) are passed through
+ *  unchanged either way. */
 const fetchMock = vi.fn(async (_url: unknown, init: { body: string }) => {
   const { command, stdin } = JSON.parse(init.body) as {
     command: string;
     stdin?: string;
   };
-  const r = spawnSync("sh", ["-c", command], {
+  const r = spawnSync(command, {
     cwd: repoDir,
     input: stdin ?? undefined,
     encoding: "utf8",
+    shell: true,
   });
+  // spawnSync sets `error` (and leaves `status` null) when the shell itself
+  // never launched. Silently defaulting that to exit code 1 would make a
+  // broken test environment indistinguishable from a real git failure.
+  if (r.error) {
+    throw new Error(`Subprocess launch failed for "${command}": ${r.error.message}`);
+  }
   return {
     ok: true,
     json: async () => ({
@@ -80,6 +93,11 @@ beforeEach(() => {
   git("config", "user.email", "proof@test.local");
   git("config", "user.name", "checkpoint-proof");
   git("config", "commit.gpgsign", "false");
+  // Production checkpoints run inside Linux workspace containers, where
+  // autocrlf is never on. Windows' git defaults it to true, which rewrites
+  // LF to CRLF on checkout and breaks the byte-identical restore proof —
+  // pin it off so the test matches production behavior everywhere.
+  git("config", "core.autocrlf", "false");
   fetchMock.mockClear();
   vi.stubGlobal("fetch", fetchMock);
   process.env.TERMINAL_SERVER_INTERNAL_URL = "http://127.0.0.1:1";
@@ -182,5 +200,30 @@ describe("workspace checkpoint — exact restore proof", () => {
         gitSha: "d".repeat(40),
       }),
     ).rejects.toThrow(/failed/i);
+  });
+
+  it("fails honestly when `git add -A` fails, without attempting a commit", async () => {
+    writeFileSync(join(repoDir, "app.txt"), "v1\n");
+    vi.mocked(createCheckpoint).mockClear();
+    fetchMock.mockImplementationOnce(async (_url: unknown, init: { body: string }) => {
+      const { command } = JSON.parse(init.body) as { command: string };
+      expect(command).toBe("git add -A");
+      return {
+        ok: true,
+        json: async () => ({
+          exitCode: 1,
+          stdout: "",
+          stderr: "simulated git add failure",
+        }),
+      };
+    });
+
+    await expect(
+      createWorkspaceCheckpoint({ ...INPUT, label: "should not commit" }),
+    ).rejects.toThrow(/staging failed/i);
+
+    // The failed `add` must short-circuit: no commit was ever attempted.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(createCheckpoint).not.toHaveBeenCalled();
   });
 });

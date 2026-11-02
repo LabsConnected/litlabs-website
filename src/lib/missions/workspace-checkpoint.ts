@@ -117,7 +117,12 @@ export async function createWorkspaceCheckpoint(
   const { projectId, userId, workspaceId, label, description } = input;
 
   // Stage all changes
-  await execInWorkspace(workspaceId, userId, "git add -A");
+  const addResult = await execInWorkspace(workspaceId, userId, "git add -A");
+  if (addResult.exitCode !== 0) {
+    throw new Error(
+      `Checkpoint staging failed (exit ${addResult.exitCode}): ${addResult.stderr.slice(0, 200)}`,
+    );
+  }
 
   const commitMessage = description ? `${label}\n\n${description}` : label;
   const commit = await execInWorkspace(
