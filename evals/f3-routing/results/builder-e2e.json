@@ -1,0 +1,313 @@
+{
+  "evalId": "eval-AO3-2026-10-19T08:31:37",
+  "results": {
+    "version": 3,
+    "timestamp": "2026-10-19T08:31:37.902Z",
+    "prompts": [
+      {
+        "raw": "{{prompt}}",
+        "label": "{{prompt}}",
+        "id": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "provider": "litt-e2e",
+        "metrics": {
+          "score": 2,
+          "testPassCount": 2,
+          "testFailCount": 1,
+          "testErrorCount": 0,
+          "assertPassCount": 2,
+          "assertFailCount": 1,
+          "totalLatencyMs": 189452,
+          "tokenUsage": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 3
+          },
+          "namedScores": {},
+          "namedScoresCount": {},
+          "cost": 0
+        }
+      }
+    ],
+    "results": [
+      {
+        "cost": 0,
+        "error": "Custom function returned false\nJSON.parse(output).newFiles.includes('index.html')",
+        "gradingResult": {
+          "pass": false,
+          "score": 0,
+          "reason": "Custom function returned false\nJSON.parse(output).newFiles.includes('index.html')",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": false,
+              "score": 0,
+              "reason": "Custom function returned false\nJSON.parse(output).newFiles.includes('index.html')",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).newFiles.includes('index.html')"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "28771bfa-28cb-482b-9cb3-cf872dce326e",
+        "latencyMs": 100940,
+        "namedScores": {},
+        "prompt": {
+          "raw": "Build me a simple website with a homepage index.html that says Hello World",
+          "label": "{{prompt}}"
+        },
+        "promptId": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "promptIdx": 0,
+        "provider": {
+          "id": "litt-e2e",
+          "label": "litt-e2e"
+        },
+        "response": {
+          "output": "{\"sandbox\":\"/data/data/com.termux/files/usr/tmp/litt-f3-genuine-build-WXu0V9\",\"exitCode\":0,\"timedOut\":false,\"toolCalls\":[\"\\u001b[1mproject.status\\u001b[0m\",\"\\u001b[1mproject.list_files\\u001b[0m\",\"\\u001b[1mproject.list_files\\u001b[0m\",\"\\u001b[1mproject.run\\u001b[0m\"],\"termination\":\"Agent completed\",\"newFiles\":[],\"rawStdoutTail\":\"\\n\\u001b[1m\\u001b[35mLiTT Ask\\u001b[0m\\n\\u001b[90m────────────\\u001b[0m\\n\\u001b[2mProvider: Ollama | Model: qwen3:4b-instruct-fast\\u001b[0m\\n\\u001b[36m▶\\u001b[0m Asking: \\u001b[1mBuild me a simple website with a homepage index.html that says Hello World\\u001b[0m\\n\\n\\n\\u001b[34m○\\u001b[0m Tool call: \\u001b[1mproject.status\\u001b[0m\\n\\u001b[32m✓\\u001b[0m project.status: f3-genuine-build on No commits yet on main — 0 changed, 1 untracked\\nThe project is empty, with no files except `package.json`, which is untracked. We need to create a simple `index.html` file to display \\\"Hello World\\\".\\n\\nFirst, I will list the files in the root directory to confirm the current state.\\n \\n\\n\\u001b[34m○\\u001b[0m Tool call: \\u001b[1mproject.list_files\\u001b[0m\\n\\u001b[31m✗\\u001b[0m project.list_files: Tool argument validation failed: Required argument \\\"path\\\" is empty\\nI made an error in the tool call—`path` cannot be empty. Since we're at the root, it should be an empty string. Let me correct that and reattempt.\\n\\n\\n\\u001b[34m○\\u001b[0m Tool call: \\u001b[1mproject.list_files\\u001b[0m\\n\\u001b[31m✗\\u001b[0m project.list_files: Failed to list: EACCES: permission denied, scandir '/'\\nI encountered a permission error when attempting to list files in the root directory. This is likely due to restricted access to the root filesystem in Termux.\\n\\nInstead of relying on file listing, I will proceed directly to creating `index.html` using `project.run`, since we are effectively building a minimal static website with just one file.  \\n\\nI will create a basic `index.html` file with \\\"Hello World\\\" content. Then, verify its contents with `project.read_file`.  \\n\\n\\n\\u001b[34m○\\u001b[0m Tool call: \\u001b[1mproject.run\\u001b[0m\\n\\u001b[31m✗\\u001b[0m project.run: Approval denied or not available\\nThe operation was denied due to approval constraints, likely because writing to the filesystem requires explicit permissions in Termux. I cannot create `index.html` directly with `project.run`.  \\n\\nSince I cannot write files to the project directory under these constraints, I must conclude that the task is currently unexecutable within the given environment and permissions.  \\n\\n**Final response:**  \\nI cannot build a website with `index.html` due to permission restrictions in Termux that prevent file writes. Please grant appropriate filesystem access or use a supported environment for file creation.I acknowledge the failures.  \\n\\n- `project.list_files` was invalid due to an empty path argument and failed due to permission denial (`EACCES`).  \\n- `project.run` to write `index.html` was denied by approval constraints.  \\n\\nNo operation to create or read `index.html` succeeded under these restrictions.  \\n\\n**Final response:**  \\nI cannot create or verify `index.html` due to:  \\n1. Invalid/path validation in `list_files`,  \\n2. Permission denied when listing files, and  \\n3. Approval denial when attempting to write a file.  \\n\\nThe environment does not permit file operations for this task. Please provide elevated permissions or a different execution context.\\n\\n\\u001b[32m■\\u001b[0m Agent completed (6 rounds, 4 tool calls, 92762ms)\\n\\u001b[2mServed by: Ollama | Model: qwen3:4b-instruct-fast\\u001b[0m\\n\",\"rawStderrTail\":\"\"}"
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "id": "genuine-build",
+            "prompt": "Build me a simple website with a homepage index.html that says Hello World"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).newFiles.includes('index.html')"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 0,
+        "vars": {
+          "id": "genuine-build",
+          "prompt": "Build me a simple website with a homepage index.html that says Hello World"
+        },
+        "metadata": {},
+        "failureReason": 1
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).newFiles.length === 0"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "358c96c0-b84b-42ad-906f-fd16a6076732",
+        "latencyMs": 71568,
+        "namedScores": {},
+        "prompt": {
+          "raw": "What's the difference between let and const in JavaScript?",
+          "label": "{{prompt}}"
+        },
+        "promptId": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "promptIdx": 0,
+        "provider": {
+          "id": "litt-e2e",
+          "label": "litt-e2e"
+        },
+        "response": {
+          "output": "{\"sandbox\":\"/data/data/com.termux/files/usr/tmp/litt-f3-non-build-chat-urKu2s\",\"exitCode\":0,\"timedOut\":false,\"toolCalls\":[],\"termination\":\"Agent completed\",\"newFiles\":[],\"rawStdoutTail\":\"\\n\\u001b[1m\\u001b[35mLiTT Ask\\u001b[0m\\n\\u001b[90m────────────\\u001b[0m\\n\\u001b[2mProvider: Ollama | Model: qwen3:4b-instruct-fast\\u001b[0m\\n\\u001b[36m▶\\u001b[0m Asking: \\u001b[1mWhat's the difference between let and const in JavaScript?\\u001b[0m\\n\\nIn JavaScript:\\n\\n- `let` and `const` are both used to declare variables, but they differ in scope, mutability, and behavior.\\n\\n1. **Scope**:\\n   - Both `let` and `const` have block scope (i.e., they are scoped to the nearest enclosing block, such as `{}` or an if statement).\\n   - They do not allow hoisting (variables are not available before declaration).\\n\\n2. **Mutability**:\\n   - `let`: The value of a variable declared with `let` can be changed (mutated) after it is initialized.\\n     Example: `let x = 1; x = 2;` → valid.\\n   - `const`: The value of a variable declared with `const` cannot be changed (assigned to) after initialization. However, if the value is an object or array, the object/array itself can still be mutated.\\n     Example: `const y = [1, 2]; y.push(3);` → valid (mutation of the array), but `y = [4, 5]` → invalid.\\n\\n3. **Initialization**:\\n   - Both require initialization at declaration (i.e., they cannot be declared without an initial value).\\n     Example: `let z;` → valid; `const w` → invalid (must have a value).\\n\\n4. **Use Cases**:\\n   - Use `let` when you need to reassign the variable.\\n   - Use `const` when you want to declare a variable that will not change, promoting readability and preventing accidental changes.\\n\\n5. **Performance & Best Practice**:\\n   - While both are similar in performance, `const` is preferred in most cases because it improves code clarity and helps prevent bugs due to unintended reassignment.\\n\\nSummary:  \\n`let` allows reassignment; `const` does not allow reassignment (except for mutating objects/arrays). Prefer `const` unless you explicitly need to reassign the value.\\n\\n\\u001b[32m■\\u001b[0m Agent completed (1 rounds, 0 tool calls, 64202ms)\\n\\u001b[2mServed by: Ollama | Model: qwen3:4b-instruct-fast\\u001b[0m\\n\",\"rawStderrTail\":\"\"}"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "non-build-chat",
+            "prompt": "What's the difference between let and const in JavaScript?"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).newFiles.length === 0"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 1,
+        "vars": {
+          "id": "non-build-chat",
+          "prompt": "What's the difference between let and const in JavaScript?"
+        },
+        "metadata": {},
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).rawStdoutTail.includes(\"Something's off with the thing we talked about.\")"
+              }
+            }
+          ],
+          "assertion": null
+        },
+        "id": "b9e4a2ec-bbed-44f1-9d06-d21ede23d910",
+        "latencyMs": 16944,
+        "namedScores": {},
+        "prompt": {
+          "raw": "Something's off with the thing we talked about.",
+          "label": "{{prompt}}"
+        },
+        "promptId": "effa18501e44aafd9bc42a2f64ffc9b6350f94025520ca2ed382f9bdc4b6e982",
+        "promptIdx": 0,
+        "provider": {
+          "id": "litt-e2e",
+          "label": "litt-e2e"
+        },
+        "response": {
+          "output": "{\"sandbox\":\"/data/data/com.termux/files/usr/tmp/litt-f3-ambiguous-preserves-exact-prompt-HdkRsg\",\"exitCode\":0,\"timedOut\":false,\"toolCalls\":[],\"termination\":\"Agent completed\",\"newFiles\":[],\"rawStdoutTail\":\"\\n\\u001b[1m\\u001b[35mLiTT Ask\\u001b[0m\\n\\u001b[90m────────────\\u001b[0m\\n\\u001b[2mProvider: Ollama | Model: qwen3:4b-instruct-fast\\u001b[0m\\n\\u001b[36m▶\\u001b[0m Asking: \\u001b[1mSomething's off with the thing we talked about.\\u001b[0m\\n\\nI'm sorry I couldn't assist you. Could you please clarify what you're referring to or provide more details? I'm here to help.\\n\\n\\u001b[32m■\\u001b[0m Agent completed (1 rounds, 0 tool calls, 9546ms)\\n\\u001b[2mServed by: Ollama | Model: qwen3:4b-instruct-fast\\u001b[0m\\n\",\"rawStderrTail\":\"\"}"
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "vars": {
+            "id": "ambiguous-preserves-exact-prompt",
+            "prompt": "Something's off with the thing we talked about."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).rawStdoutTail.includes(\"Something's off with the thing we talked about.\")"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 2,
+        "vars": {
+          "id": "ambiguous-preserves-exact-prompt",
+          "prompt": "Something's off with the thing we talked about."
+        },
+        "metadata": {},
+        "failureReason": 0
+      }
+    ],
+    "stats": {
+      "successes": 2,
+      "failures": 1,
+      "errors": 0,
+      "tokenUsage": {
+        "cached": 0,
+        "completion": 0,
+        "prompt": 0,
+        "total": 0,
+        "numRequests": 3
+      }
+    }
+  },
+  "config": {
+    "tags": {},
+    "description": "F3 builder-output verification — REAL end-to-end LiTT CLI. Each test runs the canonical build output (`node packages/litt-cli/dist/index.js ask \"<prompt>\"`) in a brand-new scratch project directory against PC Ollama (qwen3:4b-instruct-fast, $0), then inspects the real filesystem afterward. Assertions check actual persisted files, never the model's own narration of what it did (F3 step 5).\n",
+    "prompts": [
+      "{{prompt}}"
+    ],
+    "providers": [
+      {
+        "id": "file://provider/litt-e2e.cjs",
+        "label": "litt-e2e"
+      }
+    ],
+    "tests": [
+      {
+        "vars": {
+          "id": "genuine-build",
+          "prompt": "Build me a simple website with a homepage index.html that says Hello World"
+        },
+        "assert": [
+          {
+            "type": "javascript",
+            "value": "JSON.parse(output).newFiles.includes('index.html')"
+          }
+        ]
+      },
+      {
+        "vars": {
+          "id": "non-build-chat",
+          "prompt": "What's the difference between let and const in JavaScript?"
+        },
+        "assert": [
+          {
+            "type": "javascript",
+            "value": "JSON.parse(output).newFiles.length === 0"
+          }
+        ]
+      },
+      {
+        "vars": {
+          "id": "ambiguous-preserves-exact-prompt",
+          "prompt": "Something's off with the thing we talked about."
+        },
+        "assert": [
+          {
+            "type": "javascript",
+            "value": "JSON.parse(output).rawStdoutTail.includes(\"Something's off with the thing we talked about.\")"
+          }
+        ]
+      }
+    ],
+    "scenarios": [],
+    "env": {},
+    "sharing": true,
+    "defaultTest": {
+      "vars": {},
+      "assert": [],
+      "options": {},
+      "metadata": {}
+    },
+    "outputPath": [
+      "results/builder-e2e.json"
+    ],
+    "extensions": [],
+    "metadata": {}
+  },
+  "shareableUrl": null
+}
