@@ -44,11 +44,14 @@ import type { ActionExecutionContext } from "@/lib/action-runtime";
 import { resolveAvailableCapabilities } from "./capabilities";
 import type { LiTTToolDefinition } from "./types";
 import {
+  buildMissingStageDeclarationPrompt,
   buildQualityLoopPrompt,
   buildRedesignPrompt,
   finalizeQualityLoop,
   harvestStageMarkers,
   MAX_DESIGN_PASSES,
+  MAX_MARKER_REPROMPTS,
+  missingDeclarableStages,
   noteBuildFix,
   noteDeployment,
   noteToolResult,
@@ -1281,6 +1284,30 @@ async function maybeInspectBeforeFinal(
     harvestStageMarkers(qualitySession, [
       { role: "assistant" as const, content: finalAnswerText },
     ]);
+    // Missing required stage declarations get ONE bounded reprompt before
+    // the gate holds: understand/plan/design are deliberately not
+    // system-filed for full-scope builds, and a model that did the work
+    // without emitting the markers deadlocks the verdict at finalize
+    // (prod golden run 41505296694). This nudges the declaration, it does
+    // not fill evidence — the gate still demands it.
+    const missingDecl = missingDeclarableStages(qualitySession);
+    if (
+      missingDecl.length > 0 &&
+      (qualitySession.markerRepromptsUsed ?? 0) < MAX_MARKER_REPROMPTS &&
+      stepsUsed < maxSteps
+    ) {
+      qualitySession.markerRepromptsUsed = (qualitySession.markerRepromptsUsed ?? 0) + 1;
+      localProgress.emit({ type: "phase", phase: "quality_stage_declaration", step: stepsUsed });
+      localProgress.emit({
+        type: "status",
+        summary: `Quality ledger missing stage declarations (${missingDecl.join(", ")}) — requesting them`,
+      });
+      llmMessages.push({
+        role: "user",
+        content: buildMissingStageDeclarationPrompt(missingDecl),
+      });
+      return true;
+    }
     // After a demanded redesign the judge must re-score the new output:
     // reset the once-per-session latch so the next final answer is judged
     // again. Bounded by MAX_DESIGN_PASSES inside runQualityInspection.

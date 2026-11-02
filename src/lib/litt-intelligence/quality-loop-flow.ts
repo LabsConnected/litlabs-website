@@ -86,6 +86,8 @@ export interface QualityLoopSession {
   observations: QualityLoopObservation[];
   /** True once any mutating tool succeeded — gates read-back evidence. */
   mutationSeen?: boolean;
+  /** Bounded reprompts spent asking the agent to declare missing stages. */
+  markerRepromptsUsed?: number;
 }
 
 export interface QualityLoopObservation {
@@ -111,6 +113,7 @@ export interface QualityLoopSnapshot {
   critiqueFailed: boolean;
   observations: QualityLoopObservation[];
   mutationSeen?: boolean;
+  markerRepromptsUsed?: number;
 }
 
 export function snapshotQualityLoopSession(session: QualityLoopSession): QualityLoopSnapshot {
@@ -168,6 +171,7 @@ export function startQualityLoopSession(opts: {
     critiqueFailed: false,
     observations: [],
     mutationSeen: false,
+    markerRepromptsUsed: 0,
   };
   // Workspace capability is recorded on the persisted state so the
   // required-stage set (requiredStagesFor) survives an approval resume.
@@ -341,6 +345,70 @@ export function harvestStageMarkers(
     }
   }
   return recorded;
+}
+
+/** Bounded reprompts spent asking the agent to declare missing stages. */
+export const MAX_MARKER_REPROMPTS = 1;
+
+/**
+ * Cognitive stages whose evidence is an agent declaration — the only
+ * stages a marker reprompt can fill. System-evidenced stages (build/run/
+ * test/deploy/verify) are excluded: asking the model to "declare" them
+ * would accept claims over machine proof. Research/polish are skippable
+ * and never block — a reprompt about them would be noise.
+ */
+const DECLARABLE_STAGES: ReadonlySet<QualityStage> = new Set([
+  "understand",
+  "plan",
+  "design",
+]);
+
+/**
+ * Required stages still open whose only path to evidence is an agent
+ * QUALITY-marker declaration. Used to drive ONE bounded reprompt before
+ * the verdict holds: for full-scope builds understand/plan/design are
+ * intentionally NOT system-filed (a real build needs the agent's brief,
+ * plan and design intent), and a model that does the work without
+ * declaring the stages deadlocks the gate at finalize — observed in prod
+ * golden run 41505296694 where a complete static build + verified preview
+ * still failed the quality verdict because only QUALITY: BUILD was emitted.
+ */
+export function missingDeclarableStages(session: QualityLoopSession): QualityStage[] {
+  const state = session.state;
+  const required = new Set<QualityStage>(requiredStagesFor(session.taskScope, state));
+  const missing: QualityStage[] = [];
+  for (const stage of QUALITY_STAGES) {
+    if (!required.has(stage) || !DECLARABLE_STAGES.has(stage)) continue;
+    const s = state.stages[stage];
+    if (s.status !== "pending") continue;
+    // Evidence may be observed but not yet filed (filed in stage order);
+    // either form satisfies the stage — check both ledgers.
+    const hasEvidence =
+      s.evidence.length > 0 || session.observations.some((o) => o.stage === stage);
+    if (!hasEvidence) missing.push(stage);
+  }
+  return missing;
+}
+
+/** Reprompt injected once when required stage declarations are missing. */
+export function buildMissingStageDeclarationPrompt(missing: QualityStage[]): string {
+  const names = missing.join(", ");
+  const stageHints: Record<string, string> = {
+    understand: "audience, business goal, conversion goal, brand, constraints",
+    plan: "information architecture, user journeys, build steps, mobile behavior",
+    design: "typography, spacing system, visual hierarchy, component language, responsive layout",
+  };
+  const hints = missing
+    .map((s) => `- QUALITY: ${s} — <${stageHints[s] ?? "one-line summary"}>`)
+    .join("\n");
+  return (
+    `The quality ledger is still missing required stage declarations: ${names}. ` +
+    `Declare each completed stage with a QUALITY marker line now — one line per stage ` +
+    `summarizing what you actually did (the work already done is the truth; do NOT ` +
+    `rebuild or repeat it):\n${hints}\n` +
+    `Then continue: if deployment or preview work remains, emit those tool calls ` +
+    `on the next step; if the work is complete, restate the final answer after the markers.`
+  );
 }
 
 // ─── Machine observations ─────────────────────────────────────────
