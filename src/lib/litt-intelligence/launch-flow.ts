@@ -607,6 +607,11 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           enableBuildFix: options.enableBuildFix ?? true,
           isStaticWorkspace: options.isStaticWorkspace,
           requireToolCallOnFirstStep: options.requiresExecution === true,
+          // Execution intent is a separate flag from the first-call
+          // requirement: the requirement is inert once a call is emitted
+          // (e.g. across an approval resume), while the intent must keep
+          // gating prose approval-asks for the whole run.
+          executionRequested: options.requiresExecution === true,
           // Early bounded capability guard: a BUILD run that goes 3
           // consecutive steps with tool calls but zero file-writing calls
           // rules that model out for this run and switches to the next
