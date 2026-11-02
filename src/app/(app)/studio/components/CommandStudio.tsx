@@ -15,6 +15,7 @@ import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
+import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
@@ -1269,6 +1270,11 @@ function CommandStudioContent() {
   useEffect(() => {
     const conversationId = conversation.selectedConversationId;
     if (!capabilities.projectId || !conversationId || studioTasks.loading) return;
+    // Optimistic send placeholders ("pending_<req>") are client-only ids —
+    // the server has no conversation row to bind yet, so adopting here is a
+    // guaranteed 403. The canonical id replaces the selection when the
+    // conversation POST resolves, and this effect re-runs for it.
+    if (isOptimisticConversationId(conversationId)) return;
     if (studioTasks.tasks.some((task) => task.conversationId === conversationId)) return;
     if (taskSeededRef.current === conversationId) return;
     taskSeededRef.current = conversationId;
@@ -1657,7 +1663,9 @@ function CommandStudioContent() {
         toolId: opts.runResult.pendingApproval.toolId,
         reason: opts.runResult.pendingApproval.reason,
         pausedRunId: opts.runResult.pendingApproval.pausedRunId,
-        conversationId: conversation.selectedConversationId ?? undefined,
+        // Bind to the gate's own conversation — the resumed run that
+        // produced this gate — not whatever happens to be selected now.
+        conversationId: opts.conversationId,
       });
       return;
     }
@@ -1679,7 +1687,10 @@ function CommandStudioContent() {
     // conversation deterministic-403s ("Conversation mismatch") and used to
     // dead-end the card as unretryable. Falls back to the current selection
     // only for gates mounted before conversation binding existed.
-    const convId = pending?.conversationId ?? conversation.selectedConversationId;
+    const resolved = pending?.conversationId ?? conversation.selectedConversationId;
+    // An optimistic "pending_*" fallback can never host a server-side
+    // paused run — POSTing it is a guaranteed 403.
+    const convId = resolved && !isOptimisticConversationId(resolved) ? resolved : null;
     if (pending?.pausedRunId && convId) {
       exec.beginApprovalSubmit();
       submitApprovalAndPoll({
@@ -1736,7 +1747,9 @@ function CommandStudioContent() {
     const pending = exec.pendingApproval;
     // Same gate-bound conversation rule as handleResolveApproval — the
     // re-request must recreate the gate in its own conversation.
-    const convId = pending?.conversationId ?? conversation.selectedConversationId;
+    const resolved = pending?.conversationId ?? conversation.selectedConversationId;
+    // An optimistic "pending_*" fallback can never host a paused run.
+    const convId = resolved && !isOptimisticConversationId(resolved) ? resolved : null;
     if (!pending?.pausedRunId || !convId) return;
     exec.beginApprovalSubmit();
     try {
@@ -2405,7 +2418,11 @@ function CommandStudioContent() {
       regenerationOfMessageId: null,
     });
 
-    // Persist to server (no LLM call — direct message storage)
+    // Persist to server (no LLM call — direct message storage).
+    // Optimistic "pending_*" ids have no server row — the local echo
+    // above still renders the turn; the transcript lands under the
+    // canonical conversation on the next persisted turn.
+    if (isOptimisticConversationId(convId)) return;
     try {
       const token = await getToken?.();
       const res = await fetch(`/api/studio/conversations/${convId}/live-transcript`, {

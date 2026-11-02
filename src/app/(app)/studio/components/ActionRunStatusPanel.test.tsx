@@ -65,4 +65,21 @@ describe("ActionRunStatusPanel", () => {
       expect.objectContaining({ cache: "no-store", credentials: "include" }),
     );
   });
+
+  it("never fetches action-run for an optimistic pending_* conversation id", async () => {
+    // Regression: optimistic send placeholders have no server row — the
+    // lookup was a guaranteed 404 on every mount and busy-change.
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const { rerender } = render(
+      <ActionRunStatusPanel conversationId="pending_req_123_abc" busy={false} />,
+    );
+    rerender(
+      <ActionRunStatusPanel conversationId="pending_req_123_abc" busy={true} />,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("action-run-status-panel")).toBeNull();
+  });
 });
