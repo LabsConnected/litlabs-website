@@ -146,6 +146,19 @@ export interface AgentLoopConfig {
   /** Require a structured tool call on the first model turn of an execution flow. */
   requireToolCallOnFirstStep?: boolean;
   /**
+   * Execution intent, kept separate from the first-call requirement:
+   * the turn was dispatched as an execution request (requiresExecution
+   * routing) with mutation tools available. `requireToolCallOnFirstStep`
+   * is only meaningful while zero tool calls have been emitted — after an
+   * approval pause that requirement is already satisfied — so it cannot
+   * carry this intent across a resume. The approval-resume path sets this
+   * flag directly so a post-approval reply that asks for approval (or
+   * defers work) in prose without emitting the gated tool call is nudged
+   * back to execution instead of being accepted as a final answer.
+   * Falls back to `requireToolCallOnFirstStep` when unset.
+   */
+  executionRequested?: boolean;
+  /**
    * Early bounded capability guard (BUILD runs): the loop tracks consecutive
    * steps in which the model emitted tool calls but ZERO file-writing calls
    * (files.write / apply_patch / edit). After maxStepsWithoutFileWrite such
@@ -264,15 +277,74 @@ export interface PendingApproval {
   /** Run counters captured at pause time — resume must not restart them at 0. */
   stepsUsedAtPause?: number;
   hadInterveningMutationAtPause?: boolean;
+  /**
+   * Resumed-build no-write counter at pause time. A pause for a
+   * file-writing tool stores 0 — pending write intent is progress, and
+   * the approved write executes on the next segment. Persisted so the
+   * stall guard measures consecutive unproductive MODEL steps across
+   * approval cycles instead of truncating at every resume boundary.
+   */
+  zeroWriteStepsAtPause?: number;
+  /**
+   * Calls that already executed before this pause — INCLUDING declared
+   * paths and read-back persisted flags. Persisted on the paused-run record
+   * and seeded back into the resumed run's evidence log so completion
+   * verification sees the full mutation history across the boundary.
+   */
+  priorToolCalls?: AgentToolCallLogEntry[];
+}
+
+/**
+ * A recorded tool call, enriched with the persisted-truth evidence the
+ * completion evaluation uses: which workspace paths the call declared it
+ * would affect, and what a post-call read-back confirmed. The tool's own
+ * success flag only describes what the model was TOLD — these fields
+ * describe what could be independently confirmed on disk.
+ */
+export interface AgentToolCallLogEntry {
+  toolId: string;
+  success: boolean;
+  summary: string;
+  mutating: boolean;
+  /** Workspace paths the call declared it would affect, when declared. */
+  paths?: string[];
+  /**
+   * Read-back verification of a reported mutation: true = the claimed
+   * change is really persisted, false = contradicted by the workspace.
+   * Absent when not checked or not checkable for this tool.
+   */
+  persisted?: boolean;
+}
+
+/**
+ * A successfully executed mutation plus its read-back verdict, keyed by
+ * toolId+inputs for duplicate-mutation protection. A failover replay
+ * must re-emit BOTH: the result the model sees and the persisted truth
+ * the completion check relies on — replaying only the result would log
+ * a successful mutation with no evidence on gitless workspaces.
+ */
+interface ExecutedMutation {
+  result: ToolCallResult;
+  persisted?: boolean;
 }
 
 export interface AgentLoopResult {
   finalText: string;
   stepsUsed: number;
   totalDurationMs: number;
-  toolCalls: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }>;
+  toolCalls: AgentToolCallLogEntry[];
   buildFixResult?: BuildFixLoopResult;
   checkpoint?: { checkpointId: string; label: string; gitSha: string };
+  /**
+   * The FIRST pre-mutation checkpoint of this logical run — the baseline
+   * the workspace diff is measured against. `checkpoint` moves forward to
+   * every mutation (each gets its own rollback point); the run-truth diff
+   * must cover the whole run, so it is computed against this earliest
+   * baseline. It is also the checkpoint a paused run should persist, so an
+   * approval-resume still diffs the whole run's work rather than only
+   * what landed after the gate.
+   */
+  baselineCheckpoint?: { checkpointId: string; label: string; gitSha: string };
   /**
    * Post-run checkpoint: created once the run's changes landed (workspace
    * status "changed"). Paired with `checkpoint` (the pre-run baseline) so
@@ -489,7 +561,14 @@ const APPROVAL_ASK_MARKERS: RegExp[] = [
   /please confirm/i,
   /give approval/i,
   /need your approval/i,
+  /ask for your approval/i,
   /confirm.*proceed/i,
+  /how does that sound/i,
+  /sound good\?/i,
+  /shall i (?:proceed|continue|go ahead|start)/i,
+  /confirm (?:and|to) i(?:'|’)ll/i,
+  /if you(?:'|’)re ready/i,
+  /want me to (?:proceed|continue|go ahead|start|build|create|write)/i,
 ];
 
 /**
@@ -528,12 +607,36 @@ type ZeroCallResolution =
  * approval (or claims work is happening) without emitting the tool call
  * gets a targeted nudge to emit the call; on exhaustion the run fails
  * honestly — no approval card was ever created, so completing would lie.
+ *
+ * `requiredToolCallPending` marks an execution-required run that has not
+ * emitted a single tool call yet (requireToolCallOnFirstStep, unsatisfied).
+ * A text-only reply there can NEVER be the final answer — nothing was
+ * executed — so the reply is always a bounded nudge, then an honest
+ * failure. This is the loop-level backstop for providers that ignore
+ * tool_choice/"required" (e.g. a first-turn text-only QUALITY-marker
+ * reply with toolCalls:[] on gemini-2.5-flash).
+ *
+ * `executionRequested` marks a turn dispatched as an execution request
+ * with mutation tools available (requiresExecution routing in a
+ * non-plan mode). The prose approval-ask check only applies there: the
+ * approval phrases also match legitimate final replies on ordinary
+ * chat turns ("I recommend a dark background. How does that sound?"),
+ * and nudging those would force a file-change request the user never
+ * made — repeated matches turn a normal conversation into a failed
+ * mutation run.
  */
-export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCallResolution {
+export function resolveZeroToolCalls(
+  text: string,
+  nudgesUsed: number,
+  opts?: { requiredToolCallPending?: boolean; executionRequested?: boolean },
+): ZeroCallResolution {
   // The prose approval-ask is the most specific signal and is checked
   // first: the model wants to perform a gated mutation but never emitted
-  // the tool call, so no approval card exists.
-  if (asksForApprovalInProse(text) || claimsOngoingWork(text)) {
+  // the tool call, so no approval card exists. Present-continuous work
+  // claims ("I'm updating the header") assert work is happening right
+  // now — a lie regardless of turn type, so they are always checked.
+  const executionRequested = opts?.executionRequested !== false;
+  if ((executionRequested && asksForApprovalInProse(text)) || claimsOngoingWork(text)) {
     if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
       return {
         action: "nudge",
@@ -549,6 +652,22 @@ export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCall
         "so no approval card was created and no files were changed. Nothing was modified — please try again.",
     };
   }
+  if (opts?.requiredToolCallPending) {
+    if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
+      return {
+        action: "nudge",
+        nudgeMessage:
+          "This request requires tool execution, but your reply contained no tool calls, so nothing was done. " +
+          "Do not answer in prose — emit the tool calls for the first build step now (e.g. `files.write` to create or modify project files).",
+      };
+    }
+    return {
+      action: "fail",
+      failureMessage:
+        "I couldn't start the requested work: the model replied in prose instead of emitting the required tool calls, " +
+        "so no files were changed and nothing was executed. Your project is preserved — please try again.",
+    };
+  }
   if (!announcesMoreWork(text)) return { action: "final" };
   if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
     return {
@@ -562,6 +681,150 @@ export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCall
 }
 
 // ─── Tool definition conversion ───────────────────────────────────
+
+/**
+ * Minimal website-building toolset offered to small local models
+ * (Local AI Optimization, Priority 1). Everything the agent needs to
+ * inspect, write, patch, and preview a static site — and nothing else.
+ * Browser tools are excluded until a turn genuinely needs live-page
+ * interaction; deterministic preview checks cover render verification.
+ */
+const LOCAL_BUILD_TOOL_IDS = new Set([
+  "files.list",
+  "files.read",
+  "files.write",
+  "files.patch",
+  "files.delete",
+  "files.rename",
+  "files.mkdir",
+  "apply_patch",
+  "search_code",
+  "project.scan",
+  "project.read_context",
+  "preview.start",
+  "preview.stop",
+  "preview.status",
+  "preview.open",
+  "checkpoint.create",
+]);
+
+/**
+ * Capability families that stay within the workspace when the plan
+ * calls for them. If a goal needs ANY family outside this set —
+ * terminal, deployment, web search/fetch, image generation — the task
+ * keeps the full catalog; the slim set is for file/preview work only.
+ * `browser` is listed because the planner marks visual builds as
+ * requiring it for verification — the slim set satisfies that with
+ * preview tools plus deterministic render checks instead.
+ */
+const SLIM_SAFE_FAMILIES: ReadonlySet<string> = new Set([
+  "project_inspection",
+  "filesystem",
+  "preview",
+  "browser",
+  "git",
+  "memory",
+]);
+
+/**
+ * Local small-model lane (approved lightweight-local-coding config):
+ * qwen2.5-coder:1.5b-class models at an 8k context. Detection is an
+ * explicit env flag OR a small-model name pattern in OLLAMA_MODEL —
+ * matches the litbi-LLC builds (coder, fast, ≤8k ctx variants).
+ */
+export function isLocalSmallLane(): boolean {
+  if (process.env.LITT_LOCAL_SMALL === "1") return true;
+  const m = process.env.OLLAMA_MODEL ?? "";
+  return /coder|fast|:(2|4|8)k$/i.test(m);
+}
+
+/**
+ * Minimal toolset for the small lane — the 8k ctx budget leaves room for
+ * roughly one screen of schemas; anything more crowds out history and
+ * output. Covers inspect / write / patch / preview-verify.
+ */
+const LOCAL_SMALL_TOOL_IDS = new Set([
+  "files.list",
+  "files.read",
+  "files.write",
+  "files.patch",
+  "apply_patch",
+  "files.delete",
+  "files.rename",
+  "files.mkdir",
+  "preview.start",
+  "preview.status",
+]);
+
+/**
+ * Compact system prompt for the small lane. The full orchestrator +
+ * quality-loop prompts (~10-15k tokens) exceed an 8k ctx — this teaches
+ * the TEXT tool-call format these models actually emit (native
+ * message.tool_calls is unreliable at 1.5B; the fenced/bare-JSON body is
+ * recovered by tool-call-markup). Completion is gated by the workspace-
+ * mutation evidence check instead of the full quality-loop verdict.
+ */
+const LOCAL_SMALL_LANE_PROMPT =
+  "## Local coding mode\n" +
+  "You are LiTT, a website-building agent. You act by emitting tool calls.\n" +
+  "This model has no native tool channel — emit EACH call as a fenced block:\n\n" +
+  "```tool_call\n" +
+  '{"name":"files.write","arguments":{"path":"index.html","content":"<!doctype html>..."}}\n' +
+  "```\n\n" +
+  "Rules:\n" +
+  "- Emit EVERY files.write the site needs in ONE response, then emit preview.start.\n" +
+  "- For a NEW site a single index.html with complete inline CSS/JS is enough.\n" +
+  "- Emit only tool_call blocks — no prose, no explanations.\n" +
+  "- To MODIFY an existing file: files.read it FIRST, then prefer apply_patch with a " +
+  "search/replace for just the requested change — NEVER rewrite the whole file from " +
+  "scratch. Keep all existing styling, classes, and structure unless the request asks to remove them.\n" +
+  "- Do EVERY part of a multi-part request: if asked to change the heading AND the theme, " +
+  "emit one apply_patch for EACH change in the SAME response. A request is not done until " +
+  "every requested change is applied.\n" +
+  "- A files.write that strips an existing file's styling is refused — patch instead.\n" +
+  "- Available: files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.";
+
+/**
+ * Narrow the offered tools to LOCAL_BUILD_TOOL_IDS when:
+ *  - a local model is the configured route (OLLAMA_MODEL set), and
+ *  - the capability plan needs nothing outside the workspace families.
+ * Returns the ORIGINAL array (reference-equal) when slimming does not
+ * apply or would empty the set — callers distinguish by `!==`.
+ */
+function slimToolsForLocalBuild(
+  tools: LiTTToolDefinition[],
+  capabilityPlan: import("./capability-planner").CapabilityPlan | undefined,
+): LiTTToolDefinition[] {
+  // Small lane (1.5B-class, 8k ctx): always the minimal toolset — schema
+  // size is the binding constraint, not capability intent.
+  if (isLocalSmallLane()) {
+    const minimal = tools.filter((t) => LOCAL_SMALL_TOOL_IDS.has(t.id));
+    return minimal.length > 0 ? minimal : tools;
+  }
+  if (!process.env.OLLAMA_MODEL || !capabilityPlan) return tools;
+  const planned = [
+    ...capabilityPlan.requiredCapabilities,
+    ...capabilityPlan.usefulCapabilities,
+  ];
+  if (!planned.every((c) => SLIM_SAFE_FAMILIES.has(c))) return tools;
+  const slim = tools.filter((t) => LOCAL_BUILD_TOOL_IDS.has(t.id));
+  return slim.length > 0 ? slim : tools;
+}
+
+/**
+ * Prompt note appended when the slim set is active. Teaches the small
+ * local model the batch-emit pattern (Priority 2): all writes in one
+ * response, minimal inspection turns — the only way CPU inference
+ * finishes inside the runtime budget.
+ */
+const LOCAL_BUILD_TOOL_NOTE =
+  "## Local build mode\n" +
+  "Only the file and preview tools above exist in this mode — there is no browser, terminal, " +
+  "deploy, search, or image tool. Work directly and efficiently:\n" +
+  "- Read what you need once; do not repeatedly inspect the workspace.\n" +
+  "- Emit EVERY files.write the site needs in ONE response — batch all writes together instead of one per turn.\n" +
+  "- For a new static site, a single files.write with complete inline-CSS HTML is acceptable and fastest.\n" +
+  "- Call preview.start when the files are written to verify the render.";
 
 function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
   return {
@@ -681,48 +944,318 @@ async function createAfterRunCheckpoint(
 }
 
 /**
- * After a successful file mutation, re-read the file from the workspace and
- * record INSPECT evidence (targeted-edit verification). For writes, the
- * read-back must equal the written content; for search/replace patches,
- * every replacement must be present. Unified-diff patches can only be
- * confirmed readable. Never throws — verification failures are recorded
- * honestly, never as passes.
+ * What re-reading the workspace says about a claimed mutation. `verified`
+ * is deliberately tri-state — "the claim is confirmed" / "the claim is
+ * contradicted" / "could not check" — so a check that could not run is
+ * never recorded as either a pass or a contradiction.
+ */
+export interface MutationReadBack {
+  /** The workspace path the check ran against (null when none applies). */
+  path: string | null;
+  /** true = persisted as claimed; false = contradicted; null = could not check. */
+  verified: boolean | null;
+  /** Quality-ledger fidelity fields for the file-edit INSPECT evidence. */
+  readable?: boolean;
+  contentMatches?: boolean | null;
+}
+
+/** A 404/not-found read proves the file is absent; anything else is inconclusive. */
+function readFailedBecauseMissing(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\b404\b|not found|no such file/i.test(msg);
+}
+
+/** What a parent-directory listing says about a workspace path. */
+type WorkspaceListingKind = "file" | "folder" | "absent" | "unknown";
+
+/**
+ * Existence probe that never reads file content — binary-safe for
+ * generated/inserted assets, and the only probe that can verify a
+ * directory (readFile reports a bare "Not a file" for one, which cannot
+ * distinguish absent from present-as-directory). A parent listing that
+ * fails with not-found means the child cannot exist either.
+ */
+async function listingKind(
+  transport: WorkspaceTransport,
+  path: string,
+): Promise<WorkspaceListingKind> {
+  const normalized = path
+    .replace(/\\/g, "/")
+    .replace(/^\.?\//, "")
+    .replace(/\/+/g, "/")
+    .replace(/\/$/, "");
+  if (!normalized) return "unknown";
+  const slash = normalized.lastIndexOf("/");
+  const parent = slash === -1 ? "." : normalized.slice(0, slash) || ".";
+  const base = slash === -1 ? normalized : normalized.slice(slash + 1);
+  try {
+    const { entries } = await transport.listFiles(parent);
+    const hit = entries.find((e) => e.name === base);
+    if (!hit) return "absent";
+    return hit.type === "folder" || hit.type === "directory" ? "folder" : "file";
+  } catch (err) {
+    return readFailedBecauseMissing(err) ? "absent" : "unknown";
+  }
+}
+
+/**
+ * Re-read the workspace to confirm whether a mutation the tool reported as
+ * successful is really persisted. This is the completion evidence's
+ * strongest signal — and the only one that works on gitless (static)
+ * workspaces, which can never produce a checkpoint diff.
+ *
+ *   files.write / files.patch / apply_patch — the file must read back and
+ *     contain the claimed content (every replacement for patches; every
+ *     deletion's search string for deletion-only patches).
+ *   files.delete — the path must now be absent (file or directory).
+ *   files.rename — the new path must exist and the old one be gone.
+ *   files.mkdir — the directory must exist. An empty directory produces
+ *     no git-diff lines, so this is the only channel that verifies mkdir
+ *     even on git workspaces.
+ *   image.generate / project.insert_asset — the asset path the tool
+ *     returned must exist in the workspace listing (binary-safe: the
+ *     parent is listed, never the bytes).
+ *   preview.start / preview.stop — the preview service's own status probe
+ *     must confirm the lifecycle state the tool claimed.
+ *   everything else (terminal.execute, deploys, browser.*, …) — not
+ *     read-back-checkable; the baseline diff or the tool boundary is the
+ *     evidence there.
+ *
+ * Returns null for tools the read-back cannot speak to. Never throws.
+ */
+async function readBackMutation(
+  transport: WorkspaceTransport,
+  toolId: string,
+  inputs: Record<string, unknown> | undefined,
+  result?: unknown,
+): Promise<MutationReadBack | null> {
+  if (!inputs) return null;
+  if (toolId === "code.writeFile") toolId = "files.write";
+  if (toolId === "code.refactor") toolId = "apply_patch";
+  const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
+  const r = result && typeof result === "object" ? (result as Record<string, unknown>) : null;
+
+  if (toolId === "files.write" || toolId === "files.patch" || toolId === "apply_patch") {
+    const path = str(inputs.path);
+    if (!path) return null;
+    let content: string;
+    try {
+      content = (await transport.readFile(path)).content;
+    } catch (err) {
+      // A file the tool claims it wrote but that is simply not there is a
+      // contradiction, not an unanswered question.
+      return {
+        path,
+        verified: readFailedBecauseMissing(err) ? false : null,
+        readable: false,
+        contentMatches: false,
+      };
+    }
+    let contentMatches: boolean | null = null;
+    if (toolId === "files.write" && typeof inputs.content === "string") {
+      contentMatches = content === inputs.content;
+    } else if (toolId === "apply_patch" && Array.isArray(inputs.patches)) {
+      // Sequential patches can rewrite earlier replacements (A→B then
+      // B→C correctly leaves C, not B). Requiring every intermediate
+      // replacement to survive marks good patches contradicted. Simulate
+      // the produced strings instead: a later search that matches a
+      // produced string consumes it (first occurrence, matching the
+      // transport), and only the terminal strings must appear on disk.
+      const produced: string[] = [];
+      let sawConfirmed = false;
+      let sawUnverifiable = false;
+      for (const p of inputs.patches as Array<{ search?: unknown; replace?: unknown }>) {
+        const sea = typeof p?.search === "string" ? p.search : null;
+        const rep = typeof p?.replace === "string" ? p.replace : null;
+        if (sea && rep !== null) {
+          const idx = produced.findIndex((s) => s.includes(sea));
+          if (idx >= 0) {
+            produced[idx] = produced[idx].replace(sea, () => rep);
+          }
+        }
+        if (rep) {
+          produced.push(rep);
+        } else if (rep === "" && sea) {
+          // Deletion-only patch. The transport replaces the first
+          // occurrence only, so a surviving search string can be
+          // legitimate — absence confirms, presence is unverifiable.
+          if (content.includes(sea)) sawUnverifiable = true;
+          else sawConfirmed = true;
+        } else {
+          sawUnverifiable = true;
+        }
+      }
+      contentMatches = produced.some((s) => !content.includes(s))
+        ? false
+        : produced.length > 0
+          ? sawUnverifiable ? null : true
+          : sawUnverifiable ? null : sawConfirmed ? true : null;
+    }
+    return { path, verified: contentMatches, readable: true, contentMatches };
+  }
+
+  if (toolId === "files.delete") {
+    const path = str(inputs.path);
+    if (!path) return null;
+    try {
+      await transport.readFile(path);
+      // Still readable — the claimed deletion did not persist.
+      return { path, verified: false, readable: true, contentMatches: false };
+    } catch (err) {
+      if (readFailedBecauseMissing(err)) return { path, verified: true };
+      // "Not a file" and friends cannot distinguish absent from
+      // present-as-directory — only the parent listing can.
+      const kind = await listingKind(transport, path);
+      if (kind === "unknown") return { path, verified: null };
+      return { path, verified: kind === "absent" };
+    }
+  }
+
+  if (toolId === "files.rename") {
+    const path = str(inputs.newPath);
+    const oldPath = str(inputs.path);
+    if (!path) return null;
+    // The claim has two halves: the target landed AND the source is gone.
+    // Checking only the target credits a copy as a move.
+    let targetKind: WorkspaceListingKind;
+    try {
+      await transport.readFile(path);
+      targetKind = "file";
+    } catch (err) {
+      targetKind = readFailedBecauseMissing(err) ? "absent" : await listingKind(transport, path);
+    }
+    if (targetKind === "absent") return { path, verified: false };
+    if (targetKind === "unknown") return { path, verified: null };
+    if (!oldPath) return { path, verified: true };
+    const oldKind = await listingKind(transport, oldPath);
+    if (oldKind === "unknown") return { path, verified: null };
+    return { path, verified: oldKind === "absent" };
+  }
+
+  if (toolId === "files.mkdir") {
+    const path = str(inputs.path);
+    if (!path) return null;
+    const kind = await listingKind(transport, path);
+    if (kind === "unknown") return { path, verified: null };
+    return { path, verified: kind === "folder" };
+  }
+
+  if (toolId === "image.generate" || toolId === "project.insert_asset") {
+    const path = str(r?.projectPath) ?? str(r?.path);
+    if (path) {
+      const kind = await listingKind(transport, path);
+      if (kind === "unknown") return { path, verified: null };
+      return { path, verified: kind === "file" };
+    }
+    // The registry's auto-insert reported a failed in-workspace save
+    // (savedToProject:false): the asset the result implies is not there.
+    if (r?.savedToProject === false) return { path: null, verified: false };
+    return null;
+  }
+
+  if (toolId === "preview.start" || toolId === "preview.stop") {
+    try {
+      const status = await transport.getPreviewStatus();
+      if (toolId === "preview.start") {
+        return {
+          path: null,
+          verified: status.status === "ready" ? true : status.status === "failed" ? false : null,
+        };
+      }
+      return {
+        path: null,
+        verified: status.status === "stopped"
+          ? true
+          : status.status === "ready" || status.status === "starting" || status.status === "restarting"
+            ? false
+            : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * The workspace-relative paths a mutating call declares it will affect —
+ * used to corroborate a reported success against the real workspace diff.
+ * Undefined when the call names no file target.
+ */
+function declaredMutationPaths(
+  inputs: Record<string, unknown> | undefined,
+  result?: unknown,
+): string[] | undefined {
+  if (!inputs) return undefined;
+  const r = result && typeof result === "object" ? (result as Record<string, unknown>) : null;
+  const declared = [
+    inputs.path,
+    inputs.newPath,
+    inputs.directory,
+    inputs.targetPath,
+    inputs.sitePath,
+    // git.commit takes a `files` allow-list — each is a declared target.
+    ...(Array.isArray(inputs.files) ? inputs.files : []),
+    // The path the tool reports it actually wrote — authoritative for
+    // asset tools whose output name is computed server-side
+    // (project.insert_asset, image.generate's auto-insert).
+    r?.path,
+    r?.projectPath,
+    r?.sitePath,
+  ]
+    .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+    .map((p) => p.replace(/\\/g, "/").replace(/^\.?\//, "").replace(/\/+/g, "/").replace(/\/$/, ""));
+  return declared.length > 0 ? [...new Set(declared)] : undefined;
+}
+
+/**
+ * After a successful file mutation, re-read the file from the workspace —
+ * the persisted-truth check completion evidence relies on. Thin wrapper
+ * over {@link readBackMutation}: for writes the read-back must equal the
+ * written content, for search/replace patches every replacement must be
+ * present. Never throws — verification failures are recorded honestly,
+ * never as passes.
  */
 async function verifyMutationReadBack(
-  session: QualityLoopSession,
   transport: WorkspaceTransport,
   toolId: string,
   inputs: Record<string, unknown> | undefined,
   mutated: boolean,
+  result?: unknown,
+): Promise<MutationReadBack | null> {
+  if (!mutated || !inputs) return null;
+  return readBackMutation(transport, toolId, inputs, result);
+}
+
+/**
+ * Record a computed read-back into the quality ledger (INSPECT evidence,
+ * targeted-edit verification). Must run AFTER the tool result itself was
+ * noted — the ledger binds the read-back to the noted call. File-edit
+ * tools only. Static workspaces cannot run command checks (Gate 1), so
+ * the verified read-back is also recorded as the static artifact check.
+ */
+function noteReadBackToSession(
+  session: QualityLoopSession | null,
+  toolId: string,
+  check: MutationReadBack | null,
   isStaticWorkspace?: boolean,
-): Promise<void> {
-  if (!mutated || !inputs) return;
-  if (toolId === "code.writeFile") toolId = "files.write";
-  if (toolId === "code.refactor") toolId = "apply_patch";
-  if (toolId !== "files.write" && toolId !== "files.patch" && toolId !== "apply_patch") return;
-  const path = typeof inputs.path === "string" ? inputs.path : null;
-  if (!path) return;
-  let content: string;
-  try {
-    content = (await transport.readFile(path)).content;
-  } catch {
-    noteMutationReadBack(session, { path, readable: false, contentMatches: false });
-    return;
-  }
-  let contentMatches: boolean | null = null;
-  if (toolId === "files.write" && typeof inputs.content === "string") {
-    contentMatches = content === inputs.content;
-  } else if (toolId === "apply_patch" && Array.isArray(inputs.patches)) {
-    const replaces = (inputs.patches as Array<{ replace?: unknown }>)
-      .map((p) => (typeof p?.replace === "string" ? p.replace : null))
-      .filter((r): r is string => r !== null && r.length > 0);
-    contentMatches = replaces.length > 0 ? replaces.every((r) => content.includes(r)) : null;
-  }
-  noteMutationReadBack(session, { path, readable: true, contentMatches });
-  // Static workspaces cannot run the command checks (Gate 1): the verified
-  // read-back IS the executed check there, and it is the only one recorded.
+): void {
+  if (!session || !check?.path) return;
+  const isFileEdit =
+    toolId === "files.write" ||
+    toolId === "files.patch" ||
+    toolId === "apply_patch" ||
+    toolId === "code.writeFile" ||
+    toolId === "code.refactor";
+  if (!isFileEdit) return;
+  noteMutationReadBack(session, {
+    path: check.path,
+    readable: check.readable === true,
+    contentMatches: check.contentMatches ?? null,
+  });
   if (isStaticWorkspace) {
-    noteStaticArtifactCheck(session, { path, contentMatches });
+    noteStaticArtifactCheck(session, { path: check.path, contentMatches: check.contentMatches ?? null });
   }
 }
 
@@ -1004,8 +1537,12 @@ async function runAgentLoopV2Inner(
   // Quality loop (opt-in): create the evidence session and teach the agent
   // the stage contract. All hooks below degrade gracefully — the gate
   // itself is enforced at finalize() time, never mid-run.
+  const localSmallLane = isLocalSmallLane();
   let qualitySession: QualityLoopSession | null = null;
-  if (cfg.qualityLoop?.enabled) {
+  // Small lane: the full quality-loop prompt does not fit an 8k ctx — the
+  // deterministic workspace-mutation evidence check is the completion
+  // gate instead. Session skipped so no stage markers are required.
+  if (cfg.qualityLoop?.enabled && !localSmallLane) {
     qualitySession = startQualityLoopSession({
       runId: cfg.qualityLoop.runId,
       projectId: cfg.qualityLoop.projectId,
@@ -1023,7 +1560,15 @@ async function runAgentLoopV2Inner(
   // model which of its real capabilities materially improve THIS goal.
   // Reference-match requests ("make mine look like this") trigger the
   // reference workflow instead of a generic build.
-  const capabilityPlan = applyOrchestratorPrompts(cfg, userMessage);
+  // Small lane: still compute the plan (it drives the slim-tool gate and
+  // observability) but skip the multi-paragraph orchestrator prompts —
+  // a compact local-mode prompt fits the 8k ctx instead.
+  const capabilityPlan = isLocalSmallLane()
+    ? planCapabilities(userMessage)
+    : applyOrchestratorPrompts(cfg, userMessage);
+  if (isLocalSmallLane()) {
+    cfg.systemPrompt += "\n\n" + LOCAL_SMALL_LANE_PROMPT;
+  }
 
   // ── Run observability (Part J) ──
   const runObs = startRunObservability({
@@ -1039,8 +1584,9 @@ async function runAgentLoopV2Inner(
   // Mutating tool calls that already executed successfully this run —
   // keyed by toolId+inputs. A replacement provider that re-emits an
   // identical mutation after failover replays the recorded result instead
-  // of executing it again.
-  const executedMutations = new Map<string, ToolCallResult>();
+  // of executing it again. The recorded value carries the read-back
+  // verdict too, so a replayed claim keeps the original persisted truth.
+  const executedMutations = new Map<string, ExecutedMutation>();
   const patchRecoveryAttempts = new Map<string, number>();
 
   // Collect progress events
@@ -1097,7 +1643,7 @@ async function runAgentLoopV2Inner(
   );
   const { offerable: offerableToolIds, degraded: degradedToolIds } =
     filterOfferableTools(toolHealthMap);
-  const offerableTools = availableTools
+  const healthCheckedTools = availableTools
     .filter((t) => offerableToolIds.includes(t.id))
     // Browser tools only make sense when this loop drives a browser session
     // (cfg.browserSessionId). Offering them to a build/chat run invites the
@@ -1105,6 +1651,20 @@ async function runAgentLoopV2Inner(
     // measured failure: a website-build prompt picked browser_type, then a
     // malformed browser.click, instead of files.write.
     .filter((t) => cfg.browserSessionId || !t.id.startsWith("browser."));
+  // ── Local-model tool slimming (Local AI Optimization, Priority 1) ──
+  // When the configured route is a small local model (OLLAMA_MODEL set),
+  // offering the full ~60-schema catalog burns the limited context window
+  // and CPU prefill budget on tools a site build never calls — and
+  // invites wrong-tool picks (confirmed live: browser.click for a theme
+  // edit). For workspace build/edit turns offer only the file + preview
+  // set. Every mutation still passes the SAME permission/approval gates
+  // (this only narrows what is OFFERED, never what is permitted), and
+  // tasks needing terminal/deploy/web/image keep the full catalog.
+  const offerableTools = slimToolsForLocalBuild(healthCheckedTools, capabilityPlan);
+  const toolsSlimmedForLocal = offerableTools !== healthCheckedTools;
+  if (toolsSlimmedForLocal) {
+    cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
+  }
   const healthNote = buildToolHealthPromptNote(toolHealthMap);
   if (healthNote) {
     cfg.systemPrompt += "\n\n" + healthNote;
@@ -1145,11 +1705,25 @@ async function runAgentLoopV2Inner(
   let modelFailureText: string | undefined;
   let failedHonestly: string | undefined;
   let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
-  const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
+  // The FIRST pre-mutation checkpoint of this run — the baseline the final
+  // workspace diff is measured against. `checkpoint` moves forward to every
+  // mutation (each gets its own rollback point); a HEAD-side diff at run end
+  // would only see work landed after the LAST one. Diffing against this
+  // earliest baseline keeps the whole run's changes visible — a legitimate
+  // overwrite or a trailing no-op mutation can no longer make a real build
+  // read as "unchanged".
+  let baselineCheckpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
+  const toolCallLog: AgentToolCallLogEntry[] = [];
   let completedDeployment: CompletedDeployment | null = null;
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
+  // True once the model has emitted at least one tool call this run. An
+  // execution-required run (requireToolCallOnFirstStep) holds the
+  // "required" tool choice until this flips — a provider that drops the
+  // constraint after step 1 must not get a second free prose turn, and a
+  // text-only reply before any call can never be a final answer.
+  let emittedToolCalls = false;
 
   // Early bounded capability guard (BUILD runs only, via
   // cfg.buildCapabilityGuard): consecutive steps where the model emitted
@@ -1196,7 +1770,7 @@ async function runAgentLoopV2Inner(
           model: requestedModel,
           temperature: 0.15,
           maxTokens: 4096,
-          toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
+          toolChoice: cfg.requireToolCallOnFirstStep && !emittedToolCalls ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -1206,9 +1780,6 @@ async function runAgentLoopV2Inner(
           requireReliableFileWriting: cfg.buildCapabilityGuard != null,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
-          // Bounded same-model retries absorb transient 5xx/network spikes
-          // (e.g. Gemini 503 "high demand") before failover — never paid.
-          sameModelRetries: 2,
         },
       );
       const llmDurationMs = Date.now() - llmStartTime;
@@ -1306,7 +1877,15 @@ async function runAgentLoopV2Inner(
         continue;
       }
       const zeroCallText = llmResponse.text ?? "";
-      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges);
+      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
+        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Prose approval-asks can only stall a turn that was dispatched
+        // to execute: on chat/plan turns the same wording is a valid
+        // final answer, not a missing tool call. Execution intent rides
+        // its own flag so it survives approval resumes — the first-call
+        // requirement is inert once any call has been emitted.
+        executionRequested: (cfg.executionRequested ?? cfg.requireToolCallOnFirstStep) === true && cfg.executionMode !== "plan",
+      });
       if (resolution.action === "nudge") {
         continuationNudges++;
         localProgress.emit({
@@ -1355,6 +1934,10 @@ async function runAgentLoopV2Inner(
       break;
     }
 
+    // The model emitted tool calls — the required-first-call contract is
+    // satisfied and later steps run under "auto" tool choice.
+    emittedToolCalls = true;
+
     // Emit a reasoning summary for tool-calling steps (what LiTT is about to do)
     if (llmResponse.text) {
       localProgress.emit({
@@ -1389,6 +1972,26 @@ async function runAgentLoopV2Inner(
         continue;
       }
 
+      // Server-resolved context args: file/workspace tools declare
+      // projectId/conversationId/userId as required, but the executor
+      // resolves them from trusted run context — a model can never know
+      // them and a model-supplied value is untrusted anyway. Inject the
+      // run's own values so the schema check doesn't reject otherwise-
+      // valid calls (confirmed live: recovered files.write died here on
+      // the local small lane).
+      const requiredArgs = (toolDef.inputSchema?.required as string[] | undefined) ?? [];
+      const actionCtx = actionContextFrom(cfg);
+      const serverArgs: Record<string, string | undefined> = {
+        projectId: actionCtx?.projectId,
+        conversationId: cfg.conversationId ?? actionCtx?.conversationId,
+        userId: cfg.userId ?? actionCtx?.userId,
+      };
+      for (const arg of requiredArgs) {
+        if (arg in serverArgs && !(arg in toolCall.inputs) && serverArgs[arg]) {
+          toolCall.inputs = { ...toolCall.inputs, [arg]: serverArgs[arg] };
+        }
+      }
+
       // Validate inputs
       const validationError = toolRegistry.validateInputs(toolCall.toolId, toolCall.inputs);
       if (validationError) {
@@ -1414,15 +2017,57 @@ async function runAgentLoopV2Inner(
           llmMessages.push(buildToolResultMessage({
             toolCallId: toolCall.toolCallId,
             toolId: toolCall.toolId,
-            result: prior.result,
+            result: prior.result.result,
             success: true,
           }));
-          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true });
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
             success: true,
             summary: "skipped — already executed",
+            durationMs: 0,
+          });
+          continue;
+        }
+      }
+
+      // Browser interaction tools need a live session. The model cannot
+      // know the session id — the server binds it at execute time — so a
+      // call arriving without one is only valid while a session is
+      // actually live for this conversation. When none is, the call can
+      // never succeed: surfacing an approval card for it burns a user
+      // approval on a guaranteed failure (confirmed e2e-live 2026-10-31:
+      // an approved browser.click failed with no session and ended the
+      // run). Return an actionable error instead so the model starts a
+      // session or picks a workspace tool.
+      if (
+        toolCall.toolId.startsWith("browser.") &&
+        toolCall.toolId !== "browser.start_session" &&
+        typeof toolCall.inputs.sessionId !== "string"
+      ) {
+        const browserUserId = cfg.userId ?? actionContextFrom(cfg)?.userId;
+        const liveSession = browserUserId
+          ? await import("./browser-agent")
+              .then((m) => m.getActiveSession(browserUserId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId))
+              .catch(() => null)
+          : null;
+        if (!liveSession) {
+          const noSession = `No active browser session — call browser.start_session first to create one (the server supplies the session id; you do not pass it). If the task does not need a live web page, use the file tools instead.`;
+          const result: ToolCallResult = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: null,
+            success: false,
+            error: noSession,
+          };
+          llmMessages.push(buildToolResultMessage(result));
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "no active browser session", mutating: false });
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: false,
+            summary: "No active browser session — start_session required first",
             durationMs: 0,
           });
           continue;
@@ -1509,6 +2154,7 @@ async function runAgentLoopV2Inner(
           `Pre-mutation: ${toolCall.toolId} (step ${stepsUsed})`,
         ) ?? undefined;
         if (checkpoint) {
+          baselineCheckpoint ??= checkpoint;
           localProgress.emit({
             type: "checkpoint",
             label: checkpoint.label,
@@ -1561,6 +2207,11 @@ async function runAgentLoopV2Inner(
             cancelled: false,
             events,
             checkpoint: checkpoint ?? undefined,
+            // The paused run persists THIS checkpoint (the run baseline), so
+            // the resumed run diffs the whole run's work — not merely what
+            // landed after the gate — instead of reporting "unchanged"
+            // while pre-pause writes sit inside the pause-side commit.
+            baselineCheckpoint: baselineCheckpoint ?? checkpoint ?? undefined,
             // Observability (Part J): the run pauses here awaiting approval.
             runObservability: finishRunObservability(runObs, "awaiting_approval"),
             pendingApproval: {
@@ -1573,6 +2224,7 @@ async function runAgentLoopV2Inner(
               deferredToolCalls: deferredCallsAfterBatchPause(llmResponse.toolCalls, toolCall.toolCallId),
               stepsUsedAtPause: stepsUsed,
               hadInterveningMutationAtPause: hasInterveningMutation,
+              priorToolCalls: [...toolCallLog],
             },
             finalMessages: [...llmMessages],
           };
@@ -1670,12 +2322,33 @@ async function runAgentLoopV2Inner(
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
         batchHasMutation = true;
-        if (result.success) executedMutations.set(dedupeKey, result);
       }
 
-      // Log the call
+      // Log the call — enriched with the persisted-truth evidence the
+      // completion verdict uses: the workspace paths the call declared, and
+      // (for file mutations) what a post-call read-back actually confirmed.
+      // The read-back runs with or without a quality session, since it is
+      // the strongest "the bytes are really on disk" signal and the only
+      // one that works on gitless (static) workspaces.
       const summary = summarizeToolResult(toolCall.toolId, result.result);
-      toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary, mutating: !toolDef.readOnly });
+      const mutationCheck = await verifyMutationReadBack(
+        transport,
+        toolCall.toolId,
+        toolCall.inputs,
+        result.success && !toolDef.readOnly,
+        result.result,
+      );
+      if (result.success && !toolDef.readOnly) {
+        executedMutations.set(dedupeKey, { result, persisted: mutationCheck?.verified ?? undefined });
+      }
+      toolCallLog.push({
+        toolId: toolCall.toolId,
+        success: result.success,
+        summary,
+        mutating: !toolDef.readOnly,
+        paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
+        persisted: mutationCheck?.verified ?? undefined,
+      });
       // Observability (Part J): record the tool call for the run record.
       recordObsToolCall(runObs, {
         toolId: toolCall.toolId,
@@ -1703,7 +2376,7 @@ async function runAgentLoopV2Inner(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
-        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly, cfg.isStaticWorkspace);
+        noteReadBackToSession(qualitySession, toolCall.toolId, mutationCheck, cfg.isStaticWorkspace);
       }
 
       localProgress.emit({
@@ -1882,10 +2555,12 @@ async function runAgentLoopV2Inner(
   // A checkpoint only exists once a mutation was reached. An attempted
   // mutation with NO checkpoint (checkpoint creation itself failed) still
   // needs evidence — it resolves to "unknown", which is the honest answer,
-  // rather than being silently omitted.
+  // rather than being silently omitted. The diff runs against the FIRST
+  // pre-mutation checkpoint (the run baseline), so it covers every
+  // mutation — including work a later checkpoint already committed.
   const attemptedMutation = toolCallLog.some((call) => call.mutating);
-  const workspaceChange = checkpoint || attemptedMutation
-    ? await computeWorkspaceChange(transport, checkpoint ?? null)
+  const workspaceChange = baselineCheckpoint || checkpoint || attemptedMutation
+    ? await computeWorkspaceChange(transport, baselineCheckpoint ?? checkpoint ?? null)
     : undefined;
 
   if (workspaceChange) {
@@ -1918,6 +2593,7 @@ async function runAgentLoopV2Inner(
     modelFailed,
     modelFailureText,
     failedHonestly,
+    baselineCheckpoint,
     qualityLoop: qualityFinale
       ? {
           verdict: qualityFinale.verdict,
@@ -2047,6 +2723,14 @@ export interface ResumeInput {
   stepsUsedBeforePause: number;
   /** Whether a mutation already happened before pause */
   hadInterveningMutation: boolean;
+  /**
+   * Calls that executed before the pause, with their declared paths and
+   * read-back persisted flags. Seeded into this run's evidence log so the
+   * resumed run's verdict covers the WHOLE run — without it, a
+   * contradicted pre-pause mutation is invisible here and can be masked
+   * by a post-resume verified call.
+   */
+  priorToolCalls?: AgentToolCallLogEntry[];
   /** Existing checkpoint (if created before pause) */
   existingCheckpoint?: { checkpointId: string; label: string; gitSha: string };
   /**
@@ -2062,6 +2746,14 @@ export interface ResumeInput {
    * compatibility — resume falls back to resolving fresh when absent.
    */
   availableCapabilities?: string[];
+  /**
+   * No-successful-write step count at the moment the run paused. Carried
+   * through resume so approval pauses and resume bookkeeping never count
+   * as unsuccessful model steps; a pause taken FOR a file-writing tool
+   * carries 0 (a write was in flight), and a verified post-approval write
+   * resets the resumed counter.
+   */
+  zeroWriteStepsAtPause?: number;
 }
 
 /**
@@ -2092,6 +2784,8 @@ export interface DeferredToolBatchState {
   cancelled: boolean;
   cancelReason?: string;
   checkpoint?: { checkpointId: string; label: string; gitSha: string };
+  /** The run's first pre-mutation checkpoint — the whole-run diff baseline. */
+  baselineCheckpoint?: { checkpointId: string; label: string; gitSha: string };
   mutationBatchPending: boolean;
   batchHasMutation: boolean;
   completedDeployment: CompletedDeployment | null;
@@ -2102,9 +2796,9 @@ export interface DeferredToolBatchContext {
   executionMode: ExecutionMode;
   transport: WorkspaceTransport;
   llmMessages: LLMMessage[];
-  toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }>;
+  toolCallLog: AgentToolCallLogEntry[];
   toolCallRecords: ToolCallRecord[];
-  executedMutations: Map<string, ToolCallResult>;
+  executedMutations: Map<string, ExecutedMutation>;
   localProgress: ProgressEmitter;
   qualitySession: QualityLoopSession | null;
   startTime: number;
@@ -2206,10 +2900,10 @@ export async function executeDeferredToolCalls(
         ctx.llmMessages.push(buildToolResultMessage({
           toolCallId: toolCall.toolCallId,
           toolId: toolCall.toolId,
-          result: prior.result,
+          result: prior.result.result,
           success: true,
         }));
-        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true });
+        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
         ctx.localProgress.emit({
           type: "tool_result",
           toolId: toolCall.toolId,
@@ -2269,6 +2963,7 @@ export async function executeDeferredToolCalls(
             deferredToolCalls: deferredCallsAfterBatchPause(deferred, toolCall.toolCallId),
             stepsUsedAtPause: ctx.stepsUsed,
             hadInterveningMutationAtPause: state.hasInterveningMutation,
+            priorToolCalls: [...ctx.toolCallLog],
           },
         };
       }
@@ -2303,6 +2998,7 @@ export async function executeDeferredToolCalls(
         `Pre-mutation resume (deferred batch): ${toolCall.toolId}`,
       ) ?? undefined;
       if (state.checkpoint) {
+        state.baselineCheckpoint ??= state.checkpoint;
         ctx.localProgress.emit({
           type: "checkpoint",
           label: state.checkpoint.label,
@@ -2336,11 +3032,27 @@ export async function executeDeferredToolCalls(
     if (!toolDef.readOnly) {
       state.hasInterveningMutation = true;
       state.batchHasMutation = true;
-      if (result.success) ctx.executedMutations.set(dedupeKey, result);
     }
 
     const summary = summarizeToolResult(toolCall.toolId, result.result);
-    ctx.toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary, mutating: !toolDef.readOnly });
+    const mutationCheck = await verifyMutationReadBack(
+      ctx.transport,
+      toolCall.toolId,
+      toolCall.inputs,
+      result.success && !toolDef.readOnly,
+      result.result,
+    );
+    if (result.success && !toolDef.readOnly) {
+      ctx.executedMutations.set(dedupeKey, { result, persisted: mutationCheck?.verified ?? undefined });
+    }
+    ctx.toolCallLog.push({
+      toolId: toolCall.toolId,
+      success: result.success,
+      summary,
+      mutating: !toolDef.readOnly,
+      paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
+      persisted: mutationCheck?.verified ?? undefined,
+    });
     state.completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? state.completedDeployment;
     if (ctx.qualitySession) {
       noteToolResult(
@@ -2349,7 +3061,7 @@ export async function executeDeferredToolCalls(
         { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
         ctx.transport.workspaceId,
       );
-      await verifyMutationReadBack(ctx.qualitySession, ctx.transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly, ctx.isStaticWorkspace);
+      noteReadBackToSession(ctx.qualitySession, toolCall.toolId, mutationCheck, ctx.isStaticWorkspace);
     }
 
     ctx.localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
@@ -2413,7 +3125,9 @@ async function resumeAgentLoopV2Inner(
   // before the approval pause. The paused messages are still re-harvested for
   // idempotency, but conversation text is not the source of machine evidence.
   let qualitySession: QualityLoopSession | null = null;
-  if (cfg.qualityLoop?.enabled) {
+  // Small lane: same as the initial run — the full quality prompt doesn't
+  // fit the 8k ctx; the workspace-mutation evidence check is the gate.
+  if (cfg.qualityLoop?.enabled && !isLocalSmallLane()) {
     qualitySession = startQualityLoopSession({
       runId: cfg.qualityLoop.runId,
       projectId: cfg.qualityLoop.projectId,
@@ -2434,8 +3148,12 @@ async function resumeAgentLoopV2Inner(
   // pause.
   const resumeUserMessage =
     resume.pausedMessages.find((m) => m.role === "user")?.content ?? "";
-  const resumeCapabilityPlan =
-    applyOrchestratorPrompts(cfg, resumeUserMessage);
+  const resumeCapabilityPlan = isLocalSmallLane()
+    ? planCapabilities(resumeUserMessage)
+    : applyOrchestratorPrompts(cfg, resumeUserMessage);
+  if (isLocalSmallLane()) {
+    cfg.systemPrompt += "\n\n" + LOCAL_SMALL_LANE_PROMPT;
+  }
 
   // ── Run observability on resume (Part J, D) ──
   // The approval pause breaks the original run's observability record
@@ -2456,7 +3174,7 @@ async function resumeAgentLoopV2Inner(
     resume.pausedMessages,
   );
   let hasInterveningMutation = resume.hadInterveningMutation;
-  const executedMutations = new Map<string, ToolCallResult>();
+  const executedMutations = new Map<string, ExecutedMutation>();
 
   const localProgress = new ProgressEmitter((event) => {
     events.push(event);
@@ -2506,11 +3224,22 @@ async function resumeAgentLoopV2Inner(
     },
   );
   const { offerable: resumeOfferableIds } = filterOfferableTools(resumeToolHealthMap);
-  const resumeOfferableTools = availableTools
+  const resumeHealthCheckedTools = availableTools
     .filter((t) => resumeOfferableIds.includes(t.id))
     // Same browser-tool scoping as the initial run: only a loop that owns a
     // browser session may offer browser.* tools.
     .filter((t) => cfg.browserSessionId || !t.id.startsWith("browser."));
+  // Same local-model slimming as the initial run (Priority 1): the
+  // resumed turn keeps the reduced file+preview set for workspace
+  // build/edit tasks so a post-approval continuation cannot suddenly
+  // re-advertise the ~60-tool catalog mid-run.
+  const resumeOfferableTools = slimToolsForLocalBuild(
+    resumeHealthCheckedTools,
+    resumeCapabilityPlan,
+  );
+  if (resumeOfferableTools !== resumeHealthCheckedTools) {
+    cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
+  }
   const resumeHealthNote = buildToolHealthPromptNote(resumeToolHealthMap);
   if (resumeHealthNote) {
     cfg.systemPrompt += "\n\n" + resumeHealthNote;
@@ -2535,7 +3264,17 @@ async function resumeAgentLoopV2Inner(
   let modelFailureText: string | undefined;
   let failedHonestly: string | undefined;
   let checkpoint = resume.existingCheckpoint;
-  const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
+  // The paused run stores the ORIGINAL run's first pre-mutation checkpoint
+  // as its resume anchor (see messages/route.ts createPausedRun), so the
+  // baseline diff covers the whole logical run — including mutations that
+  // landed before the approval gate, which the pause-side checkpoint
+  // already committed. Legacy rows stored the latest pre-pause checkpoint
+  // instead; seeding from it keeps the pre-change "post-gate only" view.
+  let baselineCheckpoint = resume.existingCheckpoint;
+  // Seed the evidence log with pre-pause calls: a resumed run's
+  // persisted/complete verdict must cover the full mutation history, not
+  // just what ran after the gate.
+  const toolCallLog: AgentToolCallLogEntry[] = [...(resume.priorToolCalls ?? [])];
   let completedDeployment: CompletedDeployment | null = null;
   // NOTE: checkpoints are now created before EVERY mutation, so this flag no
   // longer gates anything. It is retained only because it is part of the
@@ -2545,6 +3284,10 @@ async function resumeAgentLoopV2Inner(
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
+  // A paused run exists BECAUSE the model emitted an approval-gated tool
+  // call — the required-first-call contract was satisfied pre-pause, so
+  // the resumed loop runs under "auto" tool choice throughout.
+  const emittedToolCalls = true;
 
   // Execute the approved/rejected tool FIRST, then continue the loop
   localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
@@ -2628,7 +3371,24 @@ async function resumeAgentLoopV2Inner(
     // A resumed call is one that required approval, so treat an unknown
     // tool as mutating rather than silently crediting a read-only step.
     const resumedReadOnly = availableTools.find((t) => t.id === resume.toolId)?.readOnly ?? false;
-    toolCallLog.push({ toolId: resume.toolId, success: result.success, summary, mutating: !resumedReadOnly });
+    // Read-back verification of the approved mutation — the same
+    // persisted-truth check as the live loop, and the only channel that
+    // proves anything on a gitless (static) workspace.
+    const mutationCheck = await verifyMutationReadBack(
+      transport,
+      resume.toolId,
+      resume.inputs,
+      result.success && !resumedReadOnly,
+      result.result,
+    );
+    toolCallLog.push({
+      toolId: resume.toolId,
+      success: result.success,
+      summary,
+      mutating: !resumedReadOnly,
+      paths: !resumedReadOnly ? declaredMutationPaths(resume.inputs, result.result) : undefined,
+      persisted: mutationCheck?.verified ?? undefined,
+    });
     // Observability (Part J): record the approved tool execution.
     recordObsToolCall(resumeRunObs, {
       toolId: resume.toolId,
@@ -2650,7 +3410,7 @@ async function resumeAgentLoopV2Inner(
         { success: result.success, result: result.result, mutating: !resumedReadOnly, summary },
         transport.workspaceId,
       );
-      await verifyMutationReadBack(qualitySession, transport, resume.toolId, resume.inputs, result.success && !resumedReadOnly, cfg.isStaticWorkspace);
+      noteReadBackToSession(qualitySession, resume.toolId, mutationCheck, cfg.isStaticWorkspace);
     }
 
     localProgress.emit({
@@ -2698,6 +3458,12 @@ async function resumeAgentLoopV2Inner(
     llmMessages.push(buildToolResultMessage(result));
   }
 
+  // Resumed-build stall accounting: consecutive MODEL steps that complete
+  // with no successful file write. Approval pauses and resume bookkeeping
+  // are not model steps and never count; the counter persists across
+  // approval cycles via pendingApproval.zeroWriteStepsAtPause.
+  let resumeZeroWriteSteps = resume.zeroWriteStepsAtPause ?? 0;
+
   // Re-inject the deferred remainder of the batch that hit the approval
   // gate: these calls were never executed before the pause, and approving
   // the gated tool must not silently drop them. Deferred mutations that
@@ -2710,6 +3476,7 @@ async function resumeAgentLoopV2Inner(
       cancelled,
       cancelReason,
       checkpoint,
+      baselineCheckpoint,
       mutationBatchPending,
       batchHasMutation,
       completedDeployment,
@@ -2739,11 +3506,16 @@ async function resumeAgentLoopV2Inner(
     cancelled = deferredState.cancelled;
     cancelReason = deferredState.cancelReason;
     checkpoint = deferredState.checkpoint;
+    baselineCheckpoint = deferredState.baselineCheckpoint;
     mutationBatchPending = deferredState.mutationBatchPending;
     batchHasMutation = deferredState.batchHasMutation;
     completedDeployment = deferredState.completedDeployment;
 
     if (deferredResult.nestedApproval) {
+      // A nested gate on a file-writing tool carries 0 — write intent is
+      // in flight; any other pause carries the counter forward unchanged.
+      deferredResult.nestedApproval.zeroWriteStepsAtPause =
+        isFileWritingTool(deferredResult.nestedApproval.toolId) ? 0 : resumeZeroWriteSteps;
       return {
         finalText: `I need your approval to run \`${deferredResult.nestedApproval.toolId}\`. ${deferredResult.nestedApproval.reason}`,
         stepsUsed,
@@ -2751,13 +3523,26 @@ async function resumeAgentLoopV2Inner(
         toolCalls: toolCallLog,
         cancelled: false,
         events,
+        checkpoint: checkpoint ?? undefined,
+        baselineCheckpoint: baselineCheckpoint ?? checkpoint ?? undefined,
         pendingApproval: deferredResult.nestedApproval,
       };
     }
   }
 
+  // Writes completed after approval — the gated call itself or a deferred
+  // batch-mate executed during this resume's approval phase — are verified
+  // progress and reset the stall counter.
+  if (
+    resumeZeroWriteSteps > 0 &&
+    toolCallLog
+      .slice(resume.priorToolCalls?.length ?? 0)
+      .some((call) => call.success && isFileWritingTool(call.toolId))
+  ) {
+    resumeZeroWriteSteps = 0;
+  }
+
   // Continue the loop
-  let resumeZeroWriteSteps = 0;
   while (stepsUsed < cfg.maxSteps && !cancelled) {
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
@@ -2779,7 +3564,7 @@ async function resumeAgentLoopV2Inner(
           model: cfg.model,
           temperature: 0.15,
           maxTokens: 4096,
-          toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
+          toolChoice: cfg.requireToolCallOnFirstStep && !emittedToolCalls ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -2788,7 +3573,6 @@ async function resumeAgentLoopV2Inner(
           requireReliableFileWriting: cfg.buildCapabilityGuard != null,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
-          sameModelRetries: 2,
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {
@@ -2863,7 +3647,15 @@ async function resumeAgentLoopV2Inner(
         continue;
       }
       const zeroCallText = llmResponse.text ?? "";
-      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges);
+      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
+        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Prose approval-asks can only stall a turn that was dispatched
+        // to execute: on chat/plan turns the same wording is a valid
+        // final answer, not a missing tool call. Execution intent rides
+        // its own flag so it survives approval resumes — the first-call
+        // requirement is inert once any call has been emitted.
+        executionRequested: (cfg.executionRequested ?? cfg.requireToolCallOnFirstStep) === true && cfg.executionMode !== "plan",
+      });
       if (resolution.action === "nudge") {
         continuationNudges++;
         localProgress.emit({
@@ -2948,10 +3740,10 @@ async function resumeAgentLoopV2Inner(
           llmMessages.push(buildToolResultMessage({
             toolCallId: toolCall.toolCallId,
             toolId: toolCall.toolId,
-            result: prior.result,
+            result: prior.result.result,
             success: true,
           }));
-          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true });
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
           localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — already executed", durationMs: 0 });
           continue;
         }
@@ -2981,6 +3773,7 @@ async function resumeAgentLoopV2Inner(
       if (!toolDef.readOnly) {
         checkpoint = await transport.createCheckpointBeforeMutation(`Pre-mutation resume: ${toolCall.toolId} (step ${stepsUsed})`) ?? undefined;
         if (checkpoint) {
+          baselineCheckpoint ??= checkpoint;
           localProgress.emit({ type: "checkpoint", label: checkpoint.label, gitSha: checkpoint.gitSha });
         }
       }
@@ -3012,6 +3805,7 @@ async function resumeAgentLoopV2Inner(
           cancelled: false,
           events,
           checkpoint: checkpoint ?? undefined,
+          baselineCheckpoint: baselineCheckpoint ?? checkpoint ?? undefined,
           pendingApproval: {
             toolId: toolCall.toolId,
             toolCallId: toolCall.toolCallId,
@@ -3022,6 +3816,10 @@ async function resumeAgentLoopV2Inner(
             deferredToolCalls: deferredCallsAfterBatchPause(llmResponse.toolCalls, toolCall.toolCallId),
             stepsUsedAtPause: stepsUsed,
             hadInterveningMutationAtPause: hasInterveningMutation,
+            priorToolCalls: [...toolCallLog],
+            // Pausing FOR a file write is write intent in flight — reset
+            // the stall counter so the resumed segment starts clean.
+            zeroWriteStepsAtPause: isFileWritingTool(toolCall.toolId) ? 0 : resumeZeroWriteSteps,
           },
         };
       }
@@ -3078,11 +3876,27 @@ async function resumeAgentLoopV2Inner(
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
         batchHasMutation = true;
-        if (result.success) executedMutations.set(dedupeKey, result);
       }
 
       const summary = summarizeToolResult(toolCall.toolId, result.result);
-      toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary, mutating: !toolDef.readOnly });
+      const mutationCheck = await verifyMutationReadBack(
+        transport,
+        toolCall.toolId,
+        toolCall.inputs,
+        result.success && !toolDef.readOnly,
+        result.result,
+      );
+      if (result.success && !toolDef.readOnly) {
+        executedMutations.set(dedupeKey, { result, persisted: mutationCheck?.verified ?? undefined });
+      }
+      toolCallLog.push({
+        toolId: toolCall.toolId,
+        success: result.success,
+        summary,
+        mutating: !toolDef.readOnly,
+        paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
+        persisted: mutationCheck?.verified ?? undefined,
+      });
       completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
       if (qualitySession) {
         noteToolResult(
@@ -3091,7 +3905,7 @@ async function resumeAgentLoopV2Inner(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
-        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly, cfg.isStaticWorkspace);
+        noteReadBackToSession(qualitySession, toolCall.toolId, mutationCheck, cfg.isStaticWorkspace);
       }
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
@@ -3173,8 +3987,8 @@ async function resumeAgentLoopV2Inner(
   // needs evidence — it resolves to "unknown", which is the honest answer,
   // rather than being silently omitted.
   const attemptedMutation = toolCallLog.some((call) => call.mutating);
-  const workspaceChange = checkpoint || attemptedMutation
-    ? await computeWorkspaceChange(transport, checkpoint ?? null)
+  const workspaceChange = baselineCheckpoint || checkpoint || attemptedMutation
+    ? await computeWorkspaceChange(transport, baselineCheckpoint ?? checkpoint ?? null)
     : undefined;
 
   if (workspaceChange) {
@@ -3212,6 +4026,7 @@ async function resumeAgentLoopV2Inner(
     modelFailed,
     modelFailureText,
     failedHonestly,
+    baselineCheckpoint,
     qualityLoop: qualityFinale
       ? {
           verdict: qualityFinale.verdict,

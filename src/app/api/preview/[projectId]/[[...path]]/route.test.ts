@@ -125,23 +125,15 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
     // Opaque origin: user content cannot touch LiTT cookies/storage/DOM.
     expect(csp).toContain("sandbox");
     expect(csp).not.toContain("allow-same-origin");
-    // Regression: default-src must use EXPLICIT origins, never bare 'self'.
-    // The iframe sandbox omits allow-same-origin (opaque origin), and per the
-    // CSP spec 'self' never matches subresource URLs from an opaque origin —
-    // bare 'self' would silently block relative assets (style.css, app.js,
-    // images) and render multi-file sites unstyled/broken.
-    expect(csp).toContain("https://www.litlabs.net");
+    // Bare 'self' never matches subresource URLs from an opaque origin, so
+    // it must never appear — relative assets would silently break.
     expect(csp).not.toMatch(/default-src 'self'/);
-    // Generated sites render styled: Tailwind browser build, Google Fonts and
-    // Unsplash images are allowed, each only in the directive that needs it.
-    expect(csp).toMatch(/script-src [^;]*https:\/\/cdn\.jsdelivr\.net\/npm\/@tailwindcss\//);
-    expect(csp).toMatch(/style-src [^;]*https:\/\/fonts\.googleapis\.com/);
-    expect(csp).toMatch(/font-src [^;]*https:\/\/fonts\.gstatic\.com/);
-    expect(csp).toMatch(/img-src [^;]*https:\/\/images\.unsplash\.com/);
-    // ...and nothing broader: no bare https:, no wildcard, no third-party connect/frame.
-    expect(csp).not.toMatch(/(^|[ ;])(https:|\*)([ ;]|$)/);
-    expect(csp).not.toContain("connect-src");
-    expect(csp).not.toContain("frame-src");
+    // Generated sites are built on third-party assets the generation
+    // contract emits (Tailwind browser CDN, Google Fonts, stock images);
+    // resource loads are unrestricted to match the deployed /sites policy —
+    // the sandbox + manifest-scoped token are the real security boundary.
+    expect(csp).toContain("https:");
+    expect(csp).toContain("'wasm-unsafe-eval'"); // Tailwind v4 browser build (Oxide WASM)
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     assertZeroSubprocesses();
   });

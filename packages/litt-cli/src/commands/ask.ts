@@ -139,6 +139,8 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     onApprovalRequired: (request, risk) => approvalBridge.request(request, risk),
   });
 
+  let inFlightModel: { cancel?: () => void } | null = null;
+  const askBody = async (): Promise<number> => {
   try {
     // Resolve auth + REMOTE state so the model knows who it's acting for
     // and whether the REMOTE transport is available. Without this, the
@@ -206,6 +208,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       routingMode,
       idleStallMs: resolveIdleStallMs(),
     });
+    inFlightModel = model as { cancel?: () => void };
 
     console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
     console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
@@ -270,7 +273,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
           );
         }
       },
-    });
+      });
     const streamTail = toolCallFilter.flush();
     if (streamTail) process.stdout.write(streamTail);
 
@@ -309,6 +312,48 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   } finally {
     closeApprovalPrompt?.();
   }
+  };
+
+  // Hard wall-clock deadline over the WHOLE ask — auth/routing, model
+  // discovery, provider probe, and all agent rounds/network requests.
+  // A dead endpoint can hang before the agent loop even starts, so the
+  // deadline lives outside it; firing cancels the in-flight request.
+  const deadlineMs = Number(process.env.LITT_ASK_TIMEOUT_MS) > 0
+    ? Number(process.env.LITT_ASK_TIMEOUT_MS)
+    : 120000;
+  return withAskDeadline(askBody(), deadlineMs, () => inFlightModel?.cancel?.());
+}
+
+// ─── Hard ask deadline ─────────────────────────────────────────────
+
+/**
+ * Race a promise against a hard wall-clock deadline.
+ *
+ * The agent loop's own `totalTimeoutMs` only checks BETWEEN rounds — a
+ * model request that never settles (dead endpoint, hung socket) never
+ * reaches that check, and an escalation path retries the same hung
+ * call for every remaining round. This deadline bounds the WHOLE wait:
+ * when it fires, `onTimeout` is invoked to cancel in-flight work (the
+ * provider's own stall abort also closes the socket so the process can
+ * exit), and the promise rejects with a timeout error.
+ *
+ * Exported for tests.
+ */
+export function withAskDeadline<T>(
+  work: Promise<T>,
+  deadlineMs: number,
+  onTimeout?: () => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try { onTimeout?.(); } catch { /* cancel must never mask the deadline */ }
+      reject(new Error(`Ask timed out after ${deadlineMs}ms — the provider did not respond.`));
+    }, deadlineMs);
+    work.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
 }
 
 // ─── TTY approval driver ───────────────────────────────────────────

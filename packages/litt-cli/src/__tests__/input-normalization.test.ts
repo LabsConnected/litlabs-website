@@ -110,6 +110,14 @@ describe("normalizeKey", () => {
     expect(normalizeKey("\n", noKey).kind).toBe("SUBMIT");
   });
 
+  it("CRLF chunk → SUBMIT (CR/LF normalization)", () => {
+    // Terminals/pastes that deliver "\r\n" as ONE input event must still
+    // produce exactly one submit — not inserted text.
+    expect(normalizeKey("\r\n", noKey).kind).toBe("SUBMIT");
+    expect(normalizeKey("\n\r", noKey).kind).toBe("SUBMIT");
+    expect(normalizeKey("\r\n\r\n", noKey).kind).toBe("SUBMIT");
+  });
+
   it("Escape → ESCAPE", () => {
     expect(normalizeKey("\u001b", key({ escape: true })).kind).toBe("ESCAPE");
   });

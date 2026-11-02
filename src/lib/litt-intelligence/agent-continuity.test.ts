@@ -221,7 +221,7 @@ describe("agent continuity — state survives provider failover", () => {
     expect(result.cancelled).toBe(false);
     expect(result.finalText).toBe("The file has been written.");
     expect(result.toolCalls).toEqual([
-      { toolId: "files.write", success: true, summary: expect.any(String), mutating: true },
+      expect.objectContaining({ toolId: "files.write", success: true, summary: expect.any(String), mutating: true }),
     ]);
 
     // ── Routing events show the actual providers used ──
@@ -312,9 +312,32 @@ describe("agent continuity — state survives provider failover", () => {
     };
     _setGeminiModelFactory(() => geminiModel);
 
-    mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402, "insufficient credits"))
-      .mockResolvedValueOnce({
+    // The Ollama attempt warms the model before inference — /api/ps (is it
+    // resident?) then /api/generate (load it) — each a real fetch that must
+    // be answered or the warm step fails the attempt before the chat call.
+    // Route by URL so endpoint responses are correct regardless of order.
+    mockFetch.mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("openrouter")) return makeErrorResponse(402, "insufficient credits");
+      if (u.includes("/api/ps")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({ models: [] }), // not resident → warm fires next
+          text: async () => "",
+        };
+      }
+      if (u.includes("/api/generate")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({ done: true }),
+          text: async () => "{}",
+        };
+      }
+      return {
         ok: true,
         status: 200,
         headers: new Headers(),
@@ -323,7 +346,8 @@ describe("agent continuity — state survives provider failover", () => {
           choices: [{ message: { content: "Done locally.", tool_calls: [] }, finish_reason: "stop" }],
         }),
         text: async () => "",
-      });
+      };
+    });
 
     const result = await runAgentLoopV2(
       "say hello",

@@ -47,6 +47,50 @@ export function getTerminalServerUrl(): string {
   return process.env.NODE_ENV === "production" ? "" : LOCAL_TERMINAL_URL;
 }
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
+
+/** Wildcard/unspecified bind addresses — never a valid dial target. A dev
+    server bound `-H 0.0.0.0` can surface the wildcard as the request host. */
+const WILDCARD_HOSTS = new Set(["0.0.0.0", "::", "[::]", "*", ""]);
+
+function isLoopbackHost(hostname: string): boolean {
+  return LOOPBACK_HOSTS.has(hostname.toLowerCase());
+}
+
+/**
+ * Resolve the terminal WebSocket base URL a BROWSER should dial.
+ *
+ * Local dev configures a loopback URL (http://127.0.0.1:4001) because the
+ * terminal server binds loopback by default — but "127.0.0.1" resolves on
+ * the CLIENT's device, not the dev server. When the page itself was served
+ * over a loopback-equivalent tunnel (localhost:3001 → remote 3001) or a
+ * remote dev host, the loopback literal is wrong for every non-colocated
+ * client. Substituting the request's own hostname makes the WS target
+ * follow the page origin: localhost-served pages dial localhost:4001
+ * (reachable through the authenticated SSH tunnel's port forward), and
+ * remote dev origins dial that host's terminal port — which only works
+ * when the terminal server was launched with --lan/--tailscale. Either
+ * way the socket handshake still carries the signed terminal token, so
+ * substituting the host never weakens auth.
+ *
+ * Non-loopback configured URLs (production public endpoints) are returned
+ * untouched. A configured URL that can't be parsed is returned as-is.
+ */
+export function resolveTerminalBrowserBaseUrl(configured: string, requestHostname: string): string {
+  if (!configured) return configured;
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    return configured;
+  }
+  if (!isLoopbackHost(url.hostname)) return configured;
+  const host = (requestHostname ?? "").trim().toLowerCase();
+  if (!host || WILDCARD_HOSTS.has(host)) return configured;
+  url.hostname = host;
+  return url.toString().replace(/\/$/, "");
+}
+
 export type TerminalInternalUrlSource = "internal" | "public-fallback" | "none";
 
 export interface TerminalInternalUrlResolution {
