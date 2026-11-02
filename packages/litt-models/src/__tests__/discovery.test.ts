@@ -458,6 +458,55 @@ describe("ProviderDiscoveryOrchestrator", () => {
     assert.equal(health.discoveredCount, 1);
   });
 
+  it("discovers a Tailscale endpoint when the local daemon is down", async () => {
+    const TS_TAGS = "http://100.107.123.73:11434/api/tags";
+    const TS_SHOW = "http://100.107.123.73:11434/api/show";
+    const r = registry({});
+    // localhost is unscripted → scriptFetcher returns down for it.
+    const orchestrator = new ProviderDiscoveryOrchestrator(
+      envAccessorFromMap({
+        OLLAMA_TAILSCALE_URL: "http://100.107.123.73:11434",
+      }),
+      scriptFetcher({
+        [TS_TAGS]: okResponse(ollamaTagsBody(["litt-fast:2k"])),
+        [TS_SHOW]: okResponse({
+          capabilities: ["completion", "tools"],
+          model_info: { "qwen3.context_length": 8192 },
+        }),
+      }),
+    );
+
+    await orchestrator.refresh(r, { providers: ["ollama"] });
+    const health = orchestrator.healthCache.get("ollama")!;
+    assert.equal(health.tier, "discovery-ok");
+    assert.equal(health.discoveredCount, 1);
+    assert.equal(r.getById("ollama:litt-fast:2k")?.availability, "online");
+  });
+
+  it("prefers an endpoint with models over a local daemon that answers empty", async () => {
+    const TS_TAGS = "http://100.107.123.73:11434/api/tags";
+    const TS_SHOW = "http://100.107.123.73:11434/api/show";
+    const r = registry({});
+    const orchestrator = new ProviderDiscoveryOrchestrator(
+      envAccessorFromMap({ OLLAMA_TAILSCALE_URL: "http://100.107.123.73:11434" }),
+      scriptFetcher({
+        [OLLAMA_TAGS_URL]: okResponse(ollamaTagsBody([])),
+        [TS_TAGS]: okResponse(ollamaTagsBody(["litt-fast:2k"])),
+        [TS_SHOW]: okResponse({
+          capabilities: ["completion"],
+          model_info: { "qwen3.context_length": 8192 },
+        }),
+      }),
+    );
+
+    await orchestrator.refresh(r, { providers: ["ollama"] });
+    const health = orchestrator.healthCache.get("ollama")!;
+    // Default probe order is local → tailscale; local answers but has no
+    // models, so the endpoint that can actually serve (tailscale) wins.
+    assert.equal(health.tier, "discovery-ok");
+    assert.equal(health.discoveredCount, 1);
+  });
+
   it("local provider DOWN via LITT_OLLAMA_URL (unreachable LAN) → down tier", async () => {
     const r = registry({});
     const orchestrator = new ProviderDiscoveryOrchestrator(

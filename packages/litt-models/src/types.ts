@@ -173,6 +173,16 @@ export interface ModelDefinition {
   littRecommended?: boolean;
   /** Curated LiTT tier (spec section 2). */
   littTier?: LiTTTier;
+  /**
+   * True → the model is never auto-selected: excluded from AUTO routing
+   * picks and from getFallbackChain(). Still routable via an explicit
+   * pinned/ask choice and still listed in the picker. Use for providers
+   * that require explicit opt-in — e.g. an unverified third-party
+   * gateway. A manualOnly model must never carry littRecommended or a
+   * littTier. Exception: when it is the ONLY configured provider, AUTO
+   * may still reach it as the last-resort pool rather than erroring.
+   */
+  manualOnly?: boolean;
   /** Domain — keeps creative models out of the chat picker. */
   domain: ModelDomain;
   /** Max output tokens, if known. */

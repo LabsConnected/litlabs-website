@@ -26,6 +26,7 @@ import {
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
+import { matchToolInventoryQuery, formatToolInventory } from "../lib/tool-inventory.js";
 import { hasAnyProviderKey, resolveProviderAdapter, providerLabel, resolveIdleStallMs } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { probeLocalLane } from "../lib/local-lane.js";
@@ -76,6 +77,15 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   }
 
   header("LiTT Ask");
+
+  // A tool-inventory question is answered from the registered registry
+  // itself — the same deterministic lane the cockpit uses. No provider,
+  // no model round trip, no agent loop, no tool calls: the answer is
+  // local runtime truth, annotated by the session's real mode policy.
+  if (matchToolInventoryQuery(question)) {
+    console.log(formatToolInventory(new ToolRegistry(), session?.getMode() ?? "act"));
+    return 0;
+  }
 
   // A credential-less Ollama daemon is a real provider lane. Only drop to
   // heuristic analysis when neither hosted/BYOK credentials nor a proven

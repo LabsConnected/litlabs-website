@@ -893,6 +893,7 @@ export function openAiCompatibleLocalEndpoint(
 export const OPENAI_COMPATIBLE_NATIVE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
   "openai",
   "xai",
+  "google",
   "openagents",
   "deepseek",
   "kimi",
@@ -1233,7 +1234,12 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
    */
   private authHeaders(base: Record<string, string> = {}): Record<string, string> {
     if (this._credentialless) return base;
-    return { ...base, "Authorization": `Bearer ${this._apiKey}` };
+    const headers: Record<string, string> = { ...base, "Authorization": `Bearer ${this._apiKey}` };
+    // Google's native endpoints (modelsUrl health check) authenticate
+    // via x-goog-api-key; the OpenAI-compatible chat route takes Bearer.
+    // Send both so either surface works.
+    if (this.providerId === "google") headers["x-goog-api-key"] = this._apiKey;
+    return headers;
   }
 }
 
@@ -1321,7 +1327,14 @@ export function resolveProviderAdapter(
   // 1. Native OpenAI-compatible provider with a direct key → native adapter.
   if (OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has(servedBy)) {
     const def = getProvider(servedBy);
-    const apiKey = def?.envKey ? process.env[def.envKey] : undefined;
+    // Provider-native alt keys count too (e.g. GOOGLE_API_KEY for
+    // Gemini), but never OPENROUTER_API_KEY — that key belongs to a
+    // different provider and must not be sent to the native endpoint.
+    const apiKey = def
+      ? [def.envKey, ...(def.altEnvKeys ?? []).filter((k) => k !== "OPENROUTER_API_KEY")]
+          .map((k) => (k ? process.env[k] : undefined))
+          .find(Boolean)
+      : undefined;
     if (def?.chatUrl && apiKey) {
       const modelId = routed.providerModelId ?? routed.openRouterModelId;
       if (!modelId) {

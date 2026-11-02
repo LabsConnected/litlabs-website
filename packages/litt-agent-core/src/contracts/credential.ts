@@ -430,7 +430,8 @@ type _AuditSchemaCheck = AuditSafetyViolation extends never ? "schema_ok" : neve
  * before they enter audit logs, events, or model context.
  */
 const SECRET_PATTERNS: readonly RegExp[] = [
-  /sk-[a-zA-Z0-9]{20,}/g,           // OpenAI-style keys
+  /sk-[a-zA-Z0-9_-]{20,}/g,         // OpenAI-style keys (incl. sk-proj-, sk_live_-style separators)
+  /pk_[a-zA-Z0-9_-]{20,}/g,         // Stripe-style publishable keys (pk_live_, pk_test_)
   /ghp_[a-zA-Z0-9]{36,}/g,          // GitHub PATs
   /gho_[a-zA-Z0-9]{36,}/g,          // GitHub OAuth tokens
   /Bearer\s+[a-zA-Z0-9._-]{20,}/g,  // Bearer tokens

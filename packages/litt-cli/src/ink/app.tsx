@@ -22,7 +22,7 @@
  *   to the Composer's own useInput.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Box, useApp, useStdout } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
@@ -88,6 +88,15 @@ export function CockpitApp({
   const { exit } = useApp();
   const store = useCockpitStore();
   const { stdout } = useStdout();
+  // Latest committed composer draft for keyboard callbacks — the app
+  // handler ref in overlay-manager is refreshed by a passive effect and
+  // can lag a commit, so this ref must always hold the newest value.
+  // useLayoutEffect runs synchronously at commit — before any input event
+  // can be dispatched — so the ref is never stale when a handler reads it.
+  const composerValueRef = useRef(store.state.composerValue);
+  useLayoutEffect(() => {
+    composerValueRef.current = store.state.composerValue;
+  });
   useEventBridge(client, store, sessionBridge);
 
   // ─── Canonical ModelRuntime — ONE instance for the whole app ───
@@ -128,9 +137,10 @@ export function CockpitApp({
   // commands/cockpit.ts). Read dynamically by RuntimeSession at signal
   // time, so install order relative to that call doesn't matter.
   useEffect(() => {
-    session.setOnPersistBeforeExit(() => controller.persistSession());
+    // eslint-disable-next-line react-hooks/immutability -- onPersistBeforeExit is a deliberately mutable field on RuntimeSession, added for exactly this wiring.
+    session.onPersistBeforeExit = () => controller.persistSession();
     return () => {
-      session.setOnPersistBeforeExit(null);
+      session.onPersistBeforeExit = null;
     };
   }, [session, controller]);
 
@@ -291,11 +301,12 @@ export function CockpitApp({
       || store.state.holoState === "PLANNING"
       || store.state.holoState === "READING" || store.state.holoState === "EDITING"
       || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING")) {
-      session.cancel().catch(() => {});
-      // Also cancel an in-flight REMOTE model stream — session.cancel()
-      // only stops local tool execution; the server-side model call
-      // would otherwise keep running (and being billed) unheard.
-      controller.cancelRemoteModel();
+      // One canonical teardown: aborts the agent loop (a LOCAL Ollama
+      // model stream is cancelled too, not just spawned processes), and
+      // cancels an in-flight REMOTE model stream — session.cancel()
+      // alone only stops local tool execution; the server-side model
+      // call would otherwise keep running (and being billed) unheard.
+      controller.cancelActiveRun();
       store.actions.setIsProcessing(false);
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
@@ -313,8 +324,7 @@ export function CockpitApp({
         || store.state.holoState === "PLANNING"
         || store.state.holoState === "READING" || store.state.holoState === "EDITING"
         || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING") {
-        session.cancel().catch(() => {});
-        controller.cancelRemoteModel();
+        controller.cancelActiveRun();
         store.actions.setIsProcessing(false);
         store.actions.setHoloState("IDLE");
         store.actions.clearMission();
@@ -335,11 +345,9 @@ export function CockpitApp({
       store.actions.stopBusy();
     } else if (isCtrl(input, key, "d")) {
       // Ctrl+D — DIFF when a draft exists; EOF/exit on an empty composer.
-      // store.composerValueRef is mirrored by setComposerValue at event
-      // time, so the draft stays current even if this callback ran from a
-      // handler ref that lagged a commit; persist before exit so the
-      // session survives.
-      if (ctrlDAction(store.composerValueRef.current) === "exit") {
+      // composerValueRef holds the latest committed draft (render-time ref
+      // always current); persist before exit so the session survives.
+      if (ctrlDAction(composerValueRef.current) === "exit") {
         controller.persistSession();
         exit();
       } else {
@@ -362,7 +370,7 @@ export function CockpitApp({
     } else if (input === "?") {
       if (!store.state.isProcessing) store.actions.setOverlay("help");
     }
-  }, [controller, session, store, approvalBridge, exit]);
+  }, [controller, store, approvalBridge, exit]);
 
   const disabled = store.state.isProcessing
     || store.state.holoState === "RUNNING"
