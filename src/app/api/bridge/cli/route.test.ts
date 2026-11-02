@@ -51,8 +51,8 @@ function makeFakeProc() {
 describe("bridge/cli execution policy", () => {
   beforeEach(() => {
     trustedLocalStubs();
-    vi.stubEnv("ADMIN_CLERK_ID", "");
-    vi.stubEnv("ADMIN_USER_ID", ADMIN_ID);
+    vi.stubEnv("LITTLABS_VAPI_OWNER_CLERK_ID", ADMIN_ID);
+    vi.stubEnv("ADMIN_CLERK_IDS", "");
     spawnMock.mockReset();
     mockAuth.mockReset();
   });

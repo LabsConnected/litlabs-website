@@ -5,16 +5,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
-
-const ADMIN_IDS = (process.env.ADMIN_CLERK_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
-
-function isAdmin(userId: string) {
-  return ADMIN_IDS.length === 0 || ADMIN_IDS.includes(userId);
-}
+import { isOwnerClerkId } from "@/lib/owner-identity";
 
 async function getHandler(req: NextRequest) {
   const { userId } = await auth(req);
-  if (!userId || !isAdmin(userId)) {
+  if (!isOwnerClerkId(userId)) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }
 
@@ -37,7 +32,7 @@ async function getHandler(req: NextRequest) {
 
 async function deleteHandler(req: NextRequest) {
   const { userId } = await auth(req);
-  if (!userId || !isAdmin(userId)) {
+  if (!isOwnerClerkId(userId)) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }
 

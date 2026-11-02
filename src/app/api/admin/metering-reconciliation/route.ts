@@ -19,9 +19,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { isOwnerClerkId } from "@/lib/owner-identity";
 import { getAdminSupabase } from "@/lib/supabase-admin";
-
-const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
 
 const WINDOW_DAYS = 30;
 const PAGE = 5000;
@@ -77,7 +76,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 export async function GET(req: NextRequest) {
   const { userId } = await auth(req);
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!isOwnerClerkId(userId)) {
     return new Response("Unauthorized", { status: 401 });
   }
 

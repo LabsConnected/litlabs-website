@@ -3,11 +3,10 @@
 
 import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
+import { isOwnerClerkId } from "@/lib/owner-identity";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import type { TelemetryData } from "@/components/TelemetryPanel";
 import type { AdminEvent } from "@/components/EventStream";
-
-const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
 
 function fallbackStats(): TelemetryData {
   return {
@@ -92,7 +91,7 @@ async function fetchRealEvents(): Promise<AdminEvent[]> {
 export async function GET(req: NextRequest) {
   const { userId } = await auth(req);
 
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!isOwnerClerkId(userId)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
