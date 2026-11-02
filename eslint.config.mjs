@@ -23,6 +23,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "**/dist/**",
+    // Frozen pre-upgrade snapshots — not linted
+    "**/dist-backup*/**",
     "next-env.d.ts",
     // Git worktrees — local only, 376K files
     ".worktrees/**",

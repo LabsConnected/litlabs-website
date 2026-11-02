@@ -1,7 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { PLANS } from "@/config/plans";
 import {
-  PRODUCT_IDENTITY,
   VERIFIED_STRIPE_PLANS,
   VERIFIED_PREMIUM_AGENTS,
   LEGACY_STRIPE_PRODUCTS,

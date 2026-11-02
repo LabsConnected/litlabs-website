@@ -19,7 +19,7 @@
 process.env.LITTLABS_VAPI_OWNER_CLERK_ID = "user_test_owner_123";
 process.env.ADMIN_CLERK_IDS = "";
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // Mock server-only
 vi.mock("server-only", () => ({}));
