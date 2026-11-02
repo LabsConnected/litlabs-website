@@ -225,7 +225,10 @@ function seedRecords(): Map<string, ModelRecord> {
       // and recorded failures demote via health state as usual.
       provider: "openrouter",
       canonicalId: "openrouter-nemotron-3-super",
-      providerModelId: "nvidia/nemotron-3-super-120b-a12b:free",
+      // Upstream drift (2026-11-02): nemotron-3-super-120b-a12b delisted —
+      // every attempt 404s (prod golden 41524155953). The live free successor
+      // is nemotron-3.5-super-vl per the OpenRouter catalog.
+      providerModelId: "nvidia/nemotron-3.5-super-vl:free",
       enabled: true,
       capabilities: {
         text: true,
@@ -241,8 +244,10 @@ function seedRecords(): Map<string, ModelRecord> {
     },
     {
       provider: "openrouter",
-      canonicalId: "openrouter-laguna-s-2.1",
-      providerModelId: "poolside/laguna-s-2.1:free",
+      canonicalId: "openrouter-gemma-4-26b",
+      // laguna-s-2.1 delisted upstream (2026-11-02 — 404s in prod). The
+      // slot keeps its chain position with the live gemma-4-26b free model.
+      providerModelId: "google/gemma-4-26b-a4b-it:free",
       enabled: true,
       capabilities: {
         text: true,
