@@ -11,25 +11,7 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { hostExecutionBlockedResponse } from "@/lib/host-execution-guard";
 import { executeCommand } from "@/lib/command-executor";
 import { logCommandExecution } from "@/lib/agent-logger";
-
-/* ------------------------------------------------------------------ */
-/*  Admin guard                                                        */
-/* ------------------------------------------------------------------ */
-
-function getAdminIds(): string[] {
-  const env = process.env.ADMIN_USER_IDS ?? process.env.ADMIN_USER_ID ?? "";
-  return env
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function isAdmin(userId: string | null | undefined): boolean {
-  if (!userId) return false;
-  const admins = getAdminIds();
-  if (admins.length === 0) return false;
-  return admins.includes(userId);
-}
+import { isOwnerClerkId } from "@/lib/owner-identity";
 
 /* ------------------------------------------------------------------ */
 /*  Handler                                                            */
@@ -46,7 +28,7 @@ async function handler(req: NextRequest): Promise<NextResponse> {
 
   // Auth
   const { userId } = await auth(req);
-  if (!isAdmin(userId)) {
+  if (!isOwnerClerkId(userId)) {
     return NextResponse.json(
       { error: "Access denied. Admin only." },
       { status: 403 },

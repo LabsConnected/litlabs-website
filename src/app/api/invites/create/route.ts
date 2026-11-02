@@ -5,15 +5,14 @@ import { auth } from "@/lib/auth";
 import { generateInviteCode, hashToken } from "@/lib/tokens";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
-
-const ADMIN_IDS = (process.env.ADMIN_CLERK_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
+import { isOwnerClerkId } from "@/lib/owner-identity";
 
 async function handler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (ADMIN_IDS.length > 0 && !ADMIN_IDS.includes(userId)) {
+  if (!isOwnerClerkId(userId)) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }
 
