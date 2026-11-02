@@ -317,7 +317,28 @@ export function validateEnv(): EnvValidationResult[] {
   // Integration — optional, warnings only
   results.push(validateCategory("integration", optionalIntegrationSchema, "[integration]"));
   results.push(validateCategory("terminal", terminalSchema, "[terminal]"));
-  results.push(validateCategory("admin", adminSchema, "[admin]"));
+
+  // Admin — schema fields are all optional, but a deployed production
+  // environment with no owner identity configured leaves every owner-gated
+  // surface fail-closed-denied (nobody can ever be owner/admin). Fail the
+  // deploy preflight in that case; local dev only warns so the app still
+  // starts without the owner configured.
+  const adminResult = validateCategory("admin", adminSchema, "[admin]");
+  const hasOwnerIdentity = Boolean(
+    (process.env.LITTLABS_VAPI_OWNER_CLERK_ID || "").trim() ||
+      (process.env.ADMIN_CLERK_IDS || "").trim(),
+  );
+  if (!hasOwnerIdentity) {
+    const msg =
+      "no owner identity configured — set LITTLABS_VAPI_OWNER_CLERK_ID or ADMIN_CLERK_IDS or every admin/owner surface will deny all users";
+    if (isProduction && isDeployed()) {
+      adminResult.valid = false;
+      adminResult.errors.push(`[admin] ${msg}`);
+    } else {
+      adminResult.warnings.push(`[admin] ${msg} (not required in local dev)`);
+    }
+  }
+  results.push(adminResult);
   results.push(validateCategory("demo", optionalDemoSchema, "[demo]"));
 
   return results;

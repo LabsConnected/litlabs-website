@@ -93,7 +93,7 @@ function makeFakeProc() {
 
 describe("default denial: bridge/cli", () => {
   beforeEach(() => {
-    vi.stubEnv("ADMIN_USER_ID", ADMIN_ID);
+    vi.stubEnv("LITTLABS_VAPI_OWNER_CLERK_ID", ADMIN_ID);
     mockAuth.mockReset();
     mockIsAdmin.mockReset();
     spawnMock.mockReset();
@@ -230,7 +230,7 @@ describe("default denial: bridge/cli", () => {
 
 describe("default denial: agents/execute", () => {
   beforeEach(() => {
-    vi.stubEnv("ADMIN_USER_ID", ADMIN_ID);
+    vi.stubEnv("LITTLABS_VAPI_OWNER_CLERK_ID", ADMIN_ID);
     vi.stubEnv("ENABLE_AGENT_COMMANDS", "true");
     mockAuth.mockReset();
     spawnMock.mockReset();

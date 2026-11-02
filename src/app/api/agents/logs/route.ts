@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { isOwnerClerkId } from "@/lib/owner-identity";
 
 function makeDemoLogs(): never[] {
   // No real logs in Supabase means no logs — do NOT invent demo activity.
@@ -11,17 +12,6 @@ function makeDemoLogs(): never[] {
 }
 
 
-function getAdminIds(): string[] {
-  const env = process.env.ADMIN_USER_IDS ?? process.env.ADMIN_USER_ID ?? "";
-  return env.split(",").map((s) => s.trim()).filter(Boolean);
-}
-
-function isAdmin(userId: string | null | undefined): boolean {
-  if (!userId) return false;
-  const admins = getAdminIds();
-  if (admins.length === 0) return false;
-  return admins.includes(userId);
-}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -31,7 +21,7 @@ export async function GET(req: NextRequest) {
   // Command logs require admin auth
   if (type === "commands") {
     const { userId } = await auth(req);
-    if (!isAdmin(userId)) {
+    if (!isOwnerClerkId(userId)) {
       return NextResponse.json({ error: "Admin only" }, { status: 403 });
     }
     try {
