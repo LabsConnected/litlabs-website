@@ -547,7 +547,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
 
     vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
       const progress = opts.progress;
-      progress.emit({ type: "approval_required", toolId: "deploy.production", reason: "Deploy to production" });
+      progress.emit({ type: "approval_required", toolId: "project.deploy", reason: "Deploy to production" });
       await new Promise((r) => setTimeout(r, 30));
       clientDisconnect.abort(new Error("Client disconnected"));
       const result = {
@@ -561,7 +561,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
           toolCalls: [],
           cancelled: false,
           pendingApproval: {
-            toolId: "deploy.production",
+            toolId: "project.deploy",
             toolCallId: "tc-1",
             inputs: { environment: "production" },
             reason: "Deploy to production",
@@ -569,7 +569,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
           },
         } as any,
         pendingApproval: {
-          toolId: "deploy.production",
+          toolId: "project.deploy",
           toolCallId: "tc-1",
           inputs: { environment: "production" },
           reason: "Deploy to production",
@@ -595,7 +595,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         expect.objectContaining({
           userId: "user_123",
           conversationId: "conv-123",
-          toolId: "deploy.production",
+          toolId: "project.deploy",
           toolCallId: "tc-1",
           actionRunId: "action-run-123",
         }),

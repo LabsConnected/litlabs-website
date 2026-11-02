@@ -389,8 +389,14 @@ async function main() {
     step("studio_load", studioResp?.status() === 200, `HTTP ${studioResp?.status()}`);
     await page.waitForTimeout(6000);
     const shellVisible = await page.locator(".studio-shell").isVisible().catch(() => false);
+    // The mobile nav affordance is the trigger OR the already-open LiTT
+    // sheet — the trigger hides by design whenever a surface panel owns the
+    // viewport, and the sheet's open state can legitimately persist across
+    // navigation. Asserting trigger-only flakes on that stored state.
     const triggerVisible = await page.getByTestId("litt-mobile-trigger").isVisible().catch(() => false);
-    step("studio_shell", shellVisible && triggerVisible, `shell=${shellVisible} trigger=${triggerVisible}`);
+    const sheetVisible = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
+    step("studio_shell", shellVisible && (triggerVisible || sheetVisible),
+      `shell=${shellVisible} trigger=${triggerVisible} sheet=${sheetVisible}`);
     await shot(page, "02-studio-mobile");
 
     // ── Step 3: open LiTT mobile sheet, composer usable ──
@@ -580,8 +586,11 @@ async function main() {
       step("preview_frame_loaded", !!childFrame && !!childFrame.url() && childFrame.url() !== "about:blank",
         `frames=${JSON.stringify(frameUrls.map((u) => u.slice(0, 100)))}`);
 
-      // Direct fetch of the preview URL — proves content is actually served
-      const direct = await page.request.get(iframeSrc, { timeout: 30_000 }).catch((e) => ({ status: () => -1, headers: async () => ({}), text: async () => String(e) }));
+      // Direct fetch of the preview URL — proves content is actually served.
+      // iframeSrc can be relative (/api/preview/<id>/...) — resolve against BASE
+      // because page.request.get requires an absolute URL.
+      const previewFetchUrl = new URL(iframeSrc, BASE).toString();
+      const direct = await page.request.get(previewFetchUrl, { timeout: 30_000 }).catch((e) => ({ status: () => -1, headers: async () => ({}), text: async () => String(e) }));
       const status = typeof direct.status === "function" ? direct.status() : -1;
       const body = typeof direct.text === "function" ? await direct.text() : "";
       step("preview_serves_content", status === 200 && body.length > 100, `HTTP ${status}, ${body.length} bytes`);
@@ -890,8 +899,9 @@ async function main() {
               ? `index.html contains ${JSON.stringify(followUpMarker)}`
               : `index.html did not contain ${JSON.stringify(followUpMarker)} after the follow-up`);
 
-        const followUpPreview = iframeSrc
-          ? await page.request.get(`${iframeSrc}${iframeSrc.includes("?") ? "&" : "?"}acceptance_follow_up=${Date.now()}`, { timeout: 45_000 }).catch(() => null)
+        const followUpPreviewUrl = iframeSrc ? new URL(iframeSrc, BASE).toString() : null;
+        const followUpPreview = followUpPreviewUrl
+          ? await page.request.get(`${followUpPreviewUrl}${followUpPreviewUrl.includes("?") ? "&" : "?"}acceptance_follow_up=${Date.now()}`, { timeout: 45_000 }).catch(() => null)
           : null;
         const followUpPreviewBody = followUpPreview ? await followUpPreview.text().catch(() => "") : "";
         step("post_build_follow_up_preview",

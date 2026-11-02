@@ -143,6 +143,27 @@ function seedRecords(): Map<string, ModelRecord> {
       healthState: "unknown",
     },
     {
+      provider: "gemini",
+      canonicalId: "gemini-2.5-pro",
+      providerModelId: "gemini-2.5-pro",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        // Stronger instruction-following than 2.5-flash on heavy tool
+        // prompts — kept as an ENV-selectable escape route (observed
+        // 2026-11-02 prod golden: gemini-2.5-flash → bad_response prose),
+        // never the default pick: priority below flash so it is only
+        // reached via GEMINI_PRIMARY_MODEL/GEMINI_FALLBACK_MODEL.
+        reliableFileWriting: true,
+        vision: true,
+        contextWindow: 1_048_576,
+      },
+      priority: 30,
+      healthState: "unknown",
+    },
+    {
       // P1: Managed OpenAI — platform credential (OPENAI_API_KEY).
       // Used as LAST-resort fallback for entitled users when free
       // providers fail. gpt-4o is the proven tool-calling model used
