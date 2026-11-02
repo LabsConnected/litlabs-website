@@ -580,8 +580,11 @@ async function main() {
       step("preview_frame_loaded", !!childFrame && !!childFrame.url() && childFrame.url() !== "about:blank",
         `frames=${JSON.stringify(frameUrls.map((u) => u.slice(0, 100)))}`);
 
-      // Direct fetch of the preview URL — proves content is actually served
-      const direct = await page.request.get(iframeSrc, { timeout: 30_000 }).catch((e) => ({ status: () => -1, headers: async () => ({}), text: async () => String(e) }));
+      // Direct fetch of the preview URL — proves content is actually served.
+      // iframeSrc can be relative (/api/preview/<id>/...) — resolve against BASE
+      // because page.request.get requires an absolute URL.
+      const previewFetchUrl = new URL(iframeSrc, BASE).toString();
+      const direct = await page.request.get(previewFetchUrl, { timeout: 30_000 }).catch((e) => ({ status: () => -1, headers: async () => ({}), text: async () => String(e) }));
       const status = typeof direct.status === "function" ? direct.status() : -1;
       const body = typeof direct.text === "function" ? await direct.text() : "";
       step("preview_serves_content", status === 200 && body.length > 100, `HTTP ${status}, ${body.length} bytes`);
@@ -890,8 +893,9 @@ async function main() {
               ? `index.html contains ${JSON.stringify(followUpMarker)}`
               : `index.html did not contain ${JSON.stringify(followUpMarker)} after the follow-up`);
 
-        const followUpPreview = iframeSrc
-          ? await page.request.get(`${iframeSrc}${iframeSrc.includes("?") ? "&" : "?"}acceptance_follow_up=${Date.now()}`, { timeout: 45_000 }).catch(() => null)
+        const followUpPreviewUrl = iframeSrc ? new URL(iframeSrc, BASE).toString() : null;
+        const followUpPreview = followUpPreviewUrl
+          ? await page.request.get(`${followUpPreviewUrl}${followUpPreviewUrl.includes("?") ? "&" : "?"}acceptance_follow_up=${Date.now()}`, { timeout: 45_000 }).catch(() => null)
           : null;
         const followUpPreviewBody = followUpPreview ? await followUpPreview.text().catch(() => "") : "";
         step("post_build_follow_up_preview",
