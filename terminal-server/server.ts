@@ -85,7 +85,7 @@ function sanitizeProjectEnv(value: unknown): Record<string, string> | undefined 
 import { registerPreviewProxyRoute } from "./preview/proxy";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
-import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
+import { PtySessionManager, probeHostPty, type PtySessionSnapshot } from "./pty-session-manager";
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
@@ -751,6 +751,7 @@ app.get("/health/ready", async (_req, res) => {
     workspaceRoot: workspaceReady,
     docker: dockerProbe.value,
     dockerReason: dockerProbe.reason,
+    hostPty: probeHostPty(),
   };
 
   // `readiness` describes the service (auth, internal key, workspace root).
@@ -820,6 +821,7 @@ app.get("/health", async (_req, res) => {
       workspaceRoot: workspaceReady,
       docker: dockerProbe.value,
       dockerReason: dockerProbe.reason,
+      hostPty: probeHostPty(),
     },
     reasons: allReady
       ? []
