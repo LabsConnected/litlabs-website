@@ -389,8 +389,14 @@ async function main() {
     step("studio_load", studioResp?.status() === 200, `HTTP ${studioResp?.status()}`);
     await page.waitForTimeout(6000);
     const shellVisible = await page.locator(".studio-shell").isVisible().catch(() => false);
+    // The mobile nav affordance is the trigger OR the already-open LiTT
+    // sheet — the trigger hides by design whenever a surface panel owns the
+    // viewport, and the sheet's open state can legitimately persist across
+    // navigation. Asserting trigger-only flakes on that stored state.
     const triggerVisible = await page.getByTestId("litt-mobile-trigger").isVisible().catch(() => false);
-    step("studio_shell", shellVisible && triggerVisible, `shell=${shellVisible} trigger=${triggerVisible}`);
+    const sheetVisible = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
+    step("studio_shell", shellVisible && (triggerVisible || sheetVisible),
+      `shell=${shellVisible} trigger=${triggerVisible} sheet=${sheetVisible}`);
     await shot(page, "02-studio-mobile");
 
     // ── Step 3: open LiTT mobile sheet, composer usable ──
