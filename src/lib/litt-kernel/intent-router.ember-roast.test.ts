@@ -54,6 +54,25 @@ describe("Ember Roast prompt — AUTO classifier routing", () => {
     expect(result.requiresExecution).toBe(true);
   });
 
+  it("classifies a follow-up style/theme edit as build (theme/palette/heading nouns)", () => {
+    // Acceptance MODIFY prompt (2026-10-31): "Change the theme to a light
+    // cream palette and rename the hero heading to 'Ember Roast Coffee
+    // House'." matched NO build noun list (site|footer|header|nav|…),
+    // fell to think → V1 text lane → dead-provider failure instead of an
+    // edit to the existing site.
+    const result = classifyIntent(
+      "Change the theme to a light cream palette and rename the hero heading to 'Ember Roast Coffee House'.",
+    );
+    expect(result.mode).toBe("build");
+    expect(result.requiresExecution).toBe(true);
+  });
+
+  it("classifies 'restyle the site background and fonts' as build", () => {
+    const result = classifyIntent("restyle the site background and fonts");
+    expect(result.mode).toBe("build");
+    expect(result.requiresExecution).toBe(true);
+  });
+
   it("classifies 'Build a single-page app with a contact form' as build", () => {
     const result = classifyIntent(
       "Build a single-page app with a contact form",

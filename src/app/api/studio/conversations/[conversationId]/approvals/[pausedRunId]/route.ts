@@ -662,6 +662,16 @@ export async function POST(
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
     enableBuildFix: true,
+    // Carry execution intent through the resume — kept separate from
+    // requireToolCallOnFirstStep because that requirement is inert on
+    // resume (the gated call that caused the pause already satisfied it).
+    // Every paused run was dispatched on a V2 execution-required turn —
+    // the useV2 gate only runs when routing.requiresExecution is true —
+    // so a post-approval reply asking for approval in prose with no tool
+    // call is a stall: nudge the model to emit the gated call (which
+    // surfaces a real approval card), never accept it as a final answer.
+    // The plan-mode exclusion still applies in the loop's derivation.
+    executionRequested: true,
     signal: abortController.signal,
     userId,
     isStaticWorkspace: resumeProject?.framework === "static" ? true : undefined,

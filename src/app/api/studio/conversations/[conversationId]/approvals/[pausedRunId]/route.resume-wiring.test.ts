@@ -310,3 +310,94 @@ describe("nested approval preserves first-gate evidence", () => {
     expect(mkdirCalls).not.toContain("nested-dir");
   });
 });
+
+describe("POST approval → resumed run keeps execution intent", () => {
+  // Greptile P1 on PR #757 (round 2): the resume config dropped execution
+  // intent, so a post-approval reply asking for approval in prose — zero
+  // tool calls — was accepted as the final answer and the approved work
+  // silently stopped. The route now carries `executionRequested` so the
+  // resumed loop nudges the model to emit the gated call (a real approval
+  // card) or fails honestly — never "completed" on a prose ask.
+  const PROSE_ASK =
+    "The next step modifies workspace files, so I need your approval to write the next file. How does that sound?";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mkdirCalls.length = 0;
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123" } as never);
+    vi.mocked(getProject).mockResolvedValue({ framework: "static" } as never);
+    vi.mocked(markRunProcessing).mockResolvedValue(true);
+    const run = {
+      ...pendingRun(),
+      toolId: "files.write",
+      toolCallId: "tc-write-1",
+      inputs: { projectId: "proj-123", path: "index.html", content: "<html><body>Built site</body></html>" },
+      pausedMessages: [
+        { role: "user" as const, content: "Build a roofing site" },
+        buildAssistantToolCallMessage(
+          [{ toolId: "files.write", toolCallId: "tc-write-1", inputs: { projectId: "proj-123", path: "index.html", content: "<html><body>Built site</body></html>" } }],
+          "Writing the site.",
+          undefined,
+        ),
+      ],
+    };
+    vi.mocked(getPausedRun).mockResolvedValue(run as never);
+    vi.mocked(resolvePausedRun).mockResolvedValue(run as never);
+  });
+
+  it("settles failed — never completed — when the post-approval model keeps asking in prose", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: PROSE_ASK,
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    } as never);
+
+    expect((await POST(makeRequest("approved"), routeParams)).status).toBe(202);
+    await waitFor(() =>
+      vi.mocked(transitionActionRunEventActivity).mock.calls.some(
+        (c) => (c[0] as { status?: string }).status === "failed",
+      ),
+    );
+    // The bug reported "completed" here — work silently dropped.
+    expect(
+      vi.mocked(transitionActionRunEventActivity).mock.calls.some(
+        (c) => (c[0] as { status?: string }).status === "completed",
+      ),
+    ).toBe(false);
+    // The approved write DID execute before the model stalled.
+    const transport = await vi.mocked(createWorkspaceTransport).mock.results[0].value;
+    expect(transport.writeFile).toHaveBeenCalledWith("index.html", expect.any(String));
+  });
+
+  it("turns a post-approval prose ask into a real nested approval card", async () => {
+    // Model asks in prose → nudge → emits the gated files.write → the
+    // second approval gate persists a real card instead of pretending
+    // the work finished.
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: PROSE_ASK,
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      } as never)
+      .mockResolvedValue({
+        text: "",
+        toolCalls: [
+          { toolId: "files.write", toolCallId: "tc-write-2", inputs: { projectId: "proj-123", path: "about.html", content: "<html/>" } },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      } as never);
+    vi.mocked(createPausedRun).mockResolvedValue({ id: "nested-2" } as never);
+
+    expect((await POST(makeRequest("approved"), routeParams)).status).toBe(202);
+    await waitFor(() => vi.mocked(createPausedRun).mock.calls.length > 0);
+
+    const nestedInput = vi.mocked(createPausedRun).mock.calls[0][0] as { toolId: string };
+    expect(nestedInput.toolId).toBe("files.write");
+    // The nudge produced a real gated call — the prose ask itself was
+    // never accepted as a final answer.
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+});

@@ -700,8 +700,26 @@ class ToolRegistry {
         : handlerEntry as ToolHandler;
       const timeoutMs =
         tool.timeoutMs && tool.timeoutMs > 0 ? tool.timeoutMs : DEFAULT_TOOL_TIMEOUT_MS;
-      const browserSessionId = typeof inputs.sessionId === "string" ? inputs.sessionId : null;
       const actionContext = options.actionContext;
+      // sessionId is server-resolved state, not model knowledge: when a
+      // browser.* call omits it (small models drop it on text-recovered
+      // calls), bind the conversation's live session instead of failing
+      // argument validation. start_session creates it — never inject.
+      if (
+        id.startsWith("browser.") &&
+        id !== "browser.start_session" &&
+        typeof inputs.sessionId !== "string" &&
+        actionContext?.userId
+      ) {
+        try {
+          const { getActiveSession } = await import("./browser-agent");
+          const live = await getActiveSession(actionContext.userId, actionContext.conversationId);
+          if (live?.id) inputs.sessionId = live.id;
+        } catch {
+          // No resolvable session — the handler reports the honest error.
+        }
+      }
+      const browserSessionId = typeof inputs.sessionId === "string" ? inputs.sessionId : null;
       const inputUserId = typeof inputs.userId === "string" ? inputs.userId : null;
       // Tenant identity flows DOWN from trusted execution context. A
       // userId present in tool inputs is legacy server injection only — when
@@ -2034,7 +2052,7 @@ export function registerInternalTools(): void {
               description: "Injected server-side; enables session reuse across chat turns.",
             },
           },
-          required: ["userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2065,7 +2083,7 @@ export function registerInternalTools(): void {
             url: { type: "string" },
             waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle"] },
           },
-          required: ["sessionId", "userId", "url"],
+          required: ["url"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2093,7 +2111,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2121,7 +2139,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2151,7 +2169,7 @@ export function registerInternalTools(): void {
             instruction: { type: "string" },
             schema: { type: "object" },
           },
-          required: ["sessionId", "userId", "instruction"],
+          required: ["instruction"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2182,7 +2200,7 @@ export function registerInternalTools(): void {
             timeoutMs: { type: "number" },
             waitFor: { type: "string", enum: ["selector", "navigation", "timeout"] },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2210,7 +2228,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2238,7 +2256,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2266,7 +2284,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2302,7 +2320,7 @@ export function registerInternalTools(): void {
             x: { type: "number" },
             y: { type: "number" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2337,7 +2355,7 @@ export function registerInternalTools(): void {
             value: { type: "string" },
             clear: { type: "boolean" },
           },
-          required: ["sessionId", "userId", "value"],
+          required: ["value"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2370,7 +2388,7 @@ export function registerInternalTools(): void {
             value: { type: "string" },
             label: { type: "string" },
           },
-          required: ["sessionId", "userId", "value"],
+          required: ["value"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2401,7 +2419,7 @@ export function registerInternalTools(): void {
             amount: { type: "number" },
             selector: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2430,7 +2448,7 @@ export function registerInternalTools(): void {
             userId: { type: "string" },
             key: { type: "string" },
           },
-          required: ["sessionId", "userId", "key"],
+          required: ["key"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2462,7 +2480,7 @@ export function registerInternalTools(): void {
             ariaLabel: { type: "string" },
             filePath: { type: "string" },
           },
-          required: ["sessionId", "userId", "filePath"],
+          required: ["filePath"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2497,7 +2515,7 @@ export function registerInternalTools(): void {
             text: { type: "string" },
             filename: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2525,7 +2543,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
