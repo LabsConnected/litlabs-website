@@ -1,7 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { PLANS } from "@/config/plans";
 import {
-  PRODUCT_IDENTITY,
   VERIFIED_STRIPE_PLANS,
   VERIFIED_PREMIUM_AGENTS,
   LEGACY_STRIPE_PRODUCTS,
@@ -14,11 +13,21 @@ import {
 // (which requires Supabase and Stripe integration tests).
 
 describe("Stripe catalog — verified plan products", () => {
-  it("Creator Beta: $15/month recurring", () => {
-    expect(VERIFIED_STRIPE_PLANS.creator_beta.priceCents).toBe(1500);
+  it("Creator Lite: $9.99/month recurring (test-mode pending live)", () => {
+    expect(VERIFIED_STRIPE_PLANS.creator_lite.priceCents).toBe(999);
+    expect(VERIFIED_STRIPE_PLANS.creator_lite.priceMode).toBe("recurring");
+    expect(VERIFIED_STRIPE_PLANS.creator_lite.envVar).toBe("STRIPE_PRICE_CREATOR_LITE");
+    expect(VERIFIED_STRIPE_PLANS.creator_lite.stripeStatus).toBe("test_mode_pending_live");
+    expect(PLANS.creator_lite.monthlyPriceCents).toBe(999);
+    expect(PLANS.creator_lite.billingType).toBe("subscription");
+  });
+
+  it("Creator: $19.99/month recurring (test-mode pending live)", () => {
+    expect(VERIFIED_STRIPE_PLANS.creator_beta.priceCents).toBe(1999);
     expect(VERIFIED_STRIPE_PLANS.creator_beta.priceMode).toBe("recurring");
     expect(VERIFIED_STRIPE_PLANS.creator_beta.envVar).toBe("STRIPE_PRICE_CREATOR_BETA");
-    expect(PLANS.creator_beta.monthlyPriceCents).toBe(1500);
+    expect(VERIFIED_STRIPE_PLANS.creator_beta.stripeStatus).toBe("test_mode_pending_live");
+    expect(PLANS.creator_beta.monthlyPriceCents).toBe(1999);
     expect(PLANS.creator_beta.billingType).toBe("subscription");
   });
 
@@ -38,7 +47,8 @@ describe("Stripe catalog — verified plan products", () => {
     expect(PLANS.founder.billingType).toBe("one_time");
   });
 
-  it("both purchasable plan env vars are declared; the retired one is not", () => {
+  it("all purchasable plan env vars are declared; the retired one is not", () => {
+    expect(PLANS.creator_lite.stripePriceIdEnv).toBe("STRIPE_PRICE_CREATOR_LITE");
     expect(PLANS.creator_beta.stripePriceIdEnv).toBe("STRIPE_PRICE_CREATOR_BETA");
     expect(PLANS.pro_builder_beta.stripePriceIdEnv).toBe("STRIPE_PRICE_PRO_BUILDER_BETA");
     // Founding Member is retired from sale — deliberately unwired.
@@ -174,9 +184,9 @@ describe("Legacy Stripe products", () => {
 
   it("legacy prices are NOT current plan prices", () => {
     // Legacy: $9.99, $39, $5, $19.99
-    // Current: $15, $39, $149
-    // Note: Legacy Elite Membership ($39/mo) coincidentally matches Pro Builder Beta ($39/mo),
-    // but they are different products. The distinction is the product NAME, not just price.
+    // Current: $9.99 (Creator Lite), $19.99 (Creator), $39 (Pro Builder), $149 (Founder)
+    // Note: Legacy price values ($9.99, $19.99, $39) now coincide with current
+    // plan prices — the distinction is the product NAME, not just price.
     const legacyNames = LEGACY_STRIPE_PRODUCTS.map((p) => p.name);
     const legacyPrices = LEGACY_STRIPE_PRODUCTS.map((p) => p.price);
 

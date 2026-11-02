@@ -11,9 +11,15 @@
  * - Someone needs to update the expected values after an intentional price change
  *
  * Production validation command (run manually with Stripe API access):
- *   stripe prices retrieve price_1U36qFJ53kgx4fp5avhUOuBH  # Creator $15
+ *   stripe prices retrieve price_1U36qFJ53kgx4fp5avhUOuBH  # Legacy live Creator $15
  *   stripe prices retrieve price_1U36qFJ53kgx4fp52s6oy53l  # Pro $39
  *   stripe prices retrieve price_1U066EJ53kgx4fp5ZLKsk6wp  # Founder $149
+ *
+ * Catalog note (2026-10-31): Creator Lite $9.99 and the repriced Creator
+ * $19.99 exist in Stripe TEST mode only. Their live price objects and
+ * STRIPE_PRICE_CREATOR_LITE are pending owner provisioning; until then
+ * this file encodes the intended catalog and VERIFIED_STRIPE_PLANS marks
+ * those entries "test_mode_pending_live".
  */
 
 import { describe, it, expect } from "vitest";
@@ -21,17 +27,24 @@ import { PLANS } from "@/config/plans";
 import { VERIFIED_STRIPE_PLANS } from "@/config/product-truth";
 
 /**
- * The canonical expected Stripe catalog.
- * These values are verified against the live Stripe API.
- * Update this ONLY after intentionally changing Stripe prices
- * AND updating the Railway environment variables.
+ * The canonical expected Stripe catalog — the intended paid plan prices.
+ * creator_lite and the repriced creator_beta are verified in Stripe test
+ * mode; their live price objects are pending owner provisioning (tracked
+ * in the release ledger). Update this ONLY after intentionally changing
+ * Stripe prices AND updating the Railway environment variables.
  */
 export const EXPECTED_STRIPE_CATALOG = {
+  creator_lite: {
+    priceCents: 999,
+    priceMode: "recurring" as const,
+    envVar: "STRIPE_PRICE_CREATOR_LITE",
+    label: "Creator Lite $9.99/month",
+  },
   creator_beta: {
-    priceCents: 1500,
+    priceCents: 1999,
     priceMode: "recurring" as const,
     envVar: "STRIPE_PRICE_CREATOR_BETA",
-    label: "Creator $15/month",
+    label: "Creator $19.99/month",
   },
   pro_builder_beta: {
     priceCents: 3900,
@@ -48,7 +61,33 @@ export const EXPECTED_STRIPE_CATALOG = {
 } as const;
 
 describe("Stripe catalog normalization — single source of truth", () => {
-  describe("Creator Beta $15/month", () => {
+  describe("Creator Lite $9.99/month", () => {
+    it("PLANS.monthlyPriceCents matches expected Stripe price", () => {
+      expect(PLANS.creator_lite.monthlyPriceCents).toBe(
+        EXPECTED_STRIPE_CATALOG.creator_lite.priceCents,
+      );
+    });
+
+
+    it("VERIFIED_STRIPE_PLANS.priceCents matches expected Stripe price", () => {
+      expect(VERIFIED_STRIPE_PLANS.creator_lite.priceCents).toBe(
+        EXPECTED_STRIPE_CATALOG.creator_lite.priceCents,
+      );
+    });
+
+    it("billing type is subscription/recurring", () => {
+      expect(PLANS.creator_lite.billingType).toBe("subscription");
+      expect(VERIFIED_STRIPE_PLANS.creator_lite.priceMode).toBe("recurring");
+    });
+
+    it("env var name is correct", () => {
+      expect(PLANS.creator_lite.stripePriceIdEnv).toBe(
+        EXPECTED_STRIPE_CATALOG.creator_lite.envVar,
+      );
+    });
+  });
+
+  describe("Creator $19.99/month", () => {
     it("PLANS.monthlyPriceCents matches expected Stripe price", () => {
       expect(PLANS.creator_beta.monthlyPriceCents).toBe(
         EXPECTED_STRIPE_CATALOG.creator_beta.priceCents,
@@ -130,7 +169,7 @@ describe("Stripe catalog normalization — single source of truth", () => {
 
   describe("Cross-source consistency", () => {
     it("PLANS = VERIFIED_STRIPE_PLANS for all plans", () => {
-      for (const planId of ["creator_beta", "pro_builder_beta", "founder"] as const) {
+      for (const planId of ["creator_lite", "creator_beta", "pro_builder_beta", "founder"] as const) {
         expect(PLANS[planId].monthlyPriceCents).toBe(VERIFIED_STRIPE_PLANS[planId].priceCents);
       }
     });
@@ -145,11 +184,13 @@ describe("Stripe catalog normalization — single source of truth", () => {
     it("reports the expected catalog", () => {
       // This test serves as a living documentation of the production catalog
       const report = {
+        creatorLite: `$${EXPECTED_STRIPE_CATALOG.creator_lite.priceCents / 100} monthly`,
         creator: `$${EXPECTED_STRIPE_CATALOG.creator_beta.priceCents / 100} monthly`,
         pro: `$${EXPECTED_STRIPE_CATALOG.pro_builder_beta.priceCents / 100} monthly`,
         founder: `$${EXPECTED_STRIPE_CATALOG.founder.priceCents / 100} one-time`,
       };
-      expect(report.creator).toBe("$15 monthly");
+      expect(report.creatorLite).toBe("$9.99 monthly");
+      expect(report.creator).toBe("$19.99 monthly");
       expect(report.pro).toBe("$39 monthly");
       expect(report.founder).toBe("$149 one-time");
     });

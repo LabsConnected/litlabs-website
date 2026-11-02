@@ -175,7 +175,22 @@ defineAction({
         .eq("user_id", internalUserId)
         .maybeSingle();
       if (error || !data?.url) {
-        return fail(`Asset "${args.assetId}" not found in your gallery.`, "not_implemented");
+        // Self-correcting failure: list the real gallery ids so the model
+        // can retry with a valid asset instead of hallucinating another.
+        const { data: gallery } = await supabaseAdmin
+          .from("user_media")
+          .select("id")
+          .eq("user_id", internalUserId)
+          .order("created_at", { ascending: false })
+          .limit(10);
+        const ids = (gallery ?? []).map((g) => g.id).filter(Boolean) as string[];
+        return fail(
+          `Asset "${args.assetId}" not found in your gallery.` +
+            (ids.length
+              ? ` Available assets: ${ids.join(", ")} — pick one of these ids or skip this tool.`
+              : " The gallery is empty — do not call this tool again this run."),
+          "not_implemented",
+        );
       }
       url = data.url as string;
     } catch (err) {

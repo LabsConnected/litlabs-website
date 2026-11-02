@@ -57,7 +57,9 @@ const fetchMock = vi.fn(async (_url: unknown, init: { body: string }) => {
     command: string;
     stdin?: string;
   };
-  const r = spawnSync("sh", ["-c", command], {
+  const shell = process.platform === "win32" ? "cmd.exe" : "sh";
+  const flag = process.platform === "win32" ? "/c" : "-c";
+  const r = spawnSync(shell, [flag, command], {
     cwd: repoDir,
     input: stdin ?? undefined,
     encoding: "utf8",
@@ -65,7 +67,7 @@ const fetchMock = vi.fn(async (_url: unknown, init: { body: string }) => {
   return {
     ok: true,
     json: async () => ({
-      exitCode: r.status ?? 1,
+      exitCode: r.status ?? r.error ? 1 : 0,
       stdout: r.stdout ?? "",
       stderr: r.stderr ?? "",
     }),
@@ -80,6 +82,7 @@ beforeEach(() => {
   git("config", "user.email", "proof@test.local");
   git("config", "user.name", "checkpoint-proof");
   git("config", "commit.gpgsign", "false");
+  git("config", "core.autocrlf", "false");
   fetchMock.mockClear();
   vi.stubGlobal("fetch", fetchMock);
   process.env.TERMINAL_SERVER_INTERNAL_URL = "http://127.0.0.1:1";

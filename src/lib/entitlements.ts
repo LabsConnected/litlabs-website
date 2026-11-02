@@ -68,9 +68,26 @@ const STARTER_ENTITLEMENTS: Entitlements = {
   founder: false,
 };
 
+const CREATOR_LITE_ENTITLEMENTS: Entitlements = {
+  planId: "creator_lite",
+  planName: "Creator Lite",
+  activeProjectLimit: PLAN_ENTITLEMENTS.creator_lite.activeProjectLimit,
+  monthlyCredits: getPlanCreditAllowance("creator_lite"),
+  privateProjects: PLAN_ENTITLEMENTS.creator_lite.features.privateProjects,
+  github: PLAN_ENTITLEMENTS.creator_lite.features.github,
+  terminal: PLAN_ENTITLEMENTS.creator_lite.features.terminal,
+  voice: PLAN_ENTITLEMENTS.creator_lite.features.voice,
+  premiumModels: PLAN_ENTITLEMENTS.creator_lite.features.premiumModels,
+  deployment: PLAN_ENTITLEMENTS.creator_lite.features.deployment,
+  maxMissionSteps: 15,
+  maxUploadBytes: 5_000_000,
+  beta: true,
+  founder: false,
+};
+
 const CREATOR_BETA_ENTITLEMENTS: Entitlements = {
   planId: "creator_beta",
-  planName: "Creator Beta",
+  planName: "Creator",
   activeProjectLimit: PLAN_ENTITLEMENTS.creator_beta.activeProjectLimit,
   monthlyCredits: getPlanCreditAllowance("creator_beta"),
   privateProjects: PLAN_ENTITLEMENTS.creator_beta.features.privateProjects,
@@ -87,7 +104,7 @@ const CREATOR_BETA_ENTITLEMENTS: Entitlements = {
 
 const PRO_BUILDER_BETA_ENTITLEMENTS: Entitlements = {
   planId: "pro_builder_beta",
-  planName: "Pro Builder Beta",
+  planName: "Pro Builder",
   activeProjectLimit: PLAN_ENTITLEMENTS.pro_builder_beta.activeProjectLimit,
   monthlyCredits: getPlanCreditAllowance("pro_builder_beta"),
   privateProjects: PLAN_ENTITLEMENTS.pro_builder_beta.features.privateProjects,
@@ -113,6 +130,7 @@ const FOUNDER_ENTITLEMENTS: Entitlements = {
 
 const ENTITLEMENTS_BY_PLAN: Record<PlanId, Entitlements> = {
   starter: STARTER_ENTITLEMENTS,
+  creator_lite: CREATOR_LITE_ENTITLEMENTS,
   creator_beta: CREATOR_BETA_ENTITLEMENTS,
   pro_builder_beta: PRO_BUILDER_BETA_ENTITLEMENTS,
   founder: FOUNDER_ENTITLEMENTS,

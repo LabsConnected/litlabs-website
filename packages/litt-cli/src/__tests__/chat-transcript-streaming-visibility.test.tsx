@@ -83,9 +83,9 @@ describe("AssistantMessage — streaming visibility", () => {
     const frame = m.frame();
     m.unmount();
 
-    expect(frame).toContain("LiTT");
+    expect(frame).toContain("◈"); // the LiTT turn marker
     // The body placeholder glyph must render while content is empty —
-    // pre-fix the frame is exactly "LiTT\nLitt Fast:2k\n" (label + routing
+    // pre-fix the frame is exactly "◈ Litt Fast:2k" (marker + routing
     // footer only, no body at all), so this specifically checks the BODY,
     // not just "anything after the label" (the footer always renders
     // regardless of content emptiness and would make a weaker check pass

@@ -37,7 +37,7 @@ import type {
   ModelProfile,
   ToolDefinition,
 } from "@litt/agent-core";
-import { getProvider, type ProviderId } from "@litt/models";
+import { getProvider, ensureOllamaModelResident, type ProviderId } from "@litt/models";
 import { resolveLocalLaneEndpoint } from "./local-lane.js";
 import type { RoutedModel } from "./model-runtime.js";
 import {
@@ -266,6 +266,18 @@ function resolveOllamaReasoningEffort(): string | undefined {
   if (!configured || configured === "none") return "none";
   if (configured === "auto" || configured === "default") return undefined;
   return configured;
+}
+
+/**
+ * keep_alive for local-daemon requests, when the operator configured one
+ * (OLLAMA_KEEP_ALIVE — same var the web lane and the daemon itself read).
+ * Returns undefined when unset so the request omits the field entirely
+ * and the daemon's own default applies — preserving prior behavior where
+ * the CLI sent no keep_alive at all.
+ */
+function resolveOllamaKeepAlive(): string | undefined {
+  const v = process.env.OLLAMA_KEEP_ALIVE?.trim();
+  return v || undefined;
 }
 
 // ─── Max tokens policy ──────────────────────────────────────────────
@@ -1050,6 +1062,24 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
           `model=${this._model} max_tokens=${this._maxTokens}\n`,
         );
       }
+
+      // Ollama only: serialize model loads across every LiTT process on
+      // this host (shared lockfile gate — one agent performs a cold load
+      // at a time, everyone else finds it resident). Warm path costs one
+      // cheap /api/ps; soft-fail states are diag-only, never fatal here.
+      if (this.providerId === "ollama") {
+        const endpoint = this._endpoint.replace(/\/v1\/chat\/completions\/?$/, "");
+        await ensureOllamaModelResident(endpoint, this._model, {
+          keepAlive: resolveOllamaKeepAlive(),
+          signal: abort.signal,
+          onNote: (state, detail) => {
+            if (process.env.LITT_DIAG === "1") {
+              process.stderr.write(`[litt-diag][ollama-load-gate] ${state} ${detail}\n`);
+            }
+          },
+        });
+      }
+
       const response = await fetch(this._endpoint, {
         method: "POST",
         headers: this.authHeaders({ "Content-Type": "application/json" }),
@@ -1080,6 +1110,11 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
           // reasoning and appear to stall (~120s observed on this device).
           ...(this.providerId === "ollama"
             ? { reasoning_effort: resolveOllamaReasoningEffort() }
+            : {}),
+          // keep_alive only when the operator configured one — unset means
+          // the daemon's own default applies (preserves prior behavior).
+          ...(this.providerId === "ollama" && resolveOllamaKeepAlive()
+            ? { keep_alive: resolveOllamaKeepAlive() }
             : {}),
         }),
         signal: abort.signal,

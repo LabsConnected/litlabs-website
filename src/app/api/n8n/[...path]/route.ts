@@ -28,7 +28,7 @@
  *   await sendToN8n("litt-new-lead", { ...payload });
  *
  * Usage from external services (legacy):
- *   POST https://litlabs.ai/api/n8n/webhook/{path}
+ *   POST https://www.litlabs.net/api/n8n/webhook/{path}
  *   Headers: { "x-n8n-bridge-secret": "<LITT_N8N_BRIDGE_SECRET>" }
  *   Body: any JSON
  */

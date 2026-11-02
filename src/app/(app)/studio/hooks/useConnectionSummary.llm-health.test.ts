@@ -19,7 +19,7 @@ describe("parseLlmProviderHealth", () => {
         groq: { available: false, model: "openai/gpt-oss-120b" },
         openrouter: { available: true, model: "openrouter/free" },
       }),
-    ).toEqual({ gemini: true, groq: false, openrouter: true });
+    ).toEqual({ gemini: true, groq: false, openrouter: true, ollama: false });
   });
 
   it("treats missing providers as not available when other fields exist", () => {
@@ -27,7 +27,38 @@ describe("parseLlmProviderHealth", () => {
       gemini: true,
       groq: false,
       openrouter: false,
+      ollama: false,
     });
+  });
+
+  it("parses the local Ollama route from providers.ollama (folded truth)", () => {
+    expect(
+      parseLlmProviderHealth({
+        providers: {
+          gemini: { available: false },
+          ollama: { available: true },
+        },
+        local: { reachable: true },
+      }),
+    ).toEqual({ gemini: false, groq: false, openrouter: false, ollama: true });
+  });
+
+  it("honours providers.ollama.available:false over a reachable local section (breaker truth wins)", () => {
+    expect(
+      parseLlmProviderHealth({
+        providers: { ollama: { available: false } },
+        local: { reachable: true },
+      }),
+    ).toEqual({ gemini: false, groq: false, openrouter: false, ollama: false });
+  });
+
+  it("falls back to local.reachable for payloads without the providers map", () => {
+    expect(
+      parseLlmProviderHealth({
+        gemini: { available: false },
+        local: { reachable: true },
+      }),
+    ).toEqual({ gemini: false, groq: false, openrouter: false, ollama: true });
   });
 
   it("returns null for the minimal unauthenticated {status} payload", () => {

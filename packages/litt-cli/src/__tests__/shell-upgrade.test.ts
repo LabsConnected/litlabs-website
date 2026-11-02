@@ -82,15 +82,14 @@ describe("RepoStateBadge — Git state separation", () => {
     expect(childText).toContain("Git clean");
   });
 
-  it("renders 'Git +N' element for dirty repo", () => {
+  it("renders explicit 'N changed files' wording for dirty repo", () => {
     const badge = RepoStateBadge({ modified: 5, untracked: 3 });
     expect(badge).toBeDefined();
     expect(badge.type).toBeDefined();
-    // The inner Text element has children [' Git +', 8]
+    // Explicit wording — "8 changed files", never the ambiguous "Git +8".
     const innerChildren = badge.props?.children?.props?.children;
     expect(innerChildren).toBeDefined();
-    expect(innerChildren[0]).toBe(" Git +");
-    expect(innerChildren[1]).toBe(8);
+    expect([innerChildren].flat().join("")).toContain("8 changed files");
   });
 });
 

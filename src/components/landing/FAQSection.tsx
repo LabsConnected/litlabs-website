@@ -21,7 +21,7 @@ const FAQS = [
   {
     question: "Can I use an existing GitHub project?",
     answer:
-      "Yes. You can connect a GitHub repository and LiTT works directly on your project files. GitHub connection is available on Creator Beta and Pro Builder Beta plans.",
+      "Yes. You can connect a GitHub repository and LiTT works directly on your project files. GitHub connection is available on Creator and Pro Builder plans.",
   },
   {
     question: "Who owns the code and assets LiTT creates?",

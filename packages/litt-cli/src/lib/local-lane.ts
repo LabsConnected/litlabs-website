@@ -208,8 +208,10 @@ export function selectLocalModel(models: string[], preferred?: string): string |
  * for LiTT to use it.
  */
 const LOCAL_MODEL_PREFERENCE = [
+  "litt-coder:8k",
   "litt-coder:fast",
   "litt-coder:3b",
+  "qwen2.5-coder:1.5b",
   "qwen2.5-coder:3b",
   "qwen3:4b",
   "qwen3:4b-instruct",

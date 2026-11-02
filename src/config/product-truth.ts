@@ -112,12 +112,18 @@ export const INTERNAL_SPECIALISTS: SpecialistDefinition[] = [
 // Plans
 // ---------------------------------------------------------------------------
 
-export type PlanId = "starter" | "creator_beta" | "pro_builder_beta" | "founder";
+export type PlanId =
+  | "starter"
+  | "creator_lite"
+  | "creator_beta"
+  | "pro_builder_beta"
+  | "founder";
 export type BillingType = "free" | "subscription" | "one_time";
 export type CreditCategory = "starter" | "monthly" | "purchased" | "promotional";
 
 export const PLAN_RANK: Record<PlanId, number> = {
   starter: 0,
+  creator_lite: 0, // TBD — paid but sub-Creator until owner decides access tier
   creator_beta: 1,
   founder: 1, // Founder = permanent Creator-level
   pro_builder_beta: 2,
@@ -260,11 +266,16 @@ export const POLICY_STATUSES = {
 // ---------------------------------------------------------------------------
 
 /**
- * The three official plan products already exist in Stripe at the correct
- * prices. They need to be wired to environment variables — do NOT create
- * new Stripe products for these.
+ * This is an inventory of Stripe state, not of what LiTT sells.
  *
- * This is an inventory of what exists in STRIPE, not of what LiTT sells.
+ * pro_builder_beta ($39) and founder ($149) exist in LIVE Stripe at the
+ * recorded prices. creator_lite ($9.99) and the repriced creator_beta
+ * ($19.99) exist only in Stripe TEST mode (catalog created 2026-10-31);
+ * their live price objects and the STRIPE_PRICE_CREATOR_LITE env var are
+ * still pending owner provisioning — stripeStatus reflects that so no
+ * report reads them as live-verified. The live creator_beta price object
+ * still bills $15 until it is repointed.
+ *
  * The founder entry is retained deliberately: the $149 price object still
  * exists and still backs historical purchases, so it must not be deleted.
  * What changed is that LiTT no longer offers it — PLANS.founder has no
@@ -272,9 +283,15 @@ export const POLICY_STATUSES = {
  * nothing can resolve a new checkout against it.
  */
 export const VERIFIED_STRIPE_PLANS = {
+  creator_lite: {
+    stripeStatus: "test_mode_pending_live",
+    priceCents: 999,
+    priceMode: "recurring" as const,
+    envVar: "STRIPE_PRICE_CREATOR_LITE",
+  },
   creator_beta: {
-    stripeStatus: "exists",
-    priceCents: 1500,
+    stripeStatus: "test_mode_pending_live",
+    priceCents: 1999,
     priceMode: "recurring" as const,
     envVar: "STRIPE_PRICE_CREATOR_BETA",
   },
