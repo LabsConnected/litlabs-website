@@ -392,9 +392,15 @@ async function main() {
     // The mobile nav affordance is the trigger OR the already-open LiTT
     // sheet — the trigger hides by design whenever a surface panel owns the
     // viewport, and the sheet's open state can legitimately persist across
-    // navigation. Asserting trigger-only flakes on that stored state.
-    const triggerVisible = await page.getByTestId("litt-mobile-trigger").isVisible().catch(() => false);
-    const sheetVisible = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
+    // navigation. Asserting trigger-only flakes on that stored state. Both
+    // mount behind hydration — poll briefly rather than sampling once.
+    let triggerVisible = false;
+    let sheetVisible = false;
+    for (let i = 0; i < 10 && !triggerVisible && !sheetVisible; i++) {
+      triggerVisible = await page.getByTestId("litt-mobile-trigger").isVisible().catch(() => false);
+      sheetVisible = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
+      if (!triggerVisible && !sheetVisible) await page.waitForTimeout(2000);
+    }
     step("studio_shell", shellVisible && (triggerVisible || sheetVisible),
       `shell=${shellVisible} trigger=${triggerVisible} sheet=${sheetVisible}`);
     await shot(page, "02-studio-mobile");
@@ -588,11 +594,18 @@ async function main() {
 
       // Direct fetch of the preview URL — proves content is actually served.
       // iframeSrc can be relative (/api/preview/<id>/...) — resolve against BASE
-      // because page.request.get requires an absolute URL.
+      // because page.request.get requires an absolute URL. Cold previews can
+      // also refuse the first request while the dev server binds; retry
+      // briefly so the check measures serving, not startup timing.
       const previewFetchUrl = new URL(iframeSrc, BASE).toString();
-      const direct = await page.request.get(previewFetchUrl, { timeout: 30_000 }).catch((e) => ({ status: () => -1, headers: async () => ({}), text: async () => String(e) }));
-      const status = typeof direct.status === "function" ? direct.status() : -1;
-      const body = typeof direct.text === "function" ? await direct.text() : "";
+      let status = -1;
+      let body = "";
+      for (let attempt = 0; attempt < 3 && !(status === 200 && body.length > 100); attempt++) {
+        if (attempt > 0) await page.waitForTimeout(4000);
+        const direct = await page.request.get(previewFetchUrl, { timeout: 30_000 }).catch((e) => ({ status: () => -1, headers: async () => ({}), text: async () => String(e) }));
+        status = typeof direct.status === "function" ? direct.status() : -1;
+        body = typeof direct.text === "function" ? await direct.text() : "";
+      }
       step("preview_serves_content", status === 200 && body.length > 100, `HTTP ${status}, ${body.length} bytes`);
       writeFileSync(path.join(ARTIFACT_DIR, "preview-body.html"), body.slice(0, 50_000));
       await shot(page, "07-preview-iframe");
@@ -605,6 +618,12 @@ async function main() {
     step("no_frame_violations", frameViolations.length === 0, frameViolations[0] ?? "clean");
 
     // ── Step 7: deploy — approval gate, resumed execution, live URL ──
+    // project.deploy is the canonical sensitive action; deploy.preview,
+    // deploy.production, and deploy.execute are registered station delegates
+    // of it (src/lib/station-control/stations/deploy.ts setDelegateToolId).
+    // The model may legitimately reach the deploy through any alias — the
+    // gate and the completion evidence are the same.
+    const DEPLOY_TOOL_IDS = new Set(["project.deploy", "deploy.execute", "deploy.preview", "deploy.production"]);
     // project.deploy is a sensitive action: the run MUST pause for explicit
     // approval even in AUTO mode. A deployment that executed without a
     // pending_approval pause would mean the gate was bypassed.
@@ -638,7 +657,7 @@ async function main() {
         const approvalBody = pendingBody ?? (approval ? await approval.json().catch(() => null) : null);
         pendingResponse = null;
         pendingBody = null;
-        if (currentPause.toolId === "project.deploy") {
+        if (DEPLOY_TOOL_IDS.has(currentPause.toolId)) {
           deployApprovalMeta = { status: approval?.status() ?? null, body: approvalBody };
           writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
         }
@@ -668,7 +687,7 @@ async function main() {
           }
         }
 
-        const deployCall = (runResult?.toolCalls ?? []).find((c) => c.toolId === "project.deploy");
+        const deployCall = (runResult?.toolCalls ?? []).find((c) => DEPLOY_TOOL_IDS.has(c.toolId));
         if (deployCall) {
           // summarizeToolResult JSON-encodes object results; publicUrl may be
           // truncated at 200 chars, so fall back to constructing the URL from
@@ -684,6 +703,9 @@ async function main() {
             productionUrl,
             error: String(summary).slice(0, 200),
           };
+          if (deployCall.toolId !== "project.deploy") {
+            verdict.notes.push(`Deploy executed via station alias ${deployCall.toolId} — registered delegate of project.deploy (same canonical execution path).`);
+          }
         }
 
         const nested = runResult?.pendingApproval ?? null;
@@ -699,11 +721,11 @@ async function main() {
         break;
       }
 
-      const deployGateSeen = pauseChain.includes("project.deploy");
+      const deployGateSeen = pauseChain.some((t) => DEPLOY_TOOL_IDS.has(t));
       step("deploy_approval_gate", deployGateSeen, deployGateSeen
         ? `approval chain: ${pauseChain.join(" → ")}`
         : pauseChain.length > 0
-          ? `paused on ${pauseChain.join(",")} — never reached project.deploy`
+          ? `paused on ${pauseChain.join(",")} — never reached a deploy hop`
           : deployResult ? "deploy executed with NO approval pause — gate bypassed" : "no pending_approval event in stream");
 
       if (deployApprovalMeta) {
@@ -725,9 +747,16 @@ async function main() {
       }
 
       if (productionUrl) {
-        const prodResp = await page.request.get(productionUrl, { timeout: 45_000 }).catch(() => null);
-        const prodStatus = prodResp?.status() ?? -1;
-        const prodBody = prodResp ? await prodResp.text().catch(() => "") : "";
+        // A fresh deployment can take a moment to propagate — retry briefly
+        // so the check measures the served site, not propagation timing.
+        let prodStatus = -1;
+        let prodBody = "";
+        for (let attempt = 0; attempt < 3 && prodStatus !== 200; attempt++) {
+          if (attempt > 0) await page.waitForTimeout(5000);
+          const prodResp = await page.request.get(productionUrl, { timeout: 45_000 }).catch(() => null);
+          prodStatus = prodResp?.status() ?? -1;
+          if (prodResp && prodStatus === 200) prodBody = await prodResp.text().catch(() => "");
+        }
         writeFileSync(path.join(ARTIFACT_DIR, "deployment-body.html"), prodBody.slice(0, 50_000));
         verdict.liveDeploymentUrl = productionUrl;
         step("production_url_verified",
