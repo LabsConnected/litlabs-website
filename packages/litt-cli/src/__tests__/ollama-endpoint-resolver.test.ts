@@ -10,6 +10,9 @@ import { resolveLocalLaneEndpoint, probeLocalLane, resetLocalLaneCache } from ".
 
 beforeEach(() => {
   delete process.env.LITT_OLLAMA_URL;
+  delete process.env.OLLAMA_LOCAL_URL;
+  delete process.env.OLLAMA_LAN_URL;
+  delete process.env.OLLAMA_TAILSCALE_URL;
   delete process.env.OLLAMA_HOST_PC;
   delete process.env.OLLAMA_HOST;
   delete process.env.OLLAMA_BASE_URL;

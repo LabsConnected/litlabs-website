@@ -269,7 +269,13 @@ MODEL="${LITT_LOCAL_MODEL:-${LITT_MODEL:-}}"
 OLLAMA_ACTIVE=""
 OLLAMA_TAGS=""
 
-if [ -n "$LAN" ]; then
+OLLAMA_TAGS="$(curl --max-time 2 -fsS "http://127.0.0.1:11434/api/tags" 2>/dev/null || true)"
+if [ -n "$OLLAMA_TAGS" ]; then
+  OLLAMA_ACTIVE="http://127.0.0.1:11434"
+  ok "Ollama via local daemon (127.0.0.1:11434)"
+fi
+
+if [ -z "$OLLAMA_ACTIVE" ] && [ -n "$LAN" ]; then
   OLLAMA_TAGS="$(curl --max-time 2 -fsS "$LAN/api/tags" 2>/dev/null || true)"
   if [ -n "$OLLAMA_TAGS" ]; then
     OLLAMA_ACTIVE="$LAN"
@@ -286,7 +292,7 @@ if [ -z "$OLLAMA_ACTIVE" ] && [ -n "$TS_" ]; then
 fi
 
 if [ -z "$OLLAMA_ACTIVE" ]; then
-  warn "Ollama unreachable on LAN and Tailscale"
+  warn "Ollama unreachable on local daemon, LAN, and Tailscale"
 elif [ -z "$MODEL" ]; then
   warn "Ollama reachable but no LiTT local model is configured"
 elif printf '%s' "$OLLAMA_TAGS" | jq -e --arg model "$MODEL"   '.models[]? | select(.name == $model or .model == $model)'   >/dev/null 2>&1; then

@@ -20,6 +20,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { WebSearchProvider, GitHubSearchProvider, OpenAPIDirectoryProvider } from "./research-providers";
 
+// safeFetch validates the hostname via node:dns before fetching — that is
+// a REAL DNS lookup, independent of the global.fetch mock, and exceeds the
+// 5s test budget on slow/sandboxed CI networks. Mock the resolver so the
+// SSRF boundary stays deterministic: public-IP records for every hostname.
+// (The SSRF_TARGETS below are IP literals/localhost — they are rejected by
+// the static URL check before the resolver is ever consulted.)
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
+
 const realFetch = global.fetch;
 
 beforeEach(() => {

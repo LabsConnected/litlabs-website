@@ -414,7 +414,12 @@ const DEEPSEEK_MODELS: ModelDefinition[] = [
   },
 ];
 
-// ─── OpenAgents gateway ────────────────────────────────────────────
+// ─── OpenAgents gateway (UNVERIFIED) ──────────────────────────────
+// Third-party inference gateway added 2026-10-23. Its endpoint and model
+// lineup are NOT independently verified — entries are manualOnly, carry
+// no recommendation metadata, and cannot be auto-selected or used as a
+// fallback. Promotion path: verify the gateway end-to-end, then flip the
+// provider's `unverified` flag and re-add littRecommended/littTier.
 const OPENAGENTS_MODELS: ModelDefinition[] = [
   {
     canonicalId: "openagents-deepseek-4-flash",
@@ -429,11 +434,11 @@ const OPENAGENTS_MODELS: ModelDefinition[] = [
     verified: false,
     verifiedAt: null,
     source: "unverified",
-    description: "OpenAgents gateway model verified by the operator's live gateway check.",
-    recommendedFor: ["agent", "fast", "cheap"],
-    littRecommended: true,
-    littTier: "agent",
+    description: "Unverified OpenAgents gateway model — explicit selection only pending independent verification.",
+    recommendedFor: [],
+    manualOnly: true,
     domain: "text",
+    notes: "Requires OPENAGENTS_API_KEY. Served by api-gateway.openagents.org (OpenAI-compatible). Reported live-checked by the operator on 2026-10-23; not independently verified.",
   },
 ];
 

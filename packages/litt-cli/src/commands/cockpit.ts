@@ -32,7 +32,16 @@ import { launchShellWindow, currentCliCommand } from "../lib/window-launcher.js"
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { installTerminalTeardown, restoreTerminal } from "../lib/terminal-teardown.js";
 
-export async function cockpitCommand(args: string[]): Promise<number> {
+export interface CockpitLaunchOptions {
+  /** Permission mode resolved from --mode <plan|act|auto> at dispatch. */
+  mode?: "plan" | "act" | "auto";
+}
+
+export async function cockpitCommand(
+  args: string[],
+  options: CockpitLaunchOptions = {},
+): Promise<number> {
+  const mode = options.mode ?? "act";
   // Terminal state is process-external: whatever LiTT leaves enabled
   // leaks into the parent shell. installTerminalTeardown() hooks every
   // exit path (normal exit, process.exit, SIGTERM/SIGHUP/SIGBREAK,
@@ -49,7 +58,7 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     // Default (useSizing omitted): dedicated WT window at the user's
     // native size — no hard dependency on `--size`. The 118×36 sized
     // vector stays available for visual acceptance via useSizing:true.
-    const result = launchShellWindow(process.cwd(), currentCliCommand(["shell"]));
+    const result = launchShellWindow(process.cwd(), currentCliCommand(["shell", "--mode", mode]));
     if (!result.ok) {
       fail("Could not open a LiTT window. Run 'litt shell' inside a terminal instead.");
       return 1;
@@ -130,7 +139,7 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   // runtime events → SessionEventBridge (for local event flow).
   const session = createRuntimeSession({
     cwd: projectRoot,
-    mode: "act",
+    mode,
     onApprovalRequired: (request, risk) => approvalBridge.request(request, risk),
     onEvent: (event) => sessionBridge.onEvent(event),
     onStream: (chunk) => sessionBridge.onStream(chunk),

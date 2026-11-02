@@ -295,6 +295,13 @@ export function routeModel(
     ? onlineModels
     : [...onlineModels, ...available.filter((m) => m.availability !== "online")];
 
+  // manualOnly models are never AUTO-selected: they serve only via an
+  // explicit pinned/ask pick. They stay in `available`, so the
+  // `autoPool.length > 0 ? autoPool : available` pattern below still
+  // reaches them when nothing else is configured at all.
+  const autoPool = candidatePool.filter((m) => !m.manualOnly);
+  const autoOnline = onlineModels.filter((m) => !m.manualOnly);
+
   // Helper: is a model allowed by the providerFilter?
   const isAllowed = (m: ModelDefinition | undefined): boolean =>
     !m || !providerFilter || providerFilter.has(m.provider);
@@ -314,7 +321,7 @@ export function routeModel(
     }
     // Non-strict or filtered: fall through to AUTO with a fallback reason
     const taskKind = classifyTask(input);
-    const { model, reason } = selectForTask(registry, taskKind, candidatePool.length > 0 ? candidatePool : available);
+    const { model, reason } = selectForTask(registry, taskKind, autoPool.length > 0 ? autoPool : available);
     const fbReason = pinned && !isAllowed(pinned)
       ? `Pinned ${pinned.displayName} is not a local model → LOCAL AUTO fallback`
       : pinned
@@ -334,7 +341,7 @@ export function routeModel(
       throw new Error(reason);
     }
     const taskKind = classifyTask(input);
-    const { model, reason } = selectForTask(registry, taskKind, candidatePool.length > 0 ? candidatePool : available);
+    const { model, reason } = selectForTask(registry, taskKind, autoPool.length > 0 ? autoPool : available);
     const fbReason = choice && !isAllowed(choice)
       ? `ASK ${choice.displayName} is not a local model → LOCAL AUTO fallback`
       : choice
@@ -348,7 +355,7 @@ export function routeModel(
 
   // Budget preference: cheapest capable model (verified-online preferred)
   if (preference === "budget") {
-    const cheapest = selectCheapest(candidatePool, onlineModels);
+    const cheapest = selectCheapest(autoPool, autoOnline);
     if (cheapest) {
       const fallbackReason = cheapest.availability !== "online"
         ? `No verified-online models — selected best available (unverified): ${cheapest.displayName}`
@@ -359,14 +366,14 @@ export function routeModel(
 
   // Max preference: strongest available model (verified-online only)
   if (preference === "max") {
-    const pool = onlineModels.length > 0 ? onlineModels : candidatePool;
+    const pool = autoOnline.length > 0 ? autoOnline : autoPool;
     const strongest = selectStrongest(pool);
     if (strongest) {
       // Build a fallback reason:
       //   - if no verified-online models exist (all unverified), report that
       //   - else if stronger models exist but are unavailable, list them
       let fallbackReason: string | null = null;
-      if (onlineModels.length === 0) {
+      if (autoOnline.length === 0) {
         fallbackReason = `No verified-online models discovered — selected strongest routable (unverified): ${strongest.displayName}. Run discovery to verify.`;
       } else {
         fallbackReason = buildMaxFallbackReason(registry, strongest);
@@ -375,7 +382,7 @@ export function routeModel(
     }
   }
 
-  const { model, reason } = selectForTask(registry, taskKind, candidatePool.length > 0 ? candidatePool : available);
+  const { model, reason } = selectForTask(registry, taskKind, autoPool.length > 0 ? autoPool : available);
   return buildResult(registry, model, reason, taskKind, null, "auto");
 }
 
