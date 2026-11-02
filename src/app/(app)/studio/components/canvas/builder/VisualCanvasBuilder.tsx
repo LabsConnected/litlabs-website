@@ -15,6 +15,7 @@ import { useResizableWidth } from "@/app/(app)/studio/hooks/useResizableWidth";
 import ResizeHandle from "@/app/(app)/studio/components/shell/ResizeHandle";
 import { useStudioContext } from "@/app/(app)/studio/context/StudioContext";
 import { ProjectDesignSurface } from "../../ProjectDesignSurface";
+import { useCanvasFileSync } from "./useCanvasFileSync";
 
 const HTML_FILE_ICONS: Record<string, LucideIcon> = {
   "index.html": FileCode,
@@ -76,6 +77,9 @@ export function VisualCanvasBuilder() {
   const setTool = useCanvasBuilderStore((s) => s.setTool);
   const projectType = useCanvasBuilderStore((s) => s.projectType);
   const setProjectType = useCanvasBuilderStore((s) => s.setProjectType);
+
+  // File-backed persistence for VisualCanvas (.litt/canvas.json) — server-wins on load, debounced writes
+  useCanvasFileSync(activeProjectId ?? null);
 
   // Server-backed project ID for loading persisted workspace type
   const { capabilities } = useConnectionSummary();

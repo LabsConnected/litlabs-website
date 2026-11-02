@@ -126,6 +126,49 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+/**
+ * Shown when the project-existence check itself fails. Distinct from the
+ * connect-timeout state: this is a real load failure, so the copy says so
+ * and offers retry — never a silent guess at project state.
+ */
+function StudioLoadError({ onRetry }: { onRetry: () => void }) {
+  const { tokens } = useTheme();
+
+  return (
+    <div
+      className="relative flex min-h-full items-center justify-center overflow-hidden p-6"
+      style={{ backgroundColor: tokens.background }}
+      data-testid="studio-load-error"
+    >
+      <div className="relative flex flex-col items-center gap-4 text-center">
+        <div
+          className="text-sm font-bold"
+          style={{ color: tokens.text }}
+        >
+          We couldn&rsquo;t load your projects.
+        </div>
+        <div
+          className="text-xs"
+          style={{ color: tokens.textMuted }}
+        >
+          Check your connection and try again.
+        </div>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded-xl border px-5 py-2.5 text-sm font-bold transition-all hover:opacity-80"
+          style={{
+            borderColor: `${tokens.primary}40`,
+            color: tokens.primary,
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function StudioHub() {
   const { isLoaded, isSignedIn, userId, getToken } = useClerkAuth();
   const router = useRouter();
@@ -141,7 +184,8 @@ function StudioHub() {
   const [projectCheck, setProjectCheck] = useState<{
     loading: boolean;
     hasProjects: boolean | null;
-  }>({ loading: true, hasProjects: null });
+    error: boolean;
+  }>({ loading: true, hasProjects: null, error: false });
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -159,7 +203,7 @@ function StudioHub() {
     // Skip check if project already in URL
     const params = new URLSearchParams(window.location.search);
     if (params.get("project") || peekFirstRunProjectId()) {
-      setProjectCheck({ loading: false, hasProjects: true });
+      setProjectCheck({ loading: false, hasProjects: true, error: false });
       return;
     }
 
@@ -174,10 +218,13 @@ function StudioHub() {
         const data = await res.json();
         const projects = data.projects || data || [];
         const hasProjects = Array.isArray(projects) ? projects.length > 0 : false;
-        if (!cancelled) setProjectCheck({ loading: false, hasProjects });
+        if (!cancelled) setProjectCheck({ loading: false, hasProjects, error: false });
       } catch {
-        // On error, assume has projects to avoid blocking existing users
-        if (!cancelled) setProjectCheck({ loading: false, hasProjects: true });
+        // Fail closed: a project-check failure is not proof the user has
+        // projects — routing into CommandStudio on a guess strands
+        // zero-project users on a workspace that cannot load. Show an
+        // honest error + retry instead (see StudioLoadError).
+        if (!cancelled) setProjectCheck({ loading: false, hasProjects: null, error: true });
       }
     })();
     return () => {
@@ -222,7 +269,7 @@ function StudioHub() {
         params.set("prompt", idea);
         params.set("tool", "chat");
         router.replace(`/studio?${params.toString()}`);
-        setProjectCheck({ loading: false, hasProjects: true });
+        setProjectCheck({ loading: false, hasProjects: true, error: false });
       } catch (err) {
         setCreateError(err instanceof Error ? err.message : "Failed to create project");
       } finally {
@@ -234,7 +281,7 @@ function StudioHub() {
 
   const handleFirstRunRetry = useCallback(() => {
     setCreateError(null);
-    setProjectCheck({ loading: true, hasProjects: null });
+    setProjectCheck({ loading: true, hasProjects: null, error: false });
     setRetryKey((k) => k + 1);
   }, []);
 
@@ -264,6 +311,12 @@ function StudioHub() {
   // Fresh user with no projects → first-run welcome
   if (projectCheck.loading) {
     return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
+  }
+
+  // Project check failed — never guess. Honest error + retry; the user is
+  // not sent to CommandStudio on an unverified assumption.
+  if (projectCheck.error) {
+    return <StudioLoadError onRetry={handleFirstRunRetry} />;
   }
 
   if (projectCheck.hasProjects === false && !createdProjectId) {
