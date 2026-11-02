@@ -62,6 +62,30 @@ development-only default (`NODE_ENV !== "production"`).
 - Remaining production-host literals (CSP in `next.config.ts`, the CLI auth
   config, tests, docs) are not fallbacks and are tracked for a later phase.
 
+## Reaching local dev from another device (phone/tablet)
+
+Clerk **dev** keys (`pk_test_…`) serve the sign-in widget only on
+`localhost` origins — a phone cannot sign in over a LAN/Tailscale URL.
+The supported path is an SSH local-forward tunnel that presents BOTH the
+web app and the terminal server on the phone's loopback:
+
+```bash
+ssh -N -L 3001:127.0.0.1:3001 -L 4001:127.0.0.1:4001 <dev-host>
+```
+
+- `localhost:3001` → web app (`pnpm dev`) — sign-in + Studio.
+- `localhost:4001` → terminal server (`pnpm terminal:dev`) — the Studio
+  terminal's Socket.IO connection targets
+  `NEXT_PUBLIC_TERMINAL_WS_URL=http://127.0.0.1:4001`; without the second
+  forward the phone resolves `127.0.0.1` to itself and the terminal
+  WebSocket can never connect.
+- Both forwards must target the loopback address on the dev host so the
+  terminal server can keep its safe `127.0.0.1` bind (no `--lan`
+  exposure) while remaining reachable. WebSocket upgrades traverse the
+  tunnel because it is a raw TCP forward.
+- `TERMINAL_ALLOWED_ORIGIN` must include `http://localhost:3001` (it does
+  by default in dev).
+
 ## CI and production
 
 | Workflow | Touches production? |

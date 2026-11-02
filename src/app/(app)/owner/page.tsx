@@ -5,7 +5,6 @@ export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useRouter } from "next/navigation";
 
 // ── Types ──
 
@@ -20,8 +19,6 @@ type HealthState =
   | { status: "loading" }
   | { status: "ok"; data: N8nHealth; checkedAt: Date }
   | { status: "error"; message: string; checkedAt: Date };
-
-const ADMIN_USER_ID = process.env.NEXT_PUBLIC_ADMIN_USER_ID || "user_litbit";
 
 // ── n8n Status Card ──
 
@@ -195,35 +192,18 @@ function StatusRow({
 
 export default function OwnerConsole() {
   const { resolvedColors: T } = useTheme();
-  const { userId, isLoaded, isSignedIn } = useClerkAuth();
-  const router = useRouter();
+  const { isLoaded, isSignedIn } = useClerkAuth();
 
-  useEffect(() => {
-    if (isLoaded && (!isSignedIn || userId !== ADMIN_USER_ID)) {
-      router.push("/");
-    }
-  }, [isLoaded, isSignedIn, userId, router]);
-
-  if (!isLoaded) {
+  // Authorization is enforced server-side by src/app/(app)/owner/layout.tsx
+  // (requireOwnerAccess → 404); the check below only covers Clerk's client
+  // resolution window so the console doesn't flash before the session loads.
+  if (!isLoaded || !isSignedIn) {
     return (
       <div
         className="min-h-screen grid place-items-center"
         style={{ backgroundColor: T.bgColor, color: T.textMuted }}
       >
         Loading Owner Console...
-      </div>
-    );
-  }
-
-  if (!isSignedIn || userId !== ADMIN_USER_ID) {
-    return (
-      <div
-        className="min-h-screen grid place-items-center"
-        style={{ backgroundColor: T.bgColor }}
-      >
-        <div className="text-center">
-          <p style={{ color: T.textMuted }}>Access Denied — Owner Only</p>
-        </div>
       </div>
     );
   }

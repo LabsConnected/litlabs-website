@@ -367,7 +367,11 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       // Model is resolved at attempt time from /api/tags — the registry
       // advertises tool support only for known tool-capable families.
       capabilities: { tools: true, vision: false, structuredOutput: false, coding: true },
-      timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
+      // Local CPU inference legitimately exceeds 30s on a cold model load or
+      // a large agent system prompt — like OPENROUTER_TIMEOUT_MS, allow an
+      // explicit per-route cap. The attempt still rides the agent's absolute
+      // deadline via computeAttemptTimeout, so this cannot stall a run.
+      timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS) || DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () => "not_required",
       models: () => [process.env.OLLAMA_MODEL || "auto"],
     },

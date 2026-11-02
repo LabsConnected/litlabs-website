@@ -90,6 +90,14 @@ export interface LLMToolCallResponse {
   toolCalls: ToolCallRequest[];
   finishReason: string;
   model: string;
+  /** Provider-reported token usage (OpenAI `usage` block / Ollama eval
+   *  counts). Lets diagnostics separate prefill from generation cost. */
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    promptEvalMs?: number;
+    evalMs?: number;
+  };
   /** Provider that produced this response (e.g. "gemini", "openrouter"). */
   provider?: string;
   /** Redacted shape evidence for diagnosing provider/tool protocol failures. */
@@ -579,6 +587,9 @@ interface AttemptContext {
   timeoutMs: number;
   signal?: AbortSignal;
   secrets: { userApiKey?: string; byokBaseUrl?: string };
+  /** Agent absolute deadline — local providers (Ollama) use it to bound
+   *  cold-start model loads separately from the inference attempt. */
+  deadlineMs?: number;
 }
 
 function toGeminiResponse(
@@ -657,6 +668,25 @@ async function attemptGemini(
   };
   if (functionDeclarations.length > 0) {
     body.tools = [{ functionDeclarations }];
+    // Honor the caller's tool-choice contract. The OpenAI-compatible
+    // adapter already sends tool_choice; the Gemini equivalent is
+    // toolConfig.functionCallingConfig.mode. Without it a "required"
+    // first step silently degrades to AUTO and the model can close the
+    // turn in prose — observed 2026-10-29 on gemini-2.5-flash, where
+    // execution-required runs opened with a text-only QUALITY-marker
+    // reply and zero tool calls (the silent first-turn no-op).
+    if (req.toolChoice) {
+      body.toolConfig = {
+        functionCallingConfig: {
+          mode:
+            req.toolChoice === "required"
+              ? "ANY"
+              : req.toolChoice === "none"
+                ? "NONE"
+                : "AUTO",
+        },
+      };
+    }
   }
 
   // Test seam: when a model factory override is injected, calls route through
@@ -666,6 +696,7 @@ async function attemptGemini(
     ? createGeminiModel({
         model,
         tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
+        toolConfig: body.toolConfig,
         generationConfig: body.generationConfig,
       })
     : null;
@@ -833,6 +864,12 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
   // An invalid-args call is still a protocol failure, not a guess.
   for (const call of recoveredCalls) {
     call.inputs = normalizeRecoveredInputs(call.inputs, tools.find((t) => t.id === call.toolId));
+    // Required-arg check exempts args the executor resolves from trusted
+    // server context (projectId from actionContext, sessionId from the
+    // server-owned browser session, …): a model can never know them, a
+    // model-supplied value is untrusted anyway, and native tool_calls skip
+    // this schema pass entirely — requiring them here killed every
+    // recovered files.write on the local small lane.
     const argError = validateToolCallArgs(
       call.toolId,
       call.inputs,
@@ -840,7 +877,7 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
         id: tool.id,
         name: tool.id,
         description: tool.description,
-        inputSchema: tool.inputSchema,
+        inputSchema: schemaWithoutServerResolvedRequired(tool.inputSchema),
         readOnly: true,
       })),
     );
@@ -868,6 +905,33 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
 }
 
 /**
+ * Args the executor resolves from trusted server context — never trusted
+ * from the model, so requiring them in recovered-call validation rejects
+ * calls that would execute correctly (native calls skip this pass anyway).
+ */
+const SERVER_RESOLVED_ARGS = new Set([
+  "projectId",
+  "sessionId",
+  "userId",
+  "workspaceId",
+  "conversationId",
+]);
+
+function schemaWithoutServerResolvedRequired(
+  schema: ToolDefinition["inputSchema"],
+): ToolDefinition["inputSchema"] {
+  const s = schema as Record<string, unknown> | undefined;
+  const required = s?.required;
+  if (!Array.isArray(required) || !required.some((r) => SERVER_RESOLVED_ARGS.has(String(r)))) {
+    return schema;
+  }
+  return {
+    ...s,
+    required: required.filter((r) => !SERVER_RESOLVED_ARGS.has(String(r))),
+  } as ToolDefinition["inputSchema"];
+}
+
+/**
  * Canonicalize recovered input keys against the tool's declared schema:
  * an undeclared `snake_case` key maps to its declared `camelCase`
  * property (`project_id` → `projectId`). Renames happen only when the
@@ -887,6 +951,21 @@ function normalizeRecoveredInputs(
       out[camel] = out[key];
       delete out[key];
     }
+  }
+  // Small models wrap scalar args in envelope objects —
+  // `content: {type:"text", text:"<html>…"}` or `path: {value:"…"}` —
+  // which then fail the registry's type validation at execution (the call
+  // never starts). Unwrap to the declared scalar type; only single-key or
+  // text-bearing envelopes so a genuinely complex arg is never mangled.
+  for (const key of Object.keys(out)) {
+    const declared = props[key] as { type?: string } | undefined;
+    if (!declared || declared.type !== "string") continue;
+    const v = out[key];
+    if (typeof v === "string" || !v || typeof v !== "object") continue;
+    const o = v as Record<string, unknown>;
+    if (typeof o.text === "string") out[key] = o.text;
+    else if (typeof o.value === "string") out[key] = o.value;
+    else if (typeof o.content === "string") out[key] = o.content;
   }
   return out;
 }
@@ -1060,8 +1139,15 @@ function parseOpenAiCompatibleResponse(
   // A well-formed completion with neither text nor tool calls is an empty
   // provider payload — a model failure, not a final answer. Failing over to
   // the next model/provider beats handing "" to the agent loop as if the
-  // model had concluded.
+  // model had concluded. EXCEPT the single-model local route: Ollama has
+  // nothing to fail over to, so a transient empty completion only burned
+  // the sole candidate's model cooldown and killed every subsequent call
+  // for 10 minutes — a model that stops with no text and no tool calls has
+  // simply concluded its turn; let the agent loop see that.
   if (!text.trim() && toolCalls.length === 0) {
+    if (route.provider === "ollama") {
+      return { text: "", toolCalls: [], finishReason, model: (data.model as string) ?? model, provider: route.provider, responseShape };
+    }
     throw new ProviderAttemptError(route.provider, model, {
       class: "bad_response",
       scope: "model",
@@ -1071,11 +1157,23 @@ function parseOpenAiCompatibleResponse(
 
   const normalized = normalizeTextToolCalls({ text, toolCalls, finishReason }, tools, toolIdMap, route.provider, model);
 
+  const usage = data.usage as
+    | { prompt_tokens?: number; completion_tokens?: number; prompt_eval_duration?: number; eval_duration?: number }
+    | undefined;
+
   return {
     ...normalized,
     model: (data.model as string) ?? model,
     provider: route.provider,
     responseShape,
+    usage: usage
+      ? {
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+          promptEvalMs: typeof usage.prompt_eval_duration === "number" ? Math.round(usage.prompt_eval_duration / 1e6) : undefined,
+          evalMs: typeof usage.eval_duration === "number" ? Math.round(usage.eval_duration / 1e6) : undefined,
+        }
+      : undefined,
   };
 }
 
@@ -1086,7 +1184,7 @@ async function attemptOpenAiCompatible(
   model: string,
   req: AttemptRequest,
   ctx: AttemptContext,
-  endpoint: { baseUrl: string; headers: Record<string, string> },
+  endpoint: { baseUrl: string; headers: Record<string, string>; extraBody?: Record<string, unknown> },
 ): Promise<LLMToolCallResponse> {
   const openAiTools = toOpenRouterTools(req.tools);
   const body: Record<string, unknown> = {
@@ -1097,6 +1195,7 @@ async function attemptOpenAiCompatible(
       ...req.messages.map(toOpenRouterMessage),
     ],
     temperature: req.temperature ?? 0.15,
+    ...endpoint.extraBody,
   };
 
   if (req.maxTokens) body.max_tokens = req.maxTokens;
@@ -1135,24 +1234,71 @@ async function attemptOpenAiCompatible(
 
 // ─── Ollama ───────────────────────────────────────────────────────
 
-/** Local model families with reliable structured tool calling. */
+/** Local model families with reliable structured tool calling (tag names). */
 const OLLAMA_TOOL_CAPABLE =
-  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss/i;
+  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss|hermes/i;
+
+/** /api/tags `details.families` entries that back tool-capable builds.
+ *  Coarser than tag names — a custom Modelfile build (e.g. `litt-hermes`)
+ *  inherits its base arch's family even when the name matches nothing in
+ *  OLLAMA_TOOL_CAPABLE. */
+const OLLAMA_TOOL_CAPABLE_FAMILY =
+  /llama|qwen|mistral|nemo|command|granite|phi|deepseek|devstral|gpt-oss|functionary|hermes/i;
+
+/** LiTT's own tool-tuned builds are always tool candidates — they are
+ *  installed for exactly this purpose. */
+const OLLAMA_LITT_BUILD = /^litt-/i;
+
+export interface OllamaModelInfo {
+  name: string;
+  /** Disk footprint in bytes from /api/tags — proxy for inference speed.
+   *  0 means the endpoint did not report a size (sorted last). */
+  sizeBytes: number;
+  /** Architecture families reported by /api/tags details. */
+  families: string[];
+}
 
 const OLLAMA_PROBE_TTL_MS = 5 * 60_000;
 const OLLAMA_PROBE_TIMEOUT_MS = 1_500;
-let _ollamaProbeCache: { at: number; models: string[] } | null = null;
+let _ollamaProbeCache: { at: number; models: OllamaModelInfo[] } | null = null;
+
+/** Keep the model hot server-side slightly longer than our warm cache so a
+ *  cached "warm" mark never outlives the actual loaded model. */
+const OLLAMA_KEEP_ALIVE = "10m";
+const OLLAMA_WARM_TTL_MS = 8 * 60_000;
+/** Default budget for a cold model load — separate from inference time. */
+const OLLAMA_LOAD_TIMEOUT_DEFAULT_MS = 120_000;
+const _ollamaWarmCache = new Map<string, number>(); // `${endpoint}|${model}` → warmedAt
+/** FIFO tail serializing model loads — concurrent cold loads on one Ollama
+ *  host exhaust RAM and kill both requests. */
+let _ollamaLoadTail: Promise<unknown> = Promise.resolve();
 
 /** Test seam: inject a probe result instead of calling /api/tags. */
-let _ollamaProbeOverride: (() => Promise<string[]>) | null = null;
+let _ollamaProbeOverride: (() => Promise<(OllamaModelInfo | string)[]>) | null = null;
 
 /** @internal Test-only seam to override the Ollama model probe. */
-export function _setOllamaProbeForTests(probe: (() => Promise<string[]>) | null): void {
+export function _setOllamaProbeForTests(
+  probe: (() => Promise<(OllamaModelInfo | string)[]>) | null,
+): void {
   _ollamaProbeOverride = probe;
 }
 
-async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise<string[]> {
-  if (_ollamaProbeOverride) return _ollamaProbeOverride();
+/** @internal Test-only seam to reset warm/load state. */
+export function _resetOllamaWarmForTests(): void {
+  _ollamaWarmCache.clear();
+  _ollamaLoadTail = Promise.resolve();
+}
+
+function ollamaLoadTimeoutMs(): number {
+  return Number(process.env.OLLAMA_LOAD_TIMEOUT_MS) || OLLAMA_LOAD_TIMEOUT_DEFAULT_MS;
+}
+
+function normalizeOllamaModelInfo(entry: OllamaModelInfo | string): OllamaModelInfo {
+  return typeof entry === "string" ? { name: entry, sizeBytes: 0, families: [] } : entry;
+}
+
+async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise<OllamaModelInfo[]> {
+  if (_ollamaProbeOverride) return (await _ollamaProbeOverride()).map(normalizeOllamaModelInfo);
   if (_ollamaProbeCache && Date.now() - _ollamaProbeCache.at < OLLAMA_PROBE_TTL_MS) {
     return _ollamaProbeCache.models;
   }
@@ -1171,23 +1317,191 @@ async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise
       classifyHttpFailure(res.status, txt, parseRetryAfterMs(res.headers, txt)),
     );
   }
-  const data = (await res.json()) as { models?: Array<{ name?: string }> };
-  const models = (data.models ?? [])
-    .map((m) => m.name)
-    .filter((n): n is string => !!n);
+  const data = (await res.json()) as {
+    models?: Array<Record<string, unknown>>;
+  };
+  const models: OllamaModelInfo[] = [];
+  for (const m of data.models ?? []) {
+    const name =
+      typeof m.name === "string" ? m.name : typeof m.model === "string" ? m.model : null;
+    if (!name) continue;
+    const details = (m.details ?? {}) as Record<string, unknown>;
+    const families: string[] = [];
+    if (typeof details.family === "string") families.push(details.family);
+    if (Array.isArray(details.families)) {
+      for (const f of details.families) if (typeof f === "string") families.push(f);
+    }
+    models.push({ name, sizeBytes: typeof m.size === "number" ? m.size : 0, families });
+  }
   _ollamaProbeCache = { at: Date.now(), models };
   return models;
 }
 
+function isOllamaToolCapable(m: OllamaModelInfo): boolean {
+  if (OLLAMA_LITT_BUILD.test(m.name)) return true;
+  if (OLLAMA_TOOL_CAPABLE.test(m.name)) return true;
+  return m.families.some((f) => OLLAMA_TOOL_CAPABLE_FAMILY.test(f));
+}
+
+/** Models whose size the endpoint did not report sort after known sizes —
+ *  an unknown footprint is not evidence of a fast model. */
+function ollamaSizeRank(m: OllamaModelInfo): number {
+  return m.sizeBytes > 0 ? m.sizeBytes : Number.MAX_SAFE_INTEGER;
+}
+
+/** Context-window tag convention (`name:8k`) used by LiTT's local builds.
+ *  Between equal-size candidates the smaller window wins — a 64k KV/attention
+ *  budget on modest local hardware turns a 120s inference into a timeout.
+ *  Untagged models sort last (unknown, not proven-small). */
+function ollamaCtxRank(m: OllamaModelInfo): number {
+  const tag = m.name.match(/:(\d+)k$/i);
+  return tag ? Number(tag[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+/** Reasoning-model families Ollama can suppress via `think:false` — a
+ *  thinking model emits a long `reasoning` preamble before `content`/tool
+ *  calls, which burns the whole attempt budget before a single tool call
+ *  arrives. */
+const OLLAMA_REASONING_FAMILY = /qwen3|deepseek-r1|deepseek-v3\.1|gpt-oss|magistral/i;
+
+function isOllamaReasoningModel(m: OllamaModelInfo | undefined, name: string): boolean {
+  // LiTT's own tool builds are qwen3-based thinking models — the tag carries
+  // no family hint, so the prefix is the only signal when /api/tags details
+  // are unavailable (or the model came from the OLLAMA_MODEL override).
+  if (OLLAMA_LITT_BUILD.test(name)) return true;
+  if (OLLAMA_REASONING_FAMILY.test(name)) return true;
+  return !!m?.families.some((f) => OLLAMA_REASONING_FAMILY.test(f));
+}
+
 /** Pick a local model. When the request requires tools, only tool-capable
  *  families are eligible — a model that cannot emit tool calls is never
- *  selected just because it is free. */
-function pickOllamaModel(available: string[], toolsRequired: boolean): string | null {
+ *  selected just because it is free. Among eligible candidates the smallest
+ *  footprint wins: local CPU inference latency scales with size, and a
+ *  smaller model also loads faster and leaves RAM headroom. */
+function pickOllamaModel(available: OllamaModelInfo[], toolsRequired: boolean): string | null {
   const override = process.env.OLLAMA_MODEL;
   if (override) return override;
   if (available.length === 0) return null;
-  if (!toolsRequired) return available[0];
-  return available.find((m) => OLLAMA_TOOL_CAPABLE.test(m)) ?? null;
+  const sorted = [...available].sort(
+    (a, b) => ollamaSizeRank(a) - ollamaSizeRank(b) || ollamaCtxRank(a) - ollamaCtxRank(b),
+  );
+  if (!toolsRequired) return sorted[0].name;
+  return sorted.find(isOllamaToolCapable)?.name ?? null;
+}
+
+/** Models Ollama currently holds in memory (GET /api/ps). Returns null when
+ *  the endpoint can't be asked — callers then warm unconditionally. */
+async function listLoadedOllamaModels(
+  endpoint: string,
+  ctx: AttemptContext,
+): Promise<Set<string> | null> {
+  try {
+    const res = await fetchWithTimeout(
+      `${endpoint}/api/ps`,
+      { method: "GET" },
+      Math.min(ctx.timeoutMs, OLLAMA_PROBE_TIMEOUT_MS),
+      "Ollama ps",
+      ctx.signal,
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { models?: Array<{ name?: string; model?: string }> };
+    return new Set(
+      (data.models ?? [])
+        .map((m) => m.name ?? m.model)
+        .filter((n): n is string => !!n),
+    );
+  } catch (err) {
+    if (err instanceof UpstreamAbortError) throw err;
+    return null;
+  }
+}
+
+/** Serialize model loads. A queued warmer that loses its own budget race
+ *  still lets the load finish server-side — the next caller finds a hot
+ *  model instead of a second concurrent load fighting for RAM. */
+function withOllamaLoadLock<T>(waitMs: number, fn: () => Promise<T>): Promise<T> {
+  const run = _ollamaLoadTail.then(fn);
+  _ollamaLoadTail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new ProviderTimeoutError("Ollama load queue", waitMs)), waitMs);
+  });
+  timeout.catch(() => {});
+  return Promise.race([run, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+/**
+ * Ensure `model` is resident before the inference attempt. Cold model
+ * loading is a separate budget from inference (`OLLAMA_LOAD_TIMEOUT_MS`,
+ * clipped by the agent deadline): folding a multi-GB load into the
+ * inference timeout meant every cold request timed out mid-load.
+ *
+ * Loads are serialized across this process; a model already resident
+ * (`/api/ps`) or recently warmed costs nothing.
+ */
+async function ensureOllamaModelWarm(
+  endpoint: string,
+  model: string,
+  ctx: AttemptContext,
+): Promise<void> {
+  const cacheKey = `${endpoint}|${model}`;
+  const warmedAt = _ollamaWarmCache.get(cacheKey);
+  if (warmedAt && Date.now() - warmedAt < OLLAMA_WARM_TTL_MS) return;
+
+  const loadBudgetMs = computeAttemptTimeout(ctx.deadlineMs, ollamaLoadTimeoutMs());
+  if (loadBudgetMs === null) {
+    throw new AgentBudgetExhaustedError(
+      ctx.deadlineMs ? Math.max(0, ctx.deadlineMs - Date.now()) : 0,
+      `ollama/${model} warm load cannot fit in remaining budget`,
+    );
+  }
+
+  try {
+    await withOllamaLoadLock(loadBudgetMs, async () => {
+      const warmedInside = _ollamaWarmCache.get(cacheKey);
+      if (warmedInside && Date.now() - warmedInside < OLLAMA_WARM_TTL_MS) return;
+      const loaded = await listLoadedOllamaModels(endpoint, ctx);
+      if (loaded?.has(model)) {
+        _ollamaWarmCache.set(cacheKey, Date.now());
+        return;
+      }
+      const res = await fetchWithTimeout(
+        `${endpoint}/api/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // Empty prompt + stream:false → Ollama loads the model and
+          // returns once it is resident; keep_alive holds it in RAM.
+          body: JSON.stringify({ model, prompt: "", keep_alive: OLLAMA_KEEP_ALIVE, stream: false }),
+        },
+        loadBudgetMs,
+        "Ollama warm",
+        ctx.signal,
+      );
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new ProviderAttemptError(
+          "ollama",
+          model,
+          classifyHttpFailure(res.status, txt, parseRetryAfterMs(res.headers, txt)),
+        );
+      }
+      await res.text().catch(() => "");
+      _ollamaWarmCache.set(cacheKey, Date.now());
+    });
+  } catch (err) {
+    if (
+      err instanceof ProviderAttemptError ||
+      err instanceof UpstreamAbortError ||
+      err instanceof AgentBudgetExhaustedError
+    ) {
+      throw err;
+    }
+    throw new ProviderAttemptError("ollama", model, classifyThrownFailure(err));
+  }
 }
 
 async function attemptOllama(
@@ -1197,12 +1511,28 @@ async function attemptOllama(
 ): Promise<LLMToolCallResponse> {
   const endpoint = resolveBasicOllamaEndpoint();
 
-  let available: string[];
+  let available: OllamaModelInfo[];
+  const override = process.env.OLLAMA_MODEL;
   try {
     available = await probeOllamaModels(endpoint, ctx);
   } catch (err) {
-    if (err instanceof ProviderAttemptError || err instanceof UpstreamAbortError) throw err;
-    throw new ProviderAttemptError("ollama", "auto", classifyThrownFailure(err));
+    if (err instanceof UpstreamAbortError) throw err;
+    // A busy Ollama — mid model-load, serialized to one model — can stall
+    // /api/tags past the 1500ms probe budget. That is liveness ambiguity,
+    // not proof the route is dead; treating it as fatal makes the ONLY
+    // working route disappear the moment Ollama is loading (confirmed live:
+    // 16k probe timed out while a 2.5GB model unloaded → cloud-only →
+    // all-routes-failed). With an explicit OLLAMA_MODEL the tag list is
+    // only needed for auto-selection, so fall through to a synthetic
+    // candidate and let the warm-load/inference calls decide liveness.
+    // Without an override the probe failure stands.
+    if (override) {
+      available = [normalizeOllamaModelInfo(override)];
+    } else if (err instanceof ProviderAttemptError) {
+      throw err;
+    } else {
+      throw new ProviderAttemptError("ollama", "auto", classifyThrownFailure(err));
+    }
   }
 
   const model = pickOllamaModel(available, req.tools.length > 0);
@@ -1216,19 +1546,40 @@ async function attemptOllama(
     });
   }
 
+  // Cold-start is bounded separately (OLLAMA_LOAD_TIMEOUT_MS); the agent
+  // deadline bounds both phases together.
+  await ensureOllamaModelWarm(endpoint, model, ctx);
+
+  // Re-clip inference to the budget actually left after any load.
+  const inferenceTimeoutMs = computeAttemptTimeout(ctx.deadlineMs, ctx.timeoutMs);
+  if (inferenceTimeoutMs === null) {
+    throw new AgentBudgetExhaustedError(
+      ctx.deadlineMs ? Math.max(0, ctx.deadlineMs - Date.now()) : 0,
+      `ollama/${model} inference cannot fit in remaining budget`,
+    );
+  }
+  const inferenceCtx: AttemptContext = { ...ctx, timeoutMs: inferenceTimeoutMs };
+
   const route: PlannedProvider = {
     provider: "ollama",
     adapter: "ollama",
     costClass: "LOCAL",
     capabilities: { tools: true, vision: false, structuredOutput: false, coding: true },
     models: [model],
-    timeoutMs: ctx.timeoutMs,
+    timeoutMs: inferenceTimeoutMs,
     health: "healthy",
     credentialState: "not_required",
   };
-  return attemptOpenAiCompatible(route, model, req, ctx, {
+  const modelInfo = available.find((m) => m.name === model);
+  return attemptOpenAiCompatible(route, model, req, inferenceCtx, {
     baseUrl: `${endpoint}/v1`,
     headers: {},
+    // Reasoning-family builds (qwen3/deepseek/gpt-oss) emit a long
+    // `reasoning` preamble before content/tool calls — that preamble alone
+    // exhausted the attempt timeout on local hardware. think:false asks the
+    // model to answer directly; Ollama ignores it for non-thinking models
+    // only when the family advertises thinking, so gate on the metadata.
+    extraBody: isOllamaReasoningModel(modelInfo, model) ? { think: false } : undefined,
   });
 }
 
@@ -1395,6 +1746,7 @@ export async function callLLMWithTools(
     timeoutMs: 0, // per-attempt value set below
     signal: options?.signal,
     secrets: { userApiKey: options?.userApiKey, byokBaseUrl: options?.byokBaseUrl },
+    deadlineMs: options?.deadlineMs,
   };
 
   if (plan.providers.length === 0) {
@@ -1468,7 +1820,9 @@ export async function callLLMWithTools(
         // A completion whose text was ONLY in-text tool-call markup is a
         // malformed tool attempt, not a final answer — fail over like the
         // empty-completion case instead of handing "" to the agent loop.
-        if (!normalized.text.trim() && normalized.toolCalls.length === 0) {
+        // The single-model local route has nothing to fail over to: an
+        // empty/markup-only turn ends the model's turn, not the run.
+        if (!normalized.text.trim() && normalized.toolCalls.length === 0 && route.provider !== "ollama") {
           throw new ProviderAttemptError(route.provider, model, {
             class: "bad_response",
             scope: "model",
@@ -1485,11 +1839,20 @@ export async function callLLMWithTools(
           model: result.model,
           latencyMs,
           toolCalls: result.toolCalls.length,
+          promptTokens: result.usage?.promptTokens,
+          completionTokens: result.usage?.completionTokens,
+          promptEvalMs: result.usage?.promptEvalMs,
+          evalMs: result.usage?.evalMs,
           responseContentType: result.responseShape?.contentType,
           responseMessageKeys: result.responseShape?.messageKeys.join(","),
           responseToolCalls: result.responseShape?.toolCalls.map((call) =>
             `${call.name || "<missing>"}:${call.argumentsJsonValid ? "valid" : "invalid"}`,
           ).join(","),
+          // Names of every parsed call including text-recovered ones — the
+          // responseShape only covers native calls, so small-lane text calls
+          // were invisible. Lets us see exactly which tool a local model
+          // tried to invoke when the loop drops it before execution.
+          allToolCallIds: result.toolCalls.map((c) => c.toolId).join(","),
           remainingBudgetMs: options?.deadlineMs
             ? Math.max(0, options.deadlineMs - Date.now())
             : undefined,

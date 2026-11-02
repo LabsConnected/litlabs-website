@@ -17,6 +17,7 @@ import http from "http";
 import cors from "cors";
 import { Server } from "socket.io";
 import { isAbsolute, relative, resolve } from "path";
+import { createHash } from "crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, renameSync } from "fs";
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
@@ -78,7 +79,7 @@ function sanitizeProjectEnv(value: unknown): Record<string, string> | undefined 
 import { registerPreviewProxyRoute } from "./preview/proxy";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
-import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
+import { PtySessionManager, probeHostPty, type PtySessionSnapshot } from "./pty-session-manager";
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
@@ -710,6 +711,26 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   await respondWithDispatch(res, () => dispatchCommand(normalizedReq));
 });
 
+/**
+ * Deterministic-ownership fingerprint. Every terminal-server instance
+ * reports a short digest of the secret+root it loaded at startup, so a
+ * caller (or an operator debugging a 401) can prove which instance it's
+ * talking to — without exposing the secret itself. Two servers on
+ * adjacent ports with different secrets/roots produce different
+ * fingerprints; a mismatched one is the tell that the port is occupied by
+ * a foreign instance, not the expected stack.
+ */
+function ownershipFingerprint(): { secretSha: string; serviceKeySha: string; workspaceRoot: string; port: string; pid: number } {
+  const digest = (v: string) => createHash("sha256").update(v).digest("hex").slice(0, 12);
+  return {
+    secretSha: digest(process.env.TERMINAL_AUTH_SECRET ?? ""),
+    serviceKeySha: digest(process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? ""),
+    workspaceRoot: process.env.TERMINAL_WORKSPACE_ROOT ?? "",
+    port: String(process.env.TERMINAL_SERVER_PORT ?? ""),
+    pid: process.pid,
+  };
+}
+
 app.get("/health/ready", async (_req, res) => {
   const authConfigured = (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32;
   const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;
@@ -723,6 +744,7 @@ app.get("/health/ready", async (_req, res) => {
     workspaceRoot: workspaceReady,
     docker: dockerProbe.value,
     dockerReason: dockerProbe.reason,
+    hostPty: probeHostPty(),
   };
 
   // `readiness` describes the service (auth, internal key, workspace root).
@@ -748,6 +770,7 @@ app.get("/health/ready", async (_req, res) => {
     timestamp: new Date().toISOString(),
     commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
     version: process.env.npm_package_version ?? "unknown",
+    fingerprint: ownershipFingerprint(),
     checks,
     reasons: allReady
       ? []
@@ -784,12 +807,14 @@ app.get("/health", async (_req, res) => {
     readiness: allReady ? "ready" : "not_ready",
     commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
     version: process.env.npm_package_version ?? "unknown",
+    fingerprint: ownershipFingerprint(),
     checks: {
       authConfigured,
       internalServiceConfigured,
       workspaceRoot: workspaceReady,
       docker: dockerProbe.value,
       dockerReason: dockerProbe.reason,
+      hostPty: probeHostPty(),
     },
     reasons: allReady
       ? []

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
+import { isOwnerClerkId } from "@/lib/owner-identity";
 import { PLANS, type PlanId } from "@/config/plans";
 import {
   getAdminSupabase,
@@ -18,13 +19,10 @@ export async function GET(
 
   const { userId } = await params;
 
-  const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "")
-    .split(",")
-    .filter(Boolean);
   const isOwnerOrAdmin =
     clerkId === userId &&
-    (ADMIN_CLERK_IDS.includes(clerkId) || (await isAdmin()));
-  if (clerkId !== userId && !ADMIN_CLERK_IDS.includes(clerkId) && !(await isAdmin())) {
+    (isOwnerClerkId(clerkId) || (await isAdmin()));
+  if (clerkId !== userId && !isOwnerClerkId(clerkId) && !(await isAdmin())) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -76,12 +74,9 @@ export async function POST(
 
   const { userId } = await params;
 
-  const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "")
-    .split(",")
-    .filter(Boolean);
   // Plan mutations are administrative billing operations. A normal user may
   // read their own plan, but must never be able to grant themselves access.
-  if (!ADMIN_CLERK_IDS.includes(clerkId) && !(await isAdmin())) {
+  if (!isOwnerClerkId(clerkId) && !(await isAdmin())) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

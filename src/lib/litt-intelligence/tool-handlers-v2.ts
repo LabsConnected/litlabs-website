@@ -14,7 +14,7 @@
 
 import "server-only";
 
-import { placeholderViolation } from "./patch-validation";
+import { placeholderViolation, simulatePatchResult, tailwindViolation } from "./patch-validation";
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
 import type { WorkspaceTransport } from "./workspace-transport";
 
@@ -72,9 +72,120 @@ export const handleFilesRead: ToolHandler = async (inputs, transport) => {
   }
 };
 
+// ─── Destructive-rewrite guard (lightweight lane reliability) ─────
+// Small local models answer an edit request by rewriting the WHOLE file
+// — and drop existing styling in the process (confirmed live: a
+// heading+theme edit produced a bare page, losing classes, style blocks,
+// and layout). Before persisting a files.write to an EXISTING file,
+// compare structural styling signatures; a rewrite that strips them is
+// rejected with an actionable error so the model retries with
+// files.read + apply_patch (targeted change, existing markup preserved).
+
+/** True when the small-model lane is active — mirrors isLocalSmallLane()
+ *  in agent-loop-v2 (kept inline to avoid an import cycle). */
+function localSmallLaneActive(): boolean {
+  if (process.env.LITT_LOCAL_SMALL === "1") return true;
+  return /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "");
+}
+
+/**
+ * Structural styling markers — the SHAPE of the page's presentation
+ * (style blocks, stylesheet links, class/style attributes, media
+ * queries, fonts, semantic layout), not its VALUES. A legitimate
+ * theme change alters colors but keeps these; a destructive rewrite
+ * drops most of them.
+ */
+function stylingSignature(html: string): Set<string> {
+  const sig = new Set<string>();
+  const count = (re: RegExp) => (html.match(re) ?? []).length;
+  if (/<style[\s>]/i.test(html)) sig.add("style-tag");
+  if (/rel\s*=\s*["']?stylesheet/i.test(html)) sig.add("stylesheet-link");
+  if (count(/class\s*=/gi) >= 2) sig.add("class-attrs");
+  if (/style\s*=\s*["']/i.test(html)) sig.add("inline-style");
+  if (/@media/i.test(html)) sig.add("media-query");
+  if (/--[\w-]+\s*:/i.test(html)) sig.add("css-vars");
+  if (/font(-family)?\s*[:=]|font-(family|sans|serif|mono)/i.test(html)) sig.add("font");
+  if (/<script[\s>]/i.test(html)) sig.add("script");
+  if (/<(header|nav|main|section|footer|article|aside)[\s>]/i.test(html)) sig.add("semantic-layout");
+  if (/@tailwind|tailwind/i.test(html)) sig.add("tailwind");
+  return sig;
+}
+
+/**
+ * Returns a refusal message when `next` destructively rewrites `prev`
+ * (strips most of its structural styling), else null. Only meaningful
+ * when prev was actually styled — a signature below the floor is an
+ * already-plain file where rewriting is harmless.
+ */
+function destructiveRewriteViolation(prev: string, next: string): string | null {
+  const prevSig = stylingSignature(prev);
+  if (prevSig.size < 3) return null;
+  let kept = 0;
+  for (const marker of prevSig) {
+    if (stylingSignature(next).has(marker)) kept += 1;
+  }
+  const retention = kept / prevSig.size;
+  if (retention >= 0.4) return null;
+  const lost = [...prevSig].filter((m) => !stylingSignature(next).has(m)).join(", ");
+  return (
+    `Refusing this full-file rewrite: it removes the existing page structure/styling ` +
+    `(${lost}). The file already exists — do NOT emit files.write for it. ` +
+    `Emit apply_patch instead: set path to this file and patches to a list of ` +
+    `{search, replace} pairs where each search is an exact substring copied ` +
+    `verbatim from the current file content and replace is that same substring ` +
+    `with only the requested change applied.`
+  );
+}
+
+/**
+ * External resource references in a document head — stylesheet links and
+ * src'd scripts (framework CDNs, font loads). These are the markers a
+ * weak model most often drops when it regenerates a file from scratch,
+ * and they are mechanically re-insertable without altering the model's
+ * requested content changes.
+ */
+function externalHeadRefs(html: string): string[] {
+  const refs: string[] = [];
+  const re = /<(link|script)\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const tag = m[0];
+    const isLinkStylesheet = /<link\b[^>]*rel\s*=\s*["']?stylesheet/i.test(tag);
+    const isSrcScript = /<script\b[^>]*\bsrc\s*=/i.test(tag);
+    if (isLinkStylesheet || isSrcScript) refs.push(tag);
+  }
+  return refs;
+}
+
+/**
+ * Repair a rewrite that dropped external head resources: re-inject the
+ * missing <link>/<script src> tags from `prev` into `next`'s head. The
+ * model's requested content changes land; the resources the user never
+ * asked to remove survive. Returns null when nothing was dropped or the
+ * next document has no head to merge into.
+ */
+function preserveExternalHeadRefs(prev: string, next: string): string | null {
+  const dropped = externalHeadRefs(prev).filter(
+    (tag) => !next.includes(tag),
+  );
+  if (dropped.length === 0) return null;
+  const injection = dropped.join("\n    ");
+  const headClose = /<\/head>/i.exec(next);
+  if (headClose) {
+    return next.slice(0, headClose.index) + "    " + injection + "\n  " + next.slice(headClose.index);
+  }
+  // No </head> — put the refs before <body> (still inside document flow);
+  // if neither exists, prepend before <html> content.
+  const bodyOpen = /<body[^>]*>/i.exec(next);
+  if (bodyOpen) return next.slice(0, bodyOpen.index) + "<head>\n    " + injection + "\n  </head>\n  " + next.slice(bodyOpen.index);
+  const htmlOpen = /<html[^>]*>/i.exec(next);
+  if (htmlOpen) return next.slice(0, htmlOpen.index + htmlOpen[0].length) + "\n<head>\n    " + injection + "\n  </head>" + next.slice(htmlOpen.index + htmlOpen[0].length);
+  return null;
+}
+
 export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   const path = inputs.path as string;
-  const content = inputs.content as string;
+  let content = inputs.content as string;
   if (!path || content === undefined) {
     return { success: false, error: "path and content are required" };
   }
@@ -85,6 +196,50 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   // the filesystem, no matter which entry point invoked the handler.
   const badField = placeholderViolation(path, "path") ?? placeholderViolation(content, "content");
   if (badField) return { success: false, error: badField };
+  // Enforcement floor: the Tailwind v4 browser-build traps (any @import
+  // without tailwindcss, or a v3 config object inside @theme) compile ZERO
+  // utilities and leave the page silently unstyled — refuse them here too
+  // so a resumed approval can't bypass the loop's pre-approval validation.
+  const badTailwind = tailwindViolation(content, path);
+  if (badTailwind) return { success: false, error: badTailwind };
+
+  // Destructive-rewrite guard (small lane): a full rewrite that strips an
+  // existing file's structure/styling is rejected BEFORE it lands, with an
+  // actionable error so the model repairs via files.read + apply_patch.
+  if (localSmallLaneActive()) {
+    try {
+      const prev = await transport.readFile(path);
+      // The LITT-WELCOME-SCREEN scaffold is styled boilerplate that exists
+      // precisely to be replaced — its own marker says the agent MUST
+      // replace it. Without this exemption every first files.write to
+      // index.html on a fresh project is refused, the approved mutation
+      // fails, and the run dies with "approved workspace operation failed"
+      // before the model ever got to build. Real user files (no marker)
+      // still get the full guard.
+      if (!prev.content.includes("LITT-WELCOME-SCREEN")) {
+        const violation = destructiveRewriteViolation(prev.content, content);
+        if (violation) {
+          // Before refusing, repair mechanically: re-inject the external
+          // head resources (stylesheet links, CDN scripts) the rewrite
+          // dropped. The 1.5B-class models this guard protects against
+          // cannot produce valid apply_patch calls (verified: they paste
+          // the instruction's placeholder template verbatim) — so a
+          // refusal here was effectively a dead end and every modify run
+          // died with "approved workspace operation failed". If the
+          // repaired content passes retention, land it; only a still-
+          // destructive rewrite is refused.
+          const merged = preserveExternalHeadRefs(prev.content, content);
+          if (merged && !destructiveRewriteViolation(prev.content, merged)) {
+            content = merged;
+          } else {
+            return { success: false, error: violation };
+          }
+        }
+      }
+    } catch {
+      // Unreadable target = a new file — nothing to preserve.
+    }
+  }
 
   try {
     await transport.writeFile(path, content);
@@ -247,7 +402,7 @@ export const handleTerminalExecute: ToolHandler = async (inputs, transport) => {
   // Enforcement floor: a shell command can write files too (heredoc,
   // `cat >`, `tee`), so placeholder tokens are rejected here as well —
   // the files.write guard alone does not close that bypass.
-  const badCommand = placeholderViolation(command, "command");
+  const badCommand = placeholderViolation(command, "command") ?? tailwindViolation(command, "the command");
   if (badCommand) return { success: false, error: badCommand };
 
   try {
@@ -425,8 +580,26 @@ export const handleApplyPatch: ToolHandler = async (inputs, transport) => {
     const p = rawPatches[i];
     const bad =
       placeholderViolation(p?.search, `patch ${i + 1} search`) ??
-      placeholderViolation(p?.replace, `patch ${i + 1} replace`);
+      placeholderViolation(p?.replace, `patch ${i + 1} replace`) ??
+      tailwindViolation(p?.replace, path);
     if (bad) return { success: false, error: bad };
+  }
+
+  // Resulting-file Tailwind floor: a partial edit inside an existing
+  // <style type="text/tailwindcss"> block never carries the block in its
+  // own replace text, so the per-patch scan above can't see v3 syntax
+  // smuggled into @theme — only the post-patch file reveals it. When the
+  // read fails the executor fails on the same read below and reports its
+  // own error, so there is nothing to check here.
+  try {
+    const { content } = await transport.readFile(path);
+    const resulting = simulatePatchResult(content, rawPatches);
+    if (resulting !== null) {
+      const bad = tailwindViolation(resulting, path);
+      if (bad) return { success: false, error: bad };
+    }
+  } catch {
+    // Unreadable target — applyPatch reports the read failure itself.
   }
 
   const patches = rawPatches.map((p) => ({ type: "search_replace" as const, search: p.search, replace: p.replace }));

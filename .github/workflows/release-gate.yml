@@ -61,7 +61,12 @@ jobs:
           SOURCE_SHA="${{ steps.source.outputs.sha }}"
           SOURCE_SHORT="${SOURCE_SHA:0:8}"
           WEB_SHA="${{ steps.web.outputs.deployed_sha }}"
+          # /api/health reports the full 40-char commit in checks.build.detail
+          # while terminal /health reports the 8-char short SHA. Normalize to
+          # the same prefix length before comparing so either format verifies.
+          WEB_SHORT="${WEB_SHA:0:8}"
           TERMINAL_SHA="${{ steps.terminal.outputs.deployed_sha }}"
+          TERMINAL_SHORT="${TERMINAL_SHA:0:8}"
           AUTH_STATUS="${{ steps.web.outputs.auth_status }}"
           AUTH_DETAIL="${{ steps.web.outputs.auth_detail }}"
 
@@ -84,7 +89,7 @@ jobs:
           if [ "$WEB_SHA" = "unknown" ] || [ "$WEB_SHA" = "dev" ]; then
             echo "⚠️  Web health endpoint did not report a real SHA (got: $WEB_SHA)"
             FAIL=1
-          elif [ "$WEB_SHA" != "$SOURCE_SHORT" ]; then
+          elif [ "$WEB_SHORT" != "$SOURCE_SHORT" ]; then
             echo "❌ Web SHA mismatch: source=$SOURCE_SHORT deployed=$WEB_SHA"
             FAIL=1
           else
@@ -94,7 +99,7 @@ jobs:
           if [ "$TERMINAL_SHA" = "unknown" ] || [ "$TERMINAL_SHA" = "dev" ]; then
             echo "⚠️  Terminal health endpoint did not report a real SHA (got: $TERMINAL_SHA)"
             FAIL=1
-          elif [ "$TERMINAL_SHA" != "$SOURCE_SHORT" ]; then
+          elif [ "$TERMINAL_SHORT" != "$SOURCE_SHORT" ]; then
             echo "❌ Terminal SHA mismatch: source=$SOURCE_SHORT deployed=$TERMINAL_SHA"
             FAIL=1
           else
