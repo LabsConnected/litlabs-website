@@ -701,20 +701,22 @@ async function attemptGemini(
       })
     : null;
 
-  let result: GeminiGenerateContentResponse;
-  try {
-    if (seamModel) {
-      const sdkResult = await raceProviderAttempt(
-        seamModel.generateContent(
-          { contents, systemInstruction: req.systemPrompt },
-          { timeout: ctx.timeoutMs, signal: ctx.signal },
-        ),
-        ctx.timeoutMs,
-        "Gemini direct",
-        ctx.signal,
-      );
-      result = normalizeGeminiModelResult(sdkResult);
-    } else {
+  const sendOnce = async (
+    currentBody: Record<string, unknown>,
+  ): Promise<GeminiGenerateContentResponse> => {
+    try {
+      if (seamModel) {
+        const sdkResult = await raceProviderAttempt(
+          seamModel.generateContent(
+            { contents, systemInstruction: req.systemPrompt },
+            { timeout: ctx.timeoutMs, signal: ctx.signal },
+          ),
+          ctx.timeoutMs,
+          "Gemini direct",
+          ctx.signal,
+        );
+        return normalizeGeminiModelResult(sdkResult);
+      }
       const res = await fetchWithTimeout(
         `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent`,
         {
@@ -723,7 +725,7 @@ async function attemptGemini(
             "Content-Type": "application/json",
             "x-goog-api-key": key,
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify(currentBody),
         },
         ctx.timeoutMs,
         "Gemini direct",
@@ -739,18 +741,20 @@ async function attemptGemini(
         );
       }
 
-      result = (await res.json()) as GeminiGenerateContentResponse;
+      return (await res.json()) as GeminiGenerateContentResponse;
+    } catch (err) {
+      if (
+        err instanceof ProviderAttemptError ||
+        err instanceof UpstreamAbortError ||
+        err instanceof AgentBudgetExhaustedError
+      ) {
+        throw err;
+      }
+      throw new ProviderAttemptError("gemini", model, classifyThrownFailure(err));
     }
-  } catch (err) {
-    if (
-      err instanceof ProviderAttemptError ||
-      err instanceof UpstreamAbortError ||
-      err instanceof AgentBudgetExhaustedError
-    ) {
-      throw err;
-    }
-    throw new ProviderAttemptError("gemini", model, classifyThrownFailure(err));
-  }
+  };
+
+  let result = await sendOnce(body);
 
   if (!result.candidates?.length) {
     throw new ProviderAttemptError("gemini", model, {
@@ -760,7 +764,26 @@ async function attemptGemini(
     });
   }
 
-  const parsed = toGeminiResponse(result, model, req.toolIdMap);
+  let parsed = toGeminiResponse(result, model, req.toolIdMap);
+  if (!parsed.text.trim() && parsed.toolCalls.length === 0) {
+    const finishReason = result.candidates[0]?.finishReason ?? "unknown";
+    // MALFORMED_FUNCTION_CALL is a Gemini 2.5 decoder flake concentrated on
+    // mode:ANY with large tool sets (observed in production 2026-11-02:
+    // every build request empty-completed after ~19s). The vendor-recommended
+    // recovery is a retry; re-issuing once with mode:AUTO leaves the forced
+    // decoder path and is strictly no-worse — a prose-only reply still maps
+    // to bad_response and fails over exactly as before.
+    if (finishReason === "MALFORMED_FUNCTION_CALL" && req.toolChoice === "required") {
+      const retryBody = {
+        ...body,
+        toolConfig: { functionCallingConfig: { mode: "AUTO" } },
+      };
+      result = await sendOnce(retryBody);
+      if (result.candidates?.length) {
+        parsed = toGeminiResponse(result, model, req.toolIdMap);
+      }
+    }
+  }
   // Candidates present but empty (no text, no function calls) — same
   // empty-payload failure class as the OpenAI-compatible parser; fail over
   // rather than returning "" to the agent loop.
@@ -768,7 +791,7 @@ async function attemptGemini(
     throw new ProviderAttemptError("gemini", model, {
       class: "bad_response",
       scope: "model",
-      message: `empty completion (finishReason=${result.candidates[0]?.finishReason ?? "unknown"})`,
+      message: `empty completion (finishReason=${result.candidates?.[0]?.finishReason ?? "unknown"})`,
     });
   }
   return normalizeTextToolCalls(parsed, req.tools, req.toolIdMap, "gemini", model);
