@@ -49,6 +49,7 @@ import {
   type Paths,
   type WatchdogConfig,
 } from "./core";
+import { assertHostExecutionPermitted } from "@/lib/host-execution-guard";
 
 const argv = process.argv.slice(2);
 const command = argv[0] ?? "status";
@@ -543,6 +544,10 @@ function cmdValidate(): number {
 }
 
 async function main(): Promise<number> {
+  // Loud entry guard: core's probes catch HostExecutionDisabledError and
+  // would otherwise report empty snapshots, which an operator could
+  // misread as "no processes". Fail the command instead.
+  assertHostExecutionPermitted("ram-watchdog/cli");
   switch (command) {
     case "status":
       return cmdStatus();

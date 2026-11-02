@@ -461,11 +461,11 @@ describe("streamText — local Ollama failover tail", () => {
 
     const { streamText } = await loadLlmUnderDeadCloudEnv({ OLLAMA_KEEP_ALIVE: "" });
     await streamText("hi", () => {}, { task: "chat" });
-    // Ollama's ~5m default unload forced a multi-GB reload every agent step;
-    // an explicit keep_alive keeps the model resident for the session.
+    // LiTT policy (ollamaKeepAliveSetting): the lightweight local lane unloads
+    // 1m after last use so the small models stay thermally bounded.
     // (OLLAMA_KEEP_ALIVE stubbed empty here — the env override is honored.)
     expect(chatBody).not.toBeNull();
-    expect(chatBody!.keep_alive).toBe("30m");
+    expect(chatBody!.keep_alive).toBe("1m");
   });
 
   it("an explicit ollama/<tag> model override reaches Ollama as the bare tag", async () => {

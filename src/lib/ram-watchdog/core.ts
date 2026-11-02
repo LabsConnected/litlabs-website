@@ -35,6 +35,21 @@ import {
 } from "node:fs";
 import { cpus, freemem, homedir, totalmem } from "node:os";
 import { dirname, join } from "node:path";
+import { assertHostExecutionPermitted } from "@/lib/host-execution-guard";
+
+// This module starts host processes (PowerShell probes). It is only
+// reachable through the operator CLI (src/lib/ram-watchdog/cli.ts) and its
+// test — nothing under src/app imports it — but the assert keeps every
+// probe fail-closed if any server path ever invokes it in production.
+// Applied per-call (not at module load) so unit tests can import pure
+// helpers under NODE_ENV=test without requiring the opt-in env.
+function powershellProbe(
+  args: string[],
+  opts: { encoding: "utf8"; timeout: number; windowsHide: boolean },
+): string {
+  assertHostExecutionPermitted("ram-watchdog/core");
+  return execFileSync("powershell", args, opts);
+}
 
 /* ------------------------------------------------------------------ */
 /*  Configuration                                                      */
@@ -426,8 +441,7 @@ export function readProcessActivity(): ProcessActivity {
   const empty: ProcessActivity = { total: 0, node: 0, ollama: 0, devin: 0, claude: 0 };
   if (process.platform !== "win32") return empty;
   try {
-    const out = execFileSync(
-      "powershell",
+    const out = powershellProbe(
       [
         "-NoProfile",
         "-Command",
@@ -527,8 +541,7 @@ export interface RamModule {
 export function readPhysicalModules(): RamModule[] {
   if (process.platform !== "win32") return [];
   try {
-    const out = execFileSync(
-      "powershell",
+    const out = powershellProbe(
       [
         "-NoProfile",
         "-Command",
@@ -666,7 +679,7 @@ if (-not $p) { 'null' } else {
     creationTime = $(if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString('o') } else { $null })
   } | ConvertTo-Json -Compress
 }`;
-    const out = execFileSync("powershell", ["-NoProfile", "-Command", script], {
+    const out = powershellProbe(["-NoProfile", "-Command", script], {
       encoding: "utf8",
       timeout: 15_000,
       windowsHide: true,
@@ -1221,8 +1234,7 @@ export function clearActivityMarker(activityDir: string): void {
 export function countEstablishedOllamaConnections(port = 11434): number {
   if (process.platform !== "win32") return 0;
   try {
-    const out = execFileSync(
-      "powershell",
+    const out = powershellProbe(
       [
         "-NoProfile",
         "-Command",
@@ -1345,8 +1357,7 @@ export interface ProcessTreeNode {
 export function readProcessTree(): ProcessTreeNode[] {
   if (process.platform !== "win32") return [];
   try {
-    const out = execFileSync(
-      "powershell",
+    const out = powershellProbe(
       [
         "-NoProfile",
         "-Command",

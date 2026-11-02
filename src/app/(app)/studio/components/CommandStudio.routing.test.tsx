@@ -294,6 +294,8 @@ vi.mock("../stores/useExecutionStore", () => {
     checkpoint: null,
     toolCalls: [],
     changesSummary: null,
+    previewPreparing: false,
+    setPreviewPreparing: vi.fn(),
     startRun: vi.fn(),
     endRun: vi.fn(),
     addEvent: vi.fn(),
