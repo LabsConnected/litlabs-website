@@ -82,6 +82,9 @@ Create `packages/litt-companion/.env.local` (gitignored):
 ```bash
 EXPO_PUBLIC_API_URL=https://litlabs.net
 EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=<your-clerk-publishable-key>
+# Off by default — existing app behavior is unchanged until this is
+# explicitly set to "true" and Clerk sign-in has been verified.
+EXPO_PUBLIC_ENABLE_CLERK_AUTH=false
 ```
 
 - `EXPO_PUBLIC_API_URL` — the backend API base URL
