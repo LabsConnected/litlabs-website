@@ -16,7 +16,7 @@
  *   server.ts delegates to it — no inline session state.
  */
 
-import * as pty from "node-pty";
+import type * as NodePty from "node-pty";
 import { randomUUID } from "crypto";
 import { resolve, relative, isAbsolute } from "path";
 import { realpathSync } from "fs";
@@ -1103,11 +1103,86 @@ export class PtySessionManager {
   }
 }
 
+// ─── Lazy node-pty loader ─────────────────────────────────────────
+//
+// The node-pty native binding (pty.node / conpty) must NEVER load at
+// module scope. A missing or ABI-mismatched binding throws inside the
+// CJS loader, which used to kill the entire terminal-server at startup —
+// taking the workspace file transport (HTTP) down with it and producing
+// a launch-crash-loop on any host where the binding is absent. The
+// binding is loaded on the first host-PTY spawn and the outcome is
+// cached (success or failure) so /health can report a stable status.
+
+type NodePtyModule = typeof NodePty;
+
+let nodePtyLoad:
+  | { ok: true; mod: NodePtyModule }
+  | { ok: false; error: Error }
+  | null = null;
+
+let nodePtyLoader: () => NodePtyModule = () =>
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require("node-pty") as NodePtyModule;
+
+function loadNodePty(): NodePtyModule {
+  if (nodePtyLoad === null) {
+    try {
+      nodePtyLoad = { ok: true, mod: nodePtyLoader() };
+    } catch (err) {
+      nodePtyLoad = {
+        ok: false,
+        error: err instanceof Error ? err : new Error(String(err)),
+      };
+    }
+  }
+  if (!nodePtyLoad.ok) {
+    throw new Error(
+      `Host terminal unavailable — node-pty native binding failed to load: ${nodePtyLoad.error.message}`,
+    );
+  }
+  return nodePtyLoad.mod;
+}
+
+/**
+ * Probe host-PTY availability for diagnostics (/health). Attempts the
+ * binding load once and caches the outcome — repeated calls are cheap.
+ */
+export function probeHostPty(): { available: boolean; reason: string | null } {
+  if (nodePtyLoad === null) {
+    try {
+      loadNodePty();
+    } catch {
+      // error already cached in nodePtyLoad
+    }
+  }
+  if (nodePtyLoad === null) {
+    return { available: false, reason: "load did not complete" };
+  }
+  return nodePtyLoad.ok
+    ? { available: true, reason: null }
+    : { available: false, reason: nodePtyLoad.error.message };
+}
+
+/**
+ * Test hook: replace the node-pty loader and clear the cached outcome.
+ * Pass no argument (or undefined) to restore the real require().
+ * @internal
+ */
+export function __setNodePtyLoaderForTests(loader?: () => NodePtyModule): void {
+  nodePtyLoad = null;
+  nodePtyLoader =
+    loader ??
+    (() =>
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require("node-pty") as NodePtyModule);
+}
+
 // ─── Default spawn factory (real node-pty + Docker) ────────────────
 
 function createDefaultSpawnFactory(): PtySpawnFactory {
   return {
     spawnHost({ shell, cwd, env, onData, onExit }): PtyProcessHandle {
+      const pty = loadNodePty();
       const ptyProcess = pty.spawn(shell, [], {
         name: "xterm-256color",
         cols: 120,
