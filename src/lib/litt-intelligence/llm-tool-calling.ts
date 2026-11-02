@@ -336,6 +336,12 @@ async function fetchWithTimeout(
 const CLEANUP_MARGIN_MS = 1_000;
 /** Fallback per-attempt cap when a route does not declare one. */
 const DEFAULT_ATTEMPT_TIMEOUT_MS = 30_000;
+/**
+ * Provider-advised 429 waits at or under this bound justify ONE in-place
+ * retry of the same model instead of forfeiting the route — short enough
+ * to fit inside a single call's deadline, long waits still route around.
+ */
+const MAX_IN_PLACE_429_WAIT_MS = 15_000;
 
 /**
  * Canonical budget-exhaustion error.
@@ -1760,6 +1766,8 @@ export async function callLLMWithTools(
   }
 
   const failures: RouteAttemptFailure[] = [];
+  // Bounded in-place 429 retries: one per (provider, model) per call.
+  const retriedInPlace429 = new Set<string>();
   const toolIdMap = buildToolIdReverseMap(tools);
   const req: AttemptRequest = {
     systemPrompt,
@@ -1791,7 +1799,8 @@ export async function callLLMWithTools(
     const route = plan.providers[r];
     const nextProvider = plan.providers[r + 1]?.provider;
 
-    for (const model of route.models) {
+    for (let mi = 0; mi < route.models.length; mi++) {
+      const model = route.models[mi];
       if (isModelCoolingDown(route.provider, model)) {
         logRoute("model_skipped", { provider: route.provider, model, reason: "model_cooldown" });
         continue;
@@ -1982,10 +1991,35 @@ export async function callLLMWithTools(
           // the provider (bounded) AND this model, then try the next
           // candidate — a later success clears the provider cooldown via
           // recordProviderSuccess. The last model still breaks normally.
-          const hasMoreModels = route.models.indexOf(model) < route.models.length - 1;
+          const hasMoreModels = mi < route.models.length - 1;
           if (failure.class === "rate_limited" && hasMoreModels) {
             recordModelFailure(route.provider, model);
             continue; // next model within the same provider
+          }
+
+          // Bounded in-place retry for short provider-advised 429 waits:
+          // with few eligible routes, abandoning a healthy provider over a
+          // transient rate-limit forfeits the call. Honour Retry-After once
+          // per (provider, model) per call when the wait fits the remaining
+          // budget — unchanged doctrine for long waits (route around).
+          const retryKey = `${route.provider}:${model}`;
+          if (
+            failure.class === "rate_limited" &&
+            failure.retryAfterMs !== undefined &&
+            failure.retryAfterMs > 0 &&
+            failure.retryAfterMs <= MAX_IN_PLACE_429_WAIT_MS &&
+            !retriedInPlace429.has(retryKey) &&
+            (!options?.deadlineMs || Date.now() + failure.retryAfterMs < options.deadlineMs - 5_000)
+          ) {
+            retriedInPlace429.add(retryKey);
+            logRoute("rate_limit_in_place_retry", {
+              provider: route.provider,
+              model,
+              waitMs: failure.retryAfterMs,
+            });
+            await new Promise((resolve) => setTimeout(resolve, failure.retryAfterMs));
+            mi--; // re-attempt the same model once, at the provider's own pace
+            continue;
           }
           break; // next provider — no more models behind the same account
         }

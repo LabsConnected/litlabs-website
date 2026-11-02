@@ -400,7 +400,7 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
       toolCalls: [],
       cancelled: false,
       pendingApproval: {
-        toolId: "deploy.production",
+        toolId: "project.deploy",
         toolCallId: "tc-9",
         inputs: { environment: "production" },
         reason: "Deploy requires approval",
@@ -418,7 +418,7 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     expect(createPausedRun).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationId: CONV_ID,
-        toolId: "deploy.production",
+        toolId: "project.deploy",
         toolCallId: "tc-9",
         actionRunId: "run-parent-1",
       }),
