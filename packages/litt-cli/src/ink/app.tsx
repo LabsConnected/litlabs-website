@@ -93,12 +93,18 @@ export function CockpitApp({
   const [modelRuntime] = useState(() => new ModelRuntime(store.state.executionTarget === "remote"));
 
   // Local provider truth comes from a real Ollama probe, not merely
-  // the presence of an endpoint environment variable.
+  // the presence of an endpoint environment variable. The full lane
+  // status is kept so the header can show an honest lane state
+  // (ready / pending / unreachable) rather than a bare boolean.
   const [localModelReady, setLocalModelReady] = useState(false);
+  const [localLaneReason, setLocalLaneReason] = useState<string | null>(null);
+  const [localLaneProbed, setLocalLaneProbed] = useState(false);
 
   useEffect(() => {
     if (store.state.executionTarget !== "local") {
       setLocalModelReady(false);
+      setLocalLaneReason(null);
+      setLocalLaneProbed(false);
       return;
     }
 
@@ -107,6 +113,8 @@ export function CockpitApp({
     void probeLocalLane().then((status) => {
       if (!cancelled) {
         setLocalModelReady(status.available);
+        setLocalLaneReason(status.reason);
+        setLocalLaneProbed(true);
       }
     });
 
@@ -332,11 +340,19 @@ export function CockpitApp({
   const handleModelSelect = useCallback((selected: ModelChoice) => {
     // Picking an explicit model switches routing to FIXED — in "auto" mode
     // cliModeToRouteOptions() ignores selectedModel entirely, so the pick
-    // would never be honored ("models don't stick").
+    // would never be honored ("models don't stick"). The choice persists
+    // to ~/.litt/model-prefs.json via updateSelectedModel.
     store.actions.updateSelectedModel(selected.id);
     store.actions.updateRoutingMode("fixed");
     store.actions.setOverlay("none");
     store.actions.setOverlayQuery("");
+    store.actions.addActivity({
+      id: `act_${Date.now()}_modelset`,
+      ts: Date.now(),
+      type: "info",
+      tag: "MODEL",
+      text: `Model set: ${selected.label} (${selected.id})`,
+    });
   }, [store]);
 
   const handleRoutingModeSelect = useCallback((routing: typeof store.state.routingMode) => {
@@ -361,19 +377,37 @@ export function CockpitApp({
   return (
     <OverlayKeyboardProvider appShortcutHandler={appShortcutHandler}>
     <Box flexDirection="column">
-      {/* Header — the one-line brand band (always compact in the shell). */}
+      {/* Header — the compact identity bar: mark + lane · target,
+          project / branch, one divider. Diagnostic badges live in
+          /status; real tool work shows in the transcript. */}
       <Header
         project={store.state.project}
         projectRoot={store.state.cwd}
         branch={store.state.branch}
         brain={brain}
         activeModel={store.state.activeModel}
-        source={source}
+        providerLane={
+          store.state.executionTarget === "remote"
+            ? (store.state.activeProvider ? providerLabel(store.state.activeProvider) : "LiTT remote")
+            : "Ollama"
+        }
+        laneReady={
+          store.state.executionTarget === "remote"
+            ? store.state.remoteRuntime === "connected"
+            : localModelReady
+        }
+        laneError={
+          store.state.executionTarget === "remote"
+            ? (store.state.remoteRuntime === "error" ? "transport error" : null)
+            : (localLaneProbed && !localModelReady ? (localLaneReason ?? "unavailable") : null)
+        }
         connected={store.state.connected}
         executionTarget={store.state.executionTarget}
         localRuntime={store.state.localRuntime}
         remoteRuntime={store.state.remoteRuntime}
         mode={store.state.mode}
+        gitModified={store.state.gitModified}
+        gitUntracked={store.state.gitUntracked}
         authEmail={authEmail}
         signedIn={signedIn}
         compact
