@@ -12,7 +12,7 @@ import type {
   StationResult,
 } from "./types";
 import { getStationAction } from "./registry";
-import { canMutateAction } from "./permissions";
+import { canMutateAction, stationToPermissionKey } from "./permissions";
 
 type StationEvent = Omit<ExecutionEvent, "id" | "seq" | "ts">;
 
@@ -90,7 +90,20 @@ export async function executeStationAction(
           errorCode: "permission_denied",
         };
       }
-      if (!canMutateAction(action, ctx.permissions)) {
+      // An explicit approval satisfies an "ask" permission — otherwise a
+      // mutating action on an "ask"-gated station (e.g. deploy.preview)
+      // could never execute even after the user approved it. "deny" is
+      // never satisfied: approval must not lift a hard deny.
+      const askGrantedByApproval =
+        ctx.hasApproval === true &&
+        (() => {
+          try {
+            return ctx.permissions[stationToPermissionKey(action.station)] === "ask";
+          } catch {
+            return false;
+          }
+        })();
+      if (!canMutateAction(action, ctx.permissions) && !askGrantedByApproval) {
         return {
           success: false,
           error: `Permission denied: "${id}" mutates the ${action.station} station and the permission is not "allow"`,
