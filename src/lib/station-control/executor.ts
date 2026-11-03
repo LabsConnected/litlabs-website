@@ -90,12 +90,18 @@ export async function executeStationAction(
           errorCode: "permission_denied",
         };
       }
-      // An explicit approval satisfies an "ask" permission — otherwise a
-      // mutating action on an "ask"-gated station (e.g. deploy.preview)
-      // could never execute even after the user approved it. "deny" is
-      // never satisfied: approval must not lift a hard deny.
-      const askGrantedByApproval =
-        ctx.hasApproval === true &&
+      // "ask" is not "deny": for an action that declares requiresApproval it
+      // defers the decision to the approval gate below — which pauses with
+      // approval_required when unapproved and executes once the server-
+      // authorized resume supplies hasApproval. Denying "ask" at THIS gate
+      // made approvals unanswerable (golden 41550999755: deploy.preview died
+      // with permission_denied after the customer approved). "deny" is never
+      // lifted. Actions WITHOUT requiresApproval have no gate that could
+      // satisfy the "ask" — and ctx.hasApproval is overloaded (callers pass
+      // true to mean "not required", not only "granted") — so they stay
+      // conservatively denied here.
+      const askDelegatedToApprovalGate =
+        action.requiresApproval === true &&
         (() => {
           try {
             return ctx.permissions[stationToPermissionKey(action.station)] === "ask";
@@ -103,7 +109,7 @@ export async function executeStationAction(
             return false;
           }
         })();
-      if (!canMutateAction(action, ctx.permissions) && !askGrantedByApproval) {
+      if (!canMutateAction(action, ctx.permissions) && !askDelegatedToApprovalGate) {
         return {
           success: false,
           error: `Permission denied: "${id}" mutates the ${action.station} station and the permission is not "allow"`,
