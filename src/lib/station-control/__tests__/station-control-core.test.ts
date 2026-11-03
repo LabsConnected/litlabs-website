@@ -236,6 +236,18 @@ describe("executor", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it('"ask" permission + requiresApproval without hasApproval pauses via approval_required', async () => {
+    const id = uid("deploy");
+    const execute = vi.fn(async () => ({ deployed: true }));
+    registerStationAction(makeAction(id, { mutating: true, requiresApproval: true, execute }));
+    const { ctx, events } = makeCtx({ hasApproval: false });
+    const res = await executeStationAction(id, { name: "x" }, ctx);
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.errorCode).toBe("approval_required");
+    expect(execute).not.toHaveBeenCalled();
+    expect(events.some((e) => e.type === "approval_required" && e.actionId === id)).toBe(true);
+  });
+
   it("'ask' permission without approval still denies the mutation", async () => {
     const id = uid("deploy");
     registerStationAction(makeAction(id, { mutating: true }));
@@ -245,6 +257,20 @@ describe("executor", () => {
     const res = await executeStationAction(id, { name: "x" }, ctx);
     expect(res.success).toBe(false);
     if (!res.success) expect(res.errorCode).toBe("permission_denied");
+  });
+
+  it('"ask" permission + mutating action WITHOUT requiresApproval stays permission_denied even when hasApproval is set', async () => {
+    const id = uid("deploy");
+    const execute = vi.fn(async () => ({ deployed: true }));
+    // No requiresApproval — there is no gate that could satisfy the "ask".
+    // hasApproval is overloaded (callers pass true to mean "not required"),
+    // so it alone must not lift "ask"; the conservative answer stays denied.
+    registerStationAction(makeAction(id, { mutating: true, execute }));
+    const { ctx } = makeCtx({ hasApproval: true });
+    const res = await executeStationAction(id, { name: "x" }, ctx);
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.errorCode).toBe("permission_denied");
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("approval never lifts a hard 'deny' permission", async () => {
@@ -259,6 +285,17 @@ describe("executor", () => {
     const res = await executeStationAction(id, { name: "x" }, ctx);
     expect(res.success).toBe(false);
     if (!res.success) expect(res.errorCode).toBe("permission_denied");
+  });
+
+  it("PLAN mode still denies an approved 'ask' mutation before the approval check", async () => {
+    const id = uid("deploy");
+    const execute = vi.fn(async () => ({ deployed: true }));
+    registerStationAction(makeAction(id, { mutating: true, requiresApproval: true, execute }));
+    const { ctx } = makeCtx({ hasApproval: true, missionMode: "plan" });
+    const res = await executeStationAction(id, { name: "x" }, ctx);
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.errorCode).toBe("permission_denied");
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("honest execution failure returns success:false and emits action_failed", async () => {
