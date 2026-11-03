@@ -217,6 +217,50 @@ describe("executor", () => {
     expect(events.some((e) => e.type === "approval_required")).toBe(false);
   });
 
+  // Regression (golden 41550999755): deploy.preview is mutating on the
+  // "ask"-gated deploy permission. Without the fix, the permission gate
+  // denied BEFORE the approval flow could satisfy "ask" — the action
+  // could never execute even after the user approved it.
+  it("an explicit approval satisfies an 'ask' permission on a mutating action", async () => {
+    const id = uid("deploy");
+    const execute = vi.fn(async () => ({ ok: true }));
+    registerStationAction(
+      makeAction(id, { mutating: true, requiresApproval: true, execute }),
+    );
+    const { ctx } = makeCtx({
+      permissions: { ...DEFAULT_PERMISSIONS, deploy: "ask" },
+      hasApproval: true,
+    });
+    const res = await executeStationAction(id, { name: "x" }, ctx);
+    expect(res.success).toBe(true);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("'ask' permission without approval still denies the mutation", async () => {
+    const id = uid("deploy");
+    registerStationAction(makeAction(id, { mutating: true }));
+    const { ctx } = makeCtx({
+      permissions: { ...DEFAULT_PERMISSIONS, deploy: "ask" },
+    });
+    const res = await executeStationAction(id, { name: "x" }, ctx);
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.errorCode).toBe("permission_denied");
+  });
+
+  it("approval never lifts a hard 'deny' permission", async () => {
+    const id = uid("deploy");
+    registerStationAction(
+      makeAction(id, { mutating: true, requiresApproval: true }),
+    );
+    const { ctx } = makeCtx({
+      permissions: { ...DEFAULT_PERMISSIONS, deploy: "deny" },
+      hasApproval: true,
+    });
+    const res = await executeStationAction(id, { name: "x" }, ctx);
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.errorCode).toBe("permission_denied");
+  });
+
   it("honest execution failure returns success:false and emits action_failed", async () => {
     const id = uid("browser");
     registerStationAction(
