@@ -834,6 +834,17 @@ async function main() {
     step("no_unresolved_placeholders", indexHtml !== null && placeholderHit === null,
       indexHtml === null ? "no file content to scan" : placeholderHit ? `found ${JSON.stringify(placeholderHit)}` : "clean");
 
+    // ── Step 7.5b: workspace export produces a valid ZIP containing the site ──
+    const exportResp = projectId
+      ? await page.request.get(`${BASE}/api/studio-projects/${projectId}/export`, { timeout: 60_000 }).catch(() => null)
+      : null;
+    const zipBuf = exportResp?.ok() ? await exportResp.body().catch(() => null) : null;
+    step("export_zip",
+      !!zipBuf && zipBuf.length > 500 && zipBuf.readUInt32LE(0) === 0x04034b50 && zipBuf.includes("index.html"),
+      exportResp
+        ? `GET /export → ${exportResp.status()} (${zipBuf?.length ?? 0}b, pkMagic=${zipBuf ? zipBuf.readUInt32LE(0) === 0x04034b50 : false}, hasIndex=${zipBuf ? zipBuf.includes("index.html") : false})`
+        : "export request failed");
+
     // ── Step 7.6: hard refresh preserves project/workspace/conversation/file ──
     await page.reload({ waitUntil: "domcontentloaded", timeout: 90_000 }).catch(() => null);
     await page.waitForTimeout(6000);
