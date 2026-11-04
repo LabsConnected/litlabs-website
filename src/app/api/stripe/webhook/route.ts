@@ -399,28 +399,94 @@ export async function POST(req: NextRequest) {
       case "invoice.paid": {
         if (!sb) break;
         const inv = event.data.object as Stripe.Invoice;
-        const invSubId = inv.parent?.subscription_details?.subscription;
+        const subDetails = inv.parent?.subscription_details;
+        const invSubId = subDetails?.subscription;
         if (invSubId && typeof invSubId === "string") {
           const { data: invMatch } = await sb
             .from("subscriptions")
             .select("user_id, plan")
             .eq("stripe_subscription_id", invSubId)
             .single();
-          if (invMatch) {
+          let grantUserId: string | null = invMatch?.user_id ?? null;
+          let grantPlanId: PlanId | null =
+            (invMatch?.plan as PlanId | undefined) ?? null;
+          if (!invMatch) {
+            // First-cycle race: Stripe can deliver invoice.paid before
+            // customer.subscription.created writes the row. Resolve the owner
+            // from the subscription metadata propagated onto the invoice,
+            // fetch the subscription only when that metadata is incomplete,
+            // and upsert the same row the subscription handler would have —
+            // then grant. Without this the first billing period is lost.
+            const invMeta = (subDetails?.metadata ?? {}) as Record<
+              string,
+              string | undefined
+            >;
+            let clerkId = invMeta.clerk_id;
+            let planId = (invMeta.plan_id as PlanId | undefined) ?? null;
+            let fetchedSub: Stripe.Subscription | null = null;
+            if (!clerkId || !planId) {
+              try {
+                fetchedSub = await stripe.subscriptions.retrieve(invSubId);
+              } catch {
+                fetchedSub = null;
+              }
+              clerkId ??= fetchedSub?.metadata?.clerk_id;
+              planId ??=
+                (fetchedSub?.metadata?.plan_id as PlanId | undefined) ?? null;
+            }
+            if (clerkId) {
+              const { data: invUser } = await sb
+                .from("users")
+                .select("id")
+                .eq("clerk_id", clerkId)
+                .single();
+              if (invUser?.id) {
+                grantUserId = invUser.id;
+                grantPlanId = planId ?? "creator_beta";
+                const item = fetchedSub?.items?.data?.[0];
+                const linePeriod = inv.lines?.data?.[0]?.period;
+                await sb.from("subscriptions").upsert(
+                  {
+                    user_id: invUser.id,
+                    stripe_customer_id:
+                      typeof inv.customer === "string"
+                        ? inv.customer
+                        : (inv.customer as Stripe.Customer | null)?.id ?? null,
+                    stripe_subscription_id: invSubId,
+                    plan: grantPlanId,
+                    status: fetchedSub?.status ?? "active",
+                    current_period_start: item?.current_period_start
+                      ? new Date(item.current_period_start * 1000).toISOString()
+                      : linePeriod?.start
+                        ? new Date(linePeriod.start * 1000).toISOString()
+                        : null,
+                    current_period_end: item?.current_period_end
+                      ? new Date(item.current_period_end * 1000).toISOString()
+                      : linePeriod?.end
+                        ? new Date(linePeriod.end * 1000).toISOString()
+                        : null,
+                    updated_at: new Date().toISOString(),
+                  },
+                  { onConflict: "user_id", ignoreDuplicates: false },
+                );
+              }
+            }
+          }
+          if (grantUserId) {
             await sb
               .from("subscriptions")
               .update({
                 status: "active",
                 updated_at: new Date().toISOString(),
               })
-              .eq("user_id", invMatch.user_id);
+              .eq("user_id", grantUserId);
             // Invoice payment is the only source of subscription grants. This
             // prevents the first billing period from being granted twice.
-            const planId = (invMatch.plan as PlanId) || "creator_beta";
+            const planId = grantPlanId ?? "creator_beta";
             const periodEnd = inv.lines.data[0]?.period?.end;
             await grantSubscriptionCredits(
               sb,
-              invMatch.user_id,
+              grantUserId,
               planId,
               `invoice_grant_${inv.id}`,
               periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
