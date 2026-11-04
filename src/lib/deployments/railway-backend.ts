@@ -8,10 +8,24 @@
  *
  * How it works: user sites are served by LiTT's own hosting infrastructure
  * as static snapshots under /sites/<deploymentId>/. This adapter resolves
- * the real public base URL from the infrastructure itself — the service's
- * public domains, read live from the Railway GraphQL API — creating a
- * service domain when none exists. The deploy service then persists,
- * verifies (HTTP 2xx), and displays that URL.
+ * the real public base URL from the infrastructure itself. Resolution
+ * order:
+ *
+ *   1. Server-resolved public-URL env vars — DEPLOY_PRODUCTION_URL (the
+ *      ops-owned override for exactly this purpose), then
+ *      RAILWAY_PUBLIC_DOMAIN (the platform-injected public domain of the
+ *      service actually running this code), then NEXT_PUBLIC_SITE_URL
+ *      (the canonical site host). These are infrastructure state, not
+ *      caller input — a reachable /sites/* route on this service serves
+ *      the deployment on any of them.
+ *   2. The service's public domains, read live from the Railway GraphQL
+ *      API — creating a service domain when none exists. This path covers
+ *      deployments where no public-URL env var is present (e.g. a
+ *      dedicated sites service); it needs RAILWAY_API_TOKEN,
+ *      RAILWAY_SERVICE_ID, and RAILWAY_ENVIRONMENT_ID.
+ *
+ * The deploy service then persists, verifies (HTTP 2xx), and displays
+ * the resolved URL.
  *
  * GraphQL shapes verified against the live API schema (2026-09-18):
  *   query serviceInstance(environmentId: String!, serviceId: String!)
@@ -51,7 +65,46 @@ function readEnv(env: NodeJS.ProcessEnv): RailwayEnv {
   };
 }
 
-function checkConfigured(railway: RailwayEnv): HostingConfigCheck {
+/**
+ * The service's own public URL is already in its environment — resolution
+ * must not depend on a credential whose only job was to ask the platform
+ * for data the runtime already has.
+ *
+ *   - DEPLOY_PRODUCTION_URL: the ops-owned override. deploy.ts already
+ *     treats it as "the production URL to verify after deployment" —
+ *     same semantics here.
+ *   - RAILWAY_PUBLIC_DOMAIN: Railway's platform-injected public domain
+ *     for this service (a bare host — scheme is added).
+ *   - NEXT_PUBLIC_SITE_URL: the canonical site host.
+ *
+ * A candidate is used only when it parses as an http(s) URL; malformed
+ * or absent values fall through to the next candidate.
+ */
+function resolveEnvBaseUrl(env: NodeJS.ProcessEnv): string | null {
+  const candidates = [
+    env.DEPLOY_PRODUCTION_URL,
+    env.RAILWAY_PUBLIC_DOMAIN,
+    env.NEXT_PUBLIC_SITE_URL,
+  ];
+  for (const raw of candidates) {
+    const value = raw?.trim();
+    if (!value) continue;
+    const withScheme = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+    try {
+      const url = new URL(withScheme);
+      if (url.protocol !== "https:" && url.protocol !== "http:") continue;
+      return url.origin;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function checkConfigured(railway: RailwayEnv, baseUrl: string | null): HostingConfigCheck {
+  if (baseUrl) {
+    return { ok: true };
+  }
   if (!railway.token || !railway.serviceId || !railway.environmentId) {
     return { ok: false, reason: UNCONFIGURED_REASON };
   }
@@ -189,13 +242,15 @@ export function createRailwayHostingBackend(
   fetchImpl: typeof fetch = fetch,
 ): HostingBackend {
   const railway = readEnv(env);
+  const envBaseUrl = resolveEnvBaseUrl(env);
   return {
     isConfigured() {
-      return checkConfigured(railway);
+      return checkConfigured(railway, envBaseUrl);
     },
     async resolveBaseUrl() {
-      const check = checkConfigured(railway);
+      const check = checkConfigured(railway, envBaseUrl);
       if (!check.ok) throw new Error(check.reason);
+      if (envBaseUrl) return envBaseUrl;
       const domain = await resolveServiceDomain(railway as Required<RailwayEnv>, fetchImpl);
       return `https://${domain}`;
     },
