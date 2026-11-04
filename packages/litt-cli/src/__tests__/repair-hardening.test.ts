@@ -10,6 +10,8 @@ import type { ModelProvider } from "@litt/agent-core";
 import { repairCommand, type RepairPipelineDeps } from "../commands/repair.js";
 import { formatPatchSummary } from "../lib/repair/approve.js";
 import { repairCommandSchema, repairJobSchema } from "../lib/repair/contracts.js";
+import { diagnoseFailure } from "../lib/repair/diagnose.js";
+import { runEvidenceCommand } from "../lib/repair/command-runner.js";
 import { applyContextPatches } from "../lib/repair/patch.js";
 import { createRepairReport, digestRepairJob, repairReportPath, writeRepairReport } from "../lib/repair/report.js";
 import type { RepairProviderHandle } from "../lib/repair/provider.js";
@@ -406,5 +408,128 @@ describe("review finding: --run accepted path separators and could leave .litt/r
     );
     expect(code).toBe(2);
     expect(await readFile(join(root, "src", "state.txt"), "utf8")).toBe("status=BROKEN\n");
+  });
+});
+
+describe("review finding: the diagnoser sent protected files inside editable scopes to the model", () => {
+  it("never includes a nested .env or credentials file in the model prompt", async () => {
+    const root = await pipelineWorkspace();
+    await writeFile(join(root, "src", ".env"), "DATABASE_PASSWORD=hunter2-not-a-known-pattern\n", "utf8");
+    await mkdir(join(root, "src", "credentials"), { recursive: true });
+    await writeFile(join(root, "src", "credentials", "key.txt"), "PRIVATE-MATERIAL\n", "utf8");
+
+    const job = repairJobSchema.parse(JSON.parse(await readFile(join(root, "job.json"), "utf8")));
+    let prompt = "";
+    const provider: ModelProvider = {
+      stream: async (messages, emit) => {
+        prompt = messages.map((m) => String(m.content)).join("\n");
+        const text = JSON.stringify(FIX);
+        emit({ type: "delta", text });
+        return {
+          content: text, model: "stub", provider: "stub", usage: { total_tokens: 1 },
+          timing: { ttftMs: 0, generationMs: 0, totalMs: 0 }, profile: "smart" as const,
+        };
+      },
+      health: async () => 0,
+    };
+    const evidence = {
+      name: "original failure", command: "node", args: ["repro.cjs"], cwd: root, status: "failed" as const,
+      exitCode: 1, signal: null, stdout: "", stderr: "BROKEN-SIGNATURE", stdoutTruncated: false,
+      stderrTruncated: false, startedAt: new Date().toISOString(), durationMs: 1,
+    };
+    const outcome = await diagnoseFailure(
+      root, job, evidence, { provider, modelId: "stub", label: "stub", providerId: "stub", local: true },
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(prompt).toContain("status=BROKEN");
+    expect(prompt).not.toContain("hunter2-not-a-known-pattern");
+    expect(prompt).not.toContain("PRIVATE-MATERIAL");
+  });
+});
+
+describe("review finding: a stale temp file from a crashed run broke report persistence", () => {
+  it("overwrites a leftover report temp file instead of failing", async () => {
+    const root = await tempDir();
+    const job = repairJobSchema.parse({
+      version: 1,
+      incident: "stale temp file scenario",
+      reproduction: { command: { command: "node", args: ["r.cjs"] }, expectedFailure: { stream: "any", includes: "x" } },
+      regression: { path: "t.cjs", command: { command: "node", args: ["t.cjs"] } },
+      editablePaths: ["src"],
+      checks: [{ name: "f", kind: "focused", command: { command: "node", args: ["t.cjs"] } }],
+    });
+    const path = repairReportPath(root, "repair-stale");
+    await mkdir(join(path, ".."), { recursive: true });
+    await writeFile(path + ".tmp-" + process.pid, "stale partial write", "utf8");
+
+    await expect(writeRepairReport(path, createRepairReport(job, "repair-stale"))).resolves.toBeUndefined();
+    expect(JSON.parse(await readFile(path, "utf8")).runId).toBe("repair-stale");
+  });
+});
+
+describe("review finding: OpenAI/GitHub/JWT secrets passed the redactor unmasked", () => {
+  const FAKE_LONG = "FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE";
+  const FAKE_OPENAI = "sk-" + "proj-" + FAKE_LONG;
+  const FAKE_GHP = "ghp_" + FAKE_LONG;
+  const FAKE_JWT = "eyJ" + "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" + "." +
+    "eyJ" + "zdWIiOiIxMjM0NTY3ODkwIn0" + "." + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c";
+
+  it("strips all three classes from approval previews", () => {
+    const summary = formatPatchSummary([
+      { operation: "replace", path: "src/a.ts", search: "x", replacement: `key=${FAKE_OPENAI} pat=${FAKE_GHP} jwt=${FAKE_JWT}` },
+    ]);
+    expect(summary).not.toContain(FAKE_OPENAI);
+    expect(summary).not.toContain(FAKE_GHP);
+    expect(summary).not.toContain(FAKE_JWT);
+  });
+
+  it("strips all three classes from command evidence (logs and persisted stdout/stderr)", async () => {
+    const shell = {
+      execute: async () => ({
+        command: "node", args: ["x.cjs"], cwd: "/w", status: "failed" as const,
+        exitCode: 1, pid: 1, error: null,
+        stdout: `openai=${FAKE_OPENAI}`, stderr: `gh=${FAKE_GHP} jwt=${FAKE_JWT}`,
+        truncated: false, durationMs: 1,
+      }),
+      cancel: async () => undefined,
+    };
+    const evidence = await runEvidenceCommand(
+      { command: "node", args: ["x.cjs"], timeoutMs: 5000 },
+      { name: "t", cwd: "/w", shell },
+    );
+    expect(evidence.stdout).not.toContain(FAKE_OPENAI);
+    expect(evidence.stderr).not.toContain(FAKE_GHP);
+    expect(evidence.stderr).not.toContain(FAKE_JWT);
+  });
+
+  it("strips all three classes from file content bound for the model prompt", async () => {
+    const root = await pipelineWorkspace();
+    await writeFile(join(root, "src", "leaky.ts"), `export const a = "${FAKE_OPENAI}";\nexport const b = "${FAKE_GHP}";\nexport const c = "${FAKE_JWT}";\n`, "utf8");
+    const job = repairJobSchema.parse(JSON.parse(await readFile(join(root, "job.json"), "utf8")));
+    let prompt = "";
+    const provider: ModelProvider = {
+      stream: async (messages, emit) => {
+        prompt = messages.map((m) => String(m.content)).join("\n");
+        emit({ type: "delta", text: JSON.stringify(FIX) });
+        return {
+          content: JSON.stringify(FIX), model: "stub", provider: "stub", usage: { total_tokens: 1 },
+          timing: { ttftMs: 0, generationMs: 0, totalMs: 0 }, profile: "smart" as const,
+        };
+      },
+      health: async () => 0,
+    };
+    const evidence = {
+      name: "original failure", command: "node", args: ["repro.cjs"], cwd: root, status: "failed" as const,
+      exitCode: 1, signal: null, stdout: "", stderr: "BROKEN-SIGNATURE", stdoutTruncated: false,
+      stderrTruncated: false, startedAt: new Date().toISOString(), durationMs: 1,
+    };
+    const outcome = await diagnoseFailure(
+      root, job, evidence, { provider, modelId: "stub", label: "stub", providerId: "stub", local: true },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(prompt).not.toContain(FAKE_OPENAI);
+    expect(prompt).not.toContain(FAKE_GHP);
+    expect(prompt).not.toContain(FAKE_JWT);
   });
 });

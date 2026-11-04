@@ -16,6 +16,7 @@ import { redact } from "../secret-redaction.js";
 import { contextPatchSchema, type ContextPatch } from "./patch.js";
 import type { CommandEvidence, RepairJob } from "./contracts.js";
 import { completeOnce, type RepairProviderHandle } from "./provider.js";
+import { hasUnsafePathSyntax, isProtectedRepairPath } from "./workspace-policy.js";
 
 const MAX_FILE_BYTES = 16 * 1024;
 const MAX_TOTAL_BYTES = 60 * 1024;
@@ -56,6 +57,10 @@ async function collectEditableContent(
       for (const entry of entries) {
         if (files.length >= MAX_FILES || total >= MAX_TOTAL_BYTES) return;
         const full = join(dir, entry.name);
+        // Protected paths (nested .env, credentials, backups) must never be sent to a model,
+        // even when an editable scope like "src" contains them.
+        const relativePath = relative(root, full).replace(/\\/g, "/");
+        if (isProtectedRepairPath(relativePath) || hasUnsafePathSyntax(relativePath)) continue;
         if (entry.isDirectory()) {
           if (entry.name === "node_modules" || entry.name.startsWith(".git")) continue;
           await walk(full, depth + 1);

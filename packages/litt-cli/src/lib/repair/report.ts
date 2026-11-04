@@ -50,7 +50,7 @@ export async function writeRepairReport(path: string, report: RepairReport): Pro
   await mkdir(dirname(path), { recursive: true });
   const temporaryPath = path + ".tmp-" + process.pid;
   const serialized = JSON.stringify({ ...report, updatedAt: new Date().toISOString() }, null, 2);
-  await writeFile(temporaryPath, serialized + "\n", { encoding: "utf8", flag: "wx" });
+  await writeFile(temporaryPath, serialized + "\n", { encoding: "utf8", flag: "w" });
   await rename(temporaryPath, path);
 }
 
