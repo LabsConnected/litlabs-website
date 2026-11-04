@@ -30,8 +30,8 @@ describe("PLAN_ENTITLEMENTS — rev-3 price sheet", () => {
     expect(PLAN_ENTITLEMENTS.starter.monthlyPriceCents).toBe(0);
   });
 
-  it("Creator Lite is $9.99/mo with TBD (0) bits pending owner decision", () => {
-    expect(PLAN_ENTITLEMENTS.creator_lite.monthlyBits).toBe(0);
+  it("Creator Lite is $9.99/mo with 2,500 bits/month", () => {
+    expect(PLAN_ENTITLEMENTS.creator_lite.monthlyBits).toBe(2500);
     expect(PLAN_ENTITLEMENTS.creator_lite.oneTimeGrantBits).toBe(0);
     expect(PLAN_ENTITLEMENTS.creator_lite.monthlyPriceCents).toBe(999);
   });
@@ -82,14 +82,14 @@ describe("consumers derive from PLAN_ENTITLEMENTS (no divergent hardcodes)", () 
       getPlanCreditAllowance("pro_builder_beta"),
     );
     expect(PLANS.starter.monthlyCredits).toBe(1500);
-    expect(PLANS.creator_lite.monthlyCredits).toBe(0);
+    expect(PLANS.creator_lite.monthlyCredits).toBe(2500);
     expect(PLANS.creator_beta.monthlyCredits).toBe(7500);
     expect(PLANS.pro_builder_beta.monthlyCredits).toBe(18000);
   });
 
   it("entitlements.ts monthlyCredits matches the canonical allowances", () => {
     expect(getEntitlementsForPlan("starter").monthlyCredits).toBe(1500);
-    expect(getEntitlementsForPlan("creator_lite").monthlyCredits).toBe(0);
+    expect(getEntitlementsForPlan("creator_lite").monthlyCredits).toBe(2500);
     expect(getEntitlementsForPlan("creator_beta").monthlyCredits).toBe(7500);
     expect(getEntitlementsForPlan("pro_builder_beta").monthlyCredits).toBe(
       18000,
