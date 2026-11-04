@@ -45,6 +45,7 @@ import {
   _resetProviderHealthForTests,
   getProviderHealth,
   planBasicRoutes,
+  recordProviderFailure,
 } from "./provider-registry";
 import { _resetModelRegistryForTests } from "./model-registry";
 
@@ -658,6 +659,43 @@ describe("callLLMWithTools — failure classification and failover", () => {
     expect(second.provider).toBe("mistral");
     // Still only the two first-call Groq attempts — cooldown persisted.
     expect(callsTo("groq")).toHaveLength(2);
+  });
+
+  it("waits out a short all-route cooldown instead of failing the call", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    // The golden-run follow-up shape: the only credentialed route is inside
+    // a transient 429 cooldown left over from the build seconds earlier.
+    recordProviderFailure("groq", {
+      class: "rate_limited",
+      scope: "provider",
+      retryAfterMs: 400,
+      message: "rate limited",
+    });
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse("llama-3.3-70b-versatile", "after cooldown"),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+
+    expect(result.provider).toBe("groq");
+    expect(result.text).toBe("after cooldown");
+    expect(callsTo("groq")).toHaveLength(1);
+  });
+
+  it("still fails fast when the only route's cooldown exceeds the wait ceiling", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    // Provider-stated daily-quota waits (hours) must not hold a run open.
+    recordProviderFailure("groq", {
+      class: "rate_limited",
+      scope: "provider",
+      retryAfterMs: 24 * 60 * 60_000,
+      message: "daily quota exhausted",
+    });
+
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "hi" }], []),
+    ).rejects.toThrow(AllRoutesFailedError);
+    expect(callsTo("groq")).toHaveLength(0);
   });
 
   it("a hanging provider attempt times out and the next provider continues", async () => {

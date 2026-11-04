@@ -33,6 +33,7 @@ import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
 import {
   planBasicRoutes,
+  getProviderHealth,
   recordProviderSuccess,
   recordProviderFailure,
   recordModelFailure,
@@ -342,6 +343,36 @@ const DEFAULT_ATTEMPT_TIMEOUT_MS = 30_000;
  * to fit inside a single call's deadline, long waits still route around.
  */
 const MAX_IN_PLACE_429_WAIT_MS = 15_000;
+/**
+ * When route planning leaves ZERO providers only because every candidate is
+ * inside a transient health cooldown, wait out the shortest remaining window
+ * (bounded here) and re-plan once. A follow-up message sent seconds after a
+ * build that ended on a 429 should ride out the rate-limit window rather
+ * than fail the run on a temporary cooldown. Long cooldowns — daily quota
+ * exhaustion carries provider-stated waits of hours — still fail fast.
+ * Selection itself is untouched: eligibility, ordering, and capability
+ * checks all re-run unchanged in the re-plan.
+ */
+const MAX_ZERO_ROUTE_COOLDOWN_WAIT_MS = 60_000;
+
+/**
+ * Shortest positive remaining wait among providers excluded purely for a
+ * health cooldown. Permanent exclusions (missing credentials, disabled by
+ * config, capability gaps) never produce a wait — they cannot recover.
+ */
+function shortestHealthCooldownWaitMs(
+  excluded: ReadonlyArray<{ provider: string; reason: string }>,
+): number | null {
+  let min: number | null = null;
+  for (const e of excluded) {
+    if (!e.reason.startsWith("health_cooldown")) continue;
+    const until = getProviderHealth(e.provider).cooldownUntil;
+    if (!until) continue;
+    const wait = until - Date.now();
+    if (wait > 0 && (min === null || wait < min)) min = wait;
+  }
+  return min;
+}
 
 /**
  * Canonical budget-exhaustion error.
@@ -1749,14 +1780,15 @@ export async function callLLMWithTools(
     reliableFileWriting: options?.requireReliableFileWriting === true,
   };
 
-  const plan = planBasicRoutes(requirements, {
+  const planOpts = {
     model: options?.model,
     userApiKey: options?.userApiKey,
     byokProvider: options?.byokProvider,
     byokModel: options?.byokModel,
     byokBaseUrl: options?.byokBaseUrl,
     allowLittPaidProviders: options?.allowLittPaidProviders,
-  });
+  };
+  let plan = planBasicRoutes(requirements, planOpts);
 
   if (plan.droppedModelHint) {
     logRoute("model_hint_dropped", {
@@ -1784,6 +1816,19 @@ export async function callLLMWithTools(
     secrets: { userApiKey: options?.userApiKey, byokBaseUrl: options?.byokBaseUrl },
     deadlineMs: options?.deadlineMs,
   };
+
+  if (plan.providers.length === 0) {
+    const cooldownWaitMs = shortestHealthCooldownWaitMs(plan.excluded);
+    if (
+      cooldownWaitMs !== null &&
+      cooldownWaitMs <= MAX_ZERO_ROUTE_COOLDOWN_WAIT_MS &&
+      (!options?.deadlineMs || Date.now() + cooldownWaitMs < options.deadlineMs - 5_000)
+    ) {
+      logRoute("zero_route_cooldown_wait", { waitMs: cooldownWaitMs });
+      await new Promise((resolve) => setTimeout(resolve, cooldownWaitMs + 250));
+      plan = planBasicRoutes(requirements, planOpts);
+    }
+  }
 
   if (plan.providers.length === 0) {
     logRoute("no_eligible_routes", {
