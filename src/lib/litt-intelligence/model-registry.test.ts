@@ -27,9 +27,15 @@ describe("model registry — eligibility", () => {
     const ids = models.map((m) => m.canonicalId);
     expect(ids[0]).toBe("gemini-flash");
     expect(ids[1]).toBe("gemini-2.5-flash");
-    // Chat-only and unhealthy models are NEVER build models
+    // Chat-only models are NEVER build models.
     expect(ids).not.toContain("openrouter-north-mini-code");
-    expect(ids).not.toContain("openrouter-nemotron-3.5-lightning");
+    // nemotron-3.5-lightning is a proven writer (Nov 2026 probe: 7
+    // consecutive tool turns incl. 6 files_write) and outranks the flaky
+    // reasoning-heavy nemotron variants in the free chain.
+    expect(ids).toContain("openrouter-nemotron-3.5-lightning");
+    expect(ids.indexOf("openrouter-nemotron-3.5-lightning")).toBeLessThan(
+      ids.indexOf("openrouter-nemotron-3-super"),
+    );
     // qwen3.8-27b:free is catalog-valid with tool calling but not yet
     // run-proven as a file writer — also never a build model until promoted.
     expect(ids).not.toContain("openrouter-qwen3.8-27b");
@@ -109,6 +115,7 @@ describe("model registry — eligibility", () => {
       "gemini-flash",
       "gemini-2.5-flash",
       "openrouter-qwen3.8-27b",
+      "openrouter-nemotron-3.5-lightning",
       "openrouter-nemotron-3-super",
       "openrouter-gemma-4-26b",
       "openrouter-nemotron-3-ultra",
@@ -133,6 +140,7 @@ describe("model registry — eligibility", () => {
       "gemini-flash",
       "gemini-2.5-flash",
       "openrouter-qwen3.8-27b",
+      "openrouter-nemotron-3.5-lightning",
       "openrouter-nemotron-3-super",
       "openrouter-gemma-4-26b",
       "openrouter-nemotron-3-ultra",

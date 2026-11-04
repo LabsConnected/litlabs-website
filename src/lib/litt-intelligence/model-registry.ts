@@ -322,15 +322,20 @@ function seedRecords(): Map<string, ModelRecord> {
         text: true,
         structuredOutput: true,
         toolCalling: true,
-        // bad_response in prod Sep 2026 — not a proven writer.
-        reliableFileWriting: false,
+        // PROVEN Nov 2026: sustained 7 consecutive tool-calling turns in a
+        // direct probe — files_list plus 6 files_write calls with real
+        // content (~5s/turn), while the larger nemotron variants
+        // (3.5-super-vl, 3-ultra) die on turn 2 with finish_reason=length
+        // (reasoning exhausts the 4096-token budget before any tool call).
+        reliableFileWriting: true,
         vision: false,
-        contextWindow: 131_072, // conservative seed estimate (unverified)
+        // Verified from the OpenRouter catalog (Nov 2026).
+        contextWindow: 1_000_000,
       },
-      priority: 60,
-      // Excluded from eligibility until a success is recorded (the registry
-      // learns: a later success flips it back to healthy).
-      healthState: "unhealthy",
+      // First free writer in the chain: direct evidence beats the
+      // higher-priority nemotron variants' Sep/Oct-era assumptions.
+      priority: 34,
+      healthState: "unknown",
     },
     {
       // Local Ollama (LiTT Studio build, Oct 2026): the fast hermes variant
