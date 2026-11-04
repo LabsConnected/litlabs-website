@@ -25,7 +25,10 @@ import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
 import {
   finalizeQualityLoop,
   noteBuildArtifacts,
+  noteDeployment,
   notePreviewReady,
+  noteStaticArtifactCheck,
+  verifyLiveUrl,
   restoreQualityLoopSession,
   shouldEnableQualityLoop,
   snapshotQualityLoopSession,
@@ -874,23 +877,39 @@ export async function POST(
         if (resumePreview?.ok) {
           noteBuildArtifacts(qualitySession, resumePreview.files);
           notePreviewReady(qualitySession, previewUrl);
-          const finale = finalizeQualityLoop(qualitySession, {
-            deployRequested:
-              resolved.toolId === "project.deploy" ||
-              result.toolCalls.some((call) => call.toolId === "project.deploy"),
-          });
-          qualityLoop = {
-            verdict: finale.verdict,
-            stages: finale.stages,
-            designPasses: finale.designPasses,
-          };
-          qualityLoopState = snapshotQualityLoopSession(qualitySession);
-          if (finale.verdict.ok) {
-            // The resumed agent may have finalized before the approval-boundary
-            // preview check completed. Remove only that stale machine-gate
-            // suffix; never suppress ordinary model output or a failed gate.
-            finalText = stripQualityVerdictSuffix(finalText);
-          }
+        }
+        // File the deployment the resumed run actually completed. The
+        // approved project.deploy executed deployUserProject, which
+        // persisted the snapshot and HTTP-verified the URL before
+        // returning it — the ledger must see that machine evidence or
+        // every approval-resumed deploy refuses as "missing deploy/
+        // verify evidence" while the site is already live.
+        const resumedDeployUrl = resumedDeployPublicUrl(result.toolCalls);
+        if (resumedDeployUrl) {
+          noteDeployment(qualitySession, resumedDeployUrl);
+          await verifyLiveUrl(qualitySession, resumedDeployUrl);
+        }
+        // The artifact read-back proof for TEST: the file the run wrote
+        // is read back from the workspace and carries real content —
+        // never filed on a failed or empty read.
+        await fileResumedArtifactCheck(qualitySession, transport, resumePreview);
+        const finale = finalizeQualityLoop(qualitySession, {
+          deployRequested:
+            resolved.toolId === "project.deploy" ||
+            result.toolCalls.some((call) => call.toolId === "project.deploy") ||
+            !!resumedDeployUrl,
+        });
+        qualityLoop = {
+          verdict: finale.verdict,
+          stages: finale.stages,
+          designPasses: finale.designPasses,
+        };
+        qualityLoopState = snapshotQualityLoopSession(qualitySession);
+        if (finale.verdict.ok) {
+          // The resumed agent may have finalized before the approval-boundary
+          // preview check completed. Remove only that stale machine-gate
+          // suffix; never suppress ordinary model output or a failed gate.
+          finalText = stripQualityVerdictSuffix(finalText);
         }
       }
 
@@ -1151,4 +1170,44 @@ export async function GET(
     runStartedAt: outcome.runStartedAt,
     runCompletedAt: outcome.runCompletedAt,
   });
+}
+
+/**
+ * Extract the verified live URL from a completed project.deploy call in a
+ * resumed run's tool log. The log carries the JSON-encoded tool result in
+ * `summary`; only a successful call with a real http(s) URL counts.
+ */
+function resumedDeployPublicUrl(
+  toolCalls: Array<{ toolId: string; success: boolean; summary?: string }> | undefined,
+): string | null {
+  for (const call of toolCalls ?? []) {
+    if (call.toolId !== "project.deploy" || call.success !== true) continue;
+    const summary = String(call.summary ?? "");
+    const url = summary.match(/"(?:liveUrl|publicUrl)"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1];
+    if (url) return url;
+  }
+  return null;
+}
+
+/**
+ * File TEST evidence only on a real read-back: the artifact the run wrote
+ * is read from the workspace and must contain non-trivial content. An
+ * unreadable or empty file files nothing — the gate keeps its honesty.
+ */
+async function fileResumedArtifactCheck(
+  qualitySession: Parameters<typeof noteStaticArtifactCheck>[0],
+  transport: { readFile(path: string): Promise<{ content: string } | string> },
+  resumePreview: { files?: string[] } | null,
+): Promise<void> {
+  try {
+    const candidate = (resumePreview?.files ?? []).find((f) => /\.(html?|css|js)$/i.test(f)) ?? "index.html";
+    const file = await transport.readFile(candidate);
+    const content = typeof file === "string" ? file : file?.content;
+    noteStaticArtifactCheck(qualitySession, {
+      path: candidate,
+      contentMatches: typeof content === "string" && content.length > 200,
+    });
+  } catch {
+    noteStaticArtifactCheck(qualitySession, { path: "index.html", contentMatches: null });
+  }
 }
