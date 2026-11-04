@@ -258,6 +258,18 @@ describe("POST /api/billing/checkout — checkout session creation", () => {
 
     const originalFetch = global.fetch;
     global.fetch = vi.fn(async (url: string, opts: any) => {
+      if (url === "https://api.stripe.com/v1/prices/price_test_creator") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: "price_test_creator",
+            unit_amount: 1999,
+            type: "recurring",
+            recurring: { interval: "month" },
+          }),
+        } as any;
+      }
       if (url === "https://api.stripe.com/v1/checkout/sessions") {
         const body = opts.body as string;
         expect(body).toContain("price_test_creator");
@@ -283,10 +295,77 @@ describe("POST /api/billing/checkout — checkout session creation", () => {
     const body = await res.json();
     expect(body.url).toBe("https://checkout.stripe.com/test");
     expect(body.sessionId).toBe("cs_test_123");
-    const stripeBody = (global.fetch as any).mock.calls[0][1].body as string;
+    const sessionCall = (global.fetch as any).mock.calls.find(
+      (c: any[]) => c[0] === "https://api.stripe.com/v1/checkout/sessions",
+    );
+    const stripeBody = sessionCall[1].body as string;
     const params = new URLSearchParams(stripeBody);
     expect(params.get("success_url")).not.toContain("evil.example");
     expect(params.get("cancel_url")).not.toContain("evil.example");
+    global.fetch = originalFetch;
+  });
+
+  it("fails closed when the configured price resolves to the wrong amount (retired $15 Creator price)", async () => {
+    // The env var is the only pointer to a Stripe price. If it references a
+    // stale price — e.g. STRIPE_PRICE_CREATOR_BETA still pointing at the
+    // legacy 1500-cent price — checkout must NOT create a session.
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_stale_15usd";
+
+    const originalFetch = global.fetch;
+    const sessionCalls: string[] = [];
+    global.fetch = vi.fn(async (url: string) => {
+      if (url === "https://api.stripe.com/v1/prices/price_stale_15usd") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: "price_stale_15usd",
+            unit_amount: 1500,
+            type: "recurring",
+            recurring: { interval: "month" },
+          }),
+        } as any;
+      }
+      if (url === "https://api.stripe.com/v1/checkout/sessions") {
+        sessionCalls.push(url);
+      }
+      return new Response("not found", { status: 404 });
+    }) as any;
+
+    const req = makeNextRequest(JSON.stringify({ planId: "creator_beta" }));
+    const res = await checkoutPOST(req);
+
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toContain("expected 1999 cents/month");
+    expect(body.error).toContain("1500");
+    expect(sessionCalls).toHaveLength(0);
+
+    global.fetch = originalFetch;
+  });
+
+  it("fails closed when the price lookup itself fails (cannot verify → no session)", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_unreachable";
+
+    const originalFetch = global.fetch;
+    const sessionCalls: string[] = [];
+    global.fetch = vi.fn(async (url: string) => {
+      if (url === "https://api.stripe.com/v1/checkout/sessions") {
+        sessionCalls.push(url);
+      }
+      return new Response("not found", { status: 404 });
+    }) as any;
+
+    const req = makeNextRequest(JSON.stringify({ planId: "creator_beta" }));
+    const res = await checkoutPOST(req);
+
+    expect(res.status).toBe(502);
+    expect(sessionCalls).toHaveLength(0);
+
     global.fetch = originalFetch;
   });
 
@@ -1250,11 +1329,25 @@ describe("Checkout failure modes", () => {
     process.env.STRIPE_PRICE_CREATOR_BETA = "price_test";
 
     const originalFetch = global.fetch;
-    global.fetch = vi.fn(async () => ({
-      ok: false,
-      status: 400,
-      json: async () => ({ error: { message: "Invalid price" } }),
-    }) as any);
+    global.fetch = vi.fn(async (url: string) => {
+      if (typeof url === "string" && url.includes("/v1/prices/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: "price_test",
+            unit_amount: 1999,
+            type: "recurring",
+            recurring: { interval: "month" },
+          }),
+        } as any;
+      }
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: "Invalid price" } }),
+      } as any;
+    }) as any;
 
     const req = makeNextRequest(JSON.stringify({ planId: "creator_beta" }));
     const res = await checkoutPOST(req);
