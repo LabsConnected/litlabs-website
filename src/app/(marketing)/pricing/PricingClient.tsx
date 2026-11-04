@@ -277,6 +277,11 @@ export default function PricingClient() {
         const data = await res.json();
         if (data.url) {
           window.location.href = data.url;
+        } else if (data.setup_required) {
+          // A plan whose Stripe price is not yet provisioned returns 501
+          // with server-config detail — surface a clean customer-facing
+          // state instead of the raw env-var message.
+          setError(`${plan.name} is not available for checkout yet. Please try again soon or contact support.`);
         } else {
           setError(data.error || "Failed to start checkout");
         }
