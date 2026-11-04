@@ -1281,7 +1281,8 @@ async function maybeEnrichStaticSiteVisuals(
   if (!isStaticWorkspace || !call.success || call.readOnly) return;
   try {
     const inputs = (call.inputs ?? {}) as { path?: unknown };
-    const declared = declaredMutationPaths(call.inputs, undefined) ?? [];
+    const declared =
+      declaredMutationPaths(call.inputs as Record<string, unknown> | undefined, undefined) ?? [];
     const htmlTouched =
       /\.html?$/i.test(typeof inputs.path === "string" ? inputs.path : "") ||
       declared.some((p) => /\.html?$/i.test(p));
@@ -1291,7 +1292,6 @@ async function maybeEnrichStaticSiteVisuals(
       topicKeywords: qualitySession?.userRequest,
     });
     if (report.imagesResolved > 0 || report.imagesFailed > 0 || report.filesChanged.length > 0) {
-      localProgress.emit({ type: "visual_enrichment", ...report });
       localProgress.emit({
         type: "status",
         summary:

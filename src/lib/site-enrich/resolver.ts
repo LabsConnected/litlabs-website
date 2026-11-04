@@ -79,7 +79,7 @@ async function tryPexels(keywords: string): Promise<ResolvedImage | null> {
     return {
       url: download,
       provider: "pexels",
-      attribution: photo.photographer ? `Photo by ${photo.photographer} on Pexels` : "Pexels",
+      attribution: photo?.photographer ? `Photo by ${photo.photographer} on Pexels` : "Pexels",
     };
   } catch {
     return null;
