@@ -9,6 +9,9 @@
  *   - Stripe publishable keys are NOT redacted (they are public by design)
  *   - Clerk secret keys:        sk_live_... (same pattern as Stripe)
  *   - Supabase service keys:    sb_secret_...
+ *   - OpenAI-style API keys:    sk-... (incl. sk-proj-...)
+ *   - GitHub tokens:            ghp_/gho_/ghu_/ghs_/ghr_..., github_pat_...
+ *   - JSON Web Tokens:          eyJ<hdr>.<pld>.<sig>
  *   - Generic API keys:         patterns with _API_KEY= followed by long values
  *
  * This module is the single source of truth for secret redaction.
@@ -24,6 +27,15 @@ const SECRET_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
   { pattern: /whsec_[A-Za-z0-9]{10,}/g, label: "whsec_***" },
   // Supabase service role keys
   { pattern: /sb_secret_[A-Za-z0-9_\-]{10,}/g, label: "sb_secret_***" },
+  // OpenAI-style API keys (sk-..., sk-proj-...) — Stripe sk_live_/sk_test_
+  // shapes are already handled by the rule above.
+  { pattern: /\bsk-(?!live_|test_)[A-Za-z0-9_\-]{20,}/g, label: "sk-***" },
+  // GitHub tokens: personal access (ghp_), OAuth (gho_), user-to-server
+  // (ghu_), server-to-server (ghs_), refresh (ghr_), fine-grained PATs
+  { pattern: /gh[pousr]_[A-Za-z0-9]{20,}/g, label: "gh*_***" },
+  { pattern: /github_pat_[A-Za-z0-9_]{20,}/g, label: "github_pat_***" },
+  // JSON Web Tokens: base64url header.payload.signature (headers start eyJ)
+  { pattern: /eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}/g, label: "eyJ***" },
   // Clerk secret keys (sk_ prefix, same as Stripe — already covered above)
   // Railway auth tokens (long hex strings after specific env var names)
   { pattern: /(RAILWAY_TOKEN=)[A-Za-z0-9_\-]{20,}/g, label: "$1***" },

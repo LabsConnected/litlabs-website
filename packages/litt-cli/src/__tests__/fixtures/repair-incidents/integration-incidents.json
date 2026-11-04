@@ -1,0 +1,15 @@
+{
+  "note": "Studio and infrastructure incidents are NOT executed by the CLI repair harness. They need a live stack (Railway services, the backup host, the Studio app) and are tracked here so the CLI dataset stays CLI-only.",
+  "incidents": [
+    {
+      "id": "backup-watchdog-failure",
+      "scope": "infra",
+      "description": "Incident class: the backup watchdog stops reporting, so a missed backup goes unnoticed.",
+      "requires": [
+        "backup host",
+        "watchdog service"
+      ],
+      "cliCounterpart": "None. The CLI repair loop must never delete or modify backups (protected path 'backups')."
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+name: LiTT CLI Repair Evaluation
+
+# Runs the repair unit tests and the incident evaluation dataset whenever the
+# repair pipeline, its prompts, tool/command execution, or model routing change.
+# Windows and macOS runners exercise the platform-specific behavior (cmd.exe
+# shims, path syntax, process-tree kill); Linux is the baseline.
+# Live-model tests (LITT_RUN_LIVE_OLLAMA / OpenRouter) are intentionally NOT run
+# here: hosted runners have no Ollama daemon, and a skipped live test is never
+# reported as a pass.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/litt-cli/src/lib/repair/**"
+      - "packages/litt-cli/src/commands/repair*.ts"
+      - "packages/litt-cli/src/__tests__/repair-*.test.ts"
+      - "packages/litt-cli/src/__tests__/fixtures/repair-incidents/**"
+      - "packages/litt-cli/src/lib/model-provider.ts"
+      - "packages/litt-cli/src/lib/model-runtime.ts"
+      - "packages/litt-cli/src/lib/local-lane.ts"
+      - "packages/litt-cli/src/lib/local-model-resolution.ts"
+      - "packages/litt-agent-core/src/**"
+      - "packages/litt-models/src/**"
+      - ".github/workflows/litt-cli-repair-eval.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: litt-cli-repair-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  repair-eval:
+    name: Repair eval (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies (CLI and its workspace dependencies only)
+        run: pnpm install --frozen-lockfile --filter "@litlabs1/litt-cli..."
+        env:
+          CI: true
+
+      - name: Build workspace dependencies
+        run: pnpm --filter "@litlabs1/litt-cli^..." build
+
+      - name: Type-check
+        run: pnpm --filter @litlabs1/litt-cli exec tsc --noEmit
+
+      - name: Repair tests and incident evaluation
+        run: pnpm --filter @litlabs1/litt-cli exec vitest run repair
