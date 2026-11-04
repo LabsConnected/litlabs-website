@@ -235,7 +235,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * features remain auth-gated at the provider level (resolveModelProvider
  * and awaitRemoteReady enforce this at call time, not at the gate).
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "pc", "pc-status", "pc-perf", "pc-tasks"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "repair", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "pc", "pc-status", "pc-perf", "pc-tasks"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
@@ -839,6 +839,7 @@ Commands:
   runs       List recent persisted runs (P0-5 result recovery)
   inspect    Deep repo inspection (framework, scripts, deploy)
   ask        Ask LiTT a question about your project
+  repair     Reproduce, repair, and independently verify a CLI failure
   explain    Pipe errors/diffs and get actionable advice
 
 Production operator commands:

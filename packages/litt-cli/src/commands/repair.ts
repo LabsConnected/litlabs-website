@@ -19,6 +19,7 @@ import {
   readRepairReport,
   repairReportPath,
 } from "../lib/repair/report.js";
+import { acquireRepairLock } from "../lib/repair/lock.js";
 import { loadRepairJob } from "../lib/repair/validation.js";
 import { resolveExistingWorkspacePath } from "../lib/repair/workspace-policy.js";
 import { applyAndVerify, resumeValidation } from "./repair-apply.js";
@@ -111,10 +112,19 @@ async function dispatchAction(request: DispatchRequest): Promise<number> {
 
   if (request.action === "start") {
     const report = createRepairReport(loaded.value, "repair-" + randomUUID());
-    const ctx: PipelineContext = {
-      cwd, job: loaded.value, report, outputPath: repairReportPath(cwd, report.runId), assumeYes, deps, signal,
-    };
-    return runStartPipeline(ctx);
+    const held = await acquireRepairLock(cwd, report.runId);
+    if (!held.ok) {
+      console.error(formatLockHeld(held.heldBy, report.runId));
+      return 1;
+    }
+    try {
+      const ctx: PipelineContext = {
+        cwd, job: loaded.value, report, outputPath: repairReportPath(cwd, report.runId), assumeYes, deps, signal,
+      };
+      return await runStartPipeline(ctx);
+    } finally {
+      await held.lock.release();
+    }
   }
 
   const runId = optionValue(request.args, "--run");
@@ -143,7 +153,16 @@ async function dispatchAction(request: DispatchRequest): Promise<number> {
     );
     return 2;
   }
-  return resumePipeline({ cwd, job: loaded.value, report: prior, outputPath, assumeYes, deps, signal });
+  const held = await acquireRepairLock(cwd, runId);
+  if (!held.ok) {
+    console.error(formatLockHeld(held.heldBy, runId));
+    return 1;
+  }
+  try {
+    return await resumePipeline({ cwd, job: loaded.value, report: prior, outputPath, assumeYes, deps, signal });
+  } finally {
+    await held.lock.release();
+  }
 }
 
 // ─── start: reproduce → regression-red → diagnose → propose ────────
@@ -230,6 +249,14 @@ async function resumePipeline(ctx: PipelineContext): Promise<number> {
   report.stage = "blocked";
   report.remainingRisks.push("Nothing resumable in this report — start a fresh run");
   return finish(ctx, 1);
+}
+
+function formatLockHeld(heldBy: { pid: number; runId: string; startedAt: string } | null, requested: string): string {
+  const detail = heldBy
+    ? `run ${heldBy.runId} (pid ${heldBy.pid}, since ${heldBy.startedAt})`
+    : "an unknown owner";
+  return `Repair ${requested} blocked: another repair holds this workspace's lock — ${detail}. ` +
+    `Wait for it to finish, or remove .litt/repairs/LOCK if the holder is gone.`;
 }
 
 function optionValue(args: string[], option: string): string | null {
