@@ -55,6 +55,7 @@ import { runCommand } from "./commands/run.js";
 import { runsCommand } from "./commands/runs.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
+import { repairCommand } from "./commands/repair.js";
 import { explainCommand } from "./commands/explain.js";
 import { desktopCommand } from "./commands/desktop.js";
 import { loginCommand } from "./commands/login.js";
@@ -134,7 +135,7 @@ const REMOTEABLE_COMMANDS = new Set([
 ]);
 
 /** Commands that use the RuntimeSession (shared runtime truth). */
-const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask"]);
+const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask", "repair"]);
 
 const COMMANDS: Record<string, CommandHandler> = {
   doctor: doctorCommand,
@@ -148,6 +149,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   runs: runsCommand,
   inspect: inspectCommand,
   ask: askCommand,
+  repair: repairCommand,
   explain: explainCommand,
   desktop: desktopCommand,
   login: loginCommand,
