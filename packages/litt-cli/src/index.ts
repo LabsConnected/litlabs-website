@@ -55,6 +55,7 @@ import { runCommand } from "./commands/run.js";
 import { runsCommand } from "./commands/runs.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
+import { repairCommand } from "./commands/repair.js";
 import { explainCommand } from "./commands/explain.js";
 import { desktopCommand } from "./commands/desktop.js";
 import { loginCommand } from "./commands/login.js";
@@ -134,7 +135,7 @@ const REMOTEABLE_COMMANDS = new Set([
 ]);
 
 /** Commands that use the RuntimeSession (shared runtime truth). */
-const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask"]);
+const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask", "repair"]);
 
 const COMMANDS: Record<string, CommandHandler> = {
   doctor: doctorCommand,
@@ -148,6 +149,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   runs: runsCommand,
   inspect: inspectCommand,
   ask: askCommand,
+  repair: repairCommand,
   explain: explainCommand,
   desktop: desktopCommand,
   login: loginCommand,
@@ -233,7 +235,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * features remain auth-gated at the provider level (resolveModelProvider
  * and awaitRemoteReady enforce this at call time, not at the gate).
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "pc", "pc-status", "pc-perf", "pc-tasks"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "repair", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "pc", "pc-status", "pc-perf", "pc-tasks"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
@@ -837,6 +839,7 @@ Commands:
   runs       List recent persisted runs (P0-5 result recovery)
   inspect    Deep repo inspection (framework, scripts, deploy)
   ask        Ask LiTT a question about your project
+  repair     Reproduce, repair, and independently verify a CLI failure
   explain    Pipe errors/diffs and get actionable advice
 
 Production operator commands:

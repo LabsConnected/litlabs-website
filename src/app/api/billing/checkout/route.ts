@@ -84,6 +84,31 @@ async function handler(req: NextRequest) {
       );
     }
 
+    // Verify the configured price actually charges what the plan advertises
+    // before creating a session. The env var is the only pointer — if it
+    // references a stale price (e.g. the retired $15 Creator price), checkout
+    // must fail closed rather than bill the wrong amount.
+    if (plan.billingType === "subscription" && plan.monthlyPriceCents != null) {
+      const priceRes = await fetch(
+        `https://api.stripe.com/v1/prices/${encodeURIComponent(priceId)}`,
+        { headers: { Authorization: `Bearer ${stripeKey}` } },
+      );
+      const price = await priceRes.json().catch(() => null);
+      const amountMatches =
+        priceRes.ok && price?.unit_amount === plan.monthlyPriceCents;
+      const intervalMatches =
+        price?.type === "recurring" && price?.recurring?.interval === "month";
+      if (!amountMatches || !intervalMatches) {
+        return NextResponse.json(
+          {
+            error: `Stripe price misconfigured for ${plan.name}: expected ${plan.monthlyPriceCents} cents/month, price ${priceId} resolves to ${price?.unit_amount ?? "unknown"}/${price?.recurring?.interval ?? price?.type ?? "unknown"}. Check ${plan.stripePriceIdEnv}.`,
+            setup_required: true,
+          },
+          { status: 502 },
+        );
+      }
+    }
+
     // Never trust the browser Origin for payment return URLs. Origin is a
     // request header and can be forged outside a normal browser flow.
     let appUrl: string;

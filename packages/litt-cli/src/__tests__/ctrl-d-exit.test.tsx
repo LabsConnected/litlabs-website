@@ -68,7 +68,7 @@ function mount(opts: { suppressReadable?: boolean } = {}) {
   // simulates a broken input pipeline WITHOUT touching production code.
   if (opts.suppressReadable) {
     const origAdd = stdin.addListener.bind(stdin);
-    (stdin as any).addListener = (ev: string, fn: unknown) =>
+    stdin.addListener = (ev: string | symbol, fn: (...args: unknown[]) => void) =>
       ev === "readable" ? stdin : origAdd(ev as never, fn as never);
   }
 
