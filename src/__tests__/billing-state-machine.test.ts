@@ -31,9 +31,11 @@ vi.mock("@/lib/rate-limiter", () => ({
 
 // Controllable Stripe mock — constructEvent is a spy we can set per-test
 const mockConstructEvent = vi.fn();
+const mockRetrieveSubscription = vi.fn();
 vi.mock("stripe", () => ({
   default: vi.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
+    subscriptions: { retrieve: mockRetrieveSubscription },
   })),
 }));
 
@@ -98,7 +100,14 @@ function makeStripeEvent(type: string, overrides: any = {}) {
 /**
  * Builds a mock Supabase admin that tracks all RPC calls and table mutations.
  */
-function buildTrackingSupabase(existingEvent = false) {
+function buildTrackingSupabase(
+  existingEvent = false,
+  opts: { subscriptionRow?: { user_id: string; plan: string } | null } = {},
+) {
+  const subscriptionRow =
+    opts.subscriptionRow !== undefined
+      ? opts.subscriptionRow
+      : { user_id: "user_internal_123", plan: "creator_beta" };
   const rpcCalls: { fn: string; params: any }[] = [];
   const upserts: { table: string; row: any }[] = [];
   const updates: { table: string; patch: any; matches: any[] }[] = [];
@@ -117,7 +126,7 @@ function buildTrackingSupabase(existingEvent = false) {
       if (table === "stripe_events" && existingEvent)
         return { data: { id: "evt_existing" }, error: null };
       if (table === "subscriptions")
-        return { data: { user_id: "user_internal_123", plan: "creator_beta" }, error: null };
+        return { data: subscriptionRow, error: null };
       return { data: null, error: null };
     }),
     maybeSingle: vi.fn(async () => {
@@ -125,7 +134,7 @@ function buildTrackingSupabase(existingEvent = false) {
       if (table === "stripe_events" && existingEvent)
         return { data: { id: "evt_existing" }, error: null };
       if (table === "subscriptions")
-        return { data: { user_id: "user_internal_123", plan: "creator_beta" }, error: null };
+        return { data: subscriptionRow, error: null };
       return { data: null, error: null };
     }),
     upsert: vi.fn(async (row: any) => {
@@ -170,6 +179,7 @@ beforeEach(() => {
   vi.mocked(isAdminSupabaseConfigured).mockReturnValue(false);
   vi.mocked(getAdminSupabase).mockReturnValue(null as any);
   mockConstructEvent.mockReset();
+  mockRetrieveSubscription.mockReset();
 });
 
 afterEach(() => {
@@ -706,6 +716,178 @@ describe("Webhook event processing — state mutations", () => {
     expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
     expect(upserts.length).toBe(0);
     expect(updates.length).toBe(0);
+  });
+
+  it("out-of-order: invoice.paid BEFORE customer.subscription.created still grants via subscription metadata", async () => {
+    // Race observed in real test-mode delivery: every first-cycle invoice.paid
+    // arrived ahead of customer.subscription.created, when no subscriptions
+    // row exists yet. The handler must resolve the owner from the
+    // subscription metadata propagated onto the invoice and still grant.
+    const { sb, rpcCalls, upserts } = buildTrackingSupabase(false, {
+      subscriptionRow: null,
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.paid", {
+      id: "evt_race_first",
+      object: {
+        id: "in_race_1",
+        customer: "cus_race_1",
+        parent: {
+          subscription_details: {
+            subscription: "sub_race_1",
+            metadata: { clerk_id: "user_race_1", plan_id: "pro_builder_beta", product_type: "plan" },
+          },
+        },
+        lines: { data: [{ period: { start: 1700000000, end: 1702678400 } }] },
+      },
+    }));
+    const res1 = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res1.status).toBe(200);
+
+    // Fallback path upserted the subscriptions row (metadata-derived, no
+    // subscriptions.retrieve needed since metadata was complete).
+    expect(mockRetrieveSubscription).not.toHaveBeenCalled();
+    const subUpsert = upserts.find(
+      (u) => u.table === "subscriptions" && u.row.stripe_subscription_id === "sub_race_1",
+    );
+    expect(subUpsert).toBeDefined();
+    expect(subUpsert!.row.plan).toBe("pro_builder_beta");
+    expect(subUpsert!.row.user_id).toBe("user_internal_123");
+    expect(subUpsert!.row.status).toBe("active");
+
+    // Grant issued for the resolved user — Pro Builder = 18,000.
+    const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+    expect(grants.length).toBe(1);
+    expect(grants[0].params.p_amount).toBe(18000);
+    expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_race_1");
+
+    // Now customer.subscription.created arrives late — it upserts the same
+    // row shape; no additional grant is possible.
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.created", {
+      object: {
+        id: "sub_race_1",
+        customer: "cus_race_1",
+        status: "active",
+        metadata: { clerk_id: "user_race_1", plan_id: "pro_builder_beta" },
+        items: { data: [{ current_period_start: 1700000000, current_period_end: 1702678400 }] },
+      },
+    }));
+    const res2 = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res2.status).toBe(200);
+    const grantsAfter = rpcCalls.filter((c) => c.fn === "grant_credits");
+    expect(grantsAfter.length).toBe(1); // still exactly one grant
+  });
+
+  it("delayed first-cycle invoice.paid: missing metadata falls back to subscriptions.retrieve", async () => {
+    // An invoice whose subscription_details carry no metadata (e.g., a sub
+    // created without metadata, or an older flow) must still resolve via a
+    // Stripe fetch instead of silently losing the first-period grant.
+    const { sb, rpcCalls, upserts } = buildTrackingSupabase(false, {
+      subscriptionRow: null,
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockRetrieveSubscription.mockResolvedValue({
+      id: "sub_delayed_1",
+      status: "active",
+      metadata: { clerk_id: "user_delayed_1", plan_id: "creator_beta" },
+      items: { data: [{ current_period_start: 1700000000, current_period_end: 1702678400 }] },
+    });
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.paid", {
+      id: "evt_delayed_1",
+      object: {
+        id: "in_delayed_1",
+        customer: "cus_delayed_1",
+        parent: {
+          subscription_details: {
+            subscription: "sub_delayed_1",
+            metadata: {},
+          },
+        },
+        lines: { data: [{ period: { start: 1700000000, end: 1702678400 } }] },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(mockRetrieveSubscription).toHaveBeenCalledWith("sub_delayed_1");
+
+    const subUpsert = upserts.find(
+      (u) => u.table === "subscriptions" && u.row.stripe_subscription_id === "sub_delayed_1",
+    );
+    expect(subUpsert).toBeDefined();
+    expect(subUpsert!.row.plan).toBe("creator_beta");
+
+    const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+    expect(grants.length).toBe(1);
+    expect(grants[0].params.p_amount).toBe(7500);
+  });
+
+  it("unresolvable invoice.paid: no metadata, no user — no grant, no crash", async () => {
+    const { sb, rpcCalls, upserts } = buildTrackingSupabase(false, {
+      subscriptionRow: null,
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockRetrieveSubscription.mockResolvedValue({
+      id: "sub_orphan_1",
+      status: "active",
+      metadata: {},
+      items: { data: [] },
+    });
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.paid", {
+      id: "evt_orphan_1",
+      object: {
+        id: "in_orphan_1",
+        parent: {
+          subscription_details: { subscription: "sub_orphan_1", metadata: {} },
+        },
+        lines: { data: [] },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(upserts.length).toBe(0);
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
+  });
+
+  it("retried delivery with a different event id: same invoice grant key keeps it exactly-once", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const invoice = {
+      id: "in_retry_1",
+      parent: { subscription_details: { subscription: "sub_test_123" } },
+      lines: { data: [{ period: { end: 1702678400 } }] },
+    };
+
+    for (const evtId of ["evt_retry_a", "evt_retry_b"]) {
+      mockConstructEvent.mockReturnValue(
+        makeStripeEvent("invoice.paid", { id: evtId, object: invoice }),
+      );
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+      expect(res.status).toBe(200);
+    }
+
+    const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+    expect(grants.length).toBe(2);
+    // Both deliveries produce the same ledger key — grant_credits' unique
+    // idempotency constraint makes the second insert a no-op at the DB layer.
+    expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_retry_1");
+    expect(grants[1].params.p_idempotency_key).toBe("invoice_grant_in_retry_1");
   });
 
   it("webhook processing failure → returns 500, event NOT marked processed (Stripe retries)", async () => {

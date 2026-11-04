@@ -92,10 +92,12 @@ export const PLAN_ENTITLEMENTS: Record<PlanId, PlanEntitlements> = {
     activeProjectLimit: 1,
   },
   creator_lite: {
-    // TBD (owner decision pending): monthlyBits intentionally 0 — no credit
-    // grant until the Creator Lite allocation is decided. All other values
-    // below are PROVISIONAL and pending the same decision.
-    monthlyBits: 0,
+    // 2,500 LiTTBits/month. Cost evidence (llm-cost-engine.ts catalog,
+    // 2026-08 provider rates): standard-tier routing is dominated by $0-cost
+    // free OpenRouter models and gemini-2.5-flash ($0.075/$0.30 per 1M); the
+    // worst-case full-burn exposure at the LLM-lane retail rate
+    // ($1 provider cost ≈ 1,500 retail bits) is ~$1.67 against $9.99 MRR.
+    monthlyBits: 2500,
     oneTimeGrantBits: 0,
     monthlyPriceCents: 999,
     agentStartsPer5h: 2,
