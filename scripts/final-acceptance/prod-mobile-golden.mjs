@@ -762,6 +762,29 @@ async function main() {
         step("production_url_verified",
           prodStatus === 200 && prodBody.length > 100 && /ember roast/i.test(prodBody),
           `GET ${productionUrl} → ${prodStatus} (${prodBody.length}b, expectedContent=${/ember roast/i.test(prodBody)})${deployVerify ? `; flow verify=${deployVerify.success}` : ""}`);
+
+        // Visual completeness: a 200 is not proof of a professional site.
+        // Every image the markup references must actually load, and the
+        // page needs real photography — not placeholder SVGs or hotlinks.
+        if (prodStatus === 200 && prodBody) {
+          const imgSrcs = [
+            ...[...prodBody.matchAll(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]),
+            ...[...prodBody.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)].map((m) => m[1]),
+          ].filter((s) => s && !/^(data:|blob:|javascript:|about:)/i.test(s));
+          const resolveRef = (s) => (/^https?:\/\//i.test(s) ? s : new URL(s, productionUrl).href);
+          const results = [];
+          for (const src of [...new Set(imgSrcs)].slice(0, 20)) {
+            const resp = await page.request.get(resolveRef(src), { timeout: 30_000 }).catch(() => null);
+            const bytes = resp ? Number((await resp.body().catch(() => null))?.length ?? 0) : 0;
+            results.push({ src, status: resp?.status() ?? -1, bytes });
+          }
+          const broken = results.filter((r) => r.status !== 200);
+          const photos = results.filter((r) => r.status === 200 && !r.src.toLowerCase().endsWith(".svg") && r.bytes > 8000);
+          writeFileSync(path.join(ARTIFACT_DIR, "image-audit.json"), JSON.stringify(results, null, 2));
+          step("visual_images_verified",
+            imgSrcs.length > 0 && broken.length === 0 && photos.length >= 3,
+            `${imgSrcs.length} img/css ref(s), ${photos.length} real photo(s) >8KB, broken=${broken.length}${broken.length ? " " + broken.map((b) => `${b.src.split("/").pop()}:${b.status}`).join(",") : ""}`);
+        }
       } else {
         step("production_url_verified", false, "no productionUrl in events or resumed run");
       }
