@@ -2024,6 +2024,22 @@ export async function callLLMWithTools(
           break; // next provider — no more models behind the same account
         }
 
+        // Transient bad_response (free models occasionally emit prose or
+        // truncated output instead of tool calls) gets ONE immediate retry —
+        // same bounded doctrine as the 429 retry: forfeit-proof the call
+        // without unbounded looping, then fall over to the next model.
+        const badResponseKey = `${route.provider}:${model}:bad_response`;
+        if (
+          failure.class === "bad_response" &&
+          !retriedInPlace429.has(badResponseKey) &&
+          (!options?.deadlineMs || Date.now() + 5_000 < options.deadlineMs)
+        ) {
+          retriedInPlace429.add(badResponseKey);
+          logRoute("bad_response_in_place_retry", { provider: route.provider, model });
+          mi--; // re-attempt the same model once — transient output, not a dead route
+          continue;
+        }
+
         // Model-scope failure — cool the model, try the provider's next model.
         recordModelFailure(route.provider, model);
         recordModelAttemptOutcome(route.provider, model, false, failure.class);

@@ -796,6 +796,9 @@ describe("callLLMWithTools — empty provider payloads", () => {
     vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     mockFetch
       // Both Gemini models return candidates with no text and no calls.
+      // Each gets its single bounded bad_response retry before failover.
+      .mockResolvedValueOnce(makeGeminiRawResponse([]))
+      .mockResolvedValueOnce(makeGeminiRawResponse([]))
       .mockResolvedValueOnce(makeGeminiRawResponse([]))
       .mockResolvedValueOnce(makeGeminiRawResponse([]))
       .mockResolvedValueOnce(makeSuccessResponse("openrouter/free", "Recovered."));
@@ -808,7 +811,7 @@ describe("callLLMWithTools — empty provider payloads", () => {
 
     expect(result.text).toBe("Recovered.");
     expect(result.provider).toBe("openrouter");
-    expect(callsTo("generativelanguage")).toHaveLength(2);
+    expect(callsTo("generativelanguage")).toHaveLength(4);
   });
 
   it("an OpenAI-compatible empty completion (no content, no tool_calls) advances to the next model", async () => {
