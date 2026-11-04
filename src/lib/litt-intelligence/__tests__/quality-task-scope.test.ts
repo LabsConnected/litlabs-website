@@ -330,7 +330,13 @@ describe("finalizeQualityLoop with task scope (acceptance-task replay)", () => {
     successfulMutation(session);
     const finale = finalizeQualityLoop(session, { deployRequested: false });
     expect(finale.verdict.ok).toBe(false);
-    expect(finale.verdict.missing).toContain("understand");
+    // The declaration fallback records understand/plan/design from system
+    // evidence once a real mutation exists — the refusal now lands on the
+    // missing machine stages, which still demand real evidence.
+    expect(finale.verdict.missing).not.toContain("understand");
+    expect(finale.verdict.missing).toContain("build");
+    expect(finale.verdict.missing).toContain("run");
+    expect(finale.verdict.missing).toContain("test");
   });
 
   it("task scope survives an approval-pause snapshot round-trip", () => {

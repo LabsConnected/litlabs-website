@@ -193,9 +193,12 @@ describe("implied stage advancement", () => {
     expect(s.observations).toHaveLength(0);
   });
 
-  it("leaves non-skippable stages open when they have no evidence — the gate holds", () => {
+  it("leaves non-skippable stages open when they have no machine evidence — the gate holds", () => {
     const s = makeSession();
-    // Agent builds without ever declaring understand/plan/design.
+    // Agent builds without ever declaring understand/plan/design: the
+    // system records the cognitive stages once a real mutation exists
+    // (the declaration fallback), so the gate's hold lands on the missing
+    // MACHINE stages instead — build/run/test still demand real evidence.
     noteToolResult(
       s,
       "files.write",
@@ -204,8 +207,12 @@ describe("implied stage advancement", () => {
     );
     const finale = finalizeQualityLoop(s, { deployRequested: false });
     expect(finale.verdict.ok).toBe(false);
-    expect(finale.verdict.missing).toContain("understand");
-    expect(finale.unfiledObservations).toBeGreaterThan(0);
+    expect(finale.verdict.missing).not.toContain("understand");
+    expect(finale.verdict.missing).not.toContain("plan");
+    expect(finale.verdict.missing).not.toContain("design");
+    expect(finale.verdict.missing).toContain("build");
+    expect(finale.verdict.missing).toContain("run");
+    expect(finale.verdict.missing).toContain("test");
   });
 });
 
@@ -692,6 +699,97 @@ describe("failed evidence blocks the gate — never a false pass", () => {
     expect(finale.verdict.missing).not.toContain("verify");
   });
 });
+describe("approval-resume publish — static full-scope golden scenario", () => {
+  /**
+   * The exact production-golden path (run 41845294148): a full-scope
+   * static build whose agent writes the site, emits only `QUALITY: BUILD`,
+   * and pauses on the project.deploy approval before ever reaching a
+   * final answer. The resumed run executes the approved deploy, the
+   * approval boundary verifies artifacts + preview, then the verdict is
+   * computed. Before the fix this deadlocked: understand/plan/design
+   * (full-scope required, declaration-only) stayed pending at the head
+   * of the stage order, so every machine-verified observation queued
+   * behind them and all 13 stages reported pending — the publish was
+   * refused for a completed, verified site.
+   */
+  const GOLDEN_PROMPT =
+    "Build a simple single-page landing site for a coffee roastery called Ember Roast " +
+    "with a hero, a menu section, and a contact section. This is an empty static " +
+    "workspace: write the runnable entry at the workspace root as index.html (not " +
+    "public/index.html), then publish it live to a public URL.";
+
+  function goldenPrePauseSession(): QualityLoopSession {
+    const s = startQualityLoopSession({
+      runId: "run-1",
+      projectId: "proj-1",
+      userId: "user-1",
+      userRequest: GOLDEN_PROMPT,
+      isStaticWorkspace: true,
+    });
+    expect(s.taskScope).toBe("full");
+    noteToolResult(
+      s,
+      "files.write",
+      { success: true, result: {}, mutating: true, summary: "wrote index.html" },
+      "ws-1",
+    );
+    noteStaticArtifactCheck(s, { path: "index.html", contentMatches: true });
+    harvestStageMarkers(s, [
+      {
+        role: "assistant",
+        content: "QUALITY: BUILD — Created index.html with hero, menu, and contact sections.",
+      },
+    ]);
+    return s;
+  }
+
+  it("publishes a verified static build whose agent never declared cognitive stages", async () => {
+    mockVerifyUrl.mockResolvedValue({
+      success: true,
+      detail: "HTTP 200, expected marker found",
+      url: "https://hosting.test/sites/d1/",
+    });
+    const paused = snapshotQualityLoopSession(goldenPrePauseSession());
+    const s = restoreQualityLoopSession(paused);
+    // The approved deploy executes and returns a live URL.
+    noteToolResult(
+      s,
+      "project.deploy",
+      {
+        success: true,
+        result: { success: true, deployment: { publicUrl: "https://hosting.test/sites/d1/" } },
+        mutating: true,
+        summary: "deployed",
+      },
+      "ws-1",
+    );
+    // Approval-boundary verification (approvals route): artifacts + preview.
+    noteBuildArtifacts(s, ["index.html"]);
+    notePreviewReady(s, "/api/preview/proj-1/index.html");
+    noteDeployment(s, "https://hosting.test/sites/d1/");
+    await verifyLiveUrl(s, "https://hosting.test/sites/d1/");
+
+    const finale = finalizeQualityLoop(s, { deployRequested: true });
+    expect(finale.verdict.ok).toBe(true);
+    expect(finale.verdict.missing).toHaveLength(0);
+  });
+
+  it("still fails honestly when nothing was built", () => {
+    const paused = snapshotQualityLoopSession(
+      startQualityLoopSession({
+        runId: "run-2",
+        projectId: "proj-1",
+        userId: "user-1",
+        userRequest: GOLDEN_PROMPT,
+        isStaticWorkspace: true,
+      }),
+    );
+    const s = restoreQualityLoopSession(paused);
+    const finale = finalizeQualityLoop(s, { deployRequested: true });
+    expect(finale.verdict.ok).toBe(false);
+  });
+});
+
 describe("buildRedesignPrompt", () => {
   it("includes the fixes and the pass number", () => {
     const prompt = buildRedesignPrompt(

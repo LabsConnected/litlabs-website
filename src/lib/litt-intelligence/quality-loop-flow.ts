@@ -390,6 +390,49 @@ export function missingDeclarableStages(session: QualityLoopSession): QualitySta
   return missing;
 }
 
+/**
+ * System-recorded fallback for required cognitive-stage declarations.
+ *
+ * The reprompt gives the model one bounded chance to emit its QUALITY
+ * markers; when that chance is spent and understand/plan/design are still
+ * empty, every machine-verified observation (build artifact, live
+ * preview, passing checks, deployment) queues behind the earliest
+ * pending stage and the ledger reports all stages pending — the
+ * production deadlock behind goldens 41505296694 and 41845294148, where
+ * a completed, verified, approved static site could not publish.
+ *
+ * The fallback files honest system-sourced evidence grounded in recorded
+ * facts (the user's request, the system's own capability plan, the
+ * verified artifact) — never an agent claim. It fires only once a real
+ * workspace mutation is on record: it documents a build that provably
+ * happened, it cannot invent one. Stages the agent already declared are
+ * untouched, and machine-evidenced stages (build/run/test/deploy/verify)
+ * remain strictly gated.
+ */
+export function fileSystemRecordedDeclarations(session: QualityLoopSession): QualityStage[] {
+  if (session.mutationSeen !== true) return [];
+  const filed: QualityStage[] = [];
+  const request = session.userRequest.trim().slice(0, 300);
+  const summaries: Partial<Record<QualityStage, string>> = {
+    understand: `Request brief (system-recorded): ${request}`,
+    plan: `System run plan (${session.taskScope} task): capability-planned execution for: ${request}`,
+    design:
+      "Design embodied in the verified workspace artifact (system-recorded): " +
+      "the built site carries the typography, spacing, and component choices.",
+  };
+  for (const stage of missingDeclarableStages(session)) {
+    const summary = summaries[stage];
+    if (!summary) continue;
+    fileObservation(session, stage, {
+      summary,
+      by: "system",
+      detail: { systemRecorded: true },
+    });
+    filed.push(stage);
+  }
+  return filed;
+}
+
 /** Reprompt injected once when required stage declarations are missing. */
 export function buildMissingStageDeclarationPrompt(missing: QualityStage[]): string {
   const names = missing.join(", ");
@@ -1034,6 +1077,12 @@ export function finalizeQualityLoop(
   const state = session.state;
   const requiredStages = requiredStagesFor(session.taskScope, state);
   const required = new Set<QualityStage>(requiredStages);
+
+  // A verified build whose agent never emitted QUALITY declarations must
+  // not deadlock the gate on process bookkeeping: the reprompt already
+  // ran upstream, so record the cognitive stages now — system-sourced,
+  // grounded in facts, and only once a real mutation is on record.
+  fileSystemRecordedDeclarations(session);
 
   // Final sweep: file what became due, then pass or skip whatever is still
   // open, in order. Observations must be filed as the current stage moves
