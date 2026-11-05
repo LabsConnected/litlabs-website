@@ -7,8 +7,12 @@ import "server-only";
  * hits a paid provider:
  *   1. Pexels stock search   (PEXELS_API_KEY — free tier, professional photography)
  *   2. LoremFlickr           (no key — real CC-licensed Flickr photos by keyword)
- *   3. Pollinations          (no key — free FLUX generation, best for custom art)
- *   4. Picsum                (no key — random real photography, guaranteed 200)
+ *   3. Picsum                (no key — random real photography, guaranteed 200)
+ *   4. Pollinations          (no key — free FLUX generation, best for custom art)
+ *
+ * Real-photography sources are deliberately probed before the AI
+ * generator: acceptance counts real photos, and generated art is the
+ * last-resort on-topic backstop, never the first pick.
  *
  * Returns the first publicly-fetchable URL. Callers download + save via
  * insertAssetFromUrl, which validates the payload before it ever reaches
@@ -117,11 +121,12 @@ export async function resolveSlotImage(
   if (pexels) return pexels;
 
   // Free fallbacks — probe each before committing so a flaky host can't
-  // write a broken reference into the site.
+  // write a broken reference into the site. Real photography first; the
+  // AI generator is the on-topic backstop of last resort.
   const candidates: Array<{ url: string; provider: string }> = [
-    { url: pollinationsUrl(kw, seed), provider: "pollinations" },
     { url: loremFlickrUrl(kw, seed), provider: "loremflickr" },
     { url: picsumUrl(kw), provider: "picsum" },
+    { url: pollinationsUrl(kw, seed), provider: "pollinations" },
   ];
   for (const c of candidates) {
     if (await probe(c.url)) {

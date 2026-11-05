@@ -2323,3 +2323,179 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
     expect(result.failedHonestly).toContain("3 steps");
   });
 });
+
+describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incident 2026-11-05)", () => {
+  // Production defect: the golden follow-up run called files.read on the
+  // same index.html four times and the watchdog cancelled before any
+  // mutation. Recovery must be bounded — the first detections nudge the
+  // model to spend the already-read content on a mutation; once the
+  // nudge budget is spent the watchdog still cancels honestly.
+
+  function makeEditTransport(initialContent: string) {
+    let fileContent = initialContent;
+    const appliedPatches: Array<{ search: string; replace: string }> = [];
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      readFile: vi.fn(async () => ({ content: fileContent, size: fileContent.length })),
+      applyPatch: vi.fn(async (_path: string, patches: Array<{ search: string; replace: string }>) => {
+        for (const p of patches) {
+          if (!fileContent.includes(p.search)) throw new Error("search text not found");
+          fileContent = fileContent.replace(p.search, p.replace);
+          appliedPatches.push(p);
+        }
+        return { applied: true };
+      }),
+      writeFile: vi.fn(async (_path: string, content: string) => {
+        fileContent = content;
+        return { saved: true };
+      }),
+      createCheckpointBeforeMutation: vi.fn(async () => null),
+    } as unknown as WorkspaceTransport;
+    return { transport, appliedPatches, getContent: () => fileContent };
+  }
+
+  const READ_CALL = { toolId: "files.read", inputs: { projectId: "p-test", path: "index.html" } };
+  const readResponse = (id: string) => ({
+    text: "",
+    toolCalls: [{ ...READ_CALL, toolCallId: id }],
+    finishReason: "tool_calls",
+    model: "test-model",
+  });
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("nudges a repeated identical read into a real mutation instead of cancelling", async () => {
+    const { transport, appliedPatches, getContent } = makeEditTransport(
+      "<html><body><footer>Ember Roast</footer></body></html>",
+    );
+
+    let step = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      step += 1;
+      if (step <= 4) return readResponse(`tc-read-${step}`);
+      if (step === 5) {
+        return {
+          text: "",
+          toolCalls: [{
+            toolCallId: "tc-patch",
+            toolId: "apply_patch",
+            inputs: {
+              path: "index.html",
+              patches: [{ search: "<footer>Ember Roast</footer>", replace: "<footer>Golden Acceptance follow-up verified</footer>" }],
+            },
+          }],
+          finishReason: "tool_calls",
+          model: "test-model",
+        };
+      }
+      return { text: "Done.", toolCalls: [], finishReason: "stop", model: "test-model" };
+    });
+
+    const result = await runAgentLoopV2(
+      "update the footer to include the verification marker",
+      transport,
+      { model: "test-model", systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false },
+    );
+
+    // The 4th identical read was NOT executed — it got a corrective
+    // tool-result telling the model to mutate instead.
+    expect(result.toolCalls.filter((t) => t.toolId === "files.read")).toHaveLength(3);
+    const step5Messages = vi.mocked(callLLMWithTools).mock.calls[4][1] as Array<{ content?: string }>;
+    expect(step5Messages.some((m) => (m.content ?? "").includes("already executed with identical inputs"))).toBe(true);
+
+    // The nudge converted: a real patch landed and the run finished.
+    expect(result.cancelled).toBe(false);
+    expect(appliedPatches).toHaveLength(1);
+    expect(getContent()).toContain("Golden Acceptance follow-up verified");
+    expect(result.finalText).toBe("Done.");
+  });
+
+  it("still cancels honestly once the nudge budget is spent", async () => {
+    const { transport } = makeEditTransport("<html><body>x</body></html>");
+
+    vi.mocked(callLLMWithTools).mockImplementation(async () => readResponse(`tc-read-${Math.random()}`));
+
+    const result = await runAgentLoopV2(
+      "update the footer",
+      transport,
+      { model: "test-model", systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false },
+    );
+
+    // 3 executed reads + 2 nudged detections, then the watchdog fires.
+    expect(result.cancelled).toBe(true);
+    expect(result.cancelReason).toContain("Repeated tool call detected");
+    expect(transport.readFile).toHaveBeenCalledTimes(3);
+    expect(callLLMWithTools).toHaveBeenCalledTimes(6);
+  });
+
+  it("cannot be bypassed by rotating signatures — the nudge budget is per-run", async () => {
+    // index.html ×4 (nudge 1), then about.html ×4 (nudge 2 — different
+    // signature), then index.html again: still 3 recorded identical
+    // reads, budget is spent → honest cancel. The recovery must not
+    // become an unbounded retry loop by changing one input.
+    const { transport } = makeEditTransport("<html><body>x</body></html>");
+
+    let step = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      step += 1;
+      const path = step <= 4 ? "index.html" : step <= 8 ? "about.html" : "index.html";
+      return {
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: `tc-${step}`, inputs: { projectId: "p-test", path } }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      };
+    });
+
+    const result = await runAgentLoopV2(
+      "update the footer",
+      transport,
+      { model: "test-model", systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false },
+    );
+
+    expect(result.cancelled).toBe(true);
+    expect(result.cancelReason).toContain("Repeated tool call detected");
+    // Executed: index×3 + about×3; the 4th of each was nudged, the 9th
+    // identical index read cancelled.
+    expect(callLLMWithTools).toHaveBeenCalledTimes(9);
+    expect(result.toolCalls.filter((t) => t.toolId === "files.read")).toHaveLength(6);
+  });
+
+  it("repeated MUTATING calls are outside the read-loop watchdog by design", async () => {
+    // hasInterveningMutation flips on the first non-readOnly call — even
+    // a failed one — so the detector only covers the pre-mutation phase
+    // (the golden scenario: reads before any write). A model repeating a
+    // failing patch is never nudged and never watchdog-cancelled; it is
+    // bounded by the step budget instead.
+    const { transport } = makeEditTransport("<html><body><footer>x</footer></body></html>");
+    (transport.applyPatch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("disk full"));
+
+    vi.mocked(callLLMWithTools).mockImplementation(async () => ({
+      text: "",
+      toolCalls: [{
+        toolId: "apply_patch",
+        toolCallId: `tc-patch-${Math.random()}`,
+        inputs: {
+          path: "index.html",
+          patches: [{ search: "<footer>x</footer>", replace: "<footer>y</footer>" }],
+        },
+      }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    }));
+
+    const result = await runAgentLoopV2(
+      "change the footer",
+      transport,
+      { model: "test-model", systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false, maxSteps: 8 },
+    );
+
+    expect(result.cancelReason ?? "").not.toContain("Repeated tool call detected");
+    expect(transport.applyPatch).toHaveBeenCalledTimes(8);
+  });
+});
