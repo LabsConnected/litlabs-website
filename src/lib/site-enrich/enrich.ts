@@ -20,6 +20,7 @@ import "server-only";
  * loremflickr → picsum). No paid API is ever called from here.
  */
 
+import { createHash } from "crypto";
 import { insertAssetFromUrl } from "@/lib/litt-intelligence/tool-handlers-v2";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resolveSlotImage } from "./resolver";
@@ -123,22 +124,47 @@ export async function enrichStaticSiteVisuals(
         if (path) smallImages.add(path.replace(/^\//, ""));
       }
     };
+    const usedHashes = new Set<string>();
+    const contentHash = async (sitePath: string) => {
+      try {
+        const { content } = await transport.readFile(sitePath);
+        return createHash("md5").update(content).digest("hex");
+      } catch {
+        return null;
+      }
+    };
     const resolve = async (keywords: string) => {
       if (report.imagesResolved + report.imagesFailed >= budget) return null;
-      const resolved = await resolveSlotImage(keywords, seed++);
-      if (!resolved) {
+      // Dedupe: distinct keywords can still resolve to the same photo
+      // (provider seed collisions shipped visibly duplicated gallery
+      // images) — hash the saved bytes and retry once with a bumped seed
+      // and varied keywords; a still-identical image counts as a failure
+      // so the slot falls back to the honest placeholder.
+      let resolved = await resolveSlotImage(keywords, seed);
+      let saved = resolved
+        ? await insertAssetFromUrl(resolved.url, { nameHint: keywords.slice(0, 30) }, transport)
+        : null;
+      let hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
+      if (hash && usedHashes.has(hash)) {
+        seed += 1000;
+        const varied = `${keywords} scene`;
+        resolved = await resolveSlotImage(varied, seed);
+        saved = resolved
+          ? await insertAssetFromUrl(resolved.url, { nameHint: varied.slice(0, 30) }, transport)
+          : null;
+        hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
+        if (hash && usedHashes.has(hash)) {
+          seed += 1;
+          report.imagesFailed += 1;
+          return null;
+        }
+      }
+      seed += 1;
+      if (!resolved || !saved?.success || !saved.sitePath) {
         report.imagesFailed += 1;
         return null;
       }
-      const saved = await insertAssetFromUrl(
-        resolved.url,
-        { nameHint: keywords.slice(0, 30) },
-        transport,
-      );
-      if (!saved.success || !saved.sitePath) {
-        report.imagesFailed += 1;
-        return null;
-      }
+      if (hash) usedHashes.add(hash);
       report.imagesResolved += 1;
       if (!report.providersUsed.includes(resolved.provider)) {
         report.providersUsed.push(resolved.provider);

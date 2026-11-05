@@ -2020,7 +2020,13 @@ async function runAgentLoopV2Inner(
       }
       const zeroCallText = llmResponse.text ?? "";
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
-        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Small lane exists to mutate files: until a mutation lands, a
+        // prose-only reply can never be the final answer — bounded nudges
+        // then an honest failure, never a silent fake-complete.
+        requiredToolCallPending:
+          (cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) &&
+          !emittedToolCalls &&
+          !hasInterveningMutation,
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides
@@ -3899,7 +3905,13 @@ async function resumeAgentLoopV2Inner(
       }
       const zeroCallText = llmResponse.text ?? "";
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
-        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Small lane exists to mutate files: until a mutation lands, a
+        // prose-only reply can never be the final answer — bounded nudges
+        // then an honest failure, never a silent fake-complete.
+        requiredToolCallPending:
+          (cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) &&
+          !emittedToolCalls &&
+          !hasInterveningMutation,
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides

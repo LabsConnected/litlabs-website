@@ -142,6 +142,17 @@ describe("composeSiteHtml", () => {
     expect(hue).toContain("hsl(300");
   });
 
+  it("hero without an explicit image derives bg keywords from the title", () => {
+    const p = validateSitePlan({
+      ...VALID_PLAN,
+      title: "Ember Roast Coffeehouse",
+      hero: { heading: "H", subheading: "S", cta: "Go" },
+    }).plan as SitePlan;
+    const out = composeSiteHtml(p);
+    expect(out).toContain('data-litt-bg="ember roast coffeehouse"');
+    expect(out).not.toMatch(/hero no-image/);
+  });
+
   it("split hero renders an image slot instead of a background", () => {
     const p = validateSitePlan({
       ...VALID_PLAN,

@@ -156,6 +156,12 @@ const THEMES: Record<string, Theme> = {
 
 const THEME_NAMES = Object.keys(THEMES);
 
+const STOP_WORDS = new Set([
+  "about", "best", "every", "from", "have", "more", "only", "over",
+  "site", "some", "than", "that", "them", "they", "this", "very",
+  "when", "where", "which", "with", "your",
+]);
+
 // ─── Design system CSS ───────────────────────────────────────────────
 
 function designSystemCss(theme: Theme, accentHue: number): string {
@@ -467,16 +473,20 @@ function renderHero(hero: SitePlanSection | undefined, title: string, descriptio
   const sub = esc(h.subheading ?? h.text ?? description ?? "", 280);
   const cta = esc(h.cta ?? h.button ?? "Learn more", 40);
   const ctaHref = esc(h.href ?? "#main", 120);
-  const bgAttr = h.image ? ` data-litt-bg="${esc(h.image, 80)}"` : "";
-  const cls = h.image ? "hero" : "hero no-image";
-  if (variant === "split" && h.image) {
+  // Hero fallback: models frequently omit `hero.image`, which renders a
+  // flat color band — derive photo keywords from the title so the
+  // enrichment pass can still materialize a real background image.
+  const heroImage = h.image ?? (title.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter((w) => w.length > 3 && !STOP_WORDS.has(w)).slice(0, 3).join(" ") || undefined);
+  const bgAttr = heroImage ? ` data-litt-bg="${esc(heroImage, 80)}"` : "";
+  const cls = heroImage ? "hero" : "hero no-image";
+  if (variant === "split" && heroImage) {
     return {
       navCta: cta,
       html:
         `<section class="hero hero-split no-image"><div class="container"><div>` +
         `<h1>${headline}</h1><p class="lead">${sub}</p>` +
         `<div class="actions"><a class="btn" href="${ctaHref}">${cta}</a></div></div>` +
-        `<div class="hero-media"><img data-litt-image="${esc(h.image, 80)}" alt="${headline}" fetchpriority="high"></div>` +
+        `<div class="hero-media"><img data-litt-image="${esc(heroImage, 80)}" alt="${headline}" fetchpriority="high"></div>` +
         `</div></section>`,
     };
   }
