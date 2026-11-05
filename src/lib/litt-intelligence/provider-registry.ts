@@ -106,6 +106,10 @@ export interface PlannedProvider {
   models: string[];
   /** Hard cap on a single provider attempt. */
   timeoutMs: number;
+  /** See ProviderDef.perModelRateLimits. */
+  perModelRateLimits?: boolean;
+  /** See ProviderDef.requestTokenCeiling. */
+  requestTokenCeiling?: number;
   health: ProviderHealthState;
   credentialState: CredentialState;
 }
@@ -212,6 +216,24 @@ interface ProviderDef {
   timeoutMs: number;
   credentialState(): CredentialState;
   models(): string[];
+  /**
+   * True when the provider meters rate limits per MODEL (Gemini free tier:
+   * per-model RPM/RPD; OpenRouter :free: per-model daily/RPM caps; Groq:
+   * per-model TPM). A 429 on one model then cools only that model — the
+   * provider's sibling quotas remain usable within this call and the next.
+   * Providers that meter per-account (OpenAI, Cloudflare, BYOK) keep the
+   * provider-scope default.
+   */
+  perModelRateLimits?: boolean;
+  /**
+   * Per-request token ceiling for this provider's tier (Groq free tier:
+   * 8,000 TPM — and Groq bills the REQUESTED max_tokens against it, so a
+   * prompt + declared completion that exceeds the ceiling is rejected as
+   * HTTP 413 no matter how long you wait). When set, requests whose
+   * estimated size exceeds the ceiling skip this provider's models instead
+   * of burning a guaranteed-failed attempt.
+   */
+  requestTokenCeiling?: number;
 }
 
 function envPresent(...names: string[]): boolean {
@@ -291,11 +313,18 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () =>
         envPresent("GEMINI_API_KEY", "GOOGLE_API_KEY") ? "available" : "missing",
+      // Gemini free tier meters RPM/RPD per model — a saturated flash must
+      // cool only itself so the lite/pro quota pools stay usable.
+      perModelRateLimits: true,
       // Model IDs come from the canonical registry: env overrides are
       // validated (unknown strings rejected with a warning), otherwise the
       // registry defaults (gemini-flash-latest alias + gemini-2.5-flash).
       models: () => [
         resolveRegistryModel("GEMINI_PRIMARY_MODEL", "gemini-flash", {
+          tools: true,
+          reliableFileWriting: true,
+        }).providerModelId,
+        resolveRegistryModel("GEMINI_LITE_MODEL", "gemini-2.5-flash-lite", {
           tools: true,
           reliableFileWriting: true,
         }).providerModelId,
@@ -316,6 +345,8 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       // deadline still bounds every attempt via computeAttemptTimeout.
       timeoutMs: Number(process.env.OPENROUTER_TIMEOUT_MS) || 60_000,
       credentialState: () => (envPresent("OPENROUTER_API_KEY") ? "available" : "missing"),
+      // OpenRouter :free models meter daily/RPM caps per model.
+      perModelRateLimits: true,
       models: () => openRouterModels(requirements),
     },
     {
@@ -325,6 +356,15 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       capabilities: TOOL_CAPABLE,
       timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () => (envPresent("GROQ_API_KEY") ? "available" : "missing"),
+      // Groq meters TPM per model.
+      perModelRateLimits: true,
+      // Free-tier cap: 8,000 TPM per model — and the DECLARED max_tokens is
+      // billed against it, so prompt+max_tokens over the ceiling is a
+      // guaranteed HTTP 413 (prod-verified 2026-11-05, golden 41933246698:
+      // both gpt-oss models rejected in ~100ms). Requests that cannot fit
+      // are skipped before the fetch; raise via env on a paid tier.
+      requestTokenCeiling:
+        Number(process.env.GROQ_REQUEST_TOKEN_CEILING) || 8_000,
       models: () => [
         process.env.GROQ_MODEL || "openai/gpt-oss-120b",
         // gpt-oss-20b is the live lighter Groq fallback. The llama entries
@@ -341,6 +381,8 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       capabilities: TOOL_CAPABLE,
       timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () => (envPresent("MISTRAL_API_KEY") ? "available" : "missing"),
+      // Mistral free tier meters requests/tokens per model.
+      perModelRateLimits: true,
       models: () => [
         process.env.MISTRAL_MODEL || "mistral-small-latest",
         "open-mistral-nemo",
@@ -524,8 +566,19 @@ export function recordProviderFailure(provider: string, failure: ProviderFailure
   providerHealth.set(provider, next);
 }
 
-export function recordModelFailure(provider: string, model: string): void {
-  modelCooldowns.set(`${provider}:${model}`, Date.now() + MODEL_COOLDOWN_MS);
+export function recordModelFailure(
+  provider: string,
+  model: string,
+  retryAfterMs?: number,
+): void {
+  // A provider-stated retry delay is authoritative (Google daily-quota 429s
+  // carry "retry in 9h48m…" hints): honour it up to the same cap the
+  // provider path uses so a saturated model isn't re-probed every 10 min —
+  // and so a 20s wait doesn't over-penalise a briefly-limited model.
+  const wait = retryAfterMs !== undefined
+    ? Math.min(retryAfterMs, RATE_LIMIT_STATED_MAX_MS)
+    : MODEL_COOLDOWN_MS;
+  modelCooldowns.set(`${provider}:${model}`, Date.now() + wait);
 }
 
 /** Test seam: clear all circuit-breaker state. */
@@ -870,6 +923,8 @@ export function planBasicRoutes(
       capabilities: caps,
       models,
       timeoutMs: def.timeoutMs,
+      perModelRateLimits: def.perModelRateLimits,
+      requestTokenCeiling: def.requestTokenCeiling,
       health: health.state,
       credentialState: cred,
     });

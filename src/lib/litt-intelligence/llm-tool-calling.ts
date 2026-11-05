@@ -1817,6 +1817,21 @@ export async function callLLMWithTools(
     deadlineMs: options?.deadlineMs,
   };
 
+  // Request-size estimate for providers that enforce a per-request token
+  // ceiling (Groq free tier bills prompt + the DECLARED max_tokens against
+  // an 8k TPM cap — exceeding it is a guaranteed 413, never worth an
+  // attempt). chars/4 is the standard coarse approximation; the ceiling
+  // check is a guardrail, not a meter, so exactness is unnecessary.
+  // Computed once — messages grow across steps but this entry point sees
+  // the per-call snapshot.
+  const estimatedRequestTokens =
+    Math.ceil(
+      (systemPrompt.length +
+        messages.reduce((n, m) => n + (m.content?.length ?? 0), 0) +
+        JSON.stringify(toOpenRouterTools(tools)).length) /
+        4,
+    ) + (options?.maxTokens ?? 4096);
+
   if (plan.providers.length === 0) {
     const cooldownWaitMs = shortestHealthCooldownWaitMs(plan.excluded);
     if (
@@ -1848,6 +1863,29 @@ export async function callLLMWithTools(
       const model = route.models[mi];
       if (isModelCoolingDown(route.provider, model)) {
         logRoute("model_skipped", { provider: route.provider, model, reason: "model_cooldown" });
+        continue;
+      }
+
+      // Per-request token ceiling: when the route's tier cannot physically
+      // accept a request this size, every candidate model behind the same
+      // ceiling 413s (prod-verified on Groq free tier 2026-11-05). Skip
+      // without a fetch — the attempt is a guaranteed rejection and its
+      // model-scope cooldown would only add noise.
+      if (route.requestTokenCeiling !== undefined && estimatedRequestTokens > route.requestTokenCeiling) {
+        failures.push({
+          provider: route.provider,
+          model,
+          class: "model_unavailable",
+          latencyMs: 0,
+          message: `request ~${estimatedRequestTokens} tokens exceeds ${route.provider} per-request ceiling ${route.requestTokenCeiling}`,
+        });
+        logRoute("attempt_skipped", {
+          provider: route.provider,
+          model,
+          reason: "request_exceeds_route_token_ceiling",
+          estimatedRequestTokens,
+          ceiling: route.requestTokenCeiling,
+        });
         continue;
       }
 
@@ -2017,6 +2055,32 @@ export async function callLLMWithTools(
         });
 
         if (failure.scope === "provider") {
+          // Per-model-quota providers (Gemini/OpenRouter/Groq/Mistral free
+          // tiers meter limits per model): a rate_limited sibling failure
+          // must not cool the whole provider — the remaining candidates sit
+          // on separate quota pools and can serve immediately. Cooling the
+          // provider here was the verified cause of the "one saturated
+          // model ends every BUILD" outage (golden 41929707901: a
+          // gemini-2.5-flash 429 excluded the entire Gemini lane —
+          // including its independent pro/lite quotas — for the stated
+          // retry window on every subsequent call). When this is the LAST
+          // model the provider genuinely is saturated and falls through to
+          // the normal provider-cool path below.
+          const perModelRateLimitSkip =
+            route.perModelRateLimits === true &&
+            failure.class === "rate_limited" &&
+            mi < route.models.length - 1;
+          if (perModelRateLimitSkip) {
+            recordModelFailure(route.provider, model, failure.retryAfterMs);
+            recordModelAttemptOutcome(route.provider, model, false, failure.class);
+            logRoute("per_model_rate_limit_next_model", {
+              provider: route.provider,
+              model,
+              retryAfterMs: failure.retryAfterMs,
+            });
+            continue;
+          }
+
           recordProviderFailure(route.provider, failure);
           // Registry learns the outcome for this exact model as well.
           recordModelAttemptOutcome(route.provider, model, false, failure.class);
@@ -2038,7 +2102,7 @@ export async function callLLMWithTools(
           // recordProviderSuccess. The last model still breaks normally.
           const hasMoreModels = mi < route.models.length - 1;
           if (failure.class === "rate_limited" && hasMoreModels) {
-            recordModelFailure(route.provider, model);
+            recordModelFailure(route.provider, model, failure.retryAfterMs);
             continue; // next model within the same provider
           }
 
