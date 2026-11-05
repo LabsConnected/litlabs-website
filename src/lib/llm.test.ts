@@ -388,8 +388,9 @@ describe("streamText — local Ollama failover tail", () => {
 
     expect(chunks.join("")).toBe("local hello");
     expect(result.provider).toBe("ollama");
-    // The fast local tool build wins the pick over the slower full variants.
-    expect(result.model).toBe("litt-hermes-fast:8k");
+    // litt-hermes-fast builds are excluded from auto-pick (reasoning-only
+    // output, zero tool calls) — the non-thinking hermes build wins.
+    expect(result.model).toBe("litt-hermes:16k");
     // Cloud attempts are recorded in failover order; the tail stayed LAST.
     expect(result.failover).toEqual(["gemini", "groq", "openrouter-free"]);
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));

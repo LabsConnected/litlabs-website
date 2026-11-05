@@ -21,6 +21,17 @@ vi.mock("@/lib/siteConfig", () => ({ SITE_URL: "https://test.example.com" }));
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
+// Ollama calls go through undici's own fetch (custom dispatchers are
+// rejected by Node's bundled fetch) — route it through the same mock so
+// dispatched calls stay interceptable and no real socket opens.
+vi.mock("undici", async (importOriginal) => {
+  const original = await importOriginal<typeof import("undici")>();
+  return {
+    ...original,
+    fetch: (...args: Parameters<typeof original.fetch>) => mockFetch(...args),
+  };
+});
+
 // Fake tool registry — a single mutating files.write tool whose execution is
 // spied on so we can prove exactly-once semantics.
 const { filesWriteTool, executeSpy } = vi.hoisted(() => ({
