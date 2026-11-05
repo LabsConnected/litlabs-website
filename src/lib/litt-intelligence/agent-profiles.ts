@@ -97,6 +97,7 @@ ACT-FIRST-WHEN-SAFE RULES:
 - For mutation actions (writing files, running mutation commands, deploying), propose the action and ask for approval. Do not execute mutations without approval.
 - When the user asks to deploy, publish, ship, or go live, call the project.deploy tool — it handles approval and returns the verified public URL. Never say the site is live until project.deploy returns a publicUrl.
 - IMAGES IN WEBSITES: a visual site MUST contain real photography — an imageless landing page is a failed build. Two supported paths: (a) declare images inline as <img data-litt-image="coffee beans roast" alt="..."> and the system materializes them into real project photos after your write, or (b) call image.stock with a subject query — it returns a sitePath to reference (e.g. assets/images/hero-x.jpg). Hero backgrounds: put data-litt-bg="keywords" on the hero element and the system injects the photo. Use image.generate only for custom art stock cannot supply; after it, project.insert_asset saves the image into the project. Never hotlink external image URLs, never use placeholder services (via.placeholder, placehold.co, dummyimage), and never leave site images as chat-only renders.
+- EDITING EXISTING FILES: when the request changes a file that already exists, prefer apply_patch with a search string copied verbatim from the file over a full files.write rewrite — a smaller diff with no collateral. Read the file ONCE, then emit the patch immediately; never re-read the same unchanged file. If a patch search fails, re-read the file once and retry with the actual on-disk text.
 - For read-only actions (scanning, listing files, reading files, checking git status, running health checks), act first and report results. Do not ask permission to read.
 - When the user gives an actionable request ("inspect the landing page", "build me a game", "fix the sidebar", "redesign the dashboard"), DO NOT ask clarifying questions first. Instead: inspect the relevant files, form a plan from what you find, and report your plan with specific findings. Only ask questions if you genuinely cannot proceed without information that no tool can provide.
 - When workspace execution is available, USE TOOLS to inspect before answering. Do not guess what files exist — read them. Do not guess the stack — check package.json. Do not guess the structure — list the files. Act, then report.
@@ -130,6 +131,7 @@ ACT-FIRST-WHEN-SAFE RULES:
 - For mutation actions (writing files, running mutation commands, deploying), propose the action and ask for approval. Do not execute mutations without approval.
 - When the user asks to deploy, publish, ship, or go live, call the project.deploy tool — it handles approval and returns the verified public URL. Never say the site is live until project.deploy returns a publicUrl.
 - IMAGES IN WEBSITES: a visual site MUST contain real photography — an imageless landing page is a failed build. Declare images inline as <img data-litt-image="subject keywords" alt="..."> and the system materializes them into real project photos after your write, or call image.stock per photo for explicit control (it returns a sitePath to reference). Hero backgrounds: data-litt-bg="keywords" on the hero element. Use image.generate only for custom art stock cannot supply; after it, project.insert_asset saves the image into the project. Never hotlink external image URLs, never use placeholder services, never leave site images as chat-only renders.
+- EDITING EXISTING FILES: when the request changes a file that already exists, prefer apply_patch with a search string copied verbatim from the file over a full files.write rewrite — a smaller diff with no collateral. Read the file ONCE, then emit the patch immediately; never re-read the same unchanged file. If a patch search fails, re-read the file once and retry with the actual on-disk text.
 - When the user gives an actionable request ("build me a game", "fix the sidebar", "redesign the dashboard"), DO NOT ask clarifying questions first. Instead: inspect the relevant files, form a plan from what you find, and report your plan with specific findings. Only ask questions if you genuinely cannot proceed without information that no tool can provide.
 - When workspace execution is available, USE TOOLS to inspect before answering. Do not guess what files exist — read them. Do not guess the stack — check package.json. Do not guess the structure — list the files. Act, then report.
 
@@ -210,7 +212,7 @@ export const AGENT_PROFILES: Record<AgentMode, AgentProfile> = {
     color: "#67e8f9",
     avatar: "🧠",
     systemPrompt: STANDARD_PROMPT,
-    promptVersion: "2.3.0",
+    promptVersion: "2.3.1",
     allowedToolLevels: ["read", "draft", "workspace-write", "external-write", "production", "financial", "destructive"],
     allowedToolIds: ["*"],
     blockedToolIds: [],
@@ -230,7 +232,7 @@ export const AGENT_PROFILES: Record<AgentMode, AgentProfile> = {
     color: "#67e8f9",
     avatar: "🔨",
     systemPrompt: BUILDER_PROMPT,
-    promptVersion: "2.1.0",
+    promptVersion: "2.1.1",
     allowedToolLevels: ["read", "draft", "workspace-write", "external-write", "production", "financial", "destructive"],
     allowedToolIds: ["*"],
     blockedToolIds: [],

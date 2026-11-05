@@ -683,6 +683,28 @@ export function recordHealthOutcome(canonicalId: string, success: boolean, error
 }
 
 /**
+ * Failure classes that evidence model/provider-level capability — a
+ * credential, entitlement, delisted model, or a model that cannot emit a
+ * parseable response. Only these may feed capability-health demotion.
+ *
+ * Everything else is capacity or transient infra (429 rate limits,
+ * timeouts, 5xx, network errors, local aborts): those already
+ * self-exclude through the provider-registry modelCooldowns and provider
+ * health, and counting them here permanently shrinks the fleet for the
+ * process lifetime — in golden run 41948852260 a rate-limit window
+ * demoted the proven writer nemotron-3.5-lightning to "unhealthy", so
+ * weaker sibling writers were served first.
+ */
+const CAPABILITY_FAILURE_CLASSES: ReadonlySet<string> = new Set([
+  "auth_invalid",
+  "billing",
+  "forbidden",
+  "model_unavailable",
+  "bad_response",
+  "tool_call_parse_failed",
+]);
+
+/**
  * Attempt-level wiring for the routing layer: maps (provider, model) to the
  * registry record and records the outcome. No-op for models the registry
  * does not manage (legacy candidates, BYOK, ollama).
@@ -693,6 +715,7 @@ export function recordModelAttemptOutcome(
   success: boolean,
   errorClass: string,
 ): void {
+  if (!success && !CAPABILITY_FAILURE_CLASSES.has(errorClass)) return;
   const rec = [...records.values()].find(
     (r) => r.provider === provider && (r.providerModelId === providerModelId || r.canonicalId === providerModelId),
   );

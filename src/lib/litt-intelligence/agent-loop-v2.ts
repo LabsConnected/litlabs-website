@@ -22,7 +22,7 @@ import { calculateLlmCost } from "@/lib/llm-cost-engine";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
-import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
+import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallRequest, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
 // Re-exported so launch-flow can seed a continued loop's messages.
 export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
@@ -453,6 +453,33 @@ function detectRepeatedCalls(
   );
 
   return identical.length >= 3;
+}
+
+/**
+ * Bounded read-loop recovery (golden follow-up incident 2026-11-05): when
+ * a model re-issues the SAME read-only call past the watchdog threshold,
+ * the first detections feed it a corrective tool result instead of
+ * cancelling — the content it wants is already in context, so the message
+ * tells it to spend the next step mutating. A weak model gets NUDGE_MAX
+ * chances to convert; when they are spent the watchdog still cancels
+ * honestly, so a genuinely stuck loop can never run unbounded. Mutating
+ * tools never nudge — a repeated identical write that produced no
+ * mutation is a real loop, not a stall.
+ */
+const READ_LOOP_NUDGE_MAX = 2;
+
+function buildReadLoopNudgeResult(toolCall: ToolCallRequest): ToolCallResult {
+  return {
+    toolCallId: toolCall.toolCallId,
+    toolId: toolCall.toolId,
+    result: null,
+    success: false,
+    error:
+      `${toolCall.toolId} was already executed with identical inputs and that result is in context — ` +
+      `repeating it returns nothing new. Do NOT call ${toolCall.toolId} again for these inputs. ` +
+      `If the task changes a file, emit a mutation tool call now: apply_patch with an exact verbatim ` +
+      `search string from the file content already read, or files.write with the complete new content.`,
+  };
 }
 
 /**
@@ -1790,6 +1817,7 @@ async function runAgentLoopV2Inner(
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
+  let readLoopNudges = 0;
   // True once the model has emitted at least one tool call this run. An
   // execution-required run (requireToolCallOnFirstStep) holds the
   // "required" tool choice until this flips — a provider that drops the
@@ -2317,9 +2345,21 @@ async function runAgentLoopV2Inner(
         continue;
       }
 
-      // Loop detection
+      // Loop detection — a repeated read-only call earns a bounded
+      // corrective nudge (the content is already in context; spend the
+      // step mutating). Exhausted nudges or a repeated MUTATING call
+      // still cancel honestly.
       const inputsHash = hashInputs(toolCall.inputs);
       if (detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
+        if (toolDef.readOnly && readLoopNudges < READ_LOOP_NUDGE_MAX) {
+          readLoopNudges += 1;
+          localProgress.emit({
+            type: "status",
+            summary: `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`,
+          });
+          llmMessages.push(buildToolResultMessage(buildReadLoopNudgeResult(toolCall)));
+          continue;
+        }
         cancelled = true;
         cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
         break;
@@ -2870,6 +2910,8 @@ export interface DeferredToolBatchState {
   mutationBatchPending: boolean;
   batchHasMutation: boolean;
   completedDeployment: CompletedDeployment | null;
+  /** Bounded read-loop nudges spent — shared with the resumed loop. */
+  readLoopNudges?: number;
 }
 
 export interface DeferredToolBatchContext {
@@ -3060,9 +3102,19 @@ export async function executeDeferredToolCalls(
       continue;
     }
 
-    // Loop detection
+    // Loop detection — same bounded read-loop nudge as the main loop;
+    // nudge budget lives on `state` so it carries across the boundary.
     const inputsHash = hashInputs(toolCall.inputs);
     if (detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, state.hasInterveningMutation)) {
+      if (toolDef.readOnly && (state.readLoopNudges ?? 0) < READ_LOOP_NUDGE_MAX) {
+        state.readLoopNudges = (state.readLoopNudges ?? 0) + 1;
+        ctx.localProgress.emit({
+          type: "status",
+          summary: `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`,
+        });
+        ctx.llmMessages.push(buildToolResultMessage(buildReadLoopNudgeResult(toolCall)));
+        continue;
+      }
       state.cancelled = true;
       state.cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
       break;
@@ -3372,6 +3424,7 @@ async function resumeAgentLoopV2Inner(
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
+  let readLoopNudges = 0;
   // A paused run exists BECAUSE the model emitted an approval-gated tool
   // call — the required-first-call contract was satisfied pre-pause, so
   // the resumed loop runs under "auto" tool choice throughout.
@@ -3575,6 +3628,7 @@ async function resumeAgentLoopV2Inner(
       mutationBatchPending,
       batchHasMutation,
       completedDeployment,
+      readLoopNudges,
     };
     const deferredResult = await executeDeferredToolCalls(resume.deferredToolCalls, {
       availableTools: resumeOfferableTools,
@@ -3605,6 +3659,7 @@ async function resumeAgentLoopV2Inner(
     mutationBatchPending = deferredState.mutationBatchPending;
     batchHasMutation = deferredState.batchHasMutation;
     completedDeployment = deferredState.completedDeployment;
+    readLoopNudges = deferredState.readLoopNudges ?? readLoopNudges;
 
     if (deferredResult.nestedApproval) {
       // A nested gate on a file-writing tool carries 0 — write intent is
@@ -3919,9 +3974,19 @@ async function resumeAgentLoopV2Inner(
         };
       }
 
-      // Loop detection
+      // Loop detection — same bounded read-loop nudge as the initial
+      // loop; nudges spent in the deferred batch carry over here.
       const inputsHash = hashInputs(toolCall.inputs);
       if (detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
+        if (toolDef.readOnly && readLoopNudges < READ_LOOP_NUDGE_MAX) {
+          readLoopNudges += 1;
+          localProgress.emit({
+            type: "status",
+            summary: `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`,
+          });
+          llmMessages.push(buildToolResultMessage(buildReadLoopNudgeResult(toolCall)));
+          continue;
+        }
         cancelled = true;
         cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
         break;
