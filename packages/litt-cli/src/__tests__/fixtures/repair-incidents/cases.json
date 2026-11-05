@@ -1,0 +1,1255 @@
+[
+  {
+    "id": "broken-marker-fix",
+    "description": "Baseline: a BROKEN marker is replaced with HEALTHY; pipeline completes end-to-end.",
+    "workspaceFiles": {
+      "src/state.txt": "status=BROKEN\n",
+      "repro.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');if(s.includes('BROKEN')){console.error('BROKEN-SIGNATURE: state is broken');process.exit(1)}console.log('healthy');\n",
+      "tests/regression.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');process.exit(s.includes('BROKEN')?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "state.txt carries a BROKEN marker; the service reports a failure signature on every run.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "BROKEN-SIGNATURE"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "state regression",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "state.txt holds a BROKEN marker; flip it to a healthy status.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/state.txt",
+            "search": "status=BROKEN",
+            "replacement": "status=HEALTHY"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/state.txt"
+      ],
+      "fileContents": {
+        "src/state.txt": "status=HEALTHY\n"
+      }
+    },
+    "scope": "cli"
+  },
+  {
+    "id": "noop-proposal-rollback",
+    "description": "A patch that applies but does not fix must roll the workspace back to its exact prior bytes.",
+    "workspaceFiles": {
+      "src/state.txt": "status=BROKEN\n",
+      "repro.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');if(s.includes('BROKEN')){console.error('BROKEN-SIGNATURE: state is broken');process.exit(1)}console.log('healthy');\n",
+      "tests/regression.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');process.exit(s.includes('BROKEN')?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "state.txt carries a BROKEN marker; the service reports a failure signature on every run.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "BROKEN-SIGNATURE"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "state regression",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "A comment notes the broken marker but does not remove it.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/state.txt",
+            "search": "status=BROKEN",
+            "replacement": "status=BROKEN # noted"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 4,
+      "stage": "failed",
+      "blockReason": "validation",
+      "filesChanged": [
+        "src/state.txt"
+      ],
+      "fileContents": {
+        "src/state.txt": "status=BROKEN\n"
+      },
+      "risksContain": [
+        "workspace restored"
+      ]
+    },
+    "scope": "cli"
+  },
+  {
+    "id": "already-healthy-block",
+    "description": "When the reproduction does not fail, the run must block — never invent a fix for a healthy workspace.",
+    "workspaceFiles": {
+      "src/state.txt": "status=HEALTHY\n",
+      "repro.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');if(s.includes('BROKEN')){console.error('BROKEN-SIGNATURE: state is broken');process.exit(1)}console.log('healthy');\n",
+      "tests/regression.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');process.exit(s.includes('BROKEN')?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "state.txt carries a BROKEN marker; the service reports a failure signature on every run.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "BROKEN-SIGNATURE"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "state regression",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "state.txt holds a BROKEN marker; flip it to a healthy status.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/state.txt",
+            "search": "status=BROKEN",
+            "replacement": "status=HEALTHY"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 1,
+      "stage": "blocked",
+      "blockReason": "reproduction",
+      "filesChanged": [],
+      "risksContain": [
+        "Could not reproduce"
+      ]
+    },
+    "scope": "cli"
+  },
+  {
+    "id": "provider-billing-block",
+    "description": "Provider exhaustion must surface as a billing block (exit 3), never as a repair failure — and nothing is modified.",
+    "workspaceFiles": {
+      "src/state.txt": "status=BROKEN\n",
+      "repro.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');if(s.includes('BROKEN')){console.error('BROKEN-SIGNATURE: state is broken');process.exit(1)}console.log('healthy');\n",
+      "tests/regression.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');process.exit(s.includes('BROKEN')?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "state.txt carries a BROKEN marker; the service reports a failure signature on every run.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "BROKEN-SIGNATURE"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "state regression",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "billing"
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 3,
+      "stage": "blocked",
+      "blockReason": "billing",
+      "filesChanged": [],
+      "fileContents": {
+        "src/state.txt": "status=BROKEN\n"
+      }
+    },
+    "scope": "cli"
+  },
+  {
+    "id": "out-of-scope-patch",
+    "description": "A proposal targeting a path outside editablePaths is rejected and rolled back — unrelated files are never silently modified.",
+    "workspaceFiles": {
+      "src/state.txt": "status=BROKEN\n",
+      "repro.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');if(s.includes('BROKEN')){console.error('BROKEN-SIGNATURE: state is broken');process.exit(1)}console.log('healthy');\n",
+      "tests/regression.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');process.exit(s.includes('BROKEN')?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "state.txt carries a BROKEN marker; the service reports a failure signature on every run.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "BROKEN-SIGNATURE"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "state regression",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "Suppress the failure by editing the reproduction script itself.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "repro.cjs",
+            "search": "process.exit(1)",
+            "replacement": "process.exit(0)"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 4,
+      "stage": "failed",
+      "blockReason": "validation",
+      "filesChanged": [],
+      "fileContents": {
+        "src/state.txt": "status=BROKEN\n",
+        "repro.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');if(s.includes('BROKEN')){console.error('BROKEN-SIGNATURE: state is broken');process.exit(1)}console.log('healthy');\n"
+      },
+      "risksContain": [
+        "workspace restored"
+      ]
+    },
+    "scope": "cli"
+  },
+  {
+    "id": "protected-path-patch",
+    "description": "A proposal touching a protected path (.env) is rejected even when the job lists it as editable.",
+    "workspaceFiles": {
+      "src/state.txt": "status=BROKEN\n",
+      "repro.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');if(s.includes('BROKEN')){console.error('BROKEN-SIGNATURE: state is broken');process.exit(1)}console.log('healthy');\n",
+      "tests/regression.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');process.exit(s.includes('BROKEN')?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "state.txt carries a BROKEN marker; the service reports a failure signature on every run.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "BROKEN-SIGNATURE"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src",
+        ".env"
+      ],
+      "checks": [
+        {
+          "name": "state regression",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "Write a flag file into .env to bypass the failure path.",
+        "patches": [
+          {
+            "operation": "create",
+            "path": ".env",
+            "content": "REPAIR_BYPASS=1\n"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 4,
+      "stage": "failed",
+      "blockReason": "validation",
+      "filesChanged": [],
+      "absentPaths": [
+        ".env"
+      ],
+      "risksContain": [
+        "workspace restored"
+      ]
+    },
+    "scope": "cli"
+  },
+  {
+    "id": "park-then-resume",
+    "description": "Without --yes the run parks at partially-verified with nothing applied; resume --yes completes it.",
+    "workspaceFiles": {
+      "src/state.txt": "status=BROKEN\n",
+      "repro.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');if(s.includes('BROKEN')){console.error('BROKEN-SIGNATURE: state is broken');process.exit(1)}console.log('healthy');\n",
+      "tests/regression.cjs": "const fs=require('fs');const s=fs.readFileSync('src/state.txt','utf8');process.exit(s.includes('BROKEN')?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "state.txt carries a BROKEN marker; the service reports a failure signature on every run.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "BROKEN-SIGNATURE"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "state regression",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "state.txt holds a BROKEN marker; flip it to a healthy status.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/state.txt",
+            "search": "status=BROKEN",
+            "replacement": "status=HEALTHY"
+          }
+        ]
+      }
+    },
+    "startArgs": [],
+    "resumeArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 3,
+      "stage": "partially-verified",
+      "blockReason": "approval",
+      "filesChanged": [],
+      "fileContents": {
+        "src/state.txt": "status=BROKEN\n"
+      }
+    },
+    "resumeExpect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/state.txt"
+      ],
+      "fileContents": {
+        "src/state.txt": "status=HEALTHY\n"
+      }
+    },
+    "scope": "cli"
+  },
+  {
+    "id": "create-file-fix",
+    "description": "A 'create' patch adds a missing config file; rollback must remove it if verification fails later.",
+    "workspaceFiles": {
+      "repro-missing.cjs": "const fs=require('fs');try{fs.readFileSync('src/config.json','utf8')}catch(e){console.error('MISSING-CONFIG: config.json absent');process.exit(1)}console.log('ok');\n",
+      "tests/regression-missing.cjs": "const fs=require('fs');process.exit(fs.existsSync('src/config.json')?0:1);\n",
+      "src/README.txt": "placeholder\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "The loader fails because src/config.json is missing; the run exits with MISSING-CONFIG.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro-missing.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "MISSING-CONFIG"
+        }
+      },
+      "regression": {
+        "path": "tests/regression-missing.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression-missing.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "config presence regression",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression-missing.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "src/config.json is missing; create it with the default mode.",
+        "patches": [
+          {
+            "operation": "create",
+            "path": "src/config.json",
+            "content": "{ \"mode\": \"ok\" }\n"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/config.json"
+      ],
+      "fileContents": {
+        "src/config.json": "{ \"mode\": \"ok\" }\n"
+      }
+    },
+    "scope": "cli"
+  },
+  {
+    "id": "ollama-cold-start-timeout",
+    "scope": "cli",
+    "description": "Incident class: Ollama cold start exceeds the request timeout, so the first call after idle fails.",
+    "workspaceFiles": {
+      "src/ollama.json": "{ \"timeoutMs\": 5000, \"coldStartMs\": 45000 }\n",
+      "repro.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/ollama.json','utf8'));const e=c.timeoutMs < c.coldStartMs ? \"timeout \" + c.timeoutMs + \"ms is shorter than model cold start \" + c.coldStartMs + \"ms\" : null;if(e){console.error('COLD-START-TIMEOUT: '+e);process.exit(1)}console.log('ok');\n",
+      "tests/regression.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/ollama.json','utf8'));const e=c.timeoutMs < c.coldStartMs ? \"timeout \" + c.timeoutMs + \"ms is shorter than model cold start \" + c.coldStartMs + \"ms\" : null;process.exit(e?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "Incident class: Ollama cold start exceeds the request timeout, so the first call after idle fails.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "COLD-START-TIMEOUT"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "ollama-cold-start-timeout",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "The request timeout is shorter than the model cold-start time; raise it above the cold start.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/ollama.json",
+            "search": "\"timeoutMs\": 5000",
+            "replacement": "\"timeoutMs\": 120000"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/ollama.json"
+      ],
+      "fileContents": {
+        "src/ollama.json": "{ \"timeoutMs\": 120000, \"coldStartMs\": 45000 }\n"
+      }
+    }
+  },
+  {
+    "id": "incorrect-model-selection",
+    "scope": "cli",
+    "description": "Incident class: a cloud model is selected although the local lane is preferred.",
+    "workspaceFiles": {
+      "src/routing.json": "{ \"defaultModel\": \"openrouter:gpt-4o\", \"preferLocal\": true }\n",
+      "repro.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/routing.json','utf8'));const e=c.preferLocal && !String(c.defaultModel).startsWith(\"ollama:\") ? \"preferLocal is set but default model is cloud \" + c.defaultModel : null;if(e){console.error('MODEL-SELECTION: '+e);process.exit(1)}console.log('ok');\n",
+      "tests/regression.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/routing.json','utf8'));const e=c.preferLocal && !String(c.defaultModel).startsWith(\"ollama:\") ? \"preferLocal is set but default model is cloud \" + c.defaultModel : null;process.exit(e?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "Incident class: a cloud model is selected although the local lane is preferred.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "MODEL-SELECTION"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "incorrect-model-selection",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "The default model points at a paid provider while preferLocal is set; select the local coding model.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/routing.json",
+            "search": "\"openrouter:gpt-4o\"",
+            "replacement": "\"ollama:litt-coder:8k\""
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/routing.json"
+      ],
+      "fileContents": {
+        "src/routing.json": "{ \"defaultModel\": \"ollama:litt-coder:8k\", \"preferLocal\": true }\n"
+      }
+    }
+  },
+  {
+    "id": "tailscale-lan-fallback",
+    "scope": "cli",
+    "description": "Incident class: only tailnet hosts are configured and LAN fallback is off, so a Tailscale outage strands the CLI.",
+    "workspaceFiles": {
+      "src/hosts.json": "{ \"hosts\": [\"100.101.102.103\"], \"fallbackToLan\": false }\n",
+      "repro.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/hosts.json','utf8'));const e=c.hosts.every(function (h) { return h.indexOf(\"100.\") === 0; }) && !c.fallbackToLan ? \"only tailnet hosts and no LAN fallback\" : null;if(e){console.error('LAN-FALLBACK: '+e);process.exit(1)}console.log('ok');\n",
+      "tests/regression.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/hosts.json','utf8'));const e=c.hosts.every(function (h) { return h.indexOf(\"100.\") === 0; }) && !c.fallbackToLan ? \"only tailnet hosts and no LAN fallback\" : null;process.exit(e?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "Incident class: only tailnet hosts are configured and LAN fallback is off, so a Tailscale outage strands the CLI.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "LAN-FALLBACK"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "tailscale-lan-fallback",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "LAN fallback is disabled while every configured host is on the tailnet; enable the fallback.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/hosts.json",
+            "search": "\"fallbackToLan\": false",
+            "replacement": "\"fallbackToLan\": true"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/hosts.json"
+      ],
+      "fileContents": {
+        "src/hosts.json": "{ \"hosts\": [\"100.101.102.103\"], \"fallbackToLan\": true }\n"
+      }
+    }
+  },
+  {
+    "id": "powershell-process-overhead",
+    "scope": "cli",
+    "description": "Incident class: short-lived commands are spawned through powershell instead of directly, adding process overhead on Windows.",
+    "workspaceFiles": {
+      "src/spawn.json": "{ \"spawnVia\": \"powershell\", \"timeoutMs\": 30000 }\n",
+      "repro.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/spawn.json','utf8'));const e=c.spawnVia !== \"direct\" ? \"short-lived commands spawn via \" + c.spawnVia + \" (process overhead)\" : null;if(e){console.error('PROCESS-OVERHEAD: '+e);process.exit(1)}console.log('ok');\n",
+      "tests/regression.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/spawn.json','utf8'));const e=c.spawnVia !== \"direct\" ? \"short-lived commands spawn via \" + c.spawnVia + \" (process overhead)\" : null;process.exit(e?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "Incident class: short-lived commands are spawned through powershell instead of directly, adding process overhead on Windows.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "PROCESS-OVERHEAD"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "powershell-process-overhead",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "Commands are routed through powershell; spawn them directly with argv.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/spawn.json",
+            "search": "\"spawnVia\": \"powershell\"",
+            "replacement": "\"spawnVia\": \"direct\""
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/spawn.json"
+      ],
+      "fileContents": {
+        "src/spawn.json": "{ \"spawnVia\": \"direct\", \"timeoutMs\": 30000 }\n"
+      }
+    }
+  },
+  {
+    "id": "cli-tool-execution-failure",
+    "scope": "cli",
+    "description": "Incident class: a tool call passes a whole command line as the executable, so spawn cannot find it.",
+    "workspaceFiles": {
+      "src/tool.json": "{ \"command\": \"git status --short\", \"args\": [] }\n",
+      "repro.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/tool.json','utf8'));const e=c.command.indexOf(\" \") >= 0 ? \"command contains whitespace; spawn needs argv: \" + c.command : null;if(e){console.error('TOOL-ARGV: '+e);process.exit(1)}console.log('ok');\n",
+      "tests/regression.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/tool.json','utf8'));const e=c.command.indexOf(\" \") >= 0 ? \"command contains whitespace; spawn needs argv: \" + c.command : null;process.exit(e?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "Incident class: a tool call passes a whole command line as the executable, so spawn cannot find it.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "TOOL-ARGV"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "cli-tool-execution-failure",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "The executable and its arguments were not split; pass argv instead of a command line.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/tool.json",
+            "search": "\"command\": \"git status --short\", \"args\": []",
+            "replacement": "\"command\": \"git\", \"args\": [\"status\", \"--short\"]"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/tool.json"
+      ],
+      "fileContents": {
+        "src/tool.json": "{ \"command\": \"git\", \"args\": [\"status\", \"--short\"] }\n"
+      }
+    }
+  },
+  {
+    "id": "approval-resume-interruption",
+    "scope": "cli",
+    "description": "Incident class: a run parked for approval cannot resume because its proposal was never persisted.",
+    "workspaceFiles": {
+      "src/resume.json": "{ \"persistProposal\": false, \"resumeFrom\": \"start\" }\n",
+      "repro.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/resume.json','utf8'));const e=!c.persistProposal ? \"parked run cannot resume: proposal not persisted\" : null;if(e){console.error('RESUME-STATE: '+e);process.exit(1)}console.log('ok');\n",
+      "tests/regression.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/resume.json','utf8'));const e=!c.persistProposal ? \"parked run cannot resume: proposal not persisted\" : null;process.exit(e?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "Incident class: a run parked for approval cannot resume because its proposal was never persisted.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "RESUME-STATE"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "approval-resume-interruption",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "The proposal is not persisted before approval, so resume has nothing to continue from.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/resume.json",
+            "search": "\"persistProposal\": false",
+            "replacement": "\"persistProposal\": true"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/resume.json"
+      ],
+      "fileContents": {
+        "src/resume.json": "{ \"persistProposal\": true, \"resumeFrom\": \"start\" }\n"
+      }
+    }
+  },
+  {
+    "id": "cancellation-stalled-process",
+    "scope": "cli",
+    "description": "Incident class: a stalled child has no timeout and survives cancellation.",
+    "workspaceFiles": {
+      "src/runner.json": "{ \"timeoutMs\": 0, \"killTreeOnCancel\": false }\n",
+      "repro.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/runner.json','utf8'));const e=c.timeoutMs <= 0 || !c.killTreeOnCancel ? \"stalled child can outlive cancellation\" : null;if(e){console.error('STALLED-PROCESS: '+e);process.exit(1)}console.log('ok');\n",
+      "tests/regression.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/runner.json','utf8'));const e=c.timeoutMs <= 0 || !c.killTreeOnCancel ? \"stalled child can outlive cancellation\" : null;process.exit(e?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "Incident class: a stalled child has no timeout and survives cancellation.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "STALLED-PROCESS"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "cancellation-stalled-process",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "No timeout is set and cancellation does not kill the process tree; bound the run and kill the tree.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/runner.json",
+            "search": "\"timeoutMs\": 0, \"killTreeOnCancel\": false",
+            "replacement": "\"timeoutMs\": 120000, \"killTreeOnCancel\": true"
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/runner.json"
+      ],
+      "fileContents": {
+        "src/runner.json": "{ \"timeoutMs\": 120000, \"killTreeOnCancel\": true }\n"
+      }
+    }
+  },
+  {
+    "id": "file-persistence-failure",
+    "scope": "cli",
+    "description": "Incident class: state is written in place, so a crash mid-write loses it.",
+    "workspaceFiles": {
+      "src/store.json": "{ \"writeMode\": \"truncate-in-place\" }\n",
+      "repro.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/store.json','utf8'));const e=c.writeMode !== \"atomic-rename\" ? \"non-atomic write loses data on crash\" : null;if(e){console.error('PERSISTENCE: '+e);process.exit(1)}console.log('ok');\n",
+      "tests/regression.cjs": "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src/store.json','utf8'));const e=c.writeMode !== \"atomic-rename\" ? \"non-atomic write loses data on crash\" : null;process.exit(e?1:0);\n"
+    },
+    "job": {
+      "version": 1,
+      "incident": "Incident class: state is written in place, so a crash mid-write loses it.",
+      "reproduction": {
+        "command": {
+          "command": "node",
+          "args": [
+            "repro.cjs"
+          ]
+        },
+        "expectedFailure": {
+          "stream": "stderr",
+          "includes": "PERSISTENCE"
+        }
+      },
+      "regression": {
+        "path": "tests/regression.cjs",
+        "command": {
+          "command": "node",
+          "args": [
+            "tests/regression.cjs"
+          ]
+        }
+      },
+      "editablePaths": [
+        "src"
+      ],
+      "checks": [
+        {
+          "name": "file-persistence-failure",
+          "command": {
+            "command": "node",
+            "args": [
+              "tests/regression.cjs"
+            ]
+          },
+          "kind": "focused",
+          "required": true
+        }
+      ]
+    },
+    "provider": {
+      "outcome": "proposal",
+      "proposal": {
+        "rootCause": "State is truncated and rewritten in place; write to a temp file and rename atomically.",
+        "patches": [
+          {
+            "operation": "replace",
+            "path": "src/store.json",
+            "search": "\"truncate-in-place\"",
+            "replacement": "\"atomic-rename\""
+          }
+        ]
+      }
+    },
+    "startArgs": [
+      "--yes"
+    ],
+    "expect": {
+      "exitCode": 0,
+      "stage": "complete",
+      "filesChanged": [
+        "src/store.json"
+      ],
+      "fileContents": {
+        "src/store.json": "{ \"writeMode\": \"atomic-rename\" }\n"
+      }
+    }
+  }
+]

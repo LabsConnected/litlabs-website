@@ -27,3 +27,14 @@ cf80a8f1c71e42c1d83daf42a55445a7b06d941e:packages/litt-cli/src/__tests__/dex-sta
 b596db3c67f60020cd5074ab1e87ca03adc30777:packages/litt-agent-core/src/__tests__/toolcall-debug-redaction.test.ts:jwt:37
 93ef380b4bc312e377c5647cf6f54db9cb7cf304:terminal-server/__tests__/preview-asset-pipeline.test.ts:generic-api-key:339
 93ef380b4bc312e377c5647cf6f54db9cb7cf304:terminal-server/__tests__/preview-asset-pipeline.test.ts:generic-api-key:388
+
+# Synthetic redaction fixtures in repair-hardening.test.ts - made-up
+# sk_live_abcdefghijklmnop1234 value proves formatPatchSummary strips that
+# shape from approval previews (PR #783, commit ce0065c8b).
+ce0065c8bbc238767570795d03c6b7bbe905e65b:packages/litt-cli/src/__tests__/repair-hardening.test.ts:stripe-access-token:147
+ce0065c8bbc238767570795d03c6b7bbe905e65b:packages/litt-cli/src/__tests__/repair-hardening.test.ts:stripe-access-token:153
+# Same synthetic fixtures re-surfaced under --all at squash merge commit
+# 7ee8235 (PR #783), lines 149/155 — same made-up sk_live_abcdefghijklmnop1234
+# test value. Fingerprints verified against the gitleaks push run on 7ee8235.
+7ee82350431e6e32899dd5b4a92e5ace28874718:packages/litt-cli/src/__tests__/repair-hardening.test.ts:stripe-access-token:149
+7ee82350431e6e32899dd5b4a92e5ace28874718:packages/litt-cli/src/__tests__/repair-hardening.test.ts:stripe-access-token:155

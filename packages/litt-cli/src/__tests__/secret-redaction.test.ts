@@ -85,6 +85,44 @@ describe("Secret redaction", () => {
       expect(result).toContain("whsec_***");
     });
 
+    it("redacts OpenAI-style sk- keys (bare and sk-proj-)", () => {
+      const bare = "sk-" + FAKE_SUFFIX;
+      const proj = "sk-" + "proj-" + FAKE_SUFFIX;
+      for (const key of [bare, proj]) {
+        const result = redact(`used ${key} for the call`);
+        expect(result).not.toContain(key);
+        expect(result).toContain("sk-***");
+      }
+    });
+
+    it("redacts GitHub personal/OAuth/server and fine-grained PATs", () => {
+      const ghp = "ghp_" + FAKE_SUFFIX;
+      const gho = "gho_" + FAKE_SUFFIX;
+      const ghs = "ghs_" + FAKE_SUFFIX;
+      const fine = "github" + "_pat_" + FAKE_SUFFIX;
+      for (const token of [ghp, gho, ghs, fine]) {
+        const result = redact(`token: ${token}`);
+        expect(result).not.toContain(token);
+      }
+    });
+
+    it("redacts JSON Web Tokens", () => {
+      const header = "eyJ" + "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
+      const payload = "eyJ" + "zdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkZha2UifQ";
+      const signature = "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c";
+      const jwt = `${header}.${payload}.${signature}`;
+      const result = redact(`Authorization failed for ${jwt}`);
+      expect(result).not.toContain(jwt);
+      expect(result).toContain("eyJ***");
+    });
+
+    it("does NOT redact short sk- fragments or non-token gh- words", () => {
+      const input = "see task-foo123 and sk-short and ghp_tiny";
+      const result = redact(input);
+      expect(result).toContain("sk-short");
+      expect(result).toContain("ghp_tiny");
+    });
+
     it("handles empty strings", () => {
       expect(redact("")).toBe("");
     });

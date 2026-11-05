@@ -223,6 +223,7 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   "terminal.execute": workspaceTool("terminal.execute", (m) => m.handleTerminalExecute),
   "project.health": workspaceTool("project.health", (m) => m.handleProjectHealth),
   "project.insert_asset": workspaceTool("project.insert_asset", (m) => m.handleProjectInsertAsset),
+  "image.stock": workspaceTool("image.stock", (m) => m.handleImageStock),
   // App-level capability — server-side HTTP, not workspace-scoped.
   "image.generate": async () => (await import("./tool-handlers")).handleImageGenerate,
   // V2 workspace-aware handlers (used by agent-loop-v2.ts)
@@ -1294,6 +1295,37 @@ export function registerInternalTools(): void {
         enabled: true,
       },
       handler: lazyHandlers["image.generate"],
+    },
+    {
+      tool: {
+        id: "image.stock",
+        name: "Fetch Stock Image",
+        description:
+          "Fetch a real royalty-free photograph for a topic (e.g. 'coffee beans closeup') into the project's served " +
+          "asset directory and return the sitePath to reference in HTML. Free providers only — never bills the user. " +
+          "Prefer this for photography; use image.generate only for custom art stock cannot supply.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            projectId: { type: "string" },
+            query: { type: "string", description: "Photo subject keywords, e.g. 'coffee beans roast'" },
+          },
+          required: ["projectId", "query"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "medium",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 60000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["image.stock"],
     },
     {
       tool: {

@@ -9,7 +9,7 @@
  * We assert the exact argv array — not just length or presence.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { resolveDispatch } from "../lib/dispatch.js";
 import { tokenizeShellArgs } from "../lib/shell-args.js";
 import { executeCommand } from "../lib/command-execution.js";

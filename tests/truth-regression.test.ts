@@ -53,6 +53,7 @@ describe("Starter credit grant is one-time", () => {
     );
     expect(recurring.map((p) => p.id).sort()).toEqual([
       "creator_beta",
+      "creator_lite",
       "pro_builder_beta",
     ]);
     // Starter is NOT in the recurring list.

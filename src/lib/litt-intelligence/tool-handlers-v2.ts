@@ -1011,6 +1011,45 @@ export async function insertAssetFromUrl(
   }
 }
 
+/**
+ * image.stock — fetch a real photograph for a topic into the project.
+ *
+ * Free-only resolution (Pexels free tier → pollinations → loremflickr →
+ * picsum): this tool never calls a paid provider and never debits the
+ * user. The result lands in the workspace like project.insert_asset —
+ * the model references the returned sitePath. Use for photography;
+ * image.generate remains for custom art stock cannot supply.
+ */
+export const handleImageStock: ToolHandler = async (inputs, transport) => {
+  const query = typeof inputs.query === "string" ? inputs.query.trim() : "";
+  if (query.length < 2) {
+    return { success: false, error: "query is required (e.g. 'coffee beans closeup')" };
+  }
+  const { resolveSlotImage } = await import("@/lib/site-enrich/resolver");
+  const resolved = await resolveSlotImage(query, Math.floor(Math.random() * 1e6));
+  if (!resolved) {
+    return { success: false, error: `No stock image available for "${query}" right now` };
+  }
+  const saved = await insertAssetFromUrl(
+    resolved.url,
+    { nameHint: query.slice(0, 30) },
+    transport,
+  );
+  if (!saved.success || !saved.sitePath) {
+    return { success: false, error: saved.error ?? "Failed to save stock image into project" };
+  }
+  return {
+    success: true,
+    provider: resolved.provider,
+    attribution: resolved.attribution,
+    sitePath: saved.sitePath,
+    path: saved.path,
+    siteReference:
+      `Reference this image in the site's HTML as <img src="${saved.sitePath}" /> — ` +
+      `the file already exists in the project.`,
+  };
+};
+
 export const handleProjectInsertAsset: ToolHandler = async (inputs, transport) => {
   const url = inputs.url as string | undefined;
   const nameHint = inputs.name as string | undefined;
