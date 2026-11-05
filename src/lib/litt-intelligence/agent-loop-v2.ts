@@ -27,7 +27,7 @@ import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage
 export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
-import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
+import { buildPatchRecoveryMessage, existingFileRewriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -2221,17 +2221,19 @@ async function runAgentLoopV2Inner(
 
       // Pre-approval write sanity: an apply_patch or files.write whose
       // inputs are provably invalid (unresolved template placeholders like
-      // [PERSON_NAME] or {{token}}, or a patch search string that cannot
-      // match the target file) must never become an Approve/Reject card —
+      // [PERSON_NAME] or {{token}}, a patch search string that cannot
+      // match the target file, or a full rewrite that deletes most of the
+      // existing file's content) must never become an Approve/Reject card —
       // the approval freezes the inputs, so approving a dead write can only
-      // fail on resume or persist the token verbatim. Feed the error back
+      // fail on resume or persist the damage verbatim. Feed the error back
       // as a tool result so the model re-reads and regenerates.
       if (permResult.allowed) {
         const writeError =
           toolCall.toolId === "apply_patch"
             ? await validateApplyPatchInputs(toolCall.inputs, transport)
             : toolCall.toolId === "files.write"
-              ? validateFilesWriteInputs(toolCall.inputs)
+              ? (validateFilesWriteInputs(toolCall.inputs) ??
+                (await existingFileRewriteError(toolCall.inputs, transport)))
               : null;
         if (writeError) {
           const recoveryKey = `${toolCall.toolId}:${String(toolCall.inputs.path ?? "")}`;
