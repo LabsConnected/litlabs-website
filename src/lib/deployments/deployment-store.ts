@@ -204,7 +204,13 @@ export async function readPublishedFile(
     .select("id,status")
     .eq("id", deploymentId)
     .maybeSingle();
-  if (deploymentError || !deployment) return null;
+  if (deploymentError) {
+    // A store error must not masquerade as a missing file — the golden
+    // acceptance run proved that collapsing errors into null turns a
+    // transient PostgREST blip into a public 404 for an asset that exists.
+    throw new Error(`Deployment lookup failed: ${deploymentError.message}`);
+  }
+  if (!deployment) return null;
   if ((deployment as { status: string }).status !== "ready") return null;
 
   let { data, error } = await supabaseAdmin
@@ -226,7 +232,20 @@ export async function readPublishedFile(
       .eq("path", path)
       .maybeSingle());
   }
-  if (error || !data) return null;
+  if (error) {
+    // One retry for transient store errors; a second failure surfaces as a
+    // thrown error (the route answers 503) — never a false "not found".
+    ({ data, error } = await supabaseAdmin
+      .from(FILES_TABLE)
+      .select("content,content_type,encoding")
+      .eq("deployment_id", deploymentId)
+      .eq("path", path)
+      .maybeSingle());
+    if (error) {
+      throw new Error(`Published file read failed: ${error.message}`);
+    }
+  }
+  if (!data) return null;
 
   const row = data as { content: string; content_type: string; encoding?: string | null };
   return { content: row.content, contentType: row.content_type, encoding: row.encoding };
