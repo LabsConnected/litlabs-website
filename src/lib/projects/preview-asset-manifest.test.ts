@@ -88,10 +88,38 @@ describe("collectPreviewAssetManifest", () => {
     expect(manifest.assets).toEqual(["app.js", "index.html", "pages/helper.js", "pages/two.html", "pages/two.js", "three.html"]);
   });
 
-  it("never sweeps stylesheets, images, or unreferenced files", async () => {
-    const files = { ...SENSITIVE, "index.html": '<link rel="stylesheet" href="style.css"><img src="logo.png"><script src="app.js"></script>', "style.css": "body {}", "logo.png": "binary", "app.js": "window.a = 1;" };
+  it("covers the images, icons, and stylesheet url() refs the document legitimately fetches — and nothing else", async () => {
+    const files = {
+      ...SENSITIVE,
+      "index.html": '<link rel="stylesheet" href="style.css"><img src="assets/logo.png"><img srcset="a.webp 1x, b.webp 2x"><video poster="poster.jpg"><script src="app.js"></script>',
+      "style.css": "body { background: url('images/bg.jpg'); } @font-face { src: url('fonts/x.woff2'); }",
+      "assets/logo.png": "binary",
+      "images/bg.jpg": "binary",
+      "app.js": "window.a = 1;",
+    };
     const manifest = await collectPreviewAssetManifest("index.html", files["index.html"], reader(files));
-    expect(manifest.assets).toEqual(["app.js", "index.html"]);
+    // Referenced subresources the opaque origin must fetch under the token:
+    // the imgs/srcset/poster, the linked sheet, and the sheet's own url()
+    // closure. Unreferenced files and sensitive docs stay out.
+    expect(manifest.assets).toEqual([
+      "a.webp",
+      "app.js",
+      "assets/logo.png",
+      "b.webp",
+      "fonts/x.woff2",
+      "images/bg.jpg",
+      "index.html",
+      "poster.jpg",
+      "style.css",
+    ]);
+    expect(manifest.complete).toBe(true);
+  });
+
+  it("an unreadable stylesheet does not veto the document — its path stays authorized and its urls fail closed", async () => {
+    const files = { "index.html": '<link rel="stylesheet" href="missing.css"><img src="ok.png">', "ok.png": "binary" };
+    const manifest = await collectPreviewAssetManifest("index.html", files["index.html"], reader(files));
+    expect(manifest.assets).toEqual(["index.html", "missing.css", "ok.png"]);
+    expect(manifest.complete).toBe(true);
   });
 
   it("fails closed when a referenced file cannot be read", async () => {

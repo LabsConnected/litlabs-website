@@ -11,6 +11,73 @@ function assetPath(reference: string, entryPath: string, extension: RegExp): str
   } catch { return null; }
 }
 
+/**
+ * Non-script subresource file types the sandboxed preview legitimately
+ * fetches by URL: images, fonts, media, favicons/app manifests and caption
+ * tracks. Like scripts, these requests arrive from the opaque origin with
+ * no session, so they must be issued under the token-authorized prefix.
+ */
+const SUBRESOURCE_EXT =
+  /\.(?:png|jpe?g|webp|gif|avif|svg|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|mov|m4v|mp3|wav|ogg|oga|m4a|flac|aac|vtt|webmanifest)$/i;
+
+const CSS_URL_RE = /url\(\s*(["']?)([^"')]+)\1\s*\)/g;
+
+/**
+ * Same-workspace url() references inside a CSS source (document <style>
+ * block, a style attribute, or a fetched stylesheet) resolved against
+ * `basePath` — the document path for inline CSS, the stylesheet's own
+ * workspace path for linked CSS. Shared by the transform (rewrite) and the
+ * manifest (authorization) so the two can never drift.
+ */
+export function extractCssUrls(css: string, basePath: string): string[] {
+  const paths: string[] = [];
+  for (const m of css.matchAll(CSS_URL_RE)) {
+    const path = assetPath(m[2], basePath, SUBRESOURCE_EXT);
+    if (path) paths.push(path);
+  }
+  return paths;
+}
+
+/** Rewrite resolvable url() refs inside CSS text to token-authorized URLs. */
+function rewriteCssUrls(css: string, basePath: string, assetBase: string): { text: string; changed: boolean } {
+  let changed = false;
+  const text = css.replace(CSS_URL_RE, (raw, quote: string, ref: string) => {
+    const path = assetPath(ref, basePath, SUBRESOURCE_EXT);
+    if (!path) return raw;
+    changed = true;
+    return `url(${quote}${assetBase}${path}${quote})`;
+  });
+  return { text, changed };
+}
+
+/** Parse a srcset into `{ url, descriptor }` candidates. */
+function parseSrcset(srcset: string): Array<{ url: string; descriptor: string }> {
+  return srcset
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [url, ...rest] = entry.split(/\s+/);
+      return { url, descriptor: rest.join(" ") };
+    });
+}
+
+/** Rewrite each srcset candidate's URL; descriptors pass through untouched. */
+function rewriteSrcset(srcset: string, entryPath: string, assetBase: string): { value: string; changed: boolean } {
+  let changed = false;
+  const value = parseSrcset(srcset)
+    .map(({ url, descriptor }) => {
+      const path = assetPath(url, entryPath, SUBRESOURCE_EXT);
+      if (path) {
+        changed = true;
+        return `${assetBase}${path}${descriptor ? ` ${descriptor}` : ""}`;
+      }
+      return descriptor ? `${url} ${descriptor}` : url;
+    })
+    .join(", ");
+  return { value, changed };
+}
+
 function tokenizedDocumentHref(reference: string, entryPath: string, assetBase: string): string | null {
   if (reference.startsWith("#")) return null;
   const path = assetPath(reference, entryPath, /\.html?$/i);
@@ -28,22 +95,32 @@ const SCRIPT_TYPES: Array<string | undefined> = [undefined, "", "text/javascript
 
 export type PreviewScriptAsset = { path: string; module: boolean };
 
+export type PreviewDocumentScan = {
+  scripts: PreviewScriptAsset[];
+  linkedDocuments: string[];
+  /** Same-workspace non-script subresources the document fetches by URL. */
+  subresources: string[];
+  /** Same-workspace stylesheets (their own url() closure needs authorization too). */
+  stylesheets: string[];
+};
+
 /**
  * Scan a static HTML document for the workspace references the preview
- * asset manifest must authorize: its scripts (with module flags) and the
- * same-workspace HTML documents it links to (in-frame navigation targets).
- * Uses exactly the transform's resolution and validation rules, so the
- * manifest can never drift from what the transform rewrites. Exposed for
- * preview-asset-manifest.ts; the transform itself walks the same rules
- * while rewriting.
+ * asset manifest must authorize: its scripts (with module flags), the
+ * same-workspace HTML documents it links to (in-frame navigation targets),
+ * the non-script subresources it fetches by URL (<img>/<source>/<video>/
+ * <audio> src, srcset and poster, icon/manifest links, and url() refs in
+ * inline styles) and its linked stylesheets (whose own url() closure the
+ * manifest must also cover). Uses exactly the transform's resolution and
+ * validation rules, so the manifest can never drift from what the
+ * transform rewrites.
  */
-export function scanPreviewDocument(
-  html: string,
-  documentPath: string,
-): { scripts: PreviewScriptAsset[]; linkedDocuments: string[] } {
+export function scanPreviewDocument(html: string, documentPath: string): PreviewDocumentScan {
   const document = parse(html);
   const scripts: PreviewScriptAsset[] = [];
   const linkedDocuments: string[] = [];
+  const subresources = new Set<string>();
+  const stylesheets = new Set<string>();
   const visit = (node: DefaultTreeAdapterTypes.Node): void => {
     if (!("childNodes" in node)) return;
     for (const child of node.childNodes) {
@@ -55,12 +132,44 @@ export function scanPreviewDocument(
       } else if (child.tagName === "a" && attr("href")) {
         const path = assetPath(attr("href")!.value, documentPath, /\.html?$/i);
         if (path) linkedDocuments.push(path);
+      } else if (child.tagName === "link" && attr("href")) {
+        const rel = attr("rel")?.value.toLowerCase() ?? "";
+        if (rel === "stylesheet" && attr("disabled") === undefined) {
+          const path = assetPath(attr("href")!.value, documentPath, /\.css$/i);
+          if (path) stylesheets.add(path);
+        } else {
+          const path = assetPath(attr("href")!.value, documentPath, SUBRESOURCE_EXT);
+          if (path) subresources.add(path);
+        }
+      } else {
+        for (const attrName of ["src", "poster"] as const) {
+          const value = attr(attrName)?.value;
+          if (!value) continue;
+          const path = assetPath(value, documentPath, SUBRESOURCE_EXT);
+          if (path) subresources.add(path);
+        }
+        const srcset = attr("srcset")?.value;
+        if (srcset) {
+          for (const { url } of parseSrcset(srcset)) {
+            const path = assetPath(url, documentPath, SUBRESOURCE_EXT);
+            if (path) subresources.add(path);
+          }
+        }
+        const style = attr("style")?.value;
+        if (style) for (const p of extractCssUrls(style, documentPath)) subresources.add(p);
+        if (child.tagName === "style") {
+          for (const textNode of child.childNodes) {
+            if ("value" in textNode && typeof textNode.value === "string") {
+              for (const p of extractCssUrls(textNode.value, documentPath)) subresources.add(p);
+            }
+          }
+        }
       }
       visit(child);
     }
   };
   visit(document);
-  return { scripts, linkedDocuments };
+  return { scripts, linkedDocuments, subresources: [...subresources], stylesheets: [...stylesheets] };
 }
 
 /**
@@ -86,6 +195,16 @@ export function scanPreviewDocument(
  * - Stylesheets carry no execution semantics, so they keep the established
  *   #661 treatment: same-workspace CSS is embedded during the owner's
  *   authenticated HTML read, subject to the existing count/size caps.
+ *   url() refs inside embedded CSS are reissued under the token prefix
+ *   (the browser resolves them against the document URL, which is the
+ *   session path the opaque origin cannot authenticate).
+ *
+ * - Non-script subresources (<img>/<source>/<video>/<audio> src, srcset and
+ *   poster, icon/manifest links, and url() refs in <style> blocks and
+ *   style attributes) follow the script rule: reissued under the token
+ *   prefix. The opaque-origin iframe carries no session cookie on
+ *   subresource fetches, so any reference left on the session path is a
+ *   guaranteed failed load (verified: every workspace <img> 401s).
  *
  * File access stays bound to the owner's verified workspace; the sandbox,
  * CSP and ownership checks are unchanged.
@@ -122,7 +241,15 @@ export async function prepareStaticPreviewDocument(
             child.tagName = child.nodeName = "style";
             child.attrs = child.attrs.filter((attribute) => !["href", "rel", "integrity", "crossorigin"].includes(attribute.name));
             child.attrs.push({ name: "data-preview-file", value: path });
-            child.childNodes = [{ nodeName: "#text", value: content.replace(/<\/style/gi, "\\3c /style"), parentNode: child }];
+            // url() refs inside embedded CSS resolve against the DOCUMENT —
+            // without a token URL they hit the session path and 401.
+            const rewritten = rewriteCssUrls(content.replace(/<\/style/gi, "\\3c /style"), path, options.assetBase);
+            child.childNodes = [{ nodeName: "#text", value: rewritten.text, parentNode: child }];
+            changed = true;
+          } else {
+            // Not embeddable: issue a token-authorized fetch instead of the
+            // guaranteed-401 session URL the opaque origin would produce.
+            attr("href")!.value = `${options.assetBase}${path}`;
             changed = true;
           }
         }
@@ -143,6 +270,55 @@ export async function prepareStaticPreviewDocument(
           // external and fragment-only links remain untouched.
           attr("href")!.value = href;
           changed = true;
+        }
+      } else {
+        // Non-script subresources (<img>, <source>, <video>, <audio>, icon/
+        // manifest links, inline CSS url()s) are fetched from the opaque
+        // origin with no session — reissue them under the token prefix just
+        // like scripts, or every workspace image renders as a failed load.
+        if (child.tagName === "link" && attr("href")) {
+          const path = assetPath(attr("href")!.value, entryPath, SUBRESOURCE_EXT);
+          if (path) {
+            attr("href")!.value = `${options.assetBase}${path}`;
+            changed = true;
+          }
+        } else {
+          for (const attrName of ["src", "poster"] as const) {
+            const attribute = attr(attrName);
+            if (!attribute?.value) continue;
+            const path = assetPath(attribute.value, entryPath, SUBRESOURCE_EXT);
+            if (path) {
+              attribute.value = `${options.assetBase}${path}`;
+              changed = true;
+            }
+          }
+          const srcsetAttr = attr("srcset");
+          if (srcsetAttr?.value) {
+            const rewritten = rewriteSrcset(srcsetAttr.value, entryPath, options.assetBase);
+            if (rewritten.changed) {
+              srcsetAttr.value = rewritten.value;
+              changed = true;
+            }
+          }
+          const styleAttr = attr("style");
+          if (styleAttr?.value.includes("url(")) {
+            const rewritten = rewriteCssUrls(styleAttr.value, entryPath, options.assetBase);
+            if (rewritten.changed) {
+              styleAttr.value = rewritten.text;
+              changed = true;
+            }
+          }
+          if (child.tagName === "style") {
+            for (const textNode of child.childNodes) {
+              if ("value" in textNode && typeof textNode.value === "string" && textNode.value.includes("url(")) {
+                const rewritten = rewriteCssUrls(textNode.value, entryPath, options.assetBase);
+                if (rewritten.changed) {
+                  textNode.value = rewritten.text;
+                  changed = true;
+                }
+              }
+            }
+          }
         }
       }
       await visit(child);
