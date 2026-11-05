@@ -190,23 +190,45 @@ export async function enrichStaticSiteVisuals(
         changed = true;
       }
 
-      // 3. Repair broken / external / placeholder <img src>.
-      const refs = extractImageRefs(html).filter((r) => r.kind === "img" && r.src);
+      // 3. Repair broken / external / placeholder refs — <img src> AND
+      // CSS url() (inline background-image, <style> blocks). The golden
+      // 41962554092 run shipped three hallucinated Unsplash photo-ids as
+      // CSS background url()s: extractImageRefs already audits them, but
+      // only img-kind refs were repaired, so the dead hotlinks went live.
+      const refs = extractImageRefs(html).filter(
+        (r) => (r.kind === "img" && r.src) || (r.kind === "css" && r.src),
+      );
       for (const ref of refs) {
         const src = ref.src;
         const isExternal = /^https?:\/\//i.test(src);
         const isPlaceholder = /via\.placeholder|placehold\.|dummyimage|fakeimg/i.test(src);
+        // CSS url() is not image-only space: @font-face srcs, SVG paint
+        // servers (url(#id)) and other resources share the syntax. Only
+        // refs that are actually image-shaped get the image pipeline —
+        // everything else is left exactly as authored.
+        const isImageRef =
+          ref.kind === "img" ||
+          /\.(png|jpe?g|webp|gif|avif|bmp|ico|svg)(\?|#|$)/i.test(src) ||
+          /unsplash|pexels|picsum|pixabay|pollinations|loremflickr|placehold|dummyimage|fakeimg|images?\/|img\//i.test(src);
+        if (ref.kind === "css" && (!isImageRef || src.startsWith("#"))) continue;
         const relMissing =
           !isExternal &&
           !/^(data:|blob:)/i.test(src) &&
           !fileSet.has(src.replace(/^\.\//, "").replace(/^\//, "").split(/[?#]/)[0]) &&
           !fileSet.has(`public/${src.replace(/^\.\//, "").replace(/^\//, "").split(/[?#]/)[0]}`);
+        // The rewrite differs by kind: an <img> carries src="…" inside the
+        // matched tag (SRC_ATTR_RE), a css url() is just the bare URL —
+        // replacing the src substring preserves the original quoting.
+        const rewrite = (nextSrc: string) =>
+          ref.kind === "img"
+            ? ref.raw.replace(SRC_ATTR_RE, `$1${nextSrc}$3`)
+            : ref.raw.replace(src, nextSrc);
         if (isExternal && !isPlaceholder) {
           // Rehost the hotlink into the project — persists in deploys.
           const saved = await insertAssetFromUrl(src, { nameHint: "external-image" }, transport)
             .catch(() => null);
           if (saved?.success && saved.sitePath) {
-            html = html.replace(ref.raw, ref.raw.replace(SRC_ATTR_RE, `$1${saved.sitePath}$3`));
+            html = html.replace(ref.raw, rewrite(saved.sitePath));
             changed = true;
             fileSet.add(saved.sitePath.replace(/^\//, ""));
             if (saved.path) fileSet.add(saved.path.replace(/^\//, ""));
@@ -226,7 +248,7 @@ export async function enrichStaticSiteVisuals(
               report.placeholdersUsed += 1;
               fileSet.add(PLACEHOLDER_SVG_PATH);
             }
-            html = html.replace(ref.raw, ref.raw.replace(SRC_ATTR_RE, `$1${finalSrc}$3`));
+            html = html.replace(ref.raw, rewrite(finalSrc));
             changed = true;
           }
         } else if (isPlaceholder || relMissing) {
@@ -238,7 +260,7 @@ export async function enrichStaticSiteVisuals(
             report.placeholdersUsed += 1;
             fileSet.add(PLACEHOLDER_SVG_PATH);
           }
-          html = html.replace(ref.raw, ref.raw.replace(SRC_ATTR_RE, `$1${finalSrc}$3`));
+          html = html.replace(ref.raw, rewrite(finalSrc));
           changed = true;
         }
       }

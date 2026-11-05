@@ -953,6 +953,56 @@ async function main() {
             ? followUpProviderShapes.map((event) => `${event.provider}/${event.model} toolCalls=${event.toolCalls?.length ?? 0}`).join("; ")
             : "no model response was present in the follow-up stream");
 
+        // If the follow-up paused on a legitimate approval gate, drive it
+        // exactly like a user clicking Approve on each card — a follow-up
+        // can reach any gated tool, not just deploy. AUTO-mode routine
+        // writes (files.write and its station delegates like code.writeFile)
+        // never pause, so a gate here means the model asked for something
+        // genuinely approval-worthy. The file/preview checks below then
+        // judge what actually landed — this only unblocks the execution.
+        const followUpPause = followUpEvents.find((e) => e.type === "pending_approval" && e.pausedRunId) ?? null;
+        if (followUpPause && convId) {
+          const chainDeadline = Date.now() + 5 * 60 * 1000;
+          const chain = [String(followUpPause.toolId ?? "unknown")];
+          let currentPause = followUpPause;
+          let hops = 0;
+          let lastRunError = null;
+          while (currentPause?.pausedRunId && hops < 4 && Date.now() < chainDeadline) {
+            hops++;
+            await page.request.post(
+              `${BASE}/api/studio/conversations/${convId}/approvals/${currentPause.pausedRunId}`,
+              { data: { decision: "approved" }, timeout: 30_000 },
+            ).catch(() => null);
+            let runResult = null;
+            let runStatus = "processing";
+            while (runStatus === "processing" && Date.now() < chainDeadline) {
+              await page.waitForTimeout(3000);
+              const statusResp = await page.request.get(
+                `${BASE}/api/studio/conversations/${convId}/approvals/${currentPause.pausedRunId}`,
+                { timeout: 15_000 },
+              ).catch(() => null);
+              if (!statusResp?.ok()) continue;
+              const statusBody = await statusResp.json().catch(() => null);
+              if (!statusBody) continue;
+              if (statusBody.runStatus === "completed" && statusBody.runResult) {
+                runResult = statusBody.runResult;
+                runStatus = "completed";
+              } else if (statusBody.runStatus === "failed") {
+                lastRunError = statusBody.runError ?? "resumed run failed";
+                runStatus = "failed";
+              }
+            }
+            const nested = runResult?.pendingApproval ?? null;
+            if (nested?.pausedRunId) {
+              currentPause = { toolId: nested.toolId, pausedRunId: nested.pausedRunId };
+              chain.push(String(nested.toolId ?? "unknown"));
+              continue;
+            }
+            break;
+          }
+          verdict.notes.push(`follow-up approval chain driven: ${chain.join(" → ")} (${hops} hop(s) approved${lastRunError ? `, last run error: ${lastRunError}` : ""})`);
+        }
+
         const followUpFile = await readWorkspaceFile("index.html");
         step("post_build_follow_up_mutation",
           followUpFile !== null && followUpFile.includes(followUpMarker),

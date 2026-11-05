@@ -968,9 +968,24 @@ export async function POST(
       // approval.required event's payload.result and reports this gate as
       // completed with the nested gate's pausedRunId.
       if (result.pendingApproval) {
-        let nestedPausedRunId: string;
+        let nestedPausedRunId: string | null = null;
+        // A pause without a tool identity produces an approval card that
+        // names nothing and a gate that approves nothing — unresumable even
+        // when a pausedRunId exists (golden 41962554092 observed
+        // runResult.pendingApproval with no tool identity). Fail loudly
+        // like a persist failure instead of settling an unidentifiable gate.
+        let nestedGateFailure: string | null = result.pendingApproval.toolId
+          ? null
+          : "The follow-up approval could not be saved — the requested action has no tool identity. Send the request again to retry.";
+        if (nestedGateFailure) {
+          studioLog("approval:nested_gate_missing_tool_id", {
+            conversationId,
+            userId,
+            errorClass: `gate without tool identity: ${String(result.pendingApproval.reason ?? "no reason").slice(0, 120)}`,
+          });
+        }
         try {
-          const nested = await createPausedRun({
+          const nested = nestedGateFailure ? null : await createPausedRun({
             userId,
             conversationId,
             projectId: resolved.projectId,
@@ -996,7 +1011,7 @@ export async function POST(
             // resume would lose every mutation proven across THIS gate.
             priorToolCalls: result.pendingApproval.priorToolCalls,
           });
-          nestedPausedRunId = nested.id;
+          nestedPausedRunId = nested?.id ?? null;
         } catch (nestedErr) {
           studioLog("approval:nested_paused_run_persist_failed", {
             conversationId,
@@ -1004,11 +1019,16 @@ export async function POST(
             tool: result.pendingApproval.toolId,
             errorClass: nestedErr instanceof Error ? nestedErr.message : "unknown",
           });
+          nestedGateFailure ??=
+            `The follow-up approval for \`${result.pendingApproval.toolId}\` could not be saved — send the request again to retry.`;
+        }
+        if (nestedGateFailure || !nestedPausedRunId) {
           // A nested gate that cannot be persisted is unresumable — the
           // client's Approve button would be a dead card (pausedRunId:
           // undefined). Fail the run loudly instead of completing it with
           // a broken gate.
           const nestedPersistError =
+            nestedGateFailure ??
             `The follow-up approval for \`${result.pendingApproval.toolId}\` could not be saved — send the request again to retry.`;
           await writeResumedResultToTranscript({
             conversationId,

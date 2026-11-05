@@ -25,6 +25,7 @@ import { stationToPermissionKey } from "./permissions";
 import { buildStationContext } from "./project-session";
 import { executeStationAction } from "./executor";
 import { getStationEventSink } from "./loop-events";
+import { getDelegateToolId } from "../litt-intelligence/tool-delegates";
 
 /**
  * Approval policies. NOTE: READ_ONLY_APPROVAL / MUTATION_APPROVAL are
@@ -49,17 +50,11 @@ export const STATION_MUTATION_APPROVAL: ApprovalPolicy = {
  * Station action id → tool-registry id for delegate-mirrored advertisements.
  * Chunks B/C call setDelegateToolId when a station action delegates to an
  * existing tool; the advertisement then mirrors the delegate's capabilities,
- * risk, permission level, approval policy, and timeout.
+ * risk, permission level, approval policy, and timeout. The map lives in
+ * litt-intelligence/tool-delegates so the permission engine can resolve the
+ * same canonical id without an import cycle into station-control.
  */
-const DELEGATE_TOOL_IDS = new Map<string, string>();
-
-export function setDelegateToolId(stationActionId: string, toolId: string): void {
-  DELEGATE_TOOL_IDS.set(stationActionId, toolId);
-}
-
-export function getDelegateToolId(stationActionId: string): string | undefined {
-  return DELEGATE_TOOL_IDS.get(stationActionId);
-}
+export { getDelegateToolId, setDelegateToolId } from "../litt-intelligence/tool-delegates";
 
 /** Long-running generations get a bigger budget. */
 const LONG_RUNNING_ACTION_IDS = new Set(["video.generate", "music.generate"]);
@@ -91,7 +86,7 @@ function argsSchemaToJsonSchema(action: StationAction): Record<string, unknown> 
 }
 
 export function stationActionToToolDefinition(action: StationAction): LiTTToolDefinition {
-  const delegateId = DELEGATE_TOOL_IDS.get(action.id);
+  const delegateId = getDelegateToolId(action.id);
   const delegate = delegateId ? toolRegistry.get(delegateId) : undefined;
 
   let permissionKeySuffix: string[] = [];
