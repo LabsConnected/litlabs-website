@@ -28,6 +28,14 @@ export interface LogContext {
   failover?: string[];
   claimLost?: boolean;
   alreadyTerminal?: boolean;
+  /** Approval-gate forensics: which durable event produced a handoff. */
+  gateId?: string;
+  nestedPausedRunId?: string;
+  eventId?: string;
+  eventSequence?: string;
+  eventSource?: "settle" | "action_events" | "progress" | "messages_route";
+  hasPausedRunId?: boolean;
+  hasToolId?: boolean;
 }
 
 export function studioLog(message: string, ctx: LogContext = {}): void {
