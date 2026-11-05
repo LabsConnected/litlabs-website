@@ -390,10 +390,17 @@ export async function verifyProjectArtifacts(
     .map((entry) => files.find((file) => file.toLowerCase() === entry))
     .filter((file): file is string => file !== undefined);
   if (entryFiles.length === 0) {
+    // A misplaced entry is not "no entry": name it so the failure explains
+    // the real path-convention mistake instead of implying nothing was
+    // written (e.g. static lanes must serve index.html from the workspace
+    // ROOT — public/index.html is not the served entry there).
+    const misplaced = files.find((file) => /(^|\/)index\.html?$/i.test(file));
     return {
       ok: false,
       files,
-      error: "No runnable website entry file was created in the project workspace.",
+      error: misplaced
+        ? `No runnable website entry file was created at the project root — the entry was written to ${misplaced} instead.`
+        : "No runnable website entry file was created in the project workspace.",
     };
   }
 
@@ -441,6 +448,42 @@ export async function verifyProjectArtifacts(
 }
 
 /**
+ * Static-lane entry normalization.
+ *
+ * Models trained on Next/Vite layouts habitually write `public/index.html`,
+ * but the static preview serves the WORKSPACE ROOT — `public/` is not
+ * special there, so the site renders nothing even though the entry was
+ * written. Mirror the misplaced entry to root `index.html` once so the
+ * site actually resolves; the `public/` copy stays (harmless on the static
+ * lane). Only runs on static workspaces — on a framework project a
+ * `public/` file is legitimate output and a root `index.html` could shadow
+ * the real entry.
+ *
+ * Returns true when a root entry now exists (already present or just
+ * normalized); false when there was nothing to normalize or the mirror
+ * failed — callers then apply the normal artifact gate honestly.
+ */
+export async function normalizeStaticEntryFile(
+  transport: Pick<WorkspaceTransport, "listFiles" | "readFile" | "writeFile">,
+): Promise<boolean> {
+  const root = await transport.listFiles("").catch(() => null);
+  const rootNames = new Set(
+    (root?.entries ?? [])
+      .filter((e) => e.type === "file")
+      .map((e) => String(e.name || "").replace(/\\/g, "/")),
+  );
+  if (rootNames.has("index.html") || rootNames.has("index.htm")) return true;
+  // A missing file reads as ENOENT — the try is the existence check.
+  for (const misplaced of ["public/index.html", "public/index.htm"]) {
+    const content = await transport.readFile(misplaced).then((r) => r.content).catch(() => null);
+    if (!content || !content.trim()) continue;
+    await transport.writeFile(misplaced.slice("public/".length), content);
+    return true;
+  }
+  return false;
+}
+
+/**
  * After an approved mutation, prove the artifact is on disk and bring up a
  * real preview. Used by approval-resume handling so the resumed path has the
  * same physical-artifact gate as the initial launch path.
@@ -469,6 +512,12 @@ export async function ensureProjectPreviewReady(
   progress: ProgressEmitter = new ProgressEmitter(),
   actionContext?: ActionExecutionContext,
 ): Promise<{ ok: boolean; files: string[]; error?: string }> {
+  // Static lane: a model that wrote public/index.html produced a working
+  // entry at the wrong root — mirror it before the artifact gate instead
+  // of failing the run on a path-convention mistake.
+  if (options.isStaticWorkspace) {
+    await normalizeStaticEntryFile(transport).catch(() => false);
+  }
   let artifacts: ProjectArtifactCheck = { ok: false, files: [] };
   for (let attempt = 0; attempt < 3; attempt++) {
     artifacts = await verifyProjectArtifacts(transport, {
@@ -722,6 +771,23 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         });
       }
 
+      // An honest loop failure — including a refused quality verdict — is
+      // terminal: the loop's finished event already carried success:false
+      // (→ agent.failed), so the outer run must never proceed to
+      // preview_ready/completed. The reprompt's second result flows through
+      // this guard without re-passing the first-result check above, so the
+      // verdict check must live here too (same contract as the approvals
+      // route's terminalFailure).
+      if (r.failedHonestly || (r.qualityLoop && !r.qualityLoop.verdict.ok)) {
+        return baseResult({
+          status: "failed",
+          finalText: r.failedHonestly ?? r.finalText,
+          error: r.failedHonestly ? "HONEST_LOOP_FAILURE" : "QUALITY_GATE_FAILED",
+          repairAttempts: r.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
+
       if (r.buildFixResult && !r.buildFixResult.allPassed) {
         return baseResult({
           success: false,
@@ -834,6 +900,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     // Phase 2: start and verify the live preview
     checkSignal(signal);
     if ((options.requireProjectArtifacts || options.qualityLoop?.enabled) && !pausedApproval) {
+      if (options.isStaticWorkspace) {
+        await normalizeStaticEntryFile(transport).catch(() => false);
+      }
       const artifacts = await verifyProjectArtifacts(transport);
       if (!artifacts.ok) {
         return baseResult({

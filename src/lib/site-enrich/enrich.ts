@@ -113,6 +113,11 @@ export async function enrichStaticSiteVisuals(
     await collect("", "", 0);
 
     let seed = 1;
+    // URLs already materialized this run — the provider chain skips them
+    // so two slots can never persist the same image bytes (the identical-
+    // MD5 defect: identical or colliding keyword slots all resolved to
+    // the same provider hit).
+    const usedImageUrls = new Set<string>();
     // Site-relative paths of persisted images known to be too small to
     // satisfy the real-photo floor — they are kept (real content) but do
     // not count toward MIN_REAL_PHOTOS.
@@ -125,11 +130,14 @@ export async function enrichStaticSiteVisuals(
     };
     const resolve = async (keywords: string) => {
       if (report.imagesResolved + report.imagesFailed >= budget) return null;
-      const resolved = await resolveSlotImage(keywords, seed++);
+      const resolved = await resolveSlotImage(keywords, seed++, usedImageUrls);
       if (!resolved) {
         report.imagesFailed += 1;
         return null;
       }
+      // Claim the URL before the save: even a failed insert must not let
+      // the next slot re-pick the same payload.
+      usedImageUrls.add(resolved.url);
       const saved = await insertAssetFromUrl(
         resolved.url,
         { nameHint: keywords.slice(0, 30) },
