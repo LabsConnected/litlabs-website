@@ -810,7 +810,25 @@ export async function getRunOutcomeForPausedRun(
         };
       }
       if (events[i].type === "approval.required" && result?.pendingApproval) {
-        // Nested-gate handoff: this attempt finished by opening a new gate.
+        // Nested-gate handoff: this attempt finished by opening a new
+        // gate. The handoff is only resumable when it carries the NEW
+        // gate's persisted identity — a pendingApproval that reached the
+        // event log without a pausedRunId is a dead card the client can
+        // never action ("resumed run paused again but no pausedRunId was
+        // persisted"). Report it as failed truthfully instead of
+        // completing with an unresumable gate, matching the transcript
+        // reconciler's treatment of the same state.
+        const handoff = result.pendingApproval;
+        if (typeof handoff.pausedRunId !== "string" || !handoff.pausedRunId) {
+          return {
+            runStatus: "failed",
+            runResult: null,
+            runError:
+              "The run paused for a follow-up approval, but the approval gate was not persisted — send the request again to retry.",
+            runStartedAt: run.startedAt,
+            runCompletedAt: run.completedAt,
+          };
+        }
         return {
           runStatus: "completed",
           runResult: result,
