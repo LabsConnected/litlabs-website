@@ -1263,6 +1263,50 @@ function noteReadBackToSession(
 }
 
 /**
+ * Post-mutation visual enrichment for static sites. Models reliably write
+ * markup but unreliably call image tools (every image.generate call is an
+ * approval pause), so `<img data-litt-image="keywords">` slots and broken
+ * refs are materialized here — in code — while the artifact is still in
+ * the loop, before preview serves it and before deploy snapshots it.
+ * Runs only when the mutation touched an .html file; additive-only and
+ * never allowed to break the run.
+ */
+async function maybeEnrichStaticSiteVisuals(
+  transport: WorkspaceTransport,
+  call: { toolId: string; inputs: unknown; success: boolean; readOnly: boolean },
+  qualitySession: QualityLoopSession | null,
+  isStaticWorkspace: boolean | undefined,
+  localProgress: ProgressEmitter,
+): Promise<void> {
+  if (!isStaticWorkspace || !call.success || call.readOnly) return;
+  try {
+    const inputs = (call.inputs ?? {}) as { path?: unknown };
+    const declared =
+      declaredMutationPaths(call.inputs as Record<string, unknown> | undefined, undefined) ?? [];
+    const htmlTouched =
+      /\.html?$/i.test(typeof inputs.path === "string" ? inputs.path : "") ||
+      declared.some((p) => /\.html?$/i.test(p));
+    if (!htmlTouched) return;
+    const { enrichStaticSiteVisuals } = await import("@/lib/site-enrich/enrich");
+    const report = await enrichStaticSiteVisuals(transport, {
+      topicKeywords: qualitySession?.userRequest,
+    });
+    if (report.imagesResolved > 0 || report.imagesFailed > 0 || report.filesChanged.length > 0) {
+      localProgress.emit({
+        type: "status",
+        summary:
+          `Visual enrichment: ${report.imagesResolved} image(s) resolved` +
+          (report.imagesFailed > 0 ? `, ${report.imagesFailed} unavailable` : "") +
+          (report.placeholdersUsed > 0 ? `, ${report.placeholdersUsed} placeholder fallback(s)` : "") +
+          ` (${report.providersUsed.join(", ") || "no providers"}).`,
+      });
+    }
+  } catch {
+    // Enrichment is additive — it must never break the run.
+  }
+}
+
+/**
  * Quality-gate hook at the point the agent produces its final answer.
  * Harvests any final QUALITY stage markers, then runs the visual
  * inspection once. Returns true when a below-threshold critique demands
@@ -2407,6 +2451,13 @@ async function runAgentLoopV2Inner(
         );
         noteReadBackToSession(qualitySession, toolCall.toolId, mutationCheck, cfg.isStaticWorkspace);
       }
+      await maybeEnrichStaticSiteVisuals(
+        transport,
+        { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly },
+        qualitySession,
+        cfg.isStaticWorkspace,
+        localProgress,
+      );
 
       localProgress.emit({
         type: "tool_result",
@@ -3092,6 +3143,13 @@ export async function executeDeferredToolCalls(
       );
       noteReadBackToSession(ctx.qualitySession, toolCall.toolId, mutationCheck, ctx.isStaticWorkspace);
     }
+    await maybeEnrichStaticSiteVisuals(
+      ctx.transport,
+      { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly },
+      ctx.qualitySession,
+      ctx.isStaticWorkspace,
+      ctx.localProgress,
+    );
 
     ctx.localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
 
@@ -3441,6 +3499,13 @@ async function resumeAgentLoopV2Inner(
       );
       noteReadBackToSession(qualitySession, resume.toolId, mutationCheck, cfg.isStaticWorkspace);
     }
+    await maybeEnrichStaticSiteVisuals(
+      transport,
+      { toolId: resume.toolId, inputs: resume.inputs, success: result.success, readOnly: resumedReadOnly },
+      qualitySession,
+      cfg.isStaticWorkspace,
+      localProgress,
+    );
 
     localProgress.emit({
       type: "tool_result",
@@ -3936,6 +4001,13 @@ async function resumeAgentLoopV2Inner(
         );
         noteReadBackToSession(qualitySession, toolCall.toolId, mutationCheck, cfg.isStaticWorkspace);
       }
+      await maybeEnrichStaticSiteVisuals(
+        transport,
+        { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly },
+        qualitySession,
+        cfg.isStaticWorkspace,
+        localProgress,
+      );
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
 
