@@ -984,7 +984,13 @@ export async function POST(
           studioLog("approval:nested_paused_run_malformed", {
             conversationId,
             userId,
+            actionRunId: resolved.actionRunId ?? undefined,
+            pausedRunId,
+            gateId: pausedRunId,
             tool: gate.toolId ?? "missing",
+            eventSource: "settle",
+            hasPausedRunId: false,
+            hasToolId: !!gate.toolId,
           });
           await writeResumedResultToTranscript({
             conversationId,
@@ -1089,6 +1095,21 @@ export async function POST(
           runResult,
           executionToken,
           logEvent: "approval:action_run_nested_handoff_settle_failed",
+        });
+        // Forensic signal: proves the persisted handoff carried the new
+        // gate's id at settle time — paired with the derivation log, it
+        // separates a malformed write from a malformed read.
+        studioLog("approval:nested_handoff_settled", {
+          conversationId,
+          userId,
+          actionRunId: resolved.actionRunId ?? undefined,
+          pausedRunId,
+          gateId: pausedRunId,
+          nestedPausedRunId,
+          tool: result.pendingApproval.toolId,
+          eventSource: "settle",
+          hasPausedRunId: true,
+          hasToolId: true,
         });
         return true;
       }

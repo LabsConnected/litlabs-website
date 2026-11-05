@@ -35,6 +35,7 @@
 
 import "server-only";
 
+import { studioLog } from "@/lib/studio/logger";
 import { supabaseAdmin } from "@/lib/supabase";
 import {
   getActionRun,
@@ -819,7 +820,25 @@ export async function getRunOutcomeForPausedRun(
         // completing with an unresumable gate, matching the transcript
         // reconciler's treatment of the same state.
         const handoff = result.pendingApproval;
-        if (typeof handoff.pausedRunId !== "string" || !handoff.pausedRunId) {
+        const handoffValid = typeof handoff.pausedRunId === "string" && !!handoff.pausedRunId;
+        // Structured forensic signal: which durable event produced this
+        // handoff and whether it is resumable — never logs prompts,
+        // inputs, or secrets, only identifiers and presence flags.
+        studioLog("paused_run:approval_handoff_derived", {
+          userId,
+          actionRunId: record.actionRunId,
+          pausedRunId: record.id,
+          gateId: record.id,
+          eventId: events[i].id,
+          eventSequence: events[i].sequence,
+          eventSource: "action_events",
+          tool: typeof handoff.toolId === "string" ? handoff.toolId : "missing",
+          nestedPausedRunId: handoffValid ? handoff.pausedRunId : undefined,
+          hasPausedRunId: handoffValid,
+          hasToolId: typeof handoff.toolId === "string" && !!handoff.toolId,
+          status: handoffValid ? "resumable" : "malformed",
+        });
+        if (!handoffValid) {
           return {
             runStatus: "failed",
             runResult: null,

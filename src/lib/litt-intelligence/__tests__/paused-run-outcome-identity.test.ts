@@ -1,11 +1,13 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/supabase", () => ({ supabaseAdmin: null }));
+vi.mock("@/lib/studio/logger", () => ({ studioLog: vi.fn() }));
 vi.mock("@/lib/action-runtime", () => ({
   getActionRun: vi.fn(), listActionEvents: vi.fn(),
   isTerminalActionRunStatus: (status: string) => ["completed", "failed", "cancelled"].includes(status),
 }));
 import { getActionRun, listActionEvents } from "@/lib/action-runtime";
+import { studioLog } from "@/lib/studio/logger";
 import { getRunOutcomeForPausedRun, type PausedRunRecord } from "../paused-run-store";
 describe("approval outcome identity", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -32,12 +34,25 @@ describe("approval outcome identity", () => {
     // never persisted — a dead card the client could never action.
     vi.mocked(getActionRun).mockResolvedValue({ status: "waiting_for_user" } as never);
     vi.mocked(listActionEvents).mockResolvedValue([
-      { type: "approval.required", payload: { pausedRunId: "gate-1", result: { pendingApproval: { toolId: "files.write" } } } },
+      { id: "evt-9", sequence: "9", type: "approval.required", payload: { pausedRunId: "gate-1", result: { pendingApproval: { toolId: "files.write" } } } },
     ] as never);
     const result = await getRunOutcomeForPausedRun({ id: "gate-1", actionRunId: "run" } as PausedRunRecord, "owner");
     expect(result.runStatus).toBe("failed");
     expect(result.runResult).toBeNull();
     expect(result.runError).toContain("approval gate was not persisted");
+    // Diagnostics: malformed classification names the exact event + gate.
+    expect(studioLog).toHaveBeenCalledWith(
+      "paused_run:approval_handoff_derived",
+      expect.objectContaining({
+        gateId: "gate-1",
+        eventId: "evt-9",
+        eventSequence: "9",
+        eventSource: "action_events",
+        hasPausedRunId: false,
+        hasToolId: true,
+        status: "malformed",
+      }),
+    );
   });
 
   it("a pendingApproval handoff with neither toolId nor pausedRunId is failed", async () => {
@@ -63,6 +78,18 @@ describe("approval outcome identity", () => {
     const result = await getRunOutcomeForPausedRun({ id: "gate-1", actionRunId: "run" } as PausedRunRecord, "owner");
     expect(result.runStatus).toBe("completed");
     expect(result.runResult?.pendingApproval?.pausedRunId).toBe("gate-2");
+    // Diagnostics: a legitimate handoff is classified resumable, not malformed.
+    expect(studioLog).toHaveBeenCalledWith(
+      "paused_run:approval_handoff_derived",
+      expect.objectContaining({
+        gateId: "gate-1",
+        eventSource: "action_events",
+        nestedPausedRunId: "gate-2",
+        hasPausedRunId: true,
+        hasToolId: true,
+        status: "resumable",
+      }),
+    );
   });
 
   it("a repeated pause chain resolves each gate's own handoff", async () => {
