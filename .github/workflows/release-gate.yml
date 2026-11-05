@@ -17,10 +17,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history is required: the parity check resolves the last
+          # commit that touched terminal-deploy paths and runs merge-base
+          # ancestry + rev-list lag checks against the deployed SHAs.
+          fetch-depth: 0
 
       - name: Get source SHA
         id: source
-        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          # The terminal service deploys MANUALLY (deploy-terminal.yml has
+          # no push trigger under the production hold). Its legitimately
+          # expected deployed SHA is the newest commit touching the
+          # terminal-deploy paths — not HEAD — so unrelated merges don't
+          # produce false drift.
+          TERMINAL_EXPECTED=$(git log -1 --format=%H -- terminal-server docker/Dockerfile.terminal pnpm-workspace.yaml .github/workflows/deploy-terminal.yml)
+          if [ -z "$TERMINAL_EXPECTED" ]; then TERMINAL_EXPECTED=$(git rev-parse HEAD); fi
+          echo "terminal_expected=$TERMINAL_EXPECTED" >> $GITHUB_OUTPUT
 
       - name: Check web health endpoint
         id: web
@@ -61,12 +75,7 @@ jobs:
           SOURCE_SHA="${{ steps.source.outputs.sha }}"
           SOURCE_SHORT="${SOURCE_SHA:0:8}"
           WEB_SHA="${{ steps.web.outputs.deployed_sha }}"
-          # /api/health reports the full 40-char commit in checks.build.detail
-          # while terminal /health reports the 8-char short SHA. Normalize to
-          # the same prefix length before comparing so either format verifies.
-          WEB_SHORT="${WEB_SHA:0:8}"
           TERMINAL_SHA="${{ steps.terminal.outputs.deployed_sha }}"
-          TERMINAL_SHORT="${TERMINAL_SHA:0:8}"
           AUTH_STATUS="${{ steps.web.outputs.auth_status }}"
           AUTH_DETAIL="${{ steps.web.outputs.auth_detail }}"
 
@@ -86,31 +95,35 @@ jobs:
             echo "✅ Clerk backend accepted the production secret key"
           fi
 
-          if [ "$WEB_SHA" = "unknown" ] || [ "$WEB_SHA" = "dev" ]; then
-            echo "⚠️  Web health endpoint did not report a real SHA (got: $WEB_SHA)"
-            FAIL=1
-          elif [ "$WEB_SHORT" != "$SOURCE_SHORT" ]; then
-            echo "❌ Web SHA mismatch: source=$SOURCE_SHORT deployed=$WEB_SHA"
-            FAIL=1
-          else
-            echo "✅ Web SHA matches source"
-          fi
+          # Parity is checked by scripts/ci/check-deployed-sha.mjs so the
+          # exact logic is unit-testable (tests/release-gate-deployed-sha).
+          # Web deploys automatically — a deployed SHA that is a recent
+          # ancestor of HEAD is a legitimate mid-rollout transition
+          # (replicas drain at different times; run 41955317232 sampled
+          # web=ccaa4cec while source+terminal were already at 289fddde),
+          # while a non-ancestor, absent, unknown, or beyond-window SHA
+          # remains a real failure.
+          node scripts/ci/check-deployed-sha.mjs \
+            --service "Web" \
+            --deployed "$WEB_SHA" \
+            --expect "$SOURCE_SHA" \
+            --mode auto \
+            --lag "${DEPLOY_LAG_TOLERANCE:-10}" || FAIL=1
 
-          if [ "$TERMINAL_SHA" = "unknown" ] || [ "$TERMINAL_SHA" = "dev" ]; then
-            echo "⚠️  Terminal health endpoint did not report a real SHA (got: $TERMINAL_SHA)"
-            FAIL=1
-          elif [ "$TERMINAL_SHORT" != "$SOURCE_SHORT" ]; then
-            echo "❌ Terminal SHA mismatch: source=$SOURCE_SHORT deployed=$TERMINAL_SHA"
-            FAIL=1
-          else
-            echo "✅ Terminal SHA matches source"
-          fi
+          # Terminal deploys manually — tracked drift from the last
+          # terminal-path commit is reported, only untracked/foreign/
+          # unreachable deployments fail the gate.
+          node scripts/ci/check-deployed-sha.mjs \
+            --service "Terminal" \
+            --deployed "$TERMINAL_SHA" \
+            --expect "${{ steps.source.outputs.terminal_expected }}" \
+            --mode manual || FAIL=1
 
           if [ "$FAIL" = "1" ]; then
             echo ""
-            echo "Release gate FAILED — deployed services are out of sync with source."
+            echo "Release gate FAILED — see failing checks above."
             exit 1
           fi
 
           echo ""
-          echo "Release gate PASSED — all services report the source SHA."
+          echo "Release gate PASSED — all services report tracked deployments."

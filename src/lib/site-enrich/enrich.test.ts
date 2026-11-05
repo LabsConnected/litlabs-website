@@ -293,6 +293,98 @@ describe("enrichStaticSiteVisuals", () => {
     expect(report.placeholdersUsed).toBe(1);
   });
 
+  // ── Golden 41962554092 regressions ──────────────────────────────
+  // Three hallucinated Unsplash photo-ids shipped as CSS background
+  // url() refs — extractImageRefs audits css-kind refs but only img-kind
+  // refs were repaired, so the dead hotlinks reached the live deployment.
+
+  it("rehosts an external CSS url() background hotlink into the project", async () => {
+    const transport = makeTransport({
+      "index.html": `<section class="hero" style="background-image: url('https://cdn.example.com/hero.jpg');"><h1>x</h1></section>`,
+    });
+    mockInsertAssetFromUrl.mockImplementation(async (url: string) =>
+      url === "https://cdn.example.com/hero.jpg"
+        ? { success: true, path: "assets/images/hero.jpg", sitePath: "assets/images/hero.jpg" }
+        : { success: true, path: "assets/images/x.jpg", sitePath: "assets/images/x.jpg" });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    expect(html).toContain("url('assets/images/hero.jpg')");
+    expect(html).not.toContain("cdn.example.com");
+  });
+
+  it("replaces a dead external CSS url() (hallucinated Unsplash id) instead of shipping it", async () => {
+    const transport = makeTransport({
+      "index.html": `<style>.hero{background-image:url('https://images.unsplash.com/photo-1507135547701-434797553377?q=80&w=2070');}</style>
+        <div class="hero"><h1>Ember</h1></div>`,
+    });
+    let n = 0;
+    mockInsertAssetFromUrl.mockImplementation(async (url: string) =>
+      url.includes("unsplash")
+        ? { success: false, error: "Failed to download asset: HTTP 404" }
+        : { success: true, path: `assets/images/r${++n}.jpg`, sitePath: `assets/images/r${n}.jpg` });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    expect(html).not.toContain("unsplash.com");
+    expect(html).not.toContain("photo-1507135547701");
+    expect(html).toContain("url('assets/images/r1.jpg')");
+  });
+
+  it("repairs a missing relative CSS url() image ref", async () => {
+    const transport = makeTransport({
+      "index.html": `<div style="background: url(images/missing-hero.png) center/cover;"><h1>x</h1></div>`,
+    });
+    mockInsertAssetFromUrl.mockResolvedValue({
+      success: true,
+      path: "assets/images/fixed.jpg",
+      sitePath: "assets/images/fixed.jpg",
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    expect(html).toContain("url(assets/images/fixed.jpg)");
+    expect(html).not.toContain("images/missing-hero.png");
+  });
+
+  it("leaves an existing relative CSS url() and non-image url() refs untouched", async () => {
+    const transport = makeTransport({
+      "index.html": `<div style="background:url(assets/images/ok.jpg)"></div>
+        <img src="assets/images/a.jpg"><img src="assets/images/b.jpg"><img src="assets/images/c.jpg">
+        <svg><rect fill="url(#grad)"/></svg>
+        <style>@font-face{src:url('fonts/x.woff2');}</style>`,
+      "assets/images/ok.jpg": "binary-stub",
+      "assets/images/a.jpg": "binary-stub",
+      "assets/images/b.jpg": "binary-stub",
+      "assets/images/c.jpg": "binary-stub",
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    expect(html).toContain("url(assets/images/ok.jpg)");
+    expect(html).toContain("url(#grad)");
+    expect(html).toContain("fonts/x.woff2");
+    expect(report.filesChanged).toEqual([]);
+    expect(mockInsertAssetFromUrl).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the local SVG for a dead CSS hotlink when providers are down", async () => {
+    const transport = makeTransport({
+      "index.html": `<div style="background-image:url('https://images.unsplash.com/photo-dead')"><h1>x</h1></div>`,
+    });
+    mockInsertAssetFromUrl.mockResolvedValue({ success: false, error: "HTTP 404" });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503, headers: new Map() })));
+
+    await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    expect(html).not.toContain("unsplash.com");
+    expect(html).toContain("url('assets/images/placeholder.svg')");
+  });
+
   it("injects a real-photo gallery when the entry page is short of the ≥3-photo floor", async () => {
     const transport = makeTransport({
       "index.html": `<html><head><title>Ember Roast</title></head><body>
