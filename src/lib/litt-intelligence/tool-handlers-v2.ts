@@ -14,7 +14,13 @@
 
 import "server-only";
 
-import { placeholderViolation, simulatePatchResult, tailwindViolation } from "./patch-validation";
+import {
+  destructiveContentLoss,
+  destructiveContentLossMessage,
+  placeholderViolation,
+  simulatePatchResult,
+  tailwindViolation,
+} from "./patch-validation";
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
 import type { WorkspaceTransport } from "./workspace-transport";
 
@@ -203,20 +209,20 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   const badTailwind = tailwindViolation(content, path);
   if (badTailwind) return { success: false, error: badTailwind };
 
-  // Destructive-rewrite guard (small lane): a full rewrite that strips an
-  // existing file's structure/styling is rejected BEFORE it lands, with an
-  // actionable error so the model repairs via files.read + apply_patch.
-  if (localSmallLaneActive()) {
-    try {
-      const prev = await transport.readFile(path);
-      // The LITT-WELCOME-SCREEN scaffold is styled boilerplate that exists
-      // precisely to be replaced — its own marker says the agent MUST
-      // replace it. Without this exemption every first files.write to
-      // index.html on a fresh project is refused, the approved mutation
-      // fails, and the run dies with "approved workspace operation failed"
-      // before the model ever got to build. Real user files (no marker)
-      // still get the full guard.
-      if (!prev.content.includes("LITT-WELCOME-SCREEN")) {
+  // Destructive-rewrite guards: a full rewrite that strips an existing
+  // file's structure/styling/content is rejected BEFORE it lands, with
+  // an actionable error so the model repairs via files.read + apply_patch.
+  try {
+    const prev = await transport.readFile(path);
+    // The LITT-WELCOME-SCREEN scaffold is styled boilerplate that exists
+    // precisely to be replaced — its own marker says the agent MUST
+    // replace it. Without this exemption every first files.write to
+    // index.html on a fresh project is refused, the approved mutation
+    // fails, and the run dies with "approved workspace operation failed"
+    // before the model ever got to build. Real user files (no marker)
+    // still get the full guard.
+    if (!prev.content.includes("LITT-WELCOME-SCREEN")) {
+      if (localSmallLaneActive()) {
         const violation = destructiveRewriteViolation(prev.content, content);
         if (violation) {
           // Before refusing, repair mechanically: re-inject the external
@@ -236,9 +242,20 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
           }
         }
       }
-    } catch {
-      // Unreadable target = a new file — nothing to preserve.
+      // Content-preservation floor (EVERY lane): a rewrite that deletes
+      // most of the prior file's content is refused — the styling
+      // signature above only compares structure/styling markers, so a
+      // minimal-but-styled page (a heading + gallery with a fresh theme)
+      // sailed through it while deleting every section, nav and image
+      // the request never mentioned. apply_patch is always available
+      // (AUTO-safe), so the refusal routes the model to a targeted edit.
+      const loss = destructiveContentLoss(prev.content, content);
+      if (loss) {
+        return { success: false, error: destructiveContentLossMessage(loss, path) };
+      }
     }
+  } catch {
+    // Unreadable target = a new file — nothing to preserve.
   }
 
   try {
