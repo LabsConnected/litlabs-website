@@ -38,7 +38,11 @@ export function ollamaRouteEligible(
  *  lightweight lane (qwen2.5-coder base) and DOES advertise tools via
  *  /api/tags (verified Oct 2026). */
 export const OLLAMA_TOOL_CAPABLE =
-  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss|litt-hermes|litt-tools|litt-coder/i;
+  // litt-hermes-fast excluded: its qwen3-thinking weights emit a
+  // `reasoning` preamble even under think:false and produced zero tool
+  // calls on the real Studio prompt — flagging it as a builder model
+  // invites a guaranteed-dead pick. It stays a fine chat fallback.
+  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss|litt-hermes(?!-fast)|litt-builder|litt-tools|litt-coder/i;
 
 /** Prefer a usable local tool model, not just a nominally capable one:
  *  on CPU-heavy dev hosts a full hermes variant measured >300s per call
@@ -67,21 +71,52 @@ export function preferredLocalToolModel(
   // in acceptance runs). Prefer the capable 4B hermes window; litt-coder
   // remains available as the lightweight lane after it.
   // CPU-bound box evidence: hermes:16k (4B) emits valid tool calls but
-  // burns 150-300s/turn and hits the attempt cap mid-build; the 2B
-  // hermes-fast:64k answers in ~13-41s with the same structured calls
-  // and a window that fits the real build prompt. Prefer it first.
+  // burns ~180s/turn; hermes-fast (2B) answered faster but its forced
+  // reasoning preamble burned the output budget without emitting calls.
+  // litt-builder is the validated builder lane: same non-thinking hermes
+  // weights/template that emit clean native tool_calls, at an 8k window
+  // that keeps CPU-bound turns under the attempt cap. Preferred over the
+  // hermes-fast builds — those are qwen3-thinking builds that emit a
+  // `reasoning` preamble even under think:false (proven: reasoning-only
+  // responses with zero tool calls on the real Studio prompt).
   const pickFrom = (list: string[]): string | undefined =>
-    list.find((m) => /^litt-hermes-fast:8k/i.test(m)) ??
-    list.find((m) => /^litt-hermes-fast:64k/i.test(m)) ??
+    // litt-coder:16k first — the ONLY local build that completed the full
+    // Studio loop end-to-end on CPU-bound hardware (3×12/12 acceptance:
+    // real HTML writes, approval-gated edits, persistence, preview,
+    // export at ~5-20s/turn). Its fenced text tool calls are recovered by
+    // normalizeTextToolCalls, so native tool_calls are not required.
+    // litt-builder:16k emits native tool_calls but a 4B model at ~66% CPU
+    // offload takes >900s on the write turn — quality fallback only.
+    // The 8k window is too small for the build loop (HTTP 400 at 9,383
+    // prompt tokens); 8k models remain reachable via explicit selection.
+    list.find((m) => /^litt-coder:16k/i.test(m)) ??
+    list.find((m) => /^litt-builder:16k/i.test(m)) ??
+    list.find((m) => /^litt-builder:8k/i.test(m)) ??
+    list.find((m) => /^litt-builder/i.test(m)) ??
     list.find((m) => /^litt-hermes:16k/i.test(m)) ??
     list.find((m) => /^litt-hermes:32k/i.test(m)) ??
     list.find((m) => /^litt-hermes:64k/i.test(m)) ??
+    list.find((m) => /^litt-hermes-fast:64k/i.test(m)) ??
+    list.find((m) => /^litt-hermes-fast:8k/i.test(m)) ??
     list.find((m) => /^litt-hermes-fast/i.test(m)) ??
     list.find((m) => /^litt-tools/i.test(m)) ??
     list.find((m) => /^litt-coder:8k/i.test(m)) ??
     list.find((m) => /^litt-coder/i.test(m)) ??
     list.find((m) => /^litt-hermes/i.test(m)) ??
     list[0];
+  // Context-fit aware: when the caller knows the request's estimated
+  // prompt size, prefer candidates whose ":Nk" window can actually hold it
+  // (an over-window pick is a guaranteed HTTP 400, not a slow turn).
+  // Models without a size hint are treated as fitting — unknown context
+  // is not assumed small.
+  if (minCtxTokens > 0) {
+    const fitting = capable.filter((m) => {
+      const ctx = ollamaContextTokens(m);
+      return ctx === null || ctx >= minCtxTokens;
+    });
+    const fitPick = pickFrom(fitting);
+    if (fitPick) return fitPick;
+  }
   return pickFrom(capable);
 }
 

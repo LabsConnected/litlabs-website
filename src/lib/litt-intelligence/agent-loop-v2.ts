@@ -795,6 +795,26 @@ const LOCAL_SMALL_TOOL_IDS = new Set([
  * recovered by tool-call-markup). Completion is gated by the workspace-
  * mutation evidence check instead of the full quality-loop verdict.
  */
+/**
+ * Website quality contract for the small lane — a compact design-system
+ * spec the model applies to every NEW page it writes. Teaches design
+ * tokens, required semantic structure, and a real-content floor so a
+ * 1.5B model emits a styled page instead of a bare document. Kept short:
+ * the same tokens pay for output headroom. No external dependencies —
+ * everything lands in a single inline <style> block.
+ */
+const LOCAL_SITE_QUALITY_CONTRACT =
+  "## Website quality contract\n" +
+  "A NEW index.html MUST be a complete styled page, never a bare document:\n" +
+  "- <style> block defining a design system: :root{--bg,--surface,--text,--muted,--accent,--radius:12px,--shadow},\n" +
+  "  a system font stack, body{margin:0} reset, and a max-width container.\n" +
+  "- Semantic structure: <header> with site name + <nav>, a hero <section> with headline, tagline and a call-to-action,\n" +
+  "  at least 2 more content <section>s relevant to the request (e.g. menu/features/about), and a <footer>.\n" +
+  "- Layout: cards/items in a responsive grid (repeat(auto-fit,minmax(220px,1fr))), buttons/links with a :hover state.\n" +
+  "- Real copy specific to the request — never lorem ipsum, never placeholder text like 'Add your text here'.\n" +
+  "- If the request names a theme/brand, express it through the tokens (background, accent, typography).\n" +
+  "A page missing the <style> block, the semantic sections, or real copy is incomplete — write it fully the first time.";
+
 const LOCAL_SMALL_LANE_PROMPT =
   "## Local coding mode\n" +
   "You are LiTT, a website-building agent. You act by emitting tool calls.\n" +
@@ -804,7 +824,6 @@ const LOCAL_SMALL_LANE_PROMPT =
   "```\n\n" +
   "Rules:\n" +
   "- Emit EVERY files.write the site needs in ONE response, then emit preview.start.\n" +
-  "- For a NEW site a single index.html with complete inline CSS/JS is enough.\n" +
   "- Emit only tool_call blocks — no prose, no explanations.\n" +
   "- To MODIFY an existing file: files.read it FIRST, then prefer apply_patch with a " +
   "search/replace for just the requested change — NEVER rewrite the whole file from " +
@@ -812,8 +831,11 @@ const LOCAL_SMALL_LANE_PROMPT =
   "- Do EVERY part of a multi-part request: if asked to change the heading AND the theme, " +
   "emit one apply_patch for EACH change in the SAME response. A request is not done until " +
   "every requested change is applied.\n" +
+  "- When the request specifies exact text to add or change, the patch's replace MUST contain " +
+  "that text verbatim — never paraphrase it or substitute different content.\n" +
   "- A files.write that strips an existing file's styling is refused — patch instead.\n" +
-  "- Available: files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.";
+  "- Available: files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.\n\n" +
+  LOCAL_SITE_QUALITY_CONTRACT;
 
 /**
  * Narrow the offered tools to LOCAL_BUILD_TOOL_IDS when:
