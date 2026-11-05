@@ -313,9 +313,13 @@ export async function enrichStaticSiteVisuals(
             `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">` +
             imgs.join("") +
             `</div></section>`;
-          html = /<\/body>/i.test(html)
-            ? html.replace(/<\/body>/i, `${section}</body>`)
-            : html + section;
+          // Above the footer when one exists — a trailing photo grid reads
+          // as content; after the footer it reads as a rendering bug.
+          html = /<footer[\s>]/i.test(html)
+            ? html.replace(/<footer[\s>]/i, (m) => `${section}${m}`)
+            : /<\/body>/i.test(html)
+              ? html.replace(/<\/body>/i, `${section}</body>`)
+              : html + section;
           await transport.writeFile(entry, html);
           if (!report.filesChanged.includes(entry)) report.filesChanged.push(entry);
         }
@@ -330,7 +334,8 @@ export async function enrichStaticSiteVisuals(
     for (const e of assets?.entries ?? []) if (e.type === "file") postFiles.add(`assets/images/${e.name}`);
     report.audit = auditStaticSiteHtml(finalHtml, postFiles);
     return report;
-  } catch {
+  } catch (err) {
+    console.warn("[enrich] enrichStaticSiteVisuals aborted:", err instanceof Error ? err.message : err);
     return report;
   }
 }
