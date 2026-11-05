@@ -41,6 +41,7 @@ vi.mock("../lib/auth/auth-session.js", () => ({
   getAuthSession: () => ({
     isSignedIn: mockIsSignedIn,
     getAccessToken: mockGetAccessToken,
+    getAccessTokenStrict: mockGetAccessToken,
   }),
 }));
 
@@ -280,7 +281,7 @@ describe("E — 5xx server failure", () => {
 describe("describeWorkspaceListFailure", () => {
   it("gives each category its own headline and remedy", async () => {
     const { RemoteUnavailableError } = await import("../lib/remote-unavailable.js");
-    const cases = ["endpoint_missing", "service_unavailable", "server_error", "auth_revoked", "forbidden"] as const;
+    const cases = ["endpoint_missing", "service_unavailable", "server_error", "auth_revoked", "forbidden", "terminal_owner_required"] as const;
     const headlines = cases.map(
       (reason) => describeWorkspaceListFailure(new RemoteUnavailableError(reason)).headline,
     );

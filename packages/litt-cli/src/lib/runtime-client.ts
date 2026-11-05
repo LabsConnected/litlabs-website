@@ -191,8 +191,8 @@ export class RuntimeClient {
    *
    * The Clerk token is obtained from:
    *   1. this.clerkToken (constructor option — explicit override)
-   *   2. AuthSession.getAccessToken() — the real OAuth credential store
-   *      (auto-refreshes if the access token is expired)
+   *   2. AuthSession.getAccessTokenStrict() — the real OAuth credential
+   *      store (auto-refreshes; throws auth_expired when refresh fails)
    *   3. LITT_CLERK_TOKEN env var (temporary — automated acceptance tests)
    */
   private async getAuthToken(): Promise<string> {
@@ -201,10 +201,13 @@ export class RuntimeClient {
 
     let clerkToken = this.clerkToken;
     if (!clerkToken) {
-      // Use the AuthSession (OAuth credential store with auto-refresh)
+      // Use the AuthSession (OAuth credential store with auto-refresh).
+      // Strict accessor: throws RemoteUnavailableError("auth_expired")
+      // when credentials exist but refresh failed, so an expired session
+      // is reported as expired instead of collapsing into "not signed in".
       const { getAuthSession } = await import("./auth/auth-session.js");
       const authSession = getAuthSession();
-      clerkToken = await authSession.getAccessToken() ?? "";
+      clerkToken = await authSession.getAccessTokenStrict() ?? "";
     }
 
     if (!clerkToken) {

@@ -350,7 +350,12 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
     // non-owner Clerk identity gets 403 here and never receives a
     // terminal JWT.
     if (!isTerminalOwner(userId)) {
-      res.status(403).json({ error: "Terminal access is restricted to the workspace owner" });
+      // `code` is the typed refusal the CLI classifies on; `error` stays a
+      // plain string so older clients keep their current behavior.
+      res.status(403).json({
+        error: "Terminal access is restricted to the workspace owner",
+        code: "terminal_owner_required",
+      });
       return;
     }
 
@@ -378,6 +383,7 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
       if (ws.userId !== userId) {
         res.status(403).json({
           error: "Forbidden — workspace does not belong to the authenticated user",
+          code: "workspace_unauthorized",
         });
         return;
       }

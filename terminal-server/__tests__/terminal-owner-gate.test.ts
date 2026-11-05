@@ -153,7 +153,12 @@ function createGatedExchangeApp(): express.Application {
 
       // ─── Owner gate — the REAL isTerminalOwner, in the REAL position ───
       if (!isTerminalOwner(userId)) {
-        res.status(403).json({ error: "Terminal access is restricted to the workspace owner" });
+        // Same shape as server.ts: plain-string `error` for older clients,
+        // typed `code` for clients that classify authorization refusals.
+        res.status(403).json({
+          error: "Terminal access is restricted to the workspace owner",
+          code: "terminal_owner_required",
+        });
         return;
       }
 
@@ -181,6 +186,10 @@ describe("/api/token-exchange owner gate", () => {
 
     expect(res.status).toBe(403);
     expect(res.body.error).toBe("Terminal access is restricted to the workspace owner");
+    // Typed code: lets the CLI classify this as an authorization refusal
+    // (terminal_owner_required) rather than a revoked session — so it
+    // does not tell the user to re-login or clear their valid credential.
+    expect(res.body.code).toBe("terminal_owner_required");
     expect(res.body.terminalToken).toBeUndefined();
   });
 
