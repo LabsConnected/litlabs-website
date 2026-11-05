@@ -289,6 +289,43 @@ describe("provider registry — model hints", () => {
     expect(plan.providers[0].models[0]).toBe("litt-hermes-fast:8k");
   });
 
+  it("routes a vendor-prefixed Groq slug (openai/gpt-oss-*) to Groq, not BYOK", () => {
+    // gpt-oss-120b is a Groq production model — the "openai/" prefix used
+    // to fall through to the BYOK lane, where "gpt-oss-120b" 404s on the
+    // user's OpenAI endpoint (or the hint dropped silently without a key).
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ, { model: "openai/gpt-oss-120b" });
+    expect(plan.droppedModelHint).toBeUndefined();
+    expect(plan.providers[0].provider).toBe("groq");
+    expect(plan.providers[0].models[0]).toBe("openai/gpt-oss-120b");
+  });
+
+  it("routes a qwen/* slug to Groq, not the OpenRouter paid lane", () => {
+    // qwen/qwen3.8-27b is live on Groq (the openrouter :free variant was
+    // delisted upstream). A generic vendor/model slug used to drop to the
+    // OpenRouter paid lane under the Basic cost policy.
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ, { model: "qwen/qwen3.8-27b" });
+    expect(plan.droppedModelHint).toBeUndefined();
+    expect(plan.providers[0].provider).toBe("groq");
+    expect(plan.providers[0].models[0]).toBe("qwen/qwen3.8-27b");
+  });
+
+  it("offers qwen/qwen3.8-27b as a bounded third Groq fallback candidate", () => {
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const groq = plan.providers.find((p) => p.provider === "groq");
+    expect(groq).toBeDefined();
+    expect(groq!.models).toEqual([
+      "openai/gpt-oss-120b",
+      "openai/gpt-oss-20b",
+      "qwen/qwen3.8-27b",
+    ]);
+  });
+
   it("keeps the ollama pin first even with cloud credentials present", () => {
     vi.stubEnv("GEMINI_API_KEY", "x");
     vi.stubEnv("OPENROUTER_API_KEY", "x");

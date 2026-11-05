@@ -58,13 +58,19 @@ async function probe(url: string): Promise<boolean> {
   }
 }
 
-async function tryPexels(keywords: string): Promise<ResolvedImage | null> {
+async function tryPexels(
+  keywords: string,
+  seed: number,
+  usedUrls?: ReadonlySet<string>,
+): Promise<ResolvedImage | null> {
   const key = process.env.PEXELS_API_KEY?.trim();
   if (!key) return null;
   try {
     const url = new URL(PEXELS_API_URL);
     url.searchParams.set("query", keywords.replace(/,/g, " "));
-    url.searchParams.set("per_page", "3");
+    // More than one candidate per query: identical keyword slots used to
+    // all take photos[0], materializing the same image bytes repeatedly.
+    url.searchParams.set("per_page", "8");
     url.searchParams.set("orientation", "landscape");
     const resp = await fetch(url, {
       headers: { Authorization: key },
@@ -77,14 +83,20 @@ async function tryPexels(keywords: string): Promise<ResolvedImage | null> {
         photographer?: string;
       }>;
     };
-    const photo = data.photos?.[0];
-    const download = photo?.src?.large2x ?? photo?.src?.large ?? photo?.src?.original;
-    if (!download) return null;
-    return {
-      url: download,
-      provider: "pexels",
-      attribution: photo?.photographer ? `Photo by ${photo.photographer} on Pexels` : "Pexels",
-    };
+    const photos = data.photos ?? [];
+    // Rotate the pick by seed and skip URLs already materialized this run —
+    // two "coffee" slots must not resolve to the same photo.
+    for (let i = 0; i < photos.length; i++) {
+      const photo = photos[(Math.max(seed, 1) - 1 + i) % photos.length];
+      const download = photo?.src?.large2x ?? photo?.src?.large ?? photo?.src?.original;
+      if (!download || usedUrls?.has(download)) continue;
+      return {
+        url: download,
+        provider: "pexels",
+        attribution: photo?.photographer ? `Photo by ${photo.photographer} on Pexels` : "Pexels",
+      };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -101,23 +113,28 @@ function pollinationsUrl(keywords: string, seed: number): string {
   return `${POLLINATIONS_BASE}/${encodeURIComponent(prompt)}?width=1600&height=900&seed=${seed}&nologo=true`;
 }
 
-function picsumUrl(keywords: string): string {
-  const seed = sanitizeKeywords(keywords).replace(/,/g, "-") || "site";
-  return `${PICSUM_BASE}/${encodeURIComponent(seed)}/1600/900`;
+function picsumUrl(keywords: string, seed: number): string {
+  const kw = sanitizeKeywords(keywords).replace(/,/g, "-") || "site";
+  // The numeric seed belongs in the slug: identical keyword slots used to
+  // resolve to the same deterministic photo (identical MD5s on disk).
+  return `${PICSUM_BASE}/${encodeURIComponent(`${seed}-${kw}`)}/1600/900`;
 }
 
 /**
  * Resolve one image slot to a fetchable URL. `seed` dedupes identical
- * keywords so two "coffee" slots don't return the same photo. Network
- * failures degrade to the next provider — never throws.
+ * keywords so two "coffee" slots don't return the same photo; `usedUrls`
+ * additionally excludes URLs already materialized this run so different
+ * keywords that collide on the same provider hit can't duplicate either.
+ * Network failures degrade to the next provider — never throws.
  */
 export async function resolveSlotImage(
   keywords: string,
   seed: number,
+  usedUrls?: ReadonlySet<string>,
 ): Promise<ResolvedImage | null> {
   const kw = keywords.trim() || "professional photography";
 
-  const pexels = await tryPexels(kw);
+  const pexels = await tryPexels(kw, seed, usedUrls);
   if (pexels) return pexels;
 
   // Free fallbacks — probe each before committing so a flaky host can't
@@ -125,10 +142,11 @@ export async function resolveSlotImage(
   // AI generator is the on-topic backstop of last resort.
   const candidates: Array<{ url: string; provider: string }> = [
     { url: loremFlickrUrl(kw, seed), provider: "loremflickr" },
-    { url: picsumUrl(kw), provider: "picsum" },
+    { url: picsumUrl(kw, seed), provider: "picsum" },
     { url: pollinationsUrl(kw, seed), provider: "pollinations" },
   ];
   for (const c of candidates) {
+    if (usedUrls?.has(c.url)) continue;
     if (await probe(c.url)) {
       return { url: c.url, provider: c.provider, attribution: null };
     }

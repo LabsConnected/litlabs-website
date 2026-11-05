@@ -372,6 +372,13 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
         // Groq's live catalog has neither, so the old fallbacks 404'd on
         // every attempt (verified against the live Groq catalog Oct 2026).
         "openai/gpt-oss-20b",
+        // Third bounded candidate: qwen/qwen3.8-27b is live on Groq's
+        // catalog with tool-calling support — the openrouter-qwen3.8-27b
+        // registry record documents it as Groq-hosted after the
+        // OpenRouter :free variant was delisted upstream. Kept last: it is
+        // a Groq PREVIEW model (production gpt-oss models stay preferred),
+        // and the shared requestTokenCeiling still bounds every attempt.
+        "qwen/qwen3.8-27b",
       ],
     },
     {
@@ -793,6 +800,19 @@ function resolveModelHint(model: string | undefined): ModelHint {
   if (m.startsWith("gemini") && !m.includes("/")) return { kind: "route", provider: "gemini", model: m };
   if (m.startsWith("google/gemini")) return { kind: "route", provider: "gemini", model: m.replace(/^google\//, "") };
   if (/^(llama|mixtral|gemma|whisper|deepseek-r1-distill|qwen|openai\/gpt-oss)/i.test(m) && !m.includes("/")) {
+    return { kind: "route", provider: "groq", model: m };
+  }
+  // Groq hosts its catalog under vendor-prefixed slugs, so the bare-name
+  // branch above (which requires no "/") can never reach them. Resolve the
+  // prefixed Groq families BEFORE "openai/" falls through to BYOK and the
+  // generic vendor/model slug falls through to OpenRouter paid:
+  //   - openai/gpt-oss-* are Groq production models — sending
+  //     "gpt-oss-120b" to the user's OpenAI endpoint is a guaranteed 404,
+  //     and dropping the hint silently swaps the requested model.
+  //   - qwen/* is live on Groq (qwen/qwen3.8-27b per the
+  //     openrouter-qwen3.8-27b registry record); a slug Groq does not host
+  //     fails model-scoped and the remaining Groq candidates still run.
+  if (/^openai\/gpt-oss/i.test(m) || /^qwen\//i.test(m)) {
     return { kind: "route", provider: "groq", model: m };
   }
   if (/^(mistral|codestral|pixtral|ministral|open-mistral|open-codestral)/i.test(m) && !m.includes("/")) {
