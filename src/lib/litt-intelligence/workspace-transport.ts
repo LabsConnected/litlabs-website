@@ -20,6 +20,7 @@ import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createWorkspaceCheckpoint } from "@/lib/missions/workspace-checkpoint";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
 import { unquoteGitPath } from "./workspace-change-producer";
+import { applyPatchesToContent } from "./apply-patch-content";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -705,15 +706,8 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   async applyPatch(path: string, patches: PatchOperation[]): Promise<{ applied: boolean }> {
     const { content } = await this.readFile(path);
-    let updated = content;
-
-    for (const patch of patches) {
-      if (!updated.includes(patch.search)) {
-        throw new Error(`Patch search string not found in ${path}: "${patch.search.slice(0, 80)}..."`);
-      }
-      updated = updated.replace(patch.search, patch.replace);
-    }
-
+    const { updated } = applyPatchesToContent(path, content, patches);
+    if (updated === content) return { applied: true };
     await this.writeFile(path, updated);
     return { applied: true };
   }
