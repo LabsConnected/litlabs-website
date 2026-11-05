@@ -31,6 +31,17 @@ vi.mock("@/lib/siteConfig", () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
+// Ollama calls go through undici's own fetch (custom dispatchers are
+// rejected by Node's bundled fetch) — route it through the same mock so
+// dispatched calls stay interceptable and no real socket opens.
+vi.mock("undici", async (importOriginal) => {
+  const original = await importOriginal<typeof import("undici")>();
+  return {
+    ...original,
+    fetch: (...args: Parameters<typeof original.fetch>) => mockFetch(...args),
+  };
+});
+
 import {
   callLLMWithTools,
   buildAssistantToolCallMessage,
@@ -1465,22 +1476,40 @@ describe("callLLMWithTools — Ollama local route", () => {
     expect(lastBodyFor("11434/v1/chat/completions").model).toBe("llama3.1:8b");
   });
 
-  it("treats litt-* tool builds and arch families as tool-capable", async () => {
+  it("treats validated litt-* builder builds as tool-capable", async () => {
     vi.stubEnv("LITT_DISABLE_OLLAMA", "");
     vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
-    // A custom Modelfile name matches no tag-name regex — the litt- prefix
-    // marks it as a LiTT tool build, and the llama family would too.
+    // A custom Modelfile name (litt-builder) matches the shared
+    // tool-capable tag regex even though it is not a stock model name.
     _setOllamaProbeForTests(async () => [
-      { name: "litt-hermes-fast:64k", sizeBytes: 1_300_000_000, families: ["llama"] },
+      { name: "litt-builder:8k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
     ]);
 
     mockFetch
-      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-hermes-fast:64k"]))
-      .mockResolvedValueOnce(makeSuccessResponse("litt-hermes-fast:64k", "litt build ok"));
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-builder:8k"]))
+      .mockResolvedValueOnce(makeSuccessResponse("litt-builder:8k", "litt build ok"));
 
     const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
     expect(result.provider).toBe("ollama");
-    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-hermes-fast:64k");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-builder:8k");
+  });
+
+  it("does not auto-pick litt-hermes-fast reasoning builds for the tool lane", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    // litt-hermes-fast emits reasoning-only output under the real Studio
+    // prompt (proven: zero tool calls) — it is excluded from tool-capable
+    // candidates even though it remains reachable via explicit pin.
+    _setOllamaProbeForTests(async () => [
+      { name: "litt-hermes-fast:8k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
+    ]);
+
+    const err = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [WRITE_TOOL],
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(AllRoutesFailedError);
   });
 
   it("honours the OLLAMA_MODEL override without touching warm/probe order", async () => {
@@ -1501,6 +1530,8 @@ describe("callLLMWithTools — Ollama local route", () => {
   it("sends think:false to reasoning-family builds so tool calls are not stalled", async () => {
     vi.stubEnv("LITT_DISABLE_OLLAMA", "");
     vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    // Pinned explicitly — litt-hermes-fast is never auto-picked for tools.
+    vi.stubEnv("OLLAMA_MODEL", "litt-hermes-fast:8k");
     _setOllamaProbeForTests(async () => [
       { name: "litt-hermes-fast:8k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
     ]);
@@ -1532,21 +1563,21 @@ describe("callLLMWithTools — Ollama local route", () => {
     expect(lastBodyFor("11434/v1/chat/completions").think).toBeUndefined();
   });
 
-  it("prefers the smaller context tag between equal-size candidates", async () => {
+  it("prefers the smaller context tag between equal-rank candidates", async () => {
     vi.stubEnv("LITT_DISABLE_OLLAMA", "");
     vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
     _setOllamaProbeForTests(async () => [
-      { name: "litt-hermes-fast:64k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
-      { name: "litt-hermes-fast:8k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
+      { name: "litt-hermes:64k", sizeBytes: 2_500_000_000, families: ["qwen3"] },
+      { name: "litt-hermes:32k", sizeBytes: 2_500_000_000, families: ["qwen3"] },
     ]);
 
     mockFetch
-      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-hermes-fast:8k"]))
-      .mockResolvedValueOnce(makeSuccessResponse("litt-hermes-fast:8k", "small ctx ok"));
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-hermes:32k"]))
+      .mockResolvedValueOnce(makeSuccessResponse("litt-hermes:32k", "small ctx ok"));
 
     const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
     expect(result.provider).toBe("ollama");
-    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-hermes-fast:8k");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-hermes:32k");
   });
 
   it("bounds the cold load by OLLAMA_LOAD_TIMEOUT_MS, not the inference timeout", async () => {

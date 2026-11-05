@@ -130,11 +130,15 @@ Modelfile
 .env.test
 
 # Local scratch directories
+.tmp/
 .tmp.driveupload/
 .vs/
 .temp/
 outputs/
 plans/
+# Local prod data dumps — never commit (user data + confuses Tailwind scan)
+tasks/prod-backup-*/
+tasks/golden-*/
 
 # Virtual environments
 .venv

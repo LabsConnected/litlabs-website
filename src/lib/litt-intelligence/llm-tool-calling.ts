@@ -27,6 +27,7 @@
 import "server-only";
 
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls, stripEnvelopeMarkup, stripToolCallMarkupText } from "./tool-call-markup";
 import { validateToolCallArgs } from "@litt/agent-core";
 import { SITE_URL } from "@/lib/siteConfig";
@@ -49,6 +50,7 @@ import {
   type RouteRequirements,
 } from "./provider-registry";
 import { recordModelAttemptOutcome } from "./model-registry";
+import { ollamaContextTokens, estimateOllamaPromptTokens, preferredLocalToolModel } from "./ollama-shared";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -289,12 +291,31 @@ async function raceProviderAttempt<T>(
  * The underlying HTTP request is actually cancelled via AbortController, not
  * just raced, and the controller/timer/listener are cleaned up in every path.
  */
+/** Lazy singleton dispatcher for local Ollama calls only.
+ *
+ *  Non-streaming local inference (`stream:false`) means Ollama holds response
+ *  headers until generation completes — on CPU-bound hardware a single turn
+ *  can legitimately exceed undici's default 300s `headersTimeout`, which kills
+ *  the socket as a `network` failure regardless of the app-level
+ *  `OLLAMA_TIMEOUT_MS` budget. This dispatcher lifts ONLY the header wait;
+ *  connect/body/keep-alive defaults are unchanged and the AbortController
+ *  timeout below remains the real deadline (plus upstream cancellation).
+ *  Remote providers never see this dispatcher — their socket defaults stand. */
+let _ollamaDispatcher: Dispatcher | undefined;
+function ollamaDispatcher(): Dispatcher {
+  if (!_ollamaDispatcher) {
+    _ollamaDispatcher = new Agent({ headersTimeout: 0 });
+  }
+  return _ollamaDispatcher;
+}
+
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs: number,
   label: string,
   externalSignal?: AbortSignal,
+  dispatcher?: Dispatcher,
 ): Promise<Response> {
   if (externalSignal?.aborted) {
     throw new UpstreamAbortError(label);
@@ -322,7 +343,19 @@ async function fetchWithTimeout(
   timeoutPromise.catch(() => {}); // avoid unhandled rejection when fetch wins
 
   try {
-    return await Promise.race([fetch(url, { ...init, signal: controller.signal }), timeoutPromise, externalAbortPromise]);
+    // A custom dispatcher must pair with undici's own fetch — Node's bundled
+    // global fetch rejects dispatchers built by a different undici version
+    // (UND_ERR_INVALID_ARG: invalid onRequestStart method). Remote providers
+    // stay on global fetch; only explicitly-dispatched (local) calls use
+    // undiciFetch.
+    const fetchPromise = dispatcher
+      ? undiciFetch(url, {
+          ...init,
+          signal: controller.signal,
+          dispatcher,
+        } as Parameters<typeof undiciFetch>[1])
+      : fetch(url, { ...init, signal: controller.signal });
+    return (await Promise.race([fetchPromise, timeoutPromise, externalAbortPromise])) as Response;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
     if (onExternalAbort) {
@@ -1244,7 +1277,7 @@ async function attemptOpenAiCompatible(
   model: string,
   req: AttemptRequest,
   ctx: AttemptContext,
-  endpoint: { baseUrl: string; headers: Record<string, string>; extraBody?: Record<string, unknown> },
+  endpoint: { baseUrl: string; headers: Record<string, string>; extraBody?: Record<string, unknown>; dispatcher?: Dispatcher },
 ): Promise<LLMToolCallResponse> {
   const openAiTools = toOpenRouterTools(req.tools);
   const body: Record<string, unknown> = {
@@ -1277,6 +1310,7 @@ async function attemptOpenAiCompatible(
     ctx.timeoutMs,
     route.provider,
     ctx.signal,
+    endpoint.dispatcher,
   );
 
   if (!res.ok) {
@@ -1293,21 +1327,8 @@ async function attemptOpenAiCompatible(
 }
 
 // ─── Ollama ───────────────────────────────────────────────────────
-
-/** Local model families with reliable structured tool calling (tag names). */
-const OLLAMA_TOOL_CAPABLE =
-  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss|hermes/i;
-
-/** /api/tags `details.families` entries that back tool-capable builds.
- *  Coarser than tag names — a custom Modelfile build (e.g. `litt-hermes`)
- *  inherits its base arch's family even when the name matches nothing in
- *  OLLAMA_TOOL_CAPABLE. */
-const OLLAMA_TOOL_CAPABLE_FAMILY =
-  /llama|qwen|mistral|nemo|command|granite|phi|deepseek|devstral|gpt-oss|functionary|hermes/i;
-
-/** LiTT's own tool-tuned builds are always tool candidates — they are
- *  installed for exactly this purpose. */
-const OLLAMA_LITT_BUILD = /^litt-/i;
+// Tool-capability + preference policy lives in ollama-shared.ts (the one
+// canonical copy) — both routers and /api/llm/health consume it there.
 
 export interface OllamaModelInfo {
   name: string;
@@ -1402,12 +1423,6 @@ async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise
   return models;
 }
 
-function isOllamaToolCapable(m: OllamaModelInfo): boolean {
-  if (OLLAMA_LITT_BUILD.test(m.name)) return true;
-  if (OLLAMA_TOOL_CAPABLE.test(m.name)) return true;
-  return m.families.some((f) => OLLAMA_TOOL_CAPABLE_FAMILY.test(f));
-}
-
 /** Models whose size the endpoint did not report sort after known sizes —
  *  an unknown footprint is not evidence of a fast model. */
 function ollamaSizeRank(m: OllamaModelInfo): number {
@@ -1429,11 +1444,16 @@ function ollamaCtxRank(m: OllamaModelInfo): number {
  *  arrives. */
 const OLLAMA_REASONING_FAMILY = /qwen3|deepseek-r1|deepseek-v3\.1|gpt-oss|magistral/i;
 
+/** LiTT builds that are actually thinking models — litt-hermes-fast is the
+ *  qwen3 build whose template carries the think gate (and whose weights emit
+ *  reasoning regardless of /no_think). litt-hermes, litt-builder, litt-tools,
+ *  litt-coder and litt-fast are NON-thinking builds — sending think:false to
+ *  them risks an API error on servers that validate unknown fields, and buys
+ *  nothing. */
+const OLLAMA_LITT_THINKING_BUILD = /^litt-hermes-fast/i;
+
 function isOllamaReasoningModel(m: OllamaModelInfo | undefined, name: string): boolean {
-  // LiTT's own tool builds are qwen3-based thinking models — the tag carries
-  // no family hint, so the prefix is the only signal when /api/tags details
-  // are unavailable (or the model came from the OLLAMA_MODEL override).
-  if (OLLAMA_LITT_BUILD.test(name)) return true;
+  if (OLLAMA_LITT_THINKING_BUILD.test(name)) return true;
   if (OLLAMA_REASONING_FAMILY.test(name)) return true;
   return !!m?.families.some((f) => OLLAMA_REASONING_FAMILY.test(f));
 }
@@ -1443,15 +1463,31 @@ function isOllamaReasoningModel(m: OllamaModelInfo | undefined, name: string): b
  *  selected just because it is free. Among eligible candidates the smallest
  *  footprint wins: local CPU inference latency scales with size, and a
  *  smaller model also loads faster and leaves RAM headroom. */
-function pickOllamaModel(available: OllamaModelInfo[], toolsRequired: boolean): string | null {
+function pickOllamaModel(
+  available: OllamaModelInfo[],
+  toolsRequired: boolean,
+  minCtxTokens = 0,
+): string | null {
   const override = process.env.OLLAMA_MODEL;
   if (override) return override;
   if (available.length === 0) return null;
+  // Tool lane: defer to the shared validated preference order
+  // (ollama-shared.preferredLocalToolModel) — a size-first pick would
+  // choose a smaller unvalidated build over the proven builder model.
+  // Candidates are size/ctx-sorted first so the shared fallback picks the
+  // smallest capable model when no validated litt-* build matches.
   const sorted = [...available].sort(
     (a, b) => ollamaSizeRank(a) - ollamaSizeRank(b) || ollamaCtxRank(a) - ollamaCtxRank(b),
   );
-  if (!toolsRequired) return sorted[0].name;
-  return sorted.find(isOllamaToolCapable)?.name ?? null;
+  if (toolsRequired) {
+    const preferred = preferredLocalToolModel(
+      sorted.map((m) => m.name),
+      minCtxTokens,
+    );
+    if (preferred) return preferred;
+    return null;
+  }
+  return sorted[0].name;
 }
 
 /** Models Ollama currently holds in memory (GET /api/ps). Returns null when
@@ -1545,6 +1581,7 @@ async function ensureOllamaModelWarm(
         loadBudgetMs,
         "Ollama warm",
         ctx.signal,
+        ollamaDispatcher(),
       );
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
@@ -1600,7 +1637,20 @@ async function attemptOllama(
     }
   }
 
-  const model = pickOllamaModel(available, req.tools.length > 0);
+  // An explicit route-level model (OLLAMA_MODEL env entry, or a picker hint
+  // the planner unshifted to models[0]) always wins over auto-pick. "auto"
+  // is the sentinel for no-preference. A hinted model that is not installed
+  // surfaces as an honest attempt failure downstream, never a silent swap.
+  const hinted = _model && _model !== "auto" ? _model : null;
+  // Estimate the request's footprint once — it both context-filters the
+  // auto-pick (a model whose window cannot hold the prompt is a
+  // guaranteed HTTP 400, not a slow turn) and bounds the output below.
+  const promptEst = estimateOllamaPromptTokens(
+    req.systemPrompt,
+    req.messages,
+    toOpenRouterTools(req.tools),
+  );
+  const model = hinted ?? pickOllamaModel(available, req.tools.length > 0, promptEst);
   if (!model) {
     throw new ProviderAttemptError("ollama", "auto", {
       class: "model_unavailable",
@@ -1635,8 +1685,35 @@ async function attemptOllama(
     health: "healthy",
     credentialState: "not_required",
   };
+  // Small-context output budget: num_ctx is shared by prompt + tools +
+  // transcript + response. When the tag advertises the window (":Nk"),
+  // clamp max_tokens to what actually fits so Ollama cannot silently
+  // truncate the prompt to honor an oversized num_predict. The caller's
+  // explicit budget wins when it is already smaller.
+  let effReq = req;
+  const ctxTokens = ollamaContextTokens(model);
+  if (ctxTokens) {
+    const headroom = ctxTokens - promptEst - 256;
+    const declared = req.maxTokens ?? 4096;
+    // Always bound the generation: an absent max_tokens means Ollama
+    // decodes to ctx exhaustion, and on CPU-bound local hardware an
+    // unbounded write turn (measured >15min at ~5-8 tok/s) blows through
+    // every attempt budget. Cap at min(headroom, declared) so the
+    // response can neither overflow the window nor run unbounded.
+    const bound = Math.max(Math.min(headroom, declared), 256);
+    if (bound !== req.maxTokens) {
+      effReq = { ...req, maxTokens: bound };
+      logRoute("ollama_ctx_budget", {
+        model,
+        ctxTokens,
+        promptEst,
+        maxTokens: effReq.maxTokens,
+      });
+    }
+  }
+
   const modelInfo = available.find((m) => m.name === model);
-  return attemptOpenAiCompatible(route, model, req, inferenceCtx, {
+  return attemptOpenAiCompatible(route, model, effReq, inferenceCtx, {
     baseUrl: `${endpoint}/v1`,
     headers: {},
     // Reasoning-family builds (qwen3/deepseek/gpt-oss) emit a long
@@ -1644,7 +1721,14 @@ async function attemptOllama(
     // exhausted the attempt timeout on local hardware. think:false asks the
     // model to answer directly; Ollama ignores it for non-thinking models
     // only when the family advertises thinking, so gate on the metadata.
-    extraBody: isOllamaReasoningModel(modelInfo, model) ? { think: false } : undefined,
+    // keep_alive holds the model resident across build turns — without it a
+    // multi-GB reload can land mid-run (inference alone does not refresh the
+    // unload timer on every Ollama version).
+    extraBody: {
+      keep_alive: OLLAMA_KEEP_ALIVE,
+      ...(isOllamaReasoningModel(modelInfo, model) ? { think: false } : {}),
+    },
+    dispatcher: ollamaDispatcher(),
   });
 }
 
