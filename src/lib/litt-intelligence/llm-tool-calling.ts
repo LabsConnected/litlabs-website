@@ -1474,17 +1474,19 @@ function pickOllamaModel(
   // Tool lane: defer to the shared validated preference order
   // (ollama-shared.preferredLocalToolModel) — a size-first pick would
   // choose a smaller unvalidated build over the proven builder model.
+  // Candidates are size/ctx-sorted first so the shared fallback picks the
+  // smallest capable model when no validated litt-* build matches.
+  const sorted = [...available].sort(
+    (a, b) => ollamaSizeRank(a) - ollamaSizeRank(b) || ollamaCtxRank(a) - ollamaCtxRank(b),
+  );
   if (toolsRequired) {
     const preferred = preferredLocalToolModel(
-      available.map((m) => m.name),
+      sorted.map((m) => m.name),
       minCtxTokens,
     );
     if (preferred) return preferred;
     return null;
   }
-  const sorted = [...available].sort(
-    (a, b) => ollamaSizeRank(a) - ollamaSizeRank(b) || ollamaCtxRank(a) - ollamaCtxRank(b),
-  );
   return sorted[0].name;
 }
 
