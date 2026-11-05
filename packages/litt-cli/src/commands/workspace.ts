@@ -213,6 +213,7 @@ export function describeWorkspaceListFailure(error: unknown): { headline: string
     not_authenticated: "Not signed in.",
     forbidden: "Access to workspace listing was refused.",
     workspace_unauthorized: "Not authorized for that workspace.",
+    terminal_owner_required: "Terminal access is restricted to the workspace owner.",
   };
   return {
     headline: HEADLINE[error.reason] ?? `Failed to list workspaces (${error.reason}).`,

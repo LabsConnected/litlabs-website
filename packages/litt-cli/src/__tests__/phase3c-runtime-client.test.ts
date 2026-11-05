@@ -25,13 +25,14 @@ vi.mock("socket.io-client", () => ({
 }));
 
 // ─── Auth session mock ───────────────────────────────────────────
-// RuntimeClient calls getAuthSession().getAccessToken() when no
+// RuntimeClient calls getAuthSession().getAccessTokenStrict() when no
 // explicit clerkToken is provided. Mock it to return null by default
 // so tests don't read the real keychain. Individual tests that need
 // a token use the `terminalToken` constructor option instead.
 vi.mock("../lib/auth/auth-session.js", () => ({
   getAuthSession: vi.fn(() => ({
     getAccessToken: vi.fn(async () => null),
+    getAccessTokenStrict: vi.fn(async () => null),
   })),
   resetAuthSession: vi.fn(),
 }));
