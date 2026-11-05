@@ -22,6 +22,16 @@ export interface CameraDevice {
   label: string;
 }
 
+// Errors where retrying with default constraints may still succeed — e.g. a
+// USB camera that doesn't expose facingMode, or a re-plugged camera whose
+// exact deviceId is now stale. ConstraintNotSatisfiedError is the legacy name.
+const RETRYABLE_VIDEO_ERRORS = new Set([
+  "OverconstrainedError",
+  "ConstraintNotSatisfiedError",
+  "NotFoundError",
+  "DevicesNotFoundError",
+]);
+
 export function useMediaPermissions() {
   const [permission, setPermission] = useState<PermissionStatus>({
     audio: "prompt",
@@ -80,19 +90,37 @@ export function useMediaPermissions() {
       setPermission((p) => ({ ...p, video: "error" }));
       return null;
     }
+    const openStream = (video: MediaTrackConstraints | boolean) =>
+      navigator.mediaDevices.getUserMedia({ audio: false, video });
+
     try {
-      const constraints: MediaStreamConstraints = {
-        audio: false,
-        video: deviceId
-          ? { deviceId: { exact: deviceId } }
-          : {
-              facingMode: { ideal: facingMode },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              frameRate: { ideal: 24, max: 30 },
-            },
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const videoConstraints: MediaTrackConstraints = deviceId
+        ? { deviceId: { exact: deviceId } }
+        : {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 24, max: 30 },
+          };
+      let stream: MediaStream | null = null;
+      let failure: DOMException | null = null;
+      try {
+        stream = await openStream(videoConstraints);
+      } catch (e) {
+        failure = e as DOMException;
+        // USB cameras that don't report a facing mode, or that were
+        // unplugged/re-plugged (new deviceId), reject the requested
+        // constraints — retry once with the default camera before failing.
+        if (RETRYABLE_VIDEO_ERRORS.has(failure.name)) {
+          try {
+            stream = await openStream(true);
+            failure = null;
+          } catch (e2) {
+            failure = e2 as DOMException;
+          }
+        }
+      }
+      if (!stream) throw failure ?? new Error("Camera stream unavailable");
       setPermission((p) => ({ ...p, video: "granted" }));
       return stream;
     } catch (e) {

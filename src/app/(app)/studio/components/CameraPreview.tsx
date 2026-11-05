@@ -43,6 +43,14 @@ const STATUS_LABELS: Record<PreviewStatus, string> = {
   error: "Camera error",
 };
 
+// Errors where retrying with default constraints may still succeed.
+const RETRYABLE_ERRORS = new Set([
+  "OverconstrainedError",
+  "ConstraintNotSatisfiedError",
+  "NotFoundError",
+  "DevicesNotFoundError",
+]);
+
 export default function CameraPreview({ onClose, onCapture }: CameraPreviewProps) {
   const [status, setStatus] = useState<PreviewStatus>("requesting_permission");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -72,20 +80,42 @@ export default function CameraPreview({ onClose, onCapture }: CameraPreviewProps
       return;
     }
 
+    // facingMode must be `ideal` — USB webcams don't report a facing mode, so
+    // a required constraint throws OverconstrainedError and the camera never
+    // opens. Same for a stale exact deviceId after unplug/re-plug.
+    const openStream = async (): Promise<MediaStream> => {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: deviceId
+            ? { deviceId: { exact: deviceId } }
+            : {
+                facingMode: { ideal: mode ?? facingMode },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              },
+          audio: false,
+        });
+      } catch (e) {
+        if (RETRYABLE_ERRORS.has((e as DOMException).name)) {
+          return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
+        throw e;
+      }
+    };
+
     try {
-      const constraints: MediaStreamConstraints = {
-        video: deviceId
-          ? { deviceId: { exact: deviceId } }
-          : { facingMode: mode ?? facingMode },
-        audio: false,
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const stream = await openStream();
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         void videoRef.current.play().catch(() => {});
       }
       setStatus("live");
+
+      // Remember which device actually opened so Switch cycles correctly and
+      // the selector shows the active camera.
+      const activeDeviceId = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
+      if (activeDeviceId) setSelectedDeviceId(activeDeviceId);
 
       // Enumerate devices after permission is granted
       try {
@@ -106,6 +136,9 @@ export default function CameraPreview({ onClose, onCapture }: CameraPreviewProps
       } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
         setStatus("device_busy");
         setErrorMsg("Another application is using the camera.");
+      } else if (err.name === "OverconstrainedError" || err.name === "ConstraintNotSatisfiedError") {
+        setStatus("error");
+        setErrorMsg("This camera doesn't support the requested mode.");
       } else {
         setStatus("error");
         setErrorMsg(err.message || String(e));
@@ -119,6 +152,27 @@ export default function CameraPreview({ onClose, onCapture }: CameraPreviewProps
     return () => stopStream();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Handle USB hot-plug: refresh the device list and recover if the active
+  // stream died (e.g. the camera was unplugged and another is available).
+  useEffect(() => {
+    const md = navigator.mediaDevices;
+    if (!md?.addEventListener) return;
+    const onDeviceChange = async () => {
+      try {
+        const all = await md.enumerateDevices();
+        setDevices(all.filter((d) => d.kind === "videoinput"));
+      } catch {
+        // enumeration may fail on some browsers
+      }
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (streamRef.current && (!track || track.readyState === "ended")) {
+        void startCamera();
+      }
+    };
+    md.addEventListener("devicechange", onDeviceChange);
+    return () => md.removeEventListener("devicechange", onDeviceChange);
+  }, [startCamera]);
 
   // Handle track ended (device disconnected)
   useEffect(() => {

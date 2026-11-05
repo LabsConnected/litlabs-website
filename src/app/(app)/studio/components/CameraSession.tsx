@@ -156,12 +156,34 @@ export default function CameraSession({
       streamRef.current = stream;
       setStatus("starting");
 
+      // Reflect the camera that actually opened in the device selector.
+      const activeDeviceId = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
+      if (activeDeviceId) setSelectedDeviceId(activeDeviceId);
+
       // Enumerate cameras while the stream attaches
       const cams = await enumerateCameras();
       setDevices(cams);
     },
     [facingMode, requestVideo, stopStream, enumerateCameras],
   );
+
+  // Handle USB hot-plug: refresh the device list and restart on a remaining
+  // camera if the active stream died (e.g. the camera was unplugged).
+  useEffect(() => {
+    const md = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+    if (!md?.addEventListener) return;
+    const onDeviceChange = async () => {
+      const cams = await enumerateCameras();
+      setDevices(cams);
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (streamRef.current && (!track || track.readyState === "ended")) {
+        setSelectedDeviceId(undefined);
+        void startCamera();
+      }
+    };
+    md.addEventListener("devicechange", onDeviceChange);
+    return () => md.removeEventListener("devicechange", onDeviceChange);
+  }, [enumerateCameras, startCamera]);
 
   const flipCamera = useCallback(async () => {
     stopStream();
