@@ -1294,12 +1294,13 @@ describe("runAgentLoopV2 — build capability guard", () => {
     expect(result.modelFailed).toBe("NO_BUILD_CAPABLE_MODEL");
     expect(result.modelFailureText).toContain("No build-capable model is available");
     // Chain: north-mini-code → gemini-flash → gemini-2.5-flash →
-    // nemotron-3.5-lightning → nemotron-3-super → gemma-4-26b →
-    // nemotron-3-ultra → gemma-4-31b → gemini-2.5-pro → exhausted.
-    // 9 windows × 3 steps = 27 calls, bounded far below maxSteps.
+    // gemini-2.5-flash-lite → nemotron-3.5-lightning → nemotron-3-super →
+    // gemma-4-26b → nemotron-3-ultra → gemma-4-31b → gemini-2.5-pro →
+    // exhausted.
+    // 10 windows × 3 steps = 30 calls, bounded far below maxSteps.
     // (qwen3.8-27b:free is tool-capable but not run-proven as a file
     // writer, so it never enters the build chain.)
-    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(27);
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(30);
   });
 
   it("resets the window when the model finally writes", async () => {

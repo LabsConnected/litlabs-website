@@ -232,9 +232,10 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
     expect(result.provider).toBe("openrouter");
 
     // Per-model 429s try the provider's remaining candidates (Gemini free
-    // limits are per-model) — both Gemini models were attempted, then the
-    // provider cooled down and OpenRouter took over. No sleeping either way.
-    expect(generateContentMock).toHaveBeenCalledTimes(2);
+    // limits are per-model) — all three Gemini ladder models were
+    // attempted, then the provider cooled down and OpenRouter took over.
+    // No sleeping either way.
+    expect(generateContentMock).toHaveBeenCalledTimes(3);
     expect(getProviderHealth("gemini").state).toBe("cooldown");
     // No backoff/sleep timer is pending.
     expect(vi.getTimerCount()).toBe(0);
@@ -263,11 +264,16 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
     } catch (err) {
       expect(err).toBeInstanceOf(AllRoutesFailedError);
       const e = err as AllRoutesFailedError;
-      // Both Gemini candidates hit their per-model 429 before the provider
-      // broke to OpenRouter's account-level 402.
-      expect(e.failures.map((f) => f.class)).toEqual(["rate_limited", "rate_limited", "billing"]);
+      // All three Gemini candidates hit their per-model 429 before the
+      // provider broke to OpenRouter's account-level 402.
+      expect(e.failures.map((f) => f.class)).toEqual([
+        "rate_limited",
+        "rate_limited",
+        "rate_limited",
+        "billing",
+      ]);
     }
-    expect(generateContentMock).toHaveBeenCalledTimes(2);
+    expect(generateContentMock).toHaveBeenCalledTimes(3);
     // One OpenRouter call only — account-level 402 stops the provider.
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });

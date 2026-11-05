@@ -114,6 +114,7 @@ describe("model registry — eligibility", () => {
     const none = selectBuildModel([
       "gemini-flash",
       "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
       "openrouter-qwen3.8-27b",
       "openrouter-nemotron-3.5-lightning",
       "openrouter-nemotron-3-super",
@@ -139,6 +140,7 @@ describe("model registry — eligibility", () => {
     const none = selectBuildModel([
       "gemini-flash",
       "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
       "openrouter-qwen3.8-27b",
       "openrouter-nemotron-3.5-lightning",
       "openrouter-nemotron-3-super",
