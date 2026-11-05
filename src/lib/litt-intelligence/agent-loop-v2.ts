@@ -2688,6 +2688,17 @@ async function runAgentLoopV2Inner(
       ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
       : effectiveFinalText;
 
+  // A refused quality verdict IS the loop failing honestly: the finished
+  // event below already carries success:false (→ agent.failed), and the
+  // result must carry the same truth or downstream status projection
+  // (launch-flow, messages route, runObservability) can still label the
+  // run completed. failedHonestly is the existing inner→outer failure
+  // field every consumer already reads. The gated text (closing message +
+  // verdict checklist) IS the real failure reason — keep it whole.
+  if (!cancelled && !modelFailed && !failedHonestly && qualityFinale && !qualityFinale.verdict.ok) {
+    failedHonestly = gatedFinalText;
+  }
+
   // What did this run actually do to the files?
   //
   // Tool success flags cannot answer that: a tool can write bytes and then
@@ -4190,6 +4201,17 @@ async function resumeAgentLoopV2Inner(
     qualityFinale && !qualityFinale.verdict.ok
       ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
       : effectiveFinalText;
+
+  // A refused quality verdict IS the loop failing honestly: the finished
+  // event below already carries success:false (→ agent.failed), and the
+  // result must carry the same truth or downstream status projection
+  // (launch-flow, messages route, runObservability) can still label the
+  // run completed. failedHonestly is the existing inner→outer failure
+  // field every consumer already reads. The gated text (closing message +
+  // verdict checklist) IS the real failure reason — keep it whole.
+  if (!cancelled && !modelFailed && !failedHonestly && qualityFinale && !qualityFinale.verdict.ok) {
+    failedHonestly = gatedFinalText;
+  }
 
   // What did this run actually do to the files?
   //

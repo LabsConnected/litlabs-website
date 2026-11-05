@@ -2499,3 +2499,47 @@ describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incide
     expect(transport.applyPatch).toHaveBeenCalledTimes(8);
   });
 });
+
+describe("runAgentLoopV2 — failed quality verdict propagates to failedHonestly", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "google/gemini-2.5-flash",
+    });
+  });
+
+  it("sets failedHonestly + finished success:false when the verdict refuses success", async () => {
+    // The observed defect: the loop emitted agent.failed (finished
+    // success:false) yet the outer projection marked the action run
+    // completed — failedHonestly was left unset so launch-flow and the
+    // messages route had nothing truthful to propagate.
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      fakeTransport,
+      {
+        model: "gemini-2.5-flash",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        isStaticWorkspace: true,
+        qualityLoop: {
+          enabled: true,
+          runId: "run-q",
+          projectId: "p-test",
+          userId: "u-test",
+          userRequest: "build a tiny landing page",
+        },
+      },
+    );
+
+    // Zero evidence was filed for ANY stage — every scope's gate refuses.
+    expect(result.qualityLoop?.verdict.ok).toBe(false);
+    expect(result.failedHonestly).toBeTruthy();
+    const finished = result.events.find((e) => e.type === "finished");
+    expect(finished).toBeDefined();
+    expect((finished as { success?: boolean }).success).toBe(false);
+  });
+});
