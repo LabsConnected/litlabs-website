@@ -52,6 +52,7 @@ import {
   MAX_DESIGN_PASSES,
   MAX_MARKER_REPROMPTS,
   missingDeclarableStages,
+  noteBuildArtifacts,
   noteBuildFix,
   noteDeployment,
   noteToolResult,
@@ -4062,6 +4063,33 @@ async function resumeAgentLoopV2Inner(
     (buildFixResult && !buildFixResult.allPassed
       ? `The build checks did not all pass after ${buildFixResult.repairAttempts} repair attempts.`
       : describeSilentOutcome(toolCallLog, cancelled, cancelReason));
+
+  // Artifact-verified BUILD evidence on resume: the live loop files this
+  // inside launch-flow's preview prep, which a resumed run never passes
+  // through. A full-scope build requires artifactVerified machine
+  // evidence (mutation success alone is intentionally insufficient), so
+  // without this re-derivation a completed build finalizes as
+  // "build (pending)" — the stale refusal the approval-boundary recompute
+  // then has to undo. Ground it in the real workspace listing; a run with
+  // no runnable entry artifact still holds the gate.
+  if (
+    qualitySession &&
+    toolCallLog.some((call) => call.success && call.mutating) &&
+    !qualitySession.state.stages.build.evidence.some(
+      (e) =>
+        (e.detail as { artifactVerified?: boolean } | undefined)?.artifactVerified === true,
+    )
+  ) {
+    try {
+      const { verifyProjectArtifacts } = await import("./launch-flow");
+      const artifacts = await verifyProjectArtifacts(transport, {
+        hadSuccessfulMutation: true,
+      });
+      if (artifacts.ok) noteBuildArtifacts(qualitySession, artifacts.files);
+    } catch {
+      // Evidence gathering must never break the run.
+    }
+  }
 
   // Quality gate: finalize the evidence ledger and compute the verdict.
   const qualityFinale = await finalizeQualityGatedRun(qualitySession, {
