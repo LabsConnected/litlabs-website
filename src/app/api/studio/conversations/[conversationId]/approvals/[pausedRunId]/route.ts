@@ -969,21 +969,50 @@ export async function POST(
       // completed with the nested gate's pausedRunId.
       if (result.pendingApproval) {
         let nestedPausedRunId: string | null = null;
-        // A pause without a tool identity produces an approval card that
-        // names nothing and a gate that approves nothing — unresumable even
-        // when a pausedRunId exists (golden 41962554092 observed
-        // runResult.pendingApproval with no tool identity). Fail loudly
-        // like a persist failure instead of settling an unidentifiable gate.
-        let nestedGateFailure: string | null = result.pendingApproval.toolId
-          ? null
-          : "The follow-up approval could not be saved — the requested action has no tool identity. Send the request again to retry.";
-        if (nestedGateFailure) {
-          studioLog("approval:nested_gate_missing_tool_id", {
+        // A follow-up gate is only resumable when the pause carried its
+        // full identity: tool id, the frozen call id, and the paused
+        // conversation. A malformed pause cannot produce a working
+        // Approve button — a pause without a tool identity produces an
+        // approval card that names nothing and a gate that approves
+        // nothing (golden 41962554092 observed runResult.pendingApproval
+        // with no tool identity). Fail loudly instead of persisting a
+        // gate the user could never resolve.
+        const gate = result.pendingApproval;
+        if (!gate.toolId || !gate.toolCallId || !gate.pausedMessages?.length) {
+          const malformedError =
+            `The follow-up approval could not be saved — send the request again to retry.`;
+          studioLog("approval:nested_paused_run_malformed", {
             conversationId,
             userId,
-            errorClass: `gate without tool identity: ${String(result.pendingApproval.reason ?? "no reason").slice(0, 120)}`,
+            actionRunId: resolved.actionRunId ?? undefined,
+            pausedRunId,
+            gateId: pausedRunId,
+            tool: gate.toolId ?? "missing",
+            eventSource: "settle",
+            hasPausedRunId: false,
+            hasToolId: !!gate.toolId,
           });
+          await writeResumedResultToTranscript({
+            conversationId,
+            userId,
+            projectId: resolved.projectId,
+            pausedRunId,
+            status: "failed",
+            content: malformedError,
+          });
+          await settleResumedRunOutcome({
+            record: resolved,
+            userId,
+            status: "failed",
+            eventType: "run.failed",
+            patch: { currentActivity: malformedError, failureCode: "APPROVAL_STATE_UNAVAILABLE", failureMessage: malformedError },
+            executionToken,
+            logEvent: "approval:action_run_nested_malformed_settle_failed",
+          });
+          return;
         }
+        // Persist failures funnel through the same fail-loud path below.
+        let nestedGateFailure: string | null = null;
         try {
           const nested = nestedGateFailure ? null : await createPausedRun({
             userId,
@@ -1066,6 +1095,21 @@ export async function POST(
           runResult,
           executionToken,
           logEvent: "approval:action_run_nested_handoff_settle_failed",
+        });
+        // Forensic signal: proves the persisted handoff carried the new
+        // gate's id at settle time — paired with the derivation log, it
+        // separates a malformed write from a malformed read.
+        studioLog("approval:nested_handoff_settled", {
+          conversationId,
+          userId,
+          actionRunId: resolved.actionRunId ?? undefined,
+          pausedRunId,
+          gateId: pausedRunId,
+          nestedPausedRunId,
+          tool: result.pendingApproval.toolId,
+          eventSource: "settle",
+          hasPausedRunId: true,
+          hasToolId: true,
         });
         return true;
       }
