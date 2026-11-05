@@ -3,6 +3,7 @@ import {
   getEligibleModels,
   validateEnvOverride,
   recordHealthOutcome,
+  recordModelAttemptOutcome,
   selectBuildModel,
   resolveRegistryModel,
   findModelRecord,
@@ -250,5 +251,48 @@ describe("model registry — health learning", () => {
 
   it("exposes the NO_BUILD_CAPABLE_MODEL error code", () => {
     expect(NO_BUILD_CAPABLE_MODEL).toBe("NO_BUILD_CAPABLE_MODEL");
+  });
+});
+
+describe("model registry — capacity vs capability (golden 41948852260)", () => {
+  // A rate-limit window demoted the proven writer nemotron-3.5-lightning
+  // to "unhealthy" for the rest of the process — weaker sibling writers
+  // were then served first and the follow-up edit looped on reads. 429s
+  // are capacity, not capability: they already self-exclude through
+  // modelCooldowns, and must never feed consecutiveFailures demotion.
+
+  it("rate_limit failures never demote a model — sibling models stay served", () => {
+    for (let i = 0; i < 5; i++) {
+      recordModelAttemptOutcome("openrouter", "nvidia/nemotron-3.5-lightning:free", false, "rate_limited");
+    }
+    const ids = getEligibleModels({ tools: true, reliableFileWriting: true }).map((m) => m.canonicalId);
+    expect(ids).toContain("openrouter-nemotron-3.5-lightning");
+    expect(selectBuildModel()?.canonicalId).toBe("gemini-flash");
+  });
+
+  it.each(["timeout", "server_error", "network", "aborted", "budget_exhausted"] as const)(
+    "transient class %s never demotes a model",
+    (errorClass) => {
+      for (let i = 0; i < 5; i++) {
+        recordModelAttemptOutcome("gemini", "gemini-flash-latest", false, errorClass);
+      }
+      expect(getEligibleModels({ tools: true }).map((m) => m.canonicalId)).toContain("gemini-flash");
+    },
+  );
+
+  it("capability failures still demote after 3 consecutive attempts", () => {
+    for (const errorClass of ["bad_response", "tool_call_parse_failed", "bad_response"]) {
+      recordModelAttemptOutcome("gemini", "gemini-flash-latest", false, errorClass);
+    }
+    expect(getEligibleModels({ tools: true }).map((m) => m.canonicalId)).not.toContain("gemini-flash");
+    // Honest ordering preserved — the next build model takes the lane.
+    expect(selectBuildModel()?.canonicalId).toBe("gemini-2.5-flash");
+  });
+
+  it("a real success still records and recovers the model", () => {
+    recordModelAttemptOutcome("gemini", "gemini-flash-latest", false, "bad_response");
+    recordModelAttemptOutcome("gemini", "gemini-flash-latest", false, "bad_response");
+    recordModelAttemptOutcome("gemini", "gemini-flash-latest", true, "");
+    expect(getEligibleModels({ tools: true }).map((m) => m.canonicalId)).toContain("gemini-flash");
   });
 });
