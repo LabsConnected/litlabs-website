@@ -29,6 +29,7 @@ const PROVIDER_ENVS = [
   "OLLAMA_MODEL",
   "LITT_DISABLE_OLLAMA",
   "OPENROUTER_MODEL",
+  "GROQ_REQUEST_TOKEN_CEILING",
   "RAILWAY_ENVIRONMENT",
   "RAILWAY_PROJECT_ID",
   "VERCEL",
@@ -565,5 +566,78 @@ describe("provider registry — env override safety (no silent unknown-model fal
     expect(gemini).toBeDefined();
     expect(gemini!.models).not.toContain("gemini-9.9-ultra");
     expect(gemini!.models[0]).toBe("gemini-flash-latest");
+  });
+});
+
+describe("provider registry — per-model quota routing", () => {
+  it("the Gemini ladder carries the lite rung between primary and fallback", () => {
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const gemini = plan.providers.find((p) => p.provider === "gemini");
+    expect(gemini).toBeDefined();
+    expect(gemini!.models).toEqual([
+      "gemini-flash-latest",
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-flash",
+    ]);
+    expect(gemini!.perModelRateLimits).toBe(true);
+  });
+
+  it("per-model-quota providers are flagged; per-account providers are not", () => {
+    for (const k of ["GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY"]) {
+      vi.stubEnv(k, "x");
+    }
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const flags = Object.fromEntries(
+      plan.providers.map((p) => [p.provider, p.perModelRateLimits === true]),
+    );
+    expect(flags.gemini).toBe(true);
+    expect(flags.openrouter).toBe(true);
+    expect(flags.groq).toBe(true);
+    expect(flags.mistral).toBe(true);
+  });
+
+  it("Groq carries the free-tier 8k per-request ceiling, env-overridable for paid tiers", () => {
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const groq = planBasicRoutes(TOOL_REQ).providers.find((p) => p.provider === "groq");
+    expect(groq?.requestTokenCeiling).toBe(8_000);
+    vi.stubEnv("GROQ_REQUEST_TOKEN_CEILING", "100000");
+    const raised = planBasicRoutes(TOOL_REQ).providers.find((p) => p.provider === "groq");
+    expect(raised?.requestTokenCeiling).toBe(100_000);
+  });
+
+  it("recordModelFailure honours a provider-stated retry delay", () => {
+    vi.useFakeTimers();
+    try {
+      recordModelFailure("gemini", "gemini-2.5-flash", 20_000);
+      expect(isModelCoolingDown("gemini", "gemini-2.5-flash")).toBe(true);
+      // Still cooling past the old unconditional window is wrong for a
+      // 20s stated wait — but inside it the model must stay out.
+      vi.advanceTimersByTime(21_000);
+      expect(isModelCoolingDown("gemini", "gemini-2.5-flash")).toBe(false);
+      // A multi-hour stated wait keeps the model out well past the old
+      // flat 10-minute cap.
+      recordModelFailure("gemini", "gemini-2.5-pro", 2 * 60 * 60_000);
+      vi.advanceTimersByTime(11 * 60_000);
+      expect(isModelCoolingDown("gemini", "gemini-2.5-pro")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recordModelFailure without a stated wait keeps the default cooldown", () => {
+    vi.useFakeTimers();
+    try {
+      recordModelFailure("gemini", "gemini-2.5-flash");
+      vi.advanceTimersByTime(9 * 60_000);
+      expect(isModelCoolingDown("gemini", "gemini-2.5-flash")).toBe(true);
+      vi.advanceTimersByTime(2 * 60_000);
+      expect(isModelCoolingDown("gemini", "gemini-2.5-flash")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

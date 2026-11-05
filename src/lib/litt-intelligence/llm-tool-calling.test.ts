@@ -68,6 +68,7 @@ const PROVIDER_ENVS = [
   "OLLAMA_TIMEOUT_MS",
   "OPENROUTER_MODEL",
   "GROQ_MODEL",
+  "GROQ_REQUEST_TOKEN_CEILING",
   "MISTRAL_MODEL",
   "CLOUDFLARE_AI_MODEL",
   "RAILWAY_ENVIRONMENT",
@@ -833,8 +834,11 @@ describe("callLLMWithTools — empty provider payloads", () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
     vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     mockFetch
-      // Both Gemini models return candidates with no text and no calls.
-      // Each gets its single bounded bad_response retry before failover.
+      // All three Gemini ladder models return candidates with no text and
+      // no calls. Each gets its single bounded bad_response retry before
+      // failover.
+      .mockResolvedValueOnce(makeGeminiRawResponse([]))
+      .mockResolvedValueOnce(makeGeminiRawResponse([]))
       .mockResolvedValueOnce(makeGeminiRawResponse([]))
       .mockResolvedValueOnce(makeGeminiRawResponse([]))
       .mockResolvedValueOnce(makeGeminiRawResponse([]))
@@ -849,7 +853,7 @@ describe("callLLMWithTools — empty provider payloads", () => {
 
     expect(result.text).toBe("Recovered.");
     expect(result.provider).toBe("openrouter");
-    expect(callsTo("generativelanguage")).toHaveLength(4);
+    expect(callsTo("generativelanguage")).toHaveLength(6);
   });
 
   it("an OpenAI-compatible empty completion (no content, no tool_calls) advances to the next model", async () => {
@@ -1984,5 +1988,92 @@ describe("buildAssistantToolCallMessage — envelope hygiene", () => {
     const msg = buildAssistantToolCallMessage([], "hi", undefined);
     expect(msg.parts).toBeUndefined();
     expect(msg.content).toBe("hi");
+  });
+});
+
+describe("callLLMWithTools — per-model rate limits", () => {
+  it("a 429 on the primary Gemini model cools only that model and tries the next rung", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Quota exceeded for gemini-flash-latest"))
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("Lite served."));
+
+    const result = await callLLMWithTools(
+      "You are LiTT.",
+      [{ role: "user", content: "Hello" }],
+      [],
+    );
+
+    expect(result.text).toBe("Lite served.");
+    const calls = callsTo("generativelanguage");
+    expect(calls).toHaveLength(2);
+    // Second attempt went to the lite rung behind flash-latest.
+    expect(String(calls[1][0])).toContain("gemini-2.5-flash-lite");
+    // The PROVIDER stays healthy — a sibling quota pool served the call.
+    expect(getProviderHealth("gemini").state).toBe("healthy");
+  });
+
+  it("a 429 on the LAST Gemini model cools the provider (all quota pools saturated)", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiErrorResponse(429, "quota"))
+      .mockResolvedValueOnce(makeGeminiErrorResponse(429, "quota"))
+      .mockResolvedValueOnce(makeGeminiErrorResponse(429, "quota"));
+
+    await expect(
+      callLLMWithTools("You are LiTT.", [{ role: "user", content: "Hello" }], []),
+    ).rejects.toThrow(AllRoutesFailedError);
+
+    expect(callsTo("generativelanguage")).toHaveLength(3);
+    expect(getProviderHealth("gemini").state).toBe("cooldown");
+  });
+});
+
+describe("callLLMWithTools — per-request token ceiling", () => {
+  it("skips Groq models without a fetch when the request cannot fit the free-tier ceiling", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+
+    await expect(
+      callLLMWithTools(
+        // ~20k chars ≈ 5k tokens + 4k declared max_tokens = 9k > 8k ceiling.
+        "x".repeat(20_000),
+        [{ role: "user", content: "hi" }],
+        [],
+      ),
+    ).rejects.toThrow(AllRoutesFailedError);
+
+    // No network attempt was made — the rejection was guaranteed.
+    expect(callsTo("api.groq.com")).toHaveLength(0);
+    expect(getProviderHealth("groq").state).toBe("healthy");
+  });
+
+  it("still attempts Groq when the request fits the ceiling", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openai/gpt-oss-120b", "ok"));
+
+    const result = await callLLMWithTools(
+      "short prompt",
+      [{ role: "user", content: "hi" }],
+      [],
+      { maxTokens: 512 },
+    );
+
+    expect(result.provider).toBe("groq");
+    expect(callsTo("api.groq.com")).toHaveLength(1);
+  });
+
+  it("GROQ_REQUEST_TOKEN_CEILING re-admits large requests on a paid tier", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    vi.stubEnv("GROQ_REQUEST_TOKEN_CEILING", "100000");
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openai/gpt-oss-120b", "ok"));
+
+    const result = await callLLMWithTools(
+      "x".repeat(20_000),
+      [{ role: "user", content: "hi" }],
+      [],
+    );
+
+    expect(result.provider).toBe("groq");
+    expect(callsTo("api.groq.com")).toHaveLength(1);
   });
 });

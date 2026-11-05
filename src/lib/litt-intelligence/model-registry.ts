@@ -144,6 +144,28 @@ function seedRecords(): Map<string, ModelRecord> {
     },
     {
       provider: "gemini",
+      canonicalId: "gemini-2.5-flash-lite",
+      providerModelId: "gemini-2.5-flash-lite",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        // Per-model-quota escape rung (Nov 2026): flash-lite carries the
+        // largest free-tier quota of the Gemini ladder (higher RPM/RPD than
+        // both flash and pro) so a saturated flash no longer ends the whole
+        // Gemini lane. Promotion to reliableFileWriting is provisional —
+        // same doctrine as the OpenRouter writer candidates: a real build
+        // run is the proof and recorded failures demote via health state.
+        reliableFileWriting: true,
+        vision: false,
+        contextWindow: 1_048_576,
+      },
+      priority: 25,
+      healthState: "unknown",
+    },
+    {
+      provider: "gemini",
       canonicalId: "gemini-2.5-pro",
       providerModelId: "gemini-2.5-pro",
       enabled: true,
