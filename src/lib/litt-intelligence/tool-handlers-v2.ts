@@ -14,7 +14,7 @@
 
 import "server-only";
 
-import { placeholderViolation, simulatePatchResult, tailwindViolation } from "./patch-validation";
+import { destructiveRewriteViolation, existingPageOverwriteError, placeholderViolation, simulatePatchResult, tailwindViolation } from "./patch-validation";
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
 import type { WorkspaceTransport } from "./workspace-transport";
 
@@ -86,55 +86,6 @@ export const handleFilesRead: ToolHandler = async (inputs, transport) => {
 function localSmallLaneActive(): boolean {
   if (process.env.LITT_LOCAL_SMALL === "1") return true;
   return /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "");
-}
-
-/**
- * Structural styling markers — the SHAPE of the page's presentation
- * (style blocks, stylesheet links, class/style attributes, media
- * queries, fonts, semantic layout), not its VALUES. A legitimate
- * theme change alters colors but keeps these; a destructive rewrite
- * drops most of them.
- */
-function stylingSignature(html: string): Set<string> {
-  const sig = new Set<string>();
-  const count = (re: RegExp) => (html.match(re) ?? []).length;
-  if (/<style[\s>]/i.test(html)) sig.add("style-tag");
-  if (/rel\s*=\s*["']?stylesheet/i.test(html)) sig.add("stylesheet-link");
-  if (count(/class\s*=/gi) >= 2) sig.add("class-attrs");
-  if (/style\s*=\s*["']/i.test(html)) sig.add("inline-style");
-  if (/@media/i.test(html)) sig.add("media-query");
-  if (/--[\w-]+\s*:/i.test(html)) sig.add("css-vars");
-  if (/font(-family)?\s*[:=]|font-(family|sans|serif|mono)/i.test(html)) sig.add("font");
-  if (/<script[\s>]/i.test(html)) sig.add("script");
-  if (/<(header|nav|main|section|footer|article|aside)[\s>]/i.test(html)) sig.add("semantic-layout");
-  if (/@tailwind|tailwind/i.test(html)) sig.add("tailwind");
-  return sig;
-}
-
-/**
- * Returns a refusal message when `next` destructively rewrites `prev`
- * (strips most of its structural styling), else null. Only meaningful
- * when prev was actually styled — a signature below the floor is an
- * already-plain file where rewriting is harmless.
- */
-function destructiveRewriteViolation(prev: string, next: string): string | null {
-  const prevSig = stylingSignature(prev);
-  if (prevSig.size < 3) return null;
-  let kept = 0;
-  for (const marker of prevSig) {
-    if (stylingSignature(next).has(marker)) kept += 1;
-  }
-  const retention = kept / prevSig.size;
-  if (retention >= 0.4) return null;
-  const lost = [...prevSig].filter((m) => !stylingSignature(next).has(m)).join(", ");
-  return (
-    `Refusing this full-file rewrite: it removes the existing page structure/styling ` +
-    `(${lost}). The file already exists — do NOT emit files.write for it. ` +
-    `Emit apply_patch instead: set path to this file and patches to a list of ` +
-    `{search, replace} pairs where each search is an exact substring copied ` +
-    `verbatim from the current file content and replace is that same substring ` +
-    `with only the requested change applied.`
-  );
 }
 
 /**
@@ -234,6 +185,18 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
           } else {
             return { success: false, error: violation };
           }
+        } else {
+          // Full-overwrite gate (small lane): a rewrite that KEEPS the
+          // structure passes destructiveRewriteViolation yet can still
+          // silently drop the requested edit (confirmed live: 11KB
+          // rewrite, edit missing). Structural guards can't detect a
+          // missing edit, so an overwrite of an existing real page must
+          // be an explicit choice — enforced here too because resumed
+          // approvals and direct tool execution skip the loop's
+          // pre-approval validation. site.compose rides this same gate
+          // through handleFilesWrite.
+          const overwrite = await existingPageOverwriteError(inputs, transport);
+          if (overwrite) return { success: false, error: overwrite };
         }
       }
     } catch {
@@ -1071,4 +1034,95 @@ export const handleProjectInsertAsset: ToolHandler = async (inputs, transport) =
     sizeBytes: result.sizeBytes,
     hint: `Reference this image in the site's HTML as <img src="${result.sitePath}" />.`,
   };
+};
+
+// ─── Site composer (local small lane, JSON-first generation) ─────────
+//
+// The model emits a compact structured plan instead of thousands of
+// tokens of layout CSS — reliable at 1.5B scale, ~4x fewer output
+// tokens, and every page lands with the same design system, section
+// library, and accessibility floor. Assembly is deterministic
+// server-side; the write rides handleFilesWrite so the path guard,
+// destructive-rewrite guard, scaffold exemption, and placeholder checks
+// all apply unchanged. Emitted data-litt-image / data-litt-bg slots are
+// materialized into real project assets by the post-mutation enrichment
+// pass — no image calls the model has to remember.
+
+export const handleSiteCompose: ToolHandler = async (inputs, transport) => {
+  const { validateSitePlan, composeSiteHtml } = await import("./site-compose");
+  const path = typeof inputs.path === "string" && inputs.path.trim() ? inputs.path.trim() : "index.html";
+  const planInput =
+    inputs.plan !== undefined ? inputs.plan : { ...inputs };
+  delete (planInput as Record<string, unknown>).path;
+  delete (planInput as Record<string, unknown>).projectId;
+  delete (planInput as Record<string, unknown>).allowOverwrite;
+
+  const validation = validateSitePlan(planInput);
+  if (!validation.ok || !validation.plan) {
+    return {
+      success: false,
+      error:
+        `Invalid site plan: ${validation.errors.join("; ")}. ` +
+        `Fix the plan and call site.compose again, or use files.write for full manual control.`,
+      validationErrors: validation.errors,
+    };
+  }
+
+  const html = composeSiteHtml(validation.plan);
+  // Forward the declared full-rebuild intent — a recompose over an
+  // existing page is still a full overwrite and must pass the same gate.
+  const write = await handleFilesWrite(
+    { path, content: html, allowOverwrite: inputs.allowOverwrite === true },
+    transport,
+  );
+  if (!write.success) return write;
+  return {
+    ...write,
+    sections: validation.plan.sections.length,
+    theme: validation.plan.theme ?? "light",
+    composed: true,
+    hint:
+      `index.html was assembled from the plan and written. ` +
+      `data-litt-image slots become real photos automatically — do NOT call image tools. ` +
+      `To change a whole section later (footer text, hero heading, section content), ` +
+      `call site.patch with the section name and new fields — no verbatim matching needed. ` +
+      `For precise small edits use files.read + apply_patch on the generated file.`,
+  };
+};
+
+// ─── Section-level site patch (local small lane) ─────────────────────
+//
+// The deterministic edit counterpart to site.compose: the model names a
+// region (hero / footer / a section kind or id) plus the fields to
+// change, and the server splices a re-rendered region into the file —
+// no verbatim search strings, which small models cannot reliably copy
+// out of a 10KB+ document. apply_patch stays the general-purpose edit
+// path; site.patch exists for composed pages where a whole region is the
+// natural unit of change.
+
+export const handleSitePatch: ToolHandler = async (inputs, transport) => {
+  const { applySectionEdit } = await import("./site-compose");
+  const path = typeof inputs.path === "string" && inputs.path.trim() ? inputs.path.trim() : "index.html";
+  const section = typeof inputs.section === "string" ? inputs.section.trim() : "";
+  if (!section) {
+    return { success: false, error: "section is required — hero, footer, or a section kind/id (menu, features-2, …)" };
+  }
+  const pathError = workspacePathError(path);
+  if (pathError) return { success: false, error: pathError };
+  let prev: string;
+  try {
+    ({ content: prev } = await transport.readFile(path));
+  } catch {
+    return { success: false, error: `could not read ${path} — the page does not exist yet; use site.compose to create it` };
+  }
+  const fields: Record<string, unknown> = { ...inputs };
+  for (const k of ["path", "projectId", "section", "allowOverwrite"]) delete fields[k];
+  const edit = applySectionEdit(prev, section, fields);
+  if (!edit.ok || !edit.html) return { success: false, error: edit.error ?? "section edit failed" };
+  // The splice is server-side surgery on the file — declared a full
+  // overwrite internally so the small-lane gate doesn't steer the model
+  // back to verbatim apply_patch for what is already a targeted edit.
+  const write = await handleFilesWrite({ path, content: edit.html, allowOverwrite: true }, transport);
+  if (!write.success) return write;
+  return { ...write, region: edit.region, patched: true };
 };
