@@ -1,20 +1,19 @@
 name: Deploy to Railway Staging
 
 # Manual-dispatch ONLY. Deploys a chosen commit SHA to the Railway STAGING
-# service for the web app — never production. Production auto-deploys via
+# service for the web app — NEVER production. Production auto-deploys via
 # Railway's own GitHub integration on main merges; this workflow exists so a
 # non-main commit can be exercised on staging WITHOUT touching production.
+#
+# Safety: the target service is HARDCODED to the staging web service — there
+# is no input that can redirect this workflow at the production service, and
+# a guard step rejects any name that is not the staging service.
 on:
   workflow_dispatch:
     inputs:
       sha:
         description: "Commit SHA (full 40-char hex) to deploy to staging"
         required: true
-        type: string
-      service:
-        description: "Railway service name for the staging web app"
-        required: true
-        default: "litlabslitt-shell-staging"
         type: string
 
 permissions:
@@ -24,11 +23,15 @@ concurrency:
   group: staging-web-deploy
   cancel-in-progress: false
 
+env:
+  STAGING_SERVICE: litlabslitt-shell-staging
+  STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
+
 jobs:
   deploy-staging:
     name: Deploy SHA to Railway staging
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Validate SHA input
         run: |
@@ -37,8 +40,19 @@ jobs:
             exit 1
           fi
 
+      - name: Guard — staging-only target
+        run: |
+          # The deploy target is hardcoded to the staging service. Refuse
+          # anything that smells like a production identifier.
+          case "$STAGING_SERVICE" in
+            *production*|*prod*|litlabs-terminal-server|*terminal*)
+              echo "::error::refusing to deploy — target resolves to production ($STAGING_SERVICE)"
+              exit 1
+              ;;
+          esac
+          echo "Deploy target: $STAGING_SERVICE (staging only)"
+
       - name: Check RAILWAY_TOKEN
-        id: check_token
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
@@ -46,7 +60,6 @@ jobs:
             echo "::error::RAILWAY_TOKEN GitHub secret is not set — cannot deploy."
             exit 1
           fi
-          echo "has_token=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout at requested SHA
         uses: actions/checkout@v4
@@ -55,20 +68,16 @@ jobs:
           fetch-depth: 1
 
       - name: Install Railway CLI
-        if: steps.check_token.outputs.has_token == 'true'
         run: npm install -g @railway/cli
 
       - name: Deploy to staging service only
-        if: steps.check_token.outputs.has_token == 'true'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           # --service pins the deploy to the STAGING web service only.
-          # There is deliberately no path here to the production service.
-          railway up --service "${{ inputs.service }}" --detach
+          railway up --service "$STAGING_SERVICE" --detach
 
       - name: Verify staging health + deployed SHA
-        if: steps.check_token.outputs.has_token == 'true'
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
         run: |
@@ -76,7 +85,7 @@ jobs:
           for i in $(seq 1 20); do
             body="$(curl -fsS --max-time 20 \
               -A 'Mozilla/5.0 (compatible; staging-deploy-check)' \
-              https://litlabslitt-shell-staging.up.railway.app/api/health || true)"
+              "$STAGING_URL/api/health" || true)"
             detail="$(printf '%s' "$body" | jq -r '.checks.build.detail // ""' 2>/dev/null || true)"
             status="$(printf '%s' "$body" | jq -r '.status // ""' 2>/dev/null || true)"
             echo "poll $i: status=$status build=$detail"
