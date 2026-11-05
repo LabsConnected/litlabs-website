@@ -393,7 +393,10 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       adapter: "openai-compatible",
       costClass: "FREE_MANAGED",
       capabilities: TOOL_CAPABLE,
-      timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
+      // Workers AI is fast for small replies but 70B tool-calls on grown
+      // build contexts have exceeded the shared 30s cap (staging-verified
+      // timeout at 30004ms). Env-tunable without weakening the global limit.
+      timeoutMs: Number(process.env.CLOUDFLARE_TIMEOUT_MS) || DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () =>
         envPresent("CLOUDFLARE_ACCOUNT_ID") && envPresent("CLOUDFLARE_AI_API_TOKEN")
           ? "available"
