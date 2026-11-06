@@ -1,0 +1,7 @@
+Deploy fix: project-token env-flag conflict
+
+root cause: railway up --service web --environment staging 404s on upload when RAILWAY_TOKEN is a project token (already env-bound). Fix: --environment only for account tokens.
+
+evidence: runs 42147430674 + 42147474993 — 'Failed to upload code with status code 404 Not Found'.
+
+Generated with [Devin](https://devin.ai)
