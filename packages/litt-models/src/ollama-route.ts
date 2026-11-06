@@ -56,11 +56,36 @@ export interface OllamaRouteCandidate {
 /** Env vars this module reads, exported for tests and diagnostics. */
 export const OLLAMA_ROUTE_ENV_VARS = {
   override: "LITT_OLLAMA_URL",
+  order: "OLLAMA_ROUTE_ORDER",
   local: "OLLAMA_LOCAL_URL",
   lan: "OLLAMA_LAN_URL",
   lanLegacy: ["OLLAMA_HOST_PC", "OLLAMA_HOST", "OLLAMA_BASE_URL"],
   tailscale: "OLLAMA_TAILSCALE_URL",
 } as const;
+
+/** Default probe order — local machine first, then LAN, then Tailscale. */
+const DEFAULT_TIER_ORDER: OllamaRouteTier[] = ["local", "lan", "tailscale"];
+
+/**
+ * Tier order requested via OLLAMA_ROUTE_ORDER — a comma-separated list of
+ * tier names ("tailscale,lan,local"). Listed tiers are probed first, in
+ * the given order; tiers not mentioned keep their default relative order
+ * and are appended after, so a partial order can never disable a route
+ * the caller still configured. Unrecognized tokens are ignored, and an
+ * unusable value falls back to the default order entirely.
+ */
+function resolveTierOrder(getEnv: EnvGetter): OllamaRouteTier[] {
+  const raw = getEnv(OLLAMA_ROUTE_ENV_VARS.order)?.trim();
+  if (!raw) return DEFAULT_TIER_ORDER;
+  const wanted = raw
+    .split(",")
+    .map((token) => token.trim().toLowerCase())
+    .filter((token): token is OllamaRouteTier =>
+      DEFAULT_TIER_ORDER.includes(token as OllamaRouteTier),
+    );
+  if (wanted.length === 0) return DEFAULT_TIER_ORDER;
+  return [...wanted, ...DEFAULT_TIER_ORDER.filter((tier) => !wanted.includes(tier))];
+}
 
 /**
  * Build the ordered list of endpoints to try.
@@ -85,18 +110,18 @@ export function resolveOllamaRouteCandidates(getEnv: EnvGetter): OllamaRouteCand
     candidates.push({ tier, label: OLLAMA_ROUTE_LABELS[tier], endpoint });
   };
 
-  const localUrl = normalizeOllamaEndpoint(getEnv(OLLAMA_ROUTE_ENV_VARS.local)) ?? DEFAULT_OLLAMA_URL;
-  push("local", localUrl);
+  const endpoints: Record<OllamaRouteTier, string | null> = {
+    local: normalizeOllamaEndpoint(getEnv(OLLAMA_ROUTE_ENV_VARS.local)) ?? DEFAULT_OLLAMA_URL,
+    lan:
+      normalizeOllamaEndpoint(getEnv(OLLAMA_ROUTE_ENV_VARS.lan)) ??
+      OLLAMA_ROUTE_ENV_VARS.lanLegacy.reduce<string | null>(
+        (found, key) => found ?? normalizeOllamaEndpoint(getEnv(key)),
+        null,
+      ),
+    tailscale: normalizeOllamaEndpoint(getEnv(OLLAMA_ROUTE_ENV_VARS.tailscale)),
+  };
 
-  const lanUrl =
-    normalizeOllamaEndpoint(getEnv(OLLAMA_ROUTE_ENV_VARS.lan)) ??
-    OLLAMA_ROUTE_ENV_VARS.lanLegacy.reduce<string | null>(
-      (found, key) => found ?? normalizeOllamaEndpoint(getEnv(key)),
-      null,
-    );
-  push("lan", lanUrl);
-
-  push("tailscale", normalizeOllamaEndpoint(getEnv(OLLAMA_ROUTE_ENV_VARS.tailscale)));
+  for (const tier of resolveTierOrder(getEnv)) push(tier, endpoints[tier]);
 
   return candidates;
 }
@@ -138,7 +163,7 @@ export interface ProbeOllamaRouteOptions {
   candidates?: OllamaRouteCandidate[];
 }
 
-const DEFAULT_ROUTE_TIMEOUT_MS = 1_200;
+const DEFAULT_ROUTE_TIMEOUT_MS = 3_000;
 
 /** Extract model tags from an Ollama /api/tags body. */
 function parseTagNames(body: unknown): string[] {
