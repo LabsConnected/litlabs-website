@@ -1,0 +1,97 @@
+name: Staging Builder Acceptance (10 consecutive)
+
+# Manual-dispatch ONLY. Runs the real golden acceptance journey against the
+# deployed STAGING app — a fresh disposable Clerk user per iteration drives
+# the build → approve → deploy-live → fetch-URL flow via
+# scripts/final-acceptance/prod-mobile-golden.mjs, reusing the production
+# harness with LITT_PROD_BASE_URL pointed at staging and the Clerk TEST
+# instance secrets (sk_test_/pk_test_, never live keys).
+#
+# Acceptance contract: TEN consecutive green iterations, fresh user and
+# fresh project every time. The job fails on the first failed iteration and
+# reports the consecutive-pass count — N<10 is a NO-GO signal, never a pass.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-builder-acceptance
+  cancel-in-progress: false
+
+env:
+  STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
+  ACCEPTANCE_RUNS: 10
+
+jobs:
+  acceptance:
+    name: 10 consecutive golden journeys on staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Install Playwright chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify staging is healthy before acceptance
+        run: |
+          body="$(curl -fsS --max-time 30 "$STAGING_URL/api/health")"
+          echo "$body" | jq -e '.status == "ok"' > /dev/null \
+            || { echo "::error::staging not healthy — refusing acceptance run"; echo "$body" | head -c 500; exit 1; }
+          echo "staging healthy: $(echo "$body" | jq -r .commit)"
+
+      - name: Run 10 consecutive golden journeys
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+          LITT_PROD_BASE_URL: ${{ env.STAGING_URL }}
+          LITT_ACCEPTANCE_FRESH_ACCOUNT: "1"
+          LITT_ACCEPTANCE_DEPLOY: "1"
+          LITT_GOLDEN_PROJECT_ID: ""
+        run: |
+          set -euo pipefail
+          passes=0
+          for i in $(seq 1 "$ACCEPTANCE_RUNS"); do
+            echo "=== acceptance iteration $i/$ACCEPTANCE_RUNS ==="
+            user_id="$(node scripts/final-acceptance/create-fresh-user.mjs)"
+            echo "fresh user: $user_id"
+            if LITT_ACCEPTANCE_USER_ID="$user_id" \
+               node scripts/final-acceptance/prod-mobile-golden.mjs; then
+              passes=$((passes + 1))
+              echo "iteration $i: PASS (consecutive=$passes)"
+            else
+              echo "::error::iteration $i: FAIL (consecutive=$passes)"
+              echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"
+              exit 1
+            fi
+          done
+          echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"
+          echo "ALL $ACCEPTANCE_RUNS consecutive acceptance runs PASSED"
+
+      - name: Report consecutive-pass count
+        if: always()
+        run: echo "- consecutive acceptance passes: ${CONSECUTIVE_PASSES:-0}/$ACCEPTANCE_RUNS" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload acceptance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-acceptance-${{ github.run_id }}
+          path: artifacts/final-acceptance/**
+          retention-days: 14
+          if-no-files-found: ignore
