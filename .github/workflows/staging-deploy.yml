@@ -27,8 +27,13 @@ env:
   # The Railway SERVICE name — the domain subdomain is NOT the service name
   # (terminal's service is litlabs-terminal-server vs domain …-production-0be1).
   # The staging web service reports service:"web" on /api/health.
+  # IDs are the unambiguous targets confirmed by the token-scope diagnostic
+  # (railway variables --service web --environment staging).
   STAGING_SERVICE: web
   STAGING_ENVIRONMENT: staging
+  RAILWAY_PROJECT_ID: 3d5b8abe-088c-4a6c-9b34-7054829247c9
+  RAILWAY_SERVICE_ID: 227b508d-8301-4faa-a1c3-ed3dea0d84b2
+  RAILWAY_ENVIRONMENT_ID: 8631ff55-0835-449b-942e-a9c3748dea98
   STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
 
 jobs:
@@ -97,10 +102,13 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
-          # --service + --environment pin the deploy to the STAGING web
-          # service only. (For project tokens the bound environment is
-          # used; for account tokens --environment selects it.)
-          railway up --service "$STAGING_SERVICE" --environment "$STAGING_ENVIRONMENT" --detach
+          # Link the exact staging service by ID (upload needs a linked
+          # context — bare --service/--environment 404s on the upload).
+          railway link \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID"
+          railway up --detach
 
       - name: Verify staging health + deployed SHA
         env:
