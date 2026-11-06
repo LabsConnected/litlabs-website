@@ -12,6 +12,11 @@ name: Staging Builder Acceptance (10 consecutive)
 # reports the consecutive-pass count — N<10 is a NO-GO signal, never a pass.
 on:
   workflow_dispatch:
+    inputs:
+      expected_staging_sha:
+        description: "Optional 40-char SHA staging must serve; checked every iteration (drift fails the run)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -22,6 +27,7 @@ concurrency:
 
 env:
   STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
+  EXPECTED_SHA: ${{ inputs.expected_staging_sha }}
   ACCEPTANCE_RUNS: 10
 
 jobs:
@@ -55,6 +61,11 @@ jobs:
           echo "$body" | jq -e '.status == "ok"' > /dev/null \
             || { echo "::error::staging not healthy — refusing acceptance run"; echo "$body" | head -c 500; exit 1; }
           echo "staging healthy: $(echo "$body" | jq -r .commit)"
+          if [ -n "$EXPECTED_SHA" ]; then
+            detail="$(echo "$body" | jq -r '.checks.build.detail')"
+            [ "$detail" = "$EXPECTED_SHA" ] \
+              || { echo "::error::staging serves $detail, expected $EXPECTED_SHA — redeploy first"; exit 1; }
+          fi
 
       - name: Run 10 consecutive golden journeys
         env:
@@ -68,6 +79,13 @@ jobs:
           passes=0
           for i in $(seq 1 "$ACCEPTANCE_RUNS"); do
             echo "=== acceptance iteration $i/$ACCEPTANCE_RUNS ==="
+            if [ -n "$EXPECTED_SHA" ]; then
+              # Staging auto-deploys main merges AND the staging branch —
+              # drift mid-run would make the evidence name the wrong SHA.
+              detail="$(curl -fsS --max-time 20 "$STAGING_URL/api/health" | jq -r '.checks.build.detail')"
+              [ "$detail" = "$EXPECTED_SHA" ] \
+                || { echo "::error::SHA drift at iteration $i: serving $detail, expected $EXPECTED_SHA"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
+            fi
             user_id="$(node scripts/final-acceptance/create-fresh-user.mjs)"
             echo "fresh user: $user_id"
             if LITT_ACCEPTANCE_USER_ID="$user_id" \
