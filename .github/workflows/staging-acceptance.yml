@@ -27,7 +27,6 @@ concurrency:
 
 env:
   STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
-  EXPECTED_SHA: ${{ inputs.expected_staging_sha }}
   ACCEPTANCE_RUNS: 10
 
 jobs:
@@ -35,6 +34,8 @@ jobs:
     name: 10 consecutive golden journeys on staging
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_staging_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
