@@ -1,0 +1,63 @@
+name: Railway Token Scope Diagnostic
+
+# READ-ONLY diagnostic — runs on this PR only, never merged to main as a
+# permanent workflow. Prints which project/environment/services the
+# RAILWAY_TOKEN secret can actually reach. No deploys, no writes.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Diagnose RAILWAY_TOKEN scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check RAILWAY_TOKEN present
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN secret is empty"
+            exit 1
+          fi
+          echo "token present (value masked)"
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Railway account/whoami
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: railway whoami || true
+
+      - name: Railway status (linked project/env/service)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: railway status || true
+
+      - name: Probe web service in staging env (read-only)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          railway variables --service web --environment staging 2>&1 | head -40 || true
+
+      - name: Probe litlabslitt-shell-staging service (read-only)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          railway variables --service litlabslitt-shell-staging --environment staging 2>&1 | head -40 || true
+
+      - name: Probe litlabs-terminal-server service (read-only)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          railway variables --service litlabs-terminal-server --environment production 2>&1 | head -40 || true
