@@ -115,8 +115,11 @@ jobs:
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
         run: |
+          # A Railway build of this app takes 5-15 min after `railway up`
+          # uploads — and may be queued behind the env's auto-deploy of
+          # main. Poll for ~20 min total before declaring a SHA mismatch.
           sleep 60
-          for i in $(seq 1 20); do
+          for i in $(seq 1 76); do
             body="$(curl -fsS --max-time 20 \
               -A 'Mozilla/5.0 (compatible; staging-deploy-check)' \
               "$STAGING_URL/api/health" || true)"
