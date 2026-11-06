@@ -400,7 +400,7 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
           : "missing",
       models: () => [
         process.env.CLOUDFLARE_AI_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-        "@cf/mistral/mistral-small-3.1-24b-instruct",
+        "@cf/mistralai/mistral-small-3.1-24b-instruct",
       ],
     },
     {

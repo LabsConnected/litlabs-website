@@ -6,6 +6,8 @@ import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { resolveAgentEntitlement, chargeAgentRun } from "@/lib/agent-entitlements";
 import { chargeLlmUsage } from "@/lib/llm-billing";
+import { assertSpendAuthorized } from "@/lib/metered-llm-call";
+import { studioLog } from "@/lib/studio/logger";
 import { SpendGuardError } from "@/lib/spend-guards";
 import { randomUUID } from "crypto";
 
@@ -191,9 +193,10 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null, cl
     );
     await logConversation(agent, userId, message, r.text);
 
-    // Charge LiTTBits for the LLM call (best-effort, never blocks the response).
-    // BYOK calls are not charged. Shadow mode calculates but doesn't debit.
-    let billingInfo: { charged: number; balance: number | null } | null = null;
+    // Charge LiTTBits for the LLM call. BYOK calls are not charged; shadow
+    // mode calculates but doesn't debit. A failed debit must not masquerade
+    // as a free call — surface it truthfully.
+    let billingInfo: { charged: number; balance: number | null; error?: string } | null = null;
     if (clerkId && r.usage) {
       try {
         const callId = randomUUID();
@@ -210,12 +213,35 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null, cl
           // must not create a second billable event.
           meteringBillableKey: r.metering.billableIdempotencyKey,
         });
+        // Balance dropped to zero between the preflight gate and the debit
+        // (concurrent spend) — do not hand the user free provider value.
+        // Same contract as metered-llm-call.
+        if (billing.error === "Insufficient LiTTBits") {
+          return NextResponse.json(
+            { error: "Insufficient LiTTBits", code: "insufficient_credits" },
+            { status: 402 },
+          );
+        }
+        if (billing.error) {
+          studioLog("unified_chat:llm_debit_failed", {
+            userId: clerkId,
+            provider: r.provider,
+            model: r.model,
+            errorClass: billing.error,
+          });
+        }
         billingInfo = {
           charged: billing.debited ? billing.cost.retailLiTTBits : 0,
           balance: billing.balance,
+          ...(billing.error ? { error: billing.error } : {}),
         };
-      } catch {
-        // Billing failure must never block the response
+      } catch (billingErr) {
+        studioLog("unified_chat:llm_charge_error", {
+          userId: clerkId,
+          provider: r.provider,
+          model: r.model,
+          errorClass: billingErr instanceof Error ? billingErr.message : "unknown",
+        });
       }
     }
 
@@ -257,16 +283,17 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null, cl
             `data: ${JSON.stringify({ done: true, provider: r.provider, model: r.model, latencyMs: r.latencyMs })}\n\n`,
           ),
         );
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
 
         // Best-effort billing for streaming — estimate tokens from text length.
-        // ~4 chars per token is a standard heuristic.
+        // ~4 chars per token is a standard heuristic. The headers are already
+        // sent so a debit failure can't become a 402 — it must still be
+        // logged and surfaced in-stream (before [DONE]), never swallowed.
         if (clerkId && assistantText) {
           try {
             const estimatedCompletionTokens = Math.ceil(assistantText.length / 4);
             const estimatedPromptTokens = Math.ceil(prompt.length / 4);
             const callId = randomUUID();
-            await chargeLlmUsage({
+            const billing = await chargeLlmUsage({
               clerkId,
               provider: r.provider,
               model: r.model,
@@ -279,10 +306,34 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null, cl
               // must not create a second billable event.
               meteringBillableKey: r.metering.billableIdempotencyKey,
             });
-          } catch {
-            // Billing failure must never break the stream
+            if (billing.error) {
+              studioLog("unified_chat:llm_debit_failed", {
+                userId: clerkId,
+                provider: r.provider,
+                model: r.model,
+                errorClass: billing.error,
+              });
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify(
+                    billing.error === "Insufficient LiTTBits"
+                      ? { error: "Insufficient LiTTBits", code: "insufficient_credits" }
+                      : { billing_error: billing.error },
+                  )}\n\n`,
+                ),
+              );
+            }
+          } catch (billingErr) {
+            studioLog("unified_chat:llm_charge_error", {
+              userId: clerkId,
+              provider: r.provider,
+              model: r.model,
+              errorClass: billingErr instanceof Error ? billingErr.message : "unknown",
+            });
           }
         }
+
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
         const msg = err instanceof Error ? err.message : "stream error";
         controller.enqueue(
@@ -365,6 +416,20 @@ async function authorizeAgentRun(
         reason: entitlement.reason,
       },
       { status: 403 },
+    );
+  }
+
+  // Balance gate BEFORE provider spend. Paid agents are pre-charged below,
+  // but built-in free agents (e.g. LiTT) are only debited after the run via
+  // chargeLlmUsage — without this gate a zero-balance user would get an
+  // unbillable provider call. Same preflight as metered-llm-call: owner
+  // exemption/spend ceiling first, then a positive-balance check for
+  // non-exempt users.
+  const spend = await assertSpendAuthorized(clerkId);
+  if (!spend.ok) {
+    return NextResponse.json(
+      { error: spend.error, code: spend.code },
+      { status: spend.status },
     );
   }
 

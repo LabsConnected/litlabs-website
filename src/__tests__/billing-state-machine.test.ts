@@ -529,6 +529,86 @@ describe("Webhook event processing — state mutations", () => {
     expect(subUpsert!.row.stripe_subscription_id).toBe("sub_test_456");
   });
 
+  it("customer.subscription.updated → billed price wins over stale metadata (portal upgrade)", async () => {
+    // A customer-portal upgrade swaps the subscription item's price without
+    // touching checkout-time metadata. The stored plan must follow the
+    // actual billed price, not the old plan_id in metadata.
+    process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
+    const { sb, upserts } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
+      object: {
+        id: "sub_portal_upgrade",
+        status: "active",
+        customer: "cus_test_456",
+        metadata: { clerk_id: "user_456", plan_id: "creator_beta" },
+        items: {
+          data: [
+            {
+              price: { id: "price_test_pro" },
+              current_period_start: 1700000000,
+              current_period_end: 1702678400,
+            },
+          ],
+        },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(200);
+
+    const subUpsert = upserts.find((u) => u.table === "subscriptions");
+    expect(subUpsert).toBeDefined();
+    expect(subUpsert!.row.plan).toBe("pro_builder_beta");
+    expect(subUpsert!.row.stripe_subscription_id).toBe("sub_portal_upgrade");
+  });
+
+  it("invoice.paid → billed line price determines the grant plan and remaps the stored plan", async () => {
+    // An upgrade can land on invoice.paid before customer.subscription.updated
+    // is processed. The grant amount and stored plan must follow the billed
+    // line price (Pro Builder = 18,000), not the previously stored plan
+    // (Creator = 7,500).
+    process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
+    const { sb, rpcCalls, updates } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.paid", {
+      object: {
+        id: "in_upgrade_remap",
+        parent: { subscription_details: { subscription: "sub_test_123" } },
+        lines: {
+          data: [
+            {
+              period: { end: 1702678400 },
+              pricing: { price_details: { price: "price_test_pro" } },
+            },
+          ],
+        },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(200);
+
+    const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+    expect(grants.length).toBe(1);
+    expect(grants[0].params.p_amount).toBe(18000);
+
+    // The stored plan is remapped to what was actually billed.
+    const planUpdate = updates.find((u) => u.table === "subscriptions");
+    expect(planUpdate).toBeDefined();
+    expect(planUpdate!.patch.plan).toBe("pro_builder_beta");
+  });
+
   it("end-to-end chain: checkout.session.completed → invoice.paid → entitlement + credits exactly once", async () => {
     // Build a tracking supabase that also tracks inserted stripe_events
     // so the replay (step 4) is detected as a duplicate
