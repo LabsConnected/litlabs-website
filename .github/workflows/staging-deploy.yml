@@ -99,6 +99,16 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
+          # railway up (CLI upload) does NOT inject RAILWAY_GIT_COMMIT_SHA —
+          # only Railway's own GitHub integration does. Without it the built
+          # app reports a stale/ancient commit on /api/health (observed:
+          # upload of the candidate served correctly but reported eaeefc52,
+          # a months-old stored value). Set it explicitly with --skip-deploys
+          # so the upload below is the deployment that picks it up — same
+          # pattern as deploy-terminal.yml.
+          railway variable set RAILWAY_GIT_COMMIT_SHA=${{ inputs.sha }} \
+            --service "$STAGING_SERVICE" \
+            --skip-deploys
           # --service pins the deploy to the STAGING web service only.
           # A project token (RAILWAY_TOKEN) is already bound to one
           # environment — passing --environment alongside it resolves a
