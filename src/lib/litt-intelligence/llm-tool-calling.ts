@@ -2234,7 +2234,9 @@ export async function callLLMWithTools(
         }
 
         // Model-scope failure — cool the model, try the provider's next model.
-        recordModelFailure(route.provider, model);
+        // A permanent flag (dead slug) parks this id for the long horizon;
+        // the provider and its sibling models keep serving.
+        recordModelFailure(route.provider, model, undefined, failure.permanent);
         recordModelAttemptOutcome(route.provider, model, false, failure.class);
       }
     }

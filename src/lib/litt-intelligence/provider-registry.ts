@@ -92,6 +92,15 @@ export interface ProviderFailure {
   scope: "provider" | "model";
   httpStatus?: number;
   retryAfterMs?: number;
+  /**
+   * True when the rejection provably cannot self-heal within minutes —
+   * an absent resource (404) or a body that names the model as missing/
+   * invalid. Model-scope only: permanently-invalid slugs are cooled for
+   * the long horizon instead of the standard window so they stop being
+   * re-probed every ten minutes, while the provider and its sibling
+   * models stay live.
+   */
+  permanent?: boolean;
   /** Sanitized — never contains request bodies, headers, or secrets. */
   message: string;
 }
@@ -400,7 +409,10 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       adapter: "openai-compatible",
       costClass: "FREE_MANAGED",
       capabilities: TOOL_CAPABLE,
-      timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
+      // Workers AI is fast for small replies but 70B tool-calls on grown
+      // build contexts have exceeded the shared 30s cap (staging-verified
+      // timeout at 30004ms). Env-tunable without weakening the global limit.
+      timeoutMs: Number(process.env.CLOUDFLARE_TIMEOUT_MS) || DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () =>
         envPresent("CLOUDFLARE_ACCOUNT_ID") && envPresent("CLOUDFLARE_AI_API_TOKEN")
           ? "available"
@@ -483,6 +495,10 @@ const TRANSIENT_COOLDOWN_MS = 60_000;
 const DEGRADE_THRESHOLD = 2;
 /** Model-scope failures skip that model for a while, provider unaffected. */
 const MODEL_COOLDOWN_MS = 10 * 60_000;
+/** A provably-invalid model slug (absent resource / named-as-missing in
+ *  the body) cannot self-heal — hold it off the candidate set for a day
+ *  rather than re-probing a dead id every MODEL_COOLDOWN_MS window. */
+const PERMANENT_MODEL_COOLDOWN_MS = 24 * 60 * 60_000;
 
 const providerHealth = new Map<string, ProviderHealth>();
 const modelCooldowns = new Map<string, number>(); // "provider:model" → until
@@ -577,14 +593,20 @@ export function recordModelFailure(
   provider: string,
   model: string,
   retryAfterMs?: number,
+  permanent?: boolean,
 ): void {
   // A provider-stated retry delay is authoritative (Google daily-quota 429s
   // carry "retry in 9h48m…" hints): honour it up to the same cap the
   // provider path uses so a saturated model isn't re-probed every 10 min —
   // and so a 20s wait doesn't over-penalise a briefly-limited model.
-  const wait = retryAfterMs !== undefined
-    ? Math.min(retryAfterMs, RATE_LIMIT_STATED_MAX_MS)
-    : MODEL_COOLDOWN_MS;
+  // `permanent` marks a provably-invalid slug (404 / named-missing body):
+  // it is held off the candidates for the long horizon — the provider and
+  // its sibling models keep serving, only the dead id is parked.
+  const wait = permanent
+    ? PERMANENT_MODEL_COOLDOWN_MS
+    : retryAfterMs !== undefined
+      ? Math.min(retryAfterMs, RATE_LIMIT_STATED_MAX_MS)
+      : MODEL_COOLDOWN_MS;
   modelCooldowns.set(`${provider}:${model}`, Date.now() + wait);
 }
 
@@ -673,6 +695,12 @@ function parseRetryInDurationMs(text: string): number | undefined {
   return Math.max(0, (h * 3600 + min * 60 + s) * 1000);
 }
 
+/** A response body that provably names the model as absent or invalid —
+ *  as opposed to a generic malformed request. Matches the shapes Workers
+ *  AI, OpenRouter and Groq actually emit for dead slugs. */
+const INVALID_MODEL_BODY =
+  /model.{0,60}(not found|does not exist|doesn't exist|unknown|invalid|unsupported|unavailable|no such|unrecognized)|no such model|unknown model|invalid model|model_not_found|unable to (find|locate|load|resolve)[^a-z]{0,20}model|model[^a-z]{0,20}(not found|missing)/i;
+
 export function classifyHttpFailure(
   status: number,
   bodyText: string,
@@ -689,10 +717,20 @@ export function classifyHttpFailure(
       if (/api[_\s-]?key not valid|invalid api[_\s-]?key|api[_\s-]?key.{0,40}invalid/i.test(bodyText)) {
         return { class: "auth_invalid", scope: "provider", httpStatus: status, message };
       }
-      return { class: "model_unavailable", scope: "model", httpStatus: status, message };
+      return {
+        class: "model_unavailable",
+        scope: "model",
+        httpStatus: status,
+        // A body naming the model as missing/invalid is a dead slug —
+        // permanent, unlike a generic malformed request.
+        permanent: INVALID_MODEL_BODY.test(bodyText) || undefined,
+        message,
+      };
     }
     case 404:
-      return { class: "model_unavailable", scope: "model", httpStatus: status, message };
+      // An absent resource cannot reappear within a cooldown window —
+      // permanent model-scope, provider unaffected.
+      return { class: "model_unavailable", scope: "model", httpStatus: status, permanent: true, message };
     case 401:
       return { class: "auth_invalid", scope: "provider", httpStatus: status, message };
     case 402:
