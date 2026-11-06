@@ -58,6 +58,7 @@ import {
   noteToolResult,
   noteMutationReadBack,
   noteStaticArtifactCheck,
+  noteVisualCompleteness,
   runQualityInspection,
   snapshotQualityLoopSession,
   startQualityLoopSession,
@@ -68,6 +69,7 @@ import {
   type QualityLoopSnapshot,
   formatQualityVerdictBlock,
 } from "./quality-loop-flow";
+import { runVisualCompletenessCheck } from "./visual-completeness";
 // LiTT Tool Orchestrator (fix/litt-tool-orchestrator): goal → capability
 // planning, tool health, reference-match workflow, run observability.
 import { planCapabilities, buildCapabilityPlanPrompt } from "./capability-planner";
@@ -1471,11 +1473,18 @@ async function finalizeQualityGatedRun(
     deployAttempted: boolean;
     finalText: string;
     localProgress: ProgressEmitter;
+    transport?: Pick<WorkspaceTransport, "listFiles" | "readFile">;
   },
 ): Promise<QualityFinale | null> {
   if (!qualitySession) return null;
   try {
     if (opts.buildFixResult) noteBuildFix(qualitySession, opts.buildFixResult);
+    if (opts.transport) {
+      const visual = await runVisualCompletenessCheck(opts.transport, {
+        userRequest: qualitySession.userRequest ?? null,
+      });
+      if (visual) noteVisualCompleteness(qualitySession, visual);
+    }
     if (opts.publicUrl) {
       noteDeployment(qualitySession, opts.publicUrl);
       await verifyLiveUrl(qualitySession, opts.publicUrl);
@@ -2767,6 +2776,7 @@ async function runAgentLoopV2Inner(
     deployAttempted: toolCallLog.some((t) => t.toolId === "project.deploy"),
     finalText: effectiveFinalText,
     localProgress,
+    transport,
   });
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
@@ -4276,6 +4286,7 @@ async function resumeAgentLoopV2Inner(
     deployAttempted: toolCallLog.some((t) => t.toolId === "project.deploy"),
     finalText: effectiveFinalText,
     localProgress,
+    transport,
   });
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok

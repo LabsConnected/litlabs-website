@@ -775,6 +775,63 @@ export function noteStaticArtifactCheck(
   }
 }
 
+/**
+ * Record the workspace visual-completeness scan as TEST evidence. A build
+ * that references images it never wrote (missing files, empty/placeholder
+ * URLs, or requested imagery silently omitted) has not delivered a finished
+ * page — the failure files `detail.passed === false`, blocking the finalize
+ * sweep exactly like a failing typecheck. Reports with nothing scanned or
+ * nothing wrong file a passing observation; a null report files nothing.
+ */
+export function noteVisualCompleteness(
+  session: QualityLoopSession,
+  report: {
+    ok: boolean;
+    missing: Array<{ ref: string; from: string }>;
+    placeholders: Array<{ ref: string; from: string }>;
+    external: Array<{ ref: string; from: string }>;
+    omittedImagery: boolean;
+    scannedFiles: number;
+  },
+): void {
+  try {
+    if (!session.mutationSeen) return;
+    const broken =
+      report.missing.length + report.placeholders.length + (report.omittedImagery ? 1 : 0);
+    const issues = [
+      ...report.missing.map((m) => `missing file: ${m.ref} (in ${m.from})`),
+      ...report.placeholders.map((p) => `placeholder/empty image: ${p.ref} (in ${p.from})`),
+      ...(report.omittedImagery ? ["requested imagery omitted: no real image reference exists"] : []),
+    ];
+    fileObservation(session, "test", {
+      summary:
+        broken === 0
+          ? `Visual completeness check passed: every image reference in ${report.scannedFiles} scanned file(s) resolves.`
+          : `Visual completeness check failed: ${broken} image reference(s) are broken, placeholder, or omitted.`,
+      artifacts: issues.slice(0, 20),
+      by: "system",
+      detail:
+        broken === 0
+          ? {
+              passed: true,
+              executedChecks: true,
+              via: "visual-completeness",
+              scannedFiles: report.scannedFiles,
+              externalUnverified: report.external.length,
+            }
+          : {
+              passed: false,
+              executedChecks: true,
+              via: "visual-completeness",
+              scannedFiles: report.scannedFiles,
+              reason: `Broken/placeholder image references: ${issues.slice(0, 5).join("; ")}`,
+            },
+    });
+  } catch {
+    // Never break the run.
+  }
+}
+
 /** Record build-fix (typecheck/lint/test) results as TEST evidence. */
 export function noteBuildFix(
   session: QualityLoopSession,

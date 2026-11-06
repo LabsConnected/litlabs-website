@@ -820,9 +820,15 @@ async function handleRecraftImage(prompt: string): Promise<MediaResult> {
 
 /**
  * Automatic routing starts with OpenAI GPT Image when configured. Pollinations
- * is never included in automatic routing.
+ * is the explicit last resort: it needs no key and keeps free-tier builds
+ * visually complete when every keyed provider is down or unconfigured.
  */
-const AUTO_FREE_ORDER: MediaProviderId[] = ["openai", "cloudflare", "alibaba"];
+const AUTO_FREE_ORDER: MediaProviderId[] = [
+  "openai",
+  "cloudflare",
+  "alibaba",
+  "pollinations",
+];
 
 /**
  * Auto-quality provider order: OpenAI → FAL → Recraft → Gemini
@@ -842,7 +848,7 @@ function isProviderConfigured(providerId: MediaProviderId): boolean {
     case "together": return !!TOGETHER_API_KEY;
     case "openai": return !!OPENAI_API_KEY;
     case "recraft": return !!RECRAFT_API_KEY;
-    case "pollinations": return true; // explicit experimental manual use only
+    case "pollinations": return true; // keyless — last-resort in auto-free, manual elsewhere
     case "huggingface": return !!HF_API_KEY;
     default: return false;
   }
@@ -1403,7 +1409,10 @@ export async function generateImage(
     usedProviderId === "alibaba" ||
     usedProviderId === "fal" ||
     usedProviderId === "openai" ||
-    usedProviderId === "recraft"
+    usedProviderId === "recraft" ||
+    // Pollinations URLs are ephemeral hosted links — persist them so
+    // previews, reloads, and ZIP exports keep working imagery.
+    usedProviderId === "pollinations"
   ) {
     durableUrl = await deps.persistImage(userId, result.downloadUrl, usedProviderId, prompt);
   }
