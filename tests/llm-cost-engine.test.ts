@@ -178,6 +178,17 @@ describe("LLM Billing — chargeLlmUsage", () => {
       if (table === "llm_usage_records") {
         return { insert: vi.fn(() => ({ error: null })) };
       }
+      if (table === "credit_ledger") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              like: vi.fn(() => ({
+                limit: vi.fn(async () => ({ data: [], error: null })),
+              })),
+            })),
+          })),
+        };
+      }
       return {
         select: vi.fn(() => ({
           eq: vi.fn(() => ({
@@ -227,8 +238,42 @@ describe("LLM Billing — chargeLlmUsage", () => {
   });
 
   it("Retry with same callId → one debit only (idempotent)", async () => {
+    // debit_credits returns success=true on replay — the ledger key existing
+    // beforehand is what marks this as a replay.
+    mockFrom.mockImplementation((table: string) => {
+      if (table === "users") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: { id: "user-uuid" }, error: null })),
+            })),
+          })),
+        };
+      }
+      if (table === "credit_ledger") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              like: vi.fn(() => ({
+                limit: vi.fn(async () => ({ data: [{ id: "ledger-1" }], error: null })),
+              })),
+            })),
+          })),
+        };
+      }
+      if (table === "llm_usage_records") {
+        return { insert: vi.fn(() => ({ error: null })) };
+      }
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+          })),
+        })),
+      };
+    });
     mockRpc.mockResolvedValue({
-      data: { success: false, remaining: 495 }, // replayed
+      data: { success: true, remaining: 495 }, // replayed debit
       error: null,
     });
 
@@ -245,6 +290,7 @@ describe("LLM Billing — chargeLlmUsage", () => {
     const debitCall = mockRpc.mock.calls.find((c: unknown[]) => c[0] === "debit_credits");
     expect(debitCall).toBeDefined();
     expect((debitCall![1] as Record<string, unknown>).p_idempotency_key).toBe("llm:call-retry-1");
+    expect(result.replayed).toBe(true);
   });
 
   it("Insufficient BITS → correctly blocked", async () => {

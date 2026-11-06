@@ -108,6 +108,9 @@ vi.mock("@/lib/supabase", () => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
           maybeSingle: vi.fn(async () => ({ data: { id: "user-uuid" }, error: null })),
+          like: vi.fn(() => ({
+            limit: vi.fn(async () => ({ data: [], error: null })),
+          })),
         })),
       })),
     })),
