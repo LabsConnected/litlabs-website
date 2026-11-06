@@ -1,0 +1,71 @@
+{
+  "id": "paid-beta-2026-11",
+  "title": "LiTT Paid Beta Readiness",
+  "priority": "p0",
+  "budgetMs": 7200000,
+  "steps": [
+    {
+      "id": "ci-pr805",
+      "kind": "gh-pr-checks",
+      "description": "All required CI green on release train PR #805",
+      "dependsOn": [],
+      "maxAttempts": 2,
+      "timeoutMs": 3600000,
+      "params": { "pr": 805 }
+    },
+    {
+      "id": "gate-railway-token",
+      "kind": "owner-gate",
+      "description": "OWNER ACTION: RAILWAY_TOKEN must be a Railway PROJECT token bound to the litlabs project (or set RAILWAY_API_TOKEN for an account token). Re-dispatch after credential fix.",
+      "dependsOn": [],
+      "maxAttempts": 1,
+      "params": {}
+    },
+    {
+      "id": "staging-deploy",
+      "kind": "gh-workflow-dispatch",
+      "description": "Deploy release SHA to litlabslitt-shell-staging",
+      "dependsOn": ["ci-pr805", "gate-railway-token"],
+      "maxAttempts": 2,
+      "timeoutMs": 2700000,
+      "params": {
+        "workflow": "staging-deploy.yml",
+        "ref": "main",
+        "inputs": { "sha": "04c05dffa1973efed79efd95c3e9fc3ce7b2a504" }
+      }
+    },
+    {
+      "id": "staging-verify",
+      "kind": "staging-verify-sha",
+      "description": "Staging /api/health reports the exact deployed SHA",
+      "dependsOn": ["staging-deploy"],
+      "maxAttempts": 2,
+      "timeoutMs": 600000,
+      "params": {
+        "url": "https://litlabslitt-shell-staging.up.railway.app/api/health",
+        "sha": "04c05dffa1973efed79efd95c3e9fc3ce7b2a504"
+      }
+    },
+    {
+      "id": "staging-auth",
+      "kind": "gh-workflow-dispatch",
+      "description": "Run staging Clerk auth validation at deployed SHA",
+      "dependsOn": ["staging-verify"],
+      "maxAttempts": 2,
+      "timeoutMs": 1800000,
+      "params": {
+        "workflow": "staging-clerk-auth.yml",
+        "ref": "main",
+        "inputs": { "expected_staging_sha": "04c05dffa1973efed79efd95c3e9fc3ce7b2a504" }
+      }
+    },
+    {
+      "id": "final-report",
+      "kind": "report",
+      "description": "Consolidate evidence into GO/NO-GO report for Larry",
+      "dependsOn": ["staging-auth"],
+      "maxAttempts": 1,
+      "params": {}
+    }
+  ]
+}
