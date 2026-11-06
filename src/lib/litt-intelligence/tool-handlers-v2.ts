@@ -925,10 +925,12 @@ export async function insertAssetFromUrl(
       // One retry on transient upstream failures (network blips, 429, 5xx)
       // — a single free-host hiccup must not strand an otherwise healthy
       // image the way a definitive 4xx correctly does.
+      let lastErr: unknown = null;
       const download = async (): Promise<Response | null> => {
         try {
           return await fetch(url, { signal: AbortSignal.timeout(30_000) });
-        } catch {
+        } catch (err) {
+          lastErr = err;
           return null;
         }
       };
@@ -938,7 +940,9 @@ export async function insertAssetFromUrl(
         resp = await download();
       }
       if (resp === null) {
-        return { success: false, error: "Failed to download asset: network error" };
+        // Preserve the original failure cause — callers and tests surface
+        // the real error, not a generic wrapper.
+        throw lastErr instanceof Error ? lastErr : new Error("Failed to download asset: network error");
       }
       if (!resp.ok) {
         return { success: false, error: `Failed to download asset: HTTP ${resp.status}` };
