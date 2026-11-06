@@ -35,9 +35,18 @@ import {
 /** How long a probe result stays fresh. */
 const PROBE_CACHE_MS = 10_000;
 
-/** Per-candidate timeout — the probe may try up to three hosts. */
-/** Override the Ollama probe timeout via LITT_OLLAMA_TIMEOUT env var (ms). Default 1_500 when unset. */
-const PROBE_TIMEOUT_MS = Number(process.env.LITT_OLLAMA_TIMEOUT ?? "") || 1_500;
+/**
+ * Per-candidate timeout — the probe may try up to three hosts.
+ * Override via LITT_OLLAMA_TIMEOUT env var (ms). Default 3_000 when
+ * unset, matching @litt/models' probe default: tailnet /api/tags
+ * latency on the reference phone↔PC link runs 0.45–1.4s with spikes
+ * past 1.5s, and the home-LAN tier jitters anywhere from 0.7s to 5s+.
+ * A 1_500ms budget nondeterministically skipped live tiers on every
+ * probe — the route flapped between tailscale, LAN, and local on a
+ * healthy link. 3_000 covers the observed worst cases with headroom;
+ * the all-down worst case stays bounded (~9s) and fails truthfully.
+ */
+const PROBE_TIMEOUT_MS = Number(process.env.LITT_OLLAMA_TIMEOUT ?? "") || 3_000;
 
 export interface LocalLaneStatus {
   /** True only when the daemon answered AND has at least one model. */
