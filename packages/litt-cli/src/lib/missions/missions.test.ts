@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { missionSchema } from "./contracts.js";
-import { adapters, type AdapterResult } from "./adapters.js";
+import { adapters, pollUntil, type AdapterResult } from "./adapters.js";
 import { loadMission, loadState, saveMission, saveState } from "./store.js";
 import { runMission } from "./runner.js";
 
@@ -131,5 +131,26 @@ describe("runMission", () => {
     });
     await runMission(ws, m);
     expect(order).toEqual(["a", "b"]);
+  });
+});
+
+describe("pollUntil", () => {
+  it("stops immediately on a terminal failure instead of polling to deadline", async () => {
+    // Regression: a finished-but-failed workflow run used to keep polling
+    // until the step deadline (~45min) — observed live on run 42147474993.
+    const fn = vi.fn(async (): Promise<AdapterResult> => ({ ok: false, terminal: true, evidence: ["run failed"] }));
+    const res = await pollUntil(fn, Date.now() + 60_000, 10);
+    expect(res.ok).toBe(false);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps polling non-terminal results until ok", async () => {
+    let n = 0;
+    const res = await pollUntil(async () => {
+      n++;
+      return n < 3 ? { ok: false, evidence: ["pending"] } : { ok: true, evidence: ["done"] };
+    }, Date.now() + 5_000, 5);
+    expect(res.ok).toBe(true);
+    expect(n).toBe(3);
   });
 });

@@ -14,6 +14,10 @@ const execFileP = promisify(execFile);
 
 export interface AdapterResult {
   ok: boolean;
+  /** When true the result is definitive — stop polling even though ok is
+   *  false. Without it pollUntil cannot tell "not yet" from "finished and
+   *  failed" and would burn the whole step deadline on a dead run. */
+  terminal?: boolean;
   evidence: string[];
 }
 
@@ -59,11 +63,11 @@ function jsonPath(obj: unknown, path: string): unknown {
   return cur;
 }
 
-async function pollUntil(fn: () => Promise<AdapterResult>, deadline: number, intervalMs = 10_000): Promise<AdapterResult> {
+export async function pollUntil(fn: () => Promise<AdapterResult>, deadline: number, intervalMs = 10_000): Promise<AdapterResult> {
   let last: AdapterResult = { ok: false, evidence: ["no attempt"] };
   while (Date.now() < deadline) {
     last = await fn();
-    if (last.ok) return last;
+    if (last.ok || last.terminal) return last;
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   return last;
@@ -80,7 +84,7 @@ async function prChecksTerminal(step: MissionStep): Promise<AdapterResult> {
   if (checks.length === 0) return { ok: false, evidence: ["no checks reported"] };
   const pending = checks.filter((c) => !/success|fail|error|cancel|neutral|skipped/i.test(c.state));
   const failed = checks.filter((c) => /fail|error|cancel/i.test(c.state));
-  if (failed.length > 0) return { ok: false, evidence: [`failed checks: ${failed.map((c) => c.name).join(", ")}`] };
+  if (failed.length > 0) return { ok: false, terminal: true, evidence: [`failed checks: ${failed.map((c) => c.name).join(", ")}`] };
   if (pending.length > 0) return { ok: false, evidence: [`pending: ${pending.map((c) => c.name).join(", ")}`] };
   return { ok: true, evidence: [`all ${checks.length} checks green`] };
 }
@@ -162,7 +166,7 @@ export const adapters: Record<string, StepAdapter> = {
         if (/completed/i.test(run.status)) {
           return run.conclusion === "success"
             ? { ok: true, evidence: [`run ${run.id} success`] }
-            : { ok: false, evidence: [`run ${run.id} conclusion=${run.conclusion}`] };
+            : { ok: false, terminal: true, evidence: [`run ${run.id} conclusion=${run.conclusion}`] };
         }
         return { ok: false, evidence: [`run ${run.id} ${run.status}`] };
       }, deadline, 20_000);
@@ -176,7 +180,7 @@ export const adapters: Record<string, StepAdapter> = {
       if (/completed/i.test(run.status)) {
         return run.conclusion === "success"
           ? { ok: true, evidence: [`run ${run.id} success`] }
-          : { ok: false, evidence: [`run ${run.id} ${run.conclusion}`] };
+          : { ok: false, terminal: true, evidence: [`run ${run.id} ${run.conclusion}`] };
       }
       return { ok: false, evidence: [`run ${run.id} ${run.status}`] };
     }, deadline, 20_000),

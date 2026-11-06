@@ -31,7 +31,7 @@
       "params": {
         "workflow": "staging-deploy.yml",
         "ref": "main",
-        "inputs": { "sha": "04c05dffa1973efed79efd95c3e9fc3ce7b2a504" }
+        "inputs": { "sha": "ddff0a4b82d66b45c964859d9d218ad8cec8de07" }
       }
     },
     {
@@ -43,7 +43,7 @@
       "timeoutMs": 600000,
       "params": {
         "url": "https://litlabslitt-shell-staging.up.railway.app/api/health",
-        "sha": "04c05dffa1973efed79efd95c3e9fc3ce7b2a504"
+        "sha": "ddff0a4b82d66b45c964859d9d218ad8cec8de07"
       }
     },
     {
@@ -56,7 +56,7 @@
       "params": {
         "workflow": "staging-clerk-auth.yml",
         "ref": "main",
-        "inputs": { "expected_staging_sha": "04c05dffa1973efed79efd95c3e9fc3ce7b2a504" }
+        "inputs": { "expected_staging_sha": "ddff0a4b82d66b45c964859d9d218ad8cec8de07" }
       }
     },
     {
