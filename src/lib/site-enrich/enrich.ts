@@ -327,11 +327,19 @@ export async function enrichStaticSiteVisuals(
         const base = `${title} ${h1}`.trim() || topic;
         const vary = ["", " detail", " texture", " interior"];
         const imgs: string[] = [];
-        for (let i = 0; i < needed; i++) {
+        // A single failed resolve must not starve the floor: providers are
+        // free-tier and flake, so keep trying with rotated keywords — the
+        // shared image budget still bounds total work, and a null resolve
+        // already counted itself against it.
+        let floorAttempts = 0;
+        const maxFloorAttempts = needed * 2;
+        for (let i = 0; i < needed && floorAttempts < maxFloorAttempts; ) {
+          floorAttempts += 1;
           const sitePath = await resolve(`${base}${vary[i % vary.length]}`.trim());
-          if (!sitePath) break;
+          if (!sitePath) continue;
           const alt = `${title || h1 || "Site"} — photo ${i + 1}`.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
           imgs.push(`<img src="${sitePath}" alt="${alt}" style="width:100%;height:220px;object-fit:cover;border-radius:12px;display:block;" loading="lazy">`);
+          i += 1;
         }
         if (imgs.length > 0) {
           const section =

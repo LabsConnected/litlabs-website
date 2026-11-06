@@ -922,7 +922,24 @@ export async function insertAssetFromUrl(
       buffer = decoded.buffer;
       contentType = decoded.contentType;
     } else {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      // One retry on transient upstream failures (network blips, 429, 5xx)
+      // — a single free-host hiccup must not strand an otherwise healthy
+      // image the way a definitive 4xx correctly does.
+      const download = async (): Promise<Response | null> => {
+        try {
+          return await fetch(url, { signal: AbortSignal.timeout(30_000) });
+        } catch {
+          return null;
+        }
+      };
+      let resp = await download();
+      if (resp === null || resp.status === 408 || resp.status === 429 || resp.status >= 500) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        resp = await download();
+      }
+      if (resp === null) {
+        return { success: false, error: "Failed to download asset: network error" };
+      }
       if (!resp.ok) {
         return { success: false, error: `Failed to download asset: HTTP ${resp.status}` };
       }

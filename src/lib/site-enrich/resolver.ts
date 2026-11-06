@@ -43,19 +43,40 @@ function sanitizeKeywords(raw: string): string {
     .join(",");
 }
 
-/** Probe a candidate URL — a HEAD or ranged GET that must come back 200. */
+/** Retryable upstream condition — worth one more attempt before
+ *  disqualifying the provider. Definitive answers (4xx other than
+ *  408/429, non-image payloads) are permanent, never retried. */
+type ProbeOutcome = "ok" | "transient" | "permanent";
+
+function probeOutcome(resp: Response | null): ProbeOutcome {
+  if (!resp) return "transient";
+  if (resp.ok && (resp.headers.get("content-type") ?? "").startsWith("image/")) return "ok";
+  if (resp.status === 408 || resp.status === 429 || resp.status >= 500) return "transient";
+  return "permanent";
+}
+
+/** Probe a candidate URL — a HEAD or ranged GET that must come back 200.
+ *  One immediate retry on transient failures: a dropped connection or
+ *  single-request 503 must not disqualify an otherwise healthy provider;
+ *  a blip lasting longer falls through to the next provider as before. */
 async function probe(url: string): Promise<boolean> {
-  try {
-    const resp = await fetch(url, {
-      method: "GET",
-      headers: { Range: "bytes=0-512" },
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      redirect: "follow",
-    });
-    return resp.ok && (resp.headers.get("content-type") ?? "").startsWith("image/");
-  } catch {
-    return false;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let resp: Response | null = null;
+    try {
+      resp = await fetch(url, {
+        method: "GET",
+        headers: { Range: "bytes=0-512" },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        redirect: "follow",
+      });
+    } catch {
+      resp = null;
+    }
+    const outcome = probeOutcome(resp);
+    if (outcome === "ok") return true;
+    if (outcome === "permanent") return false;
   }
+  return false;
 }
 
 async function tryPexels(keywords: string): Promise<ResolvedImage | null> {
@@ -66,11 +87,20 @@ async function tryPexels(keywords: string): Promise<ResolvedImage | null> {
     url.searchParams.set("query", keywords.replace(/,/g, " "));
     url.searchParams.set("per_page", "3");
     url.searchParams.set("orientation", "landscape");
-    const resp = await fetch(url, {
-      headers: { Authorization: key },
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-    if (!resp.ok) return null;
+    let resp: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        resp = await fetch(url, {
+          headers: { Authorization: key },
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+      } catch {
+        resp = null;
+      }
+      const transient = resp === null || resp.status === 408 || resp.status === 429 || resp.status >= 500;
+      if (!transient) break;
+    }
+    if (!resp?.ok) return null;
     const data = (await resp.json()) as {
       photos?: Array<{
         src?: { large?: string; large2x?: string; original?: string };
