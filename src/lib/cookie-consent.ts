@@ -21,6 +21,14 @@ export interface CookieConsentState {
 
 const CONSENT_KEY = "cookie-consent";
 
+/**
+ * CustomEvent name dispatched on window when the consent record changes
+ * in this tab (the CookieConsent banner writes it). Analytics loaders
+ * listen for it so consent granted mid-session takes effect without a
+ * reload. Cross-tab changes arrive via the `storage` event instead.
+ */
+export const CONSENT_CHANGED_EVENT = "litt:consent-changed";
+
 /** Returns the raw consent state from localStorage, or null if not set. */
 export function getConsent(): CookieConsentState | null {
   if (typeof window === "undefined") return null;
