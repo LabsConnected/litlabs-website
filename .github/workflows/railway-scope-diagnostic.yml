@@ -41,23 +41,24 @@ jobs:
         continue-on-error: true
         run: railway status || true
 
-      - name: Probe web service in staging env (read-only)
+      - name: Probe WITHOUT --environment (project tokens are env-bound)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         continue-on-error: true
         run: |
-          railway variables --service web --environment staging 2>&1 | head -40 || true
+          # Project tokens are bound to ONE environment — passing a different
+          # --environment makes them look invalid even when valid. Probe the
+          # bound env implicitly, then each candidate service name.
+          echo "=== variables (no env, service=web) ==="
+          railway variables --service web 2>&1 | head -30 || true
+          echo "=== variables (no env, service=litlabslitt-shell-staging) ==="
+          railway variables --service litlabslitt-shell-staging 2>&1 | head -30 || true
+          echo "=== variables (no env, service=litlabs-terminal-server) ==="
+          railway variables --service litlabs-terminal-server 2>&1 | head -30 || true
 
-      - name: Probe litlabslitt-shell-staging service (read-only)
+      - name: Probe WITH --environment staging (account-token style)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         continue-on-error: true
         run: |
-          railway variables --service litlabslitt-shell-staging --environment staging 2>&1 | head -40 || true
-
-      - name: Probe litlabs-terminal-server service (read-only)
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        continue-on-error: true
-        run: |
-          railway variables --service litlabs-terminal-server --environment production 2>&1 | head -40 || true
+          railway variables --service web --environment staging 2>&1 | head -30 || true
