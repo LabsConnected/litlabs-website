@@ -24,7 +24,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  STAGING_SERVICE: litlabslitt-shell-staging
+  # The Railway SERVICE name — neither the domain subdomain NOR the app's
+  # /api/health service label is the service name. `railway status` in the
+  # staging environment lists the web app as @litlabs/litt-shell (serving
+  # litlabslitt-shell-staging.up.railway.app); there is no "web" service —
+  # deploying with it 404s on code upload.
+  STAGING_SERVICE: "@litlabs/litt-shell"
+  STAGING_ENVIRONMENT: staging
   STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
 
 jobs:
@@ -42,22 +48,28 @@ jobs:
 
       - name: Guard — staging-only target
         run: |
-          # The deploy target is hardcoded to the staging service. Refuse
-          # anything that smells like a production identifier.
-          case "$STAGING_SERVICE" in
-            *production*|*prod*|litlabs-terminal-server|*terminal*)
-              echo "::error::refusing to deploy — target resolves to production ($STAGING_SERVICE)"
-              exit 1
-              ;;
-          esac
-          echo "Deploy target: $STAGING_SERVICE (staging only)"
+          # Both the service and environment are hardcoded to staging values.
+          # Refuse anything that smells like a production identifier.
+          for target in "$STAGING_SERVICE" "$STAGING_ENVIRONMENT"; do
+            case "$target" in
+              *production*|*prod*|litlabs-terminal-server|*terminal*)
+                echo "::error::refusing to deploy — target resolves to production ($target)"
+                exit 1
+                ;;
+            esac
+          done
+          echo "Deploy target: service=$STAGING_SERVICE env=$STAGING_ENVIRONMENT (staging only)"
 
-      - name: Check RAILWAY_TOKEN
+      - name: Check Railway credentials
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
-          if [ -z "$RAILWAY_TOKEN" ]; then
-            echo "::error::RAILWAY_TOKEN GitHub secret is not set — cannot deploy."
+          # Either a project token (RAILWAY_TOKEN) or an account token
+          # (RAILWAY_API_TOKEN) satisfies the deploy. Refuse only when
+          # BOTH are absent — and say exactly which secret to set.
+          if [ -z "$RAILWAY_TOKEN" ] && [ -z "$RAILWAY_API_TOKEN" ]; then
+            echo "::error::No Railway credential — set RAILWAY_TOKEN (project token) or RAILWAY_API_TOKEN (account token)."
             exit 1
           fi
 
@@ -70,19 +82,54 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      - name: Diagnose Railway token scope
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        continue-on-error: true
+        run: |
+          # Prints the project/environment/service the token can actually
+          # see — no secret values. If the token is project-scoped to a
+          # different project/environment the deploy step's failure is
+          # explained by this output.
+          railway status || true
+
       - name: Deploy to staging service only
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
+          # railway up (CLI upload) does NOT inject RAILWAY_GIT_COMMIT_SHA —
+          # only Railway's own GitHub integration does. Without it the built
+          # app reports a stale/ancient commit on /api/health (observed:
+          # upload of the candidate served correctly but reported eaeefc52,
+          # a months-old stored value). Set it explicitly with --skip-deploys
+          # so the upload below is the deployment that picks it up — same
+          # pattern as deploy-terminal.yml.
+          railway variable set RAILWAY_GIT_COMMIT_SHA=${{ inputs.sha }} \
+            --service "$STAGING_SERVICE" \
+            --skip-deploys
           # --service pins the deploy to the STAGING web service only.
-          railway up --service "$STAGING_SERVICE" --detach
+          # A project token (RAILWAY_TOKEN) is already bound to one
+          # environment — passing --environment alongside it resolves a
+          # second env context and the upload endpoint 404s. An account
+          # token (RAILWAY_API_TOKEN) is not env-bound, so it needs
+          # --environment to select staging.
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            railway up --service "$STAGING_SERVICE" --detach
+          else
+            railway up --service "$STAGING_SERVICE" --environment "$STAGING_ENVIRONMENT" --detach
+          fi
 
       - name: Verify staging health + deployed SHA
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
         run: |
+          # A Railway build of this app takes 5-15 min after `railway up`
+          # uploads — and may be queued behind the env's auto-deploy of
+          # main. Poll for ~20 min total before declaring a SHA mismatch.
           sleep 60
-          for i in $(seq 1 20); do
+          for i in $(seq 1 76); do
             body="$(curl -fsS --max-time 20 \
               -A 'Mozilla/5.0 (compatible; staging-deploy-check)' \
               "$STAGING_URL/api/health" || true)"
