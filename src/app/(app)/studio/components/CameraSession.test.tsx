@@ -1,3 +1,4 @@
+import "@testing-library/jest-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import CameraSession from "./CameraSession";
@@ -5,10 +6,13 @@ import CameraSession from "./CameraSession";
 const requestVideo = vi.fn();
 const enumerateCameras = vi.fn();
 const resetPermission = vi.fn();
+const hookState = {
+  lastError: null as { type: "video"; code: string; message: string } | null,
+};
 
 vi.mock("../hooks/useMediaPermissions", () => ({
   useMediaPermissions: () => ({
-    lastError: null,
+    lastError: hookState.lastError,
     permission: { audio: "prompt", video: "prompt" },
     requestVideo,
     enumerateCameras,
@@ -22,6 +26,7 @@ describe("CameraSession", () => {
     enumerateCameras.mockReset();
     resetPermission.mockReset();
     enumerateCameras.mockResolvedValue([]);
+    hookState.lastError = null;
   });
 
   it("attaches a granted stream after the video element mounts", async () => {
@@ -64,5 +69,35 @@ describe("CameraSession", () => {
     await waitFor(() => {
       expect(screen.getByText(/could not access the camera/i)).toBeTruthy();
     });
+  });
+
+  it("labels a missing camera as 'No camera found', not generic 'Camera error'", async () => {
+    hookState.lastError = {
+      type: "video",
+      code: "no_device",
+      message: "No camera was detected on this device.",
+    };
+    requestVideo.mockResolvedValue(null);
+
+    render(<CameraSession />);
+    fireEvent.click(screen.getByRole("button", { name: /start camera/i }));
+
+    expect(await screen.findByText("No camera found")).toBeInTheDocument();
+    expect(screen.queryByText("Camera error")).not.toBeInTheDocument();
+  });
+
+  it("labels denied permission as 'Permission required'", async () => {
+    hookState.lastError = {
+      type: "video",
+      code: "permission_denied",
+      message:
+        "Camera permission was denied. Please allow access in your browser settings.",
+    };
+    requestVideo.mockResolvedValue(null);
+
+    render(<CameraSession />);
+    fireEvent.click(screen.getByRole("button", { name: /start camera/i }));
+
+    expect(await screen.findByText("Permission required")).toBeInTheDocument();
   });
 });

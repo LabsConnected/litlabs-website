@@ -105,6 +105,46 @@ describe("CameraPreview", () => {
     });
   });
 
+  it("offers retry on device_busy and recovers once the camera is free", async () => {
+    const { stream } = makeStream("usb-cam");
+    getUserMedia
+      .mockRejectedValueOnce(new DOMException("in use", "NotReadableError"))
+      .mockResolvedValueOnce(stream);
+
+    render(<CameraPreview onClose={vi.fn()} onCapture={vi.fn()} />);
+
+    // The overlay must show the honest status AND a retry path — a webcam
+    // held by another app is the most common failure and must not require
+    // closing the popover to retry.
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    expect(screen.getByText("Camera is busy")).toBeInTheDocument();
+
+    fireEvent.click(retry);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("camera-capture")).not.toBeDisabled(),
+    );
+  });
+
+  it("names the insecure context when mediaDevices is absent over http", async () => {
+    const secure = Object.getOwnPropertyDescriptor(window, "isSecureContext");
+    Object.defineProperty(window, "isSecureContext", {
+      value: false,
+      configurable: true,
+    });
+    delete (window.navigator as { mediaDevices?: unknown }).mediaDevices;
+    try {
+      render(<CameraPreview onClose={vi.fn()} onCapture={vi.fn()} />);
+      await screen.findByText(/secure connection/i);
+    } finally {
+      if (secure) {
+        Object.defineProperty(window, "isSecureContext", secure);
+      } else {
+        delete (window as { isSecureContext?: boolean }).isSecureContext;
+      }
+    }
+  });
+
   it("restarts on a remaining camera when the active one is unplugged", async () => {
     const first = makeStream("usb-cam");
     const second = makeStream("builtin");

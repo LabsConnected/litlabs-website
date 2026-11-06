@@ -76,7 +76,11 @@ export default function CameraPreview({ onClose, onCapture }: CameraPreviewProps
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setStatus("unsupported");
-      setErrorMsg("This browser cannot access the camera.");
+      setErrorMsg(
+        window.isSecureContext === false
+          ? "Camera requires a secure connection — open this page via localhost or HTTPS."
+          : "This browser cannot access the camera.",
+      );
       return;
     }
 
@@ -287,7 +291,7 @@ export default function CameraPreview({ onClose, onCapture }: CameraPreviewProps
             {errorMsg && (
               <span className="px-4 text-center text-[9px] text-white/50">{errorMsg}</span>
             )}
-            {(status === "permission_denied" || status === "error") && (
+            {status !== "requesting_permission" && (
               <button
                 type="button"
                 onClick={() => void startCamera()}

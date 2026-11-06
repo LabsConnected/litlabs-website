@@ -20,6 +20,11 @@ function installMediaDevices(overrides: Partial<MediaDevices> = {}) {
   return mediaDevices;
 }
 
+const originalSecureContext = Object.getOwnPropertyDescriptor(
+  window,
+  "isSecureContext",
+);
+
 describe("useMediaPermissions.requestVideo", () => {
   beforeEach(() => {
     getUserMedia = vi.fn();
@@ -28,6 +33,12 @@ describe("useMediaPermissions.requestVideo", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     delete (window.navigator as { mediaDevices?: unknown }).mediaDevices;
+    if (originalSecureContext) {
+      Object.defineProperty(window, "isSecureContext", originalSecureContext);
+    } else {
+      // It was an inherited getter — remove the own-property override.
+      delete (window as { isSecureContext?: boolean }).isSecureContext;
+    }
   });
 
   it("requests the camera with an ideal facingMode so USB webcams work", async () => {
@@ -116,6 +127,27 @@ describe("useMediaPermissions.requestVideo", () => {
     expect(getUserMedia).toHaveBeenCalledTimes(2);
     await waitFor(() => {
       expect(result.current.lastError?.code).toBe("no_device");
+    });
+  });
+
+  it("names the insecure context, not the browser, when mediaDevices is absent over http", async () => {
+    // No mediaDevices installed — mirrors an http://LAN or tailnet origin
+    // where the API is not exposed at all.
+    Object.defineProperty(window, "isSecureContext", {
+      value: false,
+      configurable: true,
+    });
+
+    const { result } = renderHook(() => useMediaPermissions());
+    let stream: MediaStream | null = null;
+    await act(async () => {
+      stream = await result.current.requestVideo("user");
+    });
+
+    expect(stream).toBeNull();
+    await waitFor(() => {
+      expect(result.current.lastError?.code).toBe("unsupported");
+      expect(result.current.lastError?.message).toContain("secure connection");
     });
   });
 });

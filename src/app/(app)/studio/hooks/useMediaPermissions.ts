@@ -32,6 +32,17 @@ const RETRYABLE_VIDEO_ERRORS = new Set([
   "DevicesNotFoundError",
 ]);
 
+// On http://LAN-or-tailnet origins (pnpm dev --lan/--tailscale, plain-HTTP
+// previews) getUserMedia doesn't exist at all — the honest diagnosis is the
+// insecure context, not a missing browser feature.
+function unsupportedMessage(kind: "Camera" | "Microphone"): string {
+  const insecure =
+    typeof window !== "undefined" && window.isSecureContext === false;
+  return insecure
+    ? `${kind} requires a secure connection — open this page via localhost or HTTPS.`
+    : `${kind} access is not supported in this browser.`;
+}
+
 export function useMediaPermissions() {
   const [permission, setPermission] = useState<PermissionStatus>({
     audio: "prompt",
@@ -44,7 +55,7 @@ export function useMediaPermissions() {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       const err: MediaPermissionError = {
         type: "audio",
-        message: "Microphone access is not supported in this browser.",
+        message: unsupportedMessage("Microphone"),
         code: "unsupported",
       };
       setLastError(err);
@@ -83,7 +94,7 @@ export function useMediaPermissions() {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       const err: MediaPermissionError = {
         type: "video",
-        message: "Camera access is not supported in this browser.",
+        message: unsupportedMessage("Camera"),
         code: "unsupported",
       };
       setLastError(err);

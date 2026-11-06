@@ -303,11 +303,22 @@ export default function CameraSession({
     "unsupported",
     "error",
   ];
+  // requestVideo reports the specific failure via lastError.code
+  // (permission_denied / no_device / device_busy / unsupported), but
+  // startCamera can only set the generic "error" status — the hook's state
+  // isn't readable inside that async callback until after re-render.
+  // Deriving the label here keeps the displayed status truthful.
+  const errorStatus: CameraStatus =
+    status === "error" &&
+    lastError?.type === "video" &&
+    errorStates.includes(lastError.code as CameraStatus)
+      ? (lastError.code as CameraStatus)
+      : status;
   if (errorStates.includes(status)) {
     return (
       <div className="flex flex-col gap-2 rounded-2xl border border-red-400/30 bg-red-400/10 p-4 text-xs text-red-200">
         <div className="flex items-center gap-2 font-bold">
-          <AlertTriangle size={14} /> {STATUS_LABELS[status]}
+          <AlertTriangle size={14} /> {STATUS_LABELS[errorStatus]}
         </div>
         <p>{errorMsg || lastError?.message || "Could not access the camera."}</p>
         <div className="flex gap-2">
