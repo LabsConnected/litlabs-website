@@ -51,7 +51,10 @@ function makeTransport(files: Record<string, string>): FakeTransport {
         if (dir && !k.startsWith(prefix)) continue;
         const rest = k.slice(prefix.length);
         const seg = rest.split("/")[0];
-        names.set(seg, rest.includes("/") ? "directory" : "file");
+        // The real terminal-server /ws-files endpoint labels directories
+        // "folder", never "directory" — matching it here is the whole
+        // point of the regression suite.
+        names.set(seg, rest.includes("/") ? "folder" : "file");
       }
       if (!dir) names.delete(""); // root
       return { entries: [...names].map(([name, type]) => ({ name, type })) };
@@ -445,5 +448,117 @@ describe("enrichStaticSiteVisuals", () => {
     expect(html).not.toContain("<img");
     expect(report.imagesResolved).toBe(0);
     expect(report.imagesFailed).toBeGreaterThan(0);
+  });
+
+  it("never materializes the same provider URL for two identical-keyword slots", async () => {
+    // The identical-MD5 defect: three generated images hashed identically
+    // because identical keyword slots all resolved the first hit of the
+    // provider chain. With Pexels live and two photos returned, slot 2
+    // must take photo 2 — never a second copy of photo 1.
+    process.env.PEXELS_API_KEY = "test-key";
+    const transport = makeTransport({
+      "index.html": `<html><body>
+        <img data-litt-image="coffee beans"><img data-litt-image="coffee beans">
+      </body></html>`,
+    });
+    let n = 0;
+    mockInsertAssetFromUrl.mockImplementation(async () => {
+      n += 1;
+      return { success: true, path: `assets/images/i${n}.jpg`, sitePath: `assets/images/i${n}.jpg`, sizeBytes: 150_000 };
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => {
+      const s = String(u);
+      if (s.includes("api.pexels.com")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Map(),
+          json: async () => ({
+            photos: [
+              { src: { large2x: "https://images.example/a.jpg" }, photographer: "A" },
+              { src: { large2x: "https://images.example/b.jpg" }, photographer: "B" },
+            ],
+          }),
+        };
+      }
+      return fakeImageResponse(s);
+    }));
+
+    await enrichStaticSiteVisuals(transport as never, {});
+    const urls = mockInsertAssetFromUrl.mock.calls.map((c) => String(c[0]));
+    expect(urls).toContain("https://images.example/a.jpg");
+    expect(urls).toContain("https://images.example/b.jpg");
+    expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it("skips a provider URL that was already materialized this run", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+    const used = new Set(["https://loremflickr.com/1600/900/coffee?lock=1"]);
+    const resolved = await resolveSlotImage("coffee", 1, used);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.url).not.toBe("https://loremflickr.com/1600/900/coffee?lock=1");
+    // Two slots, same keyword, different seeds must not collide on the
+    // deterministic fallback either.
+    const second = await resolveSlotImage("coffee", 2, new Set([resolved!.url]));
+    expect(second).not.toBeNull();
+    expect(second!.url).not.toBe(resolved!.url);
+  });
+
+  // ── Workspace entry-type regression (staging defect) ──────────────
+  // The real terminal-server /ws-files endpoint labels directories
+  // "folder". When collect() only descended "directory", every nested
+  // asset was invisible: valid refs looked missing and were re-resolved,
+  // and the photo floor appended a gallery the page did not need.
+
+  it("sees nested assets through folder-typed listings and leaves a complete page untouched", async () => {
+    const transport = makeTransport({
+      "index.html": `<html><body><div class="hero">
+        <img src="assets/images/hero.jpg"><img src="assets/images/b.jpg"><img src="assets/images/c.jpg">
+      </div></body></html>`,
+      "assets/images/hero.jpg": "binary-stub",
+      "assets/images/b.jpg": "binary-stub",
+      "assets/images/c.jpg": "binary-stub",
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    expect(report.filesChanged).toEqual([]);
+    expect(mockInsertAssetFromUrl).not.toHaveBeenCalled();
+    expect(report.audit?.brokenRefs).toEqual([]);
+    // Nested photos satisfy the floor — no phantom gallery is appended.
+    expect(transport.files.get("index.html")).not.toContain("litt-gallery");
+  });
+
+  it("every local <img src> in the enriched page resolves to a stored workspace file", async () => {
+    const transport = makeTransport({
+      "index.html": `<html><body><h1>Ember Roast</h1>
+        <img data-litt-image="coffee beans" alt="beans">
+        <img src="assets/images/missing.jpg" alt="pour over"></body></html>`,
+    });
+    let n = 0;
+    mockInsertAssetFromUrl.mockImplementation(async (_url, opts) => {
+      n += 1;
+      const p = `assets/images/r${n}.jpg`;
+      transport.binary.set(p, "YmluYXJ5"); // the handler persists bytes
+      return { success: true, path: p, sitePath: p, sizeBytes: 200_000, directory: (opts as { directory?: string }).directory };
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    const stored = new Set([...transport.files.keys(), ...transport.binary.keys()]);
+    const srcs = [...html.matchAll(/<img\b[^>]*\bsrc="([^"]+)"/gi)].map((m) => m[1]);
+    expect(srcs.length).toBeGreaterThanOrEqual(3);
+    for (const src of srcs) {
+      const rel = src.replace(/^\.\//, "").replace(/^\//, "").split(/[?#]/)[0];
+      // A ref is allowed to be remote/data, but a local path must exist.
+      if (/^https?:|^data:|^blob:/i.test(src)) continue;
+      expect(stored.has(rel) || stored.has(`public/${rel}`)).toBe(true);
+    }
+    // And the inserts were pinned to the static workspace-root dir so the
+    // refs resolve under every delivery mount (preview, /sites, zip).
+    for (const call of mockInsertAssetFromUrl.mock.calls) {
+      expect(call[1]).toMatchObject({ directory: "assets/images" });
+    }
   });
 });

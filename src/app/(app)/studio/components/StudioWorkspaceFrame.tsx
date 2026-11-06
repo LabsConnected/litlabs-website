@@ -262,6 +262,8 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
 
 export interface StudioInspectorData {
   capabilities: ConnectionCapabilities;
+  /** Active execution mode — the Permission row must agree with the gate policy. */
+  executionMode?: "plan" | "act" | "auto";
   modelLabel: string;
   modelHealth?: ProviderHealth;
   activeAgentName: string;
@@ -296,6 +298,19 @@ function InspectorSection({ title, children }: { title: string; children: React.
       </div>
     </section>
   );
+}
+
+/**
+ * The Permission row must agree with the actual gate policy: writeAccess
+ * means "a writable surface exists", never "writes bypass approval". ACT
+ * gates every mutation; AUTO applies the routine-write safe set but still
+ * gates sensitive actions; PLAN writes nothing.
+ */
+function permissionLabel(data: StudioInspectorData): string {
+  if (!data.capabilities.writeAccess) return "No write surface";
+  if (data.executionMode === "plan") return "Read-only (PLAN mode)";
+  if (data.executionMode === "act") return "Writes require approval";
+  return "Writes allowed";
 }
 
 function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspectorData }) {
@@ -366,7 +381,7 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
         <InspectorRow label="Version control" value={describeSourceRows(capabilities).versionControl} />
         <InspectorRow label="GitHub" value={describeSourceRows(capabilities).github} />
         <InspectorRow label="Branch" value={describeSourceRows(capabilities).branch} />
-        <InspectorRow label="Permission" value={capabilities.writeAccess ? "Writes allowed" : "Approval required"} tone={capabilities.writeAccess ? "ok" : "warn"} />
+        <InspectorRow label="Permission" value={permissionLabel(data)} tone={permissionLabel(data) === "Writes allowed" ? "ok" : "warn"} />
       </InspectorSection>
       <DeploymentStatusSection projectId={capabilities.projectId} />
       <div className="rounded-xl border px-3 py-2.5 text-[10px] leading-4" style={{ borderColor: "rgba(114,242,56,0.2)", backgroundColor: "rgba(114,242,56,0.04)", color: "var(--text-secondary)" }}>

@@ -69,7 +69,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     features: [
       "LiTT agent",
       "3 active projects",
-      "LiTTBits allocation TBD (pending owner decision)",
+      "2,500 LiTTBits per billing cycle",
       "Private projects",
       "Project downloads",
       "Image generation",
@@ -221,10 +221,10 @@ export function getStripePriceId(plan: PlanDefinition): string | null {
 
 export function formatPrice(cents: number | null): string {
   if (cents === null || cents === 0) return "Free";
-  return `$${(cents / 100).toFixed(0)}`;
+  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
 }
 
 export function formatPriceMonthly(cents: number | null): string {
   if (cents === null || cents === 0) return "Free";
-  return `$${(cents / 100).toFixed(0)}/month`;
+  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}/month`;
 }

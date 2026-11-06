@@ -38,9 +38,11 @@ import "server-only";
 import { studioLog } from "@/lib/studio/logger";
 import { supabaseAdmin } from "@/lib/supabase";
 import {
+  createActionRun,
   getActionRun,
   isTerminalActionRunStatus,
   listActionEvents,
+  patchActionRun,
   transitionActionRun,
 } from "@/lib/action-runtime";
 import type { LLMMessage } from "./llm-tool-calling";
@@ -348,6 +350,37 @@ async function expireIfStale(record: PausedRunRecord): Promise<PausedRunRecord> 
 }
 
 /**
+ * Expired-gate settlement: a pending gate that outlives its TTL without a
+ * decision leaves its parent action_run parked in `waiting_for_user` —
+ * and every live-surface projection (worktab badge, mission state, "Run
+ * in progress") reads that as active work forever. When a read normalizes
+ * a gate to "expired", settle the run it was parked on with the honest
+ * reason, mirroring how a rejection settles the same wait.
+ *
+ * Strict ownership: only a run whose recorded approval_reference IS this
+ * gate is touched. A run parked on a newer gate (a nested handoff) or
+ * back at work is never cancelled by an old gate's TTL. Best-effort on
+ * read paths — a racing settler's terminal truth stands.
+ */
+async function settleRunForExpiredGate(record: PausedRunRecord): Promise<void> {
+  if (record.status !== "expired" || !record.actionRunId) return;
+  try {
+    const run = await getActionRun(record.actionRunId, record.userId);
+    if (!run || isTerminalActionRunStatus(run.status)) return;
+    if (run.approvalReference !== record.id) return;
+    const message = "Approval expired before a decision was made";
+    await transitionActionRun(record.actionRunId, record.userId, "cancelled", {
+      currentActivity: message,
+      approvalReference: null,
+      failureCode: "APPROVAL_EXPIRED",
+      failureMessage: message,
+    });
+  } catch {
+    // Read path — a racing settler owns the truth; never break the read.
+  }
+}
+
+/**
  * Stale-run recovery: an approved run whose detached execution was killed
  * mid-flight (deploy/restart) stays "processing" forever and never writes
  * back to the transcript. Any read past RUN_STALE_TIMEOUT_MS marks it
@@ -455,6 +488,7 @@ export async function getPausedRun(
   if (error || !data) return null;
 
   const record = await expireIfStale(rowToRecord(data as PausedRunRow));
+  await settleRunForExpiredGate(record);
   return recoverStaleRun(record);
 }
 
@@ -501,8 +535,11 @@ export async function listPausedRunsForActionRun(
 
   if (error || !data) return [];
   return Promise.all(
-    (data as PausedRunRow[]).map(async (row) =>
-      recoverStaleRun(await expireIfStale(rowToRecord(row)))),
+    (data as PausedRunRow[]).map(async (row) => {
+      const record = await expireIfStale(rowToRecord(row));
+      await settleRunForExpiredGate(record);
+      return recoverStaleRun(record);
+    }),
   );
 }
 
@@ -529,7 +566,9 @@ export async function getLatestPausedRunForConversation(
     .maybeSingle();
 
   if (error || !data) return null;
-  return recoverStaleRun(await expireIfStale(rowToRecord(data as PausedRunRow)));
+  const record = await expireIfStale(rowToRecord(data as PausedRunRow));
+  await settleRunForExpiredGate(record);
+  return recoverStaleRun(record);
 }
 
 export async function resolvePausedRun(
@@ -572,6 +611,9 @@ export async function resolvePausedRun(
       .update({ status: "expired", resolved_at: now })
       .eq("id", pausedRunId)
       .eq("status", decision);
+    // The decision landed past TTL — same dead gate as the lazy flip:
+    // settle the run it was parked on so nothing waits on it forever.
+    await settleRunForExpiredGate({ ...record, status: "expired", resolvedAt: now });
     return null;
   }
 
@@ -945,7 +987,37 @@ export async function reRequestExpiredRun(
   const existing = await getPausedRun(pausedRunId, userId);
   if (!existing || existing.status !== "expired") return null;
 
-  return createPausedRun({
+  // The fresh gate needs a live canonical parent or approving it can only
+  // dead-end: the expired gate's run was settled when its TTL lapsed, and
+  // a gate without a resolvable action_run approves into a settle that
+  // cannot be recorded ("no parent action_run"). Reuse the recorded
+  // parent only while it is still parked on THIS gate (a settle that
+  // raced); anything else — terminal, missing, or parked on a newer gate
+  // — gets a fresh run: a re-request IS a new execution attempt (one
+  // run = one attempt, same as the controlled retry).
+  let actionRunId: string | null = null;
+  if (existing.actionRunId) {
+    const parent = await getActionRun(existing.actionRunId, userId).catch(() => null);
+    if (
+      parent &&
+      !isTerminalActionRunStatus(parent.status) &&
+      parent.approvalReference === existing.id
+    ) {
+      actionRunId = existing.actionRunId;
+    }
+  }
+  if (!actionRunId) {
+    const freshRun = await createActionRun({
+      userId,
+      projectId: existing.projectId,
+      conversationId: existing.conversationId,
+      kind: "agent",
+      currentActivity: `Re-requested approval for ${existing.toolId}`,
+    });
+    actionRunId = freshRun.id;
+  }
+
+  const gate = await createPausedRun({
     userId,
     conversationId: existing.conversationId,
     projectId: existing.projectId,
@@ -959,7 +1031,25 @@ export async function reRequestExpiredRun(
     systemPrompt: existing.systemPrompt,
     checkpointId: existing.checkpointId,
     qualityLoopState: existing.qualityLoopState,
+    actionRunId,
   });
+
+  // Record which gate the run is parked on: the expiry settle uses it to
+  // cancel this wait if the fresh TTL lapses too — never an orphan
+  // "Run in progress". Best-effort; the gate itself is already durable.
+  await patchActionRun(actionRunId, userId, {
+    approvalReference: gate.id,
+    currentActivity: `Approval required for ${gate.toolId}`,
+  }).catch((error) =>
+    studioLog("paused_run:re_request_parent_reference_failed", {
+      userId,
+      actionRunId,
+      pausedRunId: gate.id,
+      errorClass: error instanceof Error ? error.message : "unknown",
+    }),
+  );
+
+  return gate;
 }
 
 /**

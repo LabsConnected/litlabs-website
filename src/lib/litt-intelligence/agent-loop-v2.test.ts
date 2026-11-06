@@ -344,8 +344,11 @@ describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate
       enableBuildFix: false,
     });
 
-    // The third read is the post-write persisted-change verification.
-    expect(transportWithFile.readFile).toHaveBeenCalledTimes(3);
+    // Reads: apply_patch validation + recovery re-read, then files.write
+    // pre-approval preservation check + the handler's own floor read
+    // (at-execution state can differ from pre-approval), then the
+    // post-write persisted-change verification.
+    expect(transportWithFile.readFile).toHaveBeenCalledTimes(5);
     expect(writeFile).toHaveBeenCalledWith("index.html", "<footer>Ember Roast · Freshly roasted.</footer>");
     expect(result.pendingApproval).toBeUndefined();
     expect(result.finalText).toContain("updated safely");
@@ -2252,15 +2255,24 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
     // approve write1 → resume emits write2 (pauses, counter 0) → approve
     // → resume emits write3 (pauses) → approve → completes. Without the
     // persisted reset a mid-segment read tail could kill a healthy run.
+    // write2/write3 must be DISTINCT calls: an identical re-emission of a
+    // call that was just approved and executed is deduped (replayed), not
+    // re-gated — that was the repeated-approval defect.
     const second = {
       text: "",
       toolCalls: [{ toolId: "files.write", toolCallId: "tc-w2", inputs: { projectId: "p-test", path: "b.html", content: "<b/>" } }],
       finishReason: "tool_calls" as const,
       model: "test",
     };
+    const third = {
+      text: "",
+      toolCalls: [{ toolId: "files.write", toolCallId: "tc-w3", inputs: { projectId: "p-test", path: "c.html", content: "<c/>" } }],
+      finishReason: "tool_calls" as const,
+      model: "test",
+    };
     vi.mocked(callLLMWithTools)
       .mockResolvedValueOnce(second)
-      .mockResolvedValueOnce(second)
+      .mockResolvedValueOnce(third)
       .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
     const r1 = await resumeAgentLoopV2(approvedWriteResume(), writeTransport);
     expect(r1.pendingApproval?.toolId).toBe("files.write");
@@ -2497,5 +2509,49 @@ describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incide
 
     expect(result.cancelReason ?? "").not.toContain("Repeated tool call detected");
     expect(transport.applyPatch).toHaveBeenCalledTimes(8);
+  });
+});
+
+describe("runAgentLoopV2 — failed quality verdict propagates to failedHonestly", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "google/gemini-2.5-flash",
+    });
+  });
+
+  it("sets failedHonestly + finished success:false when the verdict refuses success", async () => {
+    // The observed defect: the loop emitted agent.failed (finished
+    // success:false) yet the outer projection marked the action run
+    // completed — failedHonestly was left unset so launch-flow and the
+    // messages route had nothing truthful to propagate.
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      fakeTransport,
+      {
+        model: "gemini-2.5-flash",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        isStaticWorkspace: true,
+        qualityLoop: {
+          enabled: true,
+          runId: "run-q",
+          projectId: "p-test",
+          userId: "u-test",
+          userRequest: "build a tiny landing page",
+        },
+      },
+    );
+
+    // Zero evidence was filed for ANY stage — every scope's gate refuses.
+    expect(result.qualityLoop?.verdict.ok).toBe(false);
+    expect(result.failedHonestly).toBeTruthy();
+    const finished = result.events.find((e) => e.type === "finished");
+    expect(finished).toBeDefined();
+    expect((finished as { success?: boolean }).success).toBe(false);
   });
 });

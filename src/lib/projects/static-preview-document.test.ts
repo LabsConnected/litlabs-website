@@ -75,11 +75,14 @@ describe("authenticated static preview document", () => {
     expect(readStylesheet).not.toHaveBeenCalled();
   });
 
-  it("escapes closing style tags in embedded CSS and keeps missing stylesheets unchanged", async () => {
+  it("escapes closing style tags in embedded CSS and tokenizes missing stylesheets", async () => {
     const readStylesheet = vi.fn(async (path: string) => path === "ok.css" ? 'a::after { content: "</style>"; }' : null);
     const html = '<link rel="stylesheet" href="missing.css"><link rel="stylesheet" href="ok.css">';
     const { html: result } = await prepareStaticPreviewDocument(html, "index.html", { assetBase: ASSET_BASE, readStylesheet });
-    expect(result).toContain('href="missing.css"');
+    // A sheet that cannot be embedded keeps an external fetch — but under
+    // the token prefix (authorized, 404s honestly) instead of the session
+    // path the opaque origin cannot authenticate (guaranteed 401).
+    expect(result).toContain(`href="${ASSET_BASE}missing.css"`);
     expect(result).toContain('content: "\\3c /style>"; }');
   });
 });

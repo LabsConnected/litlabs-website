@@ -608,6 +608,7 @@ describe("callLLMWithTools — failure classification and failover", () => {
     mockFetch
       .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
       .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
+      .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
       .mockResolvedValueOnce(makeSuccessResponse("mistral-small-latest", "Mistral handled it."));
 
     const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
@@ -616,9 +617,9 @@ describe("callLLMWithTools — failure classification and failover", () => {
     const health = getProviderHealth("groq");
     expect(health.state).toBe("cooldown");
     expect(health.cooldownUntil).toBeGreaterThan(Date.now() + 25_000);
-    // Both Groq models were tried (per-model limits don't poison siblings),
-    // then the provider stopped — no third call.
-    expect(callsTo("groq")).toHaveLength(2);
+    // All three Groq candidates were tried (per-model limits don't poison
+    // siblings), then the provider stopped — no fourth call.
+    expect(callsTo("groq")).toHaveLength(3);
   });
 
   it("a per-model 429 fails over to the provider's next candidate model", async () => {
@@ -659,7 +660,8 @@ describe("callLLMWithTools — failure classification and failover", () => {
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");
     vi.stubEnv("MISTRAL_API_KEY", "test-mistral-key");
     mockFetch
-      // Both Groq candidates 429 (account-level limit) → provider cooldown.
+      // All three Groq candidates 429 (account-level limit) → provider cooldown.
+      .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
       .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
       .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
       .mockResolvedValueOnce(makeSuccessResponse("mistral-small-latest", "one"))
@@ -669,8 +671,8 @@ describe("callLLMWithTools — failure classification and failover", () => {
     const second = await callLLMWithTools("sys", [{ role: "user", content: "hi again" }], []);
 
     expect(second.provider).toBe("mistral");
-    // Still only the two first-call Groq attempts — cooldown persisted.
-    expect(callsTo("groq")).toHaveLength(2);
+    // Still only the three first-call Groq attempts — cooldown persisted.
+    expect(callsTo("groq")).toHaveLength(3);
   });
 
   it("waits out a short all-route cooldown instead of failing the call", async () => {

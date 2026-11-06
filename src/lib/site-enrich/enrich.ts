@@ -20,6 +20,7 @@ import "server-only";
  * loremflickr → picsum). No paid API is ever called from here.
  */
 
+import { createHash } from "crypto";
 import { insertAssetFromUrl } from "@/lib/litt-intelligence/tool-handlers-v2";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resolveSlotImage } from "./resolver";
@@ -107,12 +108,22 @@ export async function enrichStaticSiteVisuals(
       for (const e of res?.entries ?? []) {
         const p = prefix ? `${prefix}/${e.name}` : e.name;
         if (e.type === "file") fileSet.add(p);
-        else if (e.type === "directory") await collect(p, p, depth + 1);
+        // Workspace transports disagree on the directory label: the
+        // terminal-server /ws-files endpoint emits "folder" (see
+        // collectStaticArtifact's identical fix). Missing nested assets
+        // made every subdir file look absent — valid refs were re-resolved
+        // and the photo floor appended a phantom gallery.
+        else if (e.type === "directory" || e.type === "folder" || e.type === "dir") await collect(p, p, depth + 1);
       }
     };
     await collect("", "", 0);
 
     let seed = 1;
+    // URLs already materialized this run — the provider chain skips them
+    // so two slots can never persist the same image bytes (the identical-
+    // MD5 defect: identical or colliding keyword slots all resolved to
+    // the same provider hit).
+    const usedImageUrls = new Set<string>();
     // Site-relative paths of persisted images known to be too small to
     // satisfy the real-photo floor — they are kept (real content) but do
     // not count toward MIN_REAL_PHOTOS.
@@ -123,22 +134,53 @@ export async function enrichStaticSiteVisuals(
         if (path) smallImages.add(path.replace(/^\//, ""));
       }
     };
+    const usedHashes = new Set<string>();
+    const contentHash = async (sitePath: string) => {
+      try {
+        const { content } = await transport.readFile(sitePath);
+        return createHash("md5").update(content).digest("hex");
+      } catch {
+        return null;
+      }
+    };
     const resolve = async (keywords: string) => {
       if (report.imagesResolved + report.imagesFailed >= budget) return null;
-      const resolved = await resolveSlotImage(keywords, seed++);
-      if (!resolved) {
+      // Dedupe: distinct keywords can still resolve to the same photo
+      // (provider seed collisions shipped visibly duplicated gallery
+      // images) — hash the saved bytes and retry once with a bumped seed
+      // and varied keywords; a still-identical image counts as a failure
+      // so the slot falls back to the honest placeholder.
+      let resolved = await resolveSlotImage(keywords, seed, usedImageUrls);
+      if (resolved) usedImageUrls.add(resolved.url);
+      let saved = resolved
+        ? await insertAssetFromUrl(resolved.url, { nameHint: keywords.slice(0, 30), directory: "assets/images" }, transport)
+        : null;
+      let hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
+      if (hash && usedHashes.has(hash)) {
+        seed += 1000;
+        const varied = `${keywords} scene`;
+        resolved = await resolveSlotImage(varied, seed, usedImageUrls);
+        if (resolved) usedImageUrls.add(resolved.url);
+        saved = resolved
+          ? await insertAssetFromUrl(resolved.url, { nameHint: varied.slice(0, 30), directory: "assets/images" }, transport)
+          : null;
+        hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
+        if (hash && usedHashes.has(hash)) {
+          seed += 1;
+          report.imagesFailed += 1;
+          return null;
+        }
+      }
+      seed += 1;
+      // Static workspaces are served from the workspace ROOT — the
+      // insert dir is pinned above so a stray package.json (or a
+      // transient listFiles failure, which falls back to public/) can
+      // never land the asset where the emitted ref cannot resolve.
+      if (!resolved || !saved?.success || !saved.sitePath) {
         report.imagesFailed += 1;
         return null;
       }
-      const saved = await insertAssetFromUrl(
-        resolved.url,
-        { nameHint: keywords.slice(0, 30) },
-        transport,
-      );
-      if (!saved.success || !saved.sitePath) {
-        report.imagesFailed += 1;
-        return null;
-      }
+      if (hash) usedHashes.add(hash);
       report.imagesResolved += 1;
       if (!report.providersUsed.includes(resolved.provider)) {
         report.providersUsed.push(resolved.provider);
@@ -225,7 +267,7 @@ export async function enrichStaticSiteVisuals(
             : ref.raw.replace(src, nextSrc);
         if (isExternal && !isPlaceholder) {
           // Rehost the hotlink into the project — persists in deploys.
-          const saved = await insertAssetFromUrl(src, { nameHint: "external-image" }, transport)
+          const saved = await insertAssetFromUrl(src, { nameHint: "external-image", directory: "assets/images" }, transport)
             .catch(() => null);
           if (saved?.success && saved.sitePath) {
             html = html.replace(ref.raw, rewrite(saved.sitePath));
@@ -313,9 +355,13 @@ export async function enrichStaticSiteVisuals(
             `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">` +
             imgs.join("") +
             `</div></section>`;
-          html = /<\/body>/i.test(html)
-            ? html.replace(/<\/body>/i, `${section}</body>`)
-            : html + section;
+          // Above the footer when one exists — a trailing photo grid reads
+          // as content; after the footer it reads as a rendering bug.
+          html = /<footer[\s>]/i.test(html)
+            ? html.replace(/<footer[\s>]/i, (m) => `${section}${m}`)
+            : /<\/body>/i.test(html)
+              ? html.replace(/<\/body>/i, `${section}</body>`)
+              : html + section;
           await transport.writeFile(entry, html);
           if (!report.filesChanged.includes(entry)) report.filesChanged.push(entry);
         }
@@ -330,7 +376,8 @@ export async function enrichStaticSiteVisuals(
     for (const e of assets?.entries ?? []) if (e.type === "file") postFiles.add(`assets/images/${e.name}`);
     report.audit = auditStaticSiteHtml(finalHtml, postFiles);
     return report;
-  } catch {
+  } catch (err) {
+    console.warn("[enrich] enrichStaticSiteVisuals aborted:", err instanceof Error ? err.message : err);
     return report;
   }
 }
