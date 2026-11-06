@@ -24,7 +24,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  STAGING_SERVICE: litlabslitt-shell-staging
+  # The Railway SERVICE name — the domain subdomain is NOT the service name
+  # (terminal's service is litlabs-terminal-server vs domain …-production-0be1).
+  # The staging web service reports service:"web" on /api/health.
+  STAGING_SERVICE: web
+  STAGING_ENVIRONMENT: staging
   STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
 
 jobs:
@@ -42,22 +46,28 @@ jobs:
 
       - name: Guard — staging-only target
         run: |
-          # The deploy target is hardcoded to the staging service. Refuse
-          # anything that smells like a production identifier.
-          case "$STAGING_SERVICE" in
-            *production*|*prod*|litlabs-terminal-server|*terminal*)
-              echo "::error::refusing to deploy — target resolves to production ($STAGING_SERVICE)"
-              exit 1
-              ;;
-          esac
-          echo "Deploy target: $STAGING_SERVICE (staging only)"
+          # Both the service and environment are hardcoded to staging values.
+          # Refuse anything that smells like a production identifier.
+          for target in "$STAGING_SERVICE" "$STAGING_ENVIRONMENT"; do
+            case "$target" in
+              *production*|*prod*|litlabs-terminal-server|*terminal*)
+                echo "::error::refusing to deploy — target resolves to production ($target)"
+                exit 1
+                ;;
+            esac
+          done
+          echo "Deploy target: service=$STAGING_SERVICE env=$STAGING_ENVIRONMENT (staging only)"
 
-      - name: Check RAILWAY_TOKEN
+      - name: Check Railway credentials
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
-          if [ -z "$RAILWAY_TOKEN" ]; then
-            echo "::error::RAILWAY_TOKEN GitHub secret is not set — cannot deploy."
+          # Either a project token (RAILWAY_TOKEN) or an account token
+          # (RAILWAY_API_TOKEN) satisfies the deploy. Refuse only when
+          # BOTH are absent — and say exactly which secret to set.
+          if [ -z "$RAILWAY_TOKEN" ] && [ -z "$RAILWAY_API_TOKEN" ]; then
+            echo "::error::No Railway credential — set RAILWAY_TOKEN (project token) or RAILWAY_API_TOKEN (account token)."
             exit 1
           fi
 
@@ -70,12 +80,27 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      - name: Diagnose Railway token scope
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        continue-on-error: true
+        run: |
+          # Prints the project/environment/service the token can actually
+          # see — no secret values. If the token is project-scoped to a
+          # different project/environment the deploy step's failure is
+          # explained by this output.
+          railway status || true
+
       - name: Deploy to staging service only
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
-          # --service pins the deploy to the STAGING web service only.
-          railway up --service "$STAGING_SERVICE" --detach
+          # --service + --environment pin the deploy to the STAGING web
+          # service only. (For project tokens the bound environment is
+          # used; for account tokens --environment selects it.)
+          railway up --service "$STAGING_SERVICE" --environment "$STAGING_ENVIRONMENT" --detach
 
       - name: Verify staging health + deployed SHA
         env:
