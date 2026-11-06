@@ -24,10 +24,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The Railway SERVICE name — the domain subdomain is NOT the service name
-  # (terminal's service is litlabs-terminal-server vs domain …-production-0be1).
-  # The staging web service reports service:"web" on /api/health.
-  STAGING_SERVICE: web
+  # The Railway SERVICE name — neither the domain subdomain NOR the app's
+  # /api/health service label is the service name. `railway status` in the
+  # staging environment lists the web app as @litlabs/litt-shell (serving
+  # litlabslitt-shell-staging.up.railway.app); there is no "web" service —
+  # deploying with it 404s on code upload.
+  STAGING_SERVICE: "@litlabs/litt-shell"
   STAGING_ENVIRONMENT: staging
   STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
 
