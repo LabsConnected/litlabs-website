@@ -104,7 +104,8 @@ jobs:
 
       - name: Report consecutive-pass count
         if: always()
-        run: echo "- consecutive acceptance passes: ${CONSECUTIVE_PASSES:-0}/$ACCEPTANCE_RUNS" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "- consecutive acceptance passes: ${CONSECUTIVE_PASSES:-0}/$ACCEPTANCE_RUNS" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload acceptance artifacts
         if: always()
