@@ -97,10 +97,17 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
-          # --service + --environment pin the deploy to the STAGING web
-          # service only. (For project tokens the bound environment is
-          # used; for account tokens --environment selects it.)
-          railway up --service "$STAGING_SERVICE" --environment "$STAGING_ENVIRONMENT" --detach
+          # --service pins the deploy to the STAGING web service only.
+          # A project token (RAILWAY_TOKEN) is already bound to one
+          # environment — passing --environment alongside it resolves a
+          # second env context and the upload endpoint 404s. An account
+          # token (RAILWAY_API_TOKEN) is not env-bound, so it needs
+          # --environment to select staging.
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            railway up --service "$STAGING_SERVICE" --detach
+          else
+            railway up --service "$STAGING_SERVICE" --environment "$STAGING_ENVIRONMENT" --detach
+          fi
 
       - name: Verify staging health + deployed SHA
         env:
