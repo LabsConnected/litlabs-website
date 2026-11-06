@@ -2,7 +2,17 @@ name: Railway Token Scope Diagnostic
 
 # READ-ONLY diagnostic — runs on this PR only, never merged to main as a
 # permanent workflow. Prints which project/environment/services the
-# RAILWAY_TOKEN secret can actually reach. No deploys, no writes.
+# RAILWAY_TOKEN / RAILWAY_API_TOKEN secrets can actually reach, and which
+# token TYPE each one is. No deploys, no writes.
+#
+# Railway token types:
+#   - PROJECT token → env var RAILWAY_TOKEN, bound to one project+env;
+#     `railway whoami` fails by design, `railway variables` works without
+#     --environment (bound env is implicit).
+#   - ACCOUNT/workspace token → env var RAILWAY_API_TOKEN; `railway whoami`
+#     works, service probes need --environment.
+# A token stored under the WRONG var name reports "Invalid RAILWAY_TOKEN"
+# on every call — exactly what the last diagnostic run showed.
 on:
   pull_request:
     branches: [main]
@@ -16,49 +26,44 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check RAILWAY_TOKEN present
+      - name: Report which secrets are present
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
-          if [ -z "$RAILWAY_TOKEN" ]; then
-            echo "::error::RAILWAY_TOKEN secret is empty"
-            exit 1
-          fi
-          echo "token present (value masked)"
+          [ -n "$RAILWAY_TOKEN" ] && echo "RAILWAY_TOKEN: present" || echo "RAILWAY_TOKEN: EMPTY"
+          [ -n "$RAILWAY_API_TOKEN" ] && echo "RAILWAY_API_TOKEN: present" || echo "RAILWAY_API_TOKEN: empty"
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Railway account/whoami
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        continue-on-error: true
-        run: railway whoami || true
-
-      - name: Railway status (linked project/env/service)
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        continue-on-error: true
-        run: railway status || true
-
-      - name: Probe WITHOUT --environment (project tokens are env-bound)
+      - name: Probe RAILWAY_TOKEN (project-token semantics)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         continue-on-error: true
         run: |
-          # Project tokens are bound to ONE environment — passing a different
-          # --environment makes them look invalid even when valid. Probe the
-          # bound env implicitly, then each candidate service name.
-          echo "=== variables (no env, service=web) ==="
-          railway variables --service web 2>&1 | head -30 || true
-          echo "=== variables (no env, service=litlabslitt-shell-staging) ==="
-          railway variables --service litlabslitt-shell-staging 2>&1 | head -30 || true
-          echo "=== variables (no env, service=litlabs-terminal-server) ==="
-          railway variables --service litlabs-terminal-server 2>&1 | head -30 || true
+          echo "=== whoami ==="; railway whoami || true
+          echo "=== variables service=web (bound env implicit) ==="
+          railway variables --service web 2>&1 | head -10 || true
+          echo "=== variables service=web --environment staging ==="
+          railway variables --service web --environment staging 2>&1 | head -10 || true
 
-      - name: Probe WITH --environment staging (account-token style)
+      - name: Probe RAILWAY_API_TOKEN (account-token semantics)
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         continue-on-error: true
         run: |
-          railway variables --service web --environment staging 2>&1 | head -30 || true
+          echo "=== whoami (works only for account tokens) ==="
+          railway whoami || true
+          echo "=== variables service=web --environment staging ==="
+          railway variables --service web --environment staging 2>&1 | head -10 || true
+
+      - name: Cross-check — is RAILWAY_TOKEN actually an account token?
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          # If the value stored as RAILWAY_TOKEN is really an account token,
+          # it will authenticate when passed via RAILWAY_API_TOKEN instead.
+          echo "=== RAILWAY_TOKEN value probed AS RAILWAY_API_TOKEN ==="
+          railway whoami || true

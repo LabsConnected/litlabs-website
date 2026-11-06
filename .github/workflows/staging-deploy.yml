@@ -58,12 +58,16 @@ jobs:
           done
           echo "Deploy target: service=$STAGING_SERVICE env=$STAGING_ENVIRONMENT (staging only)"
 
-      - name: Check RAILWAY_TOKEN
+      - name: Check Railway credentials
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
-          if [ -z "$RAILWAY_TOKEN" ]; then
-            echo "::error::RAILWAY_TOKEN GitHub secret is not set — cannot deploy."
+          # Either a project token (RAILWAY_TOKEN) or an account token
+          # (RAILWAY_API_TOKEN) satisfies the deploy. Refuse only when
+          # BOTH are absent — and say exactly which secret to set.
+          if [ -z "$RAILWAY_TOKEN" ] && [ -z "$RAILWAY_API_TOKEN" ]; then
+            echo "::error::No Railway credential — set RAILWAY_TOKEN (project token) or RAILWAY_API_TOKEN (account token)."
             exit 1
           fi
 
@@ -79,6 +83,7 @@ jobs:
       - name: Diagnose Railway token scope
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         continue-on-error: true
         run: |
           # Prints the project/environment/service the token can actually
@@ -90,6 +95,7 @@ jobs:
       - name: Deploy to staging service only
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
           # --service + --environment pin the deploy to the STAGING web
           # service only. (For project tokens the bound environment is
