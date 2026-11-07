@@ -273,15 +273,33 @@ async function main() {
     }
 
     // Accordion payment-method layout: the card inputs only mount after the
-    // "Card" option is selected. Click its radio/row; no-op when Card is the
-    // sole method.
-    const cardRadio = page.getByRole("radio", { name: /^card$/i }).first();
-    const cardRow = page.locator('label:has-text("Card"), [role="button"]:has-text("Card")').first();
-    if (await cardRadio.isVisible().catch(() => false)) {
-      await cardRadio.click().catch(() => {});
-    } else if (await cardRow.isVisible().catch(() => false)) {
-      await cardRow.click().catch(() => {});
+    // "Card" option is selected. The option's accessible name includes the
+    // card-brand text, so match loosely and fall back to a text-node click
+    // that bubbles into the row's handler. No-op when Card is the sole method.
+    let cardClicked = null;
+    for (const cand of [
+      page.getByRole("radio", { name: /card/i }),
+      page.getByRole("option", { name: /card/i }),
+      page.locator('[role="radio"]:has-text("Card")'),
+      page.locator('label:has-text("Card")'),
+    ]) {
+      const el = cand.first();
+      if (await el.isVisible().catch(() => false)) {
+        await el.click({ timeout: 5_000 }).then(() => { cardClicked = "locator"; }).catch(() => {});
+        break;
+      }
     }
+    if (!cardClicked) {
+      cardClicked = await page.evaluate(() => {
+        const els = [...document.querySelectorAll("*")].filter(
+          (e) => e.offsetParent && e.children.length === 0 && /^card$/i.test(e.textContent.trim()),
+        );
+        if (!els.length) return null;
+        els[0].click();
+        return "evaluate";
+      });
+    }
+    await page.waitForTimeout(2000);
 
     const cardSel = 'input[name="cardNumber"], #cardNumber';
     const expirySel = 'input[name="cardExpiry"], #cardExpiry';
@@ -307,8 +325,12 @@ async function main() {
       const inputs = await page.locator("input")
         .evaluateAll((els) => els.map((e) => ({ id: e.id, name: e.name, type: e.type })))
         .catch(() => []);
+      const radiogroup = await page.evaluate(() => {
+        const g = document.querySelector('[role="radiogroup"],[role="listbox"]');
+        return g ? g.outerHTML.slice(0, 4000) : null;
+      }).catch(() => null);
       writeFileSync(path.join(ARTIFACT_DIR, "checkout-dom.json"),
-        JSON.stringify({ frames, inputs }, null, 2));
+        JSON.stringify({ cardClicked, frames, inputs, radiogroup }, null, 2));
       await shot(page, "stripe-checkout-no-fields");
       throw new Error("card input not found in page or any frame (see checkout-dom.json)");
     }
