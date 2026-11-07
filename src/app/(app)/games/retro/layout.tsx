@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     description:
       "Play NES, SNES, Sega Genesis, Game Boy, and GBA games right in your browser. Upload legally obtained ROMs and build your private arcade. No downloads, no uploads — everything stays local.",
     path: "/games/retro",
-    index: true,
+    index: false,
   }),
   keywords: [
     "retro arcade",
