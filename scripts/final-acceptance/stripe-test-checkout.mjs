@@ -369,6 +369,17 @@ async function main() {
       `card fields filled in ${cardCtx === page ? "document" : "iframe"} context`);
     await shot(page, "stripe-checkout-filled");
 
+    // Stripe's Link opt-in is checked by default and demands a phone number
+    // — its validation error silently blocks Subscribe. Uncheck it.
+    const linkBox = page.getByRole("checkbox", { name: /save my information|link/i }).first();
+    if (await linkBox.isChecked().catch(() => false)) {
+      await linkBox.click().catch(() => {});
+    }
+    const phoneField = page.locator('input[type="tel"], input[name*="phone" i], #phoneNumber').first();
+    if (await phoneField.isVisible().catch(() => false)) {
+      await phoneField.fill("2015550123").catch(() => {});
+    }
+
     const payBtn = page.getByRole("button", { name: /subscribe|pay|complete/i }).first();
     if (await payBtn.isVisible().catch(() => false)) {
       await payBtn.click();
