@@ -898,6 +898,92 @@ const LOCAL_BUILD_TOOL_NOTE =
   "- For a new static site, a single files.write with complete inline-CSS HTML is acceptable and fastest.\n" +
   "- Call preview.start when the files are written to verify the render.";
 
+/**
+ * Cloudflare Workers AI lane detection — the model hint carries the
+ * provider (`@cf/...` slugs always route to Workers AI). The served model
+ * may differ from the hint after fallback, but it is still the CF lane.
+ */
+export function isCloudflareLaneModel(model?: string): boolean {
+  return typeof model === "string" && model.startsWith("@cf/");
+}
+
+/**
+ * Workers AI steering (staging-verified failure): llama-class CF models
+ * over-select apply_patch for full-file creation — emitting patches whose
+ * `search` was never read from disk, which fails the re-read validation
+ * and gets the run cancelled by the patch safety guard. Teach the same
+ * rule the guard enforces: files_write for create/replace, apply_patch
+ * only for small edits to content already read this run. The patch
+ * guard itself is unchanged — this steers the model AWAY from the bad
+ * call, it does not weaken the check.
+ */
+const CLOUDFLARE_BUILD_TOOL_NOTE =
+  "## File-write tool selection\n" +
+  "- files_write CREATES a file or REPLACES a file's contents entirely — " +
+  "including replacing the starter template with a new site. It takes the COMPLETE content.\n" +
+  "- apply_patch is ONLY for a small edit to a file whose current content you have already " +
+  "read this run: `search` must be an exact verbatim substring of the file on disk. " +
+  "Patches with guessed content are rejected and can cancel the run.\n" +
+  "- Never emit apply_patch for a file you have not read, and never emit apply_patch to " +
+  "create or fully rewrite a file — use files_write instead.\n" +
+  "- Emit every files_write the site needs in ONE response, then stop.";
+
+/**
+ * Orchestration-owned preview recovery: after a VERIFIED workspace
+ * mutation the loop itself ensures the preview is up — the model is not
+ * relied upon to emit preview.start (staging-verified gap: completed
+ * builds with real writes left the preview not_started).
+ *
+ * Readiness is truthful, never asserted on the URL alone: "ready" only
+ * when the preview runtime reports serving, or when the workspace is
+ * static (file-served by the preview route — reachable by definition
+ * once real content exists). A failed/unreachable preview emits
+ * preview_result success:false. Bounded and best-effort: never throws,
+ * never hangs the run, and a preview failure does not undo verified
+ * file work.
+ */
+export async function ensurePreviewAfterVerifiedMutations(
+  transport: WorkspaceTransport,
+  workspaceChange: { status: string } | undefined,
+  localProgress: ProgressEmitter,
+): Promise<void> {
+  if (workspaceChange?.status !== "changed") return;
+  const deadline = Date.now() + 15_000;
+  try {
+    localProgress.emit({ type: "preview_start" });
+    let status = await transport.getPreviewStatus().catch(() => null);
+    if (status?.status !== "ready" && status?.status !== "starting" && status?.status !== "restarting") {
+      const started = await transport.startPreview();
+      if (started.status === "failed") {
+        throw new Error(started.error ?? "preview start failed");
+      }
+      if (started.framework === "static" || started.status === "ready") {
+        localProgress.emit({ type: "preview_status", status: "ready", healthy: true });
+        localProgress.emit({ type: "preview_result", success: true });
+        return;
+      }
+      status = await transport.getPreviewStatus().catch(() => null);
+    }
+    while (status && (status.status === "starting" || status.status === "restarting") && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      status = await transport.getPreviewStatus().catch(() => status);
+    }
+    const s = status?.status ?? "unreachable";
+    localProgress.emit({ type: "preview_status", status: s, healthy: s === "ready" });
+    localProgress.emit(
+      s === "ready"
+        ? { type: "preview_result", success: true }
+        : { type: "preview_result", success: false, error: status?.error ?? `preview status: ${s}` },
+    );
+  } catch (err) {
+    localProgress.emit({
+      type: "preview_result",
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
   return {
     id: tool.id,
@@ -1805,6 +1891,9 @@ async function runAgentLoopV2Inner(
   const toolsSlimmedForLocal = offerableTools !== healthCheckedTools;
   if (toolsSlimmedForLocal) {
     cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
+  }
+  if (isCloudflareLaneModel(cfg.model)) {
+    cfg.systemPrompt += "\n\n" + CLOUDFLARE_BUILD_TOOL_NOTE;
   }
   const healthNote = buildToolHealthPromptNote(toolHealthMap);
   if (healthNote) {
@@ -2794,6 +2883,7 @@ async function runAgentLoopV2Inner(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
+  await ensurePreviewAfterVerifiedMutations(transport, workspaceChange, localProgress);
   const afterCheckpoint = await createAfterRunCheckpoint(transport, workspaceChange, userMessage, localProgress);
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
@@ -3486,6 +3576,9 @@ async function resumeAgentLoopV2Inner(
   );
   if (resumeOfferableTools !== resumeHealthCheckedTools) {
     cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
+  }
+  if (isCloudflareLaneModel(cfg.model)) {
+    cfg.systemPrompt += "\n\n" + CLOUDFLARE_BUILD_TOOL_NOTE;
   }
   const resumeHealthNote = buildToolHealthPromptNote(resumeToolHealthMap);
   if (resumeHealthNote) {
@@ -4320,6 +4413,7 @@ async function resumeAgentLoopV2Inner(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
+  await ensurePreviewAfterVerifiedMutations(transport, workspaceChange, localProgress);
   const afterCheckpoint = await createAfterRunCheckpoint(
     transport,
     workspaceChange,

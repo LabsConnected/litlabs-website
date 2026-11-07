@@ -19,6 +19,7 @@ import { llmHealth, DEFAULT_MODELS } from "@/lib/llm";
 import {
   providerDiagnostics,
   resolveBasicOllamaEndpoint,
+  _resetProviderHealthForTests,
 } from "@/lib/litt-intelligence/provider-registry";
 import {
   OLLAMA_TOOL_CAPABLE,
@@ -231,4 +232,40 @@ export async function GET(req: NextRequest) {
   } catch (_error) {
     return NextResponse.json({ error: "Health check failed" }, { status: 500 });
   }
+}
+
+/**
+ * POST — staging/test-only provider health reset.
+ *
+ * Clears the in-process circuit-breaker + model-cooldown state so a
+ * controlled acceptance run isn't contaminated by an earlier test's
+ * failures. Triple-gated — this endpoint CANNOT clear production
+ * provider health:
+ *   1. LITT_TEST_PROVIDER_RESET=1 must be set in the deployment env
+ *      (never set on production — the flag is the opt-in itself),
+ *   2. the deployment env must not resolve to production
+ *      (RAILWAY_ENVIRONMENT_NAME / RAILWAY_ENVIRONMENT / APP_ENV), and
+ *   3. the caller must hold an authenticated session — same auth as the
+ *      health details, never unauthenticated.
+ * A missing flag 404s so the route is undiscoverable where disabled.
+ */
+export async function POST(req: NextRequest) {
+  if (process.env.LITT_TEST_PROVIDER_RESET !== "1") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  const deployEnv = (
+    process.env.RAILWAY_ENVIRONMENT_NAME ??
+    process.env.RAILWAY_ENVIRONMENT ??
+    process.env.APP_ENV ??
+    ""
+  ).toLowerCase();
+  if (deployEnv === "production" || deployEnv === "prod") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const { userId } = await auth(req);
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  _resetProviderHealthForTests();
+  return NextResponse.json({ ok: true, resetAt: new Date().toISOString() });
 }
