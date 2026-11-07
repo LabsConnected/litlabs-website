@@ -280,7 +280,10 @@ async function main() {
     for (const cand of [
       page.getByRole("radio", { name: /card/i }),
       page.getByRole("option", { name: /card/i }),
+      page.getByRole("button", { name: /^card$/i }),
       page.locator('[role="radio"]:has-text("Card")'),
+      page.locator('[data-testid*="card"], [id*="card" i]'),
+      page.getByText(/^\s*Card\s*$/),
       page.locator('label:has-text("Card")'),
     ]) {
       const el = cand.first();
@@ -337,6 +340,8 @@ async function main() {
       }).catch(() => null);
       writeFileSync(path.join(ARTIFACT_DIR, "checkout-dom.json"),
         JSON.stringify({ cardClicked, frames, inputs, radiogroup, paySection }, null, 2));
+      writeFileSync(path.join(ARTIFACT_DIR, "checkout-body.html"),
+        await page.evaluate(() => document.body.innerHTML).catch(() => ""));
       await shot(page, "stripe-checkout-no-fields");
       throw new Error("card input not found in page or any frame (see checkout-dom.json)");
     }
