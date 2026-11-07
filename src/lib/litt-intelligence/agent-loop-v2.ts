@@ -3683,6 +3683,25 @@ async function resumeAgentLoopV2Inner(
     // be cached as executed work or weaken loop detection.
     if (toolDef && !toolDef.readOnly && result.success) {
       hasInterveningMutation = true;
+      // Ledger the call the user just approved. The resume rebuilds
+      // executedMutations empty and seedToolCallRecordsFromHistory only
+      // counts calls with a tool result in the paused history — the gated
+      // call had none — so without this the approved execution is
+      // invisible to dedupe: an identical call deferred from the same
+      // batch (models repeat the same tool call in one batch) or
+      // re-emitted on the next step re-enters the permission gate and
+      // asks the user to approve the exact same action a second time.
+      const approvedInputsHash = hashInputs(resume.inputs);
+      toolCallRecords.push({
+        toolId: resume.toolId,
+        inputsHash: approvedInputsHash,
+        resultHash: hashResult(result.result),
+        step: stepsUsed,
+      });
+      executedMutations.set(`${resume.toolId}:${approvedInputsHash}`, {
+        result,
+        persisted: mutationCheck?.verified ?? undefined,
+      });
     }
   } else {
     // Rejected — inject rejection as tool result
