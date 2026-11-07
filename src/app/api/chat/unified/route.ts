@@ -10,6 +10,7 @@ import { assertSpendAuthorized } from "@/lib/metered-llm-call";
 import { studioLog } from "@/lib/studio/logger";
 import { SpendGuardError } from "@/lib/spend-guards";
 import { randomUUID } from "crypto";
+import { executeAgentChat } from "@/lib/agent-chat-execution";
 
 export const runtime = "nodejs";
 
@@ -97,7 +98,7 @@ async function logConversation(
   }
 }
 
-async function handleAgentChat(body: UnifiedChatRequest) {
+async function handleAgentChat(body: UnifiedChatRequest, clerkId: string) {
   const { from, to, message, type = "chat", metadata, simulateResponse } = body;
 
   if (!from || !to || !message) {
@@ -121,10 +122,14 @@ async function handleAgentChat(body: UnifiedChatRequest) {
   type MessageType = (typeof validTypes)[number];
   const messageType: MessageType = validTypes.includes(type as MessageType) ? (type as MessageType) : "chat";
 
+  const response = await executeAgentChat({
+    clerkId, agentSlug: to, message,
+    simulateResponse: Boolean(simulateResponse), requestId: body.requestId,
+  });
+  if (response instanceof NextResponse) return response;
   const agentMessage = orchestrator.sendMessage(from, to, message, messageType, metadata);
 
   if (simulateResponse) {
-    const response = await orchestrator.simulateAgentResponse(to, message);
     const reply = orchestrator.sendMessage(to, from, response, "chat");
 
     return NextResponse.json({
@@ -470,9 +475,9 @@ async function handler(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Agent-to-agent mode is internal orchestration — no entitlement check.
+    // Public agent mode uses the same entitlement and billing boundaries.
     if (detectedMode === "agent") {
-      return await handleAgentChat(body);
+      return await handleAgentChat(body, clerkId);
     }
 
     const agentSlug = (body.agentSlug || body.agent || "litt") as string;
