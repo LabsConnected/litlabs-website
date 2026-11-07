@@ -63,6 +63,13 @@ export async function POST(request: NextRequest) {
       meta?: Record<string, unknown>;
     };
 
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
+      return NextResponse.json(
+        { error: "Invalid session_id — must be a UUID" },
+        { status: 400 },
+      );
+    }
+
     // 1. Run structural schema validation checks on the task input payload
     const validation = validateAgentTaskInput(taskInput);
     if (!validation.ok) {
