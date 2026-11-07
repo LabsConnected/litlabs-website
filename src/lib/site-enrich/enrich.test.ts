@@ -233,6 +233,40 @@ describe("enrichStaticSiteVisuals", () => {
     expect(html).not.toContain("data-litt-image");
   });
 
+  it("gives up within its overall budget when providers never answer (CI #820)", async () => {
+    const transport = makeTransport({
+      "index.html": `<img data-litt-image="anything" alt="x">`,
+    });
+    mockInsertAssetFromUrl.mockResolvedValue({ success: false, error: "download failed" });
+    // A provider that hangs forever unless aborted. Without the overall
+    // deadline this test never returns (vitest 5s timeout) — that is the
+    // #820 CI hang: the resume loop awaited enrichment while providers
+    // never answered, and #820's retries multiplied the wait.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) => {
+        await new Promise<void>((_resolve, reject) => {
+          const sig = init?.signal;
+          if (!sig) return; // hangs forever
+          if (sig.aborted) reject(new DOMException("The operation was aborted", "AbortError"));
+          else
+            sig.addEventListener(
+              "abort",
+              () => reject(new DOMException("The operation was aborted", "AbortError")),
+              { once: true },
+            );
+        });
+        throw new Error("unreachable");
+      }),
+    );
+
+    const start = Date.now();
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    const elapsed = Date.now() - start;
+    expect(report.imagesResolved).toBe(0);
+    expect(elapsed).toBeLessThan(4500);
+  });
+
   it("leaves a healthy page untouched", async () => {
     const transport = makeTransport({
       "index.html": `<div class="hero"><img src="assets/images/hero.jpg"></div>
