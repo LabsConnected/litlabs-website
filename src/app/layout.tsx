@@ -10,6 +10,7 @@ import { ClerkAuthContextProvider } from "@/context/ClerkAuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthorityJsonLd } from "@/components/seo/AuthorityJsonLd";
 import { GhlAffiliateScript, GhlAffiliateSignupTracker } from "@/components/GhlAffiliateTracker";
+import { UmamiAnalytics } from "@/components/UmamiAnalytics";
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_OG_IMAGE,
@@ -154,6 +155,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <GhlAffiliateScript />
+        <UmamiAnalytics />
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[9999] focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:text-on-accent"
