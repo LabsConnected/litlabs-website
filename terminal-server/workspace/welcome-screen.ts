@@ -25,12 +25,12 @@ export const WELCOME_PROMPTS = [
 ] as const;
 
 const WELCOME_CAPABILITIES = [
-  "Build the project",
-  "Generate the design and copy",
-  "Create assets",
-  "Edit files",
-  "Preview changes live",
-  "Get it ready to publish",
+  "Full project builds",
+  "Design and copy",
+  "Asset generation",
+  "File editing",
+  "Live preview",
+  "Publish-ready",
 ] as const;
 
 const WELCOME_CSS = `
@@ -42,16 +42,18 @@ const WELCOME_CSS = `
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     color: #e8eef7;
     background:
-      radial-gradient(720px 480px at 18% 12%, rgba(34, 211, 238, 0.14), transparent 62%),
-      radial-gradient(760px 520px at 84% 88%, rgba(168, 85, 247, 0.13), transparent 62%),
-      radial-gradient(520px 380px at 78% 18%, rgba(59, 130, 246, 0.10), transparent 60%),
+      radial-gradient(920px 540px at 50% -14%, rgba(34, 211, 238, 0.12), transparent 64%),
+      radial-gradient(880px 580px at 90% 94%, rgba(168, 85, 247, 0.11), transparent 64%),
+      radial-gradient(540px 420px at 8% 88%, rgba(59, 130, 246, 0.07), transparent 62%),
       #05070d;
     min-height: 100vh;
     display: flex;
+    align-items: center;
     justify-content: center;
-    padding: 40px 20px;
+    padding: 44px 20px;
     position: relative;
     overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
   }
   body::before {
     content: "";
@@ -59,119 +61,262 @@ const WELCOME_CSS = `
     inset: 0;
     pointer-events: none;
     background-image:
-      linear-gradient(rgba(148, 163, 184, 0.055) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(148, 163, 184, 0.055) 1px, transparent 1px);
-    background-size: 44px 44px;
-    mask-image: radial-gradient(640px 480px at 50% 42%, black 30%, transparent 78%);
-    -webkit-mask-image: radial-gradient(640px 480px at 50% 42%, black 30%, transparent 78%);
+      linear-gradient(rgba(148, 163, 184, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.045) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(760px 560px at 50% 42%, black 25%, transparent 78%);
+    -webkit-mask-image: radial-gradient(760px 560px at 50% 42%, black 25%, transparent 78%);
   }
-  .litt-welcome { position: relative; width: 100%; max-width: 660px; text-align: center; margin: auto; }
-  .litt-status {
-    display: inline-flex;
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 95% at 50% 46%, transparent 58%, rgba(2, 4, 10, 0.5) 100%);
+  }
+  .litt-welcome {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 660px;
+    margin: auto;
+    display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: #a5f3fc;
-    background: rgba(34, 211, 238, 0.08);
-    border: 1px solid rgba(34, 211, 238, 0.28);
-    border-radius: 999px;
-    padding: 7px 16px;
-    margin-bottom: 28px;
-    box-shadow: 0 0 24px rgba(34, 211, 238, 0.18);
   }
-  .litt-status .dot {
-    width: 8px; height: 8px; border-radius: 999px;
-    background: #22d3ee;
-    box-shadow: 0 0 10px #22d3ee;
-    animation: litt-pulse 2.2s ease-in-out infinite;
+  @keyframes litt-card-in {
+    from { opacity: 0; transform: translateY(12px) scale(0.99); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes litt-rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
   }
   @keyframes litt-pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.45; transform: scale(0.8); }
   }
-  .litt-mark {
-    width: 76px; height: 76px;
-    margin: 0 auto 24px;
-    border-radius: 22px;
-    display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg, rgba(34,211,238,0.16), rgba(168,85,247,0.16));
-    border: 1px solid rgba(139, 92, 246, 0.35);
-    box-shadow: 0 0 42px rgba(34, 211, 238, 0.28), 0 0 90px rgba(168, 85, 247, 0.16), inset 0 0 24px rgba(34,211,238,0.08);
+  .litt-rise { animation: litt-rise 0.6s cubic-bezier(0.22, 0.68, 0.31, 1) both; }
+  .litt-card {
+    position: relative;
+    width: 100%;
+    text-align: center;
+    padding: 40px 44px 38px;
+    border-radius: 24px;
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    background: linear-gradient(180deg, rgba(18, 26, 43, 0.66), rgba(9, 13, 24, 0.7));
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    animation: litt-card-in 0.55s cubic-bezier(0.22, 0.68, 0.31, 1) both;
   }
-  .litt-mark svg { width: 40px; height: 40px; filter: drop-shadow(0 0 8px rgba(34,211,238,0.7)); }
-  h1 {
-    margin: 0 0 10px;
-    font-size: clamp(2.1rem, 6vw, 3.4rem);
+  .litt-card::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: 14%;
+    right: 14%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.55), rgba(168, 85, 247, 0.55), transparent);
+  }
+  .litt-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #a5f3fc;
+    background: rgba(34, 211, 238, 0.07);
+    border: 1px solid rgba(34, 211, 238, 0.22);
+    border-radius: 999px;
+    padding: 6px 14px;
+    margin-bottom: 24px;
+    animation-delay: 0.1s;
+  }
+  .litt-status .dot {
+    width: 7px; height: 7px; border-radius: 999px;
+    background: #22d3ee;
+    box-shadow: 0 0 10px #22d3ee;
+    animation: litt-pulse 2.2s ease-in-out infinite;
+  }
+  .litt-mark {
+    width: 68px; height: 68px;
+    margin: 0 auto 22px;
+    border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(145deg, rgba(34, 211, 238, 0.14), rgba(168, 85, 247, 0.14));
+    border: 1px solid rgba(139, 92, 246, 0.32);
+    box-shadow:
+      0 0 0 6px rgba(139, 92, 246, 0.05),
+      0 0 40px rgba(34, 211, 238, 0.22),
+      0 0 80px rgba(168, 85, 247, 0.13),
+      inset 0 0 22px rgba(34, 211, 238, 0.07);
+    animation-delay: 0.16s;
+  }
+  .litt-mark svg { width: 36px; height: 36px; filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.7)); }
+  .litt-card h1 {
+    margin: 0;
+    font-size: clamp(2.15rem, 6vw, 3.3rem);
     font-weight: 800;
-    letter-spacing: -0.02em;
-    background: linear-gradient(100deg, #f8fafc 20%, #a5f3fc 55%, #c4b5fd 85%);
+    letter-spacing: -0.03em;
+    line-height: 1.08;
+    text-wrap: balance;
+    background: linear-gradient(100deg, #f8fafc 25%, #a5f3fc 58%, #c4b5fd 88%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+    animation-delay: 0.24s;
   }
-  .litt-sub { margin: 0 0 18px; font-size: clamp(1.05rem, 3vw, 1.3rem); color: #cbd5e1; font-weight: 500; }
-  .litt-body { margin: 0 auto 8px; max-width: 560px; font-size: 0.98rem; line-height: 1.65; color: #94a3b8; }
-  .litt-caps { list-style: none; margin: 22px auto 0; padding: 0; max-width: 560px;
-    display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-  .litt-caps li {
-    font-size: 0.8rem; color: #c4b5fd;
-    border: 1px solid rgba(168, 85, 247, 0.3);
-    background: rgba(168, 85, 247, 0.08);
-    border-radius: 999px; padding: 6px 13px; white-space: nowrap;
+  .litt-sub {
+    margin: 12px 0 0;
+    font-size: clamp(1.02rem, 2.6vw, 1.22rem);
+    color: #c3cede;
+    font-weight: 500;
+    animation-delay: 0.3s;
   }
-  .litt-start-label { margin: 30px 0 12px; font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; }
-  .litt-prompts { display: flex; flex-direction: column; gap: 10px; max-width: 520px; margin: 0 auto; }
+  .litt-body {
+    margin: 14px auto 0;
+    max-width: 500px;
+    font-size: 0.95rem;
+    line-height: 1.65;
+    color: #8d99ae;
+    animation-delay: 0.36s;
+  }
+  .litt-start-label {
+    margin: 26px 0 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #5d6b82;
+    animation-delay: 0.42s;
+  }
+  .litt-prompts {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 520px;
+    margin: 0 auto;
+  }
   .litt-prompt {
     font: inherit;
+    display: flex;
+    align-items: center;
+    gap: 12px;
     text-align: left;
-    color: #e2e8f0;
-    background: rgba(15, 23, 42, 0.72);
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-radius: 14px;
-    padding: 13px 16px;
+    font-size: 0.92rem;
+    color: #dbe4f0;
+    background: linear-gradient(180deg, rgba(23, 32, 51, 0.6), rgba(13, 19, 32, 0.6));
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 12px;
+    padding: 12px 14px;
     cursor: pointer;
     transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
-    backdrop-filter: blur(6px);
+    animation: litt-rise 0.55s cubic-bezier(0.22, 0.68, 0.31, 1) both;
   }
+  .litt-prompt:nth-child(1) { animation-delay: 0.46s; }
+  .litt-prompt:nth-child(2) { animation-delay: 0.52s; }
+  .litt-prompt:nth-child(3) { animation-delay: 0.58s; }
+  .litt-prompt:nth-child(4) { animation-delay: 0.64s; }
   .litt-prompt:hover, .litt-prompt:focus-visible {
-    border-color: rgba(34, 211, 238, 0.65);
-    box-shadow: 0 0 22px rgba(34, 211, 238, 0.22);
+    border-color: rgba(34, 211, 238, 0.55);
+    box-shadow: 0 8px 28px rgba(34, 211, 238, 0.14);
     transform: translateY(-1px);
     outline: none;
   }
-  .litt-prompt span { color: #22d3ee; margin-right: 8px; }
+  .litt-prompt .idx {
+    flex-shrink: 0;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: #67e8f9;
+    border: 1px solid rgba(103, 232, 249, 0.28);
+    background: rgba(34, 211, 238, 0.07);
+    border-radius: 6px;
+    padding: 2px 7px;
+  }
+  .litt-prompt .txt { flex: 1; }
+  .litt-prompt .arrow {
+    flex-shrink: 0;
+    color: #5d6b82;
+    transition: transform 0.18s ease, color 0.18s ease;
+  }
+  .litt-prompt:hover .arrow, .litt-prompt:focus-visible .arrow {
+    transform: translateX(3px);
+    color: #22d3ee;
+  }
   .litt-cta {
     font: inherit;
     margin-top: 26px;
-    display: inline-flex; align-items: center; gap: 10px;
-    font-weight: 700; font-size: 1.02rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: 0.01em;
     color: #04121a;
-    background: linear-gradient(100deg, #22d3ee, #818cf8 60%, #a855f7);
-    border: none; border-radius: 14px;
-    padding: 15px 34px;
+    background: linear-gradient(100deg, #22d3ee, #818cf8 58%, #a855f7);
+    border: none;
+    border-radius: 12px;
+    padding: 14px 34px;
     cursor: pointer;
-    box-shadow: 0 8px 34px rgba(34, 211, 238, 0.35), 0 4px 18px rgba(168, 85, 247, 0.25);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.38),
+      0 10px 32px rgba(56, 189, 248, 0.26),
+      0 4px 16px rgba(168, 85, 247, 0.2);
     transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+    animation: litt-rise 0.6s cubic-bezier(0.22, 0.68, 0.31, 1) 0.72s both;
   }
   .litt-cta:hover, .litt-cta:focus-visible {
     transform: translateY(-2px);
-    filter: brightness(1.08);
-    box-shadow: 0 12px 44px rgba(34, 211, 238, 0.45), 0 6px 24px rgba(168, 85, 247, 0.3);
+    filter: brightness(1.07);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.42),
+      0 14px 42px rgba(56, 189, 248, 0.34),
+      0 6px 20px rgba(168, 85, 247, 0.26);
     outline: none;
   }
-  .litt-foot { margin: 30px auto 0; max-width: 480px; font-size: 0.78rem; line-height: 1.6; color: #475569; }
+  .litt-meta {
+    margin-top: 26px;
+    max-width: 560px;
+    text-align: center;
+    animation-delay: 0.8s;
+  }
+  .litt-caps {
+    margin: 0;
+    font-size: 0.76rem;
+    letter-spacing: 0.02em;
+    line-height: 1.75;
+    color: #5d6b82;
+  }
+  .litt-caps .sep { color: #3d4a61; }
+  .litt-foot {
+    margin: 12px 0 0;
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: #48546a;
+  }
   @media (max-width: 480px) {
     body { padding: 28px 16px; }
-    .litt-mark { width: 62px; height: 62px; border-radius: 18px; margin-bottom: 20px; }
-    .litt-mark svg { width: 32px; height: 32px; }
-    .litt-caps li { font-size: 0.74rem; padding: 5px 11px; }
+    .litt-card { padding: 34px 22px 30px; border-radius: 20px; }
+    .litt-mark { width: 58px; height: 58px; border-radius: 17px; margin-bottom: 22px; }
+    .litt-mark svg { width: 30px; height: 30px; }
+    .litt-prompt { padding: 12px; font-size: 0.88rem; }
     .litt-cta { width: 100%; justify-content: center; }
   }
+  @media (max-height: 560px) {
+    .litt-card { padding-top: 30px; padding-bottom: 28px; }
+    .litt-status { margin-bottom: 18px; }
+    .litt-mark { margin-bottom: 18px; }
+    .litt-start-label { margin-top: 22px; }
+    .litt-cta { margin-top: 22px; }
+    .litt-meta { margin-top: 18px; }
+  }
   @media (prefers-reduced-motion: reduce) {
-    .litt-status .dot { animation: none; }
-    .litt-prompt, .litt-cta { transition: none; }
+    .litt-card, .litt-rise, .litt-prompt, .litt-cta, .litt-status .dot { animation: none; }
+    .litt-prompt, .litt-prompt .arrow, .litt-cta { transition: none; }
   }
 `;
 
@@ -186,10 +331,11 @@ const BOLT_SVG = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
     </svg>`;
 
 const PROMPT_BUTTONS_HTML = WELCOME_PROMPTS.map(
-  (p) => `        <button type="button" class="litt-prompt" data-starter-prompt="${p}"><span>→</span>${p}</button>`,
+  (p, i) =>
+    `        <button type="button" class="litt-prompt" data-starter-prompt="${p}"><span class="idx">${String(i + 1).padStart(2, "0")}</span><span class="txt">${p}</span><span class="arrow" aria-hidden="true">&rarr;</span></button>`,
 ).join("\n");
 
-const CAPABILITIES_HTML = WELCOME_CAPABILITIES.map((c) => `      <li>${c}</li>`).join("\n");
+const CAPABILITIES_HTML = WELCOME_CAPABILITIES.join(` <span class="sep">&middot;</span> `);
 
 const WELCOME_SCRIPT = `<script>
     (function () {
@@ -228,21 +374,22 @@ export function buildWelcomeHtml(): string {
 </head>
 <body>
   <main class="litt-welcome">
-    <div class="litt-status"><span class="dot"></span>Workspace ready</div>
-    <div class="litt-mark">${BOLT_SVG}</div>
-    <h1>Welcome to LiTT</h1>
-    <p class="litt-sub">Your AI workspace is ready.</p>
-    <p class="litt-body">Tell LiTT what you want to build &mdash; a website, business, app, landing page, automation, or something completely new.</p>
-    <p class="litt-body">LiTT can help you:</p>
-    <ul class="litt-caps">
-${CAPABILITIES_HTML}
-    </ul>
-    <p class="litt-start-label">Start with something simple</p>
-    <div class="litt-prompts">
+    <section class="litt-card">
+      <div class="litt-status litt-rise"><span class="dot"></span>Workspace ready</div>
+      <div class="litt-mark litt-rise">${BOLT_SVG}</div>
+      <h1 class="litt-rise">Welcome to LiTT</h1>
+      <p class="litt-sub litt-rise">Your AI workspace is ready.</p>
+      <p class="litt-body litt-rise">Tell LiTT what you want to build &mdash; a website, business, app, landing page, automation, or something completely new.</p>
+      <p class="litt-start-label litt-rise">Quick starts</p>
+      <div class="litt-prompts">
 ${PROMPT_BUTTONS_HTML}
+      </div>
+      <button type="button" class="litt-cta" id="litt-start-building">Start Building <span aria-hidden="true">&rarr;</span></button>
+    </section>
+    <div class="litt-meta litt-rise">
+      <p class="litt-caps">${CAPABILITIES_HTML}</p>
+      <p class="litt-foot">This is your blank workspace &mdash; not a website yet. As soon as LiTT creates your real files, this screen is replaced by your actual project.</p>
     </div>
-    <button type="button" class="litt-cta" id="litt-start-building">Start Building <span aria-hidden="true">&rarr;</span></button>
-    <p class="litt-foot">This is your blank workspace &mdash; not a website yet. As soon as LiTT creates your real files, this screen is replaced by your actual project.</p>
   </main>
 ${WELCOME_SCRIPT}
 </body>
@@ -256,26 +403,27 @@ function escapeJsxText(s: string): string {
 
 function buildWelcomeJsxBody(): string {
   const prompts = WELCOME_PROMPTS.map(
-    (p) =>
-      `        <button type="button" className="litt-prompt" onClick={() => sendPrompt(${JSON.stringify(p)})}><span>&rarr;</span>${escapeJsxText(p)}</button>`,
+    (p, i) =>
+      `        <button type="button" className="litt-prompt" data-starter-prompt=${JSON.stringify(p)} onClick={() => sendPrompt(${JSON.stringify(p)})}><span className="idx">${String(i + 1).padStart(2, "0")}</span><span className="txt">${escapeJsxText(p)}</span><span className="arrow" aria-hidden="true">&rarr;</span></button>`,
   ).join("\n");
-  const caps = WELCOME_CAPABILITIES.map((c) => `      <li>${escapeJsxText(c)}</li>`).join("\n");
+  const caps = WELCOME_CAPABILITIES.map(escapeJsxText).join(` <span className="sep">&middot;</span> `);
   return `    <main className="litt-welcome">
-      <div className="litt-status"><span className="dot"></span>Workspace ready</div>
-      <div className="litt-mark">${BOLT_SVG.replace(/class=/g, "className=")}</div>
-      <h1>Welcome to LiTT</h1>
-      <p className="litt-sub">Your AI workspace is ready.</p>
-      <p className="litt-body">Tell LiTT what you want to build &mdash; a website, business, app, landing page, automation, or something completely new.</p>
-      <p className="litt-body">LiTT can help you:</p>
-      <ul className="litt-caps">
-${caps}
-      </ul>
-      <p className="litt-start-label">Start with something simple</p>
-      <div className="litt-prompts">
+      <section className="litt-card">
+        <div className="litt-status litt-rise"><span className="dot"></span>Workspace ready</div>
+        <div className="litt-mark litt-rise">${BOLT_SVG.replace(/class=/g, "className=").replace(/stop-color/g, "stopColor")}</div>
+        <h1 className="litt-rise">Welcome to LiTT</h1>
+        <p className="litt-sub litt-rise">Your AI workspace is ready.</p>
+        <p className="litt-body litt-rise">Tell LiTT what you want to build &mdash; a website, business, app, landing page, automation, or something completely new.</p>
+        <p className="litt-start-label litt-rise">Quick starts</p>
+        <div className="litt-prompts">
 ${prompts}
+        </div>
+        <button type="button" className="litt-cta" onClick={() => sendCta()}>Start Building <span aria-hidden="true">&rarr;</span></button>
+      </section>
+      <div className="litt-meta litt-rise">
+        <p className="litt-caps">${caps}</p>
+        <p className="litt-foot">This is your blank workspace &mdash; not a website yet. As soon as LiTT creates your real files, this screen is replaced by your actual project.</p>
       </div>
-      <button type="button" className="litt-cta" onClick={() => sendCta()}>Start Building <span aria-hidden="true">&rarr;</span></button>
-      <p className="litt-foot">This is your blank workspace &mdash; not a website yet. As soon as LiTT creates your real files, this screen is replaced by your actual project.</p>
     </main>`;
 }
 
