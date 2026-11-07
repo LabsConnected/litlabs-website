@@ -209,7 +209,7 @@ async function main() {
     // ── Step 2: baseline wallet (first read also lazy-grants Starter) ──
     const wallet0 = await apiGet(page, "/api/wallet");
     step("baseline_wallet", wallet0.status === 200 && wallet0.body?.configured !== false,
-      `status=${wallet0.status} balance=${wallet0.body?.balance} monthly=${wallet0.body?.balances?.monthly} purchased=${wallet0.body?.balances?.purchased}`);
+      `status=${wallet0.status} balance=${wallet0.body?.balance} monthly=${wallet0.body?.balances?.monthly} purchased=${wallet0.body?.balances?.purchased}${wallet0.body?.error ? ` error=${wallet0.body.error}` : ""}`);
     const baselineMonthly = wallet0.body?.balances?.monthly ?? 0;
 
     // ── Step 3: create checkout session ──
