@@ -767,6 +767,10 @@ function isSafeInsertDir(dir: string): boolean {
 export interface InsertAssetOptions {
   nameHint?: string;
   directory?: string;
+  /** Caller-wide deadline (e.g. the enrichment run's overall budget).
+   *  The download still has its own 30s per-attempt timeout; this cuts
+   *  it short when the caller has already spent its budget (CI #820). */
+  signal?: AbortSignal;
 }
 
 export interface InsertAssetResult {
@@ -922,7 +926,49 @@ export async function insertAssetFromUrl(
       buffer = decoded.buffer;
       contentType = decoded.contentType;
     } else {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      // One retry on transient upstream failures (network blips, 429, 5xx)
+      // — a single free-host hiccup must not strand an otherwise healthy
+      // image the way a definitive 4xx correctly does.
+      let lastErr: unknown = null;
+      const download = async (): Promise<Response | null> => {
+        try {
+          // Combine the 30s per-attempt timeout with the caller's overall
+          // deadline when given. AbortSignal.any is NOT used: jsdom (the
+          // test env) does not implement it — combine manually.
+          const perAttempt = AbortSignal.timeout(30_000);
+          let signal: AbortSignal = perAttempt;
+          if (opts.signal) {
+            if (opts.signal.aborted || perAttempt.aborted) {
+              const already = new AbortController();
+              already.abort();
+              signal = already.signal;
+            } else {
+              const controller = new AbortController();
+              const onAbort = () => controller.abort();
+              perAttempt.addEventListener("abort", onAbort, { once: true });
+              opts.signal.addEventListener("abort", onAbort, { once: true });
+              signal = controller.signal;
+            }
+          }
+          return await fetch(url, { signal });
+        } catch (err) {
+          lastErr = err;
+          return null;
+        }
+      };
+      let resp = await download();
+      if (resp === null || resp.status === 408 || resp.status === 429 || resp.status >= 500) {
+        if (opts.signal?.aborted) {
+          throw lastErr instanceof Error ? lastErr : new Error("Failed to download asset: aborted");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        resp = await download();
+      }
+      if (resp === null) {
+        // Preserve the original failure cause — callers and tests surface
+        // the real error, not a generic wrapper.
+        throw lastErr instanceof Error ? lastErr : new Error("Failed to download asset: network error");
+      }
       if (!resp.ok) {
         return { success: false, error: `Failed to download asset: HTTP ${resp.status}` };
       }

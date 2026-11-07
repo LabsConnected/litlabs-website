@@ -130,6 +130,20 @@ describe("resolveSlotImage", () => {
     const resolved = await resolveSlotImage("coffee", 2);
     expect(resolved?.provider).toBe("pollinations");
   });
+
+  it("retries a transient probe failure inside the same provider first", async () => {
+    // The 2026-11 golden 503s: free hosts blip constantly — one retry heals
+    // most probes, so the provider is skipped only on a repeat failure.
+    let fetches = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      fetches += 1;
+      if (fetches === 1) return { ok: false, status: 503, headers: new Map() };
+      return fakeImageResponse(String(url));
+    }));
+    const resolved = await resolveSlotImage("coffee", 1);
+    expect(resolved?.provider).toBe("loremflickr");
+    expect(fetches).toBe(2);
+  });
 });
 
 describe("enrichStaticSiteVisuals", () => {
@@ -217,6 +231,40 @@ describe("enrichStaticSiteVisuals", () => {
     expect(report.placeholdersUsed).toBe(1);
     expect(html).toContain('src="assets/images/placeholder.svg"');
     expect(html).not.toContain("data-litt-image");
+  });
+
+  it("gives up within its overall budget when providers never answer (CI #820)", async () => {
+    const transport = makeTransport({
+      "index.html": `<img data-litt-image="anything" alt="x">`,
+    });
+    mockInsertAssetFromUrl.mockResolvedValue({ success: false, error: "download failed" });
+    // A provider that hangs forever unless aborted. Without the overall
+    // deadline this test never returns (vitest 5s timeout) — that is the
+    // #820 CI hang: the resume loop awaited enrichment while providers
+    // never answered, and #820's retries multiplied the wait.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) => {
+        await new Promise<void>((_resolve, reject) => {
+          const sig = init?.signal;
+          if (!sig) return; // hangs forever
+          if (sig.aborted) reject(new DOMException("The operation was aborted", "AbortError"));
+          else
+            sig.addEventListener(
+              "abort",
+              () => reject(new DOMException("The operation was aborted", "AbortError")),
+              { once: true },
+            );
+        });
+        throw new Error("unreachable");
+      }),
+    );
+
+    const start = Date.now();
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    const elapsed = Date.now() - start;
+    expect(report.imagesResolved).toBe(0);
+    expect(elapsed).toBeLessThan(4500);
   });
 
   it("leaves a healthy page untouched", async () => {
@@ -445,5 +493,28 @@ describe("enrichStaticSiteVisuals", () => {
     expect(html).not.toContain("<img");
     expect(report.imagesResolved).toBe(0);
     expect(report.imagesFailed).toBeGreaterThan(0);
+  });
+
+  it("keeps filling the photo floor after a transient resolve failure", async () => {
+    // Golden 2026-11-06: a single failed resolve used to abort the whole
+    // floor pass, shipping sites with fewer than MIN_REAL_PHOTOS real
+    // photos. One hiccup must not starve the floor.
+    const transport = makeTransport({
+      "index.html": `<html><head><title>Ember Roast</title></head><body><h1>Ember Roast</h1></body></html>`,
+    });
+    let n = 0;
+    mockInsertAssetFromUrl.mockImplementation(async () => {
+      n += 1;
+      if (n === 1) return { success: false, error: "HTTP 503" };
+      return { success: true, path: `assets/images/g${n}.jpg`, sitePath: `assets/images/g${n}.jpg`, sizeBytes: 120_000 };
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    expect(report.imagesResolved).toBe(3);
+    expect(report.imagesFailed).toBe(1);
+    expect(html).toContain("litt-gallery");
+    expect(html).toContain('src="assets/images/g4.jpg"');
   });
 });
