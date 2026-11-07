@@ -82,7 +82,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Resolve sequence order mapping
+    // 3. Session ownership: if the session already has tasks, they must
+    // belong to the caller — otherwise this write would inject into
+    // another user's task stream.
+    const { data: existingTask } = await supabaseAdmin
+      .from("agent_tasks")
+      .select("user_id")
+      .eq("session_id", sessionId)
+      .limit(1)
+      .maybeSingle();
+    if (existingTask && existingTask.user_id !== userId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // 4. Resolve sequence order mapping
     const { count, error: countError } = await supabaseAdmin
       .from("agent_tasks")
       .select("*", { count: "exact", head: true })

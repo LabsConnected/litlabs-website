@@ -32,11 +32,12 @@ test("customer can create, chat, generate an image, and persist work @golden", a
     const response = await page.goto("/pricing", { waitUntil: "domcontentloaded" });
     expect(response?.status()).toBe(200);
 
-    // Verify correct prices are shown
+    // Verify current plan prices are shown (Creator Lite $9.99,
+    // Creator Beta $19.99, Pro Builder $39 — src/config/plans.ts).
     const bodyText = await page.locator("body").innerText();
-    expect(bodyText).toContain("$7");
-    expect(bodyText).toContain("$19");
-    expect(bodyText).toContain("Currently Unavailable");
+    expect(bodyText).toContain("$9.99");
+    expect(bodyText).toContain("$19.99");
+    expect(bodyText).toContain("$39");
   });
 
   await test.step("3. Navigate to Marketplace", async () => {

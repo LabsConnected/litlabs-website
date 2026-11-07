@@ -81,6 +81,13 @@ async function handler(req: NextRequest) {
       );
     }
 
+    // Agent-to-agent dispatch can trigger model calls (simulateResponse →
+    // generateText) — require auth like the user-facing path above.
+    const { clerkId } = await auth(req);
+    if (!clerkId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     // Validate agents exist
     const fromAgent = orchestrator.getAgent(from);
     const toAgent = orchestrator.getAgent(to);
