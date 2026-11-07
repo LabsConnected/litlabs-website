@@ -206,10 +206,27 @@ async function main() {
     );
     step("sign_in", true, `landed ${page.url()}`);
 
-    // ── Step 2: baseline wallet (first read also lazy-grants Starter) ──
-    const wallet0 = await apiGet(page, "/api/wallet");
-    step("baseline_wallet", wallet0.status === 200 && wallet0.body?.configured !== false,
-      `status=${wallet0.status} balance=${wallet0.body?.balance} monthly=${wallet0.body?.balances?.monthly} purchased=${wallet0.body?.balances?.purchased}${wallet0.body?.error ? ` error=${wallet0.body.error}` : ""}`);
+    // ── Step 2: user provisioning wait ──
+    // The users row is created by the Clerk webhook on user.created — it is
+    // NOT synchronous with sign-in. Poll /api/wallet until the row
+    // materializes; a persistent 500 "Wallet user was not found" means the
+    // Clerk TEST instance has no webhook endpoint aimed at this host — the
+    // entire billing chain is a silent no-op without the row, so abort.
+    let wallet0 = null;
+    const provDeadline = Date.now() + 90_000;
+    while (Date.now() < provDeadline) {
+      const res = await apiGet(page, "/api/wallet");
+      if (res.status === 200) { wallet0 = res; break; }
+      wallet0 = res;
+      await page.waitForTimeout(3_000);
+    }
+    step("user_provisioning", wallet0?.status === 200,
+      wallet0?.status === 200
+        ? `users row live — balance=${wallet0.body?.balance} monthly=${wallet0.body?.balances?.monthly} purchased=${wallet0.body?.balances?.purchased}`
+        : `users row never materialized (last: HTTP ${wallet0?.status} ${wallet0?.body?.error ?? "?"}) — Clerk webhook likely not registered for staging`);
+    if (wallet0?.status !== 200) {
+      throw new Error("user provisioning failed — no users row after 90s");
+    }
     const baselineMonthly = wallet0.body?.balances?.monthly ?? 0;
 
     // ── Step 3: create checkout session ──
@@ -235,31 +252,85 @@ async function main() {
     }
 
     // ── Step 5: Stripe-hosted checkout, test card ──
+    // The checkout app hydrates asynchronously — fields take seconds to
+    // mount, and newer Checkout renders them inside same-origin iframes
+    // (Payment Element). Probe the top document, then every frame.
     await page.goto(sessionUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+
+    const emailSel = 'input[name="email"], #email';
+    await page.locator(emailSel).first()
+      .waitFor({ state: "visible", timeout: 45_000 })
+      .catch(() => {});
+    await page.locator(emailSel).first()
+      .fill(`litt-acceptance-${STAMP}@litlabs.net`)
+      .catch(() => {});
+
+    // Some layouts gate the payment fields behind an email "Continue" step.
+    const cont = page.getByRole("button", { name: /continue|next/i }).first();
+    if (await cont.isVisible().catch(() => false)) {
+      await cont.click().catch(() => {});
+      await page.waitForTimeout(2000);
+    }
+
+    const cardSel = 'input[name="cardNumber"], #cardNumber';
+    const expirySel = 'input[name="cardExpiry"], #cardExpiry';
+    const cvcSel = 'input[name="cardCvc"], #cardCvc';
+    let cardCtx = null;
+    const fieldDeadline = Date.now() + 45_000;
+    while (Date.now() < fieldDeadline && !cardCtx) {
+      if (await page.locator(cardSel).first().isVisible().catch(() => false)) {
+        cardCtx = page;
+        break;
+      }
+      for (const frame of page.frames()) {
+        if (frame === page.mainFrame()) continue;
+        if (await frame.locator(cardSel).first().isVisible().catch(() => false)) {
+          cardCtx = frame;
+          break;
+        }
+      }
+      if (!cardCtx) await page.waitForTimeout(1000);
+    }
+    if (!cardCtx) {
+      const frames = page.frames().map((f) => f.url());
+      const inputs = await page.locator("input")
+        .evaluateAll((els) => els.map((e) => ({ id: e.id, name: e.name, type: e.type })))
+        .catch(() => []);
+      writeFileSync(path.join(ARTIFACT_DIR, "checkout-dom.json"),
+        JSON.stringify({ frames, inputs }, null, 2));
+      await shot(page, "stripe-checkout-no-fields");
+      throw new Error("card input not found in page or any frame (see checkout-dom.json)");
+    }
+
+    // Informational only — the cs_test_ session gate is authoritative.
     const testBadgeVisible = await page
       .getByText(/test mode/i).first()
-      .isVisible({ timeout: 20_000 }).catch(() => false);
-    step("stripe_test_mode_banner", testBadgeVisible, testBadgeVisible ? "TEST MODE banner present" : "banner not detected (sessionId gate still authoritative)");
+      .isVisible({ timeout: 15_000 }).catch(() => false);
+    step("stripe_test_mode_banner", true,
+      testBadgeVisible ? "TEST MODE banner present" : "banner not detected (sessionId gate is authoritative)");
     await shot(page, "stripe-checkout");
 
-    await page.fill("#email", `litt-acceptance-${STAMP}@litlabs.net`).catch(async () => {
-      // Some layouts autofill email or hide it behind a link — try the fieldset.
-      const alt = page.locator('input[name="email"], input[type="email"]').first();
-      await alt.fill(`litt-acceptance-${STAMP}@litlabs.net`);
-    });
-    await page.fill("#cardNumber", "4242424242424242");
-    await page.fill("#cardExpiry", "1234");
-    await page.fill("#cardCvc", "123");
-    const nameField = page.locator("#billingName");
-    if (await nameField.isVisible().catch(() => false)) {
-      await nameField.fill("LiTT Acceptance");
+    await cardCtx.locator(cardSel).first().fill("4242424242424242");
+    await cardCtx.locator(expirySel).first().fill("1234");
+    await cardCtx.locator(cvcSel).first().fill("123");
+    const nameSel = 'input[name="billingName"], #billingName';
+    if (await cardCtx.locator(nameSel).first().isVisible().catch(() => false)) {
+      await cardCtx.locator(nameSel).first().fill("LiTT Acceptance");
     }
-    const zip = page.locator("#billingPostalCode");
-    if (await zip.isVisible().catch(() => false)) {
-      await zip.fill("10001");
+    const zipSel = 'input[name="billingPostalCode"], #billingPostalCode';
+    if (await cardCtx.locator(zipSel).first().isVisible().catch(() => false)) {
+      await cardCtx.locator(zipSel).first().fill("10001");
     }
+    step("stripe_checkout_filled", true,
+      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context`);
     await shot(page, "stripe-checkout-filled");
-    await page.locator('button[type="submit"]').first().click();
+
+    const payBtn = page.locator('button[type="submit"]').first();
+    if (await payBtn.isVisible().catch(() => false)) {
+      await payBtn.click();
+    } else {
+      await page.getByRole("button", { name: /pay|subscribe|complete/i }).first().click();
+    }
 
     // ── Step 6: success redirect back to staging ──
     let redirected = false;
