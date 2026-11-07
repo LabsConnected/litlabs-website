@@ -199,11 +199,23 @@ export async function readPublishedFile(
 ): Promise<PublishedFile | null> {
   if (!supabaseAdmin) return null;
 
-  const { data: deployment, error: deploymentError } = await supabaseAdmin
+  let { data: deployment, error: deploymentError } = await supabaseAdmin
     .from(TABLE)
     .select("id,status")
     .eq("id", deploymentId)
     .maybeSingle();
+  if (deploymentError) {
+    // One short-delay retry on the deployment lookup — a transient
+    // PostgREST blip must not surface as a public 503 for an asset that
+    // exists (observed live: deployed image refs 503'd seconds after
+    // deploy, then served 200).
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    ({ data: deployment, error: deploymentError } = await supabaseAdmin
+      .from(TABLE)
+      .select("id,status")
+      .eq("id", deploymentId)
+      .maybeSingle());
+  }
   if (deploymentError) {
     // A store error must not masquerade as a missing file — the golden
     // acceptance run proved that collapsing errors into null turns a
@@ -233,8 +245,11 @@ export async function readPublishedFile(
       .maybeSingle());
   }
   if (error) {
-    // One retry for transient store errors; a second failure surfaces as a
-    // thrown error (the route answers 503) — never a false "not found".
+    // One retry for transient store errors after a short delay — an
+    // immediate retry hits the same blip window; a second failure
+    // surfaces as a thrown error (the route answers 503) — never a
+    // false "not found".
+    await new Promise((resolve) => setTimeout(resolve, 250));
     ({ data, error } = await supabaseAdmin
       .from(FILES_TABLE)
       .select("content,content_type,encoding")

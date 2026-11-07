@@ -324,6 +324,28 @@ describe("readPublishedFile — public serving read path", () => {
     );
     expect(calls.find((c) => c.table === FILES)).toBeUndefined();
   });
+
+  it("heals a transient deployment-lookup error with a single retry", async () => {
+    // Golden 2026-11-06: deployed image refs 503'd on a PostgREST blip in
+    // the deployment lookup seconds after deploy — the same transient the
+    // file read already survived one retry on. The lookup now gets the
+    // same healing read.
+    let lookups = 0;
+    handler = (table) => {
+      if (table === DEPLOYMENTS) {
+        lookups += 1;
+        if (lookups === 1) return { data: null, error: { code: "XX000", message: "timeout" } };
+        return { data: readyRow, error: null };
+      }
+      if (table === FILES) {
+        return { data: { content: "<h1>x</h1>", content_type: "text/html" }, error: null };
+      }
+      return { data: null, error: null };
+    };
+    const file = await readPublishedFile("dep-1", "index.html");
+    expect(file).toEqual({ content: "<h1>x</h1>", contentType: "text/html", encoding: undefined });
+    expect(calls.filter((c) => c.table === DEPLOYMENTS)).toHaveLength(2);
+  });
 });
 
 describe("findReadyByContentHash — duplicate suppression", () => {
