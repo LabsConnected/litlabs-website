@@ -22,6 +22,24 @@ describe("planCapabilities", () => {
     expect(plan.isReferenceMatch).toBe(false);
   });
 
+  it("Golden follow-up: explicit footer edit plans filesystem only — no web_search", () => {
+    // Exact goal from production golden run 42318962387 on 0cb374ac:
+    // gemini-2.5-flash-lite searched the web for the footer instead of
+    // reading index.html. The plan was never the problem — it correctly
+    // excludes web_search — but lock it in so a planner regression cannot
+    // silently re-admit the web for a file edit.
+    const plan = planCapabilities(
+      "Update the existing Ember Roast site footer to include exactly: Golden Acceptance follow-up verified. Keep the rest of the site unchanged and save the edit to index.html.",
+    );
+    expect(plan.requiredCapabilities).toContain("project_inspection");
+    expect(plan.requiredCapabilities).toContain("filesystem");
+    expect([...plan.requiredCapabilities, ...plan.usefulCapabilities]).not.toContain(
+      "web_search",
+    );
+    expect(plan.usefulCapabilities).not.toContain("image_generation");
+    expect(plan.needsVisualVerification).toBe(false);
+  });
+
   it("Test 1b: simple question uses minimal capabilities", () => {
     const plan = planCapabilities("What files control the homepage?");
     expect(plan.usefulCapabilities).not.toContain("web_search");
