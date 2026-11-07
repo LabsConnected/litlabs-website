@@ -55,18 +55,41 @@ function probeOutcome(resp: Response | null): ProbeOutcome {
   return "permanent";
 }
 
+/** Per-attempt signal: the probe's own timeout, cut short by the caller's
+ *  overall enrichment deadline when one is given. Without the overall
+ *  signal a stalled provider can burn the full probe timeout on every
+ *  attempt — and the caller retries across providers, so the total is
+ *  unbounded (CI #820: the resume loop hung past vitest's 5s timeout).
+ *  AbortSignal.any is NOT used here on purpose: jsdom (the test env)
+ *  does not implement it, so combine manually with an AbortController. */
+function fetchSignal(overall?: AbortSignal): AbortSignal {
+  const perAttempt = AbortSignal.timeout(PROBE_TIMEOUT_MS);
+  if (!overall) return perAttempt;
+  if (overall.aborted || perAttempt.aborted) {
+    const already = new AbortController();
+    already.abort();
+    return already.signal;
+  }
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  perAttempt.addEventListener("abort", onAbort, { once: true });
+  overall.addEventListener("abort", onAbort, { once: true });
+  return controller.signal;
+}
+
 /** Probe a candidate URL — a HEAD or ranged GET that must come back 200.
  *  One immediate retry on transient failures: a dropped connection or
  *  single-request 503 must not disqualify an otherwise healthy provider;
  *  a blip lasting longer falls through to the next provider as before. */
-async function probe(url: string): Promise<boolean> {
+async function probe(url: string, overall?: AbortSignal): Promise<boolean> {
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (overall?.aborted) return false;
     let resp: Response | null = null;
     try {
       resp = await fetch(url, {
         method: "GET",
         headers: { Range: "bytes=0-512" },
-        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        signal: fetchSignal(overall),
         redirect: "follow",
       });
     } catch {
@@ -79,9 +102,10 @@ async function probe(url: string): Promise<boolean> {
   return false;
 }
 
-async function tryPexels(keywords: string): Promise<ResolvedImage | null> {
+async function tryPexels(keywords: string, overall?: AbortSignal): Promise<ResolvedImage | null> {
   const key = process.env.PEXELS_API_KEY?.trim();
   if (!key) return null;
+  if (overall?.aborted) return null;
   try {
     const url = new URL(PEXELS_API_URL);
     url.searchParams.set("query", keywords.replace(/,/g, " "));
@@ -89,10 +113,11 @@ async function tryPexels(keywords: string): Promise<ResolvedImage | null> {
     url.searchParams.set("orientation", "landscape");
     let resp: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
+      if (overall?.aborted) return null;
       try {
         resp = await fetch(url, {
           headers: { Authorization: key },
-          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+          signal: fetchSignal(overall),
         });
       } catch {
         resp = null;
@@ -144,11 +169,14 @@ function picsumUrl(keywords: string): string {
 export async function resolveSlotImage(
   keywords: string,
   seed: number,
+  overall?: AbortSignal,
 ): Promise<ResolvedImage | null> {
   const kw = keywords.trim() || "professional photography";
+  if (overall?.aborted) return null;
 
-  const pexels = await tryPexels(kw);
+  const pexels = await tryPexels(kw, overall);
   if (pexels) return pexels;
+  if (overall?.aborted) return null;
 
   // Free fallbacks — probe each before committing so a flaky host can't
   // write a broken reference into the site. Real photography first; the
@@ -159,7 +187,8 @@ export async function resolveSlotImage(
     { url: pollinationsUrl(kw, seed), provider: "pollinations" },
   ];
   for (const c of candidates) {
-    if (await probe(c.url)) {
+    if (overall?.aborted) return null;
+    if (await probe(c.url, overall)) {
       return { url: c.url, provider: c.provider, attribution: null };
     }
   }

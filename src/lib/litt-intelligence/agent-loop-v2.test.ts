@@ -2156,7 +2156,58 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
    * write is write intent in flight (resets to 0), and writes completed
    * after approval reset accumulated debt. Genuinely stuck runs still die.
    */
-  beforeEach(() => vi.clearAllMocks());
+  // Test hygiene: reset ONLY the LLM mock between tests. clearAllMocks()
+  // does NOT clear the mockResolvedValueOnce queue, so a test that times
+  // out (or ends early) leaks its queued answers into the NEXT test —
+  // proven twice: the rejected-approval test and "still terminates"
+  // both consumed leftovers in CI. mockReset() clears the once-queue.
+  // (NOT a blanket resetAllMocks(): that would also wipe the fake
+  // transport's writeFile/readFile implementations defined above, and the
+  // approved writes would stop returning { saved: true }.)
+  // Braces are load-bearing: mockReset() returns the mock itself, and
+  // vitest invokes any function a beforeEach hook returns as a cleanup
+  // after each test — the arrow form above silently called the mock with
+  // no args after every test, consuming a queued answer (proven by the
+  // 2026-11-06 repro: it ate the "Done." and turned test 2's count 3→6).
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  // Boundary isolation (CI repro 2026-11-06): a test that times out leaves
+  // its resume chain running — vitest does not cancel it — and the chain
+  // lands LLM calls on the shared mock during the NEXT test. Every resume
+  // in this describe goes through trackedResume; afterEach awaits the ones
+  // still pending, BEFORE the next test's mockReset. Bounded: if a chain
+  // does not settle within 4000ms the afterEach FAILS loudly (stop and
+  // report) — it never silently swallows a hung chain.
+  const pendingResumes: Array<Promise<unknown>> = [];
+  function trackedResume(input: ResumeInput, transport: WorkspaceTransport) {
+    const p = resumeAgentLoopV2(input, transport);
+    pendingResumes.push(p);
+    void p.then(
+      () => {
+        const i = pendingResumes.indexOf(p);
+        if (i >= 0) pendingResumes.splice(i, 1);
+      },
+      () => {
+        const i = pendingResumes.indexOf(p);
+        if (i >= 0) pendingResumes.splice(i, 1);
+      },
+    );
+    return p;
+  }
+  afterEach(async () => {
+    if (pendingResumes.length === 0) return;
+    const pending = pendingResumes.splice(0);
+    const done = Promise.allSettled(pending);
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("cleanup: a resumed run did not settle within 4000ms — background work crossed the test boundary")),
+        4000,
+      ),
+    );
+    await Promise.race([done, timeout]);
+  });
 
   const writeTransport = {
     ...fakeTransport,
@@ -2197,7 +2248,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
       finishReason: "tool_calls",
       model: "test",
     });
-    const result = await resumeAgentLoopV2(approvedWriteResume(), writeTransport);
+    const result = await trackedResume(approvedWriteResume(), writeTransport);
     expect(result.pendingApproval?.toolId).toBe("files.write");
     expect(result.pendingApproval?.zeroWriteStepsAtPause).toBe(0);
   });
@@ -2217,7 +2268,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
         finishReason: "tool_calls",
         model: "test",
       });
-    const result = await resumeAgentLoopV2(approvedWriteResume(), writeTransport);
+    const result = await trackedResume(approvedWriteResume(), writeTransport);
     expect(result.pendingApproval?.toolId).toBe("files.delete");
     expect(result.pendingApproval?.zeroWriteStepsAtPause).toBe(1);
   });
@@ -2240,7 +2291,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
         model: "test",
       })
       .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
-    const result = await resumeAgentLoopV2(
+    const result = await trackedResume(
       approvedWriteResume({ zeroWriteStepsAtPause: 2 }),
       writeTransport,
     );
@@ -2262,9 +2313,9 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
       .mockResolvedValueOnce(second)
       .mockResolvedValueOnce(second)
       .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
-    const r1 = await resumeAgentLoopV2(approvedWriteResume(), writeTransport);
+    const r1 = await trackedResume(approvedWriteResume(), writeTransport);
     expect(r1.pendingApproval?.toolId).toBe("files.write");
-    const r2 = await resumeAgentLoopV2(
+    const r2 = await trackedResume(
       approvedWriteResume({
         toolId: r1.pendingApproval!.toolId,
         toolCallId: r1.pendingApproval!.toolCallId,
@@ -2277,7 +2328,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
     );
     expect(r2.pendingApproval?.toolId).toBe("files.write");
     expect(r2.pendingApproval?.zeroWriteStepsAtPause).toBe(0);
-    const r3 = await resumeAgentLoopV2(
+    const r3 = await trackedResume(
       approvedWriteResume({
         toolId: r2.pendingApproval!.toolId,
         toolCallId: r2.pendingApproval!.toolCallId,
@@ -2290,7 +2341,11 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
     );
     expect(r3.finalText).toBe("Done.");
     expect(r3.failedHonestly).toBeUndefined();
-  });
+    // Targeted 15s budget (test 1 only, NOT global): three sequential
+    // approved-write resumes each await a real-network enrich (up to the
+    // 3s deadline) — worst case ~9s, legitimately over the 5s default.
+    // Proven by the 2026-11-06 repro (2s sleeps → 6s total → timeout).
+  }, 15000);
 
   it("still terminates a genuinely stuck resumed run", async () => {
     // Three consecutive completed batches with no write and no write gate.
@@ -2301,7 +2356,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
       finishReason: "tool_calls",
       model: "test",
     }));
-    const result = await resumeAgentLoopV2(approvedWriteResume(), writeTransport);
+    const result = await trackedResume(approvedWriteResume(), writeTransport);
     expect(callLLMWithTools).toHaveBeenCalledTimes(3);
     expect(result.failedHonestly).toContain("3 steps");
   });
@@ -2316,7 +2371,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
       finishReason: "tool_calls",
       model: "test",
     }));
-    const result = await resumeAgentLoopV2(
+    const result = await trackedResume(
       approvedWriteResume({ decision: "rejected", rejectionReason: "not now" }),
       writeTransport,
     );

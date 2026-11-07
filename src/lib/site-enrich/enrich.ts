@@ -94,6 +94,15 @@ export async function enrichStaticSiteVisuals(
   };
   const budget = opts.maxImages ?? MAX_IMAGES_PER_RUN;
   const topic = opts.topicKeywords ?? "professional photography";
+  // One overall deadline for every network call in this run. Enrichment
+  // is additive — it must never stall the build. Each probe already has
+  // its own 12s timeout, but #820's retries multiply it across providers
+  // and slots, so the total was unbounded: in CI the resume loop hung
+  // past vitest's 5s timeout while providers never answered. The budget
+  // is deliberately short (free-tier probes answer in well under a
+  // second when healthy); override with ENRICH_TOTAL_TIMEOUT_MS to tune.
+  const totalTimeoutMs = Number(process.env.ENRICH_TOTAL_TIMEOUT_MS) || 3_000;
+  const overallSignal = AbortSignal.timeout(totalTimeoutMs);
   try {
     const root = await transport.listFiles("");
     const htmlFiles = root.entries
@@ -134,23 +143,24 @@ export async function enrichStaticSiteVisuals(
       }
     };
     const resolve = async (keywords: string) => {
+      if (overallSignal.aborted) return null;
       if (report.imagesResolved + report.imagesFailed >= budget) return null;
       // Dedupe: distinct keywords can still resolve to the same photo
       // (provider seed collisions shipped visibly duplicated gallery
       // images) — hash the saved bytes and retry once with a bumped seed
       // and varied keywords; a still-identical image counts as a failure
       // so the slot falls back to the honest placeholder.
-      let resolved = await resolveSlotImage(keywords, seed);
+      let resolved = await resolveSlotImage(keywords, seed, overallSignal);
       let saved = resolved
-        ? await insertAssetFromUrl(resolved.url, { nameHint: keywords.slice(0, 30) }, transport)
+        ? await insertAssetFromUrl(resolved.url, { nameHint: keywords.slice(0, 30), signal: overallSignal }, transport)
         : null;
       let hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
       if (hash && usedHashes.has(hash)) {
         seed += 1000;
         const varied = `${keywords} scene`;
-        resolved = await resolveSlotImage(varied, seed);
+        resolved = await resolveSlotImage(varied, seed, overallSignal);
         saved = resolved
-          ? await insertAssetFromUrl(resolved.url, { nameHint: varied.slice(0, 30) }, transport)
+          ? await insertAssetFromUrl(resolved.url, { nameHint: varied.slice(0, 30), signal: overallSignal }, transport)
           : null;
         hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
         if (hash && usedHashes.has(hash)) {
@@ -333,7 +343,7 @@ export async function enrichStaticSiteVisuals(
         // already counted itself against it.
         let floorAttempts = 0;
         const maxFloorAttempts = needed * 2;
-        for (let i = 0; i < needed && floorAttempts < maxFloorAttempts; ) {
+        for (let i = 0; i < needed && floorAttempts < maxFloorAttempts && !overallSignal.aborted; ) {
           floorAttempts += 1;
           const sitePath = await resolve(`${base}${vary[i % vary.length]}`.trim());
           if (!sitePath) continue;
