@@ -1150,6 +1150,139 @@ describe("Webhook event processing — state mutations", () => {
     // Creator Beta: 7500 credits over $15 (1500c). Refunding 750c = 50% → 3750 credits.
     expect(debits[0].params.p_amount).toBe(3750);
   });
+
+  // ── grant_credits RPC fault injection ─────────────────────────────
+  // The grant RPC failing must produce a loud, retryable failure: the
+  // route returns 500 so Stripe redelivers, the event is NOT written to
+  // stripe_events (a "processed" mark here would skip the redelivery and
+  // silently under-grant a paid purchase), and the redelivery re-attempts
+  // the grant under the same p_idempotency_key so the ledger dedupes it.
+  describe("grant_credits RPC failure → loud 500 + safe redelivery", () => {
+    type FaultMode = "error" | "throw" | "ok";
+
+    /**
+     * Controlled fault injection on the grant_credits RPC only. `modes`
+     * is a per-call queue: the first grant_credits call consumes
+     * modes[0], the second modes[1], and every call past the end of the
+     * queue succeeds. All other RPCs always succeed.
+     */
+    function withGrantFaults(modes: FaultMode[]) {
+      const tracking = buildTrackingSupabase();
+      const queue = [...modes];
+      tracking.sb.rpc = vi.fn(async (fn: string, params: any): Promise<any> => {
+        tracking.rpcCalls.push({ fn, params });
+        if (fn === "grant_credits") {
+          const mode = queue.shift() ?? "ok";
+          if (mode === "error") {
+            return { data: null, error: { message: "injected ledger failure" } };
+          }
+          if (mode === "throw") {
+            throw new Error("injected ledger transport failure");
+          }
+        }
+        return { data: { success: true, remaining: 100 }, error: null };
+      });
+      vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+      vi.mocked(getAdminSupabase).mockReturnValue(tracking.sb as any);
+      return tracking;
+    }
+
+    const creditPackEvent = (id: string) =>
+      makeStripeEvent("checkout.session.completed", {
+        id,
+        object: {
+          id: "cs_creditpack_fault",
+          metadata: {
+            product_type: "credit_pack",
+            clerk_id: "clerk_123",
+            coin_amount: "500",
+          },
+          amount_total: 999,
+          currency: "usd",
+          payment_intent: "pi_creditpack_fault",
+          customer: "cus_1",
+        },
+      });
+
+    const paidInvoiceEvent = (id: string) =>
+      makeStripeEvent("invoice.paid", {
+        id,
+        object: {
+          id: "in_grant_fault",
+          parent: { subscription_details: { subscription: "sub_test_123" } },
+          lines: { data: [{ period: { end: 1702678400 } }] },
+        },
+      });
+
+    it("credit pack: grant_credits error → 500, event NOT marked processed", async () => {
+      const { inserts, rpcCalls } = withGrantFaults(["error"]);
+      mockConstructEvent.mockReturnValue(creditPackEvent("evt_cp_fault_err"));
+
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+      expect(res.status).toBe(500);
+      expect(inserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
+      const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+      expect(grants).toHaveLength(1);
+      expect(grants[0].params.p_idempotency_key).toBe("creditpack_cs_creditpack_fault");
+    });
+
+    it("credit pack: grant_credits throw → 500, event NOT marked processed", async () => {
+      const { inserts } = withGrantFaults(["throw"]);
+      mockConstructEvent.mockReturnValue(creditPackEvent("evt_cp_fault_throw"));
+
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+      expect(res.status).toBe(500);
+      expect(inserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
+    });
+
+    it("credit pack: failed delivery then Stripe redelivery → grant retried under the same idempotency key", async () => {
+      const { inserts, rpcCalls } = withGrantFaults(["error", "ok"]);
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+
+      // First delivery: grant RPC is down → 500, no processed mark.
+      mockConstructEvent.mockReturnValue(creditPackEvent("evt_cp_retry"));
+      const first = await webhookPOST(makeWebhookRequest("body", "sig"));
+      expect(first.status).toBe(500);
+      expect(inserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
+
+      // Stripe redelivers the SAME event id after the RPC recovers.
+      const second = await webhookPOST(makeWebhookRequest("body", "sig"));
+      expect(second.status).toBe(200);
+      expect((await second.json()).received).toBe(true);
+
+      // The grant was attempted on both deliveries with the SAME
+      // creditpack_<sessionId> key — the ledger's idempotency constraint
+      // makes the redelivery exactly-once even if the first attempt had
+      // partially succeeded.
+      const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+      expect(grants).toHaveLength(2);
+      expect(grants[0].params.p_idempotency_key).toBe("creditpack_cs_creditpack_fault");
+      expect(grants[1].params.p_idempotency_key).toBe("creditpack_cs_creditpack_fault");
+
+      // Event marked processed only after the successful delivery.
+      const eventInserts = inserts.filter((i) => i.table === "stripe_events");
+      expect(eventInserts).toHaveLength(1);
+      expect(eventInserts[0].row.stripe_event_id).toBe("evt_cp_retry");
+    });
+
+    it("invoice.paid: subscription grant_credits error → 500, event NOT marked processed", async () => {
+      const { inserts, rpcCalls } = withGrantFaults(["error"]);
+      mockConstructEvent.mockReturnValue(paidInvoiceEvent("evt_inv_fault"));
+
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+      expect(res.status).toBe(500);
+      expect(inserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
+      const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+      expect(grants).toHaveLength(1);
+      expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_grant_fault");
+    });
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════
