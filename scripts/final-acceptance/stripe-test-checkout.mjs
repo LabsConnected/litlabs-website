@@ -329,8 +329,14 @@ async function main() {
         const g = document.querySelector('[role="radiogroup"],[role="listbox"]');
         return g ? g.outerHTML.slice(0, 4000) : null;
       }).catch(() => null);
+      const paySection = await page.evaluate(() => {
+        const el = [...document.querySelectorAll("div,section,fieldset,form")].find(
+          (e) => e.textContent.includes("Cash App Pay") && e.textContent.length < 4000,
+        );
+        return el ? el.outerHTML.slice(0, 6000) : document.body.innerHTML.slice(0, 6000);
+      }).catch(() => null);
       writeFileSync(path.join(ARTIFACT_DIR, "checkout-dom.json"),
-        JSON.stringify({ cardClicked, frames, inputs, radiogroup }, null, 2));
+        JSON.stringify({ cardClicked, frames, inputs, radiogroup, paySection }, null, 2));
       await shot(page, "stripe-checkout-no-fields");
       throw new Error("card input not found in page or any frame (see checkout-dom.json)");
     }
