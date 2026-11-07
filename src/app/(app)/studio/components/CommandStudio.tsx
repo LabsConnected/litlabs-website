@@ -66,6 +66,8 @@ import { mobileDiag, isMobileDiagEnabled } from "../lib/mobileDiagnostics";
 import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
 import AssetsPanel from "./context/AssetsPanel";
 import { StudioContextProvider, isStudioSelectionPayload, type StudioSelectionPayload, type StudioSelectionValue } from "../context/StudioContext";
+import { ElementEditsContext } from "../context/ElementEditsContext";
+import { useElementEdits } from "../hooks/useElementEdits";
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier } from "../hooks/useViewportTier";
@@ -374,6 +376,10 @@ function CommandStudioContent() {
       ? previewSelection
       : { elementId: previewSelection.selector, componentName: previewSelection.tagName, content: previewSelection.label }
     : null;
+  // ONE element-edit write path for the whole Studio tree: the inspector
+  // panel and the Design canvas gestures share file cache + undo history
+  // through ElementEditsContext (provided below).
+  const elementEdits = useElementEdits(capabilities.projectId ?? null);
   const [completion, setCompletion] = useState<{ changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null>(null);
 
   // Safety: clear any stuck body styles from resize handles that didn't
@@ -2812,7 +2818,7 @@ function CommandStudioContent() {
           />
         );
       case "design":
-        return <VisualCanvasBuilder />;
+        return <VisualCanvasBuilder onPreviewSelectionChange={(sel) => setPreviewSelection(sel)} />;
       case "preview":
         return (
           <StudioPreviewPanel
@@ -2984,6 +2990,7 @@ function CommandStudioContent() {
         }
       }}
     >
+    <ElementEditsContext.Provider value={elementEdits}>
     <>
       <AgentVoiceSync />
 
@@ -3125,6 +3132,8 @@ function CommandStudioContent() {
                 })}
               </>
             }
+            inspectorOpen={inspectorOpen}
+            onOpenInspector={() => setInspectorOpen(true)}
             inspector={
               <ContextInspector
                 open={inspectorOpen}
@@ -3220,6 +3229,11 @@ function CommandStudioContent() {
                 }
               />
             }
+            leftWidth={littCollapsed ? 64 : littDockResize.width}
+            onResetLeftWidth={() => {
+              littDockResize.reset();
+              setLittCollapsed(false);
+            }}
             leftPanel={
               chatDock === "left" ? (
                 <LiTTPanel
@@ -3394,7 +3408,7 @@ function CommandStudioContent() {
                   </div>
                 ) : isCanvas ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    <VisualCanvasBuilder />
+                    <VisualCanvasBuilder onPreviewSelectionChange={(sel) => setPreviewSelection(sel)} />
                   </div>
                 ) : isCode ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -3881,6 +3895,7 @@ function CommandStudioContent() {
       )}
 
     </>
+    </ElementEditsContext.Provider>
     </StudioContextProvider>
   );
 }

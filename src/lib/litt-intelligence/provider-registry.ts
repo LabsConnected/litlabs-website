@@ -303,6 +303,11 @@ function openRouterModels(requirements?: RouteRequirements): string[] {
   return list;
 }
 
+function geminiAttemptTimeoutMs(): number {
+  const configured = Number(process.env.GEMINI_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 60_000;
+}
+
 function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
   return [
     {
@@ -310,7 +315,12 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       adapter: "gemini",
       costClass: "FREE_MANAGED",
       capabilities: { ...TOOL_CAPABLE, vision: true },
-      timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
+      // Same fix as OpenRouter below: the big file-writing step of a build
+      // (~15k-token prompt) legitimately exceeds the shared 30s cap on the
+      // free tier — observed timing out mid-build and handing the write to
+      // a non-tool-calling fallback. Per-route cap; the agent's absolute
+      // deadline still bounds every attempt.
+      timeoutMs: geminiAttemptTimeoutMs(),
       credentialState: () =>
         envPresent("GEMINI_API_KEY", "GOOGLE_API_KEY") ? "available" : "missing",
       // Gemini free tier meters RPM/RPD per model — a saturated flash must

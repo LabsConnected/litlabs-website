@@ -81,6 +81,43 @@ describe("injectInspector", () => {
   });
 });
 
+describe("canvas gesture protocol (Design surface)", () => {
+  function injectedScript(): string {
+    const out = injectInspector("<html><head></head><body><h1>Hi</h1></body></html>");
+    const start = out.indexOf("<script>") + "<script>".length;
+    const end = out.indexOf("</script>");
+    return out.slice(start, end);
+  }
+
+  it("accepts tool/snap/align commands alongside enable/disable/clear", () => {
+    const script = injectedScript();
+    expect(script).toContain('data.type === "tool"');
+    expect(script).toContain('data.type === "snap"');
+    expect(script).toContain('data.type === "align"');
+  });
+
+  it("posts geometry-commit with element payload + semantic change", () => {
+    const script = injectedScript();
+    expect(script).toContain('post("geometry-commit"');
+    expect(script).toContain('kind: "reorder"');
+    expect(script).toContain('kind: "offset"');
+    expect(script).toContain('kind: "resize"');
+    expect(script).toContain('kind: "align"');
+  });
+
+  it("implements pointer drag/resize with snap + pan", () => {
+    const script = injectedScript();
+    expect(script).toContain('addEventListener("pointerdown"');
+    expect(script).toContain('addEventListener("pointermove"');
+    expect(script).toContain('addEventListener("pointerup"');
+    expect(script).toContain("snapTargets");
+    expect(script).toContain("findDrop");
+    expect(script).toContain("computeResize");
+    expect(script).toContain("scrollBy"); // pan tool
+    expect(script).toContain("data-litt-handle"); // resize handles
+  });
+});
+
 describe("INSPECTOR_DROPPED_HEADERS", () => {
   it("drops stale framing headers when the body is rewritten", () => {
     expect(INSPECTOR_DROPPED_HEADERS.has("content-length")).toBe(true);

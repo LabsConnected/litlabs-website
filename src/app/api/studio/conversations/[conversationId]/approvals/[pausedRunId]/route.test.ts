@@ -98,6 +98,7 @@ import {
   getRunOutcomeForPausedRun,
   createPausedRun,
 } from "@/lib/litt-intelligence/paused-run-store";
+import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2 } from "@/lib/litt-intelligence/agent-loop-v2";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getCheckpoint } from "@/lib/missions/mission-repository";
@@ -335,6 +336,27 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
       "failed",
       "The resumed run failed: provider exploded",
     );
+  });
+
+  it.each([
+    ["image.stock", ["assets/hero.jpg"]],
+    ["files.write", ["./assets/hero.jpg"]],
+    ["files.write", ["assets\\hero.jpg"]],
+    ["files.write", undefined],
+  ])("does not complete an untouched welcome page after %s", async (toolId, paths) => {
+    const transport = await createWorkspaceTransport("ws-123", "user_123");
+    Object.assign(transport, {
+      readFile: vi.fn(async () => ({ content: '<html><body>LITT-WELCOME-SCREEN</body></html>' })),
+    });
+    vi.mocked(createWorkspaceTransport).mockResolvedValueOnce(transport);
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "Done", stepsUsed: 1, cancelled: false,
+      toolCalls: [{ toolId, success: true, summary: "asset saved", mutating: true, paths }],
+      workspaceChange: { status: "changed", changedPaths: ["assets/hero.jpg"] },
+    } as never);
+    expect((await POST(makeRequest("approved"), routeParams)).status).toBe(202);
+    await vi.waitFor(() => expect(settleCall("failed")).not.toBeNull());
+    expect(settleCall("completed")).toBeNull();
   });
 
   it("reports the real model failure when the resumed loop dies after an approved mutation", async () => {

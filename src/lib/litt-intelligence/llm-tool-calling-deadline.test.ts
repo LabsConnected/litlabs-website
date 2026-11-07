@@ -290,7 +290,7 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
     const { model, generateContentMock } = makeMockModel(["hang"]);
     _setGeminiModelFactory(() => model);
 
-    // 120s deadline → Gemini attempt gets the full 30s route timeout
+    // 120s deadline → Gemini attempt gets the full 60s route timeout
     // (not deadline-constrained), then OR continues with budget to spare.
     const promise = callLLMWithTools(
       "You are LiTT.",
@@ -300,7 +300,7 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
     );
 
     await flushMicrotasks();
-    await tick(30_100);
+    await tick(60_100);
 
     const result = await promise;
     expect(result.provider).toBe("openrouter");

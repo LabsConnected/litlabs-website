@@ -18,7 +18,7 @@ import { Loader2, RotateCcw, RotateCw, Sparkles, X } from "lucide-react";
 import type { PreviewSelection } from "../StudioPreviewPanel";
 import type { StudioSelectionPayload } from "../../context/StudioContext";
 import type { ElementPatch } from "../../lib/element-edits";
-import { useElementEdits } from "../../hooks/useElementEdits";
+import { useSharedElementEdits } from "../../context/ElementEditsContext";
 
 /** Accepts the PreviewPanel shape OR the pinned canonical payload — the
     ask-litt pin stamps StudioSelectionPayload into the same slot. */
@@ -131,7 +131,10 @@ export default function ElementInspectorPanel({
   onClearSelection?: () => void;
 }) {
   const selection = useMemo(() => normalizeSelection(rawSelection), [rawSelection]);
-  const edits = useElementEdits(projectId);
+  // Shared instance when CommandStudio provides one — canvas gestures and
+  // this panel then share file cache + undo history. Standalone usage
+  // falls back to a private instance.
+  const edits = useSharedElementEdits(projectId);
   const [savedFlash, setSavedFlash] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -176,6 +179,7 @@ export default function ElementInspectorPanel({
     if (edits.status === "resolving") return "Resolving element in project files…";
     if (edits.status === "applying") return "Saving…";
     if (savedFlash) return "Saved";
+    if (edits.status === "conflict") return "File changed on disk";
     if (edits.status === "unavailable") return "Not directly editable";
     if (edits.status === "error") return "Save failed";
     return edits.filePath ?? "";
@@ -231,6 +235,28 @@ export default function ElementInspectorPanel({
       {lastError && (
         <div className="mx-3 mb-2 rounded-md border px-2 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.35)", color: "#fca5a5" }}>
           {lastError}
+        </div>
+      )}
+
+      {edits.status === "conflict" && (
+        <div className="mx-3 mb-2 rounded-md border px-2.5 py-2 text-[10px] leading-relaxed" style={{ borderColor: "rgba(245,158,11,0.35)", color: "#fcd34d" }} data-testid="element-edit-conflict">
+          <div>{edits.statusReason}</div>
+          <button
+            type="button"
+            className="mt-1.5 rounded-md border px-2 py-1 text-[10px] font-bold"
+            style={{ borderColor: "rgba(245,158,11,0.4)", color: "#fcd34d" }}
+            onClick={() => void edits.resolve({
+              selector: selection.selector,
+              tagName: selection.tagName,
+              label: selection.label,
+              attrs: selection.attrs,
+              text: selection.text,
+              path: selection.path,
+            }, route)}
+            data-testid="element-edit-conflict-reload"
+          >
+            Reload latest file
+          </button>
         </div>
       )}
 
