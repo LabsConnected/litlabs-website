@@ -9,7 +9,13 @@ async function main() {
     return match ? match[1].trim().replace(/^["']|["']$/g, "") : null;
   };
   
-  const supabase = createClient(getEnv("NEXT_PUBLIC_SUPABASE_URL"), getEnv("SUPABASE_SERVICE_ROLE_KEY"));
+  const supabaseUrl = getEnv("NEXT_PUBLIC_SUPABASE_URL") || "";
+  const PROD_PROJECT_REF = "rokbfvuoqildggnhappy";
+  if (supabaseUrl.includes(PROD_PROJECT_REF) && process.env.LITT_ALLOW_PROD_TARGET !== "1") {
+    console.error(`Refusing to write connection rows to production (${PROD_PROJECT_REF}) without LITT_ALLOW_PROD_TARGET=1.`);
+    process.exit(1);
+  }
+  const supabase = createClient(supabaseUrl, getEnv("SUPABASE_SERVICE_ROLE_KEY"));
   
   // Owner user
   const ownerId = "10a18d43-5449-498a-8a98-82b74a13045b"; // laidbacknostress4life@gmail.com
