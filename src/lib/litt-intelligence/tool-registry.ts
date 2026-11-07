@@ -1055,7 +1055,7 @@ export function registerInternalTools(): void {
       tool: {
         id: "web.search",
         name: "Web Search",
-        description: "Search the web for current information using registered research providers",
+        description: "Search the web for current EXTERNAL information (public facts, documentation, news) using registered research providers. It cannot see project files or the local workspace — for anything inside the project, read the file with files.read instead.",
         source: "internal",
         version: "1.0.0",
         inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
@@ -1259,7 +1259,7 @@ export function registerInternalTools(): void {
       tool: {
         id: "files.read",
         name: "Read File",
-      description: "Read a file from the project workspace. path must be workspace-relative; never use an absolute or parent path.",
+      description: "Read a file from the project workspace to learn its current content before editing it. path must be workspace-relative; never use an absolute or parent path.",
         source: "internal",
         version: "1.0.0",
         inputSchema: { type: "object", properties: { projectId: { type: "string" }, path: { type: "string" } }, required: ["projectId", "path"] },

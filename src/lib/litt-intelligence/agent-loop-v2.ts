@@ -732,6 +732,19 @@ const LOCAL_BUILD_TOOL_IDS = new Set([
   "search_code",
   "project.scan",
   "project.read_context",
+  // project.insert_asset is a filesystem write (planner's filesystem
+  // family: files.write, files.patch, project.insert_asset) — a site
+  // build that needs an asset must be able to insert one.
+  "project.insert_asset",
+  // Station asset tools are workspace-local: the project's own asset
+  // library, not the web. A goal like "search my assets" plans
+  // workspace-safe (required: [], useful: ["memory"]) so it IS slimmed —
+  // without these the loop answers "Unknown tool: assets.search" and a
+  // station test that expects a "Managing assets" summary fails.
+  // (PR #826 CI: station-acceptance.test.ts, run 42322929375.)
+  "assets.search",
+  "assets.save",
+  "assets.useInProject",
   "preview.start",
   "preview.stop",
   "preview.status",
@@ -857,11 +870,16 @@ const LOCAL_SMALL_LANE_PROMPT =
   LOCAL_SITE_QUALITY_CONTRACT;
 
 /**
- * Narrow the offered tools to LOCAL_BUILD_TOOL_IDS when:
- *  - a local model is the configured route (OLLAMA_MODEL set), and
- *  - the capability plan needs nothing outside the workspace families.
- * Returns the ORIGINAL array (reference-equal) when slimming does not
- * apply or would empty the set — callers distinguish by `!==`.
+ * Narrow the offered tools to LOCAL_BUILD_TOOL_IDS when the capability
+ * plan needs nothing outside the workspace families. Applies to ANY model
+ * route — the plan, not the model, decides: a cloud model offered the full
+ * ~60-schema catalog for an explicit file edit picked web.search for
+ * project content instead of files.read (golden follow-up on 0cb374ac:
+ * gemini-2.5-flash-lite searched the web for the footer instead of
+ * reading index.html). Tasks needing terminal / deploy / web / image keep
+ * the full catalog. Returns the ORIGINAL array (reference-equal) when
+ * slimming does not apply or would empty the set — callers distinguish
+ * by `!==`.
  */
 function slimToolsForLocalBuild(
   tools: LiTTToolDefinition[],
@@ -873,7 +891,7 @@ function slimToolsForLocalBuild(
     const minimal = tools.filter((t) => LOCAL_SMALL_TOOL_IDS.has(t.id));
     return minimal.length > 0 ? minimal : tools;
   }
-  if (!process.env.OLLAMA_MODEL || !capabilityPlan) return tools;
+  if (!capabilityPlan) return tools;
   const planned = [
     ...capabilityPlan.requiredCapabilities,
     ...capabilityPlan.usefulCapabilities,
@@ -897,6 +915,30 @@ const LOCAL_BUILD_TOOL_NOTE =
   "- Emit EVERY files.write the site needs in ONE response — batch all writes together instead of one per turn.\n" +
   "- For a new static site, a single files.write with complete inline-CSS HTML is acceptable and fastest.\n" +
   "- Call preview.start when the files are written to verify the render.";
+
+/**
+ * Prompt note appended when the slim set is active for a cloud model.
+ * Same "only file + preview tools exist" boundary as the local note, but
+ * without the local-model framing (no CPU / batch-emit advice): the point
+ * here is tool selection — an explicit project-edit task must not be
+ * answered with a web search for project content (golden follow-up on
+ * 0cb374ac).
+ */
+const TASK_SCOPED_TOOL_NOTE =
+  "## Task-scoped tools\n" +
+  "Only the file and preview tools above exist for this task — there is no web search, browser, terminal, " +
+  "deploy, or image tool. Read the project file with files.read to learn its current content before editing " +
+  "it; never search the web for project content.";
+
+/**
+ * Which slim-set note to append: the local note (batch-emit / CPU framing)
+ * for local-model routes, the task-scoped note for cloud models.
+ */
+function slimToolNoteForRoute(): string {
+  return process.env.OLLAMA_MODEL || isLocalSmallLane()
+    ? LOCAL_BUILD_TOOL_NOTE
+    : TASK_SCOPED_TOOL_NOTE;
+}
 
 function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
   return {
@@ -1804,7 +1846,7 @@ async function runAgentLoopV2Inner(
   const offerableTools = slimToolsForLocalBuild(healthCheckedTools, capabilityPlan);
   const toolsSlimmedForLocal = offerableTools !== healthCheckedTools;
   if (toolsSlimmedForLocal) {
-    cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
+    cfg.systemPrompt += "\n\n" + slimToolNoteForRoute();
   }
   const healthNote = buildToolHealthPromptNote(toolHealthMap);
   if (healthNote) {
@@ -3485,7 +3527,7 @@ async function resumeAgentLoopV2Inner(
     resumeCapabilityPlan,
   );
   if (resumeOfferableTools !== resumeHealthCheckedTools) {
-    cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
+    cfg.systemPrompt += "\n\n" + slimToolNoteForRoute();
   }
   const resumeHealthNote = buildToolHealthPromptNote(resumeToolHealthMap);
   if (resumeHealthNote) {
