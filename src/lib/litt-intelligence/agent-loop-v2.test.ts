@@ -2303,15 +2303,24 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
     // approve write1 → resume emits write2 (pauses, counter 0) → approve
     // → resume emits write3 (pauses) → approve → completes. Without the
     // persisted reset a mid-segment read tail could kill a healthy run.
+    // write2/write3 must be DISTINCT calls: an identical re-emission of a
+    // call that was just approved and executed is deduped (replayed), not
+    // re-gated — that was the repeated-approval defect.
     const second = {
       text: "",
       toolCalls: [{ toolId: "files.write", toolCallId: "tc-w2", inputs: { projectId: "p-test", path: "b.html", content: "<b/>" } }],
       finishReason: "tool_calls" as const,
       model: "test",
     };
+    const third = {
+      text: "",
+      toolCalls: [{ toolId: "files.write", toolCallId: "tc-w3", inputs: { projectId: "p-test", path: "c.html", content: "<c/>" } }],
+      finishReason: "tool_calls" as const,
+      model: "test",
+    };
     vi.mocked(callLLMWithTools)
       .mockResolvedValueOnce(second)
-      .mockResolvedValueOnce(second)
+      .mockResolvedValueOnce(third)
       .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
     const r1 = await trackedResume(approvedWriteResume(), writeTransport);
     expect(r1.pendingApproval?.toolId).toBe("files.write");

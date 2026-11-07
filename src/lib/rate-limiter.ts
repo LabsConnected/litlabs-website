@@ -1,6 +1,7 @@
 // src/lib/rate-limiter.ts
 // Serverless-compatible rate limiter using Supabase
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { newRequestId } from "@/lib/api-route-helpers";
 import { httpRequestTotal, httpRequestDurationSeconds } from "@/lib/metrics";
@@ -48,11 +49,43 @@ function inProcessRateLimit(key: string, limit: number, window: number): RateLim
 }
 
 /**
+ * Resolve the verified session user, if any. Client-supplied identity
+ * headers (x-clerk-user-id, x-user-id) are never trusted: nothing in our
+ * stack sets them, so honoring them lets a caller mint an unlimited
+ * number of fresh rate-limit buckets. auth() is safe to call in any
+ * route handler and returns nulls for unauthenticated requests.
+ */
+async function resolveVerifiedUserId(): Promise<string | null> {
+  try {
+    const { userId } = await auth();
+    return userId;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Client IP for the fallback bucket. X-Forwarded-For is append-only: the
+ * LAST entry is the address of the peer that connected to our edge, which
+ * a client cannot inject. The FIRST entry is client-controlled and must
+ * not be used for a security decision. When no proxy is present (local
+ * dev, direct connections) there is no XFF and we fall back to
+ * x-real-ip, then a shared "unknown" bucket.
+ */
+function resolveClientIp(request: NextRequest): string {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const last = forwarded.split(",").map((part) => part.trim()).filter(Boolean).pop();
+    if (last) return last;
+  }
+  return request.headers.get("x-real-ip")?.trim() || "unknown";
+}
+
+/**
  * Rate limit a request using a Supabase-backed counter.
  *
- * Uses the authenticated user ID when available (from Clerk), falling
- * back to IP address for unauthenticated requests. This prevents a
- * single local-dev IP from exhausting the limit for all users.
+ * Uses the verified authenticated user ID when available, falling
+ * back to the edge-derived client IP for unauthenticated requests.
  *
  * Falls back to an in-process sliding window if Supabase is unreachable
  * or the table is missing, so a rate-limit outage no longer means
@@ -63,14 +96,9 @@ export async function rateLimit(
   limit: number = 100,
   window: number = 60,
 ): Promise<RateLimitResult> {
-  // Build the rate-limit key — prefer user ID, fall back to IP
-  const userId = request.headers.get("x-clerk-user-id")
-    || request.headers.get("x-user-id");
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown";
-  const key = userId ? `rl_user_${userId}` : `rl_${ip}`;
+  // Build the rate-limit key — prefer verified user ID, fall back to IP
+  const userId = await resolveVerifiedUserId();
+  const key = userId ? `rl_user_${userId}` : `rl_${resolveClientIp(request)}`;
   const now = Math.floor(Date.now() / 1000);
   const windowStart = now - window;
 

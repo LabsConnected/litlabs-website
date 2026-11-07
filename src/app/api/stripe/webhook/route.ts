@@ -5,7 +5,7 @@ import {
   getAdminSupabase,
   isAdminSupabaseConfigured,
 } from "@/lib/supabase-admin";
-import { PLANS, type PlanId } from "@/config/plans";
+import { PLANS, getStripePriceId, type PlanId } from "@/config/plans";
 import { confirmBookingPayment, recordAudit } from "@/lib/business-operations";
 
 async function isEventProcessed(sb: NonNullable<ReturnType<typeof getAdminSupabase>>, eventId: string): Promise<boolean> {
@@ -28,6 +28,29 @@ async function markEventProcessed(
     event_type: eventType,
     result,
   });
+}
+
+/**
+ * Resolve a plan from a Stripe price ID using the configured STRIPE_PRICE_*
+ * env vars (via PLANS + getStripePriceId). Returns null when the price is
+ * unknown/unconfigured — callers fall back to subscription metadata.
+ *
+ * This is the entitlement source of truth for portal plan changes: an
+ * upgrade/downgrade in the Stripe customer portal swaps the subscription's
+ * price without touching checkout-time metadata.
+ */
+function planIdForStripePrice(priceId: string | null | undefined): PlanId | null {
+  if (!priceId) return null;
+  for (const plan of Object.values(PLANS)) {
+    if (getStripePriceId(plan) === priceId) return plan.id;
+  }
+  return null;
+}
+
+/** The price actually billed on an invoice's primary line (basil shape). */
+function invoiceLinePriceId(inv: Stripe.Invoice): string | null {
+  const priceId = inv.lines?.data?.[0]?.pricing?.price_details?.price;
+  return typeof priceId === "string" && priceId ? priceId : null;
 }
 
 async function creditCreditPack(
@@ -332,7 +355,12 @@ export async function POST(req: NextRequest) {
         const sub = event.data.object as Stripe.Subscription;
         const subMeta = sub.metadata || {};
         const subClerkId = subMeta.clerk_id;
-        const subPlanId = (subMeta.plan_id as PlanId) || null;
+        const metaPlanId = (subMeta.plan_id as PlanId) || null;
+        // Portal upgrades/downgrades change the subscription's price without
+        // touching checkout-time metadata — resolve the plan from the billed
+        // price first, falling back to metadata only when the price is unknown.
+        const subPlanId =
+          planIdForStripePrice(sub.items?.data?.[0]?.price?.id) ?? metaPlanId;
         let subUserId: string | null = null;
         if (subClerkId) {
           const { data: subUser } = await sb
@@ -410,6 +438,12 @@ export async function POST(req: NextRequest) {
           let grantUserId: string | null = invMatch?.user_id ?? null;
           let grantPlanId: PlanId | null =
             (invMatch?.plan as PlanId | undefined) ?? null;
+          // The billed line price is the entitlement truth for this cycle:
+          // a portal upgrade/downgrade can land here before
+          // customer.subscription.updated is processed, so remap from the
+          // price and fall back to the stored plan only when it is unknown.
+          const billedPlanId = planIdForStripePrice(invoiceLinePriceId(inv));
+          if (billedPlanId) grantPlanId = billedPlanId;
           if (!invMatch) {
             // First-cycle race: Stripe can deliver invoice.paid before
             // customer.subscription.created writes the row. Resolve the owner
@@ -432,7 +466,9 @@ export async function POST(req: NextRequest) {
               }
               clerkId ??= fetchedSub?.metadata?.clerk_id;
               planId ??=
-                (fetchedSub?.metadata?.plan_id as PlanId | undefined) ?? null;
+                planIdForStripePrice(fetchedSub?.items?.data?.[0]?.price?.id) ??
+                (fetchedSub?.metadata?.plan_id as PlanId | undefined) ??
+                null;
             }
             if (clerkId) {
               const { data: invUser } = await sb
@@ -442,7 +478,7 @@ export async function POST(req: NextRequest) {
                 .single();
               if (invUser?.id) {
                 grantUserId = invUser.id;
-                grantPlanId = planId ?? "creator_beta";
+                grantPlanId = billedPlanId ?? planId ?? "creator_beta";
                 const item = fetchedSub?.items?.data?.[0];
                 const linePeriod = inv.lines?.data?.[0]?.period;
                 await sb.from("subscriptions").upsert(
@@ -477,6 +513,9 @@ export async function POST(req: NextRequest) {
               .from("subscriptions")
               .update({
                 status: "active",
+                // When the billed price resolved, write the remapped plan
+                // back so the stored entitlement matches what was paid.
+                ...(billedPlanId ? { plan: billedPlanId } : {}),
                 updated_at: new Date().toISOString(),
               })
               .eq("user_id", grantUserId);

@@ -12,3 +12,16 @@ export async function getPublicMarketplaceItems(filters: { category?: string | n
   if (error) throw new Error("Failed to fetch marketplace items");
   return (data ?? []).map((item) => ({ ...item, installable: Boolean(item.capability_key && CAPABILITY_REGISTRY[item.capability_key]?.execute) }));
 }
+
+/** Single public catalog item by slug — used for per-page metadata. */
+export async function getPublicMarketplaceItemBySlug(slug: string) {
+  const { data, error } = await supabaseAdmin
+    .from("marketplace_items")
+    .select("*")
+    .eq("slug", slug)
+    .abortSignal(AbortSignal.timeout(12000))
+    .maybeSingle();
+  if (error) throw new Error("Failed to fetch marketplace item");
+  if (!data) return null;
+  return { ...data, installable: Boolean(data.capability_key && CAPABILITY_REGISTRY[data.capability_key]?.execute) };
+}
