@@ -464,14 +464,15 @@ async function handler(req: NextRequest) {
       else detectedMode = "llm";
     }
 
+    // All modes require auth — agent mode reaches simulateAgentResponse
+    // (real model spend via generateText) and must not run unauthenticated.
+    if (!clerkId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     // Agent-to-agent mode is internal orchestration — no entitlement check.
     if (detectedMode === "agent") {
       return await handleAgentChat(body);
-    }
-
-    // LLM and simple modes run the model for the user — require auth + entitlement.
-    if (!clerkId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const agentSlug = (body.agentSlug || body.agent || "litt") as string;

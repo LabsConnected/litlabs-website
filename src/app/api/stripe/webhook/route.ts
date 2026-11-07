@@ -61,33 +61,35 @@ async function creditCreditPack(
   if (!isAdminSupabaseConfigured()) {
     return;
   }
-  try {
-    const sb = getAdminSupabase();
-    const { data: user } = await sb
-      .from("users")
-      .select("id")
-      .eq("clerk_id", clerkId)
-      .single();
-    if (!user) {
-      return;
-    }
-    // Use credit_ledger (atomic, idempotent). No legacy fallback —
-    // the non-atomic read-then-write on wallets was a race condition.
-    const { error } = await sb.rpc("grant_credits", {
-      p_user_id: user.id,
-      p_amount: creditAmount,
-      p_category: "purchase",
-      p_balance_bucket: "purchased",
-      p_description: `Purchased ${creditAmount} LiTTBits via Stripe`,
-      p_idempotency_key: `creditpack_${sessionId}`,
-      p_reference_type: "stripe_checkout",
-      p_reference_id: sessionId,
-    });
-    if (error) {
-      // Credit ledger grant failed — error is captured in Supabase response
-    }
-  } catch {
-    // Credit grant error — non-fatal, Stripe event already recorded
+  const sb = getAdminSupabase();
+  const { data: user } = await sb
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  if (!user) {
+    // No entitlement target — permanent condition, do not retry.
+    return;
+  }
+  // Use credit_ledger (atomic, idempotent). No legacy fallback —
+  // the non-atomic read-then-write on wallets was a race condition.
+  const { error } = await sb.rpc("grant_credits", {
+    p_user_id: user.id,
+    p_amount: creditAmount,
+    p_category: "purchase",
+    p_balance_bucket: "purchased",
+    p_description: `Purchased ${creditAmount} LiTTBits via Stripe`,
+    p_idempotency_key: `creditpack_${sessionId}`,
+    p_reference_type: "stripe_checkout",
+    p_reference_id: sessionId,
+  });
+  if (error) {
+    // A failed grant must be detectable AND safely retryable: throwing
+    // makes the route return 500 so Stripe redelivers the event, and the
+    // creditpack_<sessionId> idempotency key prevents duplicate credits
+    // on redelivery. Silently recording "processed" here would under-grant
+    // a paid purchase with no retry path.
+    throw new Error(`grant_credits failed: ${error.message}`);
   }
 }
 
@@ -100,18 +102,21 @@ async function grantSubscriptionCredits(
 ): Promise<void> {
   const plan = PLANS[planId];
   if (!plan || plan.monthlyCredits <= 0) return;
-  try {
-    await sb.rpc("grant_credits", {
-      p_user_id: userId,
-      p_amount: plan.monthlyCredits,
-      p_category: "subscription_grant",
-      p_balance_bucket: "monthly",
-      p_description: `${plan.name} monthly grant — ${plan.monthlyCredits} LiTTBits`,
-      p_idempotency_key: idempotencyKey,
-      p_reference_type: "subscription",
-      p_expires_at: expiresAt ?? undefined,
-    });
-  } catch (_err) {
+  const { error } = await sb.rpc("grant_credits", {
+    p_user_id: userId,
+    p_amount: plan.monthlyCredits,
+    p_category: "subscription_grant",
+    p_balance_bucket: "monthly",
+    p_description: `${plan.name} monthly grant — ${plan.monthlyCredits} LiTTBits`,
+    p_idempotency_key: idempotencyKey,
+    p_reference_type: "subscription",
+    p_expires_at: expiresAt ?? undefined,
+  });
+  if (error) {
+    // Same contract as creditCreditPack: fail the event (500 → Stripe
+    // retry) rather than silently under-grant; the invoice_grant_<inv>
+    // idempotency key dedupes any redelivery.
+    throw new Error(`grant_credits failed: ${error.message}`);
   }
 }
 
