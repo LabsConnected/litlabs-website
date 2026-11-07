@@ -272,6 +272,17 @@ async function main() {
       await page.waitForTimeout(2000);
     }
 
+    // Accordion payment-method layout: the card inputs only mount after the
+    // "Card" option is selected. Click its radio/row; no-op when Card is the
+    // sole method.
+    const cardRadio = page.getByRole("radio", { name: /^card$/i }).first();
+    const cardRow = page.locator('label:has-text("Card"), [role="button"]:has-text("Card")').first();
+    if (await cardRadio.isVisible().catch(() => false)) {
+      await cardRadio.click().catch(() => {});
+    } else if (await cardRow.isVisible().catch(() => false)) {
+      await cardRow.click().catch(() => {});
+    }
+
     const cardSel = 'input[name="cardNumber"], #cardNumber';
     const expirySel = 'input[name="cardExpiry"], #cardExpiry';
     const cvcSel = 'input[name="cardCvc"], #cardCvc';
@@ -304,10 +315,10 @@ async function main() {
 
     // Informational only — the cs_test_ session gate is authoritative.
     const testBadgeVisible = await page
-      .getByText(/test mode/i).first()
+      .getByText(/test mode|sandbox/i).first()
       .isVisible({ timeout: 15_000 }).catch(() => false);
     step("stripe_test_mode_banner", true,
-      testBadgeVisible ? "TEST MODE banner present" : "banner not detected (sessionId gate is authoritative)");
+      testBadgeVisible ? "TEST MODE/Sandbox marker present" : "marker not detected (sessionId gate is authoritative)");
     await shot(page, "stripe-checkout");
 
     await cardCtx.locator(cardSel).first().fill("4242424242424242");
@@ -325,11 +336,11 @@ async function main() {
       `card fields filled in ${cardCtx === page ? "document" : "iframe"} context`);
     await shot(page, "stripe-checkout-filled");
 
-    const payBtn = page.locator('button[type="submit"]').first();
+    const payBtn = page.getByRole("button", { name: /subscribe|pay|complete/i }).first();
     if (await payBtn.isVisible().catch(() => false)) {
       await payBtn.click();
     } else {
-      await page.getByRole("button", { name: /pay|subscribe|complete/i }).first().click();
+      await page.locator('button[type="submit"]').first().click();
     }
 
     // ── Step 6: success redirect back to staging ──
