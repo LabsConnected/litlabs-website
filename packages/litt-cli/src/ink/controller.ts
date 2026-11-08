@@ -566,6 +566,60 @@ async function runMachineLane(
  *   - contact any remote server
  *   - fake any status — every line derives from real tool evidence
  */
+/**
+ * Run session.verify() bounded by the remaining mission budget.
+ *
+ * The agent loop's deadline covers model rounds and tool calls, but the
+ * post-loop verification gate runs OUTSIDE it — a full check suite that
+ * stalls would otherwise leave the mission in "verifying" forever
+ * (observed: 14+ min, deadline long expired, no child processes).
+ * On budget exhaustion or timeout this kills the shell's active checks
+ * and returns an honest FAILED verification — never a pass.
+ */
+async function verifyWithinMissionBudget(
+  session: RuntimeSession,
+  missionDeadlineTs: number,
+  missionBudgetMs: number,
+): Promise<VerificationResult> {
+  const remainingMs = missionDeadlineTs - Date.now();
+  const exhausted = (message: string): VerificationResult => ({
+    proven: false,
+    status: "failed",
+    checks: [],
+    totalDurationMs: 0,
+    message,
+    runId: "verify_budget_exhausted",
+    ranChecks: [],
+    skippedChecks: [],
+  });
+  if (missionBudgetMs > 0 && remainingMs <= 0) {
+    return exhausted(
+      `Mission deadline exceeded — the ${missionBudgetMs}ms budget was consumed before verification could run.`,
+    );
+  }
+  if (missionBudgetMs <= 0) {
+    // Unbounded budget (explicit opt-out): preserve previous behavior.
+    return session.verify();
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      session.verify(),
+      new Promise<VerificationResult>((resolve) => {
+        timer = setTimeout(() => {
+          // Kill any in-flight check processes, then resolve failed.
+          void session.getShell().cancel().catch(() => {});
+          resolve(exhausted(
+            `Verification did not complete within the mission deadline (${missionBudgetMs}ms total). The mission FAILED — a timeout is never a pass.`,
+          ));
+        }, remainingMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function runLocalToolMission(
   input: string,
   match: import("../lib/local-tool-mission.js").LocalToolMissionMatch,
@@ -3279,6 +3333,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           return;
         }
 
+        // One mission budget covers the agent loop AND the post-loop
+        // verification — a gate that outlives the deadline must fail,
+        // not hang the mission in "verifying" forever.
+        const missionBudgetMs = missionTimeoutFromEnv();
+        const missionDeadlineTs = Date.now() + missionBudgetMs;
         const result = await runAgentLoop(modelInput, {
           model, tools, shell: session.getShell(),
           gateway,
@@ -3288,7 +3347,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // LITT_MISSION_TIMEOUT_MS bounds the WHOLE loop — without it a
           // hung tool call or stalled stream spins "verifying" forever
           // (observed in dogfood). 0 = unbounded, previous behavior.
-          totalTimeoutMs: missionTimeoutFromEnv(),
+          totalTimeoutMs: missionBudgetMs,
           projectContext: {
             name: projectName ?? "unnamed",
             root: projectRoot,
@@ -3596,7 +3655,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                   ranChecks: [],
                   skippedChecks: [],
                 }
-              : await session.verify();
+              : await verifyWithinMissionBudget(session, missionDeadlineTs, missionBudgetMs);
           verificationSummary = verification.message;
 
           await agentStore.addMissionEvidence({

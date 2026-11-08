@@ -2216,8 +2216,24 @@ export async function runAgentLoop(
         };
       }
 
-      // Run the gate — the runtime truth boundary.
-      const verification = await options.verificationGate.verify();
+      // Run the gate — the runtime truth boundary. Deadline-wrapped:
+      // an unbounded gate.verify() (e.g. the full check suite on a
+      // mutating mission) could otherwise outlive the mission deadline
+      // and hang the run forever — observed: mission stuck in
+      // "verifying" 14+ min with the deadline already expired.
+      let verification: VerificationResult;
+      try {
+        verification = await withTotalDeadline(
+          options.verificationGate.verify(),
+          "verification gate",
+          () => void options.shell.cancel(),
+        );
+      } catch (err) {
+        if (err instanceof AgentDeadlineError) {
+          return timeoutResult("verification gate");
+        }
+        throw err;
+      }
       lastVerification = verification;
 
       if (verification.proven) {

@@ -632,6 +632,20 @@ export function createMissionEvidenceTracker(
   // A tool is an optional health check only if its CALL said so; the
   // result event carries no inputs, so remember the classification.
   const healthTools = new Set<string>();
+  /**
+   * Mutating calls awaiting their result, in call order. recordToolCall
+   * classifies with inputs (project.run needs the actual command);
+   * recordToolResult consumes one entry per result so a DENIED or
+   * cancelled mutation attempt never counts as an executed mutation.
+   */
+  const pendingMutationCalls: string[] = [];
+  let executedMutations = 0;
+  /**
+   * Failures that prove the command NEVER ran — approval denied or
+   * cancelled before spawn. Anything else (exit codes, timeouts,
+   * partial output) may have changed the project and stays conservative.
+   */
+  const NON_EXECUTION_RE = /approval denied|cancelled by user|not available/i;
   const results: {
     toolId: string;
     evidenceType: EvidenceType;
@@ -644,9 +658,12 @@ export function createMissionEvidenceTracker(
   return {
     recordToolCall(toolId: string, inputs?: Record<string, unknown> | null): void {
       if (isHealthCheckTool(toolId, inputs)) healthTools.add(toolId);
-      if (!mutated && isMutatingToolCall(toolId, mutationTools, inputs, cwd)) {
-        mutated = true;
-        onMutation?.();
+      if (isMutatingToolCall(toolId, mutationTools, inputs, cwd)) {
+        pendingMutationCalls.push(toolId);
+        if (!mutated) {
+          mutated = true;
+          onMutation?.();
+        }
       }
     },
     recordToolResult(
@@ -655,6 +672,27 @@ export function createMissionEvidenceTracker(
       message: string,
       stepId?: string | null,
     ): void {
+      const idx = pendingMutationCalls.indexOf(toolId);
+      const wasMutatingAttempt = idx !== -1;
+      if (wasMutatingAttempt) pendingMutationCalls.splice(idx, 1);
+
+      // The mission counts as MUTATING only when a mutation could have
+      // actually changed the project: a success, or a failure that is
+      // not a clean non-execution. A denied project.write_file during a
+      // "scan" must not escalate the mission to the full check gate —
+      // nothing was written (observed: approval-denied writes flipped
+      // isReadOnly() and sent verification into a 14-min stall).
+      // project.run is classified per-CALL (a `git status` is read-only,
+      // `npm install` is not) — it only counts when THIS call was queued
+      // as mutating at recordToolCall time. Always-mutating tools count
+      // on any non-denied result.
+      const mutatingResult =
+        wasMutatingAttempt ||
+        (toolId !== "project.run" && mutationTools.has(toolId));
+      if (mutatingResult && (success || !NON_EXECUTION_RE.test(message))) {
+        executedMutations++;
+      }
+
       results.push({
         toolId,
         evidenceType: toolToEvidenceType(toolId),
@@ -666,7 +704,7 @@ export function createMissionEvidenceTracker(
       if (results.length > MAX_EVIDENCE_RESULTS) results.shift();
     },
     isReadOnly(): boolean {
-      return !mutated;
+      return executedMutations === 0;
     },
     hasSuccessfulEvidence(): boolean {
       return results.some((r) => r.success && !r.health);
