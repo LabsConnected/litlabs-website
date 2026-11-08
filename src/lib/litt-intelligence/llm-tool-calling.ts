@@ -2350,6 +2350,25 @@ export function summarizeToolResult(toolId: string, result: unknown): string {
       const err = typeof obj.error === "string" && obj.error.trim() ? obj.error.trim() : "unknown error";
       return `Failed: ${err}`.slice(0, 200);
     }
+    // image.generate reports success at the provider level even when the
+    // automatic project save failed (savedToProject:false + saveError).
+    // The generic JSON fallback below would summarize only the leading
+    // base64 downloadUrl — hiding the failure from progress events,
+    // prior_tool_calls, and the UI (2026-11-08 approval loop: every
+    // approved generation "succeeded" while nothing was ever saved).
+    const saveError = typeof obj.saveError === "string" ? obj.saveError.trim() : "";
+    if (obj.savedToProject === false || saveError) {
+      return `Image generated but project save failed: ${saveError || "unknown error"}`.slice(0, 200);
+    }
+    if (obj.savedToProject === true) {
+      return "Image generated and saved to project";
+    }
+    // Media results carry a multi-KB data: URL — never let it become the
+    // summary. Chat-context generations (no project save) land here.
+    if (typeof obj.downloadUrl === "string" && obj.success === true) {
+      const provider = typeof obj.providerId === "string" ? ` via ${obj.providerId}` : "";
+      return `Media generated${provider}`;
+    }
   }
   if (typeof result === "string") return result.slice(0, 200);
   if (result && typeof result === "object") {

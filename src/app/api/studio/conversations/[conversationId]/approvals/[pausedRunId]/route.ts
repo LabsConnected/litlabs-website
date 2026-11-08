@@ -818,7 +818,19 @@ export async function POST(
             result.modelFailureText ??
             `The resumed run could not complete: ${result.modelFailed}`;
         } else if (failedMutation && !successfulMutation) {
-          resumeFailure = "The approved workspace operation failed, so the project was not completed.";
+          // Name the failed call and its recorded error so the transcript
+          // and run record carry the real reason (provider error, schema
+          // rejection, transport) instead of only the generic sentence —
+          // the 2026-11-08 staging acceptance died on an approved
+          // image.generate whose Cloudflare payload rejection was
+          // invisible in this message.
+          const failedCall = [...result.toolCalls]
+            .reverse()
+            .find((call) => call.mutating && !call.success);
+          const detail = failedCall
+            ? ` (${failedCall.toolId}: ${failedCall.summary || "failed"})`
+            : "";
+          resumeFailure = `The approved workspace operation failed${detail}, so the project was not completed.`;
         } else if (successfulMutation) {
           // Scope the artifact gate with the resumed run's own workspace
           // evidence: a "changed" diff proves the approved mutation landed,

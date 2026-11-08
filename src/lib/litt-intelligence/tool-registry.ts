@@ -199,16 +199,35 @@ export async function maybeAutoInsertGeneratedImage(
           `do NOT call project.insert_asset again and do NOT invent another path.`,
       };
     }
+    // Save failed. Drop insertHint: it instructs the model to call
+    // project.insert_asset "with this downloadUrl", but free providers
+    // return multi-KB data: URLs that are redacted from the model's
+    // context — the instruction is unfollowable, and the model responded
+    // by re-calling image.generate under a fresh approval every time
+    // (2026-11-08 staging approval loop). Keep markdown so the generated
+    // image still renders in chat.
+    const { insertHint: _insertHint, ...rest } = r;
+    const saveError = saved.error ?? "Failed to save image into project";
     return {
-      ...r,
+      ...rest,
       savedToProject: false,
-      saveError: saved.error ?? "Failed to save image into project",
+      saveError,
+      recovery:
+        `The image was generated but could not be saved into the project ` +
+        `workspace (${saveError}). Continue building the site without this ` +
+        `image — do not call image.generate again for the same asset.`,
     };
   } catch (err) {
+    const { insertHint: _insertHint, ...rest } = r;
+    const saveError = err instanceof Error ? err.message : "Failed to save image into project";
     return {
-      ...r,
+      ...rest,
       savedToProject: false,
-      saveError: err instanceof Error ? err.message : "Failed to save image into project",
+      saveError,
+      recovery:
+        `The image was generated but could not be saved into the project ` +
+        `workspace (${saveError}). Continue building the site without this ` +
+        `image — do not call image.generate again for the same asset.`,
     };
   }
 }
