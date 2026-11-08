@@ -367,7 +367,8 @@ async function handleAlibabaImage(args: {
   };
 }
 
-async function handleCloudflareImage(args: {
+// Exported for unit tests.
+export async function handleCloudflareImage(args: {
   prompt: string;
   width: number;
   height: number;
@@ -385,13 +386,13 @@ async function handleCloudflareImage(args: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${CLOUDFLARE_AI_API_TOKEN}`,
     },
-    body: JSON.stringify({
-      prompt: args.prompt.trim(),
-      width: Math.min(args.width, 1024),
-      height: Math.min(args.height, 1024),
-      seed: args.seed,
-      num_steps: 4, // FLUX schnell works well with 4 steps
-    }),
+    // The flux-1-schnell schema accepts ONLY `prompt` — width/height/seed/
+    // num_steps are rejected with HTTP 400 code 5006 ("Additional or
+    // unevaluated properties ... not allowed"), which failed every
+    // approved image.generate on staging (2026-11-08 acceptance run
+    // fa715c2e: provider=cloudflare FAIL in 649ms). Verified live: a
+    // prompt-only body returns 200 with result.image.
+    body: JSON.stringify({ prompt: args.prompt.trim() }),
     signal: AbortSignal.timeout(60_000),
   });
 
@@ -1386,7 +1387,7 @@ export async function generateImage(
     await failJob(errorMsg);
     const duration = Date.now() - startTime;
     console.info(
-      `[image-service] FAIL provider=${usedProviderId} requestId=${requestId} duration=${duration}ms`,
+      `[image-service] FAIL provider=${usedProviderId} requestId=${requestId} duration=${duration}ms error=${rawMsg.replace(/\s+/g, " ").slice(0, 200)}`,
     );
     return fail(
       isQuota ? "QUOTA_EXCEEDED" : "PROVIDER_ERROR",
