@@ -219,10 +219,13 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   "files.list": workspaceTool("files.list", (m) => m.handleFilesList),
   "files.read": workspaceTool("files.read", (m) => m.handleFilesRead),
   "files.write": workspaceTool("files.write", (m) => m.handleFilesWrite),
+  "site.patch": workspaceTool("site.patch", (m) => m.handleSitePatch),
+  "site.compose": workspaceTool("site.compose", (m) => m.handleSiteCompose),
   "git.status": workspaceTool("git.status", (m) => m.handleGitStatus),
   "terminal.execute": workspaceTool("terminal.execute", (m) => m.handleTerminalExecute),
   "project.health": workspaceTool("project.health", (m) => m.handleProjectHealth),
   "project.insert_asset": workspaceTool("project.insert_asset", (m) => m.handleProjectInsertAsset),
+  "image.stock": workspaceTool("image.stock", (m) => m.handleImageStock),
   // App-level capability — server-side HTTP, not workspace-scoped.
   "image.generate": async () => (await import("./tool-handlers")).handleImageGenerate,
   // V2 workspace-aware handlers (used by agent-loop-v2.ts)
@@ -700,8 +703,26 @@ class ToolRegistry {
         : handlerEntry as ToolHandler;
       const timeoutMs =
         tool.timeoutMs && tool.timeoutMs > 0 ? tool.timeoutMs : DEFAULT_TOOL_TIMEOUT_MS;
-      const browserSessionId = typeof inputs.sessionId === "string" ? inputs.sessionId : null;
       const actionContext = options.actionContext;
+      // sessionId is server-resolved state, not model knowledge: when a
+      // browser.* call omits it (small models drop it on text-recovered
+      // calls), bind the conversation's live session instead of failing
+      // argument validation. start_session creates it — never inject.
+      if (
+        id.startsWith("browser.") &&
+        id !== "browser.start_session" &&
+        typeof inputs.sessionId !== "string" &&
+        actionContext?.userId
+      ) {
+        try {
+          const { getActiveSession } = await import("./browser-agent");
+          const live = await getActiveSession(actionContext.userId, actionContext.conversationId);
+          if (live?.id) inputs.sessionId = live.id;
+        } catch {
+          // No resolvable session — the handler reports the honest error.
+        }
+      }
+      const browserSessionId = typeof inputs.sessionId === "string" ? inputs.sessionId : null;
       const inputUserId = typeof inputs.userId === "string" ? inputs.userId : null;
       // Tenant identity flows DOWN from trusted execution context. A
       // userId present in tool inputs is legacy server injection only — when
@@ -1279,6 +1300,37 @@ export function registerInternalTools(): void {
     },
     {
       tool: {
+        id: "image.stock",
+        name: "Fetch Stock Image",
+        description:
+          "Fetch a real royalty-free photograph for a topic (e.g. 'coffee beans closeup') into the project's served " +
+          "asset directory and return the sitePath to reference in HTML. Free providers only — never bills the user. " +
+          "Prefer this for photography; use image.generate only for custom art stock cannot supply.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            projectId: { type: "string" },
+            query: { type: "string", description: "Photo subject keywords, e.g. 'coffee beans roast'" },
+          },
+          required: ["projectId", "query"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "medium",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 60000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["image.stock"],
+    },
+    {
+      tool: {
         id: "project.insert_asset",
         name: "Insert Asset into Project",
         description:
@@ -1331,6 +1383,105 @@ export function registerInternalTools(): void {
         enabled: true,
       },
       handler: lazyHandlers["files.write"],
+    },
+    {
+      tool: {
+        id: "site.compose",
+        name: "Compose Site",
+        description:
+          "Generate a complete styled website page from a compact JSON plan (title, theme, ordered sections with copy). The server assembles the design system + section library — prefer this over files.write for a NEW page. Use files.write for full manual control or apply_patch for edits.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Workspace-relative output path; defaults to index.html" },
+            title: { type: "string", description: "Site name" },
+            description: { type: "string", description: "One-line site summary" },
+            theme: { type: "string", enum: ["light", "dark", "warm", "forest", "ocean", "mono"] },
+            accentHue: { type: "number", description: "Accent color hue 0-360" },
+            hero: {
+              type: "object",
+              properties: {
+                variant: { type: "string", enum: ["center", "split", "banner"] },
+                heading: { type: "string" },
+                subheading: { type: "string" },
+                cta: { type: "string" },
+                href: { type: "string" },
+                image: { type: "string", description: "Short keywords for the hero photo, e.g. 'coffee roastery'" },
+              },
+            },
+            sections: {
+              type: "array",
+              description:
+                "Ordered page sections. kinds: features/services/cards/menu {heading,items:[{title,text,icon?}]}; gallery {heading,images:[keywords]}; testimonials {items:[{quote,author}]}; pricing {plans:[{name,price,features[]}]}; stats {items:[{value,label}]}; about {heading,text,image?}; cta {heading,button,href}; contact {items:[{label,value}]}; footer {text,links?}",
+              // Deliberately shapeless: small local models mirror nested
+              // JSON-Schema keywords ({"type":"object","properties":{…}})
+              // into the plan instead of emitting data. The validator in
+              // site-compose is authoritative — the kinds and per-kind
+              // fields live in the `sections` description above, where the
+              // model reads them as content shapes, not schema syntax.
+              items: { type: "object" },
+            },
+          },
+          required: ["title", "sections"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "high",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        // Local-lane only: registered disabled unless the small-lane env is
+        // set at process start (same predicate as isLocalSmallLane, inlined
+        // to avoid a tool-registry -> agent-loop import cycle), so
+        // production tool catalogs and prompts are byte-identical — the
+        // tool never exists where cloud models run.
+        enabled: !!(process.env.LITT_LOCAL_SMALL === "1" || /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "")),
+      },
+      handler: lazyHandlers["site.compose"],
+    },
+    {
+      tool: {
+        id: "site.patch",
+        name: "Patch Site Section",
+        description:
+          "Edit one region of a site.compose-generated page by name — hero, footer, or a section kind/id (menu, features-2, …). Give the fields to change (heading, subheading, text, cta, image, or items/plans/images for a full section rebuild); the server splices the update in. Easier and more reliable than apply_patch for section-level changes.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Page file; defaults to index.html" },
+            section: { type: "string", description: "Region to edit: hero, footer, or a section kind/id like menu or features-2" },
+            heading: { type: "string" },
+            subheading: { type: "string" },
+            text: { type: "string" },
+            cta: { type: "string" },
+            button: { type: "string" },
+            image: { type: "string", description: "Image keywords for the region's photo slot" },
+            items: { type: "array", items: { type: "object" } },
+            plans: { type: "array", items: { type: "object" } },
+            images: { type: "array", items: { type: "string" } },
+            links: { type: "array", items: { type: "object" } },
+          },
+          required: ["section"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "high",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: !!(process.env.LITT_LOCAL_SMALL === "1" || /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "")),
+      },
+      handler: lazyHandlers["site.patch"],
     },
     {
       tool: {
@@ -2034,7 +2185,7 @@ export function registerInternalTools(): void {
               description: "Injected server-side; enables session reuse across chat turns.",
             },
           },
-          required: ["userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2065,7 +2216,7 @@ export function registerInternalTools(): void {
             url: { type: "string" },
             waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle"] },
           },
-          required: ["sessionId", "userId", "url"],
+          required: ["url"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2093,7 +2244,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2121,7 +2272,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2151,7 +2302,7 @@ export function registerInternalTools(): void {
             instruction: { type: "string" },
             schema: { type: "object" },
           },
-          required: ["sessionId", "userId", "instruction"],
+          required: ["instruction"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2182,7 +2333,7 @@ export function registerInternalTools(): void {
             timeoutMs: { type: "number" },
             waitFor: { type: "string", enum: ["selector", "navigation", "timeout"] },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2210,7 +2361,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2238,7 +2389,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2266,7 +2417,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2302,7 +2453,7 @@ export function registerInternalTools(): void {
             x: { type: "number" },
             y: { type: "number" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2337,7 +2488,7 @@ export function registerInternalTools(): void {
             value: { type: "string" },
             clear: { type: "boolean" },
           },
-          required: ["sessionId", "userId", "value"],
+          required: ["value"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2370,7 +2521,7 @@ export function registerInternalTools(): void {
             value: { type: "string" },
             label: { type: "string" },
           },
-          required: ["sessionId", "userId", "value"],
+          required: ["value"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2401,7 +2552,7 @@ export function registerInternalTools(): void {
             amount: { type: "number" },
             selector: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2430,7 +2581,7 @@ export function registerInternalTools(): void {
             userId: { type: "string" },
             key: { type: "string" },
           },
-          required: ["sessionId", "userId", "key"],
+          required: ["key"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2462,7 +2613,7 @@ export function registerInternalTools(): void {
             ariaLabel: { type: "string" },
             filePath: { type: "string" },
           },
-          required: ["sessionId", "userId", "filePath"],
+          required: ["filePath"],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2497,7 +2648,7 @@ export function registerInternalTools(): void {
             text: { type: "string" },
             filename: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -2525,7 +2676,7 @@ export function registerInternalTools(): void {
             sessionId: { type: "string" },
             userId: { type: "string" },
           },
-          required: ["sessionId", "userId"],
+          required: [],
         },
         outputSchema: { type: "object" },
         requiredCapabilities: [],

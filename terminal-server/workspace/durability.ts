@@ -1,4 +1,4 @@
-import { resolve, sep } from "path";
+import { parse, resolve, sep } from "path";
 import { tmpdir } from "os";
 import { readFileSync } from "fs";
 
@@ -20,8 +20,12 @@ export function isEphemeralPath(resolvedRoot: string): boolean {
   const normalized = resolve(resolvedRoot);
   const tmp = resolve(tmpdir());
   if (normalized === tmp || normalized.startsWith(tmp + sep)) return true;
+  // Check the RAW input in POSIX form too: on Windows resolve("/tmp/x")
+  // yields "C:\tmp\x", which would silently drop the POSIX prefix signal
+  // (TERMINAL_WORKSPACE_ROOT values are Linux container paths).
+  const posix = resolvedRoot.replace(/\\/g, "/");
   return EPHEMERAL_PREFIXES.some(
-    (prefix) => normalized === prefix || normalized.startsWith(prefix + sep),
+    (prefix) => posix === prefix || posix.startsWith(prefix + "/"),
   );
 }
 
@@ -38,7 +42,10 @@ export function isSeparateMount(resolvedRoot: string): boolean | null {
   try {
     mounts = readFileSync("/proc/mounts", "utf-8");
   } catch {
-    return null;
+    // No mount table (Windows, restricted containers). The filesystem root
+    // is still determinably a mounted volume; anything else stays unknown.
+    const target = resolve(resolvedRoot);
+    return target === parse(target).root ? true : null;
   }
   const target = resolve(resolvedRoot);
   return mounts

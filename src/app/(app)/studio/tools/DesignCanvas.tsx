@@ -5,6 +5,9 @@ import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import DragDropCanvas from "@/components/DragDropCanvas";
 import Editor from "@monaco-editor/react";
+import { configureBundledMonaco } from "@/lib/monaco/setup";
+
+configureBundledMonaco();
 import { Play, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useResizableWidth } from "@/app/(app)/studio/hooks/useResizableWidth";

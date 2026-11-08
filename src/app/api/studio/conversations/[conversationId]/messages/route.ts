@@ -33,6 +33,10 @@ import { findToolCallMarkup, stripToolCallMarkupText } from "@/lib/litt-intellig
 import { withV1NoToolsDirective } from "@/lib/litt-intelligence/text-lane-guard";
 import { sanitizeTextLaneHistory } from "@/lib/litt-intelligence/toolless-lane-guard";
 import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/launch-flow";
+import {
+  isDeterministicCodegenModel,
+  runDeterministicBuildLane,
+} from "@/lib/litt-intelligence/deterministic-codegen";
 import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
@@ -48,7 +52,7 @@ import {
 import { classifyIntent } from "@/lib/litt-kernel";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
-import { deploymentEvidenceFrom } from "@/lib/studio/completion-evidence";
+import { deploymentEvidenceFrom, evaluateCompletion } from "@/lib/studio/completion-evidence";
 import {
   createActionRun,
   requestActionRunCancellation,
@@ -332,6 +336,27 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let effectiveProjectId = conversation.projectId;
 
   if (!ctx) {
+    // A conversation that was NEVER bound to a project (legacy/general chat)
+    // must not be silently re-bound to whatever project happens to be active.
+    // Its history is foreign context — rebinding would let an unrelated
+    // conversation (e.g. a general assistant thread) execute mutations inside
+    // this project's workspace and answer in the wrong domain. Refuse with
+    // the same explicit error as PROJECT_MISMATCH below.
+    // Stale NON-NULL projectIds keep the repair fallback: that conversation
+    // was project-scoped once, so re-binding to the active project repairs a
+    // deleted-project reference rather than importing foreign context.
+    if (!conversation.projectId && clientProjectId) {
+      return NextResponse.json(
+        {
+          error: "Project mismatch",
+          code: "PROJECT_MISMATCH",
+          detail:
+            "This chat isn't linked to a project, so it can't run project tasks. " +
+            "Start a new chat in this project instead.",
+        },
+        { status: 409 },
+      );
+    }
     // Stale conversation.projectId — try the active project
     const activeProject = await resolveCurrentProject({ userId });
     if (activeProject && activeProject.projectId !== conversation.projectId) {
@@ -610,9 +635,20 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // This fallback is marked for eventual removal once all chat paths require
   // a verified workspace.
 
+  // An explicit deterministicCodegen pin (litt-coder:8k) in AUTO mode must
+  // always reach the lane — the kernel's requiresExecution classifier can
+  // false-negative on plain-worded edit requests, and the V1 text path can
+  // only *describe* the change, never apply it. The pin means "answer by
+  // generating files"; silently chatting instead is a false success.
+  const detcodegenPinned =
+    isDeterministicCodegenModel(typeof body.model === "string" ? body.model : undefined)
+    && canonicalCtx.executionMode === "auto";
+  const executionRequired =
+    !!built.kernelResult.decision.routing.requiresExecution || detcodegenPinned;
+
   const useV2 = canonicalCtx.workspaceExecutionAvailable
     && !!conversation.projectId
-    && !!built.kernelResult.decision.routing.requiresExecution;
+    && executionRequired;
 
   let v2Result: Awaited<ReturnType<typeof runAgentLoopV2>> | null = null;
   let launchFlowResult: LaunchFlowResult | null = null;
@@ -657,7 +693,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // Execution-required turns must never fall through to the read-only V1
   // inspection + text-only stream. That path cannot execute mutations and
   // would expose model pseudo-tool markup as if it were an answer.
-  if (built.kernelResult.decision.routing.requiresExecution && !(useV2 && v2Transport)) {
+  if (executionRequired && !(useV2 && v2Transport)) {
     studioLog("message:tool_execution_unavailable", {
       conversationId: conversation.id,
       projectId: conversation.projectId,
@@ -1014,7 +1050,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       ): Promise<void> => {
         const effectiveRequiresExecution = rerouted
           ? true
-          : built.kernelResult.decision.routing.requiresExecution;
+          : executionRequired;
         // ── V2 path: run agent loop INSIDE the stream with real-time events ──
         // The ProgressEmitter streams events to the SSE controller as they
         // happen, so the user can watch LiTT work in real-time.
@@ -1138,6 +1174,23 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               userId: actionContext.userId,
             })
           : undefined;
+        // Phase 2 deterministic codegen lane (tasks/litt-coder-lane): an
+        // explicit pin of a deterministicCodegen model (litt-coder:8k) in
+        // AUTO mode runs the strict-JSON pipeline instead of the native
+        // tool-calling loop — Studio validates output, performs the writes
+        // through the same verified transport, and read-back-verifies.
+        // AUTO-only by design: files.write is already a no-approval safe op
+        // there, so the lane cannot weaken ACT/PLAN approval gates.
+        const useDeterministicLane =
+          isDeterministicCodegenModel(cfg.model) && cfg.executionMode === "auto";
+        const laneProgress = useDeterministicLane
+          ? new ProgressEmitter((evt: ProgressEvent) => {
+              streamProgress.emit(evt);
+              if (persistProgressEvent) {
+                void Promise.resolve(persistProgressEvent(evt)).catch(() => {});
+              }
+            })
+          : streamProgress;
         launchFlowResult = await runWithMeteringContext(
           // Canonical metering (P0): thread identity + feature into the
           // agent run. The v2 loop's per-step emission reads this context
@@ -1151,7 +1204,18 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             runId: agentRunId ?? undefined,
             feature: "studio-chat",
           },
-          () => runLaunchFlow({
+          () => useDeterministicLane
+            ? runDeterministicBuildLane({
+                userMessage: resolvedMessage,
+                projectId: conversation.projectId ?? "",
+                userId,
+                transport,
+                model: cfg.model ?? "",
+                isStaticWorkspace: cfg.isStaticWorkspace,
+                signal: executionAbort.signal,
+                progress: laneProgress,
+              })
+            : runLaunchFlow({
           userMessage: resolvedMessage,
           projectId: conversation.projectId ?? "",
           userId,
@@ -1208,12 +1272,23 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               pausedMessages: v2Result.pendingApproval.pausedMessages,
               executionMode: canonicalCtx.executionMode,
               systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
-              checkpointId: v2Result.checkpoint?.checkpointId ?? null,
+              // The paused run stores the run's FIRST pre-mutation
+              // checkpoint (the whole-run baseline), not the latest:
+              // mutations that landed before this gate are already
+              // committed inside later checkpoints, so diffing the resumed
+              // run against anything newer would erase them and falsely
+              // report "unchanged". Legacy rows kept the latest — their
+              // resumes keep the pre-change post-gate-only view.
+              checkpointId: v2Result.baselineCheckpoint?.checkpointId ?? v2Result.checkpoint?.checkpointId ?? null,
               actionRunId: actionContext?.actionRunId ?? null,
               qualityLoopState: v2Result.qualityLoopState,
               deferredToolCalls: v2Result.pendingApproval.deferredToolCalls,
               stepsUsed: v2Result.pendingApproval.stepsUsedAtPause,
               hadInterveningMutation: v2Result.pendingApproval.hadInterveningMutationAtPause,
+              // Pre-pause call evidence (declared paths + persisted
+              // read-backs) — without it the resumed run's verdict would
+              // only see post-resume claims.
+              priorToolCalls: v2Result.pendingApproval.priorToolCalls,
             });
             pausedRunId = pausedRun.id;
             if (actionContext) {
@@ -1289,30 +1364,52 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           && !actionableApproval
           && !assistantText.trim();
 
-        // Honest completion: a mutation-required run that ended with
-        // zero tool calls and zero mutations must never be persisted or
-        // reported as "completed" — that is the silent fake-complete
-        // (e.g. a prose approval-ask settling Complete with nothing
-        // done and no approval card ever created). Fail it honestly.
+        // Honest completion: a mutation-required run must never be
+        // persisted or reported as "completed" unless the EVIDENCE says
+        // so — not the model's own narration, and not a tool's bare
+        // success flag either. evaluateCompletion() is the single
+        // source of truth also used to label the client work log
+        // (StudioTranscript); using it here too means the persisted
+        // status and the displayed label can never disagree, and it
+        // cross-checks a self-reported successful mutation against the
+        // real workspace diff (v2Result.workspaceChange) — a tool can
+        // return success:true/mutating:true having written nothing (an
+        // exit-0 command whose output never reached disk), and that
+        // alone must not establish completion. See
+        // completion-evidence.ts for exactly what counts as proof.
         const mutationRequired = effectiveRequiresExecution === true;
         const v2ToolCalls = v2Result?.toolCalls ?? [];
-        const v2Mutations = v2ToolCalls.filter((c) => c.success && c.mutating).length;
-        const zeroMutationCompletion =
-          mutationRequired &&
+        const completionRequirement = {
+          mutation: mutationRequired,
+          deployment: built.kernelResult.decision.routing.mode === "ship",
+        };
+        const completionVerdict = (completionRequirement.mutation || completionRequirement.deployment)
+          ? evaluateCompletion(completionRequirement, {
+              toolCalls: v2ToolCalls.map((c) => ({ toolId: c.toolId, success: c.success, mutating: c.mutating, paths: c.paths, persisted: c.persisted })),
+              deployment: deploymentEvidenceFrom(v2ToolCalls),
+              workspaceChange: v2Result?.workspaceChange ?? null,
+            })
+          : null;
+        const executionNotVerified =
+          completionVerdict !== null &&
           !actionableApproval &&
           !v2Result?.pendingApproval &&
           !launchFlowResult?.cancelled &&
-          v2ToolCalls.length === 0 &&
-          v2Mutations === 0;
-        if (zeroMutationCompletion) {
+          completionVerdict.state !== "complete";
+        if (executionNotVerified) {
           // Preserve a specific failure message the launch flow already
           // produced (e.g. TOOL_EXECUTION_UNAVAILABLE names the real cause
-          // after two attempts) — it is more honest than the generic text.
-          // Only fall back to the generic wording when the flow named no
-          // specific error (the silent fake-complete case).
+          // after two attempts) — it is more honest than a generic one.
+          // Only fall back to generated wording when the flow named no
+          // specific error. The zero-tool-call case keeps its original,
+          // more actionable phrasing; every other evidence-based failure
+          // (including the new self-report-vs-diff contradiction) uses
+          // evaluateCompletion's own reason, which already names what's
+          // actually missing.
           if (!launchFlowResult?.error) {
-            assistantText =
-              "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.";
+            assistantText = completionVerdict!.state === "not_started"
+              ? "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again."
+              : completionVerdict!.reason;
           }
         }
 
@@ -1320,7 +1417,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           ? "cancelled"
           : actionableApproval
             ? "awaiting_approval"
-            : v2Result?.failedHonestly || zeroMutationCompletion
+            : v2Result?.failedHonestly || executionNotVerified
               ? "failed"
               : launchFlowResult?.success && !v2Empty && !pausedRunPersistFailed
                 ? "completed"
@@ -1456,6 +1553,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                   toolId: c.toolId,
                   success: c.success,
                   mutating: c.mutating,
+                  paths: c.paths,
+                  persisted: c.persisted,
                 })),
                 deployment: deploymentEvidenceFrom(v2Result.toolCalls),
                 workspaceChange: v2Result.workspaceChange ?? null,
@@ -1622,7 +1721,21 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // payloads, but if a run still resolves with no usable text the
           // outcome is failed — never a completed empty response.
           const v1Empty = !cancelledV1 && !assistantText.trim();
-          const v1Failed = !cancelledV1 && (v1Empty || v1MarkupHit !== null);
+          // V1 is read-only pre-LLM inspection + a text-only completion —
+          // it has no tools attached and cannot execute a mutation at all
+          // (see the "TEMPORARY FALLBACK" docstring above). The guard at
+          // the top of this handler (`requiresExecution && !(useV2 &&
+          // v2Transport)` → 409) is what's SUPPOSED to keep a genuine
+          // build/ship request out of this lane entirely, by rejecting it
+          // before V1 ever runs — this check does not replace that guard,
+          // it backstops it: if a kernel misclassification (a false
+          // negative on `requiresExecution`) or a future refactor ever
+          // lets an execution-required turn reach V1 anyway, V1
+          // structurally cannot satisfy it, so it must never be reported
+          // complete regardless of how confident or detailed the model's
+          // text sounds.
+          const v1MutationRequired = built.kernelResult.decision.routing.requiresExecution === true;
+          const v1Failed = !cancelledV1 && (v1Empty || v1MarkupHit !== null || v1MutationRequired);
           const v1MessageStatus: MessageStatus = cancelledV1 ? "cancelled" : v1Failed ? "failed" : "completed";
           await updateMessageStatus(
             assistantMessage.id,
@@ -1630,10 +1743,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             v1MessageStatus,
             v1MarkupHit
               ? "The model produced a tool call in a format this run cannot execute, so nothing was executed."
-              : assistantText ||
-                  (v1Empty
-                    ? "The model returned an empty response — nothing was produced. Send the request again to retry."
-                    : undefined),
+              : v1MutationRequired
+                ? "This request needs file operations, but no executable workspace was available for this turn, so nothing was created or changed. Please try again."
+                : assistantText ||
+                    (v1Empty
+                      ? "The model returned an empty response — nothing was produced. Send the request again to retry."
+                      : undefined),
           );
           if (agentRunId) {
             const actualCredits = runtimeAgent

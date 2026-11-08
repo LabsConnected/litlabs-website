@@ -5,11 +5,17 @@ import fs from "fs";
 // Load .env.local first, then .env
 const envLocalPath = path.resolve(process.cwd(), ".env.local");
 if (fs.existsSync(envLocalPath)) {
-  dotenv.config({ path: envLocalPath });
+  // override:true — the project's own env files are authoritative for this
+  // service's auth material (TERMINAL_AUTH_SECRET etc.). Reloads after an
+  // env/secret rotation otherwise keep a stale exported value from a parent
+  // shell indefinitely (dotenv never overrides pre-set vars), which
+  // silently rejects every token minted from the updated project config.
+  dotenv.config({ path: envLocalPath, override: true });
 }
+
 const envPath = path.resolve(process.cwd(), ".env");
 if (fs.existsSync(envPath)) {
-  dotenv.config({ path: envPath });
+  dotenv.config({ path: envPath, override: true });
 }
 
 import express from "express";
@@ -17,6 +23,7 @@ import http from "http";
 import cors from "cors";
 import { Server } from "socket.io";
 import { isAbsolute, relative, resolve } from "path";
+import { createHash } from "crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, renameSync } from "fs";
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
@@ -46,6 +53,7 @@ import {
 import { resolveWorkspacePath as resolveWorkspacePathSecure, validateWritePayload } from "./workspace/WorkspaceSecurity";
 import { deleteResolvedPath } from "./workspace/FileService";
 import { replaceScaffoldingForWrite, SCAFFOLD_DIR_NAME } from "./workspace/scaffold";
+import { checkExpectedSha256 } from "./workspace/cas";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
   startPreview,
@@ -78,7 +86,7 @@ function sanitizeProjectEnv(value: unknown): Record<string, string> | undefined 
 import { registerPreviewProxyRoute } from "./preview/proxy";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
-import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
+import { PtySessionManager, probeHostPty, type PtySessionSnapshot } from "./pty-session-manager";
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
@@ -91,6 +99,7 @@ import {
 import { findOnPath } from "./path-probe";
 import { respondIfHostExecBlocked, respondWithDispatch } from "./host-exec-http";
 
+import { fileErrorResponse } from "./file-errors";
 import { verifyClerkToken } from "./clerk-verify";
 import { resolveBindHost } from "./network-bind";
 import type { RemoteCommandRequest } from "@litt/agent-core";
@@ -342,7 +351,12 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
     // non-owner Clerk identity gets 403 here and never receives a
     // terminal JWT.
     if (!isTerminalOwner(userId)) {
-      res.status(403).json({ error: "Terminal access is restricted to the workspace owner" });
+      // `code` is the typed refusal the CLI classifies on; `error` stays a
+      // plain string so older clients keep their current behavior.
+      res.status(403).json({
+        error: "Terminal access is restricted to the workspace owner",
+        code: "terminal_owner_required",
+      });
       return;
     }
 
@@ -370,6 +384,7 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
       if (ws.userId !== userId) {
         res.status(403).json({
           error: "Forbidden — workspace does not belong to the authenticated user",
+          code: "workspace_unauthorized",
         });
         return;
       }
@@ -710,6 +725,26 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   await respondWithDispatch(res, () => dispatchCommand(normalizedReq));
 });
 
+/**
+ * Deterministic-ownership fingerprint. Every terminal-server instance
+ * reports a short digest of the secret+root it loaded at startup, so a
+ * caller (or an operator debugging a 401) can prove which instance it's
+ * talking to — without exposing the secret itself. Two servers on
+ * adjacent ports with different secrets/roots produce different
+ * fingerprints; a mismatched one is the tell that the port is occupied by
+ * a foreign instance, not the expected stack.
+ */
+function ownershipFingerprint(): { secretSha: string; serviceKeySha: string; workspaceRoot: string; port: string; pid: number } {
+  const digest = (v: string) => createHash("sha256").update(v).digest("hex").slice(0, 12);
+  return {
+    secretSha: digest(process.env.TERMINAL_AUTH_SECRET ?? ""),
+    serviceKeySha: digest(process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? ""),
+    workspaceRoot: process.env.TERMINAL_WORKSPACE_ROOT ?? "",
+    port: String(process.env.TERMINAL_SERVER_PORT ?? ""),
+    pid: process.pid,
+  };
+}
+
 app.get("/health/ready", async (_req, res) => {
   const authConfigured = (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32;
   const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;
@@ -723,6 +758,7 @@ app.get("/health/ready", async (_req, res) => {
     workspaceRoot: workspaceReady,
     docker: dockerProbe.value,
     dockerReason: dockerProbe.reason,
+    hostPty: probeHostPty(),
   };
 
   // `readiness` describes the service (auth, internal key, workspace root).
@@ -748,6 +784,7 @@ app.get("/health/ready", async (_req, res) => {
     timestamp: new Date().toISOString(),
     commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
     version: process.env.npm_package_version ?? "unknown",
+    fingerprint: ownershipFingerprint(),
     checks,
     reasons: allReady
       ? []
@@ -784,12 +821,14 @@ app.get("/health", async (_req, res) => {
     readiness: allReady ? "ready" : "not_ready",
     commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
     version: process.env.npm_package_version ?? "unknown",
+    fingerprint: ownershipFingerprint(),
     checks: {
       authConfigured,
       internalServiceConfigured,
       workspaceRoot: workspaceReady,
       docker: dockerProbe.value,
       dockerReason: dockerProbe.reason,
+      hostPty: probeHostPty(),
     },
     reasons: allReady
       ? []
@@ -1342,25 +1381,6 @@ function safePath(userId: string, filePath: string) {
   return resolveWorkspacePathSecure(workspace, filePath);
 }
 
-/** Path-validation failures from the workspace path resolvers → 400, not 500. */
-function isPathValidationError(msg: string): boolean {
-  return (
-    msg === "Invalid path" ||
-    msg === "Path too long" ||
-    msg === "Absolute or parent paths are not allowed" ||
-    msg === "Path escapes workspace root" ||
-    msg === "Symlink escapes workspace root"
-  );
-}
-
-/** Map file-endpoint errors to HTTP status codes. */
-function fileErrorStatus(msg: string): number {
-  if (msg === "Forbidden") return 403;
-  if (msg === "Workspace not found" || msg === "Path not found") return 404;
-  if (isPathValidationError(msg)) return 400;
-  return 500;
-}
-
 function requireTerminalAuth(
   req: AuthenticatedRequest,
   res: Response,
@@ -1389,8 +1409,8 @@ app.get("/files", (req: AuthenticatedRequest, res) => {
     }));
     res.json({ entries });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to list files";
-    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to list files", "Path not found");
+    res.status(status).json({ error });
   }
 });
 
@@ -1411,8 +1431,8 @@ app.post("/files/read", (req: AuthenticatedRequest, res) => {
     const content = readFileSync(target, "utf-8");
     res.json({ content });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to read file";
-    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to read file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1431,8 +1451,8 @@ app.post("/files/write", (req: AuthenticatedRequest, res) => {
     writeFileSync(target, content, "utf-8");
     res.json({ saved: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to write file";
-    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to write file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1447,8 +1467,8 @@ app.post("/files/delete", (req: AuthenticatedRequest, res) => {
     deleteResolvedPath(target);
     res.json({ deleted: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to delete file";
-    res.status(fileErrorStatus(msg)).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to delete file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1515,8 +1535,8 @@ app.get("/ws-files", (req: AuthenticatedRequest, res) => {
       }));
     res.json({ entries, workspaceId: req.workspaceId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to list files";
-    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to list files", "Path not found");
+    res.status(status).json({ error });
   }
 });
 
@@ -1542,9 +1562,8 @@ app.post("/ws-files/read", (req: AuthenticatedRequest, res) => {
     // masquerades as base64 and corrupts anything that stores it as text.
     res.json({ content, size: stats.size, encoding, workspaceId: req.workspaceId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to read file";
-    const status = fileErrorStatus(msg);
-    res.status(status).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to read file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1564,6 +1583,21 @@ app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
   }
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
+    // Compare-and-swap: when the caller pins a revision, refuse the write if
+    // the file changed since — a visual edit must never silently clobber a
+    // concurrent agent/user write. Synchronous check → no interleaving.
+    const expectedSha256 =
+      typeof req.body.expectedSha256 === "string" ? req.body.expectedSha256 : undefined;
+    if (expectedSha256 !== undefined) {
+      const cas = checkExpectedSha256(target, expectedSha256);
+      if (!cas.ok) {
+        return res.status(409).json({
+          error: `Revision conflict: "${filePath}" ${cas.reason}`,
+          code: "REVISION_CONFLICT",
+          currentSha256: cas.currentSha256,
+        });
+      }
+    }
     // ─── Starter-scaffolding replacement (brief §7) ─────────────────
     // Deterministic complement to the prompt-text rule: the `scaffolded`
     // manifest — not text matching — is the authority on whether this
@@ -1605,9 +1639,8 @@ app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
       ...(scaffold?.acted ? { scaffold } : {}),
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to write file";
-    const status = fileErrorStatus(msg);
-    res.status(status).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to write file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1621,9 +1654,8 @@ app.post("/ws-files/delete", (req: AuthenticatedRequest, res) => {
     deleteResolvedPath(target);
     res.json({ deleted: true, workspaceId: req.workspaceId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to delete file";
-    const status = fileErrorStatus(msg);
-    res.status(status).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to delete file");
+    res.status(status).json({ error });
   }
 });
 
@@ -1638,9 +1670,8 @@ app.post("/ws-files/mkdir", (req: AuthenticatedRequest, res) => {
     mkdirSync(target, { recursive: false });
     res.json({ created: true, workspaceId: req.workspaceId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to create folder";
-    const status = fileErrorStatus(msg);
-    res.status(status).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to create folder");
+    res.status(status).json({ error });
   }
 });
 
@@ -1658,9 +1689,8 @@ app.post("/ws-files/rename", (req: AuthenticatedRequest, res) => {
     renameSync(source, target);
     res.json({ renamed: true, workspaceId: req.workspaceId });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to rename path";
-    const status = fileErrorStatus(msg);
-    res.status(status).json({ error: msg });
+    const { status, error } = fileErrorResponse(err, "Failed to rename path");
+    res.status(status).json({ error });
   }
 });
 

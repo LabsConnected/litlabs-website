@@ -112,15 +112,37 @@ export async function exchangeClerkToken(
   }
 
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null;
-    // 401/403 mean the credential itself is bad — surface that distinctly
-    // so the caller clears it rather than retrying with the same token.
-    const reason = response.status === 401 || response.status === 403
-      ? "auth_revoked"
-      : "session_failed";
+    const body = await response.json().catch(() => null) as
+      | { error?: string | { code?: string; message?: string }; code?: string }
+      | null;
+    const typedError = body?.error && typeof body.error === "object"
+      ? body.error as { code?: string; message?: string }
+      : undefined;
+    // The server may put the code either inside a typed `error` object or
+    // as a top-level `code` beside a legacy string `error`.
+    const code = typedError?.code ?? (typeof body?.code === "string" ? body.code : undefined);
+    const detail = typedError?.message
+      ?? (typeof body?.error === "string" ? body.error : undefined)
+      ?? `Token exchange failed (${response.status}).`;
+
+    // Typed authorization refusals FIRST — before the generic status
+    // check. Both arrive on HTTP 403 but are NOT auth revocations: the
+    // Clerk token verified fine, the account just isn't allowed. Reporting
+    // either as auth_revoked sends the user to `litt login` (a dead end)
+    // and, via CREDENTIAL_CLEARING_REASONS, deletes their valid credential.
+    if (code === "terminal_owner_required") {
+      throw new RemoteUnavailableError("terminal_owner_required", detail);
+    }
+    if (code === "workspace_unauthorized") {
+      throw new RemoteUnavailableError("workspace_unauthorized", detail);
+    }
+
+    // Status fallback — 401 is the only authentication failure here (the
+    // Clerk token itself failed verification). A bare 403 with no typed
+    // code is still an authorization refusal, not a revoked session.
     throw new RemoteUnavailableError(
-      reason,
-      body?.error ?? `Token exchange failed (${response.status}).`,
+      classifyHttpFailure(response.status),
+      detail,
     );
   }
 
@@ -147,8 +169,9 @@ export async function exchangeClerkToken(
  *
  * The Clerk token is obtained from:
  *   1. options.clerkToken (explicit override)
- *   2. AuthSession.getAccessToken() — the real OAuth credential store
- *      (auto-refreshes if the access token is expired)
+ *   2. AuthSession.getAccessTokenStrict() — the real OAuth credential
+ *      store (auto-refreshes if the access token is expired; throws
+ *      auth_expired when refresh fails)
  *   3. LITT_CLERK_TOKEN env var (temporary — automated acceptance tests)
  */
 async function getTerminalToken(options: RemoteDispatchOptions): Promise<string> {
@@ -182,7 +205,7 @@ async function getTerminalToken(options: RemoteDispatchOptions): Promise<string>
     // credentials exist but refresh failed, instead of collapsing that
     // into an indistinguishable null. The distinction matters because an
     // expired session must also be CLEARED, not merely reported.
-    clerkToken = await authSession.getAccessToken() ?? "";
+    clerkToken = await authSession.getAccessTokenStrict() ?? "";
   }
 
   if (!clerkToken) {
@@ -316,8 +339,14 @@ export async function dispatchRemote(
       throw new RemoteUnavailableError("insufficient_credits", detail);
     }
 
-    if (response.status === 401 || response.status === 403) {
+    // 401 is the only authentication failure on this endpoint — a bare
+    // 403 is an authorization refusal (e.g. cwd outside the workspace),
+    // NOT a revoked session, so it must not clear valid credentials.
+    if (response.status === 401) {
       throw new RemoteUnavailableError("auth_revoked", detail);
+    }
+    if (response.status === 403) {
+      throw new RemoteUnavailableError("forbidden", detail);
     }
     throw new RemoteUnavailableError("execution_failed", detail);
   }
@@ -431,8 +460,13 @@ export async function remoteChat(
     if (typedError?.code === "insufficient_credits" || response.status === 402) {
       throw new RemoteUnavailableError("insufficient_credits", detail);
     }
-    if (response.status === 401 || response.status === 403) {
+    // Same rule as dispatchRemote: 401 means the session is invalid;
+    // a bare 403 is an authorization refusal, not a revoked credential.
+    if (response.status === 401) {
       throw new RemoteUnavailableError("auth_revoked", detail);
+    }
+    if (response.status === 403) {
+      throw new RemoteUnavailableError("forbidden", detail);
     }
     throw new RemoteUnavailableError("execution_failed", detail);
   }

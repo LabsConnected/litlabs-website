@@ -22,27 +22,23 @@
 
 import React from "react";
 import { Box, Text, useStdout } from "ink";
+import { redactSecrets } from "./activity-redact.js";
 import { COLORS, activityColor } from "./colors.js";
-import { classifyWidth } from "./ui-primitives.js";
-import type { ActivityEntry } from "./cockpit-store.js";
 
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  const h = String(d.getHours()).padStart(2, "0");
-  const m = String(d.getMinutes()).padStart(2, "0");
-  const s = String(d.getSeconds()).padStart(2, "0");
-  return `${h}:${m}:${s}`;
-}
+import type { ActivityEntry, ActivitySemantic } from "./cockpit-store.js";
 
 const TAG_WIDTH = 8;
 const DETAIL_MAX_LINES = 8;
-const TIMESTAMP_WIDTH = 8;
-const GAP = 2; // two spaces between time and tag
 
 /** Whether the entry is a live stream delta. */
 export function isStreamEntry(entry: ActivityEntry): boolean {
   return entry.type === "tool.stdout" || entry.type === "tool.stderr" || entry.type === "agent.delta";
 }
+
+/** Tags suppressed from the live feed — pure diagnostic noise that
+ *  duplicates what the transcript already shows (the user message echo)
+ *  or belongs in the optional debug view (/activity), not conversation. */
+const HIDDEN_FEED_TAGS = new Set(["ROUTE", "CHAT"]);
 
 /** Collapse consecutive stream deltas AND consecutive duplicate semantic
  *  entries (same text + tag), then keep the newest `max` events.
@@ -58,6 +54,9 @@ export function visibleEvents(entries: ActivityEntry[], max: number): ActivityEn
   // Look back far enough that collapsing doesn't drop real events.
   const raw = entries.slice(-Math.max(max * 3, max));
   for (const entry of raw) {
+    // Noise gate: routing chatter and the user-message echo never render
+    // in the live feed. They remain in the log for /activity debugging.
+    if (HIDDEN_FEED_TAGS.has(inferTag(entry))) continue;
     const prev = collapsed.length > 0 ? collapsed[collapsed.length - 1] : null;
     // Collapse consecutive stream deltas into the newest
     if (isStreamEntry(entry) && prev && isStreamEntry(prev)) {
@@ -113,6 +112,56 @@ export function wrapText(text: string, max: number): string[] {
     if (line.length > 0) out.push(line);
   }
   return out.length > 0 ? out : [""];
+}
+
+/** Tiny-vocabulary glyphs — the canonical map (re-exported via
+ *  shell/transcript.tsx for back-compat). */
+export const SEMANTIC_GLYPH: Record<ActivitySemantic, { glyph: string; color: string }> = {
+  working: { glyph: "→", color: COLORS.working },
+  success: { glyph: "✓", color: COLORS.success },
+  warning: { glyph: "!", color: COLORS.warning },
+  failed: { glyph: "×", color: COLORS.error },
+  decision: { glyph: "◆", color: COLORS.brand },
+};
+
+/** Derive the semantic class from the entry when not explicitly set.
+ *  Plan-mode denials are DECISIONS, not failures — the policy did its job. */
+export function semanticOf(entry: ActivityEntry): ActivitySemantic {
+  if (entry.semantic) return entry.semantic;
+  if (/^PLAN mode rejects/i.test(entry.text)) return "decision";
+  switch (entry.type) {
+    case "run.completed":
+    case "tool.completed":
+    case "mission.step_passed":
+    case "mission.completed":
+    case "verification.passed":
+    case "agent.complete":
+    case "approval.granted":
+      return "success";
+    case "run.failed":
+    case "tool.failed":
+    case "mission.step_failed":
+    case "mission.failed":
+    case "verification.failed":
+    case "agent.stopped":
+    case "approval.denied":
+    case "error":
+      return "failed";
+    case "tool.timeout":
+    case "approval.required":
+      return "warning";
+    case "model.changed":
+    case "mode":
+      return "decision";
+    default:
+      return "working";
+  }
+}
+
+/** Semantic glyph + color for a feed row:
+ *  → working  ✓ success  ! warning  × failed  ◆ decision */
+export function semanticGlyphOf(entry: ActivityEntry): { glyph: string; color: string } {
+  return SEMANTIC_GLYPH[semanticOf(entry)];
 }
 
 function inferTag(entry: ActivityEntry): string {
@@ -180,6 +229,8 @@ export interface ActivityStreamProps {
   width?: number;
   /** Expand every row that has a `fullText` payload. */
   details?: boolean;
+  /** Per-row expansion — ids toggled individually (Ctrl+G on latest). */
+  expandedIds?: ReadonlySet<string>;
   /** Compact mode: drop the border/header for narrow terminals. */
   compact?: boolean;
 }
@@ -189,38 +240,38 @@ export function ActivityStream({
   maxEntries = 4,
   width: widthProp,
   details = false,
-  compact: compactProp,
+  expandedIds,
 }: ActivityStreamProps): React.ReactElement {
   const { stdout } = useStdout();
   const termWidth = widthProp ?? stdout?.columns ?? 80;
-  const compact = compactProp ?? classifyWidth(termWidth) === "narrow";
 
-  // No border — just horizontal padding (2) when not compact.
-  const innerWidth = compact ? termWidth : Math.max(20, termWidth - 2);
-  const prefixWidth = TIMESTAMP_WIDTH + GAP + TAG_WIDTH + 1 + 2 + 1; // time + gap + tag + space + indicator(2) + space
+  // Rows render as `  ✓ TAG   message` — the semantic glyph leads, the
+  // tool verb follows, the message fills the shared content column.
+  const innerWidth = Math.max(20, termWidth - 2);
+  const prefixWidth = 2 + 1 + TAG_WIDTH + 1 + 1; // indent + glyph + tag + space + indicator col
   const msgMax = Math.max(10, innerWidth - prefixWidth);
 
   const finalVisible = visibleEvents(entries, maxEntries);
 
   return (
-    <Box flexDirection="column" paddingX={compact ? 0 : 1}>
-      {!compact && <Text dimColor color={COLORS.secondary}>activity</Text>}
+    <Box flexDirection="column">
       {finalVisible.length === 0 ? (
-        <Text dimColor> No activity yet — ask LiTT something.</Text>
+        <Text dimColor>{"  "}…working</Text>
       ) : (
         finalVisible.map((entry) => {
           const tag = inferTag(entry).padEnd(TAG_WIDTH);
           const color = activityColor(tag.trim());
-          const time = formatTime(entry.ts);
+          const semantic = semanticGlyphOf(entry);
           const hasDetails = !!entry.fullText && entry.fullText !== entry.text && entry.fullText.length > entry.text.length;
           const isStream = isStreamEntry(entry);
-          const msg = truncate(entry.text, msgMax);
-          const expanded = details && hasDetails;
+          const msg = truncate(redactSecrets(entry.text), msgMax);
+          const expanded = (details || expandedIds?.has(entry.id) === true) && hasDetails;
 
           return (
             <Box key={entry.id} flexDirection="column">
               <Box>
-                <Text dimColor>{time}{" ".repeat(GAP)}</Text>
+                <Text dimColor>{"  "}</Text>
+                <Text color={semantic.color}>{semantic.glyph} </Text>
                 <Text color={color} bold={!isStream}>{tag}</Text>
                 <Text dimColor> </Text>
                 {hasDetails && (
@@ -231,12 +282,12 @@ export function ActivityStream({
               </Box>
               {expanded && (
                 <Box flexDirection="column" marginLeft={prefixWidth}>
-                  {wrapText(entry.fullText!, msgMax)
+                  {wrapText(redactSecrets(entry.fullText!), msgMax)
                     .slice(0, DETAIL_MAX_LINES)
                     .map((line, i) => (
                       <Text key={i} color={COLORS.secondary} dimColor>{line}</Text>
                     ))}
-                  {wrapText(entry.fullText!, msgMax).length > DETAIL_MAX_LINES && (
+                  {wrapText(redactSecrets(entry.fullText!), msgMax).length > DETAIL_MAX_LINES && (
                     <Text color={COLORS.secondary} dimColor>…</Text>
                   )}
                 </Box>

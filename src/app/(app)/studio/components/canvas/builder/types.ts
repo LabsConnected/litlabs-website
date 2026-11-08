@@ -119,6 +119,8 @@ export interface NodeProps {
   rows?: number;           // textarea rows
   checked?: boolean;       // checkbox
   label?: string;          // checkbox/link label
+  imageLicense?: string;   // CC0, CC-BY, etc.
+  imageAttribution?: string; // "Photo by ..."
 }
 
 export interface CanvasNode {

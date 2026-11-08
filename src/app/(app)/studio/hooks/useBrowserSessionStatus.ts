@@ -13,6 +13,7 @@
  * Polling pauses while the tab is hidden to avoid pointless traffic.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 
 export type BrowserChipState = "live" | "idle" | "disconnected" | "unknown";
 
@@ -94,9 +95,13 @@ export function useBrowserSessionStatus(conversationId?: string, opts?: { active
 
   const fetchStatus = useCallback(async () => {
     try {
-      const params = conversationId
-        ? `?conversationId=${encodeURIComponent(conversationId)}`
-        : "";
+      // Optimistic "pending_*" conversation ids have no server row — a
+      // scoped status probe on one is a guaranteed miss. Probe
+      // unscoped instead until the canonical id replaces it.
+      const params =
+        conversationId && !isOptimisticConversationId(conversationId)
+          ? `?conversationId=${encodeURIComponent(conversationId)}`
+          : "";
       const res = await fetch(`/api/litt/browser/status${params}`, {
         credentials: "same-origin",
         cache: "no-store",

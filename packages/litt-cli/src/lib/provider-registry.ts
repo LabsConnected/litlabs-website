@@ -37,7 +37,7 @@
  */
 
 import type { ModelChoice } from "./model-routing.js";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { resolveOllamaTagsUrl } from "@litt/models";
@@ -839,14 +839,21 @@ export function saveModelPrefs(prefs: ModelPrefs, prefsPath: string): void {
   try {
     const dir = dirname(prefsPath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(prefsPath, JSON.stringify(prefs, null, 2) + "\n", "utf-8");
+    // Atomic: write to a sibling temp file, then rename over the target.
+    // A process killed mid-writeFileSync leaves truncated JSON that
+    // loadModelPrefs would silently reset to defaults — losing the
+    // operator's model selection with no error surfaced.
+    const tmp = `${prefsPath}.tmp-${process.pid}`;
+    writeFileSync(tmp, JSON.stringify(prefs, null, 2) + "\n", "utf-8");
+    renameSync(tmp, prefsPath);
   } catch {
     // Non-fatal
   }
 }
 
 export function getDefaultPrefsPath(): string {
-  const littHome = process.env.LITT_HOME ?? join(homedir(), ".litt");
+  // LITT_STATE_HOME (not LITT_HOME) — see getLittHome() in config.ts.
+  const littHome = process.env.LITT_STATE_HOME ?? join(homedir(), ".litt");
   return join(littHome, "model-prefs.json");
 }
 

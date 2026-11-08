@@ -65,6 +65,69 @@ describe("checkCommandForWorkspace", () => {
   });
 });
 
+describe("gitStatus — porcelain rename and quoting", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    process.env.TERMINAL_AUTH_SECRET = "x".repeat(32);
+    process.env.TERMINAL_PUBLIC_URL = "http://terminal.test";
+    process.env.TERMINAL_INTERNAL_SERVICE_KEY = "test-service-key";
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  // Probe answers ok; the exec call returns the canned porcelain output.
+  async function transportWithPorcelain(porcelain: string) {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: unknown) => {
+      if (String(url).includes("/exec")) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({ exitCode: 0, stdout: porcelain, stderr: "" }),
+        };
+      }
+      return { ok: true, json: () => Promise.resolve({ entries: [] }) };
+    });
+    const { createWorkspaceTransport } = await import(
+      "@/lib/litt-intelligence/workspace-transport"
+    );
+    return createWorkspaceTransport("proj-1", "user-1");
+  }
+
+  it("keeps the full post-image name when a rename destination contains ' -> '", async () => {
+    const transport = await transportWithPorcelain("## main\nR  old.txt -> a -> b.txt");
+    const status = await transport.gitStatus();
+    expect(status.staged).toEqual([{ path: "a -> b.txt", status: "R " }]);
+  });
+
+  it("does not truncate a non-rename filename that contains ' -> '", async () => {
+    const transport = await transportWithPorcelain("## main\n M a -> b.txt");
+    const status = await transport.gitStatus();
+    expect(status.modified).toEqual([{ path: "a -> b.txt", status: " M" }]);
+  });
+
+  it("splits at the first arrow OUTSIDE quotes — a quoted source name can contain ' -> '", async () => {
+    const transport = await transportWithPorcelain('## main\nR  "a -> old.txt" -> new.txt');
+    const status = await transport.gitStatus();
+    expect(status.staged).toEqual([{ path: "new.txt", status: "R " }]);
+  });
+
+  it("decodes core.quotePath octal escapes in rename destinations", async () => {
+    const transport = await transportWithPorcelain(
+      '## main\nR  "caf\\303\\251.txt" -> "renamed-\\303\\251.txt"',
+    );
+    const status = await transport.gitStatus();
+    expect(status.staged).toEqual([{ path: "renamed-é.txt", status: "R " }]);
+  });
+
+  it("decodes quoted non-rename paths in porcelain status", async () => {
+    const transport = await transportWithPorcelain('## main\n M "caf\\303\\251.txt"');
+    const status = await transport.gitStatus();
+    expect(status.modified).toEqual([{ path: "café.txt", status: " M" }]);
+  });
+});
+
 describe("createWorkspaceTransport — reachability probe", () => {
   const realFetch = globalThis.fetch;
 

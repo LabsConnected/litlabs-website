@@ -31,6 +31,17 @@ vi.mock("@/lib/siteConfig", () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
+// Ollama calls go through undici's own fetch (custom dispatchers are
+// rejected by Node's bundled fetch) — route it through the same mock so
+// dispatched calls stay interceptable and no real socket opens.
+vi.mock("undici", async (importOriginal) => {
+  const original = await importOriginal<typeof import("undici")>();
+  return {
+    ...original,
+    fetch: (...args: Parameters<typeof original.fetch>) => mockFetch(...args),
+  };
+});
+
 import {
   callLLMWithTools,
   buildAssistantToolCallMessage,
@@ -38,12 +49,14 @@ import {
   AgentBudgetExhaustedError,
   AllRoutesFailedError,
   _setOllamaProbeForTests,
+  _resetOllamaWarmForTests,
   type GeminiPart,
 } from "./llm-tool-calling";
 import {
   _resetProviderHealthForTests,
   getProviderHealth,
   planBasicRoutes,
+  recordProviderFailure,
 } from "./provider-registry";
 import { _resetModelRegistryForTests } from "./model-registry";
 
@@ -62,8 +75,11 @@ const PROVIDER_ENVS = [
   "OLLAMA_HOST_PC",
   "LITT_OLLAMA_URL",
   "OLLAMA_MODEL",
+  "OLLAMA_LOAD_TIMEOUT_MS",
+  "OLLAMA_TIMEOUT_MS",
   "OPENROUTER_MODEL",
   "GROQ_MODEL",
+  "GROQ_REQUEST_TOKEN_CEILING",
   "MISTRAL_MODEL",
   "CLOUDFLARE_AI_MODEL",
   "RAILWAY_ENVIRONMENT",
@@ -146,6 +162,26 @@ function makeGeminiRawResponse(parts: GeminiPart[]) {
   };
 }
 
+/** GET /api/ps — which models Ollama currently holds in memory. */
+function makeOllamaPsResponse(loadedNames: string[]) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ models: loadedNames.map((name) => ({ name, model: name })) }),
+    text: async () => "",
+  };
+}
+
+/** POST /api/generate warm load — model resident after this resolves. */
+function makeOllamaWarmResponse() {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ response: "", done: true }),
+    text: async () => '{"response":"","done":true}',
+  };
+}
+
 const WRITE_TOOL = {
   id: "write_file",
   description: "Write a file",
@@ -157,6 +193,7 @@ beforeEach(() => {
   _resetProviderHealthForTests();
   _resetModelRegistryForTests();
   _setOllamaProbeForTests(null);
+  _resetOllamaWarmForTests();
   vi.unstubAllEnvs();
   clearProviderEnvs();
 });
@@ -165,6 +202,7 @@ afterEach(() => {
   _resetProviderHealthForTests();
   _resetModelRegistryForTests();
   _setOllamaProbeForTests(null);
+  _resetOllamaWarmForTests();
   vi.unstubAllEnvs();
 });
 
@@ -230,6 +268,122 @@ describe("callLLMWithTools — provider selection", () => {
 
     await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
     expect(callsTo("openrouter")).toHaveLength(0);
+  });
+});
+
+describe("callLLMWithTools — Gemini tool-choice mapping", () => {
+  // Regression: attemptGemini silently dropped req.toolChoice — no
+  // toolConfig.functionCallingConfig was ever sent, so a "required" first
+  // step degraded to AUTO and gemini-2.5-flash could close the turn in
+  // prose (first-turn toolCalls:[] on execution-required Studio runs).
+  it("maps toolChoice 'required' to functionCallingConfig mode ANY", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch.mockResolvedValueOnce(
+      makeGeminiSuccessResponse("", [{ name: "write_file", args: { path: "index.html" } }]),
+    );
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "build it" }],
+      [WRITE_TOOL],
+      { toolChoice: "required" },
+    );
+
+    const body = lastBodyFor("generativelanguage");
+    const toolConfig = body.toolConfig as { functionCallingConfig?: { mode?: string } } | undefined;
+    expect(toolConfig?.functionCallingConfig?.mode).toBe("ANY");
+    expect(result.toolCalls).toHaveLength(1);
+  });
+
+  it("maps toolChoice 'none' to mode NONE and 'auto' to mode AUTO", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("no calls"))
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("auto reply"));
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL], { toolChoice: "none" });
+    let body = lastBodyFor("generativelanguage");
+    expect((body.toolConfig as { functionCallingConfig?: { mode?: string } })?.functionCallingConfig?.mode).toBe("NONE");
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL], { toolChoice: "auto" });
+    body = lastBodyFor("generativelanguage");
+    expect((body.toolConfig as { functionCallingConfig?: { mode?: string } })?.functionCallingConfig?.mode).toBe("AUTO");
+  });
+
+  it("omits toolConfig when toolChoice is unset or no tools are offered", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("plain"))
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("plain again"));
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(lastBodyFor("generativelanguage").toolConfig).toBeUndefined();
+
+    // No tools offered → 'required' cannot be honored; nothing is claimed.
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [], { toolChoice: "required" });
+    const body = lastBodyFor("generativelanguage");
+    expect(body.tools).toBeUndefined();
+    expect(body.toolConfig).toBeUndefined();
+  });
+
+  // Regression: gemini-2.5-flash empty-completes with
+  // finishReason=MALFORMED_FUNCTION_CALL on mode:ANY with large tool sets
+  // (production 2026-11-02 — every build request). The retry must re-issue
+  // once with mode:AUTO; a prose-only retry still fails over honestly.
+  it("retries once with mode AUTO on MALFORMED_FUNCTION_CALL for required toolChoice", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{ content: { parts: [] }, finishReason: "MALFORMED_FUNCTION_CALL" }],
+        }),
+        text: async () => "",
+      })
+      .mockResolvedValueOnce(
+        makeGeminiSuccessResponse("", [{ name: "write_file", args: { path: "index.html", content: "<h1>x</h1>" } }]),
+      );
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "build it" }],
+      [WRITE_TOOL],
+      { toolChoice: "required" },
+    );
+
+    const geminiCalls = callsTo("generativelanguage");
+    expect(geminiCalls).toHaveLength(2);
+    const secondBody = JSON.parse((geminiCalls[1][1] as { body: string }).body);
+    expect(
+      (secondBody.toolConfig as { functionCallingConfig?: { mode?: string } })?.functionCallingConfig?.mode,
+    ).toBe("AUTO");
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]?.toolId).toBe("write_file");
+  });
+
+  it("does not retry on other empty-completions for required toolChoice", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{ content: { parts: [] }, finishReason: "MAX_TOKENS" }],
+      }),
+      text: async () => "",
+    });
+
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "build it" }], [WRITE_TOOL], { toolChoice: "required" }),
+    ).rejects.toThrow();
+    // The AUTO retry is specific to MALFORMED_FUNCTION_CALL — a MAX_TOKENS
+    // empty completion must fail over without any mode:AUTO re-issue.
+    for (const call of callsTo("generativelanguage")) {
+      const body = JSON.parse((call[1] as { body: string }).body);
+      expect(
+        (body.toolConfig as { functionCallingConfig?: { mode?: string } })?.functionCallingConfig?.mode,
+      ).not.toBe("AUTO");
+    }
   });
 });
 
@@ -519,8 +673,46 @@ describe("callLLMWithTools — failure classification and failover", () => {
     expect(callsTo("groq")).toHaveLength(2);
   });
 
+  it("waits out a short all-route cooldown instead of failing the call", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    // The golden-run follow-up shape: the only credentialed route is inside
+    // a transient 429 cooldown left over from the build seconds earlier.
+    recordProviderFailure("groq", {
+      class: "rate_limited",
+      scope: "provider",
+      retryAfterMs: 400,
+      message: "rate limited",
+    });
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse("llama-3.3-70b-versatile", "after cooldown"),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+
+    expect(result.provider).toBe("groq");
+    expect(result.text).toBe("after cooldown");
+    expect(callsTo("groq")).toHaveLength(1);
+  });
+
+  it("still fails fast when the only route's cooldown exceeds the wait ceiling", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    // Provider-stated daily-quota waits (hours) must not hold a run open.
+    recordProviderFailure("groq", {
+      class: "rate_limited",
+      scope: "provider",
+      retryAfterMs: 24 * 60 * 60_000,
+      message: "daily quota exhausted",
+    });
+
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "hi" }], []),
+    ).rejects.toThrow(AllRoutesFailedError);
+    expect(callsTo("groq")).toHaveLength(0);
+  });
+
   it("a hanging provider attempt times out and the next provider continues", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("GEMINI_TIMEOUT_MS", "30000");
     vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     mockFetch
       .mockImplementationOnce(() => new Promise(() => {})) // Gemini hangs
@@ -654,7 +846,13 @@ describe("callLLMWithTools — empty provider payloads", () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
     vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     mockFetch
-      // Both Gemini models return candidates with no text and no calls.
+      // All three Gemini ladder models return candidates with no text and
+      // no calls. Each gets its single bounded bad_response retry before
+      // failover.
+      .mockResolvedValueOnce(makeGeminiRawResponse([]))
+      .mockResolvedValueOnce(makeGeminiRawResponse([]))
+      .mockResolvedValueOnce(makeGeminiRawResponse([]))
+      .mockResolvedValueOnce(makeGeminiRawResponse([]))
       .mockResolvedValueOnce(makeGeminiRawResponse([]))
       .mockResolvedValueOnce(makeGeminiRawResponse([]))
       .mockResolvedValueOnce(makeSuccessResponse("openrouter/free", "Recovered."));
@@ -667,7 +865,7 @@ describe("callLLMWithTools — empty provider payloads", () => {
 
     expect(result.text).toBe("Recovered.");
     expect(result.provider).toBe("openrouter");
-    expect(callsTo("generativelanguage")).toHaveLength(2);
+    expect(callsTo("generativelanguage")).toHaveLength(6);
   });
 
   it("an OpenAI-compatible empty completion (no content, no tool_calls) advances to the next model", async () => {
@@ -1111,6 +1309,7 @@ describe("callLLMWithTools — deadline and abort", () => {
 
   it("the whole chain shares one absolute deadline — a short budget stops it early", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("GEMINI_TIMEOUT_MS", "30000");
     vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     mockFetch.mockImplementation(() => new Promise(() => {})); // every call hangs
 
@@ -1183,6 +1382,10 @@ describe("callLLMWithTools — Ollama local route", () => {
     mockFetch
       .mockResolvedValueOnce(makeGeminiErrorResponse(500, "Gemini down"))
       .mockResolvedValueOnce(makeErrorResponse(402, "OpenRouter out of credits"))
+      // /api/ps — nothing loaded yet → cold start required
+      .mockResolvedValueOnce(makeOllamaPsResponse([]))
+      // /api/generate — warm load completes
+      .mockResolvedValueOnce(makeOllamaWarmResponse())
       .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "Local model handled it."));
 
     const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
@@ -1193,7 +1396,253 @@ describe("callLLMWithTools — Ollama local route", () => {
     // tool-capable model picked from the probe.
     const ollamaCalls = callsTo("localhost:11434/v1/chat/completions");
     expect(ollamaCalls).toHaveLength(1);
-    expect(lastBodyFor("localhost:11434").model).toBe("llama3.1:8b");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("llama3.1:8b");
+  });
+
+  it("warms a cold model via /api/generate with keep_alive before inference", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse([]))
+      .mockResolvedValueOnce(makeOllamaWarmResponse())
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "warm ok"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+
+    const warmCalls = callsTo("11434/api/generate");
+    expect(warmCalls).toHaveLength(1);
+    const warmBody = JSON.parse((warmCalls[0][1] as { body: string }).body);
+    expect(warmBody.model).toBe("llama3.1:8b");
+    expect(warmBody.keep_alive).toBeTruthy();
+    expect(warmBody.stream).toBe(false);
+    // Warm ran before the inference call.
+    expect(mockFetch.mock.invocationCallOrder[mockFetch.mock.calls.indexOf(warmCalls[0])]).toBeLessThan(
+      mockFetch.mock.invocationCallOrder[
+        mockFetch.mock.calls.indexOf(callsTo("11434/v1/chat/completions")[0])
+      ],
+    );
+  });
+
+  it("skips the warm load when /api/ps already has the model resident", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["llama3.1:8b"]))
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "already hot"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(callsTo("11434/api/generate")).toHaveLength(0);
+    expect(callsTo("11434/v1/chat/completions")).toHaveLength(1);
+  });
+
+  it("reuses the warm mark across attempts instead of re-loading", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse([]))
+      .mockResolvedValueOnce(makeOllamaWarmResponse())
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "one"))
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "two"));
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    await callLLMWithTools("sys", [{ role: "user", content: "hi again" }], [WRITE_TOOL]);
+
+    // Second attempt found the warm mark — no second ps/generate round-trip.
+    expect(callsTo("11434/api/generate")).toHaveLength(1);
+    expect(callsTo("11434/api/ps")).toHaveLength(1);
+    expect(callsTo("11434/v1/chat/completions")).toHaveLength(2);
+  });
+
+  it("prefers the smallest tool-capable model over a larger one", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => [
+      { name: "llama3.1:70b", sizeBytes: 40_000_000_000, families: ["llama"] },
+      { name: "llama3.1:8b", sizeBytes: 4_000_000_000, families: ["llama"] },
+    ]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["llama3.1:8b"]))
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "small ok"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("llama3.1:8b");
+  });
+
+  it("treats validated litt-* builder builds as tool-capable", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    // A custom Modelfile name (litt-builder) matches the shared
+    // tool-capable tag regex even though it is not a stock model name.
+    _setOllamaProbeForTests(async () => [
+      { name: "litt-builder:8k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
+    ]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-builder:8k"]))
+      .mockResolvedValueOnce(makeSuccessResponse("litt-builder:8k", "litt build ok"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-builder:8k");
+  });
+
+  it("does not auto-pick litt-hermes-fast reasoning builds for the tool lane", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    // litt-hermes-fast emits reasoning-only output under the real Studio
+    // prompt (proven: zero tool calls) — it is excluded from tool-capable
+    // candidates even though it remains reachable via explicit pin.
+    _setOllamaProbeForTests(async () => [
+      { name: "litt-hermes-fast:8k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
+    ]);
+
+    const err = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [WRITE_TOOL],
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(AllRoutesFailedError);
+  });
+
+  it("honours the OLLAMA_MODEL override without touching warm/probe order", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    vi.stubEnv("OLLAMA_MODEL", "litt-tools:4k");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-tools:4k"]))
+      .mockResolvedValueOnce(makeSuccessResponse("litt-tools:4k", "override ok"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-tools:4k");
+  });
+
+  it("sends think:false to reasoning-family builds so tool calls are not stalled", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    // Pinned explicitly — litt-hermes-fast is never auto-picked for tools.
+    vi.stubEnv("OLLAMA_MODEL", "litt-hermes-fast:8k");
+    _setOllamaProbeForTests(async () => [
+      { name: "litt-hermes-fast:8k", sizeBytes: 1_300_000_000, families: ["qwen3"] },
+    ]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-hermes-fast:8k"]))
+      .mockResolvedValueOnce(makeSuccessResponse("litt-hermes-fast:8k", "direct answer"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    // The litt-* builds are qwen3 reasoning models — without think:false the
+    // completion burns the budget on `reasoning` and `content` stays empty.
+    expect(lastBodyFor("11434/v1/chat/completions").think).toBe(false);
+  });
+
+  it("does not send think:false to non-reasoning local models", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => [
+      { name: "llama3.1:8b", sizeBytes: 4_000_000_000, families: ["llama"] },
+    ]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["llama3.1:8b"]))
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "plain"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(lastBodyFor("11434/v1/chat/completions").think).toBeUndefined();
+  });
+
+  it("prefers the smaller context tag between equal-rank candidates", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => [
+      { name: "litt-hermes:64k", sizeBytes: 2_500_000_000, families: ["qwen3"] },
+      { name: "litt-hermes:32k", sizeBytes: 2_500_000_000, families: ["qwen3"] },
+    ]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeOllamaPsResponse(["litt-hermes:32k"]))
+      .mockResolvedValueOnce(makeSuccessResponse("litt-hermes:32k", "small ctx ok"));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.provider).toBe("ollama");
+    expect(lastBodyFor("11434/v1/chat/completions").model).toBe("litt-hermes:32k");
+  });
+
+  it("bounds the cold load by OLLAMA_LOAD_TIMEOUT_MS, not the inference timeout", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    vi.stubEnv("OLLAMA_LOAD_TIMEOUT_MS", "25");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    mockFetch.mockImplementation((url) => {
+      const u = String(url);
+      if (u.includes("/api/ps")) return Promise.resolve(makeOllamaPsResponse([]));
+      if (u.includes("/api/generate")) return new Promise(() => {}); // cold load hangs
+      return Promise.resolve(makeSuccessResponse("llama3.1:8b", "unreachable"));
+    });
+
+    const err = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [WRITE_TOOL],
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(AllRoutesFailedError);
+    expect(callsTo("11434/api/generate")).toHaveLength(1);
+    // Inference was never attempted — the load died first.
+    expect(callsTo("11434/v1/chat/completions")).toHaveLength(0);
+    const failure = (err as AllRoutesFailedError).failures.find(
+      (f) => f.provider === "ollama",
+    );
+    expect(failure?.class).toBe("timeout");
+  });
+
+  it("serializes concurrent cold loads — only one /api/generate fires", async () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b"]);
+
+    let psCalls = 0;
+    let releaseWarm!: () => void;
+    const warmGate = new Promise<void>((r) => {
+      releaseWarm = r;
+    });
+    mockFetch.mockImplementation((url) => {
+      const u = String(url);
+      if (u.includes("/api/ps")) {
+        psCalls += 1;
+        // Only the load-serialized second caller observes a resident model —
+        // the first checked before the warm completed.
+        return Promise.resolve(makeOllamaPsResponse(psCalls > 1 ? ["llama3.1:8b"] : []));
+      }
+      if (u.includes("/api/generate")) {
+        return warmGate.then(() => makeOllamaWarmResponse());
+      }
+      return Promise.resolve(makeSuccessResponse("llama3.1:8b", "ok"));
+    });
+
+    const p1 = callLLMWithTools("sys", [{ role: "user", content: "one" }], [WRITE_TOOL]);
+    const p2 = callLLMWithTools("sys", [{ role: "user", content: "two" }], [WRITE_TOOL]);
+    await new Promise((r) => setTimeout(r, 50));
+    releaseWarm();
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.provider).toBe("ollama");
+    expect(r2.provider).toBe("ollama");
+    expect(callsTo("11434/api/generate")).toHaveLength(1);
+    expect(callsTo("11434/v1/chat/completions")).toHaveLength(2);
   });
 
   it("skips Ollama when no tool-capable local model is loaded", async () => {
@@ -1572,5 +2021,92 @@ describe("buildAssistantToolCallMessage — envelope hygiene", () => {
     const msg = buildAssistantToolCallMessage([], "hi", undefined);
     expect(msg.parts).toBeUndefined();
     expect(msg.content).toBe("hi");
+  });
+});
+
+describe("callLLMWithTools — per-model rate limits", () => {
+  it("a 429 on the primary Gemini model cools only that model and tries the next rung", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Quota exceeded for gemini-flash-latest"))
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("Lite served."));
+
+    const result = await callLLMWithTools(
+      "You are LiTT.",
+      [{ role: "user", content: "Hello" }],
+      [],
+    );
+
+    expect(result.text).toBe("Lite served.");
+    const calls = callsTo("generativelanguage");
+    expect(calls).toHaveLength(2);
+    // Second attempt went to the lite rung behind flash-latest.
+    expect(String(calls[1][0])).toContain("gemini-2.5-flash-lite");
+    // The PROVIDER stays healthy — a sibling quota pool served the call.
+    expect(getProviderHealth("gemini").state).toBe("healthy");
+  });
+
+  it("a 429 on the LAST Gemini model cools the provider (all quota pools saturated)", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiErrorResponse(429, "quota"))
+      .mockResolvedValueOnce(makeGeminiErrorResponse(429, "quota"))
+      .mockResolvedValueOnce(makeGeminiErrorResponse(429, "quota"));
+
+    await expect(
+      callLLMWithTools("You are LiTT.", [{ role: "user", content: "Hello" }], []),
+    ).rejects.toThrow(AllRoutesFailedError);
+
+    expect(callsTo("generativelanguage")).toHaveLength(3);
+    expect(getProviderHealth("gemini").state).toBe("cooldown");
+  });
+});
+
+describe("callLLMWithTools — per-request token ceiling", () => {
+  it("skips Groq models without a fetch when the request cannot fit the free-tier ceiling", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+
+    await expect(
+      callLLMWithTools(
+        // ~20k chars ≈ 5k tokens + 4k declared max_tokens = 9k > 8k ceiling.
+        "x".repeat(20_000),
+        [{ role: "user", content: "hi" }],
+        [],
+      ),
+    ).rejects.toThrow(AllRoutesFailedError);
+
+    // No network attempt was made — the rejection was guaranteed.
+    expect(callsTo("api.groq.com")).toHaveLength(0);
+    expect(getProviderHealth("groq").state).toBe("healthy");
+  });
+
+  it("still attempts Groq when the request fits the ceiling", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openai/gpt-oss-120b", "ok"));
+
+    const result = await callLLMWithTools(
+      "short prompt",
+      [{ role: "user", content: "hi" }],
+      [],
+      { maxTokens: 512 },
+    );
+
+    expect(result.provider).toBe("groq");
+    expect(callsTo("api.groq.com")).toHaveLength(1);
+  });
+
+  it("GROQ_REQUEST_TOKEN_CEILING re-admits large requests on a paid tier", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    vi.stubEnv("GROQ_REQUEST_TOKEN_CEILING", "100000");
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openai/gpt-oss-120b", "ok"));
+
+    const result = await callLLMWithTools(
+      "x".repeat(20_000),
+      [{ role: "user", content: "hi" }],
+      [],
+    );
+
+    expect(result.provider).toBe("groq");
+    expect(callsTo("api.groq.com")).toHaveLength(1);
   });
 });

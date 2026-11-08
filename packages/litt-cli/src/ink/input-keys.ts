@@ -139,6 +139,15 @@ export function normalizeKey(input: string, key: KeyInfo): NormalizedKeyEvent {
     return { kind: "SUBMIT", raw: input };
   }
 
+  // CR/LF normalization: a chunk of pure line-endings ("\r\n" delivered
+  // as ONE event — CRLF terminals, non-bracketed paste ending in a
+  // newline) is still just Enter. Without this, Ink hands us input
+  // "\r\n" with key.return=false and the bytes would be inserted into
+  // the draft as text instead of submitting.
+  if (/^[\r\n]+$/.test(input)) {
+    return { kind: "SUBMIT", raw: input };
+  }
+
   // Escape
   if (key.escape === true || input === "\u001b" || input === "\x1b") {
     return { kind: "ESCAPE", raw: input };

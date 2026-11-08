@@ -37,7 +37,7 @@ import type {
   ModelProfile,
   ToolDefinition,
 } from "@litt/agent-core";
-import { getProvider, type ProviderId } from "@litt/models";
+import { getProvider, ensureOllamaModelResident, type ProviderId } from "@litt/models";
 import { resolveLocalLaneEndpoint } from "./local-lane.js";
 import type { RoutedModel } from "./model-runtime.js";
 import {
@@ -252,6 +252,34 @@ export function resolveIdleStallMs(): number {
   return env > 0 ? env : DEFAULT_IDLE_STALL_MS;
 }
 
+/**
+ * Resolve Ollama's reasoning effort for OpenAI-compatible requests.
+ *
+ * Phone-sized Qwen models can spend the entire output budget in hidden
+ * `reasoning` deltas, producing the observed ~120s apparent stall with no
+ * visible answer. LiTT's tool contract does not need hidden reasoning, so
+ * the safe local default is "none". Set LITT_OLLAMA_REASONING_EFFORT=auto
+ * to omit the field and restore daemon/model defaults.
+ */
+function resolveOllamaReasoningEffort(): string | undefined {
+  const configured = process.env.LITT_OLLAMA_REASONING_EFFORT?.trim().toLowerCase();
+  if (!configured || configured === "none") return "none";
+  if (configured === "auto" || configured === "default") return undefined;
+  return configured;
+}
+
+/**
+ * keep_alive for local-daemon requests, when the operator configured one
+ * (OLLAMA_KEEP_ALIVE — same var the web lane and the daemon itself read).
+ * Returns undefined when unset so the request omits the field entirely
+ * and the daemon's own default applies — preserving prior behavior where
+ * the CLI sent no keep_alive at all.
+ */
+function resolveOllamaKeepAlive(): string | undefined {
+  const v = process.env.OLLAMA_KEEP_ALIVE?.trim();
+  return v || undefined;
+}
+
 // ─── Max tokens policy ──────────────────────────────────────────────
 //
 // Configurable max response tokens. Previously hardcoded to 4096, which
@@ -411,6 +439,7 @@ export function hasAnyProviderKey(): boolean {
     process.env.GOOGLE_API_KEY ||
     process.env.GEMINI_API_KEY ||
     process.env.GROQ_API_KEY ||
+    process.env.OPENAGENTS_API_KEY ||
     process.env.DEEPSEEK_API_KEY ||
     process.env.MISTRAL_API_KEY
   );
@@ -514,6 +543,7 @@ export class OpenRouterModelProvider implements ModelProvider {
   async stream(
     messages: ChatMessage[],
     emit: (event: ModelStreamEvent) => void,
+    abortSignal?: AbortSignal,
   ): Promise<ModelResult> {
     // Emit meta ONCE — this is where activeModel becomes known. Retries
     // (insufficient-credits stepped fallback) re-issue the fetch with a
@@ -551,7 +581,7 @@ export class OpenRouterModelProvider implements ModelProvider {
         }
       }
       try {
-        return await this.streamOnce(messages, emit, attemptMax, state);
+        return await this.streamOnce(messages, emit, attemptMax, state, abortSignal);
       } catch (err) {
         // Never retry once content has started streaming to the user —
         // a partial response must not be followed by a second one.
@@ -588,6 +618,7 @@ export class OpenRouterModelProvider implements ModelProvider {
     emit: (event: ModelStreamEvent) => void,
     maxTokens: number,
     state: { emittedDelta: boolean },
+    externalAbortSignal?: AbortSignal,
   ): Promise<ModelResult> {
     // ─── Transport stall watchdog (dogfood P0) ─────────────────────
     // A silently-dropped SSE connection (network cut, proxy hang) can
@@ -597,6 +628,11 @@ export class OpenRouterModelProvider implements ModelProvider {
     // is re-armed on every received chunk, so the abort fires exactly
     // idleStallMs after the last byte — no poll-interval quantization.
     const abort = new AbortController();
+    const abortFromExternal = () => {
+      if (!abort.signal.aborted) abort.abort();
+    };
+    if (externalAbortSignal?.aborted) abortFromExternal();
+    externalAbortSignal?.addEventListener("abort", abortFromExternal, { once: true });
     let stallTimer: ReturnType<typeof setTimeout> | undefined;
     const armStallTimer = () => {
       if (stallTimer) clearTimeout(stallTimer);
@@ -869,6 +905,7 @@ export function openAiCompatibleLocalEndpoint(
 export const OPENAI_COMPATIBLE_NATIVE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
   "openai",
   "xai",
+  "openagents",
   "deepseek",
   "kimi",
   "mistral",
@@ -989,6 +1026,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
   async stream(
     messages: ChatMessage[],
     emit: (event: ModelStreamEvent) => void,
+    abortSignal?: AbortSignal,
   ): Promise<ModelResult> {
     // Emit meta — provider is the NATIVE provider actually serving.
     emit({
@@ -1000,6 +1038,11 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
 
     // Transport stall watchdog (same discipline as OpenRouter adapter).
     const abort = new AbortController();
+    const abortFromExternal = () => {
+      if (!abort.signal.aborted) abort.abort();
+    };
+    if (abortSignal?.aborted) abortFromExternal();
+    abortSignal?.addEventListener("abort", abortFromExternal, { once: true });
     let stallTimer: ReturnType<typeof setTimeout> | undefined;
     const armStallTimer = () => {
       if (stallTimer) clearTimeout(stallTimer);
@@ -1019,6 +1062,24 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
           `model=${this._model} max_tokens=${this._maxTokens}\n`,
         );
       }
+
+      // Ollama only: serialize model loads across every LiTT process on
+      // this host (shared lockfile gate — one agent performs a cold load
+      // at a time, everyone else finds it resident). Warm path costs one
+      // cheap /api/ps; soft-fail states are diag-only, never fatal here.
+      if (this.providerId === "ollama") {
+        const endpoint = this._endpoint.replace(/\/v1\/chat\/completions\/?$/, "");
+        await ensureOllamaModelResident(endpoint, this._model, {
+          keepAlive: resolveOllamaKeepAlive(),
+          signal: abort.signal,
+          onNote: (state, detail) => {
+            if (process.env.LITT_DIAG === "1") {
+              process.stderr.write(`[litt-diag][ollama-load-gate] ${state} ${detail}\n`);
+            }
+          },
+        });
+      }
+
       const response = await fetch(this._endpoint, {
         method: "POST",
         headers: this.authHeaders({ "Content-Type": "application/json" }),
@@ -1043,6 +1104,17 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
           // supported ... set reasoning_effort to 'none'."
           ...(this.providerId === "openai" && this._tools
             ? { reasoning_effort: "none" }
+            : {}),
+          // Ollama's OpenAI bridge also accepts reasoning_effort. Phone-sized
+          // thinking models otherwise spend the whole output budget in hidden
+          // reasoning and appear to stall (~120s observed on this device).
+          ...(this.providerId === "ollama"
+            ? { reasoning_effort: resolveOllamaReasoningEffort() }
+            : {}),
+          // keep_alive only when the operator configured one — unset means
+          // the daemon's own default applies (preserves prior behavior).
+          ...(this.providerId === "ollama" && resolveOllamaKeepAlive()
+            ? { keep_alive: resolveOllamaKeepAlive() }
             : {}),
         }),
         signal: abort.signal,

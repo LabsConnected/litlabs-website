@@ -251,7 +251,7 @@ const savedEnv: Record<string, string | undefined> = {};
 
 const MANAGED_ENV = [
   "LITT_LOCAL_MODE", "LITT_LOCAL_ONLY", "LITT_OLLAMA_URL", "LITT_MODEL",
-  "LITT_HOME", "LITT_TARGET_OVERRIDE",
+  "LITT_STATE_HOME", "LITT_HOME", "LITT_TARGET_OVERRIDE",
   "OPENROUTER_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY",
   "DEEPSEEK_API_KEY", "MISTRAL_API_KEY", "XAI_API_KEY", "KIMI_API_KEY",
   "QWEN_API_KEY", "LITT_CLERK_TOKEN",
@@ -271,7 +271,7 @@ beforeAll(async () => {
 
   // No cloud credential of any kind can serve this session.
   for (const k of MANAGED_ENV) delete process.env[k];
-  process.env.LITT_HOME = littHome;
+  process.env.LITT_STATE_HOME = littHome;
   process.env.LITT_LOCAL_MODE = "1";
   process.env.LITT_OLLAMA_URL = ollama.url;
   process.env.LITT_MODEL = MODEL;
@@ -311,13 +311,17 @@ describe("interactive LOCAL cockpit — signed out, Ollama reachable", () => {
     }
   }, 30000);
 
-  it("REQUIREMENT E3: the header reports LOCAL and SIGNED OUT", async () => {
+  it("REQUIREMENT E3: the identity bar reports the local lane", async () => {
     const c = await mountCockpit();
     try {
-      await c.waitFor((o) => o.includes("LOCAL"));
+      // New identity bar: "{model} · Ollama · local" — the lane is the
+      // permanent surface; account state moved to /whoami and /status.
+      await c.waitFor((o) => o.includes("Ollama"));
       const out = c.output();
-      expect(out).toContain("LOCAL");
-      expect(out.toUpperCase()).toContain("SIGNED OUT");
+      expect(out).toContain("Ollama");
+      expect(out.toLowerCase()).toContain("local");
+      // The badge cluster is gone — no SIGNED OUT chrome in the bar.
+      expect(out.toUpperCase()).not.toContain("SIGNED OUT");
     } finally {
       c.cleanup();
     }

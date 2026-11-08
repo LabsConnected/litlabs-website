@@ -32,6 +32,11 @@ interface TestModeState {
   options: { value: SimulatedPlan; label: string; description: string }[];
 }
 
+// A non-owner verdict cannot change within a session — remember it so
+// remounts (navigating between Studio surfaces remounts this indicator)
+// don't re-issue a doomed owner-only request.
+let notOwnerChecked = false;
+
 export interface OwnerTestModeIndicatorProps {
   /** `inline` = normal flow (header slot); `fixed` = viewport-pinned overlay. */
   placement?: "inline" | "fixed";
@@ -52,8 +57,12 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
   const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
 
   useEffect(() => {
+    if (notOwnerChecked) return;
     fetch("/api/owner/test-mode", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        if (r.status === 403) notOwnerChecked = true;
+        return r.ok ? r.json() : null;
+      })
       .then((data) => {
         if (data?.isOwner) {
           setState(data);

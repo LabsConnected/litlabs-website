@@ -1,15 +1,13 @@
 /**
  * LiTTShell — the minimal shell composition root.
  *
- *   LiTT                                  LOCAL          ← header
- *   ┌──────────────────────────────────────────────────────────┐
- *   │ (Welcome | transcript viewport + DONE)                   │ ← fixed region
- *   │ (scroll indicator while browsing history)                │
- *   └──────────────────────────────────────────────────────────┘
- *   │ › Ask LiTT anything...▌                                   ← composer
+ *   ◈ LiTT                                        Ollama · local  ← identity bar (Header)
+ *   project / branch
  *   ─────────────────────────────────────────────────────────────
- *   LiTT Auto → GPT-5.6 Luna              ○ Plan   ● Act        ← status bar
- *   litlabs-website · feat/litt-final-integration · LOCAL    clean
+ *   (Welcome | transcript viewport + inline tool events)         ← fixed region
+ *   ─────────────────────────────────────────────────────────────
+ *   › Ask LiTT anything…▌                                        ← composer
+ *   Act · ask before changes                / commands  ? help   ← status line
  *
  * The content region has a FIXED height (viewport − chrome): the
  * welcome and the transcript swap inside the same reserved region, so
@@ -38,14 +36,21 @@ import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 import type { WorkstreamSnapshot } from "../workstream-store.js";
 import type { ExecutionTarget } from "../../lib/execution-target.js";
 import { WorkstreamDock } from "../workstream-dock.js";
+import { SectionDivider } from "../ui-primitives.js";
 
 /** Rows consumed by fixed chrome below the content region:
- *  composer margin(1) + composer(1) + status margin(1) + divider(1) + 2 status lines. */
-const CHROME_ROWS = 6;
+ *  margin(1) + divider(1) + composer(1) + mode/hint(1), plus one slack
+ *  row for the conditional COMMAND/CONTEXT hint under the composer. */
+const CHROME_ROWS = 5;
+/** Rows consumed by the identity bar above the content region:
+ *  mark + lane(1) + project/branch(1) + divider(1). */
+const HEADER_ROWS = 3;
 
 export interface LiTTShellProps {
   messages: ChatMessage[];
   activityLog: ActivityEntry[];
+  /** Per-activity expansion — entry ids toggled individually (Ctrl+G latest). */
+  expandedActivityIds?: ReadonlySet<string>;
   holoState: HoloState;
   isProcessing: boolean;
   busySince: number | null;
@@ -119,6 +124,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const {
     messages, activityLog, holoState, isProcessing, busySince, missionState,
     gitModified, gitUntracked, toolProgress, toolDetails = false,
+    expandedActivityIds,
     executionTarget, canonicalMission, workstream,
     composerValue, onComposerChange, onSubmit, onNavigateHistory,
     onOpenPalette, onClosePalette, onOpenContext, onOpenFailureView, composerDisabled,
@@ -169,7 +175,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
 
   // Content measure: readable width on wide terminals, natural on narrow.
   const contentWidth = Math.max(32, Math.min(CONTENT_MEASURE, columns - 4));
-  const contentRows = Math.max(8, rows - 1 - CHROME_ROWS);
+  const contentRows = Math.max(8, rows - HEADER_ROWS - CHROME_ROWS);
 
   const layout = useMemo(() => layoutTranscript(messages, contentWidth), [messages, contentWidth]);
 
@@ -302,6 +308,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
             gitUntracked={gitUntracked}
             toolProgress={toolProgress}
             toolDetails={toolDetails}
+            expandedIds={expandedActivityIds}
             holoState={holoState}
             isProcessing={isProcessing}
             executionTarget={executionTarget}
@@ -330,44 +337,47 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
         />
       )}
 
-      {/* The single input line — always visible, always in place */}
-      <Composer
-        value={composerValue}
-        onChange={onComposerChange}
-        onSubmit={onSubmit}
-        onNavigateHistory={onNavigateHistory}
-        onOpenPalette={onOpenPalette}
-        onClosePalette={onClosePalette}
-        onOpenContext={onOpenContext}
-        onOpenFailureView={onOpenFailureView}
-        disabled={composerDisabled}
-        busy={isProcessing}
-        runtimeState={runtimeState}
-        scrolled={composerScrolled}
-        focusEpoch={composerFocusEpoch}
-        onReturnToLive={onComposerReturnToLive}
-      />
-
-      {/* The two-line bottom bar */}
-      <StatusBar
-        project={project}
-        branch={branch}
-        localRuntime={localRuntime}
-        remoteRuntime={remoteRuntime}
-        holoState={holoState}
-        brain={brain}
-        activeModel={activeModel}
-        activeProvider={activeProvider}
-        mode={mode}
-        isProcessing={isProcessing}
-        busySince={busySince}
-        approvalSince={approvalSince}
-        approvalAccumMs={approvalAccumMs}
-        approvalCount={approvalPrompt ? approvalPrompt.depth : 0}
-        missionState={missionState}
-        gitModified={gitModified}
-        gitUntracked={gitUntracked}
-      />
+      {/* The composer zone — divider, input line, mode/hint bar. Every
+          edge shares the content column with the header and transcript. */}
+      <Box flexDirection="column" marginTop={1} width={contentWidth}>
+        <SectionDivider width={contentWidth} />
+        <Composer
+          value={composerValue}
+          onChange={onComposerChange}
+          onSubmit={onSubmit}
+          onNavigateHistory={onNavigateHistory}
+          onOpenPalette={onOpenPalette}
+          onClosePalette={onClosePalette}
+          onOpenContext={onOpenContext}
+          onOpenFailureView={onOpenFailureView}
+          disabled={composerDisabled}
+          busy={isProcessing}
+          runtimeState={runtimeState}
+          scrolled={composerScrolled}
+          focusEpoch={composerFocusEpoch}
+          onReturnToLive={onComposerReturnToLive}
+        />
+        {/* The single-line bottom bar — mode·permission + runtime/hints */}
+        <StatusBar
+          project={project}
+          branch={branch}
+          localRuntime={localRuntime}
+          remoteRuntime={remoteRuntime}
+          holoState={holoState}
+          brain={brain}
+          activeModel={activeModel}
+          activeProvider={activeProvider}
+          mode={mode}
+          isProcessing={isProcessing}
+          busySince={busySince}
+          approvalSince={approvalSince}
+          approvalAccumMs={approvalAccumMs}
+          approvalCount={approvalPrompt ? approvalPrompt.depth : 0}
+          missionState={missionState}
+          gitModified={gitModified}
+          gitUntracked={gitUntracked}
+        />
+      </Box>
     </Box>
   );
 }

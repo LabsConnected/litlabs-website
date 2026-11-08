@@ -32,6 +32,7 @@
 
 import type { ShellExecutor, ToolResult, StreamChunk } from "./types.js";
 import type { RuntimeStore } from "./state.js";
+import { isBlockedChildEnvKey } from "./child-env.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -103,6 +104,24 @@ interface CommandSpec {
   subcommands?: Record<string, CapabilityTier>;
   /** Args that carry path values — validated against workspace root */
   pathArgs?: string[];
+  /**
+   * Every operand (non-flag token) is a filesystem path that must resolve
+   * inside the workspace. For file-reading commands (cat, grep, find, ...)
+   * the operands ARE the target paths — without this, `cat ../../.env`
+   * reads outside the workspace while staying classified read_only.
+   * Search commands (grep, rg) confine path operands only — the pattern
+   * argument is not a path. Other commands confine every operand.
+   */
+  confineOperands?: boolean;
+  /**
+   * Global (pre-subcommand) flags that consume the NEXT argv token as
+   * their value (e.g. `git -C <dir>`, `git -c k=v`). Without this, a
+   * flag's value could be mistaken for the subcommand — and worse, the
+   * real subcommand could be shifted out of the position the classifier
+   * checks (`git -C . commit` must still resolve `commit`).
+   * `--flag=value` forms are self-delimiting and need no entry here.
+   */
+  valueFlags?: string[];
   /** Whether this command can execute arbitrary code */
   arbitraryCode?: boolean;
 }
@@ -114,22 +133,24 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   // `where.cmd`) are normalized before this lookup — see normalizeCommand().
   where: { defaultCapability: "read_only" },
   which: { defaultCapability: "read_only" },
-  type: { defaultCapability: "read_only" }, // cmd: print file · sh builtin: describe command — both read-only
-  stat: { defaultCapability: "read_only" },
-  file: { defaultCapability: "read_only" },
-  tree: { defaultCapability: "read_only" },
-  du: { defaultCapability: "read_only" },
+  type: { defaultCapability: "read_only", confineOperands: true }, // cmd: print file · sh builtin: describe command — both read-only
+  stat: { defaultCapability: "read_only", confineOperands: true },
+  file: { defaultCapability: "read_only", confineOperands: true },
+  tree: { defaultCapability: "read_only", confineOperands: true },
+  du: { defaultCapability: "read_only", confineOperands: true },
   df: { defaultCapability: "read_only" },
-  diff: { defaultCapability: "read_only" },
-  cmp: { defaultCapability: "read_only" },
-  cut: { defaultCapability: "read_only" },
-  sort: { defaultCapability: "read_only" },
-  uniq: { defaultCapability: "read_only" },
-  md5sum: { defaultCapability: "read_only" },
-  sha256sum: { defaultCapability: "read_only" },
-  findstr: { defaultCapability: "read_only" },
-  more: { defaultCapability: "read_only" },
-  less: { defaultCapability: "read_only" },
+  diff: { defaultCapability: "read_only", confineOperands: true },
+  cmp: { defaultCapability: "read_only", confineOperands: true },
+  cut: { defaultCapability: "read_only", confineOperands: true },
+  // sort is arg-sensitive: `sort -o out in` writes a file — see
+  // classifyArgSensitive(). -o/--output stay path-confined.
+  sort: { defaultCapability: "read_only", pathArgs: ["-o", "--output"], confineOperands: true },
+  uniq: { defaultCapability: "read_only", confineOperands: true },
+  md5sum: { defaultCapability: "read_only", confineOperands: true },
+  sha256sum: { defaultCapability: "read_only", confineOperands: true },
+  findstr: { defaultCapability: "read_only", confineOperands: true },
+  more: { defaultCapability: "read_only", confineOperands: true },
+  less: { defaultCapability: "read_only", confineOperands: true },
   date: { defaultCapability: "read_only" },
   cal: { defaultCapability: "read_only" },
   id: { defaultCapability: "read_only" },
@@ -222,7 +243,11 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
     pathArgs: ["--cwd", "--prefix"],
   },
 
-  // Git — read-only vs mutating
+  // Git — read-only vs mutating. Subcommand detection is flag-aware:
+  // value-taking global flags (-C, -c, --git-dir, ...) are skipped so
+  // `git -C <dir> commit` still resolves `commit`. `branch`, `tag`,
+  // `remote`, `config`, `reflog`, `worktree`, `submodule` and
+  // `symbolic-ref` are arg-sensitive — see gitSubcommandCapability().
   git: {
     defaultCapability: "read_only",
     subcommands: {
@@ -234,16 +259,37 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
       blame: "read_only",
       ls: "read_only",
       "ls-files": "read_only",
+      "ls-remote": "read_only",
+      "ls-tree": "read_only",
       remote: "read_only",
       tag: "read_only",
       describe: "read_only",
       rev: "read_only",
       "rev-parse": "read_only",
+      "rev-list": "read_only",
+      "cat-file": "read_only",
+      "for-each-ref": "read_only",
+      "count-objects": "read_only",
+      "name-rev": "read_only",
+      "show-branch": "read_only",
+      whatchanged: "read_only",
+      fsck: "read_only",
+      grep: "read_only",
+      var: "read_only",
+      "verify-tag": "read_only",
+      "verify-commit": "read_only",
+      shortlog: "read_only",
+      help: "read_only",
+      reflog: "read_only",
+      worktree: "read_only",
+      submodule: "read_only",
+      "symbolic-ref": "read_only",
       config: "workspace_edit",
       checkout: "workspace_edit",
       switch: "workspace_edit",
       restore: "workspace_edit",
       add: "workspace_edit",
+      stage: "workspace_edit",
       commit: "workspace_edit",
       merge: "workspace_edit",
       rebase: "workspace_edit",
@@ -251,6 +297,22 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
       "cherry-pick": "workspace_edit",
       revert: "workspace_edit",
       stash: "workspace_edit",
+      bisect: "workspace_edit",
+      gc: "workspace_edit",
+      prune: "workspace_edit",
+      repack: "workspace_edit",
+      archive: "workspace_edit",
+      bundle: "workspace_edit",
+      am: "workspace_edit",
+      apply: "workspace_edit",
+      "format-patch": "workspace_edit",
+      "checkout-index": "workspace_edit",
+      "update-index": "workspace_edit",
+      "read-tree": "workspace_edit",
+      "write-tree": "workspace_edit",
+      "commit-tree": "workspace_edit",
+      "update-ref": "workspace_edit",
+      "pack-refs": "workspace_edit",
       reset: "destructive",
       clean: "destructive",
       push: "external_action",
@@ -262,34 +324,39 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
       rm: "destructive",
     },
     pathArgs: ["-C", "--git-dir", "--work-tree"],
+    valueFlags: ["-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--namespace", "--config-env"],
   },
 
   // Build tools — mostly read-only
   tsc: { defaultCapability: "read_only", pathArgs: ["--project", "-p", "--outDir", "--out", "--declarationDir"] },
   "tsc-watch": { defaultCapability: "read_only", pathArgs: ["--project", "-p"] },
-  eslint: { defaultCapability: "read_only", pathArgs: ["--config", "-c", "--output-file"] },
+  eslint: { defaultCapability: "read_only", pathArgs: ["--config", "-c", "--output-file", "-o"] },
   prettier: { defaultCapability: "read_only", pathArgs: ["--config", "-c"] },
   vitest: { defaultCapability: "arbitrary_code", arbitraryCode: true, pathArgs: ["--config", "-c"] },
   jest: { defaultCapability: "arbitrary_code", arbitraryCode: true, pathArgs: ["--config", "-c"] },
 
   // File inspection — read-only
-  cat: { defaultCapability: "read_only" },
-  ls: { defaultCapability: "read_only" },
-  dir: { defaultCapability: "read_only" },
+  cat: { defaultCapability: "read_only", confineOperands: true },
+  ls: { defaultCapability: "read_only", confineOperands: true },
+  dir: { defaultCapability: "read_only", confineOperands: true },
   echo: { defaultCapability: "read_only" },
-  head: { defaultCapability: "read_only" },
-  tail: { defaultCapability: "read_only" },
-  wc: { defaultCapability: "read_only" },
-  find: { defaultCapability: "read_only" },
-  grep: { defaultCapability: "read_only" },
-  rg: { defaultCapability: "read_only" },
+  head: { defaultCapability: "read_only", confineOperands: true },
+  tail: { defaultCapability: "read_only", confineOperands: true },
+  wc: { defaultCapability: "read_only", confineOperands: true },
+  find: { defaultCapability: "read_only", confineOperands: true },
+  grep: { defaultCapability: "read_only", confineOperands: true },
+  rg: { defaultCapability: "read_only", confineOperands: true },
 
   // System info — read-only
   whoami: { defaultCapability: "read_only" },
   hostname: { defaultCapability: "read_only" },
   uname: { defaultCapability: "read_only" },
   pwd: { defaultCapability: "read_only" },
-  env: { defaultCapability: "read_only" },
+  // env is a command WRAPPER: `env [opts] [K=V ...] CMD [ARGS...]` runs
+  // CMD. unwrapEnvCommand() exposes the inner command before this spec
+  // is used. -C/--chdir is a path arg: `env -C /outside cat x` must not
+  // escape the workspace.
+  env: { defaultCapability: "read_only", pathArgs: ["-C", "--chdir"] },
   printenv: { defaultCapability: "read_only" },
 
   // LiTT CLI self-introspection — read-only diagnostic subcommands.
@@ -359,6 +426,479 @@ function isVersionFlag(arg: string): boolean {
   return VERSION_FLAGS.has(arg);
 }
 
+// ─── Operand walking ──────────────────────────────────────────────
+
+/**
+ * Return the argv indices of operand (non-flag) tokens.
+ *
+ * Flag tokens (`-x`, `--foo`) are skipped. A flag listed in
+ * spec.valueFlags also consumes the following token as its value
+ * (`git -C <dir>`); `--flag=value` is self-contained. This prevents
+ * flag/value pairs from shifting the subcommand out of argv[0] —
+ * `git -C . commit` must still resolve the `commit` subcommand, and
+ * `git -c k=v commit` must not see `k=v` as an unknown subcommand.
+ */
+function operandIndices(spec: CommandSpec, args: string[]): number[] {
+  const valueFlags = new Set(spec.valueFlags ?? []);
+  const out: number[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg.length > 1 && arg.startsWith("-")) {
+      if (!arg.includes("=") && valueFlags.has(arg)) i++; // flag consumes next token
+      continue;
+    }
+    out.push(i);
+  }
+  return out;
+}
+
+// ─── Command wrappers ─────────────────────────────────────────────
+
+/**
+ * `env` is a command wrapper: `env [opts] [K=V ...] CMD [ARGS ...]`
+ * executes CMD — `env FOO=1 rm -rf x` runs rm, so registering `env` as
+ * read_only would let any command bypass classification. Unwrap env's
+ * own options and assignments to expose the real command.
+ *
+ * Returns the inner command, or null when env is only printing the
+ * environment (no command operand) or just setting variables.
+ */
+function unwrapEnvCommand(args: string[]): { command: string; args: string[] } | null {
+  // env options that consume the next argv token as their value
+  const VALUE_OPTS = new Set(["-u", "--unset", "-C", "--chdir", "-a", "--argv0", "-P"]);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--") {
+      i++;
+      return i < args.length ? { command: args[i], args: args.slice(i + 1) } : null;
+    }
+    // -S/--split-string: the VALUE is a command line — split it and
+    // classify the result (`env -S 'touch x'` runs touch).
+    if (arg === "-S" || arg === "--split-string") {
+      const line = args[i + 1];
+      if (line === undefined) return null;
+      const parts = line.trim().split(/\s+/).filter(Boolean);
+      return parts.length > 0 ? { command: parts[0], args: parts.slice(1) } : null;
+    }
+    const splitEq = arg.match(/^(--split-string=|-S)([\s\S]*)$/);
+    if (splitEq && splitEq[2]) {
+      const parts = splitEq[2].trim().split(/\s+/).filter(Boolean);
+      return parts.length > 0 ? { command: parts[0], args: parts.slice(1) } : null;
+    }
+    if (arg.length > 1 && arg.startsWith("-")) {
+      if (!arg.includes("=") && VALUE_OPTS.has(arg)) i++; // consume value
+      continue;
+    }
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(arg)) continue; // K=V assignment
+    return { command: arg, args: args.slice(i + 1) }; // inner command
+  }
+  return null;
+}
+
+// ─── Arg-sensitive read-only commands ─────────────────────────────
+//
+// These commands are registered read_only, but specific flags or
+// operands turn them into mutating or arbitrary-code operations. The
+// classification must reflect the args, not just the binary name —
+// otherwise PLAN mode and the approval gate let the mutating forms
+// through (`find -delete`, `sort -o`, `date -s`, `eslint --fix`, ...).
+
+const FIND_EXEC_FLAGS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+const FIND_WRITE_FLAGS = new Set(["-fprint", "-fprint0", "-fprintf", "-fls"]);
+const DATE_VALUE_FLAGS = new Set(["-d", "--date", "-r", "--reference", "-f", "--file"]);
+
+function classifyArgSensitive(cmd: string, args: string[]): RiskAssessment | null {
+  switch (cmd) {
+    case "find": {
+      if (args.some((a) => FIND_EXEC_FLAGS.has(a))) {
+        return {
+          level: "elevated",
+          capability: "arbitrary_code",
+          reason: "find -exec/-ok runs an embedded command",
+          mutating: true,
+        };
+      }
+      if (args.includes("-delete")) {
+        return {
+          level: "dangerous",
+          capability: "destructive",
+          reason: "find -delete removes matched files",
+          mutating: true,
+        };
+      }
+      if (args.some((a) => FIND_WRITE_FLAGS.has(a))) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "find -fprint/-fprintf writes an output file",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "sort": {
+      // --compress-program execs a program when sort spills to temp
+      // files — arbitrary code, not a file write.
+      if (
+        args.some(
+          (a) => a === "--compress-program" || a.startsWith("--compress-program="),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "arbitrary_code",
+          reason: "sort --compress-program runs an external program",
+          mutating: true,
+        };
+      }
+      if (
+        args.some(
+          (a) =>
+            a === "-o" ||
+            a === "--output" ||
+            a.startsWith("--output=") ||
+            (a.startsWith("-o") && a.length > 2),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "sort -o/--output writes a file",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "tree": {
+      if (
+        args.some(
+          (a) =>
+            a === "-o" ||
+            a === "--output" ||
+            a.startsWith("--output=") ||
+            (a.startsWith("-o") && a.length > 2),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "tree -o/--output writes a file",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "less": {
+      if (
+        args.some(
+          (a) =>
+            a === "--log-file" ||
+            a.startsWith("--log-file=") ||
+            (!a.startsWith("--") &&
+              (a === "-o" || a === "-O" ||
+                ((a.startsWith("-o") || a.startsWith("-O")) && a.length > 2))),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "less -o/-O/--log-file writes a file",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "date": {
+      if (args.some((a) => a === "-s" || a === "--set" || a.startsWith("--set="))) {
+        return {
+          level: "dangerous",
+          capability: "external_action",
+          reason: "date -s/--set changes the system clock",
+          mutating: true,
+        };
+      }
+      // A bare operand (not a flag value, not a +FORMAT) is a new time
+      // to set (MMDDhhmm). Skip values of flags that take one.
+      for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (a.length > 1 && a.startsWith("-")) {
+          if (!a.includes("=") && DATE_VALUE_FLAGS.has(a)) i++;
+          continue;
+        }
+        if (!a.startsWith("+")) {
+          return {
+            level: "dangerous",
+            capability: "external_action",
+            reason: "date <operand> sets the system clock",
+            mutating: true,
+          };
+        }
+      }
+      return null;
+    }
+    case "hostname": {
+      // `hostname` prints the name; `hostname NAME` sets it.
+      // -F/--file also sets it (from file contents).
+      if (
+        args.some((a) => a === "-F" || a === "--file") ||
+        args.some((a) => !(a.length > 1 && a.startsWith("-")))
+      ) {
+        return {
+          level: "dangerous",
+          capability: "external_action",
+          reason: "hostname <name>/-F changes the system hostname",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "rg": {
+      if (
+        args.some(
+          (a) =>
+            a === "--pre" ||
+            a.startsWith("--pre=") ||
+            a === "--pre-glob" ||
+            a.startsWith("--pre-glob=") ||
+            a === "--hostname-bin" ||
+            a.startsWith("--hostname-bin="),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "arbitrary_code",
+          reason: "rg --pre/--hostname-bin runs an external program",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "eslint": {
+      if (
+        args.some(
+          (a) =>
+            a === "--fix" ||
+            a === "--cache" ||
+            a === "-o" ||
+            a === "--output-file" ||
+            a.startsWith("--output-file="),
+        )
+      ) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "eslint --fix/--cache/-o writes files",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "prettier": {
+      if (args.some((a) => a === "-w" || a === "--write")) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "prettier --write modifies files",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    case "tsc":
+    case "tsc-watch": {
+      // tsc emits build artifacts by default; only explicitly
+      // non-emitting modes stay read-only.
+      const nonEmitting = args.some((a) =>
+        ["--noEmit", "--showConfig", "--listFilesOnly", "--noCheck"].includes(a),
+      );
+      if (!nonEmitting) {
+        return {
+          level: "elevated",
+          capability: "workspace_edit",
+          reason: "tsc emits build artifacts (no --noEmit)",
+          mutating: true,
+        };
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+// ─── Git arg-sensitive subcommands ────────────────────────────────
+
+const GIT_CONFIG_MUTATE_FLAGS = new Set([
+  "--add",
+  "--unset",
+  "--unset-all",
+  "--replace-all",
+  "--rename-section",
+  "--remove-section",
+  "-e",
+  "--edit",
+]);
+const GIT_CONFIG_VALUE_FLAGS = new Set([
+  "-f",
+  "--file",
+  "--blob",
+  "--default",
+  "--type",
+  "--get",
+  "--get-all",
+  "--get-regexp",
+  "--get-urlmatch",
+  "--fixed-value",
+]);
+const GIT_REF_LIST_FLAGS = new Set([
+  "-l",
+  "--list",
+  "--show-current",
+  "-r",
+  "--remotes",
+  "-v",
+  "-vv",
+  "-q",
+  "--quiet",
+  "-i",
+  "--ignore-case",
+  "--omit-empty",
+  "--sort",
+  "--format",
+  "--points-at",
+  "--merged",
+  "--no-merged",
+  "--contains",
+  "--no-contains",
+  "--column",
+  "--no-column",
+  "--color",
+  "--no-color",
+  "--abbrev",
+  "--no-abbrev",
+  "--exclude",
+  "-n",
+]);
+// `-a`/`--all` mean "list all" for `git branch` but `-a` is `--annotate`
+// (creates a tag) for `git tag` — kept out of the shared set.
+const GIT_BRANCH_LIST_FLAGS = new Set(["-a", "--all"]);
+const GIT_REF_MUTATE_FLAGS = new Set([
+  "-m",
+  "-M",
+  "--move",
+  "-c",
+  "-C",
+  "--copy",
+  "-u",
+  "--set-upstream-to",
+  "--unset-upstream",
+  "-f",
+  "--force",
+  "-t",
+  "--track",
+  "-s",
+  "--sign",
+  "--annotate",
+  "-e",
+  "--edit-description",
+]);
+const GIT_REMOTE_MUTATE_OPS = new Set([
+  "add",
+  "rename",
+  "remove",
+  "rm",
+  "set-url",
+  "set-head",
+  "set-branches",
+  "prune",
+  "update",
+]);
+
+/** Count operand tokens (non-flag args, skipping values of known value-flags). */
+function countOperands(args: string[], valueFlags: Set<string>): number {
+  let count = 0;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.length > 1 && a.startsWith("-")) {
+      if (!a.includes("=") && valueFlags.has(a)) i++;
+      continue;
+    }
+    count++;
+  }
+  return count;
+}
+
+/**
+ * Argument-sensitive capability for git subcommands registered
+ * read_only whose operands can mutate (`git branch foo` creates a
+ * branch, `git tag v1` creates a tag, `git remote add` writes config).
+ * Returns the corrected tier, or null to keep the map value.
+ */
+function gitSubcommandCapability(sub: string, rest: string[]): CapabilityTier | null {
+  switch (sub) {
+    case "config": {
+      if (rest.some((a) => GIT_CONFIG_MUTATE_FLAGS.has(a))) return "workspace_edit";
+      // `git config <key>` reads; `git config <key> <value>` writes.
+      return countOperands(rest, GIT_CONFIG_VALUE_FLAGS) >= 2 ? "workspace_edit" : "read_only";
+    }
+    case "branch":
+    case "tag": {
+      if (rest.some((a) => a === "-d" || a === "-D" || a === "--delete")) return "destructive";
+      const isListFlag = (a: string) =>
+        GIT_REF_LIST_FLAGS.has(a) ||
+        GIT_REF_LIST_FLAGS.has(a.split("=")[0]) ||
+        (sub === "branch" && GIT_BRANCH_LIST_FLAGS.has(a));
+      if (rest.some(isListFlag)) return "read_only";
+      // A name operand (or a mutate flag) creates/moves the ref.
+      // `git tag -a` is annotate (mutating) — for tag, -a is not a list flag.
+      const isMutateFlag = (a: string) =>
+        GIT_REF_MUTATE_FLAGS.has(a) || (sub === "tag" && a === "-a");
+      if (rest.some(isMutateFlag)) return "workspace_edit";
+      if (countOperands(rest, new Set(["-u", "--set-upstream-to", "-m", "-F"])) > 0)
+        return "workspace_edit";
+      return null;
+    }
+    case "remote": {
+      const op = rest.find((a) => !(a.length > 1 && a.startsWith("-")));
+      return op !== undefined && GIT_REMOTE_MUTATE_OPS.has(op) ? "workspace_edit" : null;
+    }
+    case "reflog": {
+      const op = rest.find((a) => !(a.length > 1 && a.startsWith("-")));
+      return op === "expire" || op === "delete" ? "destructive" : "read_only";
+    }
+    case "worktree": {
+      const op = rest.find((a) => !(a.length > 1 && a.startsWith("-")));
+      return op === undefined || op === "list" ? "read_only" : "workspace_edit";
+    }
+    case "submodule": {
+      const op = rest.find((a) => !(a.length > 1 && a.startsWith("-")));
+      if (op === "foreach") return "arbitrary_code";
+      return op === undefined || op === "status" ? "read_only" : "workspace_edit";
+    }
+    case "symbolic-ref": {
+      if (rest.some((a) => a === "-d" || a === "--delete")) return "workspace_edit";
+      // `symbolic-ref -q HEAD` reads; `symbolic-ref HEAD <ref>` writes.
+      return countOperands(rest, new Set(["-m"])) >= 2 ? "workspace_edit" : "read_only";
+    }
+    // The diff-family commands share diff machinery's --output flag, which
+    // writes output to a file — `git diff --output=/abs/path` escapes the
+    // workspace while looking read-only. Classify as a workspace write.
+    case "diff":
+    case "log":
+    case "show":
+    case "whatchanged":
+    case "shortlog":
+    case "blame": {
+      if (rest.some((a) => a === "--output" || a === "-o" || a.startsWith("--output="))) {
+        return "workspace_edit";
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
 // ─── Operation parser ─────────────────────────────────────────────
 
 /**
@@ -421,38 +961,77 @@ export function classifyCommand(command: string, args: string[], cwd?: string): 
     };
   }
 
-  // Determine capability from subcommand
-  let capability = spec.defaultCapability;
-  if (spec.subcommands && args.length > 0) {
-    const subcmd = args[0].toLowerCase();
-    if (spec.subcommands[subcmd]) {
-      capability = spec.subcommands[subcmd];
+  // Command wrappers: `env CMD ...` executes CMD — classify the inner
+  // command so a wrapper can't launder a mutation through a read-only
+  // registration (`env rm -rf x`, `env -S 'rm -rf x'`).
+  if (cmd === "env") {
+    const inner = unwrapEnvCommand(args);
+    if (inner) {
+      const innerRisk = classifyCommand(inner.command, inner.args, cwd);
+      return { ...innerRisk, reason: `env wrapper → ${innerRisk.reason}` };
     }
+    return {
+      level: "safe",
+      capability: "read_only",
+      reason: "env → prints environment (no wrapped command)",
+      mutating: false,
+    };
   }
 
-  // Special case: git branch -D (destructive)
-  if (cmd === "git" && args[0] === "branch" && (args.includes("-D") || args.includes("-d"))) {
-    capability = "destructive";
-  }
+  // Registered read_only commands whose flags/operands turn them
+  // mutating or arbitrary-code (find -exec, sort -o, eslint --fix, ...).
+  const argSensitive = classifyArgSensitive(cmd, args);
+  if (argSensitive) return argSensitive;
 
-  // Special case: litt --remote <subcommand> or litt <subcommand>
-  // The --remote flag can appear before the subcommand, so we scan args
-  // for the first non-flag token and check if it's a known read-only
-  // subcommand. This lets the agent run `litt --remote doctor` etc.
-  if (cmd === "litt" && spec.subcommands) {
-    const firstNonFlag = args.find((a) => !a.startsWith("-"));
-    if (firstNonFlag) {
-      const subcmd = firstNonFlag.toLowerCase();
-      if (spec.subcommands[subcmd]) {
-        capability = spec.subcommands[subcmd];
+  // Determine capability from the subcommand — the first OPERAND
+  // token. Flag/value pairs before it must not shift it out of place:
+  // `git -C <dir> commit` and `git -c k=v commit` still resolve
+  // `commit`. If the first operand is unknown but a later operand is a
+  // known subcommand (a value-flag we don't model consumed nothing),
+  // use it — fail closed toward the known capability.
+  let capability = spec.defaultCapability;
+  let subIndex: number | null = null;
+  if (spec.subcommands) {
+    const ops = operandIndices(spec, args);
+    if (ops.length > 0) {
+      if (spec.subcommands[args[ops[0]].toLowerCase()]) {
+        subIndex = ops[0];
+      } else {
+        const hit = ops.find((i) => spec.subcommands![args[i].toLowerCase()]);
+        if (hit !== undefined) {
+          subIndex = hit;
+        } else if (cmd === "git") {
+          // `git <unknown-op>` resolves an external `git-<op>` binary
+          // from PATH — arbitrary code, not a read-only builtin.
+          capability = "arbitrary_code";
+        }
+      }
+      if (subIndex !== null) {
+        capability = spec.subcommands[args[subIndex].toLowerCase()];
       }
     }
   }
 
+  // Arg-sensitive git subcommands: `git branch foo` creates a branch,
+  // `git remote add` writes config — the subcommand name alone is
+  // registered read_only, so the operands decide.
+  if (cmd === "git" && subIndex !== null) {
+    const upgraded = gitSubcommandCapability(
+      args[subIndex].toLowerCase(),
+      args.slice(subIndex + 1),
+    );
+    if (upgraded) capability = upgraded;
+  }
+
   // Special case: npm/pnpm/yarn run <script> — inspect package.json
   let resolvedScriptBody: string | null | undefined;
-  if ((cmd === "npm" || cmd === "pnpm" || cmd === "yarn") && args[0] === "run" && args.length >= 2) {
-    const scriptName = args[1];
+  if (
+    (cmd === "npm" || cmd === "pnpm" || cmd === "yarn") &&
+    subIndex !== null &&
+    args[subIndex] === "run" &&
+    args[subIndex + 1] !== undefined
+  ) {
+    const scriptName = args[subIndex + 1];
     resolvedScriptBody = resolvePackageScript(cwd ?? process.cwd(), scriptName);
     if (resolvedScriptBody === null) {
       return {
@@ -609,12 +1188,18 @@ function isWithinWorkspace(p: string, workspaceRoot: string): boolean {
  *
  * Handles both --flag value and --flag=value forms.
  */
+function pathOutsideWorkspace(pathValue: string, workspaceRoot: string): boolean {
+  if (!pathValue || pathValue.startsWith("-")) return false;
+  return !isWithinWorkspace(path.resolve(pathValue), workspaceRoot);
+}
+
 function validatePathArgs(
   command: string,
   args: string[],
   workspaceRoot: string,
 ): ExecutionError | null {
-  const spec = COMMAND_SPECS[command.toLowerCase()];
+  // `git.exe` / `Cat.CMD` must hit the same spec as `git` / `cat`.
+  const spec = COMMAND_SPECS[normalizeCommand(command)];
   if (!spec?.pathArgs) return null;
 
   const pathFlags = new Set(spec.pathArgs);
@@ -630,6 +1215,19 @@ function validatePathArgs(
       if (!isWithinWorkspace(resolved, workspaceRoot)) {
         return new ExecutionError(
           `Path argument "${arg} ${pathValue}" resolves outside workspace root`,
+          "PATH_ARG_ESCAPE",
+        );
+      }
+    }
+
+    // Attached short form used by sort: `-o/outside/file` (the separate
+    // `-o <path>` form is handled above). Only `-o`, so `-cconfig` is
+    // not mistaken for a prefix of an unrelated short flag.
+    if (pathFlags.has("-o") && arg.startsWith("-o") && !arg.startsWith("--") && arg.length > 2) {
+      const pathValue = arg.slice(2);
+      if (pathOutsideWorkspace(pathValue, workspaceRoot)) {
+        return new ExecutionError(
+          `Path argument "${arg}" resolves outside workspace root`,
           "PATH_ARG_ESCAPE",
         );
       }
@@ -654,34 +1252,643 @@ function validatePathArgs(
   return null;
 }
 
-// ─── Environment variable filtering ───────────────────────────────
-
 /**
- * Environment variables that are blocked from being passed to child processes.
- * These can be used to inject code or override security settings.
+ * For commands marked confineOperands, every operand (non-flag token)
+ * is resolved against the command cwd and must stay inside the
+ * workspace. This closes the read-escape path — `cat ../../.env`,
+ * `grep -r secret /`, `find /` — that flag-level pathArgs checking
+ * cannot reach, because for these commands the operand IS the path.
+ *
+ * Search tools (grep, rg) take `PATTERN [PATH...]`. The pattern is not a
+ * path — `rg /api/ .` and `grep ../ src/file.ts` search inside the
+ * workspace. Only operands that name files are checked. `-e`/`-f` and
+ * the other value-taking flags are skipped so their values are not
+ * mistaken for paths (except flags whose value IS a file, such as
+ * `-f`/`--file`).
+ *
+ * Flag tokens (`-x`, `--foo`) are skipped; `--flag=value` tokens are
+ * skipped because value-carrying flags are covered by pathArgs, except
+ * for the search-command parser which understands them directly.
  */
-const BLOCKED_ENV_VARS = new Set([
-  "NODE_OPTIONS",      // can inject --require
-  "NODE_PATH",         // can override module resolution
-  "LD_PRELOAD",        // can inject shared libraries
-  "LD_LIBRARY_PATH",   // can override library resolution
-  "DYLD_INSERT_LIBRARIES", // macOS injection
-  "PERL5OPT",          // can inject Perl modules
-  "PYTHONSTARTUP",     // can inject Python code
-  "PYTHONPATH",        // can override Python module resolution
-  "ELECTRON_RUN_AS_NODE", // can change Electron behavior
-  "FORCE_COLOR",       // not security but noisy
+type SearchFlagKind = "pattern" | "path" | "other";
+
+const SEARCH_PATTERN_SOURCE = new Set(["-e", "--regexp", "-f", "--file"]);
+
+const GREP_SEARCH_FLAGS = new Map<string, SearchFlagKind>([
+  ["-e", "pattern"],
+  ["--regexp", "pattern"],
+  ["-f", "path"],
+  ["--file", "path"],
+  ["--exclude-from", "path"],
+  ["-m", "other"],
+  ["--max-count", "other"],
+  ["--label", "other"],
+  ["--binary-files", "other"],
+  ["-d", "other"],
+  ["--directories", "other"],
+  ["-D", "other"],
+  ["--devices", "other"],
+  ["--include", "other"],
+  ["--exclude", "other"],
+  ["--exclude-dir", "other"],
+  ["-A", "other"],
+  ["--after-context", "other"],
+  ["-B", "other"],
+  ["--before-context", "other"],
+  ["-C", "other"],
+  ["--context", "other"],
+  ["--group-separator", "other"],
+]);
+
+const RG_SEARCH_FLAGS = new Map<string, SearchFlagKind>([
+  ["-e", "pattern"],
+  ["--regexp", "pattern"],
+  ["-f", "path"],
+  ["--file", "path"],
+  ["--ignore-file", "path"],
+  ["--cursor-ignore", "path"],
+  ["--pre", "other"],
+  ["--pre-glob", "other"],
+  ["--dfa-size-limit", "other"],
+  ["-E", "other"],
+  ["--encoding", "other"],
+  ["--engine", "other"],
+  ["-m", "other"],
+  ["--max-count", "other"],
+  ["--regex-size-limit", "other"],
+  ["-j", "other"],
+  ["--threads", "other"],
+  ["-g", "other"],
+  ["--glob", "other"],
+  ["--iglob", "other"],
+  ["-d", "other"],
+  ["--max-depth", "other"],
+  ["--max-filesize", "other"],
+  ["-t", "other"],
+  ["--type", "other"],
+  ["-T", "other"],
+  ["--type-not", "other"],
+  ["--type-add", "other"],
+  ["--type-clear", "other"],
+  ["-A", "other"],
+  ["--after-context", "other"],
+  ["-B", "other"],
+  ["--before-context", "other"],
+  ["--color", "other"],
+  ["--colors", "other"],
+  ["-C", "other"],
+  ["--context", "other"],
+  ["--context-separator", "other"],
+  ["--field-context-separator", "other"],
+  ["--field-match-separator", "other"],
+  ["--hostname-bin", "other"],
+  ["--hyperlink-format", "other"],
+  ["-M", "other"],
+  ["--max-columns", "other"],
+  ["--path-separator", "other"],
+  ["-r", "other"],
+  ["--replace", "other"],
+  ["--sort", "other"],
+  ["--sortr", "other"],
+  ["--generate", "other"],
 ]);
 
 /**
- * Filter environment variables to remove dangerous ones.
- * Merges process.env with provided env, then strips blocked vars.
+ * Path operands for grep/rg. The pattern (first positional, unless -e/-f
+ * already supplied it) is omitted. `--files` has no pattern, so every
+ * positional is a path.
  */
-function filterEnv(provided?: Record<string, string>): Record<string, string> {
-  const merged = { ...process.env, ...provided };
+function searchCommandPathOperands(cmd: "grep" | "rg", args: string[]): string[] {
+  const flags = cmd === "rg" ? RG_SEARCH_FLAGS : GREP_SEARCH_FLAGS;
+  const paths: string[] = [];
+  const positionals: string[] = [];
+  let patternFromFlag = false;
+  let endOfFlags = false;
+
+  const note = (name: string, kind: SearchFlagKind | undefined, value: string | undefined, consume: boolean) => {
+    if (SEARCH_PATTERN_SOURCE.has(name)) patternFromFlag = true;
+    if (consume && kind === "path" && value && value !== "-") paths.push(value);
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!endOfFlags && arg === "--") {
+      endOfFlags = true;
+      continue;
+    }
+    if (!endOfFlags && arg.startsWith("--") && arg.includes("=")) {
+      const eq = arg.indexOf("=");
+      const name = arg.slice(0, eq);
+      const value = arg.slice(eq + 1);
+      note(name, flags.get(name), value, true);
+      continue;
+    }
+    if (!endOfFlags && arg.startsWith("-") && !arg.startsWith("--") && arg.length > 1) {
+      // Grouped short options: `-neMARKER` is `-n -e MARKER` — the first
+      // option takes no value, so `-e` picks up "MARKER" as the pattern.
+      // Checking only arg.slice(0, 2) here skipped the group entirely when
+      // the first option was unknown, and the real operand was then dropped
+      // as the presumed pattern — letting `grep -neX /outside` read outside
+      // the workspace. Walk every option in the group; a value-taking
+      // option consumes the rest of the token, or the next argv token when
+      // nothing remains.
+      let j = 1;
+      while (j < arg.length) {
+        const name = `-${arg[j]}`;
+        const kind = flags.get(name);
+        if (kind === undefined) {
+          j++;
+          continue;
+        }
+        const attached = arg.slice(j + 1);
+        if (attached) {
+          note(name, kind, attached, true);
+        } else {
+          const value = args[i + 1];
+          if (value !== undefined) {
+            i++;
+            note(name, kind, value, true);
+          } else {
+            note(name, kind, undefined, false);
+          }
+        }
+        break;
+      }
+      continue;
+    }
+    if (!endOfFlags && flags.has(arg)) {
+      const kind = flags.get(arg);
+      const value = args[i + 1];
+      if (value !== undefined) {
+        i++;
+        note(arg, kind, value, true);
+      } else {
+        note(arg, kind, undefined, false);
+      }
+      continue;
+    }
+    if (!endOfFlags && arg.length > 1 && arg.startsWith("-")) continue;
+    if (arg) positionals.push(arg);
+  }
+
+  const noPattern = patternFromFlag || (cmd === "rg" && args.some((a) => a === "--files" || a === "--type-list"));
+  const pathPositionals = noPattern ? positionals : positionals.slice(1);
+  return [...paths, ...pathPositionals];
+}
+
+/**
+ * Operand extraction for non-search confineOperands commands. Option
+ * *values* are not files: `cut -d / -f 1 x` uses "/" as a delimiter,
+ * `find -printf "%p"` a format string, `findstr /S` an option token.
+ * Checking every non-flag token as a path both false-rejects legitimate
+ * commands and — in the grouped-short case — shifts a real file operand
+ * into an unchecked slot.
+ *
+ * Three option grammars cover the confined commands:
+ *   - getopt: single-char options, groupable (`-sd`, `-n5`, `-d/`).
+ *   - word:   multi-char single-dash predicates that are not groupable
+ *     (`find -name`, `-printf`).
+ *   - dos:    Windows-style `/X[:value]` option tokens (findstr, dir,
+ *     more) — a leading "/" is an option prefix, not a path root.
+ *
+ * Only option kinds that take a REQUIRED separate-token value are listed;
+ * optional-value options (`ls --color`, `du --time`) keep the following
+ * token as an operand — the real tool treats it as one, so the confinement
+ * check must too. Unknown options fail closed the same way: their next
+ * token stays a checked operand.
+ */
+type OperandMode = "getopt" | "word" | "dos";
+
+interface OperandSpec {
+  mode: OperandMode;
+  /** Value is a string/number, never a file — skipped, unchecked. */
+  valueFlags?: ReadonlySet<string>;
+  /**
+   * Value IS a path — collected and checked. CommandSpec.pathArgs entries
+   * are merged in for getopt commands, so a flag declared once is confined
+   * both by validatePathArgs and by operand checking.
+   */
+  pathFlags?: ReadonlySet<string>;
+  /** Flag consumes the next TWO tokens (`find -fprintf FILE FORMAT`). */
+  twoValueFlags?: ReadonlySet<string>;
+  /** After this flag, everything through the next `;`/`+` is command argv. */
+  execFlags?: ReadonlySet<string>;
+  /** First positional is a pattern/string, not a file (findstr). */
+  firstIsPattern?: boolean;
+  /** DOS `/X:value` flags whose attached value is a path (findstr /G /F /D). */
+  dosPathFlags?: ReadonlySet<string>;
+}
+
+const OPERAND_SPECS: Record<string, OperandSpec> = {
+  stat: {
+    mode: "getopt",
+    valueFlags: new Set(["-c", "--format", "--printf"]),
+  },
+  file: {
+    mode: "getopt",
+    valueFlags: new Set(["-F", "--separator", "-e", "--exclude", "--exclude-quiet", "-P", "--parameter"]),
+    pathFlags: new Set(["-f", "--files-from", "-m", "--magic-file"]),
+  },
+  tree: {
+    mode: "getopt",
+    valueFlags: new Set(["-L", "-P", "-I", "-H", "--filelimit", "--charset", "--timefmt"]),
+    pathFlags: new Set(["-o", "--output"]),
+  },
+  du: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-B", "--block-size", "-d", "--max-depth", "-t", "--threshold",
+      "--time-style", "--exclude",
+    ]),
+    pathFlags: new Set(["-X", "--exclude-from", "--files0-from"]),
+  },
+  diff: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-L", "--label", "-I", "--ignore-matching-lines", "-x", "--exclude",
+      "-D", "--ifdef", "--unchanged-line-format", "--old-line-format",
+      "--new-line-format", "--unchanged-group-format", "--old-group-format",
+      "--new-group-format", "--changed-group-format", "--horizon-lines", "--width",
+    ]),
+    pathFlags: new Set([
+      "-S", "--starting-file", "-X", "--exclude-from", "--from-file",
+      "--to-file", "--old-file", "--new-file", "--unchanged-file",
+    ]),
+  },
+  cmp: {
+    mode: "getopt",
+    valueFlags: new Set(["-n", "--bytes", "-i", "--ignore-initial"]),
+  },
+  cut: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-d", "--delimiter", "-f", "--fields", "-b", "--bytes",
+      "-c", "--characters", "--complement", "--output-delimiter",
+    ]),
+  },
+  sort: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-k", "--key", "-t", "--field-separator", "-S", "--buffer-size",
+      "--parallel", "--batch-size", "--compress-program",
+    ]),
+    pathFlags: new Set(["-T", "--temporary-directory", "--random-source", "--files0-from"]),
+  },
+  uniq: {
+    mode: "getopt",
+    valueFlags: new Set(["-f", "--skip-fields", "-s", "--skip-chars", "-w", "--check-chars"]),
+  },
+  head: {
+    mode: "getopt",
+    valueFlags: new Set(["-n", "--lines", "-c", "--bytes"]),
+  },
+  tail: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-n", "--lines", "-c", "--bytes", "-s", "--sleep-interval",
+      "--pid", "--max-unchanged-stats",
+    ]),
+  },
+  wc: {
+    mode: "getopt",
+    pathFlags: new Set(["--files0-from"]),
+  },
+  ls: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-I", "--ignore", "--hide", "--sort", "--time", "--time-style",
+      "--format", "--block-size", "--quoting-style", "--indicator-style",
+      "-T", "--tabsize", "-w", "--width",
+    ]),
+  },
+  less: {
+    mode: "getopt",
+    valueFlags: new Set([
+      "-p", "--pattern", "-P", "--prompt", "-t", "--tag", "-x", "--tabs",
+      "-z", "--window", "-j", "--jump-target", '-"', "--quotes", "-#", "--shift",
+    ]),
+    pathFlags: new Set(["-o", "-O", "--log-file", "-k", "--lesskey-file", "--tag-file"]),
+  },
+  find: {
+    mode: "word",
+    valueFlags: new Set([
+      "-name", "-iname", "-lname", "-ilname", "-path", "-ipath",
+      "-regex", "-iregex", "-regextype", "-type", "-xtype", "-perm",
+      "-user", "-group", "-uid", "-gid", "-size", "-mtime", "-mmin",
+      "-atime", "-amin", "-ctime", "-cmin", "-used", "-maxdepth",
+      "-mindepth", "-printf", "-format", "-fstype", "-context", "-D",
+      "-newermt", "-newerat", "-newerct", "-newerBt",
+    ]),
+    pathFlags: new Set([
+      "-newer", "-anewer", "-cnewer", "-neweraa", "-newerac", "-neweram",
+      "-newerca", "-newercc", "-newercm", "-newerma", "-newermc", "-newermm",
+      "-newerBa", "-newerBc", "-newerBm", "-samefile",
+    ]),
+    twoValueFlags: new Set(["-fprintf"]),
+    execFlags: new Set(["-exec", "-execdir", "-ok", "-okdir"]),
+  },
+  findstr: {
+    mode: "dos",
+    firstIsPattern: true,
+    dosPathFlags: new Set(["/G", "/F", "/D"]),
+  },
+  dir: { mode: "dos" },
+  more: { mode: "dos" },
+};
+
+/**
+ * getopt grammar: `--flag=value` is self-contained, `--flag value` and
+ * grouped shorts (`-sd`, `-d/`) follow POSIX option-argument rules. Any
+ * `-` token we cannot fully classify is skipped as a flag; the tokens we
+ * return are the ones the command will actually open.
+ */
+function getoptPathOperands(
+  args: string[],
+  ospec: OperandSpec,
+  spec: CommandSpec,
+): string[] {
+  const skipValue = ospec.valueFlags ?? new Set<string>();
+  const pathValue = new Set([...(ospec.pathFlags ?? []), ...(spec.pathArgs ?? [])]);
+  const operands: string[] = [];
+  let endOfFlags = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!endOfFlags && arg === "--") {
+      endOfFlags = true;
+      continue;
+    }
+    if (!endOfFlags && arg.length > 1 && arg.startsWith("-")) {
+      if (arg.startsWith("--")) {
+        const eq = arg.indexOf("=");
+        const name = eq > 0 ? arg.slice(0, eq) : arg;
+        if (pathValue.has(name)) {
+          const v = eq > 0 ? arg.slice(eq + 1) : args[i + 1];
+          if (v !== undefined) {
+            operands.push(v);
+            if (eq < 0) i++;
+          }
+        } else if (eq < 0 && skipValue.has(name)) {
+          i++;
+        }
+        continue;
+      }
+      // Grouped shorts. An unknown char is treated as a boolean option —
+      // every value-taking short option for these commands is enumerated,
+      // so a group tail can only be reached after genuine booleans.
+      let j = 1;
+      while (j < arg.length) {
+        const name = `-${arg[j]}`;
+        if (pathValue.has(name)) {
+          const v = j + 1 < arg.length ? arg.slice(j + 1) : args[i + 1];
+          if (v !== undefined) {
+            operands.push(v);
+            if (j + 1 >= arg.length) i++;
+          }
+          break;
+        }
+        if (skipValue.has(name)) {
+          if (j + 1 >= arg.length && args[i + 1] !== undefined) i++;
+          break;
+        }
+        j++;
+      }
+      continue;
+    }
+    if (arg) operands.push(arg);
+  }
+  return operands;
+}
+
+/**
+ * word grammar (`find`): predicates are whole words (`-name`, `-newer`),
+ * never grouped chars. `-exec`/`-ok` run through to their `;`/`+`
+ * terminator — the arguments in between belong to the embedded command,
+ * which classification already reports as arbitrary_code, so confining
+ * them here would only false-reject an approved invocation.
+ */
+function wordPathOperands(args: string[], ospec: OperandSpec): string[] {
+  const operands: string[] = [];
+  let endOfFlags = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!endOfFlags && arg === "--") {
+      endOfFlags = true;
+      continue;
+    }
+    if (!endOfFlags && ospec.execFlags?.has(arg)) {
+      while (i + 1 < args.length && args[i + 1] !== ";" && args[i + 1] !== "+") i++;
+      i++; // consume the terminator itself (or the missing terminator's tail)
+      continue;
+    }
+    if (!endOfFlags && ospec.twoValueFlags?.has(arg)) {
+      i += 2; // -fprintf FILE FORMAT — the FILE is checked by validateExternalWritePaths
+      continue;
+    }
+    if (!endOfFlags && arg.length > 1 && arg.startsWith("-")) {
+      const eq = arg.indexOf("=");
+      const name = eq > 0 ? arg.slice(0, eq) : arg;
+      if (ospec.pathFlags?.has(name)) {
+        const v = eq > 0 ? arg.slice(eq + 1) : args[i + 1];
+        if (v !== undefined) {
+          operands.push(v);
+          if (eq < 0) i++;
+        }
+      } else if (eq < 0 && ospec.valueFlags?.has(name)) {
+        i++;
+      }
+      continue;
+    }
+    if (arg) operands.push(arg);
+  }
+  return operands;
+}
+
+/**
+ * dos grammar: `/X` option tokens (findstr, dir, more). A leading "/" is
+ * an option prefix — never a filesystem root — so it is never collected.
+ * `/X:value` forms are checked when the flag names a path-bearing option
+ * (findstr /G list-file, /F file-list, /D dirlist).
+ */
+function dosPathOperands(args: string[], ospec: OperandSpec): string[] {
+  const operands: string[] = [];
+  let seenFirst = false;
+  for (const arg of args) {
+    if (arg.length > 1 && arg.startsWith("/")) {
+      const colon = arg.indexOf(":");
+      if (colon > 0 && ospec.dosPathFlags?.has(arg.slice(0, colon).toUpperCase())) {
+        operands.push(arg.slice(colon + 1));
+      }
+      continue;
+    }
+    if (!arg) continue;
+    if (!seenFirst && ospec.firstIsPattern) {
+      seenFirst = true;
+      continue;
+    }
+    seenFirst = true;
+    operands.push(arg);
+  }
+  return operands;
+}
+
+function nonSearchPathOperands(
+  command: string,
+  spec: CommandSpec,
+  args: string[],
+): string[] {
+  const ospec = OPERAND_SPECS[command];
+  if (!ospec) {
+    return args.filter((arg) => arg && !(arg.length > 1 && arg.startsWith("-")));
+  }
+  if (ospec.mode === "dos") return dosPathOperands(args, ospec);
+  if (ospec.mode === "word") return wordPathOperands(args, ospec);
+  return getoptPathOperands(args, ospec, spec);
+}
+
+function validateOperandPaths(
+  command: string,
+  args: string[],
+  cwd: string,
+  workspaceRoot: string,
+): ExecutionError | null {
+  const normalized = normalizeCommand(command);
+  const spec = COMMAND_SPECS[normalized];
+  if (!spec?.confineOperands) return null;
+  const operands =
+    normalized === "grep" || normalized === "rg"
+      ? searchCommandPathOperands(normalized, args)
+      : nonSearchPathOperands(normalized, spec, args);
+  for (const arg of operands) {
+    const resolved = path.resolve(cwd, arg);
+    if (!isWithinWorkspace(resolved, workspaceRoot)) {
+      return new ExecutionError(
+        `Operand "${arg}" resolves outside workspace root`,
+        "PATH_ARG_ESCAPE",
+      );
+    }
+  }
+  return null;
+}
+
+const GIT_FILE_OUTPUT_SUBCOMMANDS = new Set([
+  "diff",
+  "log",
+  "show",
+  "whatchanged",
+  "shortlog",
+  "blame",
+]);
+
+function outputPathEscape(
+  label: string,
+  outputPath: string,
+  cwd: string,
+  workspaceRoot: string,
+): ExecutionError | null {
+  if (!outputPath) {
+    return new ExecutionError(`${label} output path is empty`, "PATH_ARG_ESCAPE");
+  }
+  const resolved = path.resolve(cwd, outputPath);
+  if (!isWithinWorkspace(resolved, workspaceRoot)) {
+    return new ExecutionError(
+      `${label} output path "${outputPath}" resolves outside workspace root`,
+      "PATH_ARG_ESCAPE",
+    );
+  }
+  return null;
+}
+
+/**
+ * File-writing flags that classification alone does not confine.
+ * `git diff --output=/outside` is a workspace_edit, and workspace_edit
+ * runs without an approval provider (and in auto mode). The output path
+ * has to be inside the workspace or the command is refused before spawn.
+ * The same applies to find's -fprint family.
+ */
+function validateExternalWritePaths(
+  command: string,
+  args: string[],
+  cwd: string,
+  workspaceRoot: string,
+): ExecutionError | null {
+  const normalized = normalizeCommand(command);
+  if (normalized === "git") {
+    const spec = COMMAND_SPECS.git;
+    const ops = operandIndices(spec, args);
+    let sub = "";
+    let subIndex = -1;
+    for (const i of ops) {
+      const name = args[i].toLowerCase();
+      if (spec.subcommands?.[name]) {
+        sub = name;
+        subIndex = i;
+        break;
+      }
+    }
+    if (!GIT_FILE_OUTPUT_SUBCOMMANDS.has(sub)) return null;
+    const rest = args.slice(subIndex + 1);
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === "--output" || a === "-o") {
+        const next = rest[i + 1];
+        if (next === undefined || (next.length > 1 && next.startsWith("-"))) {
+          return new ExecutionError(
+            `git ${sub} ${a} writes a file and requires a path inside the workspace`,
+            "PATH_ARG_ESCAPE",
+          );
+        }
+        const err = outputPathEscape(`git ${sub} ${a}`, next, cwd, workspaceRoot);
+        if (err) return err;
+        i++;
+        continue;
+      }
+      if (a.startsWith("--output=")) {
+        const err = outputPathEscape(`git ${sub} --output`, a.slice("--output=".length), cwd, workspaceRoot);
+        if (err) return err;
+        continue;
+      }
+      if (a.startsWith("-o") && !a.startsWith("--") && a.length > 2) {
+        const err = outputPathEscape(`git ${sub} -o`, a.slice(2), cwd, workspaceRoot);
+        if (err) return err;
+      }
+    }
+    return null;
+  }
+
+  if (normalized === "find") {
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a !== "-fprint" && a !== "-fprint0" && a !== "-fls" && a !== "-fprintf") continue;
+      const file = args[i + 1];
+      if (file === undefined || (file.length > 1 && file.startsWith("-"))) {
+        return new ExecutionError(
+          `find ${a} writes a file and requires a path inside the workspace`,
+          "PATH_ARG_ESCAPE",
+        );
+      }
+      const err = outputPathEscape(`find ${a}`, file, cwd, workspaceRoot);
+      if (err) return err;
+      i++;
+    }
+  }
+  return null;
+}
+
+// ─── Environment variable filtering ───────────────────────────────
+
+/**
+ * Explicit per-call env only. Host `process.env` is NOT copied here —
+ * `NodeShellExecutor` builds the child environment from an allowlist
+ * (`buildChildEnv`) and would otherwise re-expose every host secret
+ * this filter omitted. Blocked names are dropped even if the caller
+ * passed them. Non-blocked explicit keys (a provider key the caller
+ * intentionally supplied) are kept.
+ */
+function filterEnv(provided?: Record<string, string>): Record<string, string> | undefined {
+  if (!provided) return undefined;
   const filtered: Record<string, string> = {};
-  for (const [key, value] of Object.entries(merged)) {
-    if (BLOCKED_ENV_VARS.has(key)) continue;
+  for (const [key, value] of Object.entries(provided)) {
+    if (isBlockedChildEnvKey(key)) continue;
     filtered[key] = value ?? "";
   }
   return filtered;
@@ -697,6 +1904,15 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\b(secret|password|passwd|token|api_key|apikey|access_key)\s*[:=]\s*["']?([a-zA-Z0-9+/=_-]{16,})["']?/gi,
   /\b(AKIA[0-9A-Z]{16})\b/g,
   /\b(gh[pousr]_[A-Za-z0-9]{36,})\b/g,
+  // Named secret assignments. The secret word must be its own
+  // underscore-delimited segment (or the whole name): API_KEY, MY_SECRET,
+  // TOKEN_VALUE, DATABASE_URL. A prefix is not enough — `keyword=` and
+  // `tokenizer=` are ordinary words and must pass through.
+  /\b(?:[A-Za-z][A-Za-z0-9]*_)*(?:SECRET_KEY|PRIVATE_KEY|ACCESS_KEY|SERVICE_KEY|ROLE_KEY|API_KEY|DATABASE_URL|CONNECTION_STRING|SECRET|TOKEN|PASSWORD|PASSWD|DSN|CREDENTIALS?|KEY)(?:_[A-Za-z0-9]+)*\b\s*[=:]\s*[^\s"']{3,}/gi,
+  // URL-embedded credentials: scheme://user:pass@host
+  /\b([a-z][a-z0-9+.-]*):\/\/[^\s/:]+:[^\s/@]+@/gi,
+  // PEM private key blocks
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
 ];
 
 export function redactSecrets(input: string): string {
@@ -847,6 +2063,20 @@ export async function runCommand(
   const pathError = validatePathArgs(command, args, workspaceRoot);
   if (pathError) {
     return executionError(pathError);
+  }
+
+  // 6b. For file-reading commands, confine path operands to the workspace
+  const operandError = validateOperandPaths(command, args, cwd, workspaceRoot);
+  if (operandError) {
+    return executionError(operandError);
+  }
+
+  // 6c. File-writing flags (git --output/-o, find -fprint) must land
+  // inside the workspace. Classification as workspace_edit is not enough:
+  // that tier still reaches spawn when no approval provider is set.
+  const writeError = validateExternalWritePaths(command, args, cwd, workspaceRoot);
+  if (writeError) {
+    return executionError(writeError);
   }
 
   // 7. Filter environment variables

@@ -59,6 +59,21 @@ const CARD_PLANS: CardPlan[] = [
     free: true,
   },
   {
+    id: "creator_lite",
+    name: PLANS.creator_lite.name,
+    label: "Start creating for less",
+    price: formatPrice(PLANS.creator_lite.default_price),
+    suffix: "/month",
+    futurePrice: "Beta pricing — cancel anytime",
+    description: PLANS.creator_lite.description,
+    credits: PLANS.creator_lite.monthlyCredits.toLocaleString(),
+    creditLabel: "AI credits monthly",
+    projectLimit: PLANS.creator_lite.activeProjectLimit,
+    accent: "neutral",
+    cta: "Choose Creator Lite",
+    free: false,
+  },
+  {
     id: "creator_beta",
     name: PLANS.creator_beta.name,
     label: "Best for creators",
@@ -277,6 +292,11 @@ export default function PricingClient() {
         const data = await res.json();
         if (data.url) {
           window.location.href = data.url;
+        } else if (data.setup_required) {
+          // A plan whose Stripe price is not yet provisioned returns 501
+          // with server-config detail — surface a clean customer-facing
+          // state instead of the raw env-var message.
+          setError(`${plan.name} is not available for checkout yet. Please try again soon or contact support.`);
         } else {
           setError(data.error || "Failed to start checkout");
         }
@@ -333,8 +353,8 @@ export default function PricingClient() {
         <p className={styles.heroCopy}>
           One workspace with LiTT, your project operator and creative partner —
           sharing one runtime and one memory. Start free, then unlock research,
-          writing, and marketing skills with Creator Beta — or add coding and
-          analytics skills with Pro Builder Beta.
+          writing, and marketing skills with Creator — or add coding and
+          analytics skills with Pro Builder.
         </p>
 
         <div className={styles.heroMeta}>

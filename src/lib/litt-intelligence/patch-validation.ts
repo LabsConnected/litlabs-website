@@ -112,6 +112,149 @@ export function tailwindImportTrapMessage(trap: string, path: string): string {
 }
 
 /**
+ * The Tailwind v3-theme-in-v4 trap (companion to the @import trap).
+ *
+ * @theme in the v4 browser build takes CSS custom properties
+ * (`--color-primary: #a8ff2f;`), NOT the v3 config object
+ * (`colors: { primary: '#a8ff2f' }, extend: { fontFamily: … }`). A block
+ * containing v3-style keys throws CssSyntaxError ("Invalid declaration")
+ * in the browser compiler and produces ZERO utilities — the same
+ * fully-unstyled page as the @import trap. Production evidence: the
+ * 2026-10-30 Grand Haven Roofing preview run.
+ *
+ * Detection: v3 config keys followed by `{`/`[` (object/array literal), or
+ * a quoted/array value line whose key does not start with `--` (v3 writes
+ * `primary: '#a8ff2f'` / `sans: ['Inter', 'sans-serif']`; v4 keys are all
+ * `--*` custom properties). @-rules (@media, @keyframes) are ignored —
+ * their lines never match the key shape.
+ */
+
+/** v3 theme/config keys that are invalid inside @theme when they open an
+    object or array literal. */
+const TAILWIND_V3_THEME_KEY_RE =
+  /(?:^|[\s{,])(colors|extend|fontFamily|fontWeight|fontSize|lineHeight|letterSpacing|screens|spacing|borderRadius|borderWidth|boxShadow|keyframes|animation|backgroundImage|backgroundSize|gridTemplateColumns|gridTemplateRows|zIndex|transitionDuration|transitionTimingFunction|container|flexGrow|flexShrink|maxWidth|minWidth|maxHeight|minHeight)\s*:\s*[{[]/i;
+
+/** v3-style property line: `key: 'value'` or `key: [...]` inside @theme
+    where v4 only allows `--*` keys and @-rules. */
+const TAILWIND_V3_THEME_PROP_RE = /^\s*[a-zA-Z][\w-]*\s*:\s*['"[]/m;
+
+/**
+ * Extract @theme blocks' inner text with brace matching, so nested rules
+ * (@media, @keyframes) stay intact for depth-aware scanning.
+ */
+function themeBlocks(content: string): string[] {
+  const blocks: string[] = [];
+  const re = /@theme\b[^{]*\{/g;
+  re.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    let depth = 1;
+    let i = m.index + m[0].length;
+    const start = i;
+    for (; i < content.length && depth > 0; i++) {
+      if (content[i] === "{") depth++;
+      else if (content[i] === "}") depth--;
+    }
+    blocks.push(content.slice(start, i - 1));
+    re.lastIndex = i;
+  }
+  return blocks;
+}
+
+/**
+ * Returns the offending v3-syntax fragment (truncated) when a
+ * <style type="text/tailwindcss"> block contains an @theme written as a
+ * v3 config object, else null.
+ *
+ * Lines are scanned with brace depth: v3 config keys are invalid at ANY
+ * depth, but the quoted-value property check only applies at the block's
+ * top level (depth 0) — declarations inside nested @keyframes/@media
+ * bodies are legitimate CSS and must not false-positive.
+ */
+export function findTailwindThemeV3Config(content: string): string | null {
+  if (typeof content !== "string") return null;
+  TAILWIND_STYLE_BLOCK_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = TAILWIND_STYLE_BLOCK_RE.exec(content)) !== null) {
+    for (const block of themeBlocks(m[1] ?? "")) {
+      let depth = 0;
+      for (const line of block.split("\n")) {
+        const keyMatch = line.match(TAILWIND_V3_THEME_KEY_RE);
+        if (keyMatch) return (keyMatch[0].trim()).slice(0, 120);
+        if (depth === 0) {
+          const propMatch = line.match(TAILWIND_V3_THEME_PROP_RE);
+          if (propMatch) return (propMatch[0].trim()).slice(0, 120);
+        }
+        for (const ch of line) {
+          if (ch === "{") depth++;
+          else if (ch === "}") depth--;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Model-facing remediation for the v3-theme trap. */
+export function tailwindThemeConfigMessage(offender: string, path: string): string {
+  return (
+    `rejected: ${path} contains a <style type="text/tailwindcss"> block whose @theme uses v3 config ` +
+    `syntax (${JSON.stringify(offender)}). The Tailwind v4 browser build takes CSS custom properties inside ` +
+    `@theme, not a config object — it throws CssSyntaxError and compiles ZERO utilities, so the page renders ` +
+    `completely unstyled. Write tokens as variables, e.g. @theme { --color-primary: #a8ff2f; ` +
+    `--font-sans: "Inter", sans-serif; }, then use them via utilities (bg-primary, font-sans). ` +
+    `Never use colors/extend/fontFamily objects inside @theme.`
+  );
+}
+
+/**
+ * Enforcement-floor guard for the two Tailwind v4 browser-build traps.
+ * Returns the model-facing error for the first trap found (import trap
+ * takes precedence — it suppresses the whole build including @theme),
+ * else null. Handler-level checks matter because the agent-loop gate is
+ * not the only path into a mutation — /api/litt/tools/execute and resumed
+ * approvals reach the same handlers without re-running the loop's
+ * pre-approval validation.
+ */
+export function tailwindViolation(value: unknown, label: string): string | null {
+  if (typeof value !== "string") return null;
+  const trap = findTailwindImportTrap(value);
+  if (trap) return tailwindImportTrapMessage(trap, label);
+  const v3Theme = findTailwindThemeV3Config(value);
+  if (v3Theme) return tailwindThemeConfigMessage(v3Theme, label);
+  return null;
+}
+
+/**
+ * Simulated applyPatch result — applies each search/replace to
+ * already-read content with the executor's semantics (ordered,
+ * first-match `String.replace`, every search must match the text left
+ * by the previous patch). Returns the resulting file text, or null when
+ * a search can't match — the executor throws before writing anything in
+ * that case, so there is no resulting file to check.
+ *
+ * Needed because tailwindViolation scans for complete
+ * <style type="text/tailwindcss"> blocks: a partial replace inside an
+ * EXISTING block never carries the block in its own text, so the
+ * per-replace scan can't see v3 syntax smuggled into @theme — only the
+ * post-patch file reveals it.
+ */
+export function simulatePatchResult(
+  content: string,
+  patches: Array<{ search?: unknown; replace?: unknown }>,
+): string | null {
+  let updated = content;
+  for (const patch of patches) {
+    const search = patch?.search;
+    const replace = patch?.replace;
+    if (typeof search !== "string" || typeof replace !== "string") return null;
+    if (!updated.includes(search)) return null;
+    updated = updated.replace(search, replace);
+  }
+  return updated;
+}
+
+/**
  * Enforcement-floor guard for mutation handlers. Returns an error string
  * when `value` carries an unresolved placeholder, else null. Handler-level
  * checks matter because the agent-loop gate is not the only path into a
@@ -159,7 +302,8 @@ export async function buildPatchRecoveryMessage(
       `SAFE PATCH RECOVERY ATTEMPT ${attempt}: The file was re-read from disk. ` +
       `Do not repeat the rejected patch. Either use files.write with the complete ` +
       `literal contents, or use apply_patch with search text copied exactly from ` +
-      `CURRENT FILE CONTENT below.\n\n` +
+      `CURRENT FILE CONTENT below. Use a SHORT search string (5-15 words or one ` +
+      `tag) that appears exactly once — long search strings are easy to mistype.\n\n` +
       `CURRENT FILE CONTENT (${path}):\n${bounded}`
     );
   } catch (readError) {
@@ -200,11 +344,9 @@ export async function validateApplyPatchInputs(
   // 1b. Tailwind @import trap — a patch can introduce the trap just as
   //     easily as a full write, so replace text gets the same check.
   for (let i = 0; i < patches.length; i++) {
-    const replace = patches[i]?.replace;
-    if (typeof replace !== "string") continue;
-    const trap = findTailwindImportTrap(replace);
-    if (trap) {
-      return `apply_patch ${tailwindImportTrapMessage(trap, path)} (introduced by patch ${i + 1}).`;
+    const tailwind = tailwindViolation(patches[i]?.replace, path);
+    if (tailwind) {
+      return `apply_patch ${tailwind} (introduced by patch ${i + 1}).`;
     }
   }
   for (let i = 0; i < patches.length; i++) {
@@ -245,7 +387,117 @@ export async function validateApplyPatchInputs(
     }
   }
 
+  // 3. Resulting-file Tailwind check — the per-replace scan above only
+  //    sees complete <style type="text/tailwindcss"> blocks inside the
+  //    patch text, so a partial edit inside an EXISTING block (e.g.
+  //    replacing `--color-primary: …` with `colors: { primary: … }`)
+  //    would slip v3 config syntax into @theme and leave the page
+  //    unstyled. Validate the file as it will exist after the patch.
+  const resulting = simulatePatchResult(content, patches);
+  if (resulting !== null) {
+    const tailwind = tailwindViolation(resulting, path);
+    if (tailwind) {
+      return `apply_patch ${tailwind}`;
+    }
+  }
+
   return null;
+}
+
+/**
+ * Structural styling markers — the SHAPE of the page's presentation
+ * (style blocks, stylesheet links, class/style attributes, media
+ * queries, fonts, semantic layout), not its VALUES. A legitimate
+ * theme change alters colors but keeps these; a destructive rewrite
+ * drops most of them.
+ */
+function stylingSignature(html: string): Set<string> {
+  const sig = new Set<string>();
+  const count = (re: RegExp) => (html.match(re) ?? []).length;
+  if (/<style[\s>]/i.test(html)) sig.add("style-tag");
+  if (/rel\s*=\s*["']?stylesheet/i.test(html)) sig.add("stylesheet-link");
+  if (count(/class\s*=/gi) >= 2) sig.add("class-attrs");
+  if (/style\s*=\s*["']/i.test(html)) sig.add("inline-style");
+  if (/@media/i.test(html)) sig.add("media-query");
+  if (/--[\w-]+\s*:/i.test(html)) sig.add("css-vars");
+  if (/font(-family)?\s*[:=]|font-(family|sans|serif|mono)/i.test(html)) sig.add("font");
+  if (/<script[\s>]/i.test(html)) sig.add("script");
+  if (/<(header|nav|main|section|footer|article|aside)[\s>]/i.test(html)) sig.add("semantic-layout");
+  if (/@tailwind|tailwind/i.test(html)) sig.add("tailwind");
+  return sig;
+}
+
+/**
+ * Returns a refusal message when `next` destructively rewrites `prev`
+ * (strips most of its structural styling), else null. Only meaningful
+ * when prev was actually styled — a signature below the floor is an
+ * already-plain file where rewriting is harmless.
+ */
+export function destructiveRewriteViolation(prev: string, next: string): string | null {
+  const prevSig = stylingSignature(prev);
+  if (prevSig.size < 3) return null;
+  let kept = 0;
+  for (const marker of prevSig) {
+    if (stylingSignature(next).has(marker)) kept += 1;
+  }
+  const retention = kept / prevSig.size;
+  if (retention >= 0.4) return null;
+  const lost = [...prevSig].filter((m) => !stylingSignature(next).has(m)).join(", ");
+  return (
+    `Refusing this full-file rewrite: it removes the existing page structure/styling ` +
+    `(${lost}). The file already exists — do NOT emit files.write for it. ` +
+    `Emit apply_patch instead: set path to this file and patches to a list of ` +
+    `{search, replace} pairs where each search is an exact substring copied ` +
+    `verbatim from the current file content and replace is that same substring ` +
+    `with only the requested change applied.`
+  );
+}
+
+/**
+ * Full-overwrite gate for the local small lane. A 1.5B-class model answers
+ * "change the footer text" by regenerating the whole document — and drops
+ * the requested text (confirmed live: an 11KB rewrite landed with the edit
+ * silently missing). Structural styling guards can't detect a missing
+ * edit, so overwriting an existing real page must be an explicit choice:
+ * refuse unless the call declared `allowOverwrite: true`, and steer the
+ * retry to apply_patch. Applies to files.write AND site.compose — a
+ * recompose over an existing page is the same destructive overwrite.
+ * Returns null for new files, non-HTML targets, the replaceable
+ * LITT-WELCOME-SCREEN scaffold, and declared overwrites.
+ */
+export async function existingPageOverwriteError(
+  inputs: { path?: unknown; allowOverwrite?: unknown },
+  transport: WorkspaceTransport,
+): Promise<string | null> {
+  if (inputs.allowOverwrite === true) return null;
+  // site.compose defaults an absent path to index.html at write time —
+  // resolve the same default here or that call would skip the gate.
+  const path = typeof inputs.path === "string" && inputs.path.trim() ? inputs.path.trim() : "index.html";
+  if (!/\.x?html?$/i.test(path)) return null;
+  let prev: string;
+  try {
+    ({ content: prev } = await transport.readFile(path));
+  } catch {
+    return null; // Unreadable target = a new file — nothing to preserve.
+  }
+  if (prev.includes("LITT-WELCOME-SCREEN")) return null;
+  // A provably destructive rewrite (structure/styling stripped) is owned by
+  // the merge-or-refuse path in handleFilesWrite — refusing here would
+  // preempt a repairable merge that is supposed to land.
+  if (
+    typeof (inputs as { content?: unknown }).content === "string" &&
+    destructiveRewriteViolation(prev, (inputs as { content: string }).content)
+  ) {
+    return null;
+  }
+  return (
+    `Refused: ${path} already exists — a full-file overwrite is not the edit path. ` +
+    `Emit apply_patch instead: patches is a list of {search, replace} pairs where each ` +
+    `search is an exact substring copied verbatim from the current file content ` +
+    `(files.read the file first if you have not), and replace is that same substring ` +
+    `with ONLY the requested change applied. Retry this write with "allowOverwrite": true ` +
+    `ONLY if the user explicitly asked for the whole page to be rebuilt.`
+  );
 }
 
 /**
@@ -258,6 +510,10 @@ export async function validateApplyPatchInputs(
  * model substituted a template slot for the literal brand name, and the
  * apply_patch-only guard never saw it. The approval gate freezes inputs,
  * so a placeholder write can only persist the token verbatim.
+ *
+ * The local small lane's full-overwrite gate lives in
+ * existingPageOverwriteError — the loop applies it to files.write and
+ * site.compose separately (it needs the workspace transport).
  */
 export function validateFilesWriteInputs(inputs: FilesWriteInputs): string | null {
   const path = typeof inputs.path === "string" ? inputs.path : null;
@@ -278,9 +534,9 @@ export function validateFilesWriteInputs(inputs: FilesWriteInputs): string | nul
     );
   }
 
-  const trap = findTailwindImportTrap(content);
-  if (trap) {
-    return `files.write ${tailwindImportTrapMessage(trap, path)}`;
+  const tailwind = tailwindViolation(content, path);
+  if (tailwind) {
+    return `files.write ${tailwind}`;
   }
 
   return null;

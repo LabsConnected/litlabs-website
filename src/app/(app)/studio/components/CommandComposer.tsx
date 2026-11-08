@@ -1066,8 +1066,9 @@ function TtsPopover({
 /* ── Unified agent + model selector popover ─────────────────────── */
 function planLabel(plan: string): string {
   switch (plan) {
-    case "creator_beta": return "Creator Beta";
-    case "pro_builder_beta": return "Pro Builder Beta";
+    case "creator_lite": return "Creator Lite";
+    case "creator_beta": return "Creator";
+    case "pro_builder_beta": return "Pro Builder";
     case "founder": return "Founding Member";
     default: return plan;
   }
@@ -1104,6 +1105,42 @@ function UnifiedSelectorPopover({
   const ref = useRef<HTMLDivElement>(null);
   const { hasAccess, loading } = useUserPlan();
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Live local Ollama models from /api/llm/health — fetched when the picker
+  // opens so availability + capabilities reflect the device right now, not
+  // a static catalog. Unreachable/unauthenticated → section stays hidden.
+  const [localModels, setLocalModels] = useState<SelectedModel[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/llm/health", { cache: "no-store", credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!live || !d?.local?.reachable || !Array.isArray(d.local.models)) return;
+        setLocalModels(
+          d.local.models
+            .filter((m: { name?: string }) => !!m?.name)
+            .map((m: { name: string; sizeMb?: number; capabilities?: string[]; toolCapable?: boolean; recommended?: boolean }): SelectedModel => ({
+              id: `ollama/${m.name}`,
+              label: m.name,
+              provider: "ollama",
+              name: "Ollama (local)",
+              model: `ollama/${m.name}`,
+              cost: "free",
+              speed: "medium",
+              icon: "🖥️",
+              apiModel: `ollama/${m.name}`,
+              apiProvider: "ollama",
+              category: "local",
+              description:
+                `${(m.sizeMb ?? 0) >= 1024 ? `${(m.sizeMb! / 1024).toFixed(1)} GB` : `${m.sizeMb ?? "?"} MB`} on this device` +
+                (m.toolCapable ? " · tool-capable" : "") +
+                (m.recommended ? " · recommended" : ""),
+            })),
+        );
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
@@ -1291,6 +1328,49 @@ function UnifiedSelectorPopover({
           </button>
         );
       })}
+
+      {/* ── LOCAL section — live Ollama models on this device ─────── */}
+      {localModels && localModels.length > 0 && (
+        <>
+          <div
+            className="px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.18em]"
+            style={{ color: "var(--text-muted)", borderTop: "1px solid var(--studio-border)" }}
+          >
+            Local — this device
+          </div>
+          {localModels.map((m) => {
+            const isActive = selectedModelId === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onModelSelect(m)}
+                title={m.description}
+                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
+                style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
+              >
+                <span className="text-base shrink-0">{m.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
+                  <div className="flex items-center gap-1.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
+                    <span>{m.name}</span>
+                    <span>·</span>
+                    <span>FREE</span>
+                    {m.description && (
+                      <>
+                        <span>·</span>
+                        <span className="truncate">{m.description}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: "#72f238" }} aria-hidden />
+                {isActive && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
+              </button>
+            );
+          })}
+        </>
+      )}
 
       {/* ── ADVANCED section (collapsible) ──────────────────────── */}
       <button

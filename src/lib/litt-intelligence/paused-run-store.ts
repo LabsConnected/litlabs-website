@@ -35,11 +35,14 @@
 
 import "server-only";
 
+import { studioLog } from "@/lib/studio/logger";
 import { supabaseAdmin } from "@/lib/supabase";
 import {
+  createActionRun,
   getActionRun,
   isTerminalActionRunStatus,
   listActionEvents,
+  patchActionRun,
   transitionActionRun,
 } from "@/lib/action-runtime";
 import type { LLMMessage } from "./llm-tool-calling";
@@ -92,7 +95,16 @@ export type RunStatus = "processing" | "completed" | "failed" | null;
 export interface RunResult {
   finalText: string;
   stepsUsed: number;
-  toolCalls: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }>;
+  toolCalls: Array<{
+    toolId: string;
+    success: boolean;
+    summary: string;
+    mutating: boolean;
+    /** Workspace paths the call declared it would affect, when declared. */
+    paths?: string[];
+    /** Read-back verification of a reported mutation — see ToolCallEvidence. */
+    persisted?: boolean;
+  }>;
   cancelled: boolean;
   cancelReason?: string;
   pendingApproval?: {
@@ -162,6 +174,15 @@ export interface PausedRunRecord {
   stepsUsed?: number;
   /** Whether any mutation had executed before the pause. */
   hadInterveningMutation?: boolean;
+  /**
+   * Tool calls that already executed BEFORE the pause, including their
+   * declared paths and read-back persisted flags. Resume seeds this back
+   * into the run's evidence log so completion verification sees the whole
+   * mutation history — a contradicted pre-pause claim can never be masked
+   * by a post-resume verified call. Absent on legacy rows (pre-dating the
+   * column) and on rows created before the migration is applied.
+   */
+  priorToolCalls?: RunResult["toolCalls"];
 }
 
 interface PausedRunRow {
@@ -195,6 +216,7 @@ interface PausedRunRow {
   deferred_tool_calls?: DeferredToolCall[] | null;
   steps_used?: number | null;
   had_intervening_mutation?: boolean | null;
+  prior_tool_calls?: RunResult["toolCalls"] | null;
 }
 
 function rowToRecord(row: PausedRunRow): PausedRunRecord {
@@ -229,6 +251,7 @@ function rowToRecord(row: PausedRunRow): PausedRunRecord {
     deferredToolCalls: row.deferred_tool_calls ?? undefined,
     stepsUsed: row.steps_used ?? undefined,
     hadInterveningMutation: row.had_intervening_mutation ?? undefined,
+    priorToolCalls: row.prior_tool_calls ?? undefined,
   };
 }
 
@@ -251,15 +274,15 @@ export async function createPausedRun(input: {
   deferredToolCalls?: DeferredToolCall[];
   stepsUsed?: number;
   hadInterveningMutation?: boolean;
+  /** Pre-pause tool-call evidence — see PausedRunRecord.priorToolCalls. */
+  priorToolCalls?: RunResult["toolCalls"];
 }): Promise<PausedRunRecord> {
   if (!supabaseAdmin) throw new Error("Database not available");
 
   const now = new Date();
   const expiresAt = new Date(now.getTime() + APPROVAL_TTL_MS);
 
-  const { data, error } = await supabaseAdmin
-    .from(TABLE)
-    .insert({
+  const baseRow = {
       user_id: input.userId,
       conversation_id: input.conversationId,
       project_id: input.projectId,
@@ -281,9 +304,23 @@ export async function createPausedRun(input: {
       deferred_tool_calls: input.deferredToolCalls ?? null,
       steps_used: input.stepsUsed ?? null,
       had_intervening_mutation: input.hadInterveningMutation ?? null,
-    })
+  };
+
+  let { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .insert({ ...baseRow, prior_tool_calls: input.priorToolCalls ?? null })
     .select()
     .single();
+
+  if (error && /prior_tool_calls/.test(error.message ?? "")) {
+    // Migration not applied yet — degrade to the pre-column behavior
+    // (resume sees only post-resume evidence) rather than breaking pauses.
+    ({ data, error } = await supabaseAdmin
+      .from(TABLE)
+      .insert(baseRow)
+      .select()
+      .single());
+  }
 
   if (error || !data) {
     throw new Error(`Failed to create paused run: ${error?.message ?? "unknown"}`);
@@ -310,6 +347,37 @@ async function expireIfStale(record: PausedRunRecord): Promise<PausedRunRecord> 
     .eq("id", record.id)
     .eq("status", "pending");
   return { ...record, status: "expired", resolvedAt: now };
+}
+
+/**
+ * Expired-gate settlement: a pending gate that outlives its TTL without a
+ * decision leaves its parent action_run parked in `waiting_for_user` —
+ * and every live-surface projection (worktab badge, mission state, "Run
+ * in progress") reads that as active work forever. When a read normalizes
+ * a gate to "expired", settle the run it was parked on with the honest
+ * reason, mirroring how a rejection settles the same wait.
+ *
+ * Strict ownership: only a run whose recorded approval_reference IS this
+ * gate is touched. A run parked on a newer gate (a nested handoff) or
+ * back at work is never cancelled by an old gate's TTL. Best-effort on
+ * read paths — a racing settler's terminal truth stands.
+ */
+async function settleRunForExpiredGate(record: PausedRunRecord): Promise<void> {
+  if (record.status !== "expired" || !record.actionRunId) return;
+  try {
+    const run = await getActionRun(record.actionRunId, record.userId);
+    if (!run || isTerminalActionRunStatus(run.status)) return;
+    if (run.approvalReference !== record.id) return;
+    const message = "Approval expired before a decision was made";
+    await transitionActionRun(record.actionRunId, record.userId, "cancelled", {
+      currentActivity: message,
+      approvalReference: null,
+      failureCode: "APPROVAL_EXPIRED",
+      failureMessage: message,
+    });
+  } catch {
+    // Read path — a racing settler owns the truth; never break the read.
+  }
 }
 
 /**
@@ -420,6 +488,7 @@ export async function getPausedRun(
   if (error || !data) return null;
 
   const record = await expireIfStale(rowToRecord(data as PausedRunRow));
+  await settleRunForExpiredGate(record);
   return recoverStaleRun(record);
 }
 
@@ -466,8 +535,11 @@ export async function listPausedRunsForActionRun(
 
   if (error || !data) return [];
   return Promise.all(
-    (data as PausedRunRow[]).map(async (row) =>
-      recoverStaleRun(await expireIfStale(rowToRecord(row)))),
+    (data as PausedRunRow[]).map(async (row) => {
+      const record = await expireIfStale(rowToRecord(row));
+      await settleRunForExpiredGate(record);
+      return recoverStaleRun(record);
+    }),
   );
 }
 
@@ -494,7 +566,9 @@ export async function getLatestPausedRunForConversation(
     .maybeSingle();
 
   if (error || !data) return null;
-  return recoverStaleRun(await expireIfStale(rowToRecord(data as PausedRunRow)));
+  const record = await expireIfStale(rowToRecord(data as PausedRunRow));
+  await settleRunForExpiredGate(record);
+  return recoverStaleRun(record);
 }
 
 export async function resolvePausedRun(
@@ -537,6 +611,9 @@ export async function resolvePausedRun(
       .update({ status: "expired", resolved_at: now })
       .eq("id", pausedRunId)
       .eq("status", decision);
+    // The decision landed past TTL — same dead gate as the lazy flip:
+    // settle the run it was parked on so nothing waits on it forever.
+    await settleRunForExpiredGate({ ...record, status: "expired", resolvedAt: now });
     return null;
   }
 
@@ -776,7 +853,43 @@ export async function getRunOutcomeForPausedRun(
         };
       }
       if (events[i].type === "approval.required" && result?.pendingApproval) {
-        // Nested-gate handoff: this attempt finished by opening a new gate.
+        // Nested-gate handoff: this attempt finished by opening a new
+        // gate. The handoff is only resumable when it carries the NEW
+        // gate's persisted identity — a pendingApproval that reached the
+        // event log without a pausedRunId is a dead card the client can
+        // never action ("resumed run paused again but no pausedRunId was
+        // persisted"). Report it as failed truthfully instead of
+        // completing with an unresumable gate, matching the transcript
+        // reconciler's treatment of the same state.
+        const handoff = result.pendingApproval;
+        const handoffValid = typeof handoff.pausedRunId === "string" && !!handoff.pausedRunId;
+        // Structured forensic signal: which durable event produced this
+        // handoff and whether it is resumable — never logs prompts,
+        // inputs, or secrets, only identifiers and presence flags.
+        studioLog("paused_run:approval_handoff_derived", {
+          userId,
+          actionRunId: record.actionRunId,
+          pausedRunId: record.id,
+          gateId: record.id,
+          eventId: events[i].id,
+          eventSequence: events[i].sequence,
+          eventSource: "action_events",
+          tool: typeof handoff.toolId === "string" ? handoff.toolId : "missing",
+          nestedPausedRunId: handoffValid ? handoff.pausedRunId : undefined,
+          hasPausedRunId: handoffValid,
+          hasToolId: typeof handoff.toolId === "string" && !!handoff.toolId,
+          status: handoffValid ? "resumable" : "malformed",
+        });
+        if (!handoffValid) {
+          return {
+            runStatus: "failed",
+            runResult: null,
+            runError:
+              "The run paused for a follow-up approval, but the approval gate was not persisted — send the request again to retry.",
+            runStartedAt: run.startedAt,
+            runCompletedAt: run.completedAt,
+          };
+        }
         return {
           runStatus: "completed",
           runResult: result,
@@ -874,7 +987,37 @@ export async function reRequestExpiredRun(
   const existing = await getPausedRun(pausedRunId, userId);
   if (!existing || existing.status !== "expired") return null;
 
-  return createPausedRun({
+  // The fresh gate needs a live canonical parent or approving it can only
+  // dead-end: the expired gate's run was settled when its TTL lapsed, and
+  // a gate without a resolvable action_run approves into a settle that
+  // cannot be recorded ("no parent action_run"). Reuse the recorded
+  // parent only while it is still parked on THIS gate (a settle that
+  // raced); anything else — terminal, missing, or parked on a newer gate
+  // — gets a fresh run: a re-request IS a new execution attempt (one
+  // run = one attempt, same as the controlled retry).
+  let actionRunId: string | null = null;
+  if (existing.actionRunId) {
+    const parent = await getActionRun(existing.actionRunId, userId).catch(() => null);
+    if (
+      parent &&
+      !isTerminalActionRunStatus(parent.status) &&
+      parent.approvalReference === existing.id
+    ) {
+      actionRunId = existing.actionRunId;
+    }
+  }
+  if (!actionRunId) {
+    const freshRun = await createActionRun({
+      userId,
+      projectId: existing.projectId,
+      conversationId: existing.conversationId,
+      kind: "agent",
+      currentActivity: `Re-requested approval for ${existing.toolId}`,
+    });
+    actionRunId = freshRun.id;
+  }
+
+  const gate = await createPausedRun({
     userId,
     conversationId: existing.conversationId,
     projectId: existing.projectId,
@@ -888,7 +1031,25 @@ export async function reRequestExpiredRun(
     systemPrompt: existing.systemPrompt,
     checkpointId: existing.checkpointId,
     qualityLoopState: existing.qualityLoopState,
+    actionRunId,
   });
+
+  // Record which gate the run is parked on: the expiry settle uses it to
+  // cancel this wait if the fresh TTL lapses too — never an orphan
+  // "Run in progress". Best-effort; the gate itself is already durable.
+  await patchActionRun(actionRunId, userId, {
+    approvalReference: gate.id,
+    currentActivity: `Approval required for ${gate.toolId}`,
+  }).catch((error) =>
+    studioLog("paused_run:re_request_parent_reference_failed", {
+      userId,
+      actionRunId,
+      pausedRunId: gate.id,
+      errorClass: error instanceof Error ? error.message : "unknown",
+    }),
+  );
+
+  return gate;
 }
 
 /**

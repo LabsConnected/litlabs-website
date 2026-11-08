@@ -11,13 +11,7 @@ import { hostExecutionBlockedResponse } from "@/lib/host-execution-guard";
 // spawns interactive shells that bypass the normal command pipeline, so
 // every line of stdin is classified here BEFORE it reaches the child.
 import { classifyCommand } from "@litt/agent-core";
-
-// Admin user ID - only this user can use CLI bridge.
-// Read per-request (not cached at module load) so tests and runtime env
-// changes are honored without a module reload.
-function getAdminUserId(): string {
-  return process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
-}
+import { isOwnerClerkId } from "@/lib/owner-identity";
 
 // Active sessions storage
 const activeSessions = new Map<
@@ -76,7 +70,7 @@ export function enforceBridgeInputPolicy(input: string): BridgeInputPolicyResult
 export async function GET(req: NextRequest) {
   const { userId } = await auth(req);
 
-  if (!userId || userId !== getAdminUserId()) {
+  if (!isOwnerClerkId(userId)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -261,7 +255,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { userId } = await auth(req);
 
-  if (!userId || userId !== getAdminUserId()) {
+  if (!isOwnerClerkId(userId)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -318,7 +312,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { userId } = await auth(req);
 
-  if (!userId || userId !== getAdminUserId()) {
+  if (!isOwnerClerkId(userId)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -342,12 +336,12 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const { userId } = await auth(req);
 
-  if (!userId || userId !== getAdminUserId()) {
+  if (!isOwnerClerkId(userId)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const sessions = Array.from(activeSessions.entries())
-    .filter(([id]) => id.startsWith(userId))
+    .filter(([id]) => id.startsWith(userId!))
     .map(([id, session]) => ({
       sessionId: id,
       toolName: session.toolName,

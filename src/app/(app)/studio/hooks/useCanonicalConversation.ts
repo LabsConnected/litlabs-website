@@ -35,6 +35,10 @@ import {
 } from "../context/StudioContext";
 import { mobileDiag } from "../lib/mobileDiagnostics";
 import {
+  isOptimisticConversationId,
+  OPTIMISTIC_CONVERSATION_ID_PREFIX,
+} from "../lib/optimistic-conversation";
+import {
   reconcileRunState,
   reconciledAssistantStatus,
   type ReconcileResult,
@@ -73,7 +77,6 @@ export interface SendResult {
 }
 
 const ACTIVE_PROJECT_KEY_PREFIX = "litt:active-project-id";
-const OPTIMISTIC_CONVERSATION_ID_PREFIX = "pending_";
 
 // Slow re-poll cadence for non-terminal reconciles: covers long builds and
 // mobile-backgrounded tabs without a manual reload, while staying cheap.
@@ -881,6 +884,13 @@ export function useCanonicalConversation({
           case "delete": {
             const convId = s.selectedConversationId;
             const conv = s.getSelectedConversation();
+            // An optimistic "pending_*" selection has no server row to
+            // delete — dropping the local selection is the whole operation.
+            if (convId && isOptimisticConversationId(convId)) {
+              s.setMessages(convId, []);
+              s.selectConversation(null);
+              return { accepted: true, persisted: true };
+            }
             if (convId && conv && window.confirm(`Delete "${conv.title || "this conversation"}"?`)) {
               try {
                 const res = await fetch(`/api/studio/conversations/${convId}`, {
@@ -903,7 +913,9 @@ export function useCanonicalConversation({
           }
           case "rename": {
             const convId = s.selectedConversationId;
-            if (localCommand.title && convId) {
+            // Optimistic "pending_*" ids have no server row to PATCH, and
+            // no conversations-list entry to retitle — nothing to do yet.
+            if (localCommand.title && convId && !isOptimisticConversationId(convId)) {
               try {
                 const res = await fetch(`/api/studio/conversations/${convId}`, {
                   method: "PATCH",
@@ -1787,7 +1799,9 @@ export function useCanonicalConversation({
   const regenerate = useCallback(async (assistantMessageId?: string) => {
     const s = getStore();
     const conversationId = s.selectedConversationId;
-    if (!conversationId || busy) return;
+    // Optimistic "pending_*" ids have no server row — nothing to
+    // regenerate against until the canonical conversation exists.
+    if (!conversationId || isOptimisticConversationId(conversationId) || busy) return;
 
     const allMessages = s.getMessages();
     // Retry targets the exact failed turn the user pressed Retry on. The
@@ -1878,6 +1892,14 @@ export function useCanonicalConversation({
   // while the server still reports the run active the UI shows "Stopping…".
   const cancel = useCallback(() => {
     const run = activeRunRef.current;
+    // Diagnose the ghost mid-run cancel (Local AI Optimization): capture the
+    // caller stack + the run identity so a non-Stop invocation is provable.
+    // A legitimate user Stop produces the same log — it is not suppressed.
+    console.warn(
+      "[conv.cancel] invoked",
+      { clientRequestId: run?.clientRequestId, conversationId: run?.conversationId },
+      new Error("cancel-stack").stack,
+    );
     explicitCancelRef.current = true;
     if (!run) {
       // No tracked server-side run — just release the local reader if one
@@ -1929,6 +1951,13 @@ export function useCanonicalConversation({
     const s = getStore();
     const conversationId = s.selectedConversationId;
     const conversation = s.getSelectedConversation();
+    // An optimistic "pending_*" selection has no server row to delete —
+    // dropping the local selection is the whole operation.
+    if (conversationId && isOptimisticConversationId(conversationId)) {
+      s.setMessages(conversationId, []);
+      s.selectConversation(null);
+      return true;
+    }
     if (!conversationId || !conversation) return false;
     if (!window.confirm(`Delete "${conversation.title || "this conversation"}"?`)) return false;
 
@@ -1959,7 +1988,9 @@ export function useCanonicalConversation({
   const renameConversation = useCallback(async (title: string): Promise<boolean> => {
     const s = getStore();
     const conversationId = s.selectedConversationId;
-    if (!conversationId || !title.trim()) return false;
+    // Optimistic "pending_*" ids have no server row to PATCH — the rename
+    // lands once the canonical conversation exists and retitles itself.
+    if (!conversationId || isOptimisticConversationId(conversationId) || !title.trim()) return false;
     try {
       const response = await fetch(`/api/studio/conversations/${conversationId}`, {
         method: "PATCH",
@@ -2006,7 +2037,8 @@ export function useCanonicalConversation({
     const s = getStore();
     s.setActiveAgent(id as AgentSlug);
     const conversationId = s.selectedConversationId;
-    if (conversationId) {
+    // Optimistic "pending_*" ids have no server row to PATCH.
+    if (conversationId && !isOptimisticConversationId(conversationId)) {
       void (async () => {
         try {
           await fetch(`/api/studio/conversations/${conversationId}`, {

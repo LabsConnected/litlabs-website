@@ -268,6 +268,8 @@ export interface CockpitUIState {
    *  shell shows live progress instead of an empty streaming placeholder.
    *  Mirrored from the pure ToolProgressStore (testable without React). */
   toolProgress: ToolProgressSnapshot;
+  /** Per-activity expansion — entry ids toggled individually (Ctrl+G latest). */
+  expandedActivityIds: ReadonlySet<string>;
   /** Execution mode — PLAN (read-only) or ACT (full). Tab toggles. */
   mode: "plan" | "act";
   /** Workspace context — display truth for the shell. Updated by
@@ -397,7 +399,16 @@ export function useCockpitStore() {
   const [cwd, setCwd] = useState<string>("");
   const [gitModified, setGitModified] = useState<number>(0);
   const [gitUntracked, setGitUntracked] = useState<number>(0);
-  const [composerValue, setComposerValue] = useState("");
+  const [composerValue, setComposerValueState] = useState("");
+  // Live mirror of the composer draft: the app keyboard handler can run
+  // from a handler ref that lags a commit (overlay-manager refreshes it
+  // in a passive effect), so the freshest draft must be reachable without
+  // a render. Written inside the action — event time, never render time.
+  const composerValueRef = useRef("");
+  const setComposerValue = useCallback((v: string) => {
+    composerValueRef.current = v;
+    setComposerValueState(v);
+  }, []);
   const [overlayQuery, setOverlayQuery] = useState("");
   const [busySince, setBusySince] = useState<number | null>(null);
   // ─── Approval-wait clock — blocked-on-human time is NOT work time ──
@@ -432,6 +443,14 @@ export function useCockpitStore() {
   // to show their result summaries; failed/active runs are always expanded.
   const [toolDetails, setToolDetails] = useState(false);
   const toggleToolDetails = useCallback(() => setToolDetails((v) => !v), []);
+  const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
+  const toggleActivityExpanded = useCallback((id: string) => {
+    setExpandedActivityIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
 
   // ─── Live workstream — "watch LiTT work" ───────────────────────────
   // Owned by a pure WorkstreamStore (testable in node env without React).
@@ -534,13 +553,27 @@ export function useCockpitStore() {
 
   const updateSelectedModel = useCallback((modelId: string | null) => {
     setSelectedModel(modelId);
-    savePrefs({ selectedModel: modelId, lastUsedModel: modelId });
+    savePrefs(modelId
+      ? { selectedModel: modelId, lastUsedModel: modelId }
+      : { selectedModel: modelId });
   }, [savePrefs]);
 
   const updateRoutingMode = useCallback((mode: RoutingMode) => {
     setRoutingMode(mode);
     savePrefs({ routingMode: mode });
   }, [savePrefs]);
+
+  // Auto-derived selections (local-lane reconcile, target switches)
+  // update state ONLY — they must not write model-prefs.json: the
+  // operator's persisted choice stays on disk for /remote and restart
+  // instead of being overwritten by whatever the local daemon served.
+  const applyAutoSelectedModel = useCallback((modelId: string | null) => {
+    setSelectedModel(modelId);
+  }, []);
+
+  const applyAutoRoutingMode = useCallback((mode: RoutingMode) => {
+    setRoutingMode(mode);
+  }, []);
 
   // ─── Chat transcript actions ─────────────────────────────────────
   // The transcript is the PERSISTED assistant response body. All
@@ -996,6 +1029,7 @@ export function useCockpitStore() {
       transcriptPage,
       focusEpoch,
       toolDetails,
+      expandedActivityIds,
       workstream,
     },
     actions: {
@@ -1013,6 +1047,8 @@ export function useCockpitStore() {
       setCurrentRunId,
       updateSelectedModel,
       updateRoutingMode,
+      applyAutoSelectedModel,
+      applyAutoRoutingMode,
       setActiveModel,
       setActiveProvider,
       setOverlay,
@@ -1066,10 +1102,12 @@ export function useCockpitStore() {
       scrollEnd,
       resetTranscriptScroll,
       toggleToolDetails,
+      toggleActivityExpanded,
       workstreamPush,
       workstreamToggleExpand,
       workstreamClear,
     },
+    composerValueRef,
   };
 }
 

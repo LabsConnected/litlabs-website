@@ -57,7 +57,7 @@ interface WorkspaceContext {
 }
 
 function getLiTTHome(): string {
-  return process.env.LITT_HOME ?? join(homedir(), ".litt");
+  return process.env.LITT_STATE_HOME ?? join(homedir(), ".litt");
 }
 
 /**

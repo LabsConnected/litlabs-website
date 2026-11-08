@@ -6,6 +6,7 @@ export function AuthorityJsonLd() {
     {
       "@context": "https://schema.org",
       "@type": "Organization",
+      "@id": `${SITE_URL}/#organization`,
       "name": SITE_NAME,
       "url": SITE_URL,
       "logo": absoluteUrl("/logo.png"),
@@ -18,6 +19,7 @@ export function AuthorityJsonLd() {
     {
       "@context": "https://schema.org",
       "@type": "WebSite",
+      "@id": `${SITE_URL}/#website`,
       "name": SITE_NAME,
       "url": SITE_URL,
       "potentialAction": {
@@ -32,6 +34,7 @@ export function AuthorityJsonLd() {
     {
       "@context": "https://schema.org",
       "@type": "WebApplication",
+      "@id": `${SITE_URL}/#studio-application`,
       "name": "LiTTree Studio",
       "applicationCategory": "DeveloperApplication, MultimediaApplication",
       "operatingSystem": "Web",

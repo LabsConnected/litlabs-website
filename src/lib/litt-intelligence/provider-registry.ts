@@ -30,7 +30,8 @@
 
 import "server-only";
 
-import { resolveOllamaEndpoint, OLLAMA_ENDPOINT_ENV_VARS } from "@litt/models";
+import { resolveOllamaEndpoint } from "@litt/models";
+import { ollamaRouteEligible } from "./ollama-shared";
 import {
   findModelRecord,
   getEligibleModels,
@@ -105,6 +106,10 @@ export interface PlannedProvider {
   models: string[];
   /** Hard cap on a single provider attempt. */
   timeoutMs: number;
+  /** See ProviderDef.perModelRateLimits. */
+  perModelRateLimits?: boolean;
+  /** See ProviderDef.requestTokenCeiling. */
+  requestTokenCeiling?: number;
   health: ProviderHealthState;
   credentialState: CredentialState;
 }
@@ -211,6 +216,24 @@ interface ProviderDef {
   timeoutMs: number;
   credentialState(): CredentialState;
   models(): string[];
+  /**
+   * True when the provider meters rate limits per MODEL (Gemini free tier:
+   * per-model RPM/RPD; OpenRouter :free: per-model daily/RPM caps; Groq:
+   * per-model TPM). A 429 on one model then cools only that model — the
+   * provider's sibling quotas remain usable within this call and the next.
+   * Providers that meter per-account (OpenAI, Cloudflare, BYOK) keep the
+   * provider-scope default.
+   */
+  perModelRateLimits?: boolean;
+  /**
+   * Per-request token ceiling for this provider's tier (Groq free tier:
+   * 8,000 TPM — and Groq bills the REQUESTED max_tokens against it, so a
+   * prompt + declared completion that exceeds the ceiling is rejected as
+   * HTTP 413 no matter how long you wait). When set, requests whose
+   * estimated size exceeds the ceiling skip this provider's models instead
+   * of burning a guaranteed-failed attempt.
+   */
+  requestTokenCeiling?: number;
 }
 
 function envPresent(...names: string[]): boolean {
@@ -280,6 +303,11 @@ function openRouterModels(requirements?: RouteRequirements): string[] {
   return list;
 }
 
+function geminiAttemptTimeoutMs(): number {
+  const configured = Number(process.env.GEMINI_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 60_000;
+}
+
 function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
   return [
     {
@@ -287,14 +315,26 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       adapter: "gemini",
       costClass: "FREE_MANAGED",
       capabilities: { ...TOOL_CAPABLE, vision: true },
-      timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
+      // Same fix as OpenRouter below: the big file-writing step of a build
+      // (~15k-token prompt) legitimately exceeds the shared 30s cap on the
+      // free tier — observed timing out mid-build and handing the write to
+      // a non-tool-calling fallback. Per-route cap; the agent's absolute
+      // deadline still bounds every attempt.
+      timeoutMs: geminiAttemptTimeoutMs(),
       credentialState: () =>
         envPresent("GEMINI_API_KEY", "GOOGLE_API_KEY") ? "available" : "missing",
+      // Gemini free tier meters RPM/RPD per model — a saturated flash must
+      // cool only itself so the lite/pro quota pools stay usable.
+      perModelRateLimits: true,
       // Model IDs come from the canonical registry: env overrides are
       // validated (unknown strings rejected with a warning), otherwise the
       // registry defaults (gemini-flash-latest alias + gemini-2.5-flash).
       models: () => [
         resolveRegistryModel("GEMINI_PRIMARY_MODEL", "gemini-flash", {
+          tools: true,
+          reliableFileWriting: true,
+        }).providerModelId,
+        resolveRegistryModel("GEMINI_LITE_MODEL", "gemini-2.5-flash-lite", {
           tools: true,
           reliableFileWriting: true,
         }).providerModelId,
@@ -315,6 +355,8 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       // deadline still bounds every attempt via computeAttemptTimeout.
       timeoutMs: Number(process.env.OPENROUTER_TIMEOUT_MS) || 60_000,
       credentialState: () => (envPresent("OPENROUTER_API_KEY") ? "available" : "missing"),
+      // OpenRouter :free models meter daily/RPM caps per model.
+      perModelRateLimits: true,
       models: () => openRouterModels(requirements),
     },
     {
@@ -324,6 +366,15 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       capabilities: TOOL_CAPABLE,
       timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () => (envPresent("GROQ_API_KEY") ? "available" : "missing"),
+      // Groq meters TPM per model.
+      perModelRateLimits: true,
+      // Free-tier cap: 8,000 TPM per model — and the DECLARED max_tokens is
+      // billed against it, so prompt+max_tokens over the ceiling is a
+      // guaranteed HTTP 413 (prod-verified 2026-11-05, golden 41933246698:
+      // both gpt-oss models rejected in ~100ms). Requests that cannot fit
+      // are skipped before the fetch; raise via env on a paid tier.
+      requestTokenCeiling:
+        Number(process.env.GROQ_REQUEST_TOKEN_CEILING) || 8_000,
       models: () => [
         process.env.GROQ_MODEL || "openai/gpt-oss-120b",
         // gpt-oss-20b is the live lighter Groq fallback. The llama entries
@@ -340,6 +391,8 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       capabilities: TOOL_CAPABLE,
       timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () => (envPresent("MISTRAL_API_KEY") ? "available" : "missing"),
+      // Mistral free tier meters requests/tokens per model.
+      perModelRateLimits: true,
       models: () => [
         process.env.MISTRAL_MODEL || "mistral-small-latest",
         "open-mistral-nemo",
@@ -357,7 +410,7 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
           : "missing",
       models: () => [
         process.env.CLOUDFLARE_AI_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-        "@cf/mistral/mistral-small-3.1-24b-instruct",
+        "@cf/mistralai/mistral-small-3.1-24b-instruct",
       ],
     },
     {
@@ -367,7 +420,11 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       // Model is resolved at attempt time from /api/tags — the registry
       // advertises tool support only for known tool-capable families.
       capabilities: { tools: true, vision: false, structuredOutput: false, coding: true },
-      timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
+      // Local models need a much wider cap than the shared 30s: a cold
+      // load (multi-GB GGUF) plus a real single-page generation measured
+      // ~117s on this dev host (CPU-heavy inference). Per-route cap only;
+      // the agent deadline still bounds the attempt.
+      timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS) || 300_000,
       credentialState: () => "not_required",
       models: () => [process.env.OLLAMA_MODEL || "auto"],
     },
@@ -404,16 +461,11 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
 // Local Ollama is a legitimate zero-cost route when connected, but probing
 // localhost on every request of a deployed web server is pointless. Include it
 // when explicitly configured, or when running outside a deployed environment.
+// The rule itself lives in ./ollama-shared (ollamaRouteEligible) — shared
+// with the V1 chain and the health endpoint.
 
 function ollamaIncluded(): boolean {
-  if (process.env.LITT_DISABLE_OLLAMA) return false;
-  if (OLLAMA_ENDPOINT_ENV_VARS.some((k) => !!process.env[k])) return true;
-  const deployed = !!(
-    process.env.RAILWAY_ENVIRONMENT ||
-    process.env.RAILWAY_PROJECT_ID ||
-    process.env.VERCEL
-  );
-  return !deployed;
+  return ollamaRouteEligible();
 }
 
 // ─── Health store (process-local circuit breaker) ─────────────────
@@ -423,6 +475,11 @@ const DISABLE_COOLDOWN_MS = 30 * 60_000;
 /** 429 without a Retry-After hint. */
 const RATE_LIMIT_DEFAULT_MS = 60_000;
 const RATE_LIMIT_MAX_MS = 10 * 60_000;
+/** Provider-stated retry delays are authoritative (Google daily-quota 429s
+ *  carry "retry in 9h48m…" hints). Honour them up to one day so an exhausted
+ *  quota isn't re-probed every few minutes — a longer silence would just
+ *  make the provider look dead with no recovery probe at all. */
+const RATE_LIMIT_STATED_MAX_MS = 24 * 60 * 60_000;
 /** Repeated transient failures (timeout/network/5xx). */
 const TRANSIENT_COOLDOWN_MS = 60_000;
 /** A single transient failure degrades; a second consecutive one cools down. */
@@ -497,7 +554,9 @@ export function recordProviderFailure(provider: string, failure: ProviderFailure
       }
       break;
     case "rate_limited": {
-      const wait = Math.min(failure.retryAfterMs ?? RATE_LIMIT_DEFAULT_MS, RATE_LIMIT_MAX_MS);
+      const wait = failure.retryAfterMs !== undefined
+        ? Math.min(failure.retryAfterMs, RATE_LIMIT_STATED_MAX_MS)
+        : Math.min(RATE_LIMIT_DEFAULT_MS, RATE_LIMIT_MAX_MS);
       next.state = "cooldown";
       next.cooldownUntil = now + wait;
       break;
@@ -517,8 +576,19 @@ export function recordProviderFailure(provider: string, failure: ProviderFailure
   providerHealth.set(provider, next);
 }
 
-export function recordModelFailure(provider: string, model: string): void {
-  modelCooldowns.set(`${provider}:${model}`, Date.now() + MODEL_COOLDOWN_MS);
+export function recordModelFailure(
+  provider: string,
+  model: string,
+  retryAfterMs?: number,
+): void {
+  // A provider-stated retry delay is authoritative (Google daily-quota 429s
+  // carry "retry in 9h48m…" hints): honour it up to the same cap the
+  // provider path uses so a saturated model isn't re-probed every 10 min —
+  // and so a 20s wait doesn't over-penalise a briefly-limited model.
+  const wait = retryAfterMs !== undefined
+    ? Math.min(retryAfterMs, RATE_LIMIT_STATED_MAX_MS)
+    : MODEL_COOLDOWN_MS;
+  modelCooldowns.set(`${provider}:${model}`, Date.now() + wait);
 }
 
 /** Test seam: clear all circuit-breaker state. */
@@ -590,7 +660,20 @@ export function parseRetryAfterMs(headers: Headers | null | undefined, bodyText:
     const secs = Number(m[1]);
     if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
   }
-  return undefined;
+  return parseRetryInDurationMs(bodyText);
+}
+
+/** Google quota bodies say "Please retry in 9h48m52.106458201s" — a compound
+ *  h/m/s duration that the Retry-After patterns above don't match. Also used
+ *  for thrown-error messages that embed the same text. */
+function parseRetryInDurationMs(text: string): number | undefined {
+  const m = text.match(/retry\s+in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*([\d.]+)s/i);
+  if (!m) return undefined;
+  const h = m[1] ? Number(m[1]) : 0;
+  const min = m[2] ? Number(m[2]) : 0;
+  const s = Number(m[3]);
+  if (![h, min, s].every(Number.isFinite)) return undefined;
+  return Math.max(0, (h * 3600 + min * 60 + s) * 1000);
 }
 
 export function classifyHttpFailure(
@@ -679,11 +762,12 @@ export function classifyThrownFailure(err: unknown): ProviderFailure {
     return { class: "timeout", scope: "provider", message: sanitizeBody(msg) };
   }
   if (/429|too many requests|rate.?limit/i.test(msg)) {
+    const hinted = parseRetryAfterMs(null, msg);
     const m = msg.match(/(\d+)\s*s(?:econds?)?/i);
     return {
       class: "rate_limited",
       scope: "provider",
-      retryAfterMs: m ? Number(m[1]) * 1000 : undefined,
+      retryAfterMs: hinted ?? (m ? Number(m[1]) * 1000 : undefined),
       message: sanitizeBody(msg),
     };
   }
@@ -707,6 +791,13 @@ function resolveModelHint(model: string | undefined): ModelHint {
   if (!model) return null;
   const m = model.trim();
   if (!m || m === "auto" || m.startsWith("litt-")) return null; // LiTT aliases → auto
+  // Explicit local pin: "ollama/<tag>" (the Studio picker's Local section).
+  // The tag is passed verbatim — attemptOllama validates it against the
+  // live /api/tags probe and fails model-scoped when it isn't loaded.
+  if (m.startsWith("ollama/")) {
+    const tag = m.slice("ollama/".length).trim();
+    return tag ? { kind: "route", provider: "ollama", model: tag } : null;
+  }
   if (m === "openrouter/free" || m.endsWith(":free")) return { kind: "route", provider: "openrouter", model: m };
   if (m.startsWith("@cf/")) return { kind: "route", provider: "cloudflare", model: m };
   if (m.startsWith("gemini") && !m.includes("/")) return { kind: "route", provider: "gemini", model: m };
@@ -842,6 +933,8 @@ export function planBasicRoutes(
       capabilities: caps,
       models,
       timeoutMs: def.timeoutMs,
+      perModelRateLimits: def.perModelRateLimits,
+      requestTokenCeiling: def.requestTokenCeiling,
       health: health.state,
       credentialState: cred,
     });

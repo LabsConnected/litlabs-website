@@ -223,8 +223,17 @@ All production env vars must be set on the Railway web service.
 - `SENTRY_DSN`
 - `SENTRY_AUTH_TOKEN` — for source map uploads during build
 
+**User-site publishing (LiTT Hosting):**
+- `DEPLOY_PRODUCTION_URL=https://www.litlabs.net` — the public base URL
+  deployments are published and verified under (`/sites/<id>`). The
+  hosting backend resolves it from `DEPLOY_PRODUCTION_URL`,
+  `RAILWAY_PUBLIC_DOMAIN` (platform-injected), then
+  `NEXT_PUBLIC_SITE_URL`. The Railway GraphQL vars below are only needed
+  when none of these are set (e.g. a dedicated sites service).
+
 **Railway deploy trigger (optional):**
-- `RAILWAY_API_TOKEN` — for the `/api/deploy/trigger` endpoint
+- `RAILWAY_API_TOKEN` — for the `/api/deploy/trigger` endpoint and the
+  GraphQL hosting-URL fallback
 - `RAILWAY_SERVICE_ID` — the Railway service ID to redeploy
 
 **Rate limiting:**

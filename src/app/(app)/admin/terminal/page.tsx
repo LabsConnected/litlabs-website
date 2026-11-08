@@ -17,9 +17,6 @@ import {
   Trash2,
 } from "lucide-react";
 
-// ─── Auth guard ────────────────────────────────────────────────────────────────
-const ADMIN_USER_ID = "user_litbit";
-
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 interface OutputLine {
@@ -134,7 +131,7 @@ function makeId() {
 
 export default function AdminTerminal() {
   const { resolvedColors: T } = useTheme();
-  const { userId, isLoaded, isSignedIn } = useClerkAuth();
+  const { isLoaded, isSignedIn } = useClerkAuth();
   const router = useRouter();
 
   const [output, setOutput] = useState<OutputLine[]>([
@@ -163,12 +160,9 @@ export default function AdminTerminal() {
   const outputRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // ── Auth guard ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (isLoaded && (!isSignedIn || userId !== ADMIN_USER_ID)) {
-      router.push("/");
-    }
-  }, [isLoaded, isSignedIn, userId, router]);
+  // Authorization is enforced server-side by src/app/(app)/admin/layout.tsx
+  // (requireOwnerAccess → 404). Client-side state here only tracks whether
+  // Clerk has finished resolving a session for UX.
 
   // ── Load command history from localStorage ────────────────────────────────
   useEffect(() => {
@@ -391,8 +385,8 @@ export default function AdminTerminal() {
     }
   };
 
-  // ── Loading / access denied states ───────────────────────────────────────
-  if (!isLoaded) {
+  // ── Loading state ────────────────────────────────────────────────────────
+  if (!isLoaded || !isSignedIn) {
     return (
       <div
         className="min-h-screen flex items-center justify-center"
@@ -403,24 +397,6 @@ export default function AdminTerminal() {
           size={28}
           style={{ color: T.accentColor }}
         />
-      </div>
-    );
-  }
-
-  if (!isSignedIn || userId !== ADMIN_USER_ID) {
-    return (
-      <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ backgroundColor: T.bgColor }}
-      >
-        <div className="text-center">
-          <AlertTriangle
-            size={48}
-            className="mx-auto mb-4"
-            style={{ color: T.warning }}
-          />
-          <p style={{ color: T.textMuted }}>Access Denied — Admin Only</p>
-        </div>
       </div>
     );
   }

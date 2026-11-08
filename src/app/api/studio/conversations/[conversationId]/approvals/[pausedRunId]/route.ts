@@ -25,7 +25,10 @@ import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
 import {
   finalizeQualityLoop,
   noteBuildArtifacts,
+  noteDeployment,
   notePreviewReady,
+  noteStaticArtifactCheck,
+  verifyLiveUrl,
   restoreQualityLoopSession,
   shouldEnableQualityLoop,
   snapshotQualityLoopSession,
@@ -662,6 +665,16 @@ export async function POST(
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
     enableBuildFix: true,
+    // Carry execution intent through the resume — kept separate from
+    // requireToolCallOnFirstStep because that requirement is inert on
+    // resume (the gated call that caused the pause already satisfied it).
+    // Every paused run was dispatched on a V2 execution-required turn —
+    // the useV2 gate only runs when routing.requiresExecution is true —
+    // so a post-approval reply asking for approval in prose with no tool
+    // call is a stall: nudge the model to emit the gated call (which
+    // surfaces a real approval card), never accept it as a final answer.
+    // The plan-mode exclusion still applies in the loop's derivation.
+    executionRequested: true,
     signal: abortController.signal,
     userId,
     isStaticWorkspace: resumeProject?.framework === "static" ? true : undefined,
@@ -739,6 +752,10 @@ export async function POST(
       // re-injected after the approved tool runs so approving one tool
       // cannot silently drop the rest of the batch.
       deferredToolCalls: resolved.deferredToolCalls,
+      // Calls that already executed before the pause — including their
+      // read-back evidence — seeded into the resumed run's log so the
+      // verdict covers the whole mutation history.
+      priorToolCalls: resolved.priorToolCalls,
       existingCheckpoint: resumeCheckpoint,
       // Capability set for the resume execution gate. Resolved fresh here
       // from the same source of truth the initial loop used
@@ -768,6 +785,26 @@ export async function POST(
       // existed on disk.
       const successfulMutation = result.toolCalls.some((call) => call.mutating && call.success);
       const failedMutation = result.toolCalls.some((call) => call.mutating && !call.success);
+      // The welcome-screen marker escape hatch exists for an edit to real
+      // project files (the agent changed the starter or added real site
+      // files while keeping the entry marker). A mutation that only drops
+      // downloaded assets — e.g. an approved image.stock fetch into
+      // assets/ — is not a site edit and must not waive the marker check:
+      // the placeholder would then pass the artifact gate and the run
+      // would report "completed" on an unbuilt site.
+      const successfulSiteFileMutation = result.toolCalls.some((call) =>
+        call.mutating &&
+        call.success &&
+        // site.compose/site.patch write index.html through files.write
+        // internally — the log records the outer tool id, so they are not
+        // covered by isFileWritingTool but are site-file mutations.
+        (isFileWritingTool(call.toolId) ||
+          call.toolId === "site.compose" ||
+          call.toolId === "site.patch") &&
+        (call.paths?.some((path) =>
+          !/^assets?\//i.test(path.replace(/\\/g, "/").replace(/^(\.\/)+/, "")),
+        ) ?? (call.toolId === "site.compose" || call.toolId === "site.patch")),
+      );
       let resumeFailure: string | undefined;
       let resumePreview: Awaited<ReturnType<typeof ensureProjectPreviewReady>> | null = null;
       if (!result.pendingApproval && !result.cancelled) {
@@ -794,7 +831,7 @@ export async function POST(
           // (or wrote to the wrong workspace) still fails honestly.
           resumePreview = await ensureProjectPreviewReady(
             transport,
-            { workspaceChange: result.workspaceChange ?? null, hadSuccessfulMutation: successfulMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
+            { workspaceChange: successfulSiteFileMutation ? result.workspaceChange ?? null : null, hadSuccessfulMutation: successfulSiteFileMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
             undefined,
             actionContext,
           );
@@ -808,7 +845,7 @@ export async function POST(
         // nested gate merely because a later file has not been written yet.
         resumePreview = await ensureProjectPreviewReady(
           transport,
-          { hadSuccessfulMutation: successfulMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
+          { hadSuccessfulMutation: successfulSiteFileMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
           undefined,
           actionContext,
         ).catch(() => null);
@@ -860,23 +897,39 @@ export async function POST(
         if (resumePreview?.ok) {
           noteBuildArtifacts(qualitySession, resumePreview.files);
           notePreviewReady(qualitySession, previewUrl);
-          const finale = finalizeQualityLoop(qualitySession, {
-            deployRequested:
-              resolved.toolId === "project.deploy" ||
-              result.toolCalls.some((call) => call.toolId === "project.deploy"),
-          });
-          qualityLoop = {
-            verdict: finale.verdict,
-            stages: finale.stages,
-            designPasses: finale.designPasses,
-          };
-          qualityLoopState = snapshotQualityLoopSession(qualitySession);
-          if (finale.verdict.ok) {
-            // The resumed agent may have finalized before the approval-boundary
-            // preview check completed. Remove only that stale machine-gate
-            // suffix; never suppress ordinary model output or a failed gate.
-            finalText = stripQualityVerdictSuffix(finalText);
-          }
+        }
+        // File the deployment the resumed run actually completed. The
+        // approved project.deploy executed deployUserProject, which
+        // persisted the snapshot and HTTP-verified the URL before
+        // returning it — the ledger must see that machine evidence or
+        // every approval-resumed deploy refuses as "missing deploy/
+        // verify evidence" while the site is already live.
+        const resumedDeployUrl = resumedDeployPublicUrl(result.toolCalls);
+        if (resumedDeployUrl) {
+          noteDeployment(qualitySession, resumedDeployUrl);
+          await verifyLiveUrl(qualitySession, resumedDeployUrl);
+        }
+        // The artifact read-back proof for TEST: the file the run wrote
+        // is read back from the workspace and carries real content —
+        // never filed on a failed or empty read.
+        await fileResumedArtifactCheck(qualitySession, transport, resumePreview);
+        const finale = finalizeQualityLoop(qualitySession, {
+          deployRequested:
+            resolved.toolId === "project.deploy" ||
+            result.toolCalls.some((call) => call.toolId === "project.deploy") ||
+            !!resumedDeployUrl,
+        });
+        qualityLoop = {
+          verdict: finale.verdict,
+          stages: finale.stages,
+          designPasses: finale.designPasses,
+        };
+        qualityLoopState = snapshotQualityLoopSession(qualitySession);
+        if (finale.verdict.ok) {
+          // The resumed agent may have finalized before the approval-boundary
+          // preview check completed. Remove only that stale machine-gate
+          // suffix; never suppress ordinary model output or a failed gate.
+          finalText = stripQualityVerdictSuffix(finalText);
         }
       }
 
@@ -935,9 +988,53 @@ export async function POST(
       // approval.required event's payload.result and reports this gate as
       // completed with the nested gate's pausedRunId.
       if (result.pendingApproval) {
-        let nestedPausedRunId: string;
+        let nestedPausedRunId: string | null = null;
+        // A follow-up gate is only resumable when the pause carried its
+        // full identity: tool id, the frozen call id, and the paused
+        // conversation. A malformed pause cannot produce a working
+        // Approve button — a pause without a tool identity produces an
+        // approval card that names nothing and a gate that approves
+        // nothing (golden 41962554092 observed runResult.pendingApproval
+        // with no tool identity). Fail loudly instead of persisting a
+        // gate the user could never resolve.
+        const gate = result.pendingApproval;
+        if (!gate.toolId || !gate.toolCallId || !gate.pausedMessages?.length) {
+          const malformedError =
+            `The follow-up approval could not be saved — send the request again to retry.`;
+          studioLog("approval:nested_paused_run_malformed", {
+            conversationId,
+            userId,
+            actionRunId: resolved.actionRunId ?? undefined,
+            pausedRunId,
+            gateId: pausedRunId,
+            tool: gate.toolId ?? "missing",
+            eventSource: "settle",
+            hasPausedRunId: false,
+            hasToolId: !!gate.toolId,
+          });
+          await writeResumedResultToTranscript({
+            conversationId,
+            userId,
+            projectId: resolved.projectId,
+            pausedRunId,
+            status: "failed",
+            content: malformedError,
+          });
+          await settleResumedRunOutcome({
+            record: resolved,
+            userId,
+            status: "failed",
+            eventType: "run.failed",
+            patch: { currentActivity: malformedError, failureCode: "APPROVAL_STATE_UNAVAILABLE", failureMessage: malformedError },
+            executionToken,
+            logEvent: "approval:action_run_nested_malformed_settle_failed",
+          });
+          return;
+        }
+        // Persist failures funnel through the same fail-loud path below.
+        let nestedGateFailure: string | null = null;
         try {
-          const nested = await createPausedRun({
+          const nested = nestedGateFailure ? null : await createPausedRun({
             userId,
             conversationId,
             projectId: resolved.projectId,
@@ -949,14 +1046,21 @@ export async function POST(
             pausedMessages: result.pendingApproval.pausedMessages,
             executionMode: resolved.executionMode,
             systemPrompt: resolved.systemPrompt,
-            checkpointId: null,
+            // Persist the run baseline (the original run's first
+            // pre-mutation checkpoint), not null: the next resume diffs
+            // the whole run's work instead of reporting "unknown".
+            checkpointId: result.baselineCheckpoint?.checkpointId ?? result.checkpoint?.checkpointId ?? null,
             actionRunId: resolved.actionRunId ?? null,
             qualityLoopState: result.pendingApproval.qualityLoopState,
             deferredToolCalls: result.pendingApproval.deferredToolCalls,
             stepsUsed: result.pendingApproval.stepsUsedAtPause,
             hadInterveningMutation: result.pendingApproval.hadInterveningMutationAtPause,
+            // Carry the first gate's verified/contradicted call history —
+            // omitting it writes prior_tool_calls: null, so the next
+            // resume would lose every mutation proven across THIS gate.
+            priorToolCalls: result.pendingApproval.priorToolCalls,
           });
-          nestedPausedRunId = nested.id;
+          nestedPausedRunId = nested?.id ?? null;
         } catch (nestedErr) {
           studioLog("approval:nested_paused_run_persist_failed", {
             conversationId,
@@ -964,11 +1068,16 @@ export async function POST(
             tool: result.pendingApproval.toolId,
             errorClass: nestedErr instanceof Error ? nestedErr.message : "unknown",
           });
+          nestedGateFailure ??=
+            `The follow-up approval for \`${result.pendingApproval.toolId}\` could not be saved — send the request again to retry.`;
+        }
+        if (nestedGateFailure || !nestedPausedRunId) {
           // A nested gate that cannot be persisted is unresumable — the
           // client's Approve button would be a dead card (pausedRunId:
           // undefined). Fail the run loudly instead of completing it with
           // a broken gate.
           const nestedPersistError =
+            nestedGateFailure ??
             `The follow-up approval for \`${result.pendingApproval.toolId}\` could not be saved — send the request again to retry.`;
           await writeResumedResultToTranscript({
             conversationId,
@@ -1006,6 +1115,21 @@ export async function POST(
           runResult,
           executionToken,
           logEvent: "approval:action_run_nested_handoff_settle_failed",
+        });
+        // Forensic signal: proves the persisted handoff carried the new
+        // gate's id at settle time — paired with the derivation log, it
+        // separates a malformed write from a malformed read.
+        studioLog("approval:nested_handoff_settled", {
+          conversationId,
+          userId,
+          actionRunId: resolved.actionRunId ?? undefined,
+          pausedRunId,
+          gateId: pausedRunId,
+          nestedPausedRunId,
+          tool: result.pendingApproval.toolId,
+          eventSource: "settle",
+          hasPausedRunId: true,
+          hasToolId: true,
         });
         return true;
       }
@@ -1130,4 +1254,44 @@ export async function GET(
     runStartedAt: outcome.runStartedAt,
     runCompletedAt: outcome.runCompletedAt,
   });
+}
+
+/**
+ * Extract the verified live URL from a completed project.deploy call in a
+ * resumed run's tool log. The log carries the JSON-encoded tool result in
+ * `summary`; only a successful call with a real http(s) URL counts.
+ */
+function resumedDeployPublicUrl(
+  toolCalls: Array<{ toolId: string; success: boolean; summary?: string }> | undefined,
+): string | null {
+  for (const call of toolCalls ?? []) {
+    if (call.toolId !== "project.deploy" || call.success !== true) continue;
+    const summary = String(call.summary ?? "");
+    const url = summary.match(/"(?:liveUrl|publicUrl)"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1];
+    if (url) return url;
+  }
+  return null;
+}
+
+/**
+ * File TEST evidence only on a real read-back: the artifact the run wrote
+ * is read from the workspace and must contain non-trivial content. An
+ * unreadable or empty file files nothing — the gate keeps its honesty.
+ */
+async function fileResumedArtifactCheck(
+  qualitySession: Parameters<typeof noteStaticArtifactCheck>[0],
+  transport: { readFile(path: string): Promise<{ content: string } | string> },
+  resumePreview: { files?: string[] } | null,
+): Promise<void> {
+  try {
+    const candidate = (resumePreview?.files ?? []).find((f) => /\.(html?|css|js)$/i.test(f)) ?? "index.html";
+    const file = await transport.readFile(candidate);
+    const content = typeof file === "string" ? file : file?.content;
+    noteStaticArtifactCheck(qualitySession, {
+      path: candidate,
+      contentMatches: typeof content === "string" && content.length > 200,
+    });
+  } catch {
+    noteStaticArtifactCheck(qualitySession, { path: "index.html", contentMatches: null });
+  }
 }

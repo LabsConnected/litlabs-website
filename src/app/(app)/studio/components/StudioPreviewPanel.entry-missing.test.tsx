@@ -93,6 +93,13 @@ describe("StudioPreviewPanel — preview-entry-missing message", () => {
   it("ignores the message from a foreign origin", async () => {
     const fetchSpy = renderReadyPreview();
     await screen.findByTitle("Demo preview");
+    // Same settle as the positive test: previewUrl-dependent effects
+    // (listener registration + a follow-up status fetch) commit on a
+    // microtask after the iframe appears. Sampling the baseline before
+    // that point races CI — a settling fetch lands inside the 50ms
+    // window and looks like a response to the message.
+    await act(async () => Promise.resolve());
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
     const callsAfterReady = fetchSpy.mock.calls.length;
 
     window.dispatchEvent(
@@ -109,6 +116,10 @@ describe("StudioPreviewPanel — preview-entry-missing message", () => {
   it("ignores messages with the wrong source or type", async () => {
     const fetchSpy = renderReadyPreview();
     await screen.findByTitle("Demo preview");
+    // Same settle as the positive test before baselining (see the
+    // foreign-origin case above).
+    await act(async () => Promise.resolve());
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
     const callsAfterReady = fetchSpy.mock.calls.length;
 
     for (const data of [

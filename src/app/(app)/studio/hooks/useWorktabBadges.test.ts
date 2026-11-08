@@ -97,4 +97,40 @@ describe("useWorktabBadges", () => {
       expect(result.current["tab-a"]).toBe("needs-approval");
     });
   });
+
+  it("never polls action-run for optimistic pending_* conversation ids", async () => {
+    // Regression: optimistic send placeholders have no server row — the
+    // per-tab projection poll was a guaranteed 404 on every cycle.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ projection: null }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const tabs: Worktab[] = [
+      ...seedTabs(),
+      {
+        id: "tab-pending",
+        title: "Sending…",
+        conversationId: "pending_req_123_abc",
+        surface: "studio/work",
+        selection: null,
+        createdAt: 3,
+      },
+    ];
+
+    const { result } = renderHook(() => useWorktabBadges(tabs));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/studio/conversations/conv-a/action-run",
+        expect.anything(),
+      );
+    });
+
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String(call[0]).includes("pending_req_123_abc"),
+      ),
+    ).toBe(false);
+    expect(result.current["tab-pending"]).toBe("idle");
+  });
 });

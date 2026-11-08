@@ -36,6 +36,7 @@ import { DEFAULT_TERMINAL_URL } from "../lib/auth/auth-config.js";
 import { getAuthSession, resetAuthSession } from "../lib/auth/auth-session.js";
 import { createCredentialStore } from "../lib/auth/credential-store.js";
 import type { RemoteUnavailableError } from "../lib/remote-unavailable.js";
+import { isRemoteUnavailable } from "../lib/remote-unavailable.js";
 
 // ─── Mock fetch ───────────────────────────────────────────────────
 
@@ -847,5 +848,198 @@ describe("CLI workspace error propagation", () => {
       // Must NOT suggest running locally
       expect(msg).not.toMatch(/without --remote|local execution|run locally/i);
     }
+  });
+});
+
+// ─── Token-exchange auth classification ───────────────────────────
+//
+// Regression: POST /api/token-exchange previously mapped EVERY 401/403
+// to `auth_revoked`. The owner gate and the workspace-ownership check
+// both answer 403 with a VALID Clerk token — reporting them as
+// auth_revoked produced the exact observed failure:
+//   "Remote execution unavailable: Terminal access is restricted to the
+//    workspace owner. Your session is no longer valid. Run 'litt login'
+//    to sign in again."
+// and — because auth_revoked is a credential-clearing reason — deleted
+// the operator's perfectly good stored credential.
+
+describe("token exchange — auth vs authorization classification", () => {
+  const CLERK_TOKEN = "clerk-session-jwt-token-here";
+  const EXCHANGE_URL = "http://127.0.0.1:4001";
+  const TERMINAL_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSJ9.signature";
+
+  async function dispatchExpectingThrow() {
+    try {
+      await dispatchRemote("doctor", [], {
+        clerkToken: CLERK_TOKEN,
+        terminalUrl: EXCHANGE_URL,
+      });
+      expect.fail("Should have thrown");
+    } catch (error) {
+      return error;
+    }
+  }
+
+  it("valid owner → exchange succeeds and the command dispatches", async () => {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      terminalToken: TERMINAL_JWT,
+      expiresIn: 300,
+      userId: "owner-user",
+    }));
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      ok: true, runId: "r", kind: "doctor", result: {}, timestamp: 0, durationMs: 0,
+    }));
+
+    const result = await dispatchRemote("doctor", [], {
+      clerkToken: CLERK_TOKEN,
+      terminalUrl: EXCHANGE_URL,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("expired/invalid session (401) → auth_revoked with a clear login-required error", async () => {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse(
+      { error: "Clerk token verification failed (status: 401, reason: token-expired)" },
+      401,
+    ));
+
+    const error = await dispatchExpectingThrow();
+    const rue = error as InstanceType<typeof RemoteUnavailableError>;
+    expect(isRemoteUnavailable(error)).toBe(true);
+    expect(rue.reason).toBe("auth_revoked");
+    // Clear login-required error — the only truthful remedy here.
+    expect(rue.message).toMatch(/litt login/i);
+    // And it must NOT pretend to be an owner-access problem.
+    expect(rue.message).not.toMatch(/workspace owner/i);
+  });
+
+  it("non-owner (403 + terminal_owner_required code) → its own reason, never auth_revoked", async () => {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse(
+      {
+        error: "Terminal access is restricted to the workspace owner",
+        code: "terminal_owner_required",
+      },
+      403,
+    ));
+
+    const error = await dispatchExpectingThrow();
+    const rue = error as InstanceType<typeof RemoteUnavailableError>;
+    expect(isRemoteUnavailable(error)).toBe(true);
+    expect(rue.reason).toBe("terminal_owner_required");
+    expect(rue.reason).not.toBe("auth_revoked");
+    // The server's message survives; the remedy is owner-side, not re-login.
+    expect(rue.message).toMatch(/workspace owner/i);
+    expect(rue.message).not.toMatch(/no longer valid/i);
+    expect(rue.message).not.toMatch(/litt login to sign in again/i);
+    // Non-credential-clearing — the session is valid.
+    const { CREDENTIAL_CLEARING_REASONS } = await import("../lib/remote-unavailable.js");
+    expect(CREDENTIAL_CLEARING_REASONS.has(rue.reason)).toBe(false);
+  });
+
+  it("non-owner on a legacy server (403, no typed code) → forbidden, never auth_revoked", async () => {
+    // Servers predating the `code` field send only the string error.
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse(
+      { error: "Terminal access is restricted to the workspace owner" },
+      403,
+    ));
+
+    const error = await dispatchExpectingThrow();
+    const rue = error as InstanceType<typeof RemoteUnavailableError>;
+    expect(isRemoteUnavailable(error)).toBe(true);
+    expect(rue.reason).toBe("forbidden");
+    expect(rue.reason).not.toBe("auth_revoked");
+    expect(rue.message).not.toMatch(/no longer valid/i);
+
+    const { CREDENTIAL_CLEARING_REASONS } = await import("../lib/remote-unavailable.js");
+    expect(CREDENTIAL_CLEARING_REASONS.has(rue.reason)).toBe(false);
+  });
+
+  it("workspace the account does not own (403 + workspace_unauthorized code) → workspace_unauthorized", async () => {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse(
+      {
+        error: "Forbidden — workspace does not belong to the authenticated user",
+        code: "workspace_unauthorized",
+      },
+      403,
+    ));
+
+    const error = await dispatchExpectingThrow();
+    const rue = error as InstanceType<typeof RemoteUnavailableError>;
+    expect(isRemoteUnavailable(error)).toBe(true);
+    expect(rue.reason).toBe("workspace_unauthorized");
+    expect(rue.reason).not.toBe("auth_revoked");
+  });
+
+  it("unreachable terminal host → service_unavailable", async () => {
+    fetchSpy.mockRejectedValueOnce(new Error("connect ECONNREFUSED 10.0.0.1:4001"));
+
+    const error = await dispatchExpectingThrow();
+    const rue = error as InstanceType<typeof RemoteUnavailableError>;
+    expect(isRemoteUnavailable(error)).toBe(true);
+    expect(rue.reason).toBe("service_unavailable");
+    expect(rue.message).toMatch(/ECONNREFUSED/);
+    // An outage is not a credential problem — nothing to re-login for.
+    expect(rue.message).not.toMatch(/litt login/i);
+  });
+
+  it("expired stored session (refresh fails) → auth_expired via the strict accessor", async () => {
+    // Seed the in-memory credential store with an expired token set whose
+    // refresh token is dead: the strict accessor must throw auth_expired
+    // instead of collapsing to not_authenticated (which would leave the
+    // dead credential on disk and loop the user through login).
+    const store = createCredentialStore("memory");
+    resetAuthSession();
+    const session = getAuthSession({ storage: store });
+    await store.set("tokens", JSON.stringify({
+      accessToken: "expired-access-token",
+      refreshToken: "dead-refresh-token",
+      expiresAt: Date.now() - 60_000,
+    }));
+    const strictSpy = vi.spyOn(session, "getAccessTokenStrict");
+    const lenientSpy = vi.spyOn(session, "getAccessToken");
+
+    // The Clerk refresh call fails — the refresh token is revoked.
+    fetchSpy.mockRejectedValueOnce(new Error("connect ECONNREFUSED clerk.example"));
+
+    // No explicit clerkToken — the dispatch must consult the auth session.
+    let error: unknown;
+    try {
+      await dispatchRemote("doctor", [], { terminalUrl: EXCHANGE_URL });
+      expect.fail("Should have thrown");
+    } catch (err) {
+      error = err;
+    }
+    const rue = error as InstanceType<typeof RemoteUnavailableError>;
+    expect(isRemoteUnavailable(error)).toBe(true);
+    expect(rue.reason).toBe("auth_expired");
+    expect(rue.message).toMatch(/litt login/i);
+    // Prove the strict accessor is the one consulted on the remote path.
+    expect(strictSpy).toHaveBeenCalled();
+    expect(lenientSpy).not.toHaveBeenCalled();
+  });
+
+  it("a bare 403 from /api/command → forbidden, never auth_revoked", async () => {
+    // e.g. "Forbidden — cwd is outside your workspace" — an authorization
+    // refusal, not a revoked session.
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      terminalToken: TERMINAL_JWT,
+      expiresIn: 300,
+      userId: "owner-user",
+    }));
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse(
+      { error: "Forbidden — cwd is outside your workspace" },
+      403,
+    ));
+
+    const error = await dispatchExpectingThrow();
+    const rue = error as InstanceType<typeof RemoteUnavailableError>;
+    expect(isRemoteUnavailable(error)).toBe(true);
+    expect(rue.reason).toBe("forbidden");
+    expect(rue.reason).not.toBe("auth_revoked");
+
+    const { CREDENTIAL_CLEARING_REASONS } = await import("../lib/remote-unavailable.js");
+    expect(CREDENTIAL_CLEARING_REASONS.has(rue.reason)).toBe(false);
   });
 });

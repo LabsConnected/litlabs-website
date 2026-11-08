@@ -6,6 +6,7 @@ import { AGENTS } from "@/lib/agents";
 import { generateText } from "@/lib/llm";
 import { auth } from "@/lib/auth";
 import { resolveAgentEntitlement, chargeAgentRun } from "@/lib/agent-entitlements";
+import { executeAgentChat } from "@/lib/agent-chat-execution";
 
 async function handler(req: NextRequest) {
   if (req.method !== "POST") {
@@ -81,6 +82,13 @@ async function handler(req: NextRequest) {
       );
     }
 
+    // Agent-to-agent dispatch can trigger model calls (simulateResponse →
+    // generateText) — require auth like the user-facing path above.
+    const { clerkId } = await auth(req);
+    if (!clerkId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     // Validate agents exist
     const fromAgent = orchestrator.getAgent(from);
     const toAgent = orchestrator.getAgent(to);
@@ -92,7 +100,13 @@ async function handler(req: NextRequest) {
       );
     }
 
-    // Send message
+    const response = await executeAgentChat({
+      clerkId, agentSlug: to, message,
+      simulateResponse: Boolean(body.simulateResponse), requestId: body.requestId,
+    });
+    if (response instanceof NextResponse) return response;
+
+    // Record messages only after authorization and billing succeed.
     const agentMessage = orchestrator.sendMessage(
       from,
       to,
@@ -102,9 +116,7 @@ async function handler(req: NextRequest) {
     );
 
     // If simulating, generate a response
-    let response = null;
     if (body.simulateResponse) {
-      response = await orchestrator.simulateAgentResponse(to, message);
       const reply = orchestrator.sendMessage(to, from, response, "chat");
 
       return NextResponse.json({

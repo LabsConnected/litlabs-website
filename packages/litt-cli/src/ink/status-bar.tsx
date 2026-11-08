@@ -1,57 +1,49 @@
 /**
- * StatusBar — the LiTT shell's two-line bottom bar.
+ * StatusBar — the LiTT shell's single-line bottom bar.
  *
  * ```
- *   LiTT Auto → GPT-5.6 Luna                    ○ Plan   ● Act
- *   litlabs-website · feat/litt-final-integration · LOCAL    clean
+ *   Act · ask before changes                    / commands  ? help
+ *   Plan · read-only                            ◆ Running · 0:12
+ *   Act · ask before changes                    ⚠ APPROVAL · waiting 0:40
+ *   Act · ask before changes                    × failed · v View
  * ```
  *
- * Hierarchy (never everything bright):
- *   brain        — white + subtle orange identity
- *   active model — white
- *   Plan/Act     — active orange, inactive dim gray
- *   project      — gray
- *   branch       — slightly brighter gray
- *   LOCAL        — muted, state-colored
- *   clean        — muted green
- *   dirty        — muted amber (+N)
- *   working      — small active indicator (◆ Running · m:ss). Excludes
- *                  approval-wait time — blocked-on-human is NOT work time.
- *   waiting      — gold (⚠ APPROVAL · waiting m:ss). Mutually exclusive
- *                  with "Working": a pending approval is never rendered
- *                  as active execution.
- *   error        — muted red (× failed · v View)
+ * Left: the mode and the permission it actually grants — "Plan" means
+ * read-only (mutations are denied at the gateway), "Act" means the run
+ * executes with approval prompts at restricted actions. "Act" alone
+ * never implies unrestricted execution.
  *
- * One dim divider above. No fake statuses — everything comes from
- * canonical state. Left/right segments never overlap: the left side
- * truncates to the width the right side leaves.
+ * Right: the ONE authoritative runtime state (runtime-state.ts) while
+ * a run is live or terminal; the quiet `/ commands ? help` hints when
+ * idle. Approval wait is gold and never rendered as active execution;
+ * approval-wait time is excluded from the working clock.
+ *
+ * Everything else moved out of the footer: project/branch/git state
+ * live in the header identity bar, model/provider in the reply
+ * metadata and /status.
  */
 
 import React from "react";
 import { clockIntervalMs } from "./motion.js";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
-import { truncateTail, shortModelName } from "./text-wrap.js";
-import { providerLabel } from "../lib/model-provider.js";
 import type { HoloState, MissionState } from "./cockpit-store.js";
-import { deriveTransport } from "../lib/transport-projection.js";
 import {
-  deriveRuntimeState, isBusyState, isTerminalState, runtimeGlyph, runtimeLabel, runtimeColorRole,
+  deriveRuntimeState, isBusyState, isTerminalState, runtimeGlyph, runtimeLabel,
   formatDuration, approvalWaitSeconds, busySecondsExcludingApproval,
   type RuntimeState,
 } from "./runtime-state.js";
-import { SectionDivider, RepoStateBadge, ModeToggle } from "./ui-primitives.js";
 
 export interface StatusBarProps {
   project: string;
   branch: string;
   localRuntime: string;
-  /** Remote transport state — required so the footer cannot contradict the header. */
+  /** Remote transport state — retained for call-site compatibility. */
   remoteRuntime?: string;
   holoState: HoloState;
   brain: string;
   activeModel: string | null;
-  /** The provider that ACTUALLY served the most recent request (e.g. "openai"). */
+  /** The provider that ACTUALLY served the most recent request. */
   activeProvider: string | null;
   mode: "plan" | "act";
   isProcessing: boolean;
@@ -68,18 +60,13 @@ export interface StatusBarProps {
 }
 
 export function StatusBar({
-  project, branch, localRuntime, remoteRuntime = "offline", holoState, brain, activeModel, activeProvider,
-  mode, isProcessing, busySince, approvalSince = null, approvalAccumMs = 0, approvalCount = 0, missionState,
-  gitModified, gitUntracked,
+  holoState, mode, isProcessing, busySince,
+  approvalSince = null, approvalAccumMs = 0, approvalCount = 0, missionState,
 }: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
 
   // ── ONE authoritative runtime state — never a self-derived status ──
-  // Approval, working, and terminal states are decided by the shared
-  // derivation, so the footer can never say "Working" while waiting for
-  // approval or after the mission has ended. A live approval-wait clock
-  // (approvalSince) OR the APPROVAL holo phase pins the waiting state.
   const hasApproval = approvalSince !== null || holoState === "APPROVAL";
   const runtime: RuntimeState = deriveRuntimeState({
     holoState,
@@ -99,8 +86,6 @@ export function StatusBar({
   }, [busy]);
 
   // ── Clock math — approval wait is NOT work time ──
-  // "Working · Ns" excludes open + accumulated approval windows, so a
-  // 3-minute decision never inflates agent execution time.
   const now = Date.now();
   const activeSeconds = busySecondsExcludingApproval(
     busySince ?? missionState?.startedAt ?? null,
@@ -110,7 +95,7 @@ export function StatusBar({
   );
   const waitSeconds = approvalWaitSeconds(approvalSince, now);
 
-  // ── Line 2 right: ⚠ APPROVAL / ◆ Running / ✓ Done / × failed / git ──
+  // Right side: runtime truth while live/terminal, hints when idle.
   let right: React.ReactElement;
   if (runtime === "waiting_for_approval") {
     const countSuffix = approvalCount > 1 ? ` · ${approvalCount} pending` : "";
@@ -127,9 +112,7 @@ export function StatusBar({
     );
   } else if (runtime === "completed") {
     right = (
-      <Text color={COLORS.success} dimColor={!busy}>
-        {`${runtimeGlyph(runtime)} ${runtimeLabel(runtime)}`}
-      </Text>
+      <Text color={COLORS.success} dimColor>{`${runtimeGlyph(runtime)} ${runtimeLabel(runtime)}`}</Text>
     );
   } else if (runtime === "failed" || runtime === "cancelled" || runtime === "timeout") {
     const tests = missionState?.testResults && missionState.testResults.failed > 0
@@ -142,103 +125,22 @@ export function StatusBar({
       </Text>
     );
   } else {
-    // Use the reusable RepoStateBadge for clean/dirty state
-    right = <RepoStateBadge modified={gitModified} untracked={gitUntracked} />;
+    right = (
+      <Text dimColor>{width >= 60 ? "/ commands  ? help" : "? help"}</Text>
+    );
   }
-  // runtimeColorRole is the semantic contract used by tests — the footer
-  // must render each state in its declared role color.
-  void runtimeColorRole(runtime);
 
-  // ── Line 1: model · PROVIDER   |   Plan/Act ──
-  // Per spec: don't show "LiTT Auto →" — the user knows it's LiTT.
-  // Show the model and real provider: "GPT-5.6 Luna · OpenAI"
-  // If no model is active yet, show the brain label (routing mode).
-  const modelShort = activeModel ? shortModelName(activeModel) : null;
-  const providerShort = activeProvider ? providerLabel(activeProvider) : null;
-  const planDot = mode === "plan" ? "●" : "○";
-  const actDot = mode === "act" ? "●" : "○";
-  const right1Text = `${planDot} Plan   ${actDot} Act`;
-
-  // ── Line 2: project · branch · LOCAL   |   right status ──
-  // Footer label comes from the SHARED projection — never derived here.
-  // This is what makes "header says REMOTE, footer says LOCAL" structurally
-  // impossible rather than merely unlikely.
-  const transport = deriveTransport({ localRuntime, remoteRuntime });
-  const localIcon = transport.footerSeverity === "ok" ? "●"
-    : transport.footerSeverity === "error" ? "✗" : "○";
-  const localColor = transport.footerSeverity === "ok" ? COLORS.success
-    : transport.footerSeverity === "error" ? COLORS.error : COLORS.warning;
-  const localLabel = transport.footerLabel;
-
-  // Right-segment widths for overlap-free truncation.
-  const rightWidth = Math.max(5, measure(right));
-  const right1Width = right1Text.length;
-  const left1Max = Math.max(20, width - 4 - right1Width);
-  const left2Max = Math.max(24, width - 4 - rightWidth);
-
-  // Line 1 left: model · provider (or brain label if no model active yet)
-  const left1 = modelShort ? (
-    <Text>
-      <Text color={COLORS.text}>{truncateTail(modelShort, Math.max(8, left1Max - (providerShort ? providerShort.length + 3 : 0)))}</Text>
-      {providerShort && (
-        <>
-          <Text dimColor> · </Text>
-          <Text color={COLORS.secondaryBright}>{providerShort}</Text>
-        </>
-      )}
-    </Text>
-  ) : (
-    <Text>
-      <Text color={COLORS.brand} bold>{truncateTail(brain, Math.max(12, Math.floor(left1Max * 0.6)))}</Text>
-    </Text>
-  );
-
-  const right1 = <ModeToggle active={mode} />;
-
-  const projectShort = truncateTail(project, Math.max(10, Math.floor(left2Max * 0.42)));
-  const branchShort = truncateTail(branch, Math.max(10, Math.floor(left2Max * 0.36)));
-
-  const left2 = (
-    <Text>
-      <Text color={COLORS.secondary}>{projectShort}</Text>
-      <Text dimColor> · </Text>
-      <Text color={COLORS.secondaryBright}>{branchShort}</Text>
-      <Text dimColor> · </Text>
-      <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>
-    </Text>
-  );
-
+  // Left: mode + the permission it actually grants.
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <SectionDivider width={Math.max(20, Math.min(width - 4, 72))} />
-      <Box justifyContent="space-between">
-        {left1}
-        {right1}
-      </Box>
-      <Box justifyContent="space-between">
-        {left2}
-        {right}
-      </Box>
+    <Box justifyContent="space-between">
+      <Text>
+        <Text color={COLORS.brand} bold>{mode === "plan" ? "Plan" : "Act"}</Text>
+        <Text dimColor>{mode === "plan" ? " · read-only" : " · ask before changes"}</Text>
+      </Text>
+      {right}
     </Box>
   );
 }
 
-/** Rough visual width of a React element subtree (text lengths only). */
-function measure(node: React.ReactElement): number {
-  let total = 0;
-  const walk = (n: React.ReactNode): void => {
-    if (n == null || typeof n === "boolean") return;
-    if (typeof n === "string" || typeof n === "number") { total += String(n).length; return; }
-    if (Array.isArray(n)) { n.forEach(walk); return; }
-    if (React.isValidElement(n)) {
-      const props = n.props as { children?: React.ReactNode };
-      if (typeof props.children === "string") total += props.children.length;
-      else walk(props.children);
-    }
-  };
-  walk(node);
-  return total;
-}
-
 // Re-export for consumers that need the friendly label logic.
-export { shortModelName };
+export { shortModelName } from "./text-wrap.js";

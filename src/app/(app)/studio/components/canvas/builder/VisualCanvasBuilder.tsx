@@ -15,6 +15,8 @@ import { useResizableWidth } from "@/app/(app)/studio/hooks/useResizableWidth";
 import ResizeHandle from "@/app/(app)/studio/components/shell/ResizeHandle";
 import { useStudioContext } from "@/app/(app)/studio/context/StudioContext";
 import { ProjectDesignSurface } from "../../ProjectDesignSurface";
+import type { PreviewSelection } from "../../StudioPreviewPanel";
+import { useCanvasFileSync } from "./useCanvasFileSync";
 
 const HTML_FILE_ICONS: Record<string, LucideIcon> = {
   "index.html": FileCode,
@@ -59,7 +61,14 @@ function HtmlFileList() {
   );
 }
 
-export function VisualCanvasBuilder() {
+export function VisualCanvasBuilder({
+  onPreviewSelectionChange,
+}: {
+  /** Full-fidelity selection sink — forwards the live preview element
+      identity (attrs/styles/path/rect) to CommandStudio's
+      previewSelection so the inspector can edit the real file. */
+  onPreviewSelectionChange?: (selection: PreviewSelection | null) => void;
+} = {}) {
   const { projectId: activeProjectId } = useStudioContext();
   const loadDocument = useCanvasBuilderStore((s) => s.loadDocument);
   const selectedNodeId = useCanvasBuilderStore((s) => s.selectedNodeId);
@@ -76,6 +85,9 @@ export function VisualCanvasBuilder() {
   const setTool = useCanvasBuilderStore((s) => s.setTool);
   const projectType = useCanvasBuilderStore((s) => s.projectType);
   const setProjectType = useCanvasBuilderStore((s) => s.setProjectType);
+
+  // File-backed persistence for VisualCanvas (.litt/canvas.json) — server-wins on load, debounced writes
+  useCanvasFileSync(activeProjectId ?? null);
 
   // Server-backed project ID for loading persisted workspace type
   const { capabilities } = useConnectionSummary();
@@ -199,7 +211,7 @@ export function VisualCanvasBuilder() {
   // Existing projects are project-first. The canvas-only starter flow is
   // reserved for a genuinely project-less creation session.
   if (activeProjectId || serverProjectId) {
-    return <ProjectDesignSurface />;
+    return <ProjectDesignSurface onPreviewSelectionChange={onPreviewSelectionChange} />;
   }
 
   // HTML/CSS/JS mode — render the file editor with live preview

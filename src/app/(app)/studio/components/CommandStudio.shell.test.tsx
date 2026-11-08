@@ -429,6 +429,10 @@ describe("StudioShell — desktop operating shell", () => {
     // Reset the chat-dock preference so every test starts from the
     // default left dock unless it explicitly opts into bottom mode.
     window.localStorage.removeItem("littree:studio:chat-dock");
+    window.localStorage.removeItem("litt-studio-layout");
+    window.localStorage.removeItem("littree:studio:litt-dock-width");
+    window.localStorage.removeItem("littree:studio:litt-collapsed");
+    window.sessionStorage.removeItem("littree:studio:litt-collapsed");
 
     globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
     window.innerWidth = DESKTOP_WIDTH;
@@ -453,10 +457,48 @@ describe("StudioShell — desktop operating shell", () => {
     expect(screen.getByTestId("studio-workspace-rail")).toBeTruthy();
     expect(screen.getByTestId("studio-stage")).toBeTruthy();
     expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
+    expect(screen.getByTestId("studio-inspector-open")).toBeTruthy();
+    expect(screen.getByTestId("dock-inspector-panel").style.width).toBe("20px");
+    expect(screen.queryByTestId("dock-resize-inspector")).toBeNull();
     // Default chatDock is "left": the chat lives in the left panel and the
     // bottom command layer is not mounted.
     expect(screen.getByTestId("litt-panel")).toBeTruthy();
     expect(screen.queryByTestId("litt-command-layer")).toBeNull();
+  });
+
+  it("opens and floats the inspector without hiding the docked chat", async () => {
+    const { user } = await renderStudioShell();
+    await user.click(screen.getByTestId("dock-float-toggle"));
+    await waitFor(() => expect(screen.getByTestId("studio-context-inspector")).toBeTruthy());
+    expect(screen.getByTestId("dock-inspector-panel").style.width).toBe("320px");
+
+    await user.click(screen.getByTestId("dock-float-toggle"));
+    expect(screen.getByTestId("floating-inspector")).toBeTruthy();
+    expect(screen.getByTestId("litt-panel")).toBeTruthy();
+    expect(screen.getByTestId("studio-left-panel").style.display).not.toBe("none");
+
+    await user.click(screen.getByTestId("dock-float-toggle"));
+    expect(screen.queryByTestId("floating-inspector")).toBeNull();
+    expect(screen.getByTestId("studio-context-inspector")).toBeTruthy();
+  });
+
+  it("expands the stage while keeping side-panel contents mounted, then restores them", async () => {
+    const { user } = await renderStudioShell();
+    const shell = screen.getByTestId("studio-shell");
+    const leftPanel = screen.getByTestId("studio-left-panel");
+    const rail = screen.getByTestId("studio-rail-slot");
+
+    await user.click(screen.getByTestId("studio-expand-toggle"));
+    expect(shell).toHaveAttribute("data-layout-expanded", "true");
+    expect(leftPanel.style.display).toBe("none");
+    expect(rail.style.display).toBe("none");
+    expect(screen.getByTestId("litt-panel")).toBeTruthy();
+    expect(screen.getByTestId("studio-preview-panel")).toBeTruthy();
+
+    await user.click(screen.getByTestId("studio-expand-toggle"));
+    expect(shell).toHaveAttribute("data-layout-expanded", "false");
+    expect(leftPanel.style.display).not.toBe("none");
+    expect(rail.style.display).not.toBe("none");
   });
 
   it("mounts the bottom LiTT command layer when the dock preference is bottom", async () => {
@@ -567,6 +609,7 @@ describe("StudioShell — left chat dock", () => {
     capState.projectId = "project-1";
     capState.projectName = "Test Project";
     window.localStorage.removeItem("littree:studio:chat-dock");
+    window.localStorage.removeItem("litt-studio-layout");
     window.localStorage.removeItem("littree:studio:litt-dock-width");
     window.localStorage.removeItem("littree:studio:litt-collapsed");
     // The collapse preference is session-scoped (a manual collapse sticks for
@@ -604,6 +647,9 @@ describe("StudioShell — left chat dock", () => {
     // 360px default width (expandedMaxWidth="500px" keeps the 26vw legacy
     // clamp from capping it at 1600px).
     expect(panel.style.width).toContain("360px");
+    expect(screen.getByTestId("studio-left-panel").style.width).toBe("360px");
+    expect(screen.getAllByTestId("litt-dock-resize")).toHaveLength(1);
+    expect(screen.queryByTestId("dock-resize-left")).toBeNull();
     // Bottom layer is not mounted in left-dock mode.
     expect(screen.queryByTestId("litt-command-layer")).toBeNull();
   });
@@ -670,6 +716,7 @@ describe("StudioShell — left chat dock", () => {
     window.localStorage.setItem("littree:studio:litt-collapsed", "true");
     await renderStudioShell();
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
+    expect(screen.getByTestId("studio-left-panel").style.width).toBe("64px");
   });
 
   it("a stored dock width is clamped to 300–500px", async () => {
@@ -709,6 +756,7 @@ describe("StudioShell — left chat dock", () => {
     await waitFor(() => {
       expect(panel().style.width).toContain("460px");
     });
+    expect(screen.getByTestId("studio-left-panel").style.width).toBe("460px");
     // Drag far left → clamped at 300px, and persisted (the hook persists
     // via rAF debounce, so poll for it).
     fireEvent.mouseDown(handle, { clientX: 460, button: 0 });
@@ -717,9 +765,31 @@ describe("StudioShell — left chat dock", () => {
     await waitFor(() => {
       expect(panel().style.width).toContain("300px");
     });
+    expect(screen.getByTestId("studio-left-panel").style.width).toBe("300px");
     await waitFor(() => {
       expect(window.localStorage.getItem("littree:studio:litt-dock-width")).toBe("300");
     });
+  });
+
+  it("reset layout realigns the shared chat width and exits focus mode", async () => {
+    window.localStorage.setItem("littree:studio:litt-dock-width", "440");
+    window.localStorage.setItem(
+      "litt-studio-layout",
+      JSON.stringify({ inspector: 420, floating: "inspector", expanded: true }),
+    );
+    const { user } = await renderStudioShell();
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-shell")).toHaveAttribute("data-layout-expanded", "true");
+      expect(screen.getByTestId("studio-left-panel").style.width).toBe("440px");
+    });
+
+    await user.click(screen.getByTestId("dock-reset"));
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-shell")).toHaveAttribute("data-layout-expanded", "false");
+      expect(screen.getByTestId("studio-left-panel").style.width).toBe("360px");
+    });
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByTestId("dock-inspector-panel").style.width).toBe("20px");
   });
 
   it("P0: a fresh Studio entry shows LiTT Chat and a visible composer on desktop", async () => {

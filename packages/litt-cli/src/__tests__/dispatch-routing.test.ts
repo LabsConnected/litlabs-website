@@ -75,6 +75,13 @@ describe("Entry routing — litt / litt shell / litt desktop", () => {
     expect(d.command).toBeUndefined();
   });
 
+  it("`litt help` is an alias for help and never dispatches a command", () => {
+    const d = resolveDispatch(["help"]);
+    expect(d.isHelp).toBe(true);
+    expect(d.command).toBeUndefined();
+    expect(d.surface).toBe("none");
+  });
+
   it("`litt --version` never dispatches a command", () => {
     const d = resolveDispatch(["--version"]);
     expect(d.isVersion).toBe(true);

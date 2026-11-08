@@ -31,6 +31,10 @@ const InteractiveProductDemo = dynamic(
   () => import("@/components/landing/InteractiveProductDemo").then((m) => m.InteractiveProductDemo),
   { ssr: true },
 );
+const RealProjectWalkthrough = dynamic(
+  () => import("@/components/landing/RealProjectWalkthrough").then((m) => m.RealProjectWalkthrough),
+  { ssr: true },
+);
 const AgentCrew = dynamic(
   () => import("@/components/landing/AgentCrew").then((m) => m.AgentCrew),
   { ssr: true },
@@ -290,6 +294,7 @@ function LandingPage() {
   return (
     <main ref={landingRef} id="main-content" className="litt-landing min-h-dvh overflow-hidden bg-[#03050a] text-white selection:bg-accent selection:text-on-accent">
       <LandingHeroV3 />
+      <RealProjectWalkthrough />
       <CapabilityGrid />
       <MissionDemo />
       <StudioTour />

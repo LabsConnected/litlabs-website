@@ -391,6 +391,7 @@ export interface ModelProvider {
   stream(
     messages: ChatMessage[],
     emit: (event: ModelStreamEvent) => void,
+    abortSignal?: AbortSignal,
   ): Promise<ModelResult>;
   health(): Promise<number>;
 }

@@ -12,9 +12,15 @@ import {
   stopPreviewInternal,
   buildPreviewProxyUrl,
 } from "@/lib/terminal-internal-client";
+import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
+import { createPreviewToken } from "@/lib/projects/preview-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Same signal /workspace-state uses to detect seed content. Duplicated here
+// to avoid pulling the terminal-server module into an API route.
+const WELCOME_SCREEN_MARKER = "LITT-WELCOME-SCREEN";
 
 /**
  * GET /api/studio-projects/[projectId]/preview
@@ -49,7 +55,9 @@ export async function GET(
 
   // Static projects: return ready status with static preview URL.
   // No dev-server health check needed — files are served directly.
-  // Verify index.html exists; empty workspace reports not_started.
+  // Verify index.html exists AND carries real content: a workspace whose
+  // only entry file is still the seeded welcome screen reports not_started
+  // (never "ready" — the preview must not imply generated content exists).
   if (project.framework === "static") {
     try {
       const terminalBase = requireTerminalBaseUrl();
@@ -79,6 +87,19 @@ export async function GET(
           logs: [],
         });
       }
+      const entry = (await checkResp.json().catch(() => null)) as { content?: unknown } | null;
+      if (typeof entry?.content === "string" && entry.content.includes(WELCOME_SCREEN_MARKER)) {
+        return NextResponse.json({
+          runtimeStatus: "not_started",
+          previewUrl: null,
+          runtimeError: null,
+          starterContent: true,
+          framework: "static",
+          developmentCommand: null,
+          packageManager: null,
+          logs: [],
+        });
+      }
     } catch {
       // Terminal unavailable — report not_started rather than broken ready
       return NextResponse.json({
@@ -91,9 +112,18 @@ export async function GET(
         logs: [],
       });
     }
+
+    const manifest = await collectPreviewAssetManifest("index.html", "<html></html>", async () => null);
+    const token = createPreviewToken(userId, {
+      projectId,
+      workspaceId: project.workspaceId,
+      assets: manifest.assets,
+    });
     return NextResponse.json({
       runtimeStatus: "ready",
-      previewUrl: `/api/preview/${encodeURIComponent(projectId)}/index.html`,
+      previewUrl: `/api/preview/${encodeURIComponent(projectId)}/t/${token.token}/index.html`,
+      previewToken: token.token,
+      previewTokenExpiresAt: token.expiresAt,
       runtimeError: null,
       framework: "static",
       developmentCommand: null,

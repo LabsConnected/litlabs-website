@@ -11,6 +11,7 @@ import {
   useStudioModelStore,
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
+import { resolveSelectedModelHealth } from "../lib/model-health";
 import {
   Eye,
   Rocket,
@@ -77,6 +78,8 @@ export default function CommandStudioHeader({
   onDeleteChatAction,
   onRenameChatAction,
   onExportChatAction,
+  onExportProjectAction,
+  exportBusy = false,
   hasConversation,
   runtime,
   runtimeLoading,
@@ -109,6 +112,9 @@ export default function CommandStudioHeader({
   onDeleteChatAction?: () => void;
   onRenameChatAction?: () => void;
   onExportChatAction?: () => void;
+  /** Downloads the project's publishable source as a server-built ZIP. */
+  onExportProjectAction?: () => void;
+  exportBusy?: boolean;
   hasConversation?: boolean;
   runtime: ProjectRuntimeState;
   runtimeLoading: boolean;
@@ -174,8 +180,7 @@ export default function CommandStudioHeader({
   }, [statusOpen, overflowOpen, updateRect]);
 
   const writesAllowed = capabilities.writeAccess;
-  const modelHealth = providerHealth[selectedModel.provider]
-    ?? providerHealth[selectedModel.apiProvider ?? ""];
+  const modelHealth = resolveSelectedModelHealth(selectedModel, providerHealth);
   const hasAi = modelHealth === "available" || modelHealth === "degraded";
   const providerCount = hasAi ? 1 : 0;
 
@@ -303,6 +308,7 @@ export default function CommandStudioHeader({
             repoName={capabilities.repositoryName}
             ptyState={capabilities.terminalStatus}
             writesAllowed={writesAllowed}
+            executionMode={executionMode}
             modelLabel={selectedModel.label}
             modelHealth={modelHealth}
             fallbackNotice={fallbackNotice}
@@ -405,6 +411,8 @@ export default function CommandStudioHeader({
             onDeleteChatAction={onDeleteChatAction}
             onRenameChatAction={onRenameChatAction}
             onExportChatAction={onExportChatAction}
+            onExportProjectAction={onExportProjectAction}
+            exportBusy={exportBusy}
             onOpenDockTabAction={onOpenDockTabAction}
             executionMode={executionMode}
             onExecutionModeChange={onExecutionModeChange}
@@ -468,6 +476,7 @@ function WorkspaceStatusPopover({
   repoName,
   ptyState,
   writesAllowed,
+  executionMode,
   modelLabel,
   modelHealth,
   fallbackNotice,
@@ -482,8 +491,10 @@ function WorkspaceStatusPopover({
   repoName: string | null;
   ptyState: string;
   writesAllowed: boolean;
+  executionMode: StudioTopBarMode;
   modelLabel: string;
-  modelHealth: ProviderHealth;
+  /** Undefined while provider health is unverified — renders "Checking". */
+  modelHealth: ProviderHealth | undefined;
   fallbackNotice: string | null;
   walletBalance: number | null;
   connectionSummary: string;
@@ -507,6 +518,19 @@ function WorkspaceStatusPopover({
     ptyState === "connecting" ? "Connecting…" :
     ptyState === "idle" ? "Ready · no session" :
     ptyState === "error" ? "Error" : "Disconnected";
+
+  // Write permission must state BOTH truths: whether a writable surface
+  // exists (writesAllowed = "a write surface exists", not "writes bypass
+  // approval") and what the active execution mode does with it. ACT gates
+  // every mutation; AUTO applies the routine-write safe set but still
+  // gates sensitive actions; PLAN writes nothing.
+  const writePermission = !writesAllowed
+    ? { value: "No write surface", ok: false, warn: true, detail: "No writable workspace is available yet" }
+    : executionMode === "plan"
+      ? { value: "Read-only", ok: false, warn: true, detail: "PLAN mode runs no file writes" }
+      : executionMode === "act"
+        ? { value: "Writes require approval", ok: false, warn: true, detail: "Every file write asks first in ACT mode" }
+        : { value: "Writes allowed", ok: true, warn: false, detail: "Routine file writes apply without approval — sensitive actions still ask" };
 
   const left = Math.min(rect.left, window.innerWidth - 320);
   const top = rect.bottom + 6;
@@ -553,7 +577,7 @@ function WorkspaceStatusPopover({
           value={modelLabel}
           ok={modelHealth === "available"}
           warn={modelHealth === "degraded" || modelHealth === "locked"}
-          detail={fallbackNotice ?? HEALTH_DOT[modelHealth].label}
+          detail={fallbackNotice ?? (modelHealth ? HEALTH_DOT[modelHealth].label : "Checking")}
         />
         <StatusRow
           label="Repository"
@@ -586,10 +610,10 @@ function WorkspaceStatusPopover({
         )}
         <StatusRow
           label="Write Permission"
-          value={writesAllowed ? "Writes allowed" : "Writes require approval"}
-          ok={writesAllowed}
-          warn={!writesAllowed}
-          detail={writesAllowed ? "File writes apply without approval" : "Approvals required before applying edits"}
+          value={writePermission.value}
+          ok={writePermission.ok}
+          warn={writePermission.warn}
+          detail={writePermission.detail}
         />
         <StatusRow
           label="Wallet"
@@ -618,6 +642,8 @@ function OverflowMenu({
   onDeleteChatAction,
   onRenameChatAction,
   onExportChatAction,
+  onExportProjectAction,
+  exportBusy = false,
   onOpenDockTabAction,
   executionMode,
   onExecutionModeChange,
@@ -635,6 +661,8 @@ function OverflowMenu({
   onDeleteChatAction?: () => void;
   onRenameChatAction?: () => void;
   onExportChatAction?: () => void;
+  onExportProjectAction?: () => void;
+  exportBusy?: boolean;
   onOpenDockTabAction?: (tab: StudioTopBarDockTab) => void;
   executionMode: StudioTopBarMode;
   onExecutionModeChange?: (mode: StudioTopBarMode) => void;
@@ -752,6 +780,20 @@ function OverflowMenu({
         <Eye size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Preview
       </button>
+      {onExportProjectAction && (
+        <button
+          type="button"
+          disabled={exportBusy}
+          onClick={() => { onClose(); onExportProjectAction(); }}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ color: "var(--text-primary)" }}
+          title="Download the project's source files as a ZIP"
+          data-testid="header-export-project"
+        >
+          <Download size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+          {exportBusy ? "Exporting…" : "Export project (.zip)"}
+        </button>
+      )}
       {onDeployAction && (
         <button
           type="button"

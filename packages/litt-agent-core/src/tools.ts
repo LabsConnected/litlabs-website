@@ -342,8 +342,14 @@ const ENTRIES: Record<string, ToolEntry> = {
 export class ToolRegistry {
   private entries: Record<string, ToolEntry>;
 
-  constructor(initial?: Record<string, ToolEntry>) {
-    this.entries = { ...ENTRIES, ...initial };
+  constructor(
+    initial?: Record<string, ToolEntry>,
+    options?: { includeDefaults?: boolean },
+  ) {
+    this.entries = {
+      ...(options?.includeDefaults === false ? {} : ENTRIES),
+      ...initial,
+    };
   }
 
   register(entry: ToolEntry): void {

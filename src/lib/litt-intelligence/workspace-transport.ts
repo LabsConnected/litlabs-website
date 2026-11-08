@@ -19,6 +19,8 @@ import { isCanonicalBase64 } from "@/lib/deployments/user-deployment";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createWorkspaceCheckpoint } from "@/lib/missions/workspace-checkpoint";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
+import { unquoteGitPath } from "./workspace-change-producer";
+import { applyPatchesToContent } from "./apply-patch-content";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -189,6 +191,35 @@ function terminalBase(): string {
   return requireTerminalBaseUrl();
 }
 
+// ─── Deterministic-ownership validation ───────────────────────────
+// A terminal server on the configured URL may be a FOREIGN instance —
+// another stack's leftover process with a different TERMINAL_AUTH_SECRET
+// (every token minted by this app then 401s: the failure class that
+// killed Studio file writes on 2026-11-01). Verify once per process
+// that the served fingerprint matches this app's own env; a mismatch is
+// logged loudly so file-op 401s are diagnosable instead of silent.
+let _ownershipCheck: Promise<{ ok: boolean; detail: string }> | null = null;
+export async function verifyTerminalOwnership(): Promise<{ ok: boolean; detail: string }> {
+  if (_ownershipCheck) return _ownershipCheck;
+  _ownershipCheck = (async () => {
+    try {
+      const res = await fetch(`${terminalBase()}/health`, { signal: AbortSignal.timeout(4_000) });
+      if (!res.ok) return { ok: false, detail: `/health returned ${res.status}` };
+      const fp = (await res.json())?.fingerprint;
+      if (!fp?.secretSha) return { ok: true, detail: "no fingerprint (pre-fingerprint server)" };
+      const { createHash } = await import("crypto");
+      const own = createHash("sha256").update(process.env.TERMINAL_AUTH_SECRET ?? "").digest("hex").slice(0, 12);
+      if (fp.secretSha !== own) {
+        return { ok: false, detail: `secretSha ${fp.secretSha} != own ${own} — foreign terminal-server instance` };
+      }
+      return { ok: true, detail: `secretSha ${own} matches` };
+    } catch (err) {
+      return { ok: false, detail: `health probe failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  })();
+  return _ownershipCheck;
+}
+
 function internalServiceKey(): string {
   return process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
 }
@@ -223,6 +254,19 @@ export async function createWorkspaceTransport(
   // "Write permission: allowed".
   transport.fileOpsReachable = await transport.probeReachable(REACHABILITY_PROBE_TIMEOUT_MS);
 
+  // Ownership probe — non-blocking. A foreign instance (different secret)
+  // is the silent-401 failure class; log it once per process so the
+  // transport's 401s are diagnosable instead of mysterious.
+  void verifyTerminalOwnership().then((v) => {
+    if (!v.ok) {
+      console.error(
+        `[workspace-transport] TERMINAL SERVER OWNERSHIP MISMATCH: ${v.detail}. ` +
+          `Every file op will 401 — point the app at its own terminal-server instance.`,
+      );
+      transport.fileOpsReachable = false;
+    }
+  });
+
   return transport;
 }
 
@@ -245,6 +289,30 @@ const BINARY_WRITE_TIMEOUT_MS = 120_000;
  * than stall the request for 30s.
  */
 const REACHABILITY_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * Post-image name of a porcelain rename entry `orig -> new`. Either
+ * side may be C-quoted or itself contain " -> ", so the separator is
+ * the first arrow OUTSIDE a quoted span (backslash escapes are skipped
+ * inside quotes). Returns the remainder when no separator is found.
+ */
+function postRenamePath(spec: string): string {
+  let inQuotes = false;
+  for (let i = 0; i + 3 < spec.length; i++) {
+    const ch = spec[i];
+    if (inQuotes) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inQuotes = false;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (spec.startsWith(" -> ", i)) return spec.slice(i + 4);
+  }
+  return spec;
+}
 
 class WorkspaceTransportImpl implements WorkspaceTransport {
   constructor(
@@ -460,7 +528,15 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       const line = lines[i];
       const index = line[0] || " ";
       const workDir = line[1] || " ";
-      const filePath = line.slice(3);
+      // Porcelain quotes paths with non-ASCII/special bytes the same way
+      // diff headers do — decode so downstream path comparisons see the
+      // real name. Only RENAME entries carry "orig -> new"; either side
+      // may be quoted or itself contain " -> ", so the separator is the
+      // first arrow OUTSIDE quotes. The post-image name is the changed
+      // path.
+      let filePath = line.slice(3);
+      if (index === "R" || workDir === "R") filePath = postRenamePath(filePath);
+      filePath = unquoteGitPath(filePath);
 
       if (index === "?" && workDir === "?") {
         untracked.push(filePath);
@@ -488,7 +564,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     };
   }
 
-  async gitDiff(options?: { staged?: boolean; path?: string; untracked?: boolean }): Promise<{ diff: string }> {
+  async gitDiff(options?: { staged?: boolean; path?: string; untracked?: boolean; base?: string }): Promise<{ diff: string }> {
     // `git diff` omits untracked files. Compare each requested untracked
     // path against /dev/null so newly-created files appear in the same real
     // unified diff as tracked edits. The path came from git status, not the
@@ -500,9 +576,25 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     }
 
     const parts = ["git diff"];
+    if (options?.base) {
+      // A diff baseline must be a commit-ish hex SHA — refuse anything else
+      // rather than silently producing a diff against HEAD, which would
+      // change what the evidence claims without telling the caller.
+      if (!/^[0-9a-f]{7,40}$/i.test(options.base)) {
+        throw new Error("gitDiff base must be a git SHA");
+      }
+      parts.push(options.base);
+    }
     if (options?.staged) parts.push("--staged");
     if (options?.path) parts.push(`-- ${options.path}`);
     const result = await this.exec(parts.join(" "));
+    // A failed baseline diff exits nonzero with EMPTY stdout — indistinguishable
+    // from "no changes" unless the exit code is checked. An unreachable baseline
+    // must surface as a failure so callers fall back instead of reporting a
+    // false "unchanged".
+    if (options?.base && result.exitCode !== 0) {
+      throw new Error(`git diff ${options.base} failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`);
+    }
     return { diff: result.stdout };
   }
 
@@ -614,15 +706,8 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   async applyPatch(path: string, patches: PatchOperation[]): Promise<{ applied: boolean }> {
     const { content } = await this.readFile(path);
-    let updated = content;
-
-    for (const patch of patches) {
-      if (!updated.includes(patch.search)) {
-        throw new Error(`Patch search string not found in ${path}: "${patch.search.slice(0, 80)}..."`);
-      }
-      updated = updated.replace(patch.search, patch.replace);
-    }
-
+    const { updated } = applyPatchesToContent(path, content, patches);
+    if (updated === content) return { applied: true };
     await this.writeFile(path, updated);
     return { applied: true };
   }

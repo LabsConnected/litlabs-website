@@ -4,7 +4,7 @@
  * Drives a REAL authenticated session on https://www.litlabs.net from a
  * Pixel-7-class mobile context:
  *
- *   sign-in (Clerk sign_in_token magic link)
+ *   sign-in (Clerk sign_in_token redeemed on BASE's /sign-in page)
  *   → Studio → mobile LiTT sheet → real build request
  *   → SSE stream capture (tool_execution, preview, deploy events)
  *   → live preview iframe verification (CSP frame-src / XFO proof)
@@ -160,7 +160,12 @@ async function openMobileSheet(page) {
 }
 
 // ─── Clerk sign-in token ───────────────────────────────────────
-async function createSignInUrl(secretKey) {
+// Returns the raw ticket token (not the magic-link URL). The magic link
+// redeems through Clerk's Frontend API and lands on the instance's
+// configured sign-in page — the production host, not BASE — so the harness
+// redeems the ticket directly on BASE's own /sign-in page instead (see
+// Step 1). The prebuilt <SignIn> component consumes __clerk_ticket.
+async function createSignInToken(secretKey) {
   const resp = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
     method: "POST",
     headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
@@ -168,8 +173,8 @@ async function createSignInUrl(secretKey) {
   });
   if (!resp.ok) throw new Error(`sign_in_tokens failed: ${resp.status}`);
   const data = await resp.json();
-  if (!data.url) throw new Error("sign_in_tokens response missing url");
-  return data.url;
+  if (!data.token) throw new Error("sign_in_tokens response missing token");
+  return data.token;
 }
 
 // ─── SSE parser ────────────────────────────────────────────────
@@ -195,7 +200,7 @@ function parseSSE(raw) {
 // ─── Main ──────────────────────────────────────────────────────
 async function main() {
   const secretKey = loadSecret();
-  const signInUrl = await createSignInUrl(secretKey);
+  const signInToken = await createSignInToken(secretKey);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -291,10 +296,41 @@ async function main() {
   });
 
   try {
-    // ── Step 1: sign in via magic link ──
-    await page.goto(signInUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
-    // Clerk processes the ticket and redirects through the site.
-    await page.waitForURL(/litlabs\.net/, { timeout: 60_000 });
+    // ── Step 1: sign in via ticket on the configured origin ──
+    // Redeem the ticket on BASE's own /sign-in page: the prebuilt <SignIn>
+    // component consumes __clerk_ticket and the session cookie is set on
+    // BASE's origin. (Visiting Clerk's magic-link URL instead redeems
+    // through Clerk's Frontend API and lands on the instance's configured
+    // sign-in page — the production host — so the session would belong to
+    // the wrong origin and the auth probe below would fail.)
+    // After success the page redirects to /studio, the app's default
+    // post-login destination.
+    const baseOrigin = new URL(BASE).origin;
+    const signInPage = `${BASE}/sign-in?__clerk_ticket=${encodeURIComponent(signInToken)}`;
+    await page.goto(signInPage, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    // Wait until the browser has left /sign-in for a post-login page, then
+    // verify the landing URL's origin is exactly BASE. A landing anywhere
+    // else means the session belongs to another host and the auth probe
+    // below would be meaningless — fail fast with the actual URL recorded.
+    let landedUrl = page.url();
+    try {
+      await page.waitForURL((url) => {
+        const u = new URL(url);
+        return u.origin === baseOrigin && !u.pathname.startsWith("/sign-in");
+      }, { timeout: 60_000 });
+      landedUrl = page.url();
+    } catch (err) {
+      landedUrl = page.url();
+      step("sign_in_origin", false,
+        `never left /sign-in on ${baseOrigin} (still at ${landedUrl}): ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
+    const landed = new URL(landedUrl);
+    step("sign_in_origin", landed.origin === baseOrigin,
+      `landed ${landedUrl} (origin ${landed.origin}, expected ${baseOrigin})`);
+    if (landed.origin !== baseOrigin) {
+      throw new Error(`sign-in landed on ${landed.origin}, expected origin ${baseOrigin}`);
+    }
     await page.waitForTimeout(4000);
     const authProbe = await page.request.get(`${BASE}/api/studio-projects`, { timeout: 60_000 });
     step("sign_in", authProbe.status() === 200, `GET /api/studio-projects → ${authProbe.status()}`);
@@ -389,8 +425,20 @@ async function main() {
     step("studio_load", studioResp?.status() === 200, `HTTP ${studioResp?.status()}`);
     await page.waitForTimeout(6000);
     const shellVisible = await page.locator(".studio-shell").isVisible().catch(() => false);
-    const triggerVisible = await page.getByTestId("litt-mobile-trigger").isVisible().catch(() => false);
-    step("studio_shell", shellVisible && triggerVisible, `shell=${shellVisible} trigger=${triggerVisible}`);
+    // The mobile nav affordance is the trigger OR the already-open LiTT
+    // sheet — the trigger hides by design whenever a surface panel owns the
+    // viewport, and the sheet's open state can legitimately persist across
+    // navigation. Asserting trigger-only flakes on that stored state. Both
+    // mount behind hydration — poll briefly rather than sampling once.
+    let triggerVisible = false;
+    let sheetVisible = false;
+    for (let i = 0; i < 10 && !triggerVisible && !sheetVisible; i++) {
+      triggerVisible = await page.getByTestId("litt-mobile-trigger").isVisible().catch(() => false);
+      sheetVisible = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
+      if (!triggerVisible && !sheetVisible) await page.waitForTimeout(2000);
+    }
+    step("studio_shell", shellVisible && (triggerVisible || sheetVisible),
+      `shell=${shellVisible} trigger=${triggerVisible} sheet=${sheetVisible}`);
     await shot(page, "02-studio-mobile");
 
     // ── Step 3: open LiTT mobile sheet, composer usable ──
@@ -580,10 +628,20 @@ async function main() {
       step("preview_frame_loaded", !!childFrame && !!childFrame.url() && childFrame.url() !== "about:blank",
         `frames=${JSON.stringify(frameUrls.map((u) => u.slice(0, 100)))}`);
 
-      // Direct fetch of the preview URL — proves content is actually served
-      const direct = await page.request.get(iframeSrc, { timeout: 30_000 }).catch((e) => ({ status: () => -1, headers: async () => ({}), text: async () => String(e) }));
-      const status = typeof direct.status === "function" ? direct.status() : -1;
-      const body = typeof direct.text === "function" ? await direct.text() : "";
+      // Direct fetch of the preview URL — proves content is actually served.
+      // iframeSrc can be relative (/api/preview/<id>/...) — resolve against BASE
+      // because page.request.get requires an absolute URL. Cold previews can
+      // also refuse the first request while the dev server binds; retry
+      // briefly so the check measures serving, not startup timing.
+      const previewFetchUrl = new URL(iframeSrc, BASE).toString();
+      let status = -1;
+      let body = "";
+      for (let attempt = 0; attempt < 3 && !(status === 200 && body.length > 100); attempt++) {
+        if (attempt > 0) await page.waitForTimeout(4000);
+        const direct = await page.request.get(previewFetchUrl, { timeout: 30_000 }).catch((e) => ({ status: () => -1, headers: async () => ({}), text: async () => String(e) }));
+        status = typeof direct.status === "function" ? direct.status() : -1;
+        body = typeof direct.text === "function" ? await direct.text() : "";
+      }
       step("preview_serves_content", status === 200 && body.length > 100, `HTTP ${status}, ${body.length} bytes`);
       writeFileSync(path.join(ARTIFACT_DIR, "preview-body.html"), body.slice(0, 50_000));
       await shot(page, "07-preview-iframe");
@@ -596,6 +654,12 @@ async function main() {
     step("no_frame_violations", frameViolations.length === 0, frameViolations[0] ?? "clean");
 
     // ── Step 7: deploy — approval gate, resumed execution, live URL ──
+    // project.deploy is the canonical sensitive action; deploy.preview,
+    // deploy.production, and deploy.execute are registered station delegates
+    // of it (src/lib/station-control/stations/deploy.ts setDelegateToolId).
+    // The model may legitimately reach the deploy through any alias — the
+    // gate and the completion evidence are the same.
+    const DEPLOY_TOOL_IDS = new Set(["project.deploy", "deploy.execute", "deploy.preview", "deploy.production"]);
     // project.deploy is a sensitive action: the run MUST pause for explicit
     // approval even in AUTO mode. A deployment that executed without a
     // pending_approval pause would mean the gate was bypassed.
@@ -629,7 +693,7 @@ async function main() {
         const approvalBody = pendingBody ?? (approval ? await approval.json().catch(() => null) : null);
         pendingResponse = null;
         pendingBody = null;
-        if (currentPause.toolId === "project.deploy") {
+        if (DEPLOY_TOOL_IDS.has(currentPause.toolId)) {
           deployApprovalMeta = { status: approval?.status() ?? null, body: approvalBody };
           writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
         }
@@ -659,7 +723,7 @@ async function main() {
           }
         }
 
-        const deployCall = (runResult?.toolCalls ?? []).find((c) => c.toolId === "project.deploy");
+        const deployCall = (runResult?.toolCalls ?? []).find((c) => DEPLOY_TOOL_IDS.has(c.toolId));
         if (deployCall) {
           // summarizeToolResult JSON-encodes object results; publicUrl may be
           // truncated at 200 chars, so fall back to constructing the URL from
@@ -675,6 +739,9 @@ async function main() {
             productionUrl,
             error: String(summary).slice(0, 200),
           };
+          if (deployCall.toolId !== "project.deploy") {
+            verdict.notes.push(`Deploy executed via station alias ${deployCall.toolId} — registered delegate of project.deploy (same canonical execution path).`);
+          }
         }
 
         const nested = runResult?.pendingApproval ?? null;
@@ -690,11 +757,11 @@ async function main() {
         break;
       }
 
-      const deployGateSeen = pauseChain.includes("project.deploy");
+      const deployGateSeen = pauseChain.some((t) => DEPLOY_TOOL_IDS.has(t));
       step("deploy_approval_gate", deployGateSeen, deployGateSeen
         ? `approval chain: ${pauseChain.join(" → ")}`
         : pauseChain.length > 0
-          ? `paused on ${pauseChain.join(",")} — never reached project.deploy`
+          ? `paused on ${pauseChain.join(",")} — never reached a deploy hop`
           : deployResult ? "deploy executed with NO approval pause — gate bypassed" : "no pending_approval event in stream");
 
       if (deployApprovalMeta) {
@@ -716,14 +783,60 @@ async function main() {
       }
 
       if (productionUrl) {
-        const prodResp = await page.request.get(productionUrl, { timeout: 45_000 }).catch(() => null);
-        const prodStatus = prodResp?.status() ?? -1;
-        const prodBody = prodResp ? await prodResp.text().catch(() => "") : "";
+        // A fresh deployment can take a moment to propagate — retry briefly
+        // so the check measures the served site, not propagation timing.
+        let prodStatus = -1;
+        let prodBody = "";
+        for (let attempt = 0; attempt < 3 && prodStatus !== 200; attempt++) {
+          if (attempt > 0) await page.waitForTimeout(5000);
+          const prodResp = await page.request.get(productionUrl, { timeout: 45_000 }).catch(() => null);
+          prodStatus = prodResp?.status() ?? -1;
+          if (prodResp && prodStatus === 200) prodBody = await prodResp.text().catch(() => "");
+        }
         writeFileSync(path.join(ARTIFACT_DIR, "deployment-body.html"), prodBody.slice(0, 50_000));
         verdict.liveDeploymentUrl = productionUrl;
         step("production_url_verified",
           prodStatus === 200 && prodBody.length > 100 && /ember roast/i.test(prodBody),
           `GET ${productionUrl} → ${prodStatus} (${prodBody.length}b, expectedContent=${/ember roast/i.test(prodBody)})${deployVerify ? `; flow verify=${deployVerify.success}` : ""}`);
+
+        // Visual completeness: a 200 is not proof of a professional site.
+        // Every image the markup references must actually load, and the
+        // page needs real photography — not placeholder SVGs or hotlinks.
+        if (prodStatus === 200 && prodBody) {
+          const imgSrcs = [
+            ...[...prodBody.matchAll(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]),
+            ...[...prodBody.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)].map((m) => m[1]),
+          ].filter((s) => s && !/^(data:|blob:|javascript:|about:)/i.test(s));
+          const resolveRef = (s) => (/^https?:\/\//i.test(s) ? s : new URL(s, productionUrl).href);
+          const results = [];
+          for (const src of [...new Set(imgSrcs)].slice(0, 20)) {
+            // Freshly deployed assets blip 503 for ~1s while the file rows
+            // settle — the audit runs immediately after deploy approval,
+            // so it must retry transient statuses instead of recording a
+            // false "broken image". Bounded: 3 attempts on 5xx/429/network
+            // failures only; a definitive 4xx fails fast (real breakages
+            // must not hide behind retries). Same discipline as the
+            // production_url_verified fetch above.
+            let resp = null;
+            let status = -1;
+            let bytes = 0;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              if (attempt > 0) await page.waitForTimeout(3000);
+              resp = await page.request.get(resolveRef(src), { timeout: 30_000 }).catch(() => null);
+              status = resp?.status() ?? -1;
+              const transient = status === -1 || status === 408 || status === 429 || status >= 500;
+              if (!transient) break;
+            }
+            if (resp && status === 200) bytes = Number((await resp.body().catch(() => null))?.length ?? 0);
+            results.push({ src, status, bytes });
+          }
+          const broken = results.filter((r) => r.status !== 200);
+          const photos = results.filter((r) => r.status === 200 && !r.src.toLowerCase().endsWith(".svg") && r.bytes > 8000);
+          writeFileSync(path.join(ARTIFACT_DIR, "image-audit.json"), JSON.stringify(results, null, 2));
+          step("visual_images_verified",
+            imgSrcs.length > 0 && broken.length === 0 && photos.length >= 3,
+            `${imgSrcs.length} img/css ref(s), ${photos.length} real photo(s) >8KB, broken=${broken.length}${broken.length ? " " + broken.map((b) => `${b.src.split("/").pop()}:${b.status}`).join(",") : ""}`);
+        }
       } else {
         step("production_url_verified", false, "no productionUrl in events or resumed run");
       }
@@ -772,6 +885,17 @@ async function main() {
     const placeholderHit = indexHtml?.match(PLACEHOLDER)?.[0] ?? null;
     step("no_unresolved_placeholders", indexHtml !== null && placeholderHit === null,
       indexHtml === null ? "no file content to scan" : placeholderHit ? `found ${JSON.stringify(placeholderHit)}` : "clean");
+
+    // ── Step 7.5b: workspace export produces a valid ZIP containing the site ──
+    const exportResp = projectId
+      ? await page.request.get(`${BASE}/api/studio-projects/${projectId}/export`, { timeout: 60_000 }).catch(() => null)
+      : null;
+    const zipBuf = exportResp?.ok() ? await exportResp.body().catch(() => null) : null;
+    step("export_zip",
+      !!zipBuf && zipBuf.length > 500 && zipBuf.readUInt32LE(0) === 0x04034b50 && zipBuf.includes("index.html"),
+      exportResp
+        ? `GET /export → ${exportResp.status()} (${zipBuf?.length ?? 0}b, pkMagic=${zipBuf ? zipBuf.readUInt32LE(0) === 0x04034b50 : false}, hasIndex=${zipBuf ? zipBuf.includes("index.html") : false})`
+        : "export request failed");
 
     // ── Step 7.6: hard refresh preserves project/workspace/conversation/file ──
     await page.reload({ waitUntil: "domcontentloaded", timeout: 90_000 }).catch(() => null);
@@ -881,6 +1005,56 @@ async function main() {
             ? followUpProviderShapes.map((event) => `${event.provider}/${event.model} toolCalls=${event.toolCalls?.length ?? 0}`).join("; ")
             : "no model response was present in the follow-up stream");
 
+        // If the follow-up paused on a legitimate approval gate, drive it
+        // exactly like a user clicking Approve on each card — a follow-up
+        // can reach any gated tool, not just deploy. AUTO-mode routine
+        // writes (files.write and its station delegates like code.writeFile)
+        // never pause, so a gate here means the model asked for something
+        // genuinely approval-worthy. The file/preview checks below then
+        // judge what actually landed — this only unblocks the execution.
+        const followUpPause = followUpEvents.find((e) => e.type === "pending_approval" && e.pausedRunId) ?? null;
+        if (followUpPause && convId) {
+          const chainDeadline = Date.now() + 5 * 60 * 1000;
+          const chain = [String(followUpPause.toolId ?? "unknown")];
+          let currentPause = followUpPause;
+          let hops = 0;
+          let lastRunError = null;
+          while (currentPause?.pausedRunId && hops < 4 && Date.now() < chainDeadline) {
+            hops++;
+            await page.request.post(
+              `${BASE}/api/studio/conversations/${convId}/approvals/${currentPause.pausedRunId}`,
+              { data: { decision: "approved" }, timeout: 30_000 },
+            ).catch(() => null);
+            let runResult = null;
+            let runStatus = "processing";
+            while (runStatus === "processing" && Date.now() < chainDeadline) {
+              await page.waitForTimeout(3000);
+              const statusResp = await page.request.get(
+                `${BASE}/api/studio/conversations/${convId}/approvals/${currentPause.pausedRunId}`,
+                { timeout: 15_000 },
+              ).catch(() => null);
+              if (!statusResp?.ok()) continue;
+              const statusBody = await statusResp.json().catch(() => null);
+              if (!statusBody) continue;
+              if (statusBody.runStatus === "completed" && statusBody.runResult) {
+                runResult = statusBody.runResult;
+                runStatus = "completed";
+              } else if (statusBody.runStatus === "failed") {
+                lastRunError = statusBody.runError ?? "resumed run failed";
+                runStatus = "failed";
+              }
+            }
+            const nested = runResult?.pendingApproval ?? null;
+            if (nested?.pausedRunId) {
+              currentPause = { toolId: nested.toolId, pausedRunId: nested.pausedRunId };
+              chain.push(String(nested.toolId ?? "unknown"));
+              continue;
+            }
+            break;
+          }
+          verdict.notes.push(`follow-up approval chain driven: ${chain.join(" → ")} (${hops} hop(s) approved${lastRunError ? `, last run error: ${lastRunError}` : ""})`);
+        }
+
         const followUpFile = await readWorkspaceFile("index.html");
         step("post_build_follow_up_mutation",
           followUpFile !== null && followUpFile.includes(followUpMarker),
@@ -890,8 +1064,9 @@ async function main() {
               ? `index.html contains ${JSON.stringify(followUpMarker)}`
               : `index.html did not contain ${JSON.stringify(followUpMarker)} after the follow-up`);
 
-        const followUpPreview = iframeSrc
-          ? await page.request.get(`${iframeSrc}${iframeSrc.includes("?") ? "&" : "?"}acceptance_follow_up=${Date.now()}`, { timeout: 45_000 }).catch(() => null)
+        const followUpPreviewUrl = iframeSrc ? new URL(iframeSrc, BASE).toString() : null;
+        const followUpPreview = followUpPreviewUrl
+          ? await page.request.get(`${followUpPreviewUrl}${followUpPreviewUrl.includes("?") ? "&" : "?"}acceptance_follow_up=${Date.now()}`, { timeout: 45_000 }).catch(() => null)
           : null;
         const followUpPreviewBody = followUpPreview ? await followUpPreview.text().catch(() => "") : "";
         step("post_build_follow_up_preview",

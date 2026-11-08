@@ -255,6 +255,28 @@ export function Composer({
         // the composer" signal — return to live.
         if (scrolledRef.current) onReturnToLiveRef.current?.();
 
+        // A chunk whose text ENDS in a line boundary is "text + Enter"
+        // delivered as one event (fast terminals coalescing keystrokes,
+        // non-bracketed paste ending in a newline). Insert the text part
+        // as the draft, then submit — the boundary is not draft content.
+        const evtText = evt.text ?? "";
+        const trailingBreak = evtText.match(/[\r\n]+$/);
+        if (trailingBreak && trailingBreak.index !== undefined && trailingBreak.index >= 0) {
+          const head = evtText.slice(0, trailingBreak.index);
+          if (head) {
+            const state: ComposerState = { text: valueRef.current, caret: caretRef.current };
+            const next = applyKeyEvent(state, { kind: "INSERT_TEXT", text: head });
+            onChangeRef.current(next.text);
+            setCaret(next.caret);
+            valueRef.current = next.text;
+            caretRef.current = next.caret;
+            pokeRef.current();
+          }
+          const text = valueRef.current.trim();
+          if (text) onSubmitRef.current(text);
+          return;
+        }
+
         // Apply through the grapheme-safe editor.
         const state: ComposerState = { text: valueRef.current, caret: caretRef.current };
         const next = applyKeyEvent(state, evt);
@@ -338,21 +360,10 @@ export function Composer({
   };
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box
-        flexDirection="row"
-        borderStyle="single"
-        borderTop={false}
-        borderBottom={false}
-        borderLeft
-        borderRight
-        borderLeftColor={copy?.gold ? COLORS.gold : value.startsWith("/") ? COLORS.info : value.startsWith("@") ? COLORS.secondaryBright : COLORS.brand}
-        borderRightColor={COLORS.secondaryDim}
-        paddingLeft={1}
-        paddingRight={1}
-      >
+    <Box flexDirection="column">
+      <Box flexDirection="row">
         <Box flexGrow={1}>
-          <Text bold color={copy?.gold ? COLORS.gold : COLORS.brand}>› </Text>
+          <Text bold color={copy?.gold ? COLORS.gold : value.startsWith("/") ? COLORS.info : value.startsWith("@") ? COLORS.secondaryBright : COLORS.brand}>› </Text>
           {renderInput()}
         </Box>
         {copy?.hint && (

@@ -196,6 +196,55 @@ describe("approval-batch: executeDeferredToolCalls", () => {
     expect(abortGuards.length).toBe(executeSites.length);
   });
 
+  it("the resume ledgers the APPROVED call for dedupe — a same-batch duplicate can never re-gate", () => {
+    // Regression (2026-11 staging): the approved tool executed on resume
+    // without landing in executedMutations/toolCallRecords — both rebuilt
+    // empty on resume and the gated call has no tool result in the paused
+    // history for seedToolCallRecordsFromHistory to count. An identical
+    // call deferred from the same batch then re-entered the permission
+    // gate, so one files.write approval was re-requested repeatedly with
+    // no work between prompts. Pin the ledger write at the approved-
+    // execution site so the deferred dedupe (tested above) sees it.
+    const source = readFileSync(
+      resolve(process.cwd(), "src/lib/litt-intelligence/agent-loop-v2.ts"),
+      "utf8",
+    );
+    const start = source.indexOf('if (resume.decision === "approved") {');
+    const end = source.indexOf(
+      'resume.decision === "approved" && resume.deferredToolCalls',
+      start,
+    );
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+
+    const approvedExecution = source.slice(start, end);
+    expect(approvedExecution).toContain("executedMutations.set(");
+    expect(approvedExecution).toContain("toolCallRecords.push(");
+  });
+
+  it("a deferred duplicate of an already-executed mutation dedupes — never a nested gate", async () => {
+    const executeSpy = vi
+      .spyOn(toolRegistry, "execute")
+      .mockResolvedValue({ ok: true, result: { success: true } });
+    const ctx = makeCtx({ executionMode: "act" });
+    const deferred = [{ toolCallId: "c3", toolId: "files.write", inputs: WRITE_INPUTS }];
+
+    // First pass (AUTO-style replay seed): populate the mutation ledger as
+    // the approved-call ledger does — then the ACT-mode second pass must
+    // dedupe the identical call instead of pausing again.
+    await executeDeferredToolCalls(deferred, { ...ctx, executionMode: "auto" });
+    const result = await executeDeferredToolCalls(
+      [{ toolCallId: "c4", toolId: "files.write", inputs: WRITE_INPUTS }],
+      ctx,
+    );
+
+    expect(result.nestedApproval).toBeNull();
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(
+      ctx.toolCallLog.some((e) => e.summary.includes("already executed")),
+    ).toBe(true);
+  });
+
   it("unknown tool id is reported honestly to the model, not dropped silently", async () => {
     const ctx = makeCtx({ executionMode: "auto" });
     await executeDeferredToolCalls(

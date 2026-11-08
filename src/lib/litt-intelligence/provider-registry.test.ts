@@ -29,6 +29,7 @@ const PROVIDER_ENVS = [
   "OLLAMA_MODEL",
   "LITT_DISABLE_OLLAMA",
   "OPENROUTER_MODEL",
+  "GROQ_REQUEST_TOKEN_CEILING",
   "RAILWAY_ENVIRONMENT",
   "RAILWAY_PROJECT_ID",
   "VERCEL",
@@ -50,6 +51,20 @@ afterEach(() => {
 });
 
 describe("provider registry — Basic cost policy", () => {
+  it.each([undefined, "", "invalid", "-1", "0", "Infinity"])("uses a finite Gemini timeout for invalid override %s", (override) => {
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("GEMINI_TIMEOUT_MS", override);
+    const gemini = planBasicRoutes(TOOL_REQ).providers.find(route => route.provider === "gemini");
+    expect(gemini?.timeoutMs).toBe(60_000);
+  });
+
+  it("honors a positive Gemini timeout override", () => {
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("GEMINI_TIMEOUT_MS", "45000");
+    const gemini = planBasicRoutes(TOOL_REQ).providers.find(route => route.provider === "gemini");
+    expect(gemini?.timeoutMs).toBe(45_000);
+  });
+
   it("includes FREE_MANAGED routes when credentials are present", () => {
     vi.stubEnv("GEMINI_API_KEY", "x");
     vi.stubEnv("OPENROUTER_API_KEY", "x");
@@ -277,6 +292,24 @@ describe("provider registry — model hints", () => {
       expect(plan.providers[0].provider).toBe("gemini");
     }
   });
+
+  it("routes an explicit ollama/<tag> hint to the local provider with the bare tag", () => {
+    // Studio's picker emits "ollama/<tag>" for the Local section. The hint
+    // must pin the local provider first with the bare tag Ollama expects.
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    const plan = planBasicRoutes(TOOL_REQ, { model: "ollama/litt-hermes-fast:8k" });
+    expect(plan.droppedModelHint).toBeUndefined();
+    expect(plan.providers[0].provider).toBe("ollama");
+    expect(plan.providers[0].models[0]).toBe("litt-hermes-fast:8k");
+  });
+
+  it("keeps the ollama pin first even with cloud credentials present", () => {
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("GROQ_API_KEY", "x");
+    const plan = planBasicRoutes(TOOL_REQ, { model: "ollama/litt-hermes-fast:8k" });
+    expect(plan.providers[0].provider).toBe("ollama");
+  });
 });
 
 describe("provider registry — openrouter auto-router tool exclusion", () => {
@@ -456,6 +489,46 @@ describe("provider registry — failure classification", () => {
     expect(parseRetryAfterMs(null, '{"retryDelay":"12s"}')).toBe(12_000);
   });
 
+  it("parses Google's compound 'retry in XhYmZs' quota hint", () => {
+    const body =
+      '{"error":{"code":429,"message":"Quota exceeded ... Please retry in 9h48m52.106458201s."}}';
+    const parsed = parseRetryAfterMs(null, body);
+    expect(parsed).toBeCloseTo((9 * 3600 + 48 * 60 + 52.106458) * 1000, 0);
+    // Single-unit forms also parse.
+    expect(parseRetryAfterMs(null, "Please retry in 45.5s")).toBeCloseTo(45_500, -2);
+  });
+
+  it("honours a provider-stated multi-hour 429 delay instead of the 10-minute cap", () => {
+    const statedMs = (9 * 3600 + 48 * 60) * 1000;
+    recordProviderFailure("gemini", {
+      class: "rate_limited",
+      scope: "provider",
+      retryAfterMs: statedMs,
+      message: "quota",
+    });
+    const h = getProviderHealth("gemini");
+    expect(h.state).toBe("cooldown");
+    expect(h.cooldownUntil).toBeGreaterThan(Date.now() + statedMs - 5_000);
+    // …but an absurd stated delay is still bounded at one day.
+    recordProviderFailure("gemini", {
+      class: "rate_limited",
+      scope: "provider",
+      retryAfterMs: 7 * 24 * 60 * 60_000,
+      message: "quota",
+    });
+    expect(getProviderHealth("gemini").cooldownUntil).toBeLessThanOrEqual(
+      Date.now() + 24 * 60 * 60_000 + 1_000,
+    );
+  });
+
+  it("extracts the multi-hour retry hint from thrown 429 errors", () => {
+    const f = classifyThrownFailure(
+      new Error("HTTP 429: quota exceeded. Please retry in 9h48m52.106458201s"),
+    );
+    expect(f.class).toBe("rate_limited");
+    expect(f.retryAfterMs).toBeGreaterThan(35_000_000);
+  });
+
   it("classifies thrown errors: timeout, 429-in-message, 5xx-in-message, network", () => {
     expect(classifyThrownFailure(new Error("Gemini direct request timed out after 30000ms")).class).toBe("timeout");
     expect(classifyThrownFailure(new Error("429 Too Many Requests")).class).toBe("rate_limited");
@@ -507,5 +580,78 @@ describe("provider registry — env override safety (no silent unknown-model fal
     expect(gemini).toBeDefined();
     expect(gemini!.models).not.toContain("gemini-9.9-ultra");
     expect(gemini!.models[0]).toBe("gemini-flash-latest");
+  });
+});
+
+describe("provider registry — per-model quota routing", () => {
+  it("the Gemini ladder carries the lite rung between primary and fallback", () => {
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const gemini = plan.providers.find((p) => p.provider === "gemini");
+    expect(gemini).toBeDefined();
+    expect(gemini!.models).toEqual([
+      "gemini-flash-latest",
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-flash",
+    ]);
+    expect(gemini!.perModelRateLimits).toBe(true);
+  });
+
+  it("per-model-quota providers are flagged; per-account providers are not", () => {
+    for (const k of ["GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY"]) {
+      vi.stubEnv(k, "x");
+    }
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const flags = Object.fromEntries(
+      plan.providers.map((p) => [p.provider, p.perModelRateLimits === true]),
+    );
+    expect(flags.gemini).toBe(true);
+    expect(flags.openrouter).toBe(true);
+    expect(flags.groq).toBe(true);
+    expect(flags.mistral).toBe(true);
+  });
+
+  it("Groq carries the free-tier 8k per-request ceiling, env-overridable for paid tiers", () => {
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const groq = planBasicRoutes(TOOL_REQ).providers.find((p) => p.provider === "groq");
+    expect(groq?.requestTokenCeiling).toBe(8_000);
+    vi.stubEnv("GROQ_REQUEST_TOKEN_CEILING", "100000");
+    const raised = planBasicRoutes(TOOL_REQ).providers.find((p) => p.provider === "groq");
+    expect(raised?.requestTokenCeiling).toBe(100_000);
+  });
+
+  it("recordModelFailure honours a provider-stated retry delay", () => {
+    vi.useFakeTimers();
+    try {
+      recordModelFailure("gemini", "gemini-2.5-flash", 20_000);
+      expect(isModelCoolingDown("gemini", "gemini-2.5-flash")).toBe(true);
+      // Still cooling past the old unconditional window is wrong for a
+      // 20s stated wait — but inside it the model must stay out.
+      vi.advanceTimersByTime(21_000);
+      expect(isModelCoolingDown("gemini", "gemini-2.5-flash")).toBe(false);
+      // A multi-hour stated wait keeps the model out well past the old
+      // flat 10-minute cap.
+      recordModelFailure("gemini", "gemini-2.5-pro", 2 * 60 * 60_000);
+      vi.advanceTimersByTime(11 * 60_000);
+      expect(isModelCoolingDown("gemini", "gemini-2.5-pro")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recordModelFailure without a stated wait keeps the default cooldown", () => {
+    vi.useFakeTimers();
+    try {
+      recordModelFailure("gemini", "gemini-2.5-flash");
+      vi.advanceTimersByTime(9 * 60_000);
+      expect(isModelCoolingDown("gemini", "gemini-2.5-flash")).toBe(true);
+      vi.advanceTimersByTime(2 * 60_000);
+      expect(isModelCoolingDown("gemini", "gemini-2.5-flash")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -171,16 +171,14 @@ describe("estimateActivityFeedHeight", () => {
     expect(estimateActivityFeedHeight([])).toBe(0);
   });
 
-  it("returns header + 1 line per visible event (no border)", () => {
+  it("returns 1 line per visible event (no border, no header)", () => {
     const events = activityEntries(3);
-    // non-compact: no border (removed) + header (1) + 3 rows = 4
-    expect(estimateActivityFeedHeight(events)).toBe(0 + 1 + 3);
+    expect(estimateActivityFeedHeight(events)).toBe(3);
   });
 
   it("caps at 4 visible events", () => {
     const events = activityEntries(10);
-    // non-compact: 0 border + 1 header + max 4 rows = 5
-    expect(estimateActivityFeedHeight(events)).toBe(0 + 1 + 4);
+    expect(estimateActivityFeedHeight(events)).toBe(4);
   });
 });
 
@@ -214,9 +212,8 @@ describe("estimateExtraContentHeight", () => {
     const events = activityEntries(3);
     const h = estimateExtraContentHeight(null, null, events, false, "IDLE", false, null, "local", COLS);
     expect(h).toBe(estimateActivityFeedHeight(events, 4, false, COLS) + 1);
-    // The helper itself still works for /activity consumers.
-    // non-compact: no border (removed for compact chrome) + header (1) + 3 rows = 4
-    expect(estimateActivityFeedHeight(events)).toBe(0 + 1 + 3);
+    // The helper itself still works for /activity consumers — bare rows.
+    expect(estimateActivityFeedHeight(events)).toBe(3);
   });
 
   it("sums activity feed + result block + summary when all present", () => {
@@ -235,11 +232,13 @@ describe("estimateExtraContentHeight", () => {
 describe("100×30 collision regression", () => {
   const WIDTH = 96; // 100 - 4 padding
   const ROWS = 30;
-  const CHROME_ROWS = 6;
-  const CONTENT_ROWS = Math.max(8, ROWS - 1 - CHROME_ROWS); // 23
+  // New chrome budget: identity bar (3) + composer zone (5).
+  const HEADER_ROWS = 3;
+  const CHROME_ROWS = 5;
+  const CONTENT_ROWS = Math.max(8, ROWS - HEADER_ROWS - CHROME_ROWS); // 22
 
-  it("contentRows = 23 at 100×30", () => {
-    expect(CONTENT_ROWS).toBe(23);
+  it("contentRows = 22 at 100×30", () => {
+    expect(CONTENT_ROWS).toBe(22);
   });
 
   it("without extra content: messages fit and fits=true", () => {
@@ -263,11 +262,11 @@ describe("100×30 collision regression", () => {
     const mission = failedReadOnlyMission();
     const events = activityEntries(4);
     const extraHeight = estimateExtraContentHeight(null, mission, events, false, "IDLE", false, null, "local", WIDTH);
-    // extraHeight = feed(0 border + 1 header + 4 rows) + 1 marginTop + resultBlock(6) + 1 + summary(2) + 1 = 16
-    expect(extraHeight).toBe(16);
+    // extraHeight = feed(4 rows) + 1 marginTop + resultBlock(6) + 1 + summary(2) + 1 = 15
+    expect(extraHeight).toBe(15);
     // Reserve must be subtracted from the budget
     const reserve = extraHeight;
-    const budget = CONTENT_ROWS - reserve; // 23 - 16 = 7
+    const budget = CONTENT_ROWS - reserve; // 22 - 15 = 7
     expect(budget).toBe(7);
     const vp = computeViewport(messages, layout, budget, null, 0);
     // Messages must fit in the reduced budget
@@ -298,8 +297,8 @@ describe("100×30 collision regression", () => {
 
   it("100×24: messages don't fit → fits=false → natural flow (no collision)", () => {
     const ROWS_24 = 24;
-    const CONTENT_ROWS_24 = Math.max(8, ROWS_24 - 1 - CHROME_ROWS); // 17
-    expect(CONTENT_ROWS_24).toBe(17);
+    const CONTENT_ROWS_24 = Math.max(8, ROWS_24 - HEADER_ROWS - CHROME_ROWS); // 16
+    expect(CONTENT_ROWS_24).toBe(16);
     // With extra content, budget is even smaller
     const messages = [userMsg(0), asstMsg(1, 8), userMsg(2), asstMsg(3, 5)];
     const layout = layoutTranscript(messages, WIDTH);
@@ -362,8 +361,9 @@ describe("100×30 collision regression", () => {
 describe("120×30 wide terminal", () => {
   const WIDTH = 116; // 120 - 4 padding
   const ROWS = 30;
-  const CHROME_ROWS = 6;
-  const CONTENT_ROWS = Math.max(8, ROWS - 1 - CHROME_ROWS); // 23
+  const HEADER_ROWS = 3;
+  const CHROME_ROWS = 5;
+  const CONTENT_ROWS = Math.max(8, ROWS - HEADER_ROWS - CHROME_ROWS); // 22
 
   it("wide terminal with failed mission + events: no overflow", () => {
     const messages = [userMsg(0), asstMsg(1, 3), userMsg(2), asstMsg(3, 2)];

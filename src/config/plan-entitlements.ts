@@ -5,13 +5,19 @@
  * src/lib/entitlements.ts, grant logic, UI) MUST derive its numbers from
  * here. Do not hardcode plan allowances anywhere else.
  *
- * Locked pricing (rev 2, 2026-09-29):
+ * Price sheet (rev 3, 2026-10-31 — Stripe TEST catalog):
  * - Starter: free, 1,500 LiTTBits ONE-TIME grant (not monthly, not renewing)
- * - Creator: $15/mo, 7,500 LiTTBits/month
- * - Pro Builder: $39/mo, 18,000 LiTTBits/month
+ * - Creator Lite: $9.99/mo, LiTTBits/month TBD (pending owner decision)
+ * - Creator: $19.99/mo, 7,500 LiTTBits/month (preserved value)
+ * - Pro Builder: $39/mo, 18,000 LiTTBits/month (preserved value)
+ *
+ * PROFITABILITY UNVERIFIED: the preserved 7,500/18,000 credit amounts are
+ * carried forward as configuration values only. Unit economics vs. real
+ * provider cost have not been validated — do not treat as profitable
+ * pricing until measured against genuine usage.
  *
  * The 40,000 Pro allowance is dead. There are no comeback credits and no
- * rollover in rev 2.
+ * rollover.
  *
  * NOTE on the $1 / 1,000 LiTTBits conversion: this is a PRICING MODEL, not a
  * validated fact. It is labeled `modeled` everywhere and must not be treated
@@ -85,10 +91,34 @@ export const PLAN_ENTITLEMENTS: Record<PlanId, PlanEntitlements> = {
     },
     activeProjectLimit: 1,
   },
+  creator_lite: {
+    // 2,500 LiTTBits/month. Cost evidence (llm-cost-engine.ts catalog,
+    // 2026-08 provider rates): standard-tier routing is dominated by $0-cost
+    // free OpenRouter models and gemini-2.5-flash ($0.075/$0.30 per 1M); the
+    // worst-case full-burn exposure at the LLM-lane retail rate
+    // ($1 provider cost ≈ 1,500 retail bits) is ~$1.67 against $9.99 MRR.
+    monthlyBits: 2500,
+    oneTimeGrantBits: 0,
+    monthlyPriceCents: 999,
+    agentStartsPer5h: 2,
+    browserStartsPer5h: 2,
+    maxConcurrency: 2,
+    maxRuntimeMinutes: 30,
+    routingTier: "standard",
+    features: {
+      privateProjects: true,
+      github: false,
+      terminal: false,
+      voice: false,
+      premiumModels: false,
+      deployment: true,
+    },
+    activeProjectLimit: 3,
+  },
   creator_beta: {
     monthlyBits: 7500,
     oneTimeGrantBits: 0,
-    monthlyPriceCents: 1500,
+    monthlyPriceCents: 1999,
     agentStartsPer5h: 3,
     browserStartsPer5h: 3,
     maxConcurrency: 3,

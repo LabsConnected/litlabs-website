@@ -6,6 +6,7 @@ import { requireTerminalBaseUrl } from "@/lib/terminal-config";
 import { prepareStaticPreviewDocument } from "@/lib/projects/static-preview-document";
 import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
 import { createPreviewToken, verifyPreviewToken } from "@/lib/projects/preview-token";
+import { PREVIEW_CONTENT_SECURITY_POLICY } from "@/lib/projects/preview-csp";
 
 /**
  * Static preview: serves HTML/CSS/JS/image files from a project's workspace
@@ -71,19 +72,14 @@ const PREVIEW_SECURITY_HEADERS: Record<string, string> = {
   // same-origin privileges. unsafe-inline allows Canvas-generated inline
   // styles/scripts; the sandbox still blocks same-origin access.
   //
-  // NOTE: default-src uses EXPLICIT origins, never bare 'self'. The preview
-  // iframe sandbox omits allow-same-origin, so the document gets an opaque
-  // origin — and per the CSP spec, 'self' never matches any subresource URL
-  // from an opaque origin, which would silently block relative assets
-  // (style.css, app.js, images) and render multi-file sites unstyled/broken.
-  // Scheme+host sources match on the subresource URL alone, so relative
-  // assets load while third-party exfiltration stays blocked.
-  // KEEP IN SYNC with next.config.ts /api/preview/:path* (config wins in prod).
-  "Content-Security-Policy":
-    "sandbox allow-scripts; " +
-    "default-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* data: blob:; " +
-    "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data:; " +
-    "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data: blob:;",
+  // NOTE: resource loads are intentionally unrestricted (parity with the
+  // deployed /sites CSP) — generated sites are built on third-party CDNs
+  // (Tailwind browser build, Google Fonts, stock images) that an origin
+  // allowlist can never enumerate. The opaque-origin sandbox and the
+  // manifest-scoped preview token are the real security boundary.
+  // Single source of truth: src/lib/projects/preview-csp.ts (shared with
+  // next.config.ts; the config header wins over this one in production).
+  "Content-Security-Policy": PREVIEW_CONTENT_SECURITY_POLICY,
   "X-Content-Type-Options": "nosniff",
   // No referrer leakage to third parties embedded in user content.
   "Referrer-Policy": "no-referrer",

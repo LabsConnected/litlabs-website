@@ -14,7 +14,7 @@
 
 import "server-only";
 
-import { placeholderViolation } from "./patch-validation";
+import { destructiveRewriteViolation, existingPageOverwriteError, placeholderViolation, simulatePatchResult, tailwindViolation } from "./patch-validation";
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
 import type { WorkspaceTransport } from "./workspace-transport";
 
@@ -72,9 +72,71 @@ export const handleFilesRead: ToolHandler = async (inputs, transport) => {
   }
 };
 
+// ─── Destructive-rewrite guard (lightweight lane reliability) ─────
+// Small local models answer an edit request by rewriting the WHOLE file
+// — and drop existing styling in the process (confirmed live: a
+// heading+theme edit produced a bare page, losing classes, style blocks,
+// and layout). Before persisting a files.write to an EXISTING file,
+// compare structural styling signatures; a rewrite that strips them is
+// rejected with an actionable error so the model retries with
+// files.read + apply_patch (targeted change, existing markup preserved).
+
+/** True when the small-model lane is active — mirrors isLocalSmallLane()
+ *  in agent-loop-v2 (kept inline to avoid an import cycle). */
+function localSmallLaneActive(): boolean {
+  if (process.env.LITT_LOCAL_SMALL === "1") return true;
+  return /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "");
+}
+
+/**
+ * External resource references in a document head — stylesheet links and
+ * src'd scripts (framework CDNs, font loads). These are the markers a
+ * weak model most often drops when it regenerates a file from scratch,
+ * and they are mechanically re-insertable without altering the model's
+ * requested content changes.
+ */
+function externalHeadRefs(html: string): string[] {
+  const refs: string[] = [];
+  const re = /<(link|script)\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const tag = m[0];
+    const isLinkStylesheet = /<link\b[^>]*rel\s*=\s*["']?stylesheet/i.test(tag);
+    const isSrcScript = /<script\b[^>]*\bsrc\s*=/i.test(tag);
+    if (isLinkStylesheet || isSrcScript) refs.push(tag);
+  }
+  return refs;
+}
+
+/**
+ * Repair a rewrite that dropped external head resources: re-inject the
+ * missing <link>/<script src> tags from `prev` into `next`'s head. The
+ * model's requested content changes land; the resources the user never
+ * asked to remove survive. Returns null when nothing was dropped or the
+ * next document has no head to merge into.
+ */
+function preserveExternalHeadRefs(prev: string, next: string): string | null {
+  const dropped = externalHeadRefs(prev).filter(
+    (tag) => !next.includes(tag),
+  );
+  if (dropped.length === 0) return null;
+  const injection = dropped.join("\n    ");
+  const headClose = /<\/head>/i.exec(next);
+  if (headClose) {
+    return next.slice(0, headClose.index) + "    " + injection + "\n  " + next.slice(headClose.index);
+  }
+  // No </head> — put the refs before <body> (still inside document flow);
+  // if neither exists, prepend before <html> content.
+  const bodyOpen = /<body[^>]*>/i.exec(next);
+  if (bodyOpen) return next.slice(0, bodyOpen.index) + "<head>\n    " + injection + "\n  </head>\n  " + next.slice(bodyOpen.index);
+  const htmlOpen = /<html[^>]*>/i.exec(next);
+  if (htmlOpen) return next.slice(0, htmlOpen.index + htmlOpen[0].length) + "\n<head>\n    " + injection + "\n  </head>" + next.slice(htmlOpen.index + htmlOpen[0].length);
+  return null;
+}
+
 export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   const path = inputs.path as string;
-  const content = inputs.content as string;
+  let content = inputs.content as string;
   if (!path || content === undefined) {
     return { success: false, error: "path and content are required" };
   }
@@ -85,6 +147,62 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   // the filesystem, no matter which entry point invoked the handler.
   const badField = placeholderViolation(path, "path") ?? placeholderViolation(content, "content");
   if (badField) return { success: false, error: badField };
+  // Enforcement floor: the Tailwind v4 browser-build traps (any @import
+  // without tailwindcss, or a v3 config object inside @theme) compile ZERO
+  // utilities and leave the page silently unstyled — refuse them here too
+  // so a resumed approval can't bypass the loop's pre-approval validation.
+  const badTailwind = tailwindViolation(content, path);
+  if (badTailwind) return { success: false, error: badTailwind };
+
+  // Destructive-rewrite guard (small lane): a full rewrite that strips an
+  // existing file's structure/styling is rejected BEFORE it lands, with an
+  // actionable error so the model repairs via files.read + apply_patch.
+  if (localSmallLaneActive()) {
+    try {
+      const prev = await transport.readFile(path);
+      // The LITT-WELCOME-SCREEN scaffold is styled boilerplate that exists
+      // precisely to be replaced — its own marker says the agent MUST
+      // replace it. Without this exemption every first files.write to
+      // index.html on a fresh project is refused, the approved mutation
+      // fails, and the run dies with "approved workspace operation failed"
+      // before the model ever got to build. Real user files (no marker)
+      // still get the full guard.
+      if (!prev.content.includes("LITT-WELCOME-SCREEN")) {
+        const violation = destructiveRewriteViolation(prev.content, content);
+        if (violation) {
+          // Before refusing, repair mechanically: re-inject the external
+          // head resources (stylesheet links, CDN scripts) the rewrite
+          // dropped. The 1.5B-class models this guard protects against
+          // cannot produce valid apply_patch calls (verified: they paste
+          // the instruction's placeholder template verbatim) — so a
+          // refusal here was effectively a dead end and every modify run
+          // died with "approved workspace operation failed". If the
+          // repaired content passes retention, land it; only a still-
+          // destructive rewrite is refused.
+          const merged = preserveExternalHeadRefs(prev.content, content);
+          if (merged && !destructiveRewriteViolation(prev.content, merged)) {
+            content = merged;
+          } else {
+            return { success: false, error: violation };
+          }
+        } else {
+          // Full-overwrite gate (small lane): a rewrite that KEEPS the
+          // structure passes destructiveRewriteViolation yet can still
+          // silently drop the requested edit (confirmed live: 11KB
+          // rewrite, edit missing). Structural guards can't detect a
+          // missing edit, so an overwrite of an existing real page must
+          // be an explicit choice — enforced here too because resumed
+          // approvals and direct tool execution skip the loop's
+          // pre-approval validation. site.compose rides this same gate
+          // through handleFilesWrite.
+          const overwrite = await existingPageOverwriteError(inputs, transport);
+          if (overwrite) return { success: false, error: overwrite };
+        }
+      }
+    } catch {
+      // Unreadable target = a new file — nothing to preserve.
+    }
+  }
 
   try {
     await transport.writeFile(path, content);
@@ -247,7 +365,7 @@ export const handleTerminalExecute: ToolHandler = async (inputs, transport) => {
   // Enforcement floor: a shell command can write files too (heredoc,
   // `cat >`, `tee`), so placeholder tokens are rejected here as well —
   // the files.write guard alone does not close that bypass.
-  const badCommand = placeholderViolation(command, "command");
+  const badCommand = placeholderViolation(command, "command") ?? tailwindViolation(command, "the command");
   if (badCommand) return { success: false, error: badCommand };
 
   try {
@@ -425,8 +543,26 @@ export const handleApplyPatch: ToolHandler = async (inputs, transport) => {
     const p = rawPatches[i];
     const bad =
       placeholderViolation(p?.search, `patch ${i + 1} search`) ??
-      placeholderViolation(p?.replace, `patch ${i + 1} replace`);
+      placeholderViolation(p?.replace, `patch ${i + 1} replace`) ??
+      tailwindViolation(p?.replace, path);
     if (bad) return { success: false, error: bad };
+  }
+
+  // Resulting-file Tailwind floor: a partial edit inside an existing
+  // <style type="text/tailwindcss"> block never carries the block in its
+  // own replace text, so the per-patch scan above can't see v3 syntax
+  // smuggled into @theme — only the post-patch file reveals it. When the
+  // read fails the executor fails on the same read below and reports its
+  // own error, so there is nothing to check here.
+  try {
+    const { content } = await transport.readFile(path);
+    const resulting = simulatePatchResult(content, rawPatches);
+    if (resulting !== null) {
+      const bad = tailwindViolation(resulting, path);
+      if (bad) return { success: false, error: bad };
+    }
+  } catch {
+    // Unreadable target — applyPatch reports the read failure itself.
   }
 
   const patches = rawPatches.map((p) => ({ type: "search_replace" as const, search: p.search, replace: p.replace }));
@@ -631,6 +767,10 @@ function isSafeInsertDir(dir: string): boolean {
 export interface InsertAssetOptions {
   nameHint?: string;
   directory?: string;
+  /** Caller-wide deadline (e.g. the enrichment run's overall budget).
+   *  The download still has its own 30s per-attempt timeout; this cuts
+   *  it short when the caller has already spent its budget (CI #820). */
+  signal?: AbortSignal;
 }
 
 export interface InsertAssetResult {
@@ -786,7 +926,49 @@ export async function insertAssetFromUrl(
       buffer = decoded.buffer;
       contentType = decoded.contentType;
     } else {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      // One retry on transient upstream failures (network blips, 429, 5xx)
+      // — a single free-host hiccup must not strand an otherwise healthy
+      // image the way a definitive 4xx correctly does.
+      let lastErr: unknown = null;
+      const download = async (): Promise<Response | null> => {
+        try {
+          // Combine the 30s per-attempt timeout with the caller's overall
+          // deadline when given. AbortSignal.any is NOT used: jsdom (the
+          // test env) does not implement it — combine manually.
+          const perAttempt = AbortSignal.timeout(30_000);
+          let signal: AbortSignal = perAttempt;
+          if (opts.signal) {
+            if (opts.signal.aborted || perAttempt.aborted) {
+              const already = new AbortController();
+              already.abort();
+              signal = already.signal;
+            } else {
+              const controller = new AbortController();
+              const onAbort = () => controller.abort();
+              perAttempt.addEventListener("abort", onAbort, { once: true });
+              opts.signal.addEventListener("abort", onAbort, { once: true });
+              signal = controller.signal;
+            }
+          }
+          return await fetch(url, { signal });
+        } catch (err) {
+          lastErr = err;
+          return null;
+        }
+      };
+      let resp = await download();
+      if (resp === null || resp.status === 408 || resp.status === 429 || resp.status >= 500) {
+        if (opts.signal?.aborted) {
+          throw lastErr instanceof Error ? lastErr : new Error("Failed to download asset: aborted");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        resp = await download();
+      }
+      if (resp === null) {
+        // Preserve the original failure cause — callers and tests surface
+        // the real error, not a generic wrapper.
+        throw lastErr instanceof Error ? lastErr : new Error("Failed to download asset: network error");
+      }
       if (!resp.ok) {
         return { success: false, error: `Failed to download asset: HTTP ${resp.status}` };
       }
@@ -838,6 +1020,45 @@ export async function insertAssetFromUrl(
   }
 }
 
+/**
+ * image.stock — fetch a real photograph for a topic into the project.
+ *
+ * Free-only resolution (Pexels free tier → pollinations → loremflickr →
+ * picsum): this tool never calls a paid provider and never debits the
+ * user. The result lands in the workspace like project.insert_asset —
+ * the model references the returned sitePath. Use for photography;
+ * image.generate remains for custom art stock cannot supply.
+ */
+export const handleImageStock: ToolHandler = async (inputs, transport) => {
+  const query = typeof inputs.query === "string" ? inputs.query.trim() : "";
+  if (query.length < 2) {
+    return { success: false, error: "query is required (e.g. 'coffee beans closeup')" };
+  }
+  const { resolveSlotImage } = await import("@/lib/site-enrich/resolver");
+  const resolved = await resolveSlotImage(query, Math.floor(Math.random() * 1e6));
+  if (!resolved) {
+    return { success: false, error: `No stock image available for "${query}" right now` };
+  }
+  const saved = await insertAssetFromUrl(
+    resolved.url,
+    { nameHint: query.slice(0, 30) },
+    transport,
+  );
+  if (!saved.success || !saved.sitePath) {
+    return { success: false, error: saved.error ?? "Failed to save stock image into project" };
+  }
+  return {
+    success: true,
+    provider: resolved.provider,
+    attribution: resolved.attribution,
+    sitePath: saved.sitePath,
+    path: saved.path,
+    siteReference:
+      `Reference this image in the site's HTML as <img src="${saved.sitePath}" /> — ` +
+      `the file already exists in the project.`,
+  };
+};
+
 export const handleProjectInsertAsset: ToolHandler = async (inputs, transport) => {
   const url = inputs.url as string | undefined;
   const nameHint = inputs.name as string | undefined;
@@ -859,4 +1080,95 @@ export const handleProjectInsertAsset: ToolHandler = async (inputs, transport) =
     sizeBytes: result.sizeBytes,
     hint: `Reference this image in the site's HTML as <img src="${result.sitePath}" />.`,
   };
+};
+
+// ─── Site composer (local small lane, JSON-first generation) ─────────
+//
+// The model emits a compact structured plan instead of thousands of
+// tokens of layout CSS — reliable at 1.5B scale, ~4x fewer output
+// tokens, and every page lands with the same design system, section
+// library, and accessibility floor. Assembly is deterministic
+// server-side; the write rides handleFilesWrite so the path guard,
+// destructive-rewrite guard, scaffold exemption, and placeholder checks
+// all apply unchanged. Emitted data-litt-image / data-litt-bg slots are
+// materialized into real project assets by the post-mutation enrichment
+// pass — no image calls the model has to remember.
+
+export const handleSiteCompose: ToolHandler = async (inputs, transport) => {
+  const { validateSitePlan, composeSiteHtml } = await import("./site-compose");
+  const path = typeof inputs.path === "string" && inputs.path.trim() ? inputs.path.trim() : "index.html";
+  const planInput =
+    inputs.plan !== undefined ? inputs.plan : { ...inputs };
+  delete (planInput as Record<string, unknown>).path;
+  delete (planInput as Record<string, unknown>).projectId;
+  delete (planInput as Record<string, unknown>).allowOverwrite;
+
+  const validation = validateSitePlan(planInput);
+  if (!validation.ok || !validation.plan) {
+    return {
+      success: false,
+      error:
+        `Invalid site plan: ${validation.errors.join("; ")}. ` +
+        `Fix the plan and call site.compose again, or use files.write for full manual control.`,
+      validationErrors: validation.errors,
+    };
+  }
+
+  const html = composeSiteHtml(validation.plan);
+  // Forward the declared full-rebuild intent — a recompose over an
+  // existing page is still a full overwrite and must pass the same gate.
+  const write = await handleFilesWrite(
+    { path, content: html, allowOverwrite: inputs.allowOverwrite === true },
+    transport,
+  );
+  if (!write.success) return write;
+  return {
+    ...write,
+    sections: validation.plan.sections.length,
+    theme: validation.plan.theme ?? "light",
+    composed: true,
+    hint:
+      `index.html was assembled from the plan and written. ` +
+      `data-litt-image slots become real photos automatically — do NOT call image tools. ` +
+      `To change a whole section later (footer text, hero heading, section content), ` +
+      `call site.patch with the section name and new fields — no verbatim matching needed. ` +
+      `For precise small edits use files.read + apply_patch on the generated file.`,
+  };
+};
+
+// ─── Section-level site patch (local small lane) ─────────────────────
+//
+// The deterministic edit counterpart to site.compose: the model names a
+// region (hero / footer / a section kind or id) plus the fields to
+// change, and the server splices a re-rendered region into the file —
+// no verbatim search strings, which small models cannot reliably copy
+// out of a 10KB+ document. apply_patch stays the general-purpose edit
+// path; site.patch exists for composed pages where a whole region is the
+// natural unit of change.
+
+export const handleSitePatch: ToolHandler = async (inputs, transport) => {
+  const { applySectionEdit } = await import("./site-compose");
+  const path = typeof inputs.path === "string" && inputs.path.trim() ? inputs.path.trim() : "index.html";
+  const section = typeof inputs.section === "string" ? inputs.section.trim() : "";
+  if (!section) {
+    return { success: false, error: "section is required — hero, footer, or a section kind/id (menu, features-2, …)" };
+  }
+  const pathError = workspacePathError(path);
+  if (pathError) return { success: false, error: pathError };
+  let prev: string;
+  try {
+    ({ content: prev } = await transport.readFile(path));
+  } catch {
+    return { success: false, error: `could not read ${path} — the page does not exist yet; use site.compose to create it` };
+  }
+  const fields: Record<string, unknown> = { ...inputs };
+  for (const k of ["path", "projectId", "section", "allowOverwrite"]) delete fields[k];
+  const edit = applySectionEdit(prev, section, fields);
+  if (!edit.ok || !edit.html) return { success: false, error: edit.error ?? "section edit failed" };
+  // The splice is server-side surgery on the file — declared a full
+  // overwrite internally so the small-lane gate doesn't steer the model
+  // back to verbatim apply_patch for what is already a targeted edit.
+  const write = await handleFilesWrite({ path, content: edit.html, allowOverwrite: true }, transport);
+  if (!write.success) return write;
+  return { ...write, region: edit.region, patched: true };
 };

@@ -5,6 +5,7 @@ import {
 
 export type PlanId =
   | "starter"
+  | "creator_lite"
   | "creator_beta"
   | "pro_builder_beta"
   | "founder"
@@ -54,14 +55,38 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     beta: false,
     enabled: true,
   },
+  creator_lite: {
+    id: "creator_lite",
+    name: "Creator Lite",
+    description: "Entry paid tier — creator tools at a lower price",
+    billingType: "subscription",
+    monthlyPriceCents: 999,
+    standardPriceCents: null,
+    default_price: 999,
+    stripePriceIdEnv: "STRIPE_PRICE_CREATOR_LITE",
+    monthlyCredits: getPlanCreditAllowance("creator_lite"),
+    activeProjectLimit: PLAN_ENTITLEMENTS.creator_lite.activeProjectLimit,
+    features: [
+      "LiTT agent",
+      "3 active projects",
+      "2,500 LiTTBits per billing cycle",
+      "Private projects",
+      "Project downloads",
+      "Image generation",
+      "Public previews",
+      "Standard AI routing",
+    ],
+    beta: true,
+    enabled: true,
+  },
   creator_beta: {
     id: "creator_beta",
-    name: "Creator Beta",
+    name: "Creator",
     description: "Research, write, and market with AI agents",
     billingType: "subscription",
-    monthlyPriceCents: 1500,
+    monthlyPriceCents: 1999,
     standardPriceCents: null,
-    default_price: 1500,
+    default_price: 1999,
     stripePriceIdEnv: "STRIPE_PRICE_CREATOR_BETA",
     monthlyCredits: getPlanCreditAllowance("creator_beta"),
     activeProjectLimit: PLAN_ENTITLEMENTS.creator_beta.activeProjectLimit,
@@ -82,7 +107,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   },
   pro_builder_beta: {
     id: "pro_builder_beta",
-    name: "Pro Builder Beta",
+    name: "Pro Builder",
     description: "Build, debug, and deploy with full AI tooling",
     billingType: "subscription",
     monthlyPriceCents: 3900,
@@ -167,6 +192,7 @@ export const PLAN_LIST = Object.values(PLANS).filter((p) => p.enabled); // Exclu
  */
 export const PLAN_RANK: Record<PlanId, number> = {
   starter: 0,
+  creator_lite: 0, // TBD: paid but sub-Creator until owner decides its agent-access tier
   creator_beta: 1,
   founder: 1,
   pro_builder_beta: 2,
@@ -195,10 +221,10 @@ export function getStripePriceId(plan: PlanDefinition): string | null {
 
 export function formatPrice(cents: number | null): string {
   if (cents === null || cents === 0) return "Free";
-  return `$${(cents / 100).toFixed(0)}`;
+  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
 }
 
 export function formatPriceMonthly(cents: number | null): string {
   if (cents === null || cents === 0) return "Free";
-  return `$${(cents / 100).toFixed(0)}/month`;
+  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}/month`;
 }

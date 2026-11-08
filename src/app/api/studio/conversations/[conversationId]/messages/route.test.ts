@@ -193,6 +193,7 @@ import {
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { buildCanonicalRuntimeContext } from "@/lib/litt-intelligence/canonical-runtime-context";
 import { buildStudioContext } from "@/lib/studio/project-resolver";
+import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getConversation, insertMessage, listMessages, updateMessageStatus } from "@/lib/studio/conversation-service";
 import { createPausedRun, getPendingPausedRunForConversation, getLatestPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
 import { persistMemory } from "@/lib/studio/memory-service";
@@ -324,9 +325,10 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         agentLoopResult: {
           stepsUsed: 2,
           toolCalls: [
-            { toolId: "files.list", toolCallId: "tc1", inputs: {} },
-            { toolId: "files.write", toolCallId: "tc2", inputs: { path: "index.html" } },
+            { toolId: "files.list", toolCallId: "tc1", inputs: {}, success: true, mutating: false, summary: "5 entries" },
+            { toolId: "files.write", toolCallId: "tc2", inputs: { path: "index.html" }, success: true, mutating: true, summary: "saved", paths: ["index.html"] },
           ],
+          workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true },
           cancelled: false,
           pendingApproval: null,
         } as any,
@@ -429,7 +431,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "I built your landing page.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"] }], workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true }, cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 100,
       } as any;
@@ -508,7 +510,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "Built after disconnect.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"] }], workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true }, cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 60,
       } as any;
@@ -546,7 +548,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
 
     vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
       const progress = opts.progress;
-      progress.emit({ type: "approval_required", toolId: "deploy.production", reason: "Deploy to production" });
+      progress.emit({ type: "approval_required", toolId: "project.deploy", reason: "Deploy to production" });
       await new Promise((r) => setTimeout(r, 30));
       clientDisconnect.abort(new Error("Client disconnected"));
       const result = {
@@ -560,7 +562,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
           toolCalls: [],
           cancelled: false,
           pendingApproval: {
-            toolId: "deploy.production",
+            toolId: "project.deploy",
             toolCallId: "tc-1",
             inputs: { environment: "production" },
             reason: "Deploy to production",
@@ -568,7 +570,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
           },
         } as any,
         pendingApproval: {
-          toolId: "deploy.production",
+          toolId: "project.deploy",
           toolCallId: "tc-1",
           inputs: { environment: "production" },
           reason: "Deploy to production",
@@ -594,7 +596,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         expect.objectContaining({
           userId: "user_123",
           conversationId: "conv-123",
-          toolId: "deploy.production",
+          toolId: "project.deploy",
           toolCallId: "tc-1",
           actionRunId: "action-run-123",
         }),
@@ -715,7 +717,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "Done after downstream cancel.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"] }], workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true }, cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 100,
       } as any;
@@ -1160,6 +1162,177 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     );
   });
 
+  it("hallucinated file creation: the model claims it built index.html with zero tool calls — reported failed, not completed", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      finalText: "Done! I've created index.html with your landing page content.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [],
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.any(String),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("failed");
+  });
+
+  it("tool success without workspace mutations: a mutating tool reports success:true but the checkpoint diff shows nothing changed — reported failed, not completed", async () => {
+    // The CLI-equivalent bug this PR follow-up targets: a tool returns
+    // success:true/mutating:true (e.g. a no-op command that exited 0
+    // having written nothing) — that claim alone must not establish
+    // completion once a real workspace diff contradicts it.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      finalText: "Done! I've created index.html.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+        workspaceChange: { status: "unchanged", files: [], checkpointSha: "abc1234", rollbackAvailable: true },
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.stringContaining("workspace diff shows no changes"),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("failed");
+  });
+
+  it("successful real file creation: a mutating tool reports success AND the checkpoint diff confirms the change — reported completed", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: "https://preview.example.com",
+      finalText: "Done! I've created index.html.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+        workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true },
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "completed",
+      expect.any(String),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("completed");
+  });
+
+  it("per-claim verification: a contradicted write in a multi-file build reports failed even when the other writes verified (gitless)", async () => {
+    // Issue #704: before per-claim tracking, one verified mutation
+    // satisfied the whole run — a write contradicted by read-back was
+    // silently dropped whenever another mutation verified.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      finalText: "Done! I've created all three files.",
+      agentLoopResult: {
+        stepsUsed: 3,
+        toolCalls: [
+          { toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"], persisted: true },
+          { toolId: "files.write", success: true, summary: "wrote style.css", mutating: true, paths: ["style.css"], persisted: true },
+          { toolId: "files.write", success: true, summary: "wrote app.js", mutating: true, paths: ["app.js"], persisted: false },
+        ],
+        // A static workspace can never produce a checkpoint diff — the
+        // read-back evidence above is the only channel.
+        workspaceChange: null,
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.stringContaining("did not find the claimed change"),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("failed");
+  });
+
+  it("a gitless run whose only mutation is files.mkdir verified by read-back reports completed, not failed", async () => {
+    // Issue #703: on static workspaces (no checkpoint diff is ever
+    // possible), mutations beyond files.write/patch/delete/rename were
+    // unverifiable and reported failed on real success.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      finalText: "Done! I've created the assets folder.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [{ toolId: "files.mkdir", success: true, summary: "created assets/", mutating: true, paths: ["assets"], persisted: true }],
+        workspaceChange: null,
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "completed",
+      expect.any(String),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("completed");
+  });
+
   it("a failed run releases the conversation — an immediate second send is not rejected", async () => {
     vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
     vi.mocked(runLaunchFlow).mockRejectedValue(new Error("Provider connection refused"));
@@ -1177,7 +1350,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       previewUrl: null,
       productionUrl: null,
       finalText: "Recovered answer.",
-      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }], cancelled: false, pendingApproval: null } as any,
+      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"] }], workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true }, cancelled: false, pendingApproval: null } as any,
       cancelled: false,
       totalDurationMs: 50,
     } as any);
@@ -1730,5 +1903,63 @@ describe("POST /api/studio/conversations/[conversationId]/messages — project r
       const body = await res.json().catch(() => null);
       expect(body?.code).not.toBe("PROJECT_MISMATCH");
     }
+  });
+});
+
+describe("POST /api/studio/conversations/[conversationId]/messages — never-bound conversation guard", () => {
+  // A conversation with projectId=null (legacy/general chat) viewed inside a
+  // project must NOT be silently re-bound to the active project: its history
+  // is foreign context and rebinding would let an unrelated thread execute
+  // mutations inside this project's workspace. The server refuses instead.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetExecutionRegistryForTests();
+
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv-123",
+      projectId: null,
+      revision: 1,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    } as any);
+    // The unbound conversation resolves no project context…
+    vi.mocked(buildStudioContext).mockResolvedValue(null as any);
+    // …while a different project is active for this user.
+    vi.mocked(resolveCurrentProject).mockResolvedValue({ projectId: "proj-active" } as any);
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: true,
+      workspaceId: "ws-123",
+      executionMode: "auto",
+    } as any);
+    vi.mocked(insertMessage).mockImplementation(async (args: any) => ({
+      message: { id: `msg-${args.role}`, ...args },
+      duplicate: false,
+      error: null,
+    }) as any);
+  });
+
+  const routeParams = { params: Promise.resolve({ conversationId: "conv-123" }) };
+
+  it("refuses to silently re-bind a project-less chat into the active project", async () => {
+    const req = makeRequest({ projectId: "proj-active", message: "edit index.html" });
+    const res = await POST(req, routeParams);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("PROJECT_MISMATCH");
+    // The repair fallback must not run for never-bound chats — no silent
+    // rebind, no workspace transport, no execution against the wrong project.
+    expect(resolveCurrentProject).not.toHaveBeenCalled();
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+  });
+
+  it("still allows the legacy rebind path when the client omits projectId", async () => {
+    const req = makeRequest({});
+    const res = await POST(req, routeParams);
+
+    // Older clients keep the previous behavior: the fallback may rebind.
+    expect(resolveCurrentProject).toHaveBeenCalled();
+    expect(res.status).not.toBe(500);
   });
 });

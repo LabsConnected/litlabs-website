@@ -41,6 +41,8 @@ import {
   type MeteringStatus,
 } from "@/lib/metering";
 import { checkRunawayGuards, SpendGuardError } from "@/lib/spend-guards";
+import { resolveOllamaEndpoint, ensureOllamaModelResident } from "@litt/models";
+import { preferredLocalToolModel, ollamaKeepAliveSetting, ollamaRouteEligible, ollamaOutputTokenBudget } from "./litt-intelligence/ollama-shared";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -58,9 +60,10 @@ export type LLMProvider =
   | "openrouter-mistral"
   | "openrouter-llama"
   | "openrouter-trinity"
-  | "openrouter-vision";
+  | "openrouter-vision"
+  | "ollama";
 
-export type ModelCategory = "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
+export type ModelCategory = "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias" | "local";
 
 /**
  * Which account pays for each provider.
@@ -86,6 +89,8 @@ export const PROVIDER_COST_CLASS: Record<LLMProvider, "included" | "litt_paid"> 
   "openrouter-llama": "included",
   "openrouter-trinity": "included",
   "openrouter-vision": "included",
+  /** Local inference — zero marginal cost, LiTT pays nothing. */
+  ollama: "included",
 };
 
 /** True when calling this provider spends LiTT's own money. */
@@ -137,6 +142,25 @@ export interface LLMOptions {
    * not a provider failure).
    */
   signal?: AbortSignal;
+  /**
+   * Bounded retries against the SAME provider for transient failures
+   * (429, 408, 5xx, timeouts, network errors) before failing over to the
+   * next chain entry. Default 0 — historical behavior (immediate failover).
+   * Capped at 3 retries (4 total attempts per provider).
+   *
+   * Retrying never widens the chain: cost-class filtering in defaultChain
+   * is untouched, so a pinned or paid-provider-denied chain can never reach
+   * a litt_paid provider through retry. Each attempt is metered/metriced
+   * individually (retrySequence keeps ordering). Non-retryable errors
+   * (4xx like 400/404) and caller aborts never retry.
+   */
+  providerRetries?: number;
+  /**
+   * Base delay (ms) for `providerRetries` backoff — doubled per retry,
+   * ±25% jitter, capped at 4s. Default 500. Honours `signal` (an abort
+   * during backoff cancels the wait and rejects the call).
+   */
+  providerRetryDelayMs?: number;
   /**
    * Canonical metering context for this call. When set, the user action
    * emits one usage_events row, and each provider attempt (success or
@@ -200,6 +224,9 @@ export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   groq: "openai/gpt-oss-120b",
   "groq-whisper": "whisper-large-v3",
   openai: OPENAI_MODEL,
+  /** Placeholder — the real model is picked live from /api/tags per call
+   *  (see generateViaOllama/streamViaOllama). OLLAMA_MODEL pins it. */
+  ollama: process.env.OLLAMA_MODEL || "local-auto",
   "openrouter-free": "google/gemma-4-31b-it:free",
   "openrouter-qwen": "nvidia/nemotron-3-super-120b-a12b:free",
   "openrouter-deepseek": "nvidia/nemotron-3-ultra-550b-a55b:free",
@@ -263,8 +290,46 @@ function markModelUnavailable(provider: string): void {
  * The v2 agent path (planBasicRoutes) already enforces this structurally;
  * this brings the v1 chat path in line with it.
  */
+/** Local Ollama route eligibility — shared rule in
+ *  ./litt-intelligence/ollama-shared (same as planBasicRoutes': include
+ *  when explicitly configured via env, or when running outside a deployed
+ *  host; LITT_DISABLE_OLLAMA hard-disables). */
+function ollamaTailEligible(): boolean {
+  return ollamaRouteEligible();
+}
+
+/** Append the local OLLAMA failover tail as the LAST chain entry.
+ *
+ *  Rationale: with stale cloud keys (401 User not found, depleted billing)
+ *  a Studio run bricked with "All LLM streaming providers failed. Tried:
+ *  gemini, groq, openrouter-free" even while three healthy litt-hermes
+ *  models sat loaded in local Ollama. The tail is purely additive — it
+ *  never reorders or lands before a cloud provider, preserving the
+ *  failoverChain() trust-order invariant (LITT_LOCAL_ONLY contract).
+ *
+ *  Not eligible: pinned providers (explicit user choice must not silently
+ *  resolve elsewhere), byok (caller owns the chain), and tasks no local
+ *  model serves (vision/transcription). */
+function withOllamaTail(chain: LLMProvider[], task: LLMTask, opts: LLMOptions): LLMProvider[] {
+  const pinnedExplicitProvider =
+    !!opts.provider && opts.category !== "litt-alias";
+  if (
+    chain.length > 0 &&
+    chain[chain.length - 1] !== "ollama" &&
+    !pinnedExplicitProvider &&
+    ollamaTailEligible() &&
+    task !== "vision" &&
+    task !== "transcription" &&
+    opts.category !== "byok" &&
+    opts.category !== "vision"
+  ) {
+    return [...chain, "ollama"];
+  }
+  return chain;
+}
+
 function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
-  const chain = rawDefaultChain(task, opts);
+  const chain = withOllamaTail(rawDefaultChain(task, opts), task, opts);
 
   // P1 launch: Gemini billing is depleted (HTTP 402). Until credits are
   // restored, explicitly skip Gemini — do not rely on health checks or
@@ -277,7 +342,7 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
     // The pinned provider was filtered out (e.g. GEMINI_DISABLED): the pin
     // cannot be honored, so drop it and route through the full entitled
     // chain (incl. LITT_PAID) instead of failing with zero attempts.
-    const unpinned = rawDefaultChain(task, { ...opts, provider: undefined });
+    const unpinned = withOllamaTail(rawDefaultChain(task, { ...opts, provider: undefined }), task, { ...opts, provider: undefined });
     return geminiDisabled ? unpinned.filter((p) => p !== "gemini") : unpinned;
   }
 
@@ -285,7 +350,11 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   if (included.length > 0) return included;
 
   // Every candidate was litt_paid (e.g. a forged provider: "openai").
-  return INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p) && (!geminiDisabled || p !== "gemini"));
+  return withOllamaTail(
+    INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p) && (!geminiDisabled || p !== "gemini")),
+    task,
+    opts,
+  );
 }
 
 function rawDefaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
@@ -442,6 +511,46 @@ async function fetchWithTimeout(
   }
 }
 
+/** Hard ceiling on same-provider retries: providerRetries ≤ 3 (4 total attempts). */
+const MAX_SAME_PROVIDER_ATTEMPTS = 4;
+
+/**
+ * Backoff delay for same-provider retry index `retryIndex` (0-based):
+ * base × 2^retryIndex, ±25% jitter, capped at 4s.
+ */
+function providerRetryDelayMs(retryIndex: number, baseMsOpt?: number): number {
+  const base = Math.max(50, baseMsOpt ?? 500);
+  const exp = Math.min(4_000, base * 2 ** retryIndex);
+  return Math.round(exp * (0.75 + Math.random() * 0.5));
+}
+
+/**
+ * Sleep that honours a caller AbortSignal — an abort during backoff
+ * rejects immediately rather than letting a cancelled run proceed to the
+ * next provider attempt.
+ */
+function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(
+        signal.reason ?? new DOMException("The operation was aborted.", "AbortError"),
+      );
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(tid);
+      reject(
+        signal?.reason ?? new DOMException("The operation was aborted.", "AbortError"),
+      );
+    };
+    const tid = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /*  Provider implementations                                            */
 /* ------------------------------------------------------------------ */
@@ -452,9 +561,28 @@ interface GenerateParams {
   opts: LLMOptions;
 }
 
+/**
+ * Re-classify @google/generative-ai SDK failures as ProviderError. The SDK
+ * throws plain Errors whose message embeds the HTTP status
+ * ("[503 Service Unavailable]"), and AbortError-shaped failures when its
+ * requestOptions.timeout fires — neither is a ProviderError, so without this
+ * the retry gate treated every Gemini failure as non-retryable and a
+ * transient 503 failed the request instantly. A caller-side abort is handled
+ * upstream (options.signal.aborted check) before this classification
+ * matters, so mapping it here is safe.
+ */
+function toGeminiProviderError(err: unknown): ProviderError {
+  if (err instanceof ProviderError) return err;
+  const msg = err instanceof Error ? err.message : String(err);
+  const statusMatch = msg.match(/\[(\d{3})[\s\]]/);
+  const status = statusMatch ? Number(statusMatch[1]) : null;
+  return new ProviderError("gemini", status, msg);
+}
+
 async function generateViaGemini(
   p: GenerateParams,
   modelName: string,
+  timeoutMs: number,
 ): Promise<{ text: string; usage?: LLMUsage; model: string }> {
   const genAI = getGenAI();
   if (!genAI) throw new ProviderError("gemini", null, "GEMINI_API_KEY not set");
@@ -476,10 +604,21 @@ async function generateViaGemini(
     ? `${p.systemPrompt}\n\n${p.prompt}`
     : p.prompt;
 
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
-    generationConfig,
-  });
+  // requestOptions.timeout: unlike the fetch-based providers, the Gemini SDK
+  // had no bounded wait — a hung call ran forever (seen live during a Gemini
+  // overload: demo requests sat >2min with no resolution). The SDK timeout
+  // makes it abort into the retryable-provider-error path below.
+  const result = await model
+    .generateContent(
+      {
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        generationConfig,
+      },
+      { timeout: timeoutMs, signal: p.opts.signal },
+    )
+    .catch((err) => {
+      throw toGeminiProviderError(err);
+    });
   const text = result.response.text();
 
   const usageMd = result.response.usageMetadata;
@@ -746,11 +885,11 @@ async function dispatchProvider(
   if (provider === "gemini") {
     // Try the configured model first, then fall back to the lite variant
     try {
-      return await generateViaGemini(p, modelName);
+      return await generateViaGemini(p, modelName, timeoutMs);
     } catch (err) {
       if (err instanceof ProviderError && modelName !== GEMINI_FALLBACK_MODEL) {
         try {
-          return await generateViaGemini(p, GEMINI_FALLBACK_MODEL);
+          return await generateViaGemini(p, GEMINI_FALLBACK_MODEL, timeoutMs);
         } catch {
           throw err; // throw original
         }
@@ -763,6 +902,11 @@ async function dispatchProvider(
   }
   if (provider === "openai") {
     return generateViaOpenAI(p, modelName, timeoutMs);
+  }
+  if (provider === "ollama") {
+    // The generic modelName above is just the DEFAULT_MODELS placeholder;
+    // the real model is resolved against live /api/tags inside these calls.
+    return generateViaOllama(p, timeoutMs);
   }
   // All others are OpenRouter
   return generateViaOpenRouter(p, provider, modelName, timeoutMs);
@@ -785,130 +929,162 @@ export async function generateText(
   // Stable id for canonical metering: one usage_event per provider attempt.
   const meteringRequestId = newLlmRequestId();
 
+  // Bounded same-provider retry (opt-in via providerRetries): re-attempt the
+  // SAME provider a limited number of times on transient failures (503, 429,
+  // timeouts, network errors) before failing over to the next chain entry.
+  // The chain is already cost-class-filtered by defaultChain, so retrying
+  // can never reach a litt_paid provider the caller didn't authorize —
+  // e.g. a pinned free-tier demo provider retries on transient 503s without
+  // ever falling back to paid providers.
+  const sameProviderAttempts = Math.min(
+    MAX_SAME_PROVIDER_ATTEMPTS,
+    Math.max(1, (options.providerRetries ?? 0) + 1),
+  );
+
   let lastErr: unknown = null;
-  let attempted = 0;
+  let attempted = 0; // total provider dispatches (drives metering attemptIndex)
+  let providersAttempted = 0; // distinct providers dispatched (empty-response check)
   for (const provider of chain) {
     // Circuit breaker: skip models temporarily marked unavailable
     if (isModelInCooldown(provider)) {
       failover.push(provider);
       continue;
     }
-    attempted++;
-    const attemptStartedAt = new Date();
-    const attemptIndex = attempted - 1;
-    // Hard spend/runaway guard — per-attempt, fail-open. Kills retry storms
-    // before they burn the user's allowance or LiTT's margin.
-    if (options.metering) {
-      const guard = await checkRunawayGuards({
-        userId: options.metering.userId,
-        clerkId: options.metering.clerkId,
-        feature: String(options.metering.feature ?? "unknown"),
-        originalRequestId: meteringRequestId,
-        isByok: !!options.userApiKey,
-      });
-      if (!guard.allowed) {
-        throw new SpendGuardError(guard);
+    providersAttempted++;
+    for (let sameAttempt = 0; sameAttempt < sameProviderAttempts; sameAttempt++) {
+      attempted++;
+      const attemptStartedAt = new Date();
+      const attemptIndex = attempted - 1;
+      // Hard spend/runaway guard — per-attempt, fail-open. Kills retry storms
+      // before they burn the user's allowance or LiTT's margin.
+      if (options.metering) {
+        const guard = await checkRunawayGuards({
+          userId: options.metering.userId,
+          clerkId: options.metering.clerkId,
+          feature: String(options.metering.feature ?? "unknown"),
+          originalRequestId: meteringRequestId,
+          isByok: !!options.userApiKey,
+        });
+        if (!guard.allowed) {
+          throw new SpendGuardError(guard);
+        }
       }
-    }
-    try {
-      const r = await dispatchProvider(
-        provider,
-        { prompt, systemPrompt, task, opts: options },
-        timeoutMs,
-      );
-      if (!r.text.trim()) {
-        // A well-formed but empty completion is not a usable answer —
-        // classify it as a provider failure so the chain fails over.
-        emptyProviders.push(provider);
-        throw new EmptyProviderResponseError(provider, r.model);
-      }
-      const result = {
-        text: r.text,
-        provider,
-        model: r.model,
-        usage: r.usage,
-        latencyMs: Date.now() - t0,
-        failover,
-        // The successful attempt is the ONE billable event for this logical
-        // action. Charge paths must reuse its idempotency key.
-        metering: {
+      try {
+        const r = await dispatchProvider(
+          provider,
+          { prompt, systemPrompt, task, opts: options },
+          timeoutMs,
+        );
+        if (!r.text.trim()) {
+          // A well-formed but empty completion is not a usable answer —
+          // classify it as a provider failure so the chain fails over.
+          if (!emptyProviders.includes(provider)) emptyProviders.push(provider);
+          throw new EmptyProviderResponseError(provider, r.model);
+        }
+        const result = {
+          text: r.text,
+          provider,
+          model: r.model,
+          usage: r.usage,
+          latencyMs: Date.now() - t0,
+          failover,
+          // The successful attempt is the ONE billable event for this logical
+          // action. Charge paths must reuse its idempotency key.
+          metering: {
+            requestId: meteringRequestId,
+            billableIdempotencyKey: `metering:llm:${meteringRequestId}`,
+          },
+        };
+        logLLMCall({
+          prompt,
+          systemPrompt,
+          output: result.text,
+          provider: result.provider,
+          model: result.model,
+          latencyMs: result.latencyMs,
+          failover: result.failover,
+          usage: result.usage,
+          metadata: options.evalMetadata ?? {},
+        });
+        recordLLMCall({
+          provider,
+          model: r.model,
+          task,
+          status: "success",
+          latencyMs: result.latencyMs,
+          promptTokens: r.usage?.prompt,
+          completionTokens: r.usage?.completion,
+          failoverFrom: failover.length > 0 ? failover : undefined,
+        });
+        // Canonical metering: one event per successful provider attempt.
+        meterLlmAttempt({
+          options,
+          provider,
+          model: r.model,
+          status: "success",
+          promptTokens: r.usage?.prompt,
+          completionTokens: r.usage?.completion,
           requestId: meteringRequestId,
-          billableIdempotencyKey: `metering:llm:${meteringRequestId}`,
-        },
-      };
-      logLLMCall({
-        prompt,
-        systemPrompt,
-        output: result.text,
-        provider: result.provider,
-        model: result.model,
-        latencyMs: result.latencyMs,
-        failover: result.failover,
-        usage: result.usage,
-        metadata: options.evalMetadata ?? {},
-      });
-      recordLLMCall({
-        provider,
-        model: r.model,
-        task,
-        status: "success",
-        latencyMs: result.latencyMs,
-        promptTokens: r.usage?.prompt,
-        completionTokens: r.usage?.completion,
-        failoverFrom: failover.length > 0 ? failover : undefined,
-      });
-      // Canonical metering: one event per successful provider attempt.
-      meterLlmAttempt({
-        options,
-        provider,
-        model: r.model,
-        status: "success",
-        promptTokens: r.usage?.prompt,
-        completionTokens: r.usage?.completion,
-        requestId: meteringRequestId,
-        attemptIndex,
-        startedAt: attemptStartedAt,
-      });
-      return result;
-    } catch (err) {
-      lastErr = err;
-      const isProviderError = err instanceof ProviderError;
-      recordLLMCall({
-        provider,
-        model: "unknown",
-        task,
-        status: "error",
-        latencyMs: Date.now() - t0,
-        failoverFrom: failover.length > 0 ? failover : undefined,
-      });
-      // Canonical metering: failed attempts are recorded too (billable=false;
-      // LLM API 4xx/5xx failures are not provider-billed, but the attempt
-      // is visible for retry-waste analysis).
-      meterLlmAttempt({
-        options,
-        provider,
-        model: "unknown",
-        status: "failed",
-        requestId: meteringRequestId,
-        attemptIndex,
-        error: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
-        startedAt: attemptStartedAt,
-      });
-      // Mark model unavailable on 404 (model not found)
-      if (isProviderError && err.status === 404) {
-        markModelUnavailable(provider);
+          attemptIndex,
+          startedAt: attemptStartedAt,
+        });
+        return result;
+      } catch (err) {
+        // An explicit caller abort is not a provider failure — surface it
+        // immediately instead of retrying or failing over (same contract
+        // streamText enforces).
+        if (options.signal?.aborted) {
+          throw options.signal.reason instanceof Error
+            ? options.signal.reason
+            : new DOMException("The operation was aborted.", "AbortError");
+        }
+        lastErr = err;
+        const isProviderError = err instanceof ProviderError;
+        recordLLMCall({
+          provider,
+          model: "unknown",
+          task,
+          status: "error",
+          latencyMs: Date.now() - t0,
+          failoverFrom: failover.length > 0 ? failover : undefined,
+        });
+        // Canonical metering: failed attempts are recorded too (billable=false;
+        // LLM API 4xx/5xx failures are not provider-billed, but the attempt
+        // is visible for retry-waste analysis).
+        meterLlmAttempt({
+          options,
+          provider,
+          model: "unknown",
+          status: "failed",
+          requestId: meteringRequestId,
+          attemptIndex,
+          error: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
+          startedAt: attemptStartedAt,
+        });
+        // Mark model unavailable on 404 (model not found)
+        if (isProviderError && err.status === 404) {
+          markModelUnavailable(provider);
+        }
+        // Non-retryable errors (e.g. 400 bad request) — advance to the next
+        // provider; never burn a same-provider retry on them.
+        if (!isProviderError || !err.isRetryable) {
+          break;
+        }
+        // Retryable: retry the same provider while attempts remain, then
+        // fail over to the next chain entry.
+        if (sameAttempt + 1 < sameProviderAttempts && !options.signal?.aborted) {
+          await sleepWithAbort(
+            providerRetryDelayMs(sameAttempt, options.providerRetryDelayMs),
+            options.signal,
+          );
+          continue;
+        }
+        break;
       }
-      // Don't retry non-retryable errors (e.g. 400 bad request) — skip to next
-      if (!isProviderError || !err.isRetryable) {
-        // For non-retryable, skip to the next provider in the chain
-        failover.push(provider);
-        continue;
-      }
-      // Retryable: try the next provider
-      failover.push(provider);
     }
+    failover.push(provider);
   }
-  if (attempted > 0 && emptyProviders.length === attempted) {
+  if (providersAttempted > 0 && emptyProviders.length === providersAttempted) {
     throw new AllProvidersEmptyError(emptyProviders);
   }
   throw new Error(
@@ -1055,6 +1231,14 @@ export async function streamText(
           failover,
           timeoutMs,
           onReasoning,
+        );
+      } else if (provider === "ollama") {
+        result = await streamViaOllama(
+          { prompt, systemPrompt, task, opts: options },
+          wrappedOnChunk,
+          t0,
+          failover,
+          timeoutMs,
         );
       } else {
         result = await streamViaOpenRouter(
@@ -1331,6 +1515,265 @@ async function streamViaOpenRouter(
     throw new DOMException("The operation was aborted.", "AbortError");
   }
   return { provider, model: modelName, latencyMs: Date.now() - t0, failover, finishReason };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Ollama (local) implementations                                      */
+/* ------------------------------------------------------------------ */
+
+/** Local model probe (5min TTL, 4s probe budget) — same policy as
+ *  llm-tool-calling.ts's probeOllamaModels so both routers agree. The
+ *  tool-capable family rule + preferred pick order live in
+ *  ./litt-intelligence/ollama-shared. */
+const OLLAMA_PROBE_TTL_MS = 5 * 60_000;
+const OLLAMA_PROBE_TIMEOUT_MS = 4_000;
+let _llmOllamaProbeCache: { at: number; models: string[] } | null = null;
+
+async function probeLlmOllamaModels(
+  endpoint: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  if (_llmOllamaProbeCache && Date.now() - _llmOllamaProbeCache.at < OLLAMA_PROBE_TTL_MS) {
+    return _llmOllamaProbeCache.models;
+  }
+  const res = await fetchWithTimeout(
+    `${endpoint}/api/tags`,
+    { method: "GET" },
+    Math.min(timeoutMs, OLLAMA_PROBE_TIMEOUT_MS),
+    signal,
+  );
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderError("ollama", res.status, `Ollama /api/tags ${res.status}: ${txt.slice(0, 120)}`);
+  }
+  const data = (await res.json()) as { models?: Array<{ name?: string }> };
+  const models = (data.models ?? [])
+    .map((m) => m.name)
+    .filter((n): n is string => !!n);
+  _llmOllamaProbeCache = { at: Date.now(), models };
+  return models;
+}
+
+function pickLlmOllamaModel(available: string[], modelOverride?: string): string | null {
+  // The placeholder hints (default / DEFAULT_MODELS value) are advisory —
+  // resolve them against the live catalog rather than posting them as a
+  // model name Ollama doesn't have. An explicit pin travels on the wire as
+  // "ollama/<tag>" — strip the prefix; Ollama only knows bare tags.
+  if (modelOverride && modelOverride !== "auto" && modelOverride !== DEFAULT_MODELS.ollama) {
+    // Honour the pin only when /api/tags actually reports it — never
+    // silently swap a requested local model onto another one (same rule
+    // as the V2 router's model_unavailable path).
+    const tag = modelOverride.replace(/^ollama\//, "");
+    return available.includes(tag) ? tag : null;
+  }
+  const override = process.env.OLLAMA_MODEL;
+  if (override) return override;
+  // Prefer the fast local tool build: on CPU-heavy hosts a full hermes
+  // variant measured >300s per call while litt-hermes-fast answered in
+  // ~73s — the tail must pick a usable model, not just a nominally
+  // capable one (same priority order as pickOllamaModel).
+  return preferredLocalToolModel(available) ?? available[0] ?? null;
+}
+
+/** Honest distinction between "Ollama has no models" and "the pinned model
+ *  isn't loaded" — the two failures need different user recovery paths. */
+function ollamaNoModelMessage(available: string[], modelOverride?: string): string {
+  const pin = modelOverride?.replace(/^ollama\//, "");
+  if (pin && pin !== "auto" && available.length > 0 && !available.includes(pin)) {
+    return `Pinned local model not loaded in Ollama: ${pin}`;
+  }
+  return "No local models loaded in Ollama";
+}
+
+/** Local inference legitimately needs a much wider budget than the shared
+ *  60s stream default: a cold model load plus a real single-page build
+ *  measured ~117s on CPU-heavy hosts, and planBasicRoutes already allows
+ *  300s for this provider. Exceeding the caller's cloud timeout here is
+ *  deliberate — the tail must not silently lose to a cloud attempt that
+ *  would have died at timeout anyway (per-route cap only). */
+function ollamaAttemptTimeoutMs(timeoutMs: number): number {
+  return Math.max(timeoutMs, Number(process.env.OLLAMA_TIMEOUT_MS) || 300_000);
+}
+
+async function generateViaOllama(
+  p: GenerateParams,
+  timeoutMs: number,
+): Promise<{ text: string; usage?: LLMUsage; model: string }> {
+  const endpoint = resolveOllamaEndpoint((key) => process.env[key]);
+  const available = await probeLlmOllamaModels(endpoint, timeoutMs, p.opts.signal);
+  const modelName = pickLlmOllamaModel(available, p.opts.modelOverride?.ollama);
+  if (!modelName) {
+    throw new ProviderError("ollama", null, ollamaNoModelMessage(available, p.opts.modelOverride?.ollama));
+  }
+
+  // Serialize model loads across every LiTT process on this host (cold
+  // path only — warm path is a single cheap /api/ps). See @litt/models.
+  await ensureOllamaModelResident(endpoint, modelName, {
+    keepAlive: ollamaKeepAliveSetting(),
+    signal: p.opts.signal,
+  });
+
+  // Small-context budget: on ":Nk" models (N ≤ 8K) cap the response at a
+  // quarter of the window when the caller didn't set max_tokens, so
+  // prompt + tools + transcript + output share one window.
+  const numPredict = p.opts.maxTokens ?? ollamaOutputTokenBudget(modelName) ?? undefined;
+
+  const res = await fetchWithTimeout(
+    `${endpoint}/api/chat`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: modelName,
+        stream: false,
+        // Keep the local model resident between chat turns — Ollama's
+        // default ~5m unload forced a multi-GB reload on every step.
+        keep_alive: ollamaKeepAliveSetting(),
+        messages: [
+          ...(p.systemPrompt ? [{ role: "system", content: p.systemPrompt }] : []),
+          { role: "user", content: p.prompt },
+        ],
+        options: {
+          ...(numPredict ? { num_predict: numPredict } : {}),
+          ...(p.opts.temperature !== undefined ? { temperature: p.opts.temperature } : {}),
+          ...(p.opts.stop?.length ? { stop: p.opts.stop } : {}),
+        },
+      }),
+    },
+    ollamaAttemptTimeoutMs(timeoutMs),
+    p.opts.signal,
+  );
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderError(
+      "ollama",
+      res.status,
+      `Ollama chat ${res.status}: ${txt.slice(0, 200)}`,
+    );
+  }
+  const data = (await res.json()) as {
+    message?: { content?: string };
+    prompt_eval_count?: number;
+    eval_count?: number;
+  };
+  const text = data.message?.content ?? "";
+  return {
+    text,
+    model: modelName,
+    usage: text
+      ? {
+          prompt: data.prompt_eval_count ?? 0,
+          completion: data.eval_count ?? 0,
+          total: (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0),
+        }
+      : undefined,
+  };
+}
+
+/** Stream from local Ollama via its OpenAI-compatible /v1 endpoint so the
+ *  same SSE parser as streamViaOpenRouter applies. No Authorization header:
+ *  Ollama is local and unauthenticated. */
+async function streamViaOllama(
+  p: GenerateParams,
+  onChunk: (text: string) => void,
+  t0: number,
+  failover: LLMProvider[],
+  timeoutMs: number,
+): Promise<{
+  provider: LLMProvider;
+  model: string;
+  latencyMs: number;
+  failover: LLMProvider[];
+  finishReason?: string;
+}> {
+  const endpoint = resolveOllamaEndpoint((key) => process.env[key]);
+  const available = await probeLlmOllamaModels(endpoint, timeoutMs, p.opts.signal);
+  const modelName = pickLlmOllamaModel(available, p.opts.modelOverride?.ollama);
+  if (!modelName) {
+    throw new ProviderError("ollama", null, ollamaNoModelMessage(available, p.opts.modelOverride?.ollama));
+  }
+
+  // Serialize model loads across LiTT processes (same gate as
+  // generateViaOllama and the V2 tool-calling lane).
+  await ensureOllamaModelResident(endpoint, modelName, {
+    keepAlive: ollamaKeepAliveSetting(),
+    signal: p.opts.signal,
+  });
+
+  const body: Record<string, unknown> = {
+    model: modelName,
+    stream: true,
+    // Keep the local model resident between chat turns (same policy as
+    // generateViaOllama / the V2 tool-calling lane).
+    keep_alive: ollamaKeepAliveSetting(),
+    messages: [
+      ...(p.systemPrompt ? [{ role: "system", content: p.systemPrompt }] : []),
+      { role: "user", content: p.prompt },
+    ],
+  };
+  // Small-context response budget — same policy as generateViaOllama.
+  const maxTokens = p.opts.maxTokens ?? ollamaOutputTokenBudget(modelName) ?? undefined;
+  if (maxTokens) body.max_tokens = maxTokens;
+  if (p.opts.temperature !== undefined) body.temperature = p.opts.temperature;
+
+  const res = await fetchWithTimeout(
+    `${endpoint}/v1/chat/completions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    ollamaAttemptTimeoutMs(timeoutMs),
+    p.opts.signal,
+  );
+
+  if (!res.ok || !res.body) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderError(
+      "ollama",
+      res.status,
+      `Ollama stream ${res.status}: ${txt.slice(0, 200)}`,
+    );
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const abortReader = () => { void reader.cancel().catch(() => {}); };
+  if (p.opts.signal?.aborted) {
+    abortReader();
+  } else {
+    p.opts.signal?.addEventListener("abort", abortReader, { once: true });
+  }
+  let buffer = "";
+  let finishReason: string | undefined;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const json = JSON.parse(payload);
+        const choice = json.choices?.[0];
+        const delta = choice?.delta;
+        if (delta?.content) onChunk(delta.content);
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
+      } catch {
+        // ignore malformed chunk
+      }
+    }
+  }
+  p.opts.signal?.removeEventListener("abort", abortReader);
+  if (p.opts.signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+  return { provider: "ollama", model: modelName, latencyMs: Date.now() - t0, failover, finishReason };
 }
 
 async function streamViaOpenAI(

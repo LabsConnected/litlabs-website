@@ -32,10 +32,16 @@ const DEFAULT_CONFIG: LittConfig = {
 };
 
 /**
- * Get the LiTT home directory (~/.litt or LITT_HOME env var).
+ * Get the LiTT state directory (~/.litt, overridable via LITT_STATE_HOME).
+ *
+ * NOTE: LITT_HOME is intentionally NOT honored here — on Android/Termux
+ * the shell tooling uses LITT_HOME to mean "the LiTT repository root",
+ * and honoring it scattered user state (model-prefs.json,
+ * recent-projects.json, config.json) into the working tree.
+ * LITT_STATE_HOME is the dedicated override for this state directory.
  */
 export function getLittHome(): string {
-  return process.env.LITT_HOME ?? join(homedir(), ".litt");
+  return process.env.LITT_STATE_HOME ?? join(homedir(), ".litt");
 }
 
 /**

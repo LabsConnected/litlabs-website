@@ -55,6 +55,7 @@ import { runCommand } from "./commands/run.js";
 import { runsCommand } from "./commands/runs.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
+import { repairCommand } from "./commands/repair.js";
 import { explainCommand } from "./commands/explain.js";
 import { desktopCommand } from "./commands/desktop.js";
 import { loginCommand } from "./commands/login.js";
@@ -68,6 +69,9 @@ import { stripeSandboxCommand } from "./commands/stripe-sandbox.js";
 import { deployVerifyCommand } from "./commands/deploy-verify.js";
 import { studioAcceptanceCommand } from "./commands/studio-acceptance.js";
 import { productionFinishCommand } from "./commands/production-finish.js";
+import { pcStatusCommand } from "./commands/pc-status.js";
+import { pcPerfCommand } from "./commands/pc-perf.js";
+import { pcTasksCommand } from "./commands/pc-tasks.js";
 import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
 import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
 import { executeCommand } from "./lib/command-execution.js";
@@ -83,7 +87,15 @@ import { probeLocalLane } from "./lib/local-lane.js";
 // Lazy-loaded commands that pull in heavy dependencies (Ink/React).
 // These are only imported when the user actually runs them, so
 // `litt doctor` / `litt run` / etc. don't need Ink installed.
-type CommandHandler = (args: string[], session?: RuntimeSession) => Promise<number>;
+/**
+ * Dispatch context — parsed CLI flags that every command surface must
+ * honor. `mode` is the --mode <plan|act|auto> value from dispatch; it
+ * is the explicit launch mode and takes precedence over every default.
+ */
+export interface CommandContext {
+  mode: "plan" | "act" | "auto";
+}
+type CommandHandler = (args: string[], session?: RuntimeSession, context?: CommandContext) => Promise<number>;
 const lazyCockpit = async (): Promise<CommandHandler> =>
   (await import("./commands/cockpit.js")).cockpitCommand;
 
@@ -123,7 +135,7 @@ const REMOTEABLE_COMMANDS = new Set([
 ]);
 
 /** Commands that use the RuntimeSession (shared runtime truth). */
-const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask"]);
+const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask", "repair"]);
 
 const COMMANDS: Record<string, CommandHandler> = {
   doctor: doctorCommand,
@@ -137,6 +149,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   runs: runsCommand,
   inspect: inspectCommand,
   ask: askCommand,
+  repair: repairCommand,
   explain: explainCommand,
   desktop: desktopCommand,
   login: loginCommand,
@@ -151,6 +164,10 @@ const COMMANDS: Record<string, CommandHandler> = {
   "stripe-sandbox": stripeSandboxCommand,
   "deploy-verify": deployVerifyCommand,
   "studio-acceptance": studioAcceptanceCommand,
+  // PC performance controller (nested: litt pc status / perf / tasks)
+  "pc-status": pcStatusCommand,
+  "pc-perf": pcPerfCommand,
+  "pc-tasks": pcTasksCommand,
   // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
@@ -183,6 +200,11 @@ const NESTED_COMMANDS: Record<string, Record<string, string>> = {
   studio: {
     acceptance: "studio-acceptance",
   },
+  pc: {
+    status: "pc-status",
+    perf: "pc-perf",
+    tasks: "pc-tasks",
+  },
 };
 
 /** All valid nested group names (for help routing). */
@@ -213,7 +235,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * features remain auth-gated at the provider level (resolveModelProvider
  * and awaitRemoteReady enforce this at call time, not at the gate).
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "repair", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "pc", "pc-status", "pc-perf", "pc-tasks"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
@@ -642,7 +664,7 @@ async function main(): Promise<number> {
   }
 
   try {
-    return await handler(rest, session);
+    return await handler(rest, session, { mode });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`${c.red}Error:${c.reset} ${message}`);
@@ -753,10 +775,21 @@ function printNestedHelp(group: string): void {
     "stripe-sandbox": "Real Stripe TEST-mode E2E (never live)",
     "deploy-verify": "Watch deploy + verify production health",
     "studio-acceptance": "Pre-flight + owner browser acceptance",
+    "pc-status": "Workstation health snapshot (RAM/CPU/GPU/AI/Dex)",
+    "pc-perf": "Switch performance mode: light | dev | max",
+    "pc-tasks": "Scheduled-task health: state, results, live process truth",
+  };
+
+  const taglines: Record<string, string> = {
+    production: "production operator",
+    stripe: "production operator",
+    deploy: "production operator",
+    studio: "production operator",
+    pc: "workstation performance",
   };
 
   console.log(`
-LiTT ${group} — production operator
+LiTT ${group} — ${taglines[group] ?? "command group"}
 
 Usage: litt ${group} <subcommand> [options]
 
@@ -806,6 +839,7 @@ Commands:
   runs       List recent persisted runs (P0-5 result recovery)
   inspect    Deep repo inspection (framework, scripts, deploy)
   ask        Ask LiTT a question about your project
+  repair     Reproduce, repair, and independently verify a CLI failure
   explain    Pipe errors/diffs and get actionable advice
 
 Production operator commands:
@@ -816,6 +850,11 @@ Production operator commands:
   litt stripe sandbox        Real Stripe TEST-mode E2E (never live)
   litt deploy verify         Watch deploy + verify production health
   litt studio acceptance     Pre-flight + owner browser acceptance
+
+Workstation performance:
+  litt pc status             Workstation health snapshot (RAM/CPU/GPU/AI/Dex)
+  litt pc perf <mode>        Switch mode: light | dev | max (--dry-run, --yes, --preload)
+  litt pc tasks              Scheduled-task health: state, results, live process truth
 
   (legacy hyphen aliases also work: litt production-doctor, etc.)
 

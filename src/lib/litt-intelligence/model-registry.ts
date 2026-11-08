@@ -44,6 +44,12 @@ export interface ModelCapabilities {
   /** CRITICAL: proven to emit file-writing tool calls. Chat-only models
    *  (e.g. north-mini-code) have this FALSE and are never BUILD models. */
   reliableFileWriting: boolean;
+  /**
+   * The model participates in the deterministic codegen lane: Studio asks
+   * for a strict-JSON files payload, validates it, and performs the writes
+   * itself — no native tool calling required (see deterministic-codegen.ts).
+   */
+  deterministicCodegen?: boolean;
   vision: boolean;
   contextWindow: number;
 }
@@ -137,6 +143,49 @@ function seedRecords(): Map<string, ModelRecord> {
       healthState: "unknown",
     },
     {
+      provider: "gemini",
+      canonicalId: "gemini-2.5-flash-lite",
+      providerModelId: "gemini-2.5-flash-lite",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        // Per-model-quota escape rung (Nov 2026): flash-lite carries the
+        // largest free-tier quota of the Gemini ladder (higher RPM/RPD than
+        // both flash and pro) so a saturated flash no longer ends the whole
+        // Gemini lane. Promotion to reliableFileWriting is provisional —
+        // same doctrine as the OpenRouter writer candidates: a real build
+        // run is the proof and recorded failures demote via health state.
+        reliableFileWriting: true,
+        vision: false,
+        contextWindow: 1_048_576,
+      },
+      priority: 25,
+      healthState: "unknown",
+    },
+    {
+      provider: "gemini",
+      canonicalId: "gemini-2.5-pro",
+      providerModelId: "gemini-2.5-pro",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        // Stronger instruction-following than 2.5-flash on heavy tool
+        // prompts — kept as an ENV-selectable escape route (observed
+        // 2026-11-02 prod golden: gemini-2.5-flash → bad_response prose),
+        // never the default pick: priority below flash so it is only
+        // reached via GEMINI_PRIMARY_MODEL/GEMINI_FALLBACK_MODEL.
+        reliableFileWriting: true,
+        vision: true,
+        contextWindow: 1_048_576,
+      },
+      priority: 30,
+      healthState: "unknown",
+    },
+    {
       // P1: Managed OpenAI — platform credential (OPENAI_API_KEY).
       // Used as LAST-resort fallback for entitled users when free
       // providers fail. gpt-4o is the proven tool-calling model used
@@ -198,7 +247,10 @@ function seedRecords(): Map<string, ModelRecord> {
       // and recorded failures demote via health state as usual.
       provider: "openrouter",
       canonicalId: "openrouter-nemotron-3-super",
-      providerModelId: "nvidia/nemotron-3-super-120b-a12b:free",
+      // Upstream drift (2026-11-02): nemotron-3-super-120b-a12b delisted —
+      // every attempt 404s (prod golden 41524155953). The live free successor
+      // is nemotron-3.5-super-vl per the OpenRouter catalog.
+      providerModelId: "nvidia/nemotron-3.5-super-vl:free",
       enabled: true,
       capabilities: {
         text: true,
@@ -214,8 +266,10 @@ function seedRecords(): Map<string, ModelRecord> {
     },
     {
       provider: "openrouter",
-      canonicalId: "openrouter-laguna-s-2.1",
-      providerModelId: "poolside/laguna-s-2.1:free",
+      canonicalId: "openrouter-gemma-4-26b",
+      // laguna-s-2.1 delisted upstream (2026-11-02 — 404s in prod). The
+      // slot keeps its chain position with the live gemma-4-26b free model.
+      providerModelId: "google/gemma-4-26b-a4b-it:free",
       enabled: true,
       capabilities: {
         text: true,
@@ -290,15 +344,89 @@ function seedRecords(): Map<string, ModelRecord> {
         text: true,
         structuredOutput: true,
         toolCalling: true,
-        // bad_response in prod Sep 2026 — not a proven writer.
+        // PROVEN Nov 2026: sustained 7 consecutive tool-calling turns in a
+        // direct probe — files_list plus 6 files_write calls with real
+        // content (~5s/turn), while the larger nemotron variants
+        // (3.5-super-vl, 3-ultra) die on turn 2 with finish_reason=length
+        // (reasoning exhausts the 4096-token budget before any tool call).
+        reliableFileWriting: true,
+        vision: false,
+        // Verified from the OpenRouter catalog (Nov 2026).
+        contextWindow: 1_000_000,
+      },
+      // First free writer in the chain: direct evidence beats the
+      // higher-priority nemotron variants' Sep/Oct-era assumptions.
+      priority: 34,
+      healthState: "unknown",
+    },
+    {
+      // Local Ollama (LiTT Studio build, Oct 2026): the fast hermes variant
+      // is the measured-fast local tool model (~73s/call on CPU hosts where
+      // full hermes exceeds 300s). PROVEN file writer — a live run emitted a
+      // native write_file tool call with valid {path,content} args
+      // (tasks/mission-devin-20261030/ollama-probe-results.json). Registered
+      // so an explicit ollama/<tag> pin survives the BUILD
+      // reliableFileWriting gate instead of being silently downgraded to
+      // auto-pick. Only honored when the tag is actually loaded — the
+      // adapter verifies against live /api/tags.
+      provider: "ollama",
+      canonicalId: "ollama-litt-hermes-fast-8k",
+      providerModelId: "litt-hermes-fast:8k",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        reliableFileWriting: true,
+        vision: false,
+        contextWindow: 8_192,
+      },
+      priority: 10,
+      healthState: "unknown",
+    },
+    {
+      // Tool-tuned local variant — tool-capable per /api/tags, not yet
+      // run-proven as a file writer, so reliableFileWriting stays FALSE
+      // (evidence-based doctrine: promote only after a real build run).
+      provider: "ollama",
+      canonicalId: "ollama-litt-tools-4k",
+      providerModelId: "litt-tools:4k",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
         reliableFileWriting: false,
         vision: false,
-        contextWindow: 131_072, // conservative seed estimate (unverified)
+        contextWindow: 4_096,
       },
-      priority: 60,
-      // Excluded from eligibility until a success is recorded (the registry
-      // learns: a later success flips it back to healthy).
-      healthState: "unhealthy",
+      priority: 20,
+      healthState: "unknown",
+    },
+    {
+      // Lightweight local coding lane (Oct 2026): qwen2.5-coder:1.5b built
+      // as litt-coder:8k (num_ctx 8192) for thermally constrained CPU hosts —
+      // ~1GB resident vs the 2.4GB hermes builds. /api/tags advertises
+      // "tools" (verified via `ollama show`). reliableFileWriting starts
+      // FALSE per the evidence doctrine — promote to true only after a real
+      // build run proves file writes (see tasks/litt-coder-lane).
+      provider: "ollama",
+      canonicalId: "ollama-litt-coder-8k",
+      providerModelId: "litt-coder:8k",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        reliableFileWriting: false,
+        vision: false,
+        contextWindow: 8_192,
+        // Phase 2 (tasks/litt-coder-lane): the lane produces files through
+        // the deterministic JSON pipeline, not tool calls.
+        deterministicCodegen: true,
+      },
+      priority: 30,
+      healthState: "unknown",
     },
   ];
 
@@ -364,13 +492,32 @@ function meetsRequirements(r: ModelRecord, required: CapabilityRequirements): bo
 }
 
 /**
+ * Providers whose models are host-conditional: an ollama record describes a
+ * model on THIS machine's daemon, which the registry cannot verify. Such a
+ * record can therefore never qualify as a proven file writer for build
+ * selection — local models enter builds only through an explicit pin,
+ * where attemptOllama verifies live /api/tags first.
+ */
+export const HOST_CONDITIONAL_PROVIDERS: ReadonlySet<string> = new Set(["ollama"]);
+
+/**
  * Enabled models with the required capabilities that are not unhealthy,
  * sorted by priority (lower first). Unhealthy models are excluded until a
  * success is recorded via recordHealthOutcome.
+ *
+ * When `reliableFileWriting` is required (the build-model query),
+ * host-conditional providers are excluded regardless of what their record
+ * claims — availability cannot be proven from the registry alone.
  */
 export function getEligibleModels(required: CapabilityRequirements): ModelRecord[] {
   return [...records.values()]
-    .filter((r) => r.enabled && r.health.state !== "unhealthy" && meetsRequirements(r, required))
+    .filter(
+      (r) =>
+        r.enabled &&
+        r.health.state !== "unhealthy" &&
+        meetsRequirements(r, required) &&
+        (!required.reliableFileWriting || !HOST_CONDITIONAL_PROVIDERS.has(r.provider)),
+    )
     .sort((a, b) => a.priority - b.priority)
     .map(snapshot);
 }
@@ -536,6 +683,28 @@ export function recordHealthOutcome(canonicalId: string, success: boolean, error
 }
 
 /**
+ * Failure classes that evidence model/provider-level capability — a
+ * credential, entitlement, delisted model, or a model that cannot emit a
+ * parseable response. Only these may feed capability-health demotion.
+ *
+ * Everything else is capacity or transient infra (429 rate limits,
+ * timeouts, 5xx, network errors, local aborts): those already
+ * self-exclude through the provider-registry modelCooldowns and provider
+ * health, and counting them here permanently shrinks the fleet for the
+ * process lifetime — in golden run 41948852260 a rate-limit window
+ * demoted the proven writer nemotron-3.5-lightning to "unhealthy", so
+ * weaker sibling writers were served first.
+ */
+const CAPABILITY_FAILURE_CLASSES: ReadonlySet<string> = new Set([
+  "auth_invalid",
+  "billing",
+  "forbidden",
+  "model_unavailable",
+  "bad_response",
+  "tool_call_parse_failed",
+]);
+
+/**
  * Attempt-level wiring for the routing layer: maps (provider, model) to the
  * registry record and records the outcome. No-op for models the registry
  * does not manage (legacy candidates, BYOK, ollama).
@@ -546,6 +715,7 @@ export function recordModelAttemptOutcome(
   success: boolean,
   errorClass: string,
 ): void {
+  if (!success && !CAPABILITY_FAILURE_CLASSES.has(errorClass)) return;
   const rec = [...records.values()].find(
     (r) => r.provider === provider && (r.providerModelId === providerModelId || r.canonicalId === providerModelId),
   );

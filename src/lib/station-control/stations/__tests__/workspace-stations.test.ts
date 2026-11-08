@@ -279,10 +279,8 @@ describe("deploy station", () => {
     expect(action("deploy.preview").requiresApproval).toBe(true);
   });
 
-  it("deploy.production delegates to project.deploy and is approval-gated", async () => {
-    await run("deploy.production", {});
-    expect(callsFor("project.deploy")).toHaveLength(1);
-    expect(action("deploy.production").requiresApproval).toBe(true);
+  it("deploy.production is not registered — customers use project.deploy/deploy.preview", () => {
+    expect(getStationAction("deploy.production")).toBeUndefined();
   });
 
   it("deploy.status delegates to deploy.verify with the url", async () => {
@@ -533,7 +531,6 @@ describe("delegate tool-id mirroring (approval policy)", () => {
     ["git.branch", "terminal.execute"],
     ["git.commit", "git.commit"],
     ["deploy.preview", "project.deploy"],
-    ["deploy.production", "project.deploy"],
     ["deploy.status", "deploy.verify"],
     ["checks.typecheck", "typecheck.run"],
     ["checks.lint", "lint.run"],

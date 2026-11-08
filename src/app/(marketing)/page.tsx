@@ -109,21 +109,30 @@ const homeSchema = {
         },
         {
           "@type": "Offer",
-          name: "Creator Beta",
-          price: "15",
+          name: "Creator Lite",
+          price: "9.99",
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            `Beta pricing. Research, write, and market with AI agents. ${formatBits(getPlanCreditAllowance("creator_beta"))} AI credits monthly, 5 active projects.`,
+            "Entry paid tier — creator tools at a lower price. 3 active projects.",
         },
         {
           "@type": "Offer",
-          name: "Pro Builder Beta",
+          name: "Creator",
+          price: "19.99",
+          priceCurrency: "USD",
+          url: absoluteUrl("/pricing"),
+          description:
+            `Research, write, and market with AI agents. ${formatBits(getPlanCreditAllowance("creator_beta"))} AI credits monthly, 5 active projects.`,
+        },
+        {
+          "@type": "Offer",
+          name: "Pro Builder",
           price: "39",
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            `Beta pricing. Build, debug, and deploy with full AI tooling. ${formatBits(getPlanCreditAllowance("pro_builder_beta"))} AI credits monthly, 25 active projects.`,
+            `Build, debug, and deploy with full AI tooling. ${formatBits(getPlanCreditAllowance("pro_builder_beta"))} AI credits monthly, 25 active projects.`,
         },
       ],
     },

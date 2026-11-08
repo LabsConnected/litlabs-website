@@ -7,8 +7,14 @@
  *
  * Delegate map:
  * - deploy.preview    → project.deploy ({}) — approval-gated
- * - deploy.production → project.deploy ({}) — approval-gated
  * - deploy.status     → deploy.verify  ({url})
+ *
+ * NOTE: `deploy.production` was removed (2026-11-02) from customer-facing
+ * tool registries. The preview/production split has no backend counterpart
+ * (single LiTT Hosting target — see SHAPE DIFFERENCES below), and the
+ * near-identical name let models pick a second publish path instead of the
+ * canonical `project.deploy` (golden run 41505296694). Customer deploys go
+ * through `deploy.preview`/`project.deploy` only.
  *
  * IMPORTANT CORRECTION vs the audit's gap matrix: the audit mapped
  * deploy.preview/production to `deploy.execute`. That tool redeploys
@@ -21,11 +27,10 @@
  * SHAPE DIFFERENCES (reported):
  * - Neither deploy.execute nor project.deploy takes a target/environment
  *   argument: V1 has exactly ONE deploy target (LiTT Hosting's static tier —
- *   see deploy-service.ts: "The only deployment target in V1"). The
- *   contract's preview/production split has no backend counterpart, so both
- *   actions delegate to project.deploy and publish to the same public URL.
- *   The descriptions say this plainly; both stay approval-gated so the user
- *   approves every publish. (The private dev-server preview is preview.launch.)
+ *   see deploy-service.ts: "The only deployment target in V1"). The single
+ *   publish action (deploy.preview → project.deploy) stays approval-gated
+ *   so the user approves every publish. (The private dev-server preview is
+ *   preview.launch.)
  * - deploy.verify requires {url} but the contract lists deploy.status args
  *   as {}. This action accepts an optional url and fails honestly when it
  *   is missing — there is no "latest deployment" lookup tool to default to.
@@ -65,8 +70,8 @@ defineAction({
   description:
     "Deploy the user's project to its live URL (delegates to the real project.deploy: collects, " +
     "publishes to LiTT Hosting, and HTTP-verifies before reporting success). " +
-    "NOTE: V1 has a single deploy target — there is no separate preview channel, so this publishes " +
-    "to the same public URL as deploy.production. Approval-gated. The private dev-server preview is preview.launch.",
+    "NOTE: V1 has a single deploy target — there is no separate preview channel. " +
+    "Approval-gated. The private dev-server preview is preview.launch.",
   argsSchema: z.object({}),
   resultType: stationResultSchema,
   mutating: true,
@@ -78,28 +83,12 @@ defineAction({
 setDelegateToolId("deploy.preview", "project.deploy");
 
 defineAction({
-  id: "deploy.production",
-  station: "deploy",
-  description:
-    "Deploy the user's project to its public live URL (delegates to the real project.deploy: " +
-    "collects, publishes to LiTT Hosting, and HTTP-verifies before reporting success). Approval-gated.",
-  argsSchema: z.object({}),
-  resultType: stationResultSchema,
-  mutating: true,
-  requiresApproval: true,
-  execute: async (_args, ctx): Promise<StationResult> => {
-    return projectDeployExecute({}, ctx);
-  },
-});
-setDelegateToolId("deploy.production", "project.deploy");
-
-defineAction({
   id: "deploy.status",
   station: "deploy",
   description:
     "Verify a deployed URL is reachable and healthy (delegates to the real deploy.verify). " +
     "Read-only. The contract lists no args, but the backend requires the URL to check — " +
-    "pass the publicUrl returned by deploy.preview/deploy.production.",
+    "pass the publicUrl returned by deploy.preview/project.deploy.",
   argsSchema: z.object({
     url: z.string().url().optional().describe("Deployed URL to verify (required)"),
   }),
@@ -120,6 +109,5 @@ setDelegateToolId("deploy.status", "deploy.verify");
 
 export const DEPLOY_STATION_ACTIONS = [
   "deploy.preview",
-  "deploy.production",
   "deploy.status",
 ] as const;

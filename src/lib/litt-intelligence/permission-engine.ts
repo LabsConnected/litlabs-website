@@ -19,6 +19,7 @@
 
 import type { ToolPermissionLevel } from "./types";
 import { classifyTerminalCommand } from "./terminal-command-policy";
+import { getDelegateToolId } from "./tool-delegates";
 
 export type ExecutionMode = "plan" | "act" | "auto";
 
@@ -80,7 +81,6 @@ const SENSITIVE_ACTIONS: ReadonlySet<string> = new Set([
   "git.reset_hard",
   "git.rebase",
   "files.delete",
-  "deploy.production",
   "deploy.execute",
   // Publishing the user's project to a PUBLIC url is outward-facing: it
   // makes their content reachable by anyone. Approval is required in ACT and
@@ -169,9 +169,19 @@ export class PermissionEngine {
       return { allowed: true, requiresApproval: false };
     }
 
+    // Station-action delegates (code.writeFile → files.write,
+    // deploy.preview → project.deploy, …) execute the canonical tool they
+    // are registered against, so the gate must classify the CANONICAL id —
+    // an alias inherits exactly the delegate's privilege, never more, and
+    // never less either: a literal sensitive id stays sensitive even when
+    // its delegate is not. terminal.execute keeps its literal-id command
+    // policy — station aliases of it stay on the generic mutation gate,
+    // which is at least as strict.
+    const canonicalId = getDelegateToolId(tool.toolId) ?? tool.toolId;
+
     // 4. ACT and AUTO: same security boundary
     // Sensitive actions always require approval
-    if (SENSITIVE_ACTIONS.has(tool.toolId)) {
+    if (SENSITIVE_ACTIONS.has(tool.toolId) || SENSITIVE_ACTIONS.has(canonicalId)) {
       return {
         allowed: true,
         requiresApproval: true,
@@ -195,7 +205,7 @@ export class PermissionEngine {
 
     // 7. AUTO mode: auto-approve safe workspace operations
     if (mode === "auto") {
-      if (AUTO_APPROVE_SAFE.has(tool.toolId)) {
+      if (AUTO_APPROVE_SAFE.has(canonicalId)) {
         return { allowed: true, requiresApproval: false };
       }
       // Other mutations: allowed but require approval

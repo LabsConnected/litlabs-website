@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
 import StudioPublishControls from "./StudioPublishControls";
+import { downloadProjectExport } from "../lib/export-project";
 
 /**
  * Preview states — the five canonical states the UI explicitly supports.
@@ -88,6 +89,10 @@ type StartPhase = "provision" | "devserver" | null;
  */
 type WorkspaceTruth = "unknown" | "has_content" | "no_content";
 const START_STAGES = ["Provision", "Dev server"] as const;
+/** A not_started preview with nothing in flight must fail visibly after this. */
+const STUCK_NOT_STARTED_MS = 20000;
+/** How long the preview URL gets to answer before "ready" is rejected. */
+const FRAME_PROBE_TIMEOUT_MS = 20000;
 
 function deriveStartPhase(state: PreviewState, workspaceStatus: string | null, runtimeStatusRaw: string | null): StartPhase {
   if (state !== "starting" && state !== "restarting") return null;
@@ -229,7 +234,12 @@ export default function StudioPreviewPanel({
   sourceStatus = null,
   versionControl = "none",
   refreshKey = 0,
+  startGraceMs = STUCK_NOT_STARTED_MS,
   onSelectionChange,
+  lockSelection = false,
+  inspectorTool = "select",
+  snapEnabled = true,
+  onBridgeMessage,
 }: {
   projectId: string | null;
   projectName: string | null;
@@ -244,7 +254,17 @@ export default function StudioPreviewPanel({
   /** Whether the workspace has a Git repository. Managed projects do. */
   versionControl?: "git" | "none";
   refreshKey?: number;
+  /** How long a not_started preview may sit idle before it fails visibly. Overridable for tests. */
+  startGraceMs?: number;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
+  /** Canvas mode: selection stays on regardless of the toolbar toggle. */
+  lockSelection?: boolean;
+  /** Active canvas tool forwarded to the in-frame inspector bridge. */
+  inspectorTool?: "select" | "pan" | "edit";
+  /** Whether in-frame drag/resize gestures snap to alignment lines. */
+  snapEnabled?: boolean;
+  /** Every recognized bridge message (select/hover/geometry-commit/…). */
+  onBridgeMessage?: (type: string, payload: unknown) => void;
 }) {
   const { getToken } = useClerkAuth();
   const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_started");
@@ -266,6 +286,19 @@ export default function StudioPreviewPanel({
   // v4 @import trap) must never keep the green "Preview ready" badge.
   const [styleProbe, setStyleProbe] = useState<{ tailwindDetected: boolean; styled: boolean } | null>(null);
   const [selectionMode, setSelectionMode] = useState(true);
+  // Canvas hosts (Design surface) lock selection on and drive the
+  // in-frame tool/snap state through props rather than the toolbar.
+  const effectiveSelectionMode = lockSelection || selectionMode;
+  const inspectorToolRef = useRef(inspectorTool);
+  const snapEnabledRef = useRef(snapEnabled);
+  const onBridgeMessageRef = useRef(onBridgeMessage);
+  // Refs mirror the latest props for the postMessage bridge callbacks,
+  // which outlive individual renders (attachSelection, message handler).
+  useEffect(() => {
+    inspectorToolRef.current = inspectorTool;
+    snapEnabledRef.current = snapEnabled;
+    onBridgeMessageRef.current = onBridgeMessage;
+  }, [inspectorTool, snapEnabled, onBridgeMessage]);
   const [selectedElement, setSelectedElement] = useState<PreviewSelection | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -276,6 +309,10 @@ export default function StudioPreviewPanel({
   // Project secrets editor (Clerk keys for the preview runtime). Toggled
   // from the toolbar; auto-opened from the auth-config error CTA.
   const [secretsOpen, setSecretsOpen] = useState(false);
+  // Source-export (ZIP) state — single-flight; the notice strip shows the
+  // server's real outcome (downloaded filename / error), never fake success.
+  const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const selectionCleanupRef = useRef<(() => void) | null>(null);
@@ -302,20 +339,45 @@ export default function StudioPreviewPanel({
   // Bounded startup polling: a start that never resolves must become a
   // terminal failure, never an infinite spinner.
   const startPollAttemptsRef = useRef(0);
+  // A status request is in flight: the poller must not stack another one on
+  // top (each new request supersedes the previous, so a slow API would never
+  // get a response applied).
+  const statusInFlightRef = useRef(false);
   const MAX_START_POLL_ATTEMPTS = 40; // 40 × 3s ≈ 2 minutes
+  // Which project this panel is showing right now, and a token per start
+  // attempt: late results for a previous project are discarded, not applied.
+  const activeProjectRef = useRef<string | null>(projectId);
+  const startTokenRef = useRef(0);
+  // Whether the preview URL actually answers. "Preview ready" is only shown
+  // once this is "ok" — a runtime that reports ready over a 404 is not ready.
+  const [frameCheck, setFrameCheck] = useState<"checking" | "ok" | "failed">("checking");
+  const [frameError, setFrameError] = useState<string | null>(null);
+  const probedUrlRef = useRef<string | null>(null);
   // Set by the files-changed handler so the next status check that reports
   // ready also reloads the iframe (a "stale" preview must actually refresh).
   const reloadFrameOnNextReadyRef = useRef(false);
 
-  const postInspectorCommand = useCallback((type: "enable" | "disable" | "clear") => {
+  const postInspectorCommand = useCallback((type: string, extra?: Record<string, unknown>) => {
     const bridge = bridgeRef.current;
     if (!bridge?.target) return;
     try {
-      bridge.target.postMessage({ source: "litt-inspector", type, token: bridge.token }, bridge.origin);
+      bridge.target.postMessage({ source: "litt-inspector", type, token: bridge.token, ...(extra ?? {}) }, bridge.origin);
     } catch {
       // Frame navigated away mid-flight — the next load re-attaches.
     }
   }, []);
+
+  /** Push the current tool/snap state into the frame (idempotent). */
+  const pushInspectorState = useCallback(() => {
+    postInspectorCommand("tool", { tool: inspectorToolRef.current });
+    postInspectorCommand("snap", { enabled: snapEnabledRef.current });
+  }, [postInspectorCommand]);
+
+  // Prop-driven tool/snap changes reach the frame immediately; the
+  // "ready" handshake inside attachSelection re-sends them after reloads.
+  useEffect(() => {
+    pushInspectorState();
+  }, [inspectorTool, snapEnabled, pushInspectorState]);
 
   const clearSelection = useCallback((notify = true) => {
     postInspectorCommand("clear");
@@ -335,7 +397,7 @@ export default function StudioPreviewPanel({
   const attachSelection = useCallback(() => {
     selectionCleanupRef.current?.();
     selectionCleanupRef.current = null;
-    if (!selectionMode) return;
+    if (!effectiveSelectionMode) return;
     let documentInFrame: Document | null = null;
     try {
       documentInFrame = iframeRef.current?.contentDocument ?? null;
@@ -377,8 +439,10 @@ export default function StudioPreviewPanel({
             bridgeTimerRef.current = null;
           }
           setSelectionError(null);
+          pushInspectorState();
           return;
         }
+        onBridgeMessageRef.current?.(data.type, data.payload);
         if (data.type === "select") {
           const p = data.payload as Record<string, unknown> | null;
           if (p && typeof p.label === "string" && typeof p.selector === "string" && typeof p.tagName === "string") {
@@ -405,6 +469,7 @@ export default function StudioPreviewPanel({
       // server) — surface that truthfully.
       try {
         target.postMessage({ source: "litt-inspector", type: "enable", token }, origin);
+        pushInspectorState();
       } catch {
         // Frame navigated away; the load handler will re-attach.
       }
@@ -455,7 +520,7 @@ export default function StudioPreviewPanel({
     };
     documentInFrame.addEventListener("click", handleClick, true);
     selectionCleanupRef.current = () => documentInFrame.removeEventListener("click", handleClick, true);
-  }, [clearSelection, onSelectionChange, selectionMode, previewUrl]);
+  }, [clearSelection, onSelectionChange, effectiveSelectionMode, previewUrl, pushInspectorState]);
 
   const handleIframeLoad = useCallback(() => {
     setIframeFailed(false);
@@ -482,6 +547,7 @@ export default function StudioPreviewPanel({
       return;
     }
     const seq = ++statusSeqRef.current;
+    statusInFlightRef.current = true;
     if (stale) setState((current) => current === "ready" ? "stale" : current);
     else setState("loading");
     setIframeFailed(false);
@@ -526,6 +592,8 @@ export default function StudioPreviewPanel({
       if (seq !== statusSeqRef.current) return;
       setState("unreachable");
       setError(loadError instanceof Error ? loadError.message : "Preview runtime is unreachable");
+    } finally {
+      if (seq === statusSeqRef.current) statusInFlightRef.current = false;
     }
   }, [authHeaders, clearSelection, projectId, workspaceStatus]);
 
@@ -698,15 +766,19 @@ export default function StudioPreviewPanel({
   // spinner. The counter resets whenever the panel leaves the polling set
   // (e.g. reaching ready) or the project changes.
   useEffect(() => {
-    if (state !== "starting" && state !== "restarting" && state !== "loading") {
+    // Only a start in progress is polled. "loading" is a single bounded request
+    // (15s timeout -> unreachable); polling it re-issued the request every 3s.
+    if (state !== "starting" && state !== "restarting") {
       startPollAttemptsRef.current = 0;
       return;
     }
     const interval = setInterval(() => {
+      if (statusInFlightRef.current) return;
       startPollAttemptsRef.current += 1;
       if (startPollAttemptsRef.current >= MAX_START_POLL_ATTEMPTS) {
         clearInterval(interval);
         statusSeqRef.current++;
+        statusInFlightRef.current = false;
         setState("failed");
         setStartPhase(null);
         setError("The preview took too long to start. The dev server may have crashed during startup — check the logs, then try restarting.");
@@ -789,40 +861,20 @@ export default function StudioPreviewPanel({
 
   const preparePreview = useCallback(async () => {
     if (!projectId) return;
-    // Static projects: no dev server to start. Check readiness via the
-    // status endpoint (verifies index.html exists), then mark ready.
-    if (framework === "static") {
-      try {
-        const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
-          cache: "no-store",
-          credentials: "include",
-          headers: await authHeaders(),
-          signal: AbortSignal.timeout(15000),
-        });
-        const payload = await response.json().catch(() => null) as PreviewPayload | null;
-        if (response.ok && payload && payload.runtimeStatus === "ready") {
-          setState("ready");
-          setPreviewUrl(`/api/preview/${encodeURIComponent(projectId)}/index.html`);
-          setError(null);
-        } else {
-          setState("not_started");
-          setPreviewUrl(null);
-        }
-      } catch {
-        setState("not_started");
-        setPreviewUrl(null);
-      }
-      setIframeFailed(false);
-      return;
-    }
     // Single-flight guard: only one preview start in flight at a time.
     // Mobile rerenders and rapid prop changes cannot launch duplicate runtimes.
     if (startInFlightRef.current) return;
     startInFlightRef.current = true;
+    // Per-call token: a start launched for a previous project must never
+    // clear the in-flight flag or write state for the project now on screen.
+    const startToken = ++startTokenRef.current;
+    const isCurrent = () => startTokenRef.current === startToken && activeProjectRef.current === projectId;
     setState("starting");
     setError(null);
+    setErrorCode(null);
     setIframeFailed(false);
     setPreviewPreparing(true);
+    let isStatic = framework === "static";
     try {
       // Pre-flight status check: a remount (or a second panel instance)
       // racing the first start must NOT fire a duplicate POST. If the
@@ -836,7 +888,9 @@ export default function StudioPreviewPanel({
           signal: AbortSignal.timeout(15000),
         });
         const preflightPayload = await preflight.json().catch(() => null) as PreviewPayload | null;
+        if (!isCurrent()) return;
         if (preflight.ok && preflightPayload) {
+          if (preflightPayload.framework === "static") isStatic = true;
           const adopted = statusFromPayload(preflightPayload, workspaceStatus);
           if (adopted.state === "starting" || adopted.state === "restarting" || adopted.state === "ready") {
             setState(adopted.state);
@@ -849,6 +903,32 @@ export default function StudioPreviewPanel({
       } catch {
         // Pre-flight is best-effort — a failed check falls through to POST.
       }
+      if (!isCurrent()) return;
+      if (isStatic) {
+        // The server rejects POST /preview for static projects by design (400):
+        // there is no dev server. "Started" means index.html is actually served.
+        const staticUrl = `/api/preview/${encodeURIComponent(projectId)}/index.html`;
+        const probe = await fetch(staticUrl, {
+          cache: "no-store",
+          credentials: "include",
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(15000),
+        }).catch(() => null);
+        if (!isCurrent()) return;
+        if (probe?.ok) {
+          setState("ready");
+          setPreviewUrl(staticUrl);
+          setError(null);
+          setErrorCode(null);
+          setFrameKey((value) => value + 1);
+        } else {
+          setState("failed");
+          setPreviewUrl(null);
+          setError(probe ? `index.html is not being served for this project (HTTP ${probe.status}).` : "The static preview could not be reached. Retry to check it again.");
+          setErrorCode(null);
+        }
+        return;
+      }
       const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
         method: "POST",
         credentials: "include",
@@ -858,22 +938,75 @@ export default function StudioPreviewPanel({
         signal: AbortSignal.timeout(120000),
       });
       const payload = await response.json().catch(() => null) as PreviewPayload | null;
+      if (!isCurrent()) return;
       if (!response.ok || !payload) throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview preparation failed (${response.status})`);
       const next = statusFromPayload(payload, workspaceStatus);
+      if (next.state === "not_started") {
+        // A start that answers "not started" has not started. Say so with a
+        // Retry instead of falling back to an indefinite "Preparing…".
+        setState("failed");
+        setPreviewUrl(null);
+        setError(next.error ?? "The preview did not start. Retry, or check that the project has an index.html.");
+        setErrorCode(next.errorCode);
+        return;
+      }
       setState(next.state);
       setPreviewUrl(next.url);
       setError(next.error);
       setErrorCode(next.errorCode);
       if (next.state === "ready") setFrameKey((value) => value + 1);
     } catch (prepareError) {
+      if (!isCurrent()) return;
       setState("failed");
       setError(prepareError instanceof Error ? prepareError.message : "Preview preparation failed");
       setErrorCode(null);
     } finally {
-      startInFlightRef.current = false;
-      setPreviewPreparing(false);
+      if (startTokenRef.current === startToken) {
+        startInFlightRef.current = false;
+        setPreviewPreparing(false);
+      }
     }
   }, [authHeaders, projectId, setPreviewPreparing, workspaceStatus, framework]);
+
+  // Project switch: drop everything that belonged to the previous project.
+  // Keyed on the project ID only — never the display name, which is not unique.
+  useEffect(() => {
+    activeProjectRef.current = projectId;
+    startTokenRef.current++;
+    startInFlightRef.current = false;
+    setPreviewPreparing(false);
+    setPreviewUrl(null);
+    setError(null);
+    setErrorCode(null);
+    setFramework(null);
+    setDevCommand(null);
+    setLogs([]);
+    setIframeFailed(false);
+    setStyleProbe(null);
+    setFrameCheck("checking");
+    setFrameError(null);
+    setState(projectId ? "loading" : "not_started");
+  }, [projectId, setPreviewPreparing]);
+
+  // Never an infinite "Preparing…": if nothing has started and nothing is in
+  // flight after the grace period, surface a failure with a working Retry.
+  useEffect(() => {
+    if (state !== "not_started" || !projectId || workspaceTruth === "no_content") return;
+    const timer = setTimeout(() => {
+      if (startInFlightRef.current) return;
+      setState("failed");
+      setError("The preview did not start in time. Retry to start it again.");
+      setErrorCode(null);
+    }, startGraceMs);
+    return () => clearTimeout(timer);
+  }, [state, projectId, workspaceTruth, startGraceMs]);
+
+  // New content (refreshKey) re-arms auto-start for a project whose first
+  // attempt was spent or failed, so a later edit can recover it.
+  useEffect(() => {
+    if (refreshKey <= 0) return;
+    if (state === "failed" || state === "not_started") autoStartedForRef.current = null;
+  }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-start: when the preview is not_started (workspace/runtime never
   // provisioned or dev server not running), automatically start it. The
@@ -956,10 +1089,82 @@ export default function StudioPreviewPanel({
   // An untouched project has nothing to preview yet — say so honestly instead
   // of an indefinite "Preparing your preview automatically…".
   const awaitingFirstContent = state === "not_started" && workspaceTruth === "no_content";
-  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "not_started" ? (awaitingFirstContent ? "Build something in this project and the preview will start automatically." : "Preparing your preview automatically…") : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
+  const frameFailed = iframeFailed || frameCheck === "failed";
+  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : frameCheck === "ok" ? "Preview ready" : "Loading preview…") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
+
+  // Verify the preview address answers before calling it ready. Iframes do
+  // not raise onError for HTTP 404/5xx, so the probe is what catches a
+  // runtime that reports ready while serving nothing.
+  useEffect(() => {
+    if (!isLive || !effectivePreviewUrl) {
+      probedUrlRef.current = null;
+      return;
+    }
+    if (probedUrlRef.current !== effectivePreviewUrl) {
+      probedUrlRef.current = effectivePreviewUrl;
+      setFrameCheck("checking");
+      setFrameError(null);
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FRAME_PROBE_TIMEOUT_MS);
+    (async () => {
+      try {
+        const response = await fetch(effectivePreviewUrl, { cache: "no-store", credentials: "include", signal: controller.signal });
+        if (cancelled) return;
+        if (response.ok) {
+          setFrameCheck("ok");
+          setFrameError(null);
+        } else {
+          setFrameCheck("failed");
+          setFrameError(response.status === 404
+            ? "The preview address returned 404 — index.html was not found for this project."
+            : `The preview address returned HTTP ${response.status}.`);
+        }
+      } catch {
+        if (cancelled) return;
+        setFrameCheck("failed");
+        setFrameError("The preview address did not respond. Retry to check it again.");
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isLive, effectivePreviewUrl, frameKey]);
+
+  const handleRetry = useCallback(() => {
+    setFrameCheck("checking");
+    setFrameError(null);
+    setIframeFailed(false);
+    setFrameKey((value) => value + 1);
+    autoStartedForRef.current = projectId;
+    void preparePreview();
+  }, [preparePreview, projectId]);
+
+  // Export the project's publishable source as a ZIP download. Server-side
+  // build — the button only reports what the endpoint actually returned.
+  const handleExport = useCallback(async () => {
+    if (!projectId || exporting) return;
+    setExporting(true);
+    setExportNotice(null);
+    const result = await downloadProjectExport(projectId, getToken);
+    setExporting(false);
+    if (result.ok) {
+      setExportNotice({
+        kind: "ok",
+        text: `Exported ${result.filename}${result.fileCount !== null ? ` (${result.fileCount} files)` : ""}${result.truncated ? " — truncated" : ""}`,
+      });
+    } else {
+      setExportNotice({ kind: "err", text: result.error });
+    }
+  }, [projectId, exporting, getToken]);
   const sourceSummary = formatSourceSummary({
     kind: sourceKind,
     status: sourceStatus,
@@ -969,7 +1174,7 @@ export default function StudioPreviewPanel({
   });
 
   return (
-    <div className={`flex h-full min-h-0 flex-col ${maximized ? "fixed inset-0 z-[300] p-3" : ""}`} data-testid="studio-preview-panel">
+    <div className={`flex h-full min-h-0 flex-col ${maximized ? "fixed inset-0 z-[300] p-3" : ""}`} data-testid="studio-preview-panel" data-project-id={projectId ?? ""}>
       {/* Compact header — optimized for permanent side column.
           Horizontally scrollable: on narrow phones the action buttons
           (refresh/restart/stop/copy/maximize) would otherwise be cut off
@@ -987,7 +1192,7 @@ export default function StudioPreviewPanel({
         />
         <div className="min-w-[96px] flex-1">
           <div className="flex items-center gap-1">
-            <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{projectName ?? "Project preview"}</span>
+            <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }} title={projectId ? `${projectName ?? "Project"} · ${projectId}` : undefined}>{projectName ?? "Project preview"}</span>
             {/*
               `framework` is the RUNTIME technology (static, nextjs, vite,
               expo) — never source ownership. Titled so that "STATIC"
@@ -1034,7 +1239,7 @@ export default function StudioPreviewPanel({
           </div>
         )}
         {/* Lightweight visual selection — the preview remains the source of truth. */}
-        {isLive && (
+        {isLive && !lockSelection && (
           <button
             type="button"
             onClick={() => {
@@ -1113,6 +1318,22 @@ export default function StudioPreviewPanel({
         )}
         {/* Publish controls — static site publishing (compact toolbar mode) */}
         {projectId && <StudioPublishControls projectId={projectId} compact />}
+        {/* Export — download the project source as a ZIP (server-built) */}
+        {projectId && (
+          <button
+            type="button"
+            onClick={() => void handleExport()}
+            disabled={exporting}
+            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+            aria-label="Export project source as ZIP"
+            title="Export project source (.zip)"
+            data-testid="preview-export"
+          >
+            {exporting
+              ? <Loader2 size={12} className="pointer-events-none animate-spin" />
+              : <Download size={12} className="pointer-events-none" />}
+          </button>
+        )}
         {/* Project secrets — Clerk keys for the preview runtime */}
         <button
           type="button"
@@ -1158,6 +1379,29 @@ export default function StudioPreviewPanel({
           />
         </div>
       )}
+      {exportNotice && (
+        <div
+          className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[10px]"
+          style={{
+            borderColor: exportNotice.kind === "err" ? "rgba(239,68,68,0.3)" : "var(--studio-border)",
+            backgroundColor: exportNotice.kind === "err" ? "rgba(239,68,68,0.06)" : "rgba(114,242,56,0.05)",
+            color: exportNotice.kind === "err" ? "#fca5a5" : "var(--text-secondary)",
+          }}
+          role="status"
+          aria-live="polite"
+          data-testid="preview-export-notice"
+        >
+          <span className="min-w-0 flex-1 truncate">{exportNotice.text}</span>
+          <button
+            type="button"
+            onClick={() => setExportNotice(null)}
+            className="shrink-0 rounded p-0.5 hover:bg-white/10"
+            aria-label="Dismiss export notice"
+          >
+            <X size={10} />
+          </button>
+        </div>
+      )}
       {selectedElement && (
         <div
           className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[10px]"
@@ -1189,7 +1433,7 @@ export default function StudioPreviewPanel({
 
       {/* Preview surface */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
-        {isLive && displayUrl ? (
+        {isLive && displayUrl && !frameFailed ? (
           <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-2">
             <iframe
               key={frameKey}
@@ -1273,11 +1517,11 @@ export default function StudioPreviewPanel({
             )}
             {/* Retry button for unreachable/failed states. not_started is
                 handled by auto-start — no manual button needed. */}
-            {["unreachable", "failed"].includes(state) && (
+            {(["unreachable", "failed", "not_started"].includes(state) || (isLive && frameFailed)) && projectId && (
               <>
                 <button
                   type="button"
-                  onClick={() => void preparePreview()}
+                  onClick={handleRetry}
                   disabled={!projectId || state === "starting" || state === "restarting"}
                   className="flex min-h-10 items-center gap-2 rounded-xl px-4 text-xs font-extrabold transition-all hover:-translate-y-0.5 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
                   style={{
@@ -1288,7 +1532,7 @@ export default function StudioPreviewPanel({
                   data-testid="preview-prepare"
                 >
                   <RotateCcw size={12} className="pointer-events-none" />
-                  {state === "failed" ? "Restart preview" : "Retry"}
+                  {state === "not_started" ? "Start preview" : state === "failed" ? "Restart preview" : "Retry"}
                 </button>
                 {/* Auth-config failure → the fix is the project's Clerk keys.
                     This button now opens the real secrets editor (shipped
@@ -1361,3 +1605,4 @@ export default function StudioPreviewPanel({
     </div>
   );
 }
+

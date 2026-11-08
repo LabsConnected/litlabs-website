@@ -28,7 +28,7 @@ import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
 import { OverlayKeyboardProvider, type KeyboardHandler } from "./overlay-manager.js";
-import { isCtrl, isRawF2 } from "./keyboard-utils.js";
+import { isCtrl, isRawF2, ctrlDAction } from "./keyboard-utils.js";
 import { useTerminalSize } from "./use-terminal-size.js";
 import { Header } from "./header.js";
 import { LiTTShell } from "./shell/shell.js";
@@ -56,6 +56,7 @@ import { applyBranchRefresh } from "../lib/project-state.js";
 import { getDiffData, suggestCommitMessage } from "../lib/diff-view.js";
 import { discoverWorkspaces } from "../lib/workspace-store.js";
 import { listSessions } from "../lib/session-store.js";
+import { useRunWatchdog } from "./use-run-watchdog.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
@@ -93,12 +94,18 @@ export function CockpitApp({
   const [modelRuntime] = useState(() => new ModelRuntime(store.state.executionTarget === "remote"));
 
   // Local provider truth comes from a real Ollama probe, not merely
-  // the presence of an endpoint environment variable.
+  // the presence of an endpoint environment variable. The full lane
+  // status is kept so the header can show an honest lane state
+  // (ready / pending / unreachable) rather than a bare boolean.
   const [localModelReady, setLocalModelReady] = useState(false);
+  const [localLaneReason, setLocalLaneReason] = useState<string | null>(null);
+  const [localLaneProbed, setLocalLaneProbed] = useState(false);
 
   useEffect(() => {
     if (store.state.executionTarget !== "local") {
       setLocalModelReady(false);
+      setLocalLaneReason(null);
+      setLocalLaneProbed(false);
       return;
     }
 
@@ -107,6 +114,8 @@ export function CockpitApp({
     void probeLocalLane().then((status) => {
       if (!cancelled) {
         setLocalModelReady(status.available);
+        setLocalLaneReason(status.reason);
+        setLocalLaneProbed(true);
       }
     });
 
@@ -121,6 +130,17 @@ export function CockpitApp({
     client, signedIn,
   });
   const { submit, handleApproval } = controller;
+
+  // Wire the idle-SIGINT persist hook (installSigintHandler() itself is
+  // called by the command entrypoint before this component mounts — see
+  // commands/cockpit.ts). Read dynamically by RuntimeSession at signal
+  // time, so install order relative to that call doesn't matter.
+  useEffect(() => {
+    session.setOnPersistBeforeExit(() => controller.persistSession());
+    return () => {
+      session.setOnPersistBeforeExit(null);
+    };
+  }, [session, controller]);
 
   // Seed shell context from the launcher (once). After that, /workspace
   // and branch refreshes own these via the store.
@@ -213,6 +233,47 @@ export function CockpitApp({
     return suggestCommitMessage(store.state.cwd, diffData.files);
   }, [overlay, diffData, store.state.cwd]);
 
+  // ─── Execution watchdog — LITT_MAX_RUN_MS run timeout ──────────
+  // One watchdog for the whole cockpit: armed while a run is
+  // processing, disarmed when it settles. Firing performs the same
+  // teardown as Esc (session cancel + remote model abort + UI reset)
+  // and records a WATCHDOG activity so the operator sees why the run
+  // was terminated instead of it hanging silently forever.
+  //
+  // `store`/`controller` are fresh objects every render — useRunWatchdog
+  // keys the arm/disarm effect on runActive ONLY and reads the latest
+  // teardown callbacks through a ref, so streamed updates can never
+  // reset the countdown.
+  const runActive = store.state.isProcessing
+    || store.state.holoState === "RUNNING"
+    || store.state.holoState === "UNDERSTANDING"
+    || store.state.holoState === "PLANNING"
+    || store.state.holoState === "READING"
+    || store.state.holoState === "EDITING"
+    || store.state.holoState === "TESTING"
+    || store.state.holoState === "VERIFYING";
+  useRunWatchdog(runActive, {
+    cancelSession: () => session.cancel().then(() => undefined).catch(() => {}),
+    cancelRemoteModel: () => controller.cancelRemoteModel(),
+    resetUi: () => {
+      store.actions.setIsProcessing(false);
+      store.actions.setHoloState("IDLE");
+      store.actions.clearMission();
+      store.actions.clearToolProgress();
+      store.actions.stopBusy();
+    },
+    recordFailure: (text) => {
+      store.actions.addActivity({
+        id: `act_${Date.now()}_watchdog`,
+        ts: Date.now(),
+        type: "error",
+        tag: "WATCHDOG",
+        semantic: "failed",
+        text,
+      });
+    },
+  });
+
   // ─── App shortcuts (only when no overlay owns the keyboard) ─────
   const appShortcutHandler = useCallback<KeyboardHandler>((input, key) => {
     if (isRawF2(input)) {
@@ -281,7 +342,22 @@ export function CockpitApp({
       store.actions.clearToolProgress();
       store.actions.stopBusy();
     } else if (isCtrl(input, key, "d")) {
-      controller.openDiffViewer();
+      // Ctrl+D — DIFF when a draft exists; EOF/exit on an empty composer.
+      // store.composerValueRef is mirrored by setComposerValue at event
+      // time, so the draft stays current even if this callback ran from a
+      // handler ref that lagged a commit; persist before exit so the
+      // session survives.
+      if (ctrlDAction(store.composerValueRef.current) === "exit") {
+        controller.persistSession();
+        exit();
+      } else {
+        controller.openDiffViewer();
+      }
+    } else if (isCtrl(input, key, "g")) {
+      // Ctrl+G — expand/collapse the most recent activity entry's detail.
+      // (Ctrl+E is the composer's move-to-end and must not be shadowed.)
+      const last = store.state.activityLog[store.state.activityLog.length - 1];
+      if (last) store.actions.toggleActivityExpanded(last.id);
     } else if (isCtrl(input, key, "n")) {
       controller.newSession();
     } else if (isCtrl(input, key, "r")) {
@@ -306,11 +382,19 @@ export function CockpitApp({
   const handleModelSelect = useCallback((selected: ModelChoice) => {
     // Picking an explicit model switches routing to FIXED — in "auto" mode
     // cliModeToRouteOptions() ignores selectedModel entirely, so the pick
-    // would never be honored ("models don't stick").
+    // would never be honored ("models don't stick"). The choice persists
+    // to ~/.litt/model-prefs.json via updateSelectedModel.
     store.actions.updateSelectedModel(selected.id);
     store.actions.updateRoutingMode("fixed");
     store.actions.setOverlay("none");
     store.actions.setOverlayQuery("");
+    store.actions.addActivity({
+      id: `act_${Date.now()}_modelset`,
+      ts: Date.now(),
+      type: "info",
+      tag: "MODEL",
+      text: `Model set: ${selected.label} (${selected.id})`,
+    });
   }, [store]);
 
   const handleRoutingModeSelect = useCallback((routing: typeof store.state.routingMode) => {
@@ -335,19 +419,37 @@ export function CockpitApp({
   return (
     <OverlayKeyboardProvider appShortcutHandler={appShortcutHandler}>
     <Box flexDirection="column">
-      {/* Header — the one-line brand band (always compact in the shell). */}
+      {/* Header — the compact identity bar: mark + lane · target,
+          project / branch, one divider. Diagnostic badges live in
+          /status; real tool work shows in the transcript. */}
       <Header
         project={store.state.project}
         projectRoot={store.state.cwd}
         branch={store.state.branch}
         brain={brain}
         activeModel={store.state.activeModel}
-        source={source}
+        providerLane={
+          store.state.executionTarget === "remote"
+            ? (store.state.activeProvider ? providerLabel(store.state.activeProvider) : "LiTT remote")
+            : "Ollama"
+        }
+        laneReady={
+          store.state.executionTarget === "remote"
+            ? store.state.remoteRuntime === "connected"
+            : localModelReady
+        }
+        laneError={
+          store.state.executionTarget === "remote"
+            ? (store.state.remoteRuntime === "error" ? "transport error" : null)
+            : (localLaneProbed && !localModelReady ? (localLaneReason ?? "unavailable") : null)
+        }
         connected={store.state.connected}
         executionTarget={store.state.executionTarget}
         localRuntime={store.state.localRuntime}
         remoteRuntime={store.state.remoteRuntime}
         mode={store.state.mode}
+        gitModified={store.state.gitModified}
+        gitUntracked={store.state.gitUntracked}
         authEmail={authEmail}
         signedIn={signedIn}
         compact
@@ -472,6 +574,7 @@ export function CockpitApp({
             gitUntracked={store.state.gitUntracked}
             toolProgress={store.state.toolProgress}
             toolDetails={store.state.toolDetails}
+            expandedActivityIds={store.state.expandedActivityIds}
             executionTarget={store.state.executionTarget}
             canonicalMission={store.state.canonicalMission}
             workstream={store.state.workstream}

@@ -160,7 +160,14 @@ describe("AgentLoop", () => {
   // ─── Failed command isolation ─────────────────────────────────
 
   it("failed command can be reasoned about and retried", async () => {
-    const loop = createLoop(session);
+    // `git badcmd` resolves an external `git-badcmd` binary — classified
+    // arbitrary_code — so ACT mode needs an approval handler to let it
+    // execute (and fail) for real.
+    const actSession = createSession("act");
+    const loop = createLoop(actSession, {
+      mode: "act",
+      onApprovalRequired: async () => true,
+    });
 
     // First run: fails
     const result1 = await loop.run([

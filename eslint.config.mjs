@@ -23,6 +23,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "**/dist/**",
+    // Frozen pre-upgrade snapshots — not linted
+    "**/dist-backup*/**",
     "next-env.d.ts",
     // Git worktrees — local only, 376K files
     ".worktrees/**",
@@ -56,6 +58,7 @@ const eslintConfig = defineConfig([
     // CommonJS scripts — require() is correct in .cjs and .js files
     "scripts/**/*.cjs",
     "scripts/**/*.js",
+    "tasks/**/*.cjs",
     // Root level JS scripts and debug artifacts
     "*.js",
     "scripts/__smoke*.mjs",

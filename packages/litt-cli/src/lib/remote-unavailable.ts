@@ -51,6 +51,15 @@ export type RemoteUnavailableReason =
   | "workspace_selection_required"
   /** Authenticated, but not authorized for the requested workspace. */
   | "workspace_unauthorized"
+  /**
+   * Authenticated, but the account is not on the terminal-owner allowlist
+   * (TERMINAL_OWNER_CLERK_IDS). The session is VALID — this is an
+   * authorization refusal at the token-exchange owner gate, NOT a revoked
+   * credential. It must never be reported as auth_revoked: doing so told
+   * the user to re-login (a dead end) and, because auth_revoked is a
+   * credential-clearing reason, deleted their valid stored credential.
+   */
+  | "terminal_owner_required"
   /** The server's billing/entitlement service could not be reached. */
   | "billing_unavailable"
   /** Authenticated, but the account's plan does not include CLI access. */
@@ -76,6 +85,7 @@ const SUBJECT: Record<RemoteUnavailableReason, string> = {
   workspace_required: "No remote project workspace is prepared.",
   workspace_selection_required: "Multiple remote workspaces are available.",
   workspace_unauthorized: "Not authorized for that workspace.",
+  terminal_owner_required: "Terminal access is restricted to the workspace owner.",
   billing_unavailable: "Billing service unavailable.",
   plan_not_entitled: "Your plan does not include LiTT CLI access.",
   insufficient_credits: "LiTTBits balance exhausted.",
@@ -98,6 +108,10 @@ const REMEDY: Record<RemoteUnavailableReason, string> = {
   workspace_required: "Prepare a remote project workspace, then retry with --remote.",
   workspace_selection_required: "Specify which workspace to use with --workspace <id>.",
   workspace_unauthorized: "You are authenticated but not authorized for that workspace. Select a workspace that belongs to your account.",
+  // NOTE: like the billing reasons below, this does NOT suggest 'litt
+  // login' — the session is valid. Re-authenticating as the same account
+  // cannot fix an owner-allowlist refusal.
+  terminal_owner_required: "Your session is valid — this terminal server only grants remote access to the workspace owner. Sign in with the owner account, or add your Clerk user ID (shown by 'litt whoami') to TERMINAL_OWNER_CLERK_IDS on the terminal server.",
   // NOTE: none of the three below suggest 'litt login'. They are NOT
   // authentication failures — the session is valid. Telling the user to
   // re-authenticate here sends them down a dead end for a problem that

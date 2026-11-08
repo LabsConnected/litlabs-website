@@ -27,7 +27,7 @@ beforeEach(() => {
   fs.mkdirSync(tmpDir, { recursive: true });
   fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ name: "test-project" }));
   // Use a temp LITT_HOME so we don't read the user's real prefs
-  process.env.LITT_HOME = tmpDir;
+  process.env.LITT_STATE_HOME = tmpDir;
 });
 
 afterEach(() => {
@@ -41,7 +41,7 @@ afterEach(() => {
   delete process.env.OPENAI_API_KEY;
   delete process.env.GROQ_API_KEY;
   delete process.env.OPENROUTER_API_KEY;
-  delete process.env.LITT_HOME;
+  delete process.env.LITT_STATE_HOME;
 });
 
 describe("P0-8: Doctor Effective Provider", () => {

@@ -135,11 +135,30 @@ export async function getStudioTask(userId: string, taskId: string): Promise<Stu
   return mapTask(row, statuses.get(row.active_action_run_id ?? row.latest_action_run_id ?? ""));
 }
 
+/**
+ * Read-after-write grace for association checks. A task POST can arrive
+ * before the just-created project/conversation row is visible on the
+ * read path (replica lag / connection pool timing), producing a spurious
+ * 403 that the client then has to retry. A short bounded retry keeps the
+ * check fully server-authoritative — the row is still validated when it
+ * lands — while eliminating the transient rejection.
+ */
+export async function readWithGrace<T>(read: () => Promise<T | null>): Promise<T | null> {
+  let value = await read();
+  for (let attempt = 0; !value && attempt < 3; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    value = await read();
+  }
+  return value;
+}
+
 export async function createStudioTask(userId: string, input: CreateStudioTaskInput): Promise<StudioTask | null> {
-  if (!(await projectOwned(userId, input.projectId))) return null;
+  const project = await readWithGrace(() => getProject(input.projectId, userId));
+  if (!project) return null;
   let conversationId = input.conversationId ?? null;
   if (conversationId) {
-    const conversation = await getConversation(conversationId, userId);
+    const boundConversationId = conversationId;
+    const conversation = await readWithGrace(() => getConversation(boundConversationId, userId));
     if (!conversation || conversation.projectId !== input.projectId) return null;
     // Idempotent adoption: a conversation already bound to an open task
     // returns that task instead of creating a duplicate worktab.

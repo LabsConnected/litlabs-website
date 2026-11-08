@@ -5,9 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useRouter } from "next/navigation";
 import {
-  AlertCircle,
   Activity,
   Database,
   Sparkles,
@@ -19,8 +17,6 @@ import {
 import GalaxyMap, { type GalaxyNode } from "@/components/GalaxyMap";
 import TelemetryPanel, { type TelemetryData } from "@/components/TelemetryPanel";
 import EventStream, { type AdminEvent } from "@/components/EventStream";
-
-const ADMIN_USER_ID = "user_litbit";
 
 type LivePayload =
   | { type: "stats"; payload: TelemetryData }
@@ -43,8 +39,7 @@ const DEFAULT_STATS: TelemetryData = {
 
 export default function AdminDashboard() {
   const { resolvedColors: T } = useTheme();
-  const { userId, isLoaded, isSignedIn } = useClerkAuth();
-  const router = useRouter();
+  const { isLoaded, isSignedIn } = useClerkAuth();
 
   const [stats, setStats] = useState<TelemetryData>(DEFAULT_STATS);
   const [events, setEvents] = useState<AdminEvent[]>([]);
@@ -54,11 +49,11 @@ export default function AdminDashboard() {
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    if (isLoaded && (!isSignedIn || userId !== ADMIN_USER_ID)) router.push("/");
-  }, [isLoaded, isSignedIn, userId, router]);
-
-  useEffect(() => {
-    if (!isSignedIn || userId !== ADMIN_USER_ID) return;
+    // Authorization is enforced server-side by src/app/(app)/admin/layout.tsx
+    // (requireOwnerAccess → 404). This effect only gates the SSE connection
+    // on Clerk having loaded a session — the page can render before Clerk
+    // finishes resolving, and EventSource without a session cookie 401s.
+    if (!isSignedIn) return;
 
     const connect = () => {
       const es = new EventSource("/api/admin/live");
@@ -91,7 +86,7 @@ export default function AdminDashboard() {
     connect();
 
     return () => eventSourceRef.current?.close();
-  }, [isSignedIn, userId]);
+  }, [isSignedIn]);
 
   const topKpis = useMemo(
     () => [
@@ -111,13 +106,10 @@ export default function AdminDashboard() {
     );
   }
 
-  if (!isSignedIn || userId !== ADMIN_USER_ID) {
+  if (!isSignedIn) {
     return (
-      <div className="min-h-screen grid place-items-center" style={{ backgroundColor: T.bgColor }}>
-        <div className="text-center">
-          <AlertCircle size={48} className="mx-auto mb-4" style={{ color: T.warning }} />
-          <p style={{ color: T.textMuted }}>Access Denied - Admin Only</p>
-        </div>
+      <div className="min-h-screen grid place-items-center" style={{ backgroundColor: T.bgColor, color: T.textMuted }}>
+        Loading Admin Dashboard...
       </div>
     );
   }

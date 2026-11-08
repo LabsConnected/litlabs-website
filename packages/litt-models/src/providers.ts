@@ -107,6 +107,13 @@ export const PROVIDERS: ProviderDefinition[] = [
     chatUrl: "https://api.groq.com/openai/v1/chat/completions",
   },
   {
+    id: "openagents",
+    label: "OpenAgents",
+    envKey: "OPENAGENTS_API_KEY",
+    modelsUrl: "https://api-gateway.openagents.org/v1/models",
+    chatUrl: "https://api-gateway.openagents.org/v1/chat/completions",
+  },
+  {
     id: "openrouter",
     label: "OpenRouter",
     envKey: "OPENROUTER_API_KEY",

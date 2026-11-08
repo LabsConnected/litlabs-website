@@ -344,7 +344,8 @@ describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate
       enableBuildFix: false,
     });
 
-    expect(transportWithFile.readFile).toHaveBeenCalledTimes(2);
+    // The third read is the post-write persisted-change verification.
+    expect(transportWithFile.readFile).toHaveBeenCalledTimes(3);
     expect(writeFile).toHaveBeenCalledWith("index.html", "<footer>Ember Roast · Freshly roasted.</footer>");
     expect(result.pendingApproval).toBeUndefined();
     expect(result.finalText).toContain("updated safely");
@@ -835,6 +836,54 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
     expect(resolveZeroToolCalls("Which file should I update?", 0).action).toBe("final");
   });
 
+  it("treats conversational check-ins as final on non-execution turns", () => {
+    // Greptile P1 on PR #757: the approval phrases also match legitimate
+    // final replies and clarification questions. On a turn that was not
+    // dispatched as an execution request, they must end the run — a
+    // nudge would force a file-change request the user never made, and
+    // repeated matches turn a normal conversation into a failed
+    // mutation run.
+    const finalReplies = [
+      "I recommend a dark background. How does that sound?",
+      "Here are a few palette directions — sound good?",
+      "Want me to proceed with any of these ideas?",
+      "If you're ready, we can look at the layout next.",
+    ];
+    for (const text of finalReplies) {
+      expect(resolveZeroToolCalls(text, 0, { executionRequested: false }).action, text).toBe("final");
+      expect(resolveZeroToolCalls(text, 2, { executionRequested: false }).action, text).toBe("final");
+    }
+    // The same wording on an execution turn stays a nudge — the model
+    // was asked to mutate and must emit the gated tool call.
+    expect(
+      resolveZeroToolCalls("Here's the plan for the landing page. Shall I proceed?", 0, {
+        executionRequested: true,
+      }).action,
+    ).toBe("nudge");
+    // Ongoing-work claims are lies regardless of turn type.
+    expect(
+      resolveZeroToolCalls("I'm updating the header styles now.", 0, { executionRequested: false }).action,
+    ).toBe("nudge");
+  });
+
+  it("routes ACT-mode deferral phrasing to the nudge path (explicit build requests)", () => {
+    // The 2026-10-30 Studio regression: an explicit "build my website"
+    // request got a plan + a prose approval ask ("...then ask for your
+    // approval to write it to the project. How does that sound?") — no
+    // tool call, no approval card, run settled "Complete" untouched.
+    const deferrals = [
+      "I can't create the file on this turn, but if you're ready, I'll draft the initial index.html content with these sections and the base styling, then ask for your approval to write it to the project. How does that sound?",
+      "Here's the plan for the landing page. Shall I proceed?",
+      "I can write index.html for you — want me to go ahead?",
+      "Ready when you are — confirm and I'll create the file.",
+    ];
+    for (const text of deferrals) {
+      expect(resolveZeroToolCalls(text, 0).action, text).toBe("nudge");
+    }
+    // Exhausted nudges still fail honestly, never complete.
+    expect(resolveZeroToolCalls(deferrals[0], 2).action).toBe("fail");
+  });
+
   it("fails the run honestly when the model keeps asking for approval in prose", async () => {
     vi.mocked(callLLMWithTools).mockResolvedValue({
       text: APPROVAL_ASK,
@@ -852,6 +901,10 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
         executionMode: "act",
         enableBuildFix: false,
         maxSteps: 10,
+        // The kernel dispatches this explicit change request as an
+        // execution turn — the prose approval-ask guard only applies
+        // there (chat turns can legitimately end on a check-in).
+        requireToolCallOnFirstStep: true,
       },
     );
 
@@ -869,6 +922,177 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
     expect(
       secondCallMessages.some((m) => m.role === "user" && m.content.includes("files.write")),
     ).toBe(true);
+  });
+
+  it("accepts a design check-in as the final answer on a non-execution turn", async () => {
+    // Full-loop regression for the Greptile P1: a conversational reply
+    // must not be nudged into a file-write request when the turn was
+    // never an execution request.
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "I recommend a dark background. How does that sound?",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2(
+      "Which background color fits a coffee shop site?",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
+    expect(result.finalText).toBe("I recommend a dark background. How does that sound?");
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toBeUndefined();
+  });
+});
+
+describe("runAgentLoopV2 — required first tool call (immediate execution)", () => {
+  // Release-blocker regression (2026-10-29): an execution-required Studio
+  // build opened with a text-only QUALITY-marker reply and toolCalls:[] —
+  // the Gemini adapter never received the "required" tool choice, and the
+  // loop accepted the stage declaration as the final answer. The run must
+  // hold "required" until a tool call is actually emitted, and a
+  // text-only reply before the first call can never resolve "final".
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  const execCfg = {
+    model: "gemini-2.5-flash",
+    systemPrompt: "You are LiTT.",
+    executionMode: "auto" as const,
+    enableBuildFix: false,
+    requireToolCallOnFirstStep: true,
+  };
+
+  function callToolChoice(index: number): string | undefined {
+    const opts = vi.mocked(callLLMWithTools).mock.calls[index]?.[3] as
+      | { toolChoice?: string }
+      | undefined;
+    return opts?.toolChoice;
+  }
+
+  it("resolveZeroToolCalls: pending required call nudges then fails — never 'final'", () => {
+    expect(
+      resolveZeroToolCalls("QUALITY: understand — captured the brief.", 0, {
+        requiredToolCallPending: true,
+      }).action,
+    ).toBe("nudge");
+    expect(
+      resolveZeroToolCalls("Done — the site is complete.", 1, {
+        requiredToolCallPending: true,
+      }).action,
+    ).toBe("nudge");
+    const exhausted = resolveZeroToolCalls("Done.", 2, { requiredToolCallPending: true });
+    expect(exhausted.action).toBe("fail");
+    // Without the flag the same plain prose stays a final answer.
+    expect(resolveZeroToolCalls("Done.", 0).action).toBe("final");
+    expect(resolveZeroToolCalls("QUALITY: understand — noted.", 0).action).toBe("final");
+  });
+
+  it("a text-only QUALITY-marker first reply is nudged back to execution, then a real write lands", async () => {
+    const writeFile = vi.fn().mockResolvedValue(undefined);
+    const transport = {
+      ...fakeTransport,
+      writeFile,
+      readFile: vi.fn(async () => ({ content: "<html>Built.</html>", size: 18 })),
+      createCheckpointBeforeMutation: vi.fn().mockResolvedValue(null),
+    } as unknown as WorkspaceTransport;
+
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "QUALITY: understand — a landing page for the coffee brand.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "gemini-2.5-flash",
+      })
+      .mockResolvedValueOnce({
+        text: "QUALITY: build — writing index.html",
+        toolCalls: [{
+          toolCallId: "tc-exec-1",
+          toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "<html>Built.</html>" },
+        }],
+        finishReason: "tool_calls",
+        model: "gemini-2.5-flash",
+      })
+      .mockResolvedValueOnce({
+        text: "Built the landing page.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "gemini-2.5-flash",
+      });
+
+    const result = await runAgentLoopV2("build my coffee landing page", transport, execCfg);
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    // "required" is held until a tool call is actually emitted, then "auto".
+    expect(callToolChoice(0)).toBe("required");
+    expect(callToolChoice(1)).toBe("required");
+    expect(callToolChoice(2)).toBe("auto");
+
+    // The text-only reply produced a nudge, not a final answer.
+    const secondCallMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      secondCallMessages.some((m) => m.role === "user" && m.content.includes("emit the tool calls")),
+    ).toBe(true);
+
+    // One explicit build prompt → one real file write.
+    expect(writeFile).toHaveBeenCalledWith("index.html", "<html>Built.</html>");
+    expect(result.toolCalls.some((t) => t.toolId === "files.write" && t.success)).toBe(true);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.finalText).toBe("Built the landing page.");
+  });
+
+  it("fails honestly — never 'final' — when the model never emits a tool call", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "QUALITY: understand — planning the site structure.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "gemini-2.5-flash",
+    });
+
+    const result = await runAgentLoopV2("build my landing page", fakeTransport, {
+      ...execCfg,
+      maxSteps: 10,
+    });
+
+    // 1 initial + 2 bounded nudges, then an honest failure.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    for (let i = 0; i < 3; i++) expect(callToolChoice(i)).toBe("required");
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toContain("no files were changed");
+    expect(result.finalText).toBe(result.failedHonestly);
+  });
+
+  it("still accepts plain prose as final when the flag is off", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done — the site is complete.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2("build a tiny landing page", fakeTransport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "act",
+      enableBuildFix: false,
+    });
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
+    expect(callToolChoice(0)).toBe("auto");
+    expect(result.finalText).toBe("Done — the site is complete.");
   });
 });
 
@@ -1070,11 +1294,13 @@ describe("runAgentLoopV2 — build capability guard", () => {
     expect(result.modelFailed).toBe("NO_BUILD_CAPABLE_MODEL");
     expect(result.modelFailureText).toContain("No build-capable model is available");
     // Chain: north-mini-code → gemini-flash → gemini-2.5-flash →
-    // nemotron-3-super → laguna-s-2.1 → nemotron-3-ultra → gemma-4-31b →
-    // exhausted. 7 windows × 3 steps = 21 calls, bounded far below
-    // maxSteps. (qwen3.8-27b:free is tool-capable but not run-proven as
-    // a file writer, so it never enters the build chain.)
-    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(21);
+    // gemini-2.5-flash-lite → nemotron-3.5-lightning → nemotron-3-super →
+    // gemma-4-26b → nemotron-3-ultra → gemma-4-31b → gemini-2.5-pro →
+    // exhausted.
+    // 10 windows × 3 steps = 30 calls, bounded far below maxSteps.
+    // (qwen3.8-27b:free is tool-capable but not run-proven as a file
+    // writer, so it never enters the build chain.)
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(30);
   });
 
   it("resets the window when the model finally writes", async () => {
@@ -1258,6 +1484,135 @@ describe("BUILD resume completion evidence", () => {
   });
 });
 
+describe("resumeAgentLoopV2 — approval-resume execution intent", () => {
+  // Greptile P1 on PR #757 (round 2): the approvals route rebuilt the
+  // resume config without the execution intent — requireToolCallOnFirstStep
+  // is inert on resume (the gated call that caused the pause already
+  // satisfied it, and the resumed loop always counts a call as emitted) —
+  // so a post-approval reply asking for approval in prose with zero tool
+  // calls was accepted as the final answer and the requested work silently
+  // stopped. Execution intent now rides its own flag (executionRequested),
+  // carried through approval resumes.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const PROSE_ASK =
+    "The next step modifies workspace files, so I need your approval to write the next file. How does that sound?";
+
+  const execTransport = {
+    ...fakeTransport,
+    writeFile: vi.fn(async () => ({ saved: true })),
+    readFile: vi.fn(async () => ({ content: "<html><body>Built site</body></html>", size: 40 })),
+    listFiles: vi.fn(async () => ({ entries: [{ name: "index.html", type: "file" }] })),
+  } as unknown as WorkspaceTransport;
+
+  function writeResume(config?: Partial<ResumeInput["config"]>): ResumeInput {
+    return {
+      pausedMessages: [{ role: "user", content: "Build a roofing site" }],
+      toolId: "files.write",
+      toolCallId: "tc-write-1",
+      inputs: { projectId: "p-test", path: "index.html", content: "<html><body>Built site</body></html>" },
+      decision: "approved",
+      stepsUsedBeforePause: 1,
+      hadInterveningMutation: false,
+      config: {
+        systemPrompt: "You are LiTT.",
+        userId: "u-test",
+        executionMode: "act",
+        enableBuildFix: false,
+        isStaticWorkspace: true,
+        executionRequested: true,
+        ...config,
+      },
+    };
+  }
+
+  it("nudges a post-approval prose approval-ask back to execution — never 'final'", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({ text: PROSE_ASK, toolCalls: [], finishReason: "stop", model: "test" })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: "read-1", inputs: { projectId: "p-test", path: "index.html" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      })
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
+
+    const result = await resumeAgentLoopV2(writeResume(), execTransport);
+
+    // Without the carried intent the first reply resolved "final" and the
+    // run ended — the silent-resume bug. Now it nudges, the emitted call
+    // executes, and the run completes with the real answer.
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBeGreaterThanOrEqual(3);
+    const nudgedMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      nudgedMessages.some((m) => m.role === "user" && m.content.includes("don't create approval cards")),
+    ).toBe(true);
+    expect(result.finalText).toBe("Done.");
+    expect(result.failedHonestly).toBeUndefined();
+  });
+
+  it("fails honestly — never completes — when the post-approval model keeps asking in prose", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: PROSE_ASK,
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test",
+    });
+
+    const result = await resumeAgentLoopV2(writeResume(), execTransport);
+
+    // 1 initial + 2 bounded nudges, then an honest failure — the run can
+    // never report "Complete" for work that stopped on a prose ask.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    expect(result.failedHonestly).toContain("no approval card was created");
+    expect(result.finalText).toBe(result.failedHonestly);
+  });
+
+  it("keeps the guard on the requireToolCallOnFirstStep fallback path", async () => {
+    // Backward compat: callers that set only the legacy flag still get the
+    // prose-ask gate — it only ever came from requiresExecution dispatch.
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: PROSE_ASK,
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test",
+    });
+
+    const result = await resumeAgentLoopV2(
+      writeResume({ executionRequested: undefined, requireToolCallOnFirstStep: true }),
+      execTransport,
+    );
+
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBeGreaterThan(1);
+    expect(result.failedHonestly).toContain("no approval card was created");
+  });
+
+  it("keeps conversational check-ins final on a plan-mode resume", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Here is the plan for the landing page. How does that sound?",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test",
+    });
+
+    const result = await resumeAgentLoopV2(
+      writeResume({ executionMode: "plan" }),
+      execTransport,
+    );
+
+    // The plan-mode exclusion survives: check-in phrasing is a legitimate
+    // final answer, not a missing tool call.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
+    expect(result.finalText).toBe("Here is the plan for the landing page. How does that sound?");
+    expect(result.failedHonestly).toBeUndefined();
+  });
+});
+
 describe("runAgentLoopV2 — model routing evidence", () => {
   beforeEach(async () => {
     vi.mocked(callLLMWithTools).mockReset();
@@ -1305,5 +1660,906 @@ describe("runAgentLoopV2 — model routing evidence", () => {
     // No secrets in the run evidence payload.
     const payload = JSON.stringify(routing[0]);
     expect(payload).not.toContain("sk-fake-gemini-secret-abc123");
+  });
+});
+
+/**
+ * Persisted-truth read-back coverage for the mutators issue #703 named:
+ * files.mkdir, project.insert_asset, image.generate's saved asset, and
+ * preview.* — plus the per-claim evidence multi-file builds need. On a
+ * gitless (static) workspace this read-back is the ONLY channel that can
+ * verify a claimed mutation, so each claim must produce it.
+ */
+describe("runAgentLoopV2 — mutation read-back coverage (gitless/static workspaces)", () => {
+  const PNG_BYTES = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+  ]);
+
+  function toolCallReply(toolCallId: string, toolId: string, inputs: Record<string, unknown>) {
+    return {
+      text: "",
+      toolCalls: [{ toolCallId, toolId, inputs }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    };
+  }
+  const doneReply = { text: "Done.", toolCalls: [], finishReason: "stop", model: "test-model" };
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("files.mkdir records persisted:true when the directory is really there", async () => {
+    const transport = {
+      ...fakeTransport,
+      mkdir: vi.fn(async () => ({ created: true })),
+      listFiles: vi.fn(async (p: string) =>
+        p === "." ? { entries: [{ name: "assets", type: "folder" }] } : { entries: [] }),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-mkdir", "files.mkdir", { path: "assets" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("make an assets folder", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    const call = result.toolCalls.find((t) => t.toolId === "files.mkdir");
+    expect(call?.success).toBe(true);
+    expect(call?.persisted).toBe(true);
+    expect(call?.paths).toContain("assets");
+  });
+
+  it("files.mkdir records persisted:false when the directory is not there", async () => {
+    const transport = {
+      ...fakeTransport,
+      mkdir: vi.fn(async () => ({ created: true })),
+      listFiles: vi.fn(async () => ({ entries: [] })),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-mkdir2", "files.mkdir", { path: "assets" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("make an assets folder", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    expect(result.toolCalls.find((t) => t.toolId === "files.mkdir")?.persisted).toBe(false);
+  });
+
+  // project.insert_asset and preview.start sit outside the AUTO
+  // auto-approve set — they pause at a gate, then the approved resume
+  // executes them (exercising the resume lane's read-back too).
+  async function approveGate(
+    paused: Awaited<ReturnType<typeof runAgentLoopV2>>,
+    transport: WorkspaceTransport,
+  ) {
+    const gate = paused.pendingApproval;
+    expect(gate).toBeDefined();
+    return resumeAgentLoopV2({
+      pausedMessages: gate!.pausedMessages,
+      toolId: gate!.toolId,
+      toolCallId: gate!.toolCallId,
+      inputs: gate!.inputs,
+      decision: "approved",
+      config: {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "auto",
+        enableBuildFix: false,
+      },
+      stepsUsedBeforePause: gate!.stepsUsedAtPause ?? 1,
+      hadInterveningMutation: gate!.hadInterveningMutationAtPause ?? false,
+      priorToolCalls: gate!.priorToolCalls,
+    }, transport);
+  }
+
+  it("an approval pause carries the pre-pause mutation history into the resumed run's evidence", async () => {
+    // files.write auto-approves and runs FIRST; preview.start then pauses.
+    // The pre-pause write's read-back evidence must survive the boundary —
+    // otherwise a contradicted pre-pause claim can be masked post-resume.
+    const disk = new Map<string, string>();
+    const transport = {
+      ...fakeTransport,
+      writeFile: vi.fn(async (path: string, content: string) => {
+        disk.set(path, content);
+        return { saved: true };
+      }),
+      readFile: vi.fn(async (path: string) => {
+        const content = disk.get(path);
+        if (content === undefined) throw new Error("readFile failed (404): not found");
+        return { content, size: content.length };
+      }),
+      startPreview: vi.fn(async () => ({
+        workspaceId: "ws-test", status: "ready", port: 3000,
+        framework: "static", command: "serve", startedAt: Date.now(),
+      })),
+      getPreviewStatus: vi.fn(async () => ({
+        status: "ready", port: 3000, framework: "static", command: "serve",
+        startedAt: Date.now(), lastHealthCheck: Date.now(),
+        error: null, errorCode: null, logs: [],
+      })),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-w", "files.write", { projectId: "p-test", path: "index.html", content: "<html>ok</html>" }))
+      .mockResolvedValueOnce(toolCallReply("tc-p", "preview.start", { projectId: "p-test" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const paused = await runAgentLoopV2("write the file then start preview", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    // The paused run's own log has the pre-pause write; the gate record
+    // must carry it across the boundary for the resumed run.
+    expect(paused.toolCalls.some((t) => t.toolId === "files.write" && t.persisted === true)).toBe(true);
+    expect(paused.pendingApproval?.priorToolCalls?.some((t) => t.toolId === "files.write")).toBe(true);
+
+    const resumed = await approveGate(paused, transport);
+
+    // The resumed run's evidence covers the WHOLE run — the pre-pause
+    // verified write AND the resumed-lane preview claim are both visible.
+    expect(resumed.toolCalls.some((t) => t.toolId === "files.write" && t.persisted === true)).toBe(true);
+    expect(resumed.toolCalls.some((t) => t.toolId === "preview.start" && t.persisted === true)).toBe(true);
+  });
+
+  it("project.insert_asset records persisted:true via the returned asset path — binary-safe", async () => {
+    let written = "";
+    const transport = {
+      ...fakeTransport,
+      writeBinaryFile: vi.fn(async (path: string) => {
+        written = path;
+        return { saved: true };
+      }),
+      listFiles: vi.fn(async (p: string) => {
+        if (p === "assets" && written) {
+          return { entries: [{ name: written.slice("assets/".length), type: "file" }] };
+        }
+        return { entries: [] };
+      }),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-asset", "project.insert_asset", {
+        projectId: "p-test",
+        url: `data:image/png;base64,${PNG_BYTES.toString("base64")}`,
+        name: "hero",
+        directory: "assets",
+      }))
+      .mockResolvedValueOnce(doneReply);
+
+    const paused = await runAgentLoopV2("put this image in the site", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+    const result = await approveGate(paused, transport);
+
+    const call = result.toolCalls.find((t) => t.toolId === "project.insert_asset");
+    expect(call?.success).toBe(true);
+    expect(written).toMatch(/^assets\/hero-.+\.png$/);
+    expect(call?.persisted).toBe(true);
+    // The real output path — not just the declared directory — is what
+    // the diff attribution can corroborate against.
+    expect(call?.paths).toContain(written);
+  });
+
+  it("preview.start records persisted:true when the status probe reports ready", async () => {
+    const transport = {
+      ...fakeTransport,
+      startPreview: vi.fn(async () => ({
+        workspaceId: "ws-test", status: "ready", port: 3000,
+        framework: "static", command: "serve", startedAt: Date.now(),
+      })),
+      getPreviewStatus: vi.fn(async () => ({
+        status: "ready", port: 3000, framework: "static", command: "serve",
+        startedAt: Date.now(), lastHealthCheck: Date.now(),
+        error: null, errorCode: null, logs: [],
+      })),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-prev", "preview.start", { projectId: "p-test" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const paused = await runAgentLoopV2("start the preview", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+    const result = await approveGate(paused, transport);
+
+    const call = result.toolCalls.find((t) => t.toolId === "preview.start");
+    expect(call?.success).toBe(true);
+    expect(call?.persisted).toBe(true);
+  });
+
+  it("preview.start records persisted:false when the status probe reports failed", async () => {
+    const transport = {
+      ...fakeTransport,
+      startPreview: vi.fn(async () => ({
+        workspaceId: "ws-test", status: "starting", port: 3000,
+        framework: "static", command: "serve", startedAt: Date.now(),
+      })),
+      getPreviewStatus: vi.fn(async () => ({
+        status: "failed", port: null, framework: null, command: null,
+        startedAt: null, lastHealthCheck: null,
+        error: "port closed", errorCode: null, logs: [],
+      })),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-prev2", "preview.start", { projectId: "p-test" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const paused = await runAgentLoopV2("start the preview", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+    const result = await approveGate(paused, transport);
+
+    const call = result.toolCalls.find((t) => t.toolId === "preview.start");
+    expect(call?.success).toBe(true);
+    expect(call?.persisted).toBe(false);
+  });
+
+  it("a multi-file build records per-claim persisted evidence — verified and contradicted independently", async () => {
+    const disk = new Map<string, string>([
+      ["index.html", "<html>ok</html>"],
+      ["style.css", "body{}"],
+      // The third write claimed bytes that never landed.
+      ["app.js", "stale();"],
+    ]);
+    const transport = {
+      ...fakeTransport,
+      writeFile: vi.fn(async (path: string, content: string) => {
+        if (path !== "app.js") disk.set(path, content);
+        return { saved: true };
+      }),
+      readFile: vi.fn(async (path: string) => {
+        const content = disk.get(path);
+        if (content === undefined) throw new Error("readFile failed (404): not found");
+        return { content, size: content.length };
+      }),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-a", "files.write", { projectId: "p-test", path: "index.html", content: "<html>ok</html>" }))
+      .mockResolvedValueOnce(toolCallReply("tc-b", "files.write", { projectId: "p-test", path: "style.css", content: "body{}" }))
+      .mockResolvedValueOnce(toolCallReply("tc-c", "files.write", { projectId: "p-test", path: "app.js", content: "fresh();" }))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("build the three files", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    const writes = result.toolCalls.filter((t) => t.toolId === "files.write");
+    expect(writes).toHaveLength(3);
+    expect(writes.find((t) => t.paths?.includes("index.html"))?.persisted).toBe(true);
+    expect(writes.find((t) => t.paths?.includes("style.css"))?.persisted).toBe(true);
+    // app.js never landed — the claim must be contradicted, not masked.
+    expect(writes.find((t) => t.paths?.includes("app.js"))?.persisted).toBe(false);
+  });
+});
+
+// ─── Read-back regression: replay + sequential patches ─────────────
+
+describe("runAgentLoopV2 — replay carries the original persisted verdict", () => {
+  function reply(toolCallId: string, toolId: string, inputs: Record<string, unknown>) {
+    return { text: "", toolCalls: [{ toolCallId, toolId, inputs }], finishReason: "tool_calls", model: "test-model" };
+  }
+  const doneReply = { text: "Done.", toolCalls: [], finishReason: "stop", model: "test-model" };
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("a failover replay logs persisted:true, not an unverifiable claim", async () => {
+    // Gitless (static) workspace: the ONLY evidence a mutation persisted
+    // is the post-call read-back — the replayed entry used to carry no
+    // persisted flag at all, so the run was saved as failed despite the
+    // verified write.
+    const disk = new Map<string, string>();
+    const transport = {
+      ...fakeTransport,
+      writeFile: vi.fn(async (path: string, content: string) => {
+        disk.set(path, content);
+        return { saved: true };
+      }),
+      readFile: vi.fn(async (path: string) => {
+        const content = disk.get(path);
+        if (content === undefined) throw new Error("readFile failed (404): not found");
+        return { content, size: content.length };
+      }),
+    } as unknown as WorkspaceTransport;
+
+    const inputs = { projectId: "p-test", path: "index.html", content: "<html>ok</html>" };
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(reply("tc-1", "files.write", inputs))
+      // A replacement provider re-emits the identical call after failover.
+      .mockResolvedValueOnce(reply("tc-2", "files.write", inputs))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("write index.html", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    const writes = result.toolCalls.filter((t) => t.toolId === "files.write");
+    expect(writes).toHaveLength(2);
+    // The mutation really executed once — the second was a replay.
+    expect(transport.writeFile).toHaveBeenCalledTimes(1);
+    expect(writes[0].persisted).toBe(true);
+    expect(writes[1].summary).toContain("skipped");
+    // The replay must carry the original read-back verdict — this was
+    // undefined before the fix, leaving a successful mutation unverifiable.
+    expect(writes[1].persisted).toBe(true);
+    // The replayed message must carry the RESULT PAYLOAD, not the
+    // ToolCallResult wrapper (would contain toolCallId/success fields).
+    const thirdCallMessages = JSON.stringify(vi.mocked(callLLMWithTools).mock.calls[2][2] ?? []);
+    expect(thirdCallMessages).toContain("saved");
+    expect(thirdCallMessages).not.toContain("tc-2");
+  });
+});
+
+describe("runAgentLoopV2 — sequential apply_patch read-back", () => {
+  function reply(toolCallId: string, toolId: string, inputs: Record<string, unknown>) {
+    return { text: "", toolCalls: [{ toolCallId, toolId, inputs }], finishReason: "tool_calls", model: "test-model" };
+  }
+  const doneReply = { text: "Done.", toolCalls: [], finishReason: "stop", model: "test-model" };
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  function patchTransport(finalContent: string) {
+    return {
+      ...fakeTransport,
+      applyPatch: vi.fn(async (path: string) => {
+        // The call reports success; finalContent is what ACTUALLY landed.
+        disk.set(path, finalContent);
+        return { applied: true };
+      }),
+      readFile: vi.fn(async (path: string) => {
+        const content = disk.get(path);
+        if (content === undefined) throw new Error("readFile failed (404): not found");
+        return { content, size: content.length };
+      }),
+    } as unknown as WorkspaceTransport;
+  }
+
+  let disk: Map<string, string>;
+  beforeEach(() => { disk = new Map([["f.txt", "A B"]]); });
+
+  it("verifies A→B, B→C, B→D as persisted when the terminal strings landed", async () => {
+    const transport = patchTransport("C D");
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(reply("tc-1", "apply_patch", {
+        path: "f.txt",
+        patches: [
+          { search: "A", replace: "B" },
+          { search: "B", replace: "C" },
+          { search: "B", replace: "D" },
+        ],
+      }))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("patch f.txt", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    const patch = result.toolCalls.find((t) => t.toolId === "apply_patch");
+    expect(patch?.success).toBe(true);
+    // Before the fix every intermediate replacement had to survive —
+    // "B" is gone from "C D", so a correct patch read back as failed.
+    expect(patch?.persisted).toBe(true);
+  });
+
+  it("still contradicts a patch whose terminal replacement never landed", async () => {
+    const transport = patchTransport("C B"); // the B→D step never persisted
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(reply("tc-1", "apply_patch", {
+        path: "f.txt",
+        patches: [
+          { search: "A", replace: "B" },
+          { search: "B", replace: "C" },
+          { search: "B", replace: "D" },
+        ],
+      }))
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2("patch f.txt", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    const patch = result.toolCalls.find((t) => t.toolId === "apply_patch");
+    expect(patch?.persisted).toBe(false);
+  });
+});
+
+describe("runAgentLoopV2 — browser interaction without a live session never reaches approval", () => {
+  // Regression (e2e-live 2026-10-31): a local model emitted browser.click
+  // for a theme edit with no browser session — it surfaced as an approval
+  // card, the user approved it, and the call failed at execution, ending
+  // the run failed. The no-session error must come back as a tool result
+  // instead: no approval card for a call that can never succeed.
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("returns a session-required tool error instead of an approval card", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          {
+            toolCallId: "tc-1",
+            toolId: "browser.click",
+            inputs: { selector: "#hero" },
+          },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "The browser was not needed — no files were changed.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2("click the hero", fakeTransport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "act",
+      enableBuildFix: false,
+    });
+
+    // No approval pause — the dead call never becomes a card.
+    expect(result.pendingApproval).toBeUndefined();
+    // The failure is recorded on the tool log as a non-mutating,
+    // session-level error the model can act on.
+    const click = result.toolCalls.find((t) => t.toolId === "browser.click");
+    expect(click).toBeDefined();
+    expect(click!.success).toBe(false);
+    expect(click!.mutating).toBe(false);
+    expect(click!.summary).toMatch(/browser session/i);
+  });
+});
+
+describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
+  /**
+   * P1 fix (e9e86189): the resumed-build no-write counter must measure
+   * consecutive unproductive MODEL steps across approval cycles — approval
+   * pauses and resume transitions are not model steps, a pause FOR a file
+   * write is write intent in flight (resets to 0), and writes completed
+   * after approval reset accumulated debt. Genuinely stuck runs still die.
+   */
+  // Test hygiene: reset ONLY the LLM mock between tests. clearAllMocks()
+  // does NOT clear the mockResolvedValueOnce queue, so a test that times
+  // out (or ends early) leaks its queued answers into the NEXT test —
+  // proven twice: the rejected-approval test and "still terminates"
+  // both consumed leftovers in CI. mockReset() clears the once-queue.
+  // (NOT a blanket resetAllMocks(): that would also wipe the fake
+  // transport's writeFile/readFile implementations defined above, and the
+  // approved writes would stop returning { saved: true }.)
+  // Braces are load-bearing: mockReset() returns the mock itself, and
+  // vitest invokes any function a beforeEach hook returns as a cleanup
+  // after each test — the arrow form above silently called the mock with
+  // no args after every test, consuming a queued answer (proven by the
+  // 2026-11-06 repro: it ate the "Done." and turned test 2's count 3→6).
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  // Boundary isolation (CI repro 2026-11-06): a test that times out leaves
+  // its resume chain running — vitest does not cancel it — and the chain
+  // lands LLM calls on the shared mock during the NEXT test. Every resume
+  // in this describe goes through trackedResume; afterEach awaits the ones
+  // still pending, BEFORE the next test's mockReset. Bounded: if a chain
+  // does not settle within 4000ms the afterEach FAILS loudly (stop and
+  // report) — it never silently swallows a hung chain.
+  const pendingResumes: Array<Promise<unknown>> = [];
+  function trackedResume(input: ResumeInput, transport: WorkspaceTransport) {
+    const p = resumeAgentLoopV2(input, transport);
+    pendingResumes.push(p);
+    void p.then(
+      () => {
+        const i = pendingResumes.indexOf(p);
+        if (i >= 0) pendingResumes.splice(i, 1);
+      },
+      () => {
+        const i = pendingResumes.indexOf(p);
+        if (i >= 0) pendingResumes.splice(i, 1);
+      },
+    );
+    return p;
+  }
+  afterEach(async () => {
+    if (pendingResumes.length === 0) return;
+    const pending = pendingResumes.splice(0);
+    const done = Promise.allSettled(pending);
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("cleanup: a resumed run did not settle within 4000ms — background work crossed the test boundary")),
+        4000,
+      ),
+    );
+    await Promise.race([done, timeout]);
+  });
+
+  const writeTransport = {
+    ...fakeTransport,
+    writeFile: vi.fn(async () => ({ saved: true })),
+    readFile: vi.fn(async () => ({ content: "<html/>", size: 7 })),
+    listFiles: vi.fn(async () => ({ entries: [{ name: "index.html", type: "file" }] })),
+  } as unknown as WorkspaceTransport;
+
+  function approvedWriteResume(extra?: Partial<ResumeInput>): ResumeInput {
+    return {
+      pausedMessages: [{ role: "user", content: "Build a site" }],
+      toolId: "files.write",
+      toolCallId: "tc-w1",
+      inputs: { projectId: "p-test", path: "index.html", content: "<html/>" },
+      decision: "approved",
+      stepsUsedBeforePause: 1,
+      hadInterveningMutation: false,
+      priorToolCalls: [],
+      config: {
+        systemPrompt: "You are LiTT.",
+        userId: "u-test",
+        executionMode: "act",
+        enableBuildFix: false,
+        isStaticWorkspace: true,
+        buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+        executionRequested: true,
+      },
+      ...extra,
+    };
+  }
+
+  it("pausing FOR a file write stores zeroWriteStepsAtPause=0", async () => {
+    // Resumed model emits another gated write → pause → the pause record
+    // must carry 0, not whatever the segment accumulated.
+    vi.mocked(callLLMWithTools).mockResolvedValueOnce({
+      text: "",
+      toolCalls: [{ toolId: "files.write", toolCallId: "tc-w2", inputs: { projectId: "p-test", path: "b.html", content: "<b/>" } }],
+      finishReason: "tool_calls",
+      model: "test",
+    });
+    const result = await trackedResume(approvedWriteResume(), writeTransport);
+    expect(result.pendingApproval?.toolId).toBe("files.write");
+    expect(result.pendingApproval?.zeroWriteStepsAtPause).toBe(0);
+  });
+
+  it("a non-write pause carries accumulated no-write steps forward", async () => {
+    // read (+1) then a gated non-write mutation pauses → counter persists at 1.
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: "r1", inputs: { projectId: "p-test", path: "index.html" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "files.delete", toolCallId: "d1", inputs: { projectId: "p-test", path: "stale.html" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      });
+    const result = await trackedResume(approvedWriteResume(), writeTransport);
+    expect(result.pendingApproval?.toolId).toBe("files.delete");
+    expect(result.pendingApproval?.zeroWriteStepsAtPause).toBe(1);
+  });
+
+  it("a write completed after approval resets previously accumulated steps", async () => {
+    // Resume carrying debt=2 with an approved files.write: the approved
+    // write executes first (verified progress) → counter resets → two
+    // subsequent read batches must NOT kill the run (0+1+1 < 3).
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: "r1", inputs: { projectId: "p-test", path: "a.html" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: "r2", inputs: { projectId: "p-test", path: "b.html" } }],
+        finishReason: "tool_calls",
+        model: "test",
+      })
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
+    const result = await trackedResume(
+      approvedWriteResume({ zeroWriteStepsAtPause: 2 }),
+      writeTransport,
+    );
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.finalText).toBe("Done.");
+  });
+
+  it("multiple sequential write approvals keep the build alive", async () => {
+    // approve write1 → resume emits write2 (pauses, counter 0) → approve
+    // → resume emits write3 (pauses) → approve → completes. Without the
+    // persisted reset a mid-segment read tail could kill a healthy run.
+    // write2/write3 must be DISTINCT calls: an identical re-emission of a
+    // call that was just approved and executed is deduped (replayed), not
+    // re-gated — that was the repeated-approval defect.
+    const second = {
+      text: "",
+      toolCalls: [{ toolId: "files.write", toolCallId: "tc-w2", inputs: { projectId: "p-test", path: "b.html", content: "<b/>" } }],
+      finishReason: "tool_calls" as const,
+      model: "test",
+    };
+    const third = {
+      text: "",
+      toolCalls: [{ toolId: "files.write", toolCallId: "tc-w3", inputs: { projectId: "p-test", path: "c.html", content: "<c/>" } }],
+      finishReason: "tool_calls" as const,
+      model: "test",
+    };
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(second)
+      .mockResolvedValueOnce(third)
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
+    const r1 = await trackedResume(approvedWriteResume(), writeTransport);
+    expect(r1.pendingApproval?.toolId).toBe("files.write");
+    const r2 = await trackedResume(
+      approvedWriteResume({
+        toolId: r1.pendingApproval!.toolId,
+        toolCallId: r1.pendingApproval!.toolCallId,
+        inputs: r1.pendingApproval!.inputs,
+        pausedMessages: r1.pendingApproval!.pausedMessages,
+        priorToolCalls: r1.pendingApproval!.priorToolCalls,
+        zeroWriteStepsAtPause: r1.pendingApproval!.zeroWriteStepsAtPause,
+      }),
+      writeTransport,
+    );
+    expect(r2.pendingApproval?.toolId).toBe("files.write");
+    expect(r2.pendingApproval?.zeroWriteStepsAtPause).toBe(0);
+    const r3 = await trackedResume(
+      approvedWriteResume({
+        toolId: r2.pendingApproval!.toolId,
+        toolCallId: r2.pendingApproval!.toolCallId,
+        inputs: r2.pendingApproval!.inputs,
+        pausedMessages: r2.pendingApproval!.pausedMessages,
+        priorToolCalls: r2.pendingApproval!.priorToolCalls,
+        zeroWriteStepsAtPause: r2.pendingApproval!.zeroWriteStepsAtPause,
+      }),
+      writeTransport,
+    );
+    expect(r3.finalText).toBe("Done.");
+    expect(r3.failedHonestly).toBeUndefined();
+    // Targeted 15s budget (test 1 only, NOT global): three sequential
+    // approved-write resumes each await a real-network enrich (up to the
+    // 3s deadline) — worst case ~9s, legitimately over the 5s default.
+    // Proven by the 2026-11-06 repro (2s sleeps → 6s total → timeout).
+  }, 15000);
+
+  it("still terminates a genuinely stuck resumed run", async () => {
+    // Three consecutive completed batches with no write and no write gate.
+    let step = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => ({
+      text: "",
+      toolCalls: [{ toolId: "files.read", toolCallId: `r-${++step}`, inputs: { projectId: "p-test", path: `p-${step}` } }],
+      finishReason: "tool_calls",
+      model: "test",
+    }));
+    const result = await trackedResume(approvedWriteResume(), writeTransport);
+    expect(callLLMWithTools).toHaveBeenCalledTimes(3);
+    expect(result.failedHonestly).toContain("3 steps");
+  });
+
+  it("a rejected write approval keeps counting — no free progress", async () => {
+    // REJECTED write: no execution, no progress. Read steps after the
+    // rejection still accumulate toward the bound.
+    let step = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => ({
+      text: "",
+      toolCalls: [{ toolId: "files.read", toolCallId: `r-${++step}`, inputs: { projectId: "p-test", path: `p-${step}` } }],
+      finishReason: "tool_calls",
+      model: "test",
+    }));
+    const result = await trackedResume(
+      approvedWriteResume({ decision: "rejected", rejectionReason: "not now" }),
+      writeTransport,
+    );
+    expect(result.failedHonestly).toContain("3 steps");
+  });
+});
+
+describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incident 2026-11-05)", () => {
+  // Production defect: the golden follow-up run called files.read on the
+  // same index.html four times and the watchdog cancelled before any
+  // mutation. Recovery must be bounded — the first detections nudge the
+  // model to spend the already-read content on a mutation; once the
+  // nudge budget is spent the watchdog still cancels honestly.
+
+  function makeEditTransport(initialContent: string) {
+    let fileContent = initialContent;
+    const appliedPatches: Array<{ search: string; replace: string }> = [];
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      readFile: vi.fn(async () => ({ content: fileContent, size: fileContent.length })),
+      applyPatch: vi.fn(async (_path: string, patches: Array<{ search: string; replace: string }>) => {
+        for (const p of patches) {
+          if (!fileContent.includes(p.search)) throw new Error("search text not found");
+          fileContent = fileContent.replace(p.search, p.replace);
+          appliedPatches.push(p);
+        }
+        return { applied: true };
+      }),
+      writeFile: vi.fn(async (_path: string, content: string) => {
+        fileContent = content;
+        return { saved: true };
+      }),
+      createCheckpointBeforeMutation: vi.fn(async () => null),
+    } as unknown as WorkspaceTransport;
+    return { transport, appliedPatches, getContent: () => fileContent };
+  }
+
+  const READ_CALL = { toolId: "files.read", inputs: { projectId: "p-test", path: "index.html" } };
+  const readResponse = (id: string) => ({
+    text: "",
+    toolCalls: [{ ...READ_CALL, toolCallId: id }],
+    finishReason: "tool_calls",
+    model: "test-model",
+  });
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("nudges a repeated identical read into a real mutation instead of cancelling", async () => {
+    const { transport, appliedPatches, getContent } = makeEditTransport(
+      "<html><body><footer>Ember Roast</footer></body></html>",
+    );
+
+    let step = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      step += 1;
+      if (step <= 4) return readResponse(`tc-read-${step}`);
+      if (step === 5) {
+        return {
+          text: "",
+          toolCalls: [{
+            toolCallId: "tc-patch",
+            toolId: "apply_patch",
+            inputs: {
+              path: "index.html",
+              patches: [{ search: "<footer>Ember Roast</footer>", replace: "<footer>Golden Acceptance follow-up verified</footer>" }],
+            },
+          }],
+          finishReason: "tool_calls",
+          model: "test-model",
+        };
+      }
+      return { text: "Done.", toolCalls: [], finishReason: "stop", model: "test-model" };
+    });
+
+    const result = await runAgentLoopV2(
+      "update the footer to include the verification marker",
+      transport,
+      { model: "test-model", systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false },
+    );
+
+    // The 4th identical read was NOT executed — it got a corrective
+    // tool-result telling the model to mutate instead.
+    expect(result.toolCalls.filter((t) => t.toolId === "files.read")).toHaveLength(3);
+    const step5Messages = vi.mocked(callLLMWithTools).mock.calls[4][1] as Array<{ content?: string }>;
+    expect(step5Messages.some((m) => (m.content ?? "").includes("already executed with identical inputs"))).toBe(true);
+
+    // The nudge converted: a real patch landed and the run finished.
+    expect(result.cancelled).toBe(false);
+    expect(appliedPatches).toHaveLength(1);
+    expect(getContent()).toContain("Golden Acceptance follow-up verified");
+    expect(result.finalText).toBe("Done.");
+  });
+
+  it("still cancels honestly once the nudge budget is spent", async () => {
+    const { transport } = makeEditTransport("<html><body>x</body></html>");
+
+    vi.mocked(callLLMWithTools).mockImplementation(async () => readResponse(`tc-read-${Math.random()}`));
+
+    const result = await runAgentLoopV2(
+      "update the footer",
+      transport,
+      { model: "test-model", systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false },
+    );
+
+    // 3 executed reads + 2 nudged detections, then the watchdog fires.
+    expect(result.cancelled).toBe(true);
+    expect(result.cancelReason).toContain("Repeated tool call detected");
+    expect(transport.readFile).toHaveBeenCalledTimes(3);
+    expect(callLLMWithTools).toHaveBeenCalledTimes(6);
+  });
+
+  it("cannot be bypassed by rotating signatures — the nudge budget is per-run", async () => {
+    // index.html ×4 (nudge 1), then about.html ×4 (nudge 2 — different
+    // signature), then index.html again: still 3 recorded identical
+    // reads, budget is spent → honest cancel. The recovery must not
+    // become an unbounded retry loop by changing one input.
+    const { transport } = makeEditTransport("<html><body>x</body></html>");
+
+    let step = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      step += 1;
+      const path = step <= 4 ? "index.html" : step <= 8 ? "about.html" : "index.html";
+      return {
+        text: "",
+        toolCalls: [{ toolId: "files.read", toolCallId: `tc-${step}`, inputs: { projectId: "p-test", path } }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      };
+    });
+
+    const result = await runAgentLoopV2(
+      "update the footer",
+      transport,
+      { model: "test-model", systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false },
+    );
+
+    expect(result.cancelled).toBe(true);
+    expect(result.cancelReason).toContain("Repeated tool call detected");
+    // Executed: index×3 + about×3; the 4th of each was nudged, the 9th
+    // identical index read cancelled.
+    expect(callLLMWithTools).toHaveBeenCalledTimes(9);
+    expect(result.toolCalls.filter((t) => t.toolId === "files.read")).toHaveLength(6);
+  });
+
+  it("repeated MUTATING calls are outside the read-loop watchdog by design", async () => {
+    // hasInterveningMutation flips on the first non-readOnly call — even
+    // a failed one — so the detector only covers the pre-mutation phase
+    // (the golden scenario: reads before any write). A model repeating a
+    // failing patch is never nudged and never watchdog-cancelled; it is
+    // bounded by the step budget instead.
+    const { transport } = makeEditTransport("<html><body><footer>x</footer></body></html>");
+    (transport.applyPatch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("disk full"));
+
+    vi.mocked(callLLMWithTools).mockImplementation(async () => ({
+      text: "",
+      toolCalls: [{
+        toolId: "apply_patch",
+        toolCallId: `tc-patch-${Math.random()}`,
+        inputs: {
+          path: "index.html",
+          patches: [{ search: "<footer>x</footer>", replace: "<footer>y</footer>" }],
+        },
+      }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    }));
+
+    const result = await runAgentLoopV2(
+      "change the footer",
+      transport,
+      { model: "test-model", systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false, maxSteps: 8 },
+    );
+
+    expect(result.cancelReason ?? "").not.toContain("Repeated tool call detected");
+    expect(transport.applyPatch).toHaveBeenCalledTimes(8);
   });
 });

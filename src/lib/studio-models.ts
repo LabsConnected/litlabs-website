@@ -23,7 +23,7 @@ export type StudioModel = {
   apiModel?: string;
   apiProvider?: string;
   short?: string;
-  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias" | "advanced";
+  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias" | "advanced" | "local";
   /** True if this is a stable LiTT alias that routes to an underlying provider. */
   isLittAlias?: boolean;
   /** Description shown in the model picker tooltip. */
