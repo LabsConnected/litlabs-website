@@ -30,7 +30,7 @@ export default function PrivacyPage() {
             🛡️ Privacy Policy
           </div>
           <p className="text-[10px] opacity-60 uppercase tracking-widest">
-            Last Updated: August 10, 2026
+            Last Updated: October 10, 2026
           </p>
         </div>
 
@@ -208,6 +208,10 @@ export default function PrivacyPage() {
                 <strong>Inworld AI:</strong>{" "}Voice speech-to-text and
                 text-to-speech.
               </li>
+              <li>
+                <strong>HighLevel / LeadConnector:</strong>{" "}Optional affiliate
+                attribution and eligible signup referral tracking after consent.
+              </li>
             </ul>
             <p className="mt-2">
               Each provider processes data according to its own privacy policy.
@@ -329,9 +333,14 @@ export default function PrivacyPage() {
                 the server, not stored locally.
               </li>
               <li>
-                <strong>Analytics:</strong>{" "}Vercel Analytics may collect basic
-                usage metrics (page views, performance). No cross-site
-                tracking or advertising cookies are used.
+                <strong>Analytics:</strong>{" "}With your permission, our
+                first-party analytics records limited usage and funnel events.
+              </li>
+              <li>
+                <strong>Affiliate tracking:</strong>{" "}If you opt in, our
+                referral partner HighLevel / LeadConnector may set attribution
+                cookies and receive referral identifiers and eligible signup data.
+                You can change or withdraw consent from our Cookie Policy page.
               </li>
             </ul>
             <p className="mt-2">
