@@ -11,7 +11,7 @@ export const metadata: Metadata = buildMetadata({
   index: true,
 });
 
-const UPDATED = "July 27, 2026";
+const UPDATED = "November 7, 2026";
 
 const sections = [
   {
@@ -106,15 +106,17 @@ const sections = [
       <>
         <p>
           The Platform offers a free tier with starter credits and optional paid
-          plans, credit packs, and marketplace listings. Generation costs, credit
+          subscription plans and marketplace listings. Generation costs, credit
           values, plan pricing, and marketplace fees may change as the Platform
           evolves. Any paid feature will clearly show its cost before purchase or use.
         </p>
         <p className="mt-4">
-          Credits have no cash value, are non-refundable unless required by law, and
-          do not expire unless stated at the time of purchase. Refunds for paid
-          plans, where applicable, are handled per the plan&apos;s terms and
-          applicable consumer law.
+          Monthly plan credits are granted after each successful billing cycle,
+          expire at the end of that billing cycle, and do not roll over. Credits
+          granted at signup or purchase do not expire unless stated otherwise at
+          the time of grant. Credits have no cash value and are non-refundable
+          unless required by law. Refunds for paid plans, where applicable, are
+          handled per the plan&apos;s terms and applicable consumer law.
         </p>
       </>
     ),
