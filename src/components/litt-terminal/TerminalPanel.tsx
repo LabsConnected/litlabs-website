@@ -11,7 +11,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { clearTerminalTokenCache, getTerminalTokenResult, WorkspaceNotReadyError } from "@/lib/terminal-client";
+import { clearTerminalTokenCache, getTerminalTokenResult, TerminalDisabledError, WorkspaceNotReadyError } from "@/lib/terminal-client";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle, Copy, Check, Download, ExternalLink } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
@@ -670,6 +670,19 @@ export const TerminalPanel = forwardRef<
               });
 
           void pollPrepare().catch((prepErr: unknown) => {
+            // The token endpoint's TERMINAL_DISABLED verdict is a
+            // deploy-time policy state, not a provisioning failure —
+            // surface it truthfully instead of "workspace provisioning failed".
+            if (prepErr instanceof TerminalDisabledError) {
+              const disabledMessage = prepErr.message || "The terminal is not available yet.";
+              term.writeln(`\x1b[33m⚠ ${disabledMessage}\x1b[0m`);
+              term.writeln("\x1b[90m   Terminal execution is disabled in this environment.\x1b[0m");
+              onLog?.(`[TERMINAL] ${disabledMessage}`);
+              terminalStore.setError(disabledMessage);
+              terminalStore.setFailureStage("feature_disabled");
+              terminalStore.setStatus("unavailable");
+              return;
+            }
             const prepMessage = prepErr instanceof Error ? prepErr.message : "Workspace preparation failed";
             term.writeln(`\x1b[31m❌ ${prepMessage}\x1b[0m`);
             onLog?.(`[WORKSPACE] ${prepMessage}`);
@@ -678,6 +691,20 @@ export const TerminalPanel = forwardRef<
             const isContextMissing = /canonical project|not found|project context/i.test(prepMessage);
             terminalStore.setStatus(isContextMissing ? "project_context_missing" : "error");
           });
+          return;
+        }
+        // TERMINAL_DISABLED (403 from /api/terminal/token): the terminalRuntime
+        // feature flag is off — a policy verdict, not a socket failure. Report
+        // it as unavailable with its own stage; never as "socket unavailable",
+        // and never retry (the client-side cache already suppresses refetches).
+        if (error instanceof TerminalDisabledError) {
+          const disabledMessage = error.message || "The terminal is not available yet.";
+          term.writeln(`\x1b[33m⚠ ${disabledMessage}\x1b[0m`);
+          term.writeln("\x1b[90m   Terminal execution is disabled in this environment.\x1b[0m");
+          onLog?.(`[TERMINAL] ${disabledMessage}`);
+          terminalStore.setError(disabledMessage);
+          terminalStore.setFailureStage("feature_disabled");
+          terminalStore.setStatus("unavailable");
           return;
         }
         const message =
