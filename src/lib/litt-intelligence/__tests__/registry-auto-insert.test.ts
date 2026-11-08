@@ -75,6 +75,36 @@ describe("maybeAutoInsertGeneratedImage", () => {
     expect(writeBinaryFile).toHaveBeenCalledTimes(1);
   });
 
+  it("saves a data: URL whose label lies about the encoding (staging loop payload)", async () => {
+    // Regression for 2026-11-08: Cloudflare flux returns JPEG bytes that
+    // were wrapped as data:image/png. insertAssetFromUrl now trusts the
+    // bytes over the label, so the auto-insert succeeds instead of
+    // reporting savedToProject:false on every approved generation.
+    const jpeg = Buffer.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46,
+      0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+      0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
+    ]);
+    const writeBinaryFile = vi.fn(async () => ({ saved: true }));
+    const out = (await maybeAutoInsertGeneratedImage(
+      "image.generate",
+      {
+        success: true,
+        providerId: "cloudflare",
+        downloadUrl: `data:image/png;base64,${jpeg.toString("base64")}`,
+        title: "hero dog",
+        markdown: "![hero](data:image/png;base64,…)",
+        insertHint: "call project.insert_asset with this downloadUrl",
+      },
+      projectTransport(writeBinaryFile),
+    )) as Record<string, unknown>;
+
+    expect(out.savedToProject).toBe(true);
+    expect(out.sitePath).toMatch(/\.jpe?g$/);
+    expect(writeBinaryFile).toHaveBeenCalledTimes(1);
+    expect(out.insertHint).toBeUndefined();
+  });
+
   it("leaves chat-only generations untouched (no project workspace)", async () => {
     const result = generateResult();
     const out = await maybeAutoInsertGeneratedImage("image.generate", result, undefined);
@@ -106,6 +136,11 @@ describe("maybeAutoInsertGeneratedImage", () => {
     expect(out.savedToProject).toBe(false);
     expect(out.saveError).toBe("download failed");
     expect(out.sitePath).toBeUndefined();
+    // The unfollowable insertHint (its downloadUrl is redacted from model
+    // context) must not survive a failed save — it drove the approval
+    // loop. Recovery guidance replaces it.
+    expect(out.insertHint).toBeUndefined();
+    expect(out.recovery).toContain("could not be saved");
     // The chat URL still works even when the project save failed.
     expect(out.downloadUrl).toBe("https://cdn.example.com/gen-abc.png");
   });
@@ -121,5 +156,7 @@ describe("maybeAutoInsertGeneratedImage", () => {
 
     expect(out.savedToProject).toBe(false);
     expect(out.saveError).toBe("terminal 413");
+    expect(out.insertHint).toBeUndefined();
+    expect(out.recovery).toContain("terminal 413");
   });
 });

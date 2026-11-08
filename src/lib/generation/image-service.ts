@@ -31,6 +31,7 @@ import {
   getProvider,
 } from "@/lib/media";
 import { uploadBinaryAsset } from "@/lib/r2";
+import { sniffImageMimeType } from "@/lib/image-sniff";
 import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase";
 import { calculateRetailBits } from "@/lib/generation/cost-engine";
 import {
@@ -203,6 +204,25 @@ async function persistImage(
 
 // ── Provider implementations ──
 
+/**
+ * Wrap provider-returned base64 image bytes in a data: URL whose MIME label
+ * matches the actual bytes. Providers do not report an encoding for their
+ * base64 payloads — Cloudflare flux-1-schnell returns JPEG while handlers
+ * historically hardcoded image/png — and a wrong label makes downstream
+ * consumers (insertAssetFromUrl's structural check, R2/Supabase uploads)
+ * treat valid images as corrupt. Sniff the bytes; fall back to the
+ * provider-expected type only when the payload matches no known format.
+ */
+function base64ImageDataUrl(base64: string, fallbackMime: string): string {
+  let mime = fallbackMime;
+  try {
+    mime = sniffImageMimeType(Buffer.from(base64, "base64")) ?? fallbackMime;
+  } catch {
+    // Undecodable base64 keeps the fallback label — downstream validation
+    // still applies its own structural checks.
+  }
+  return `data:${mime};base64,${base64}`;
+}
 
 async function handleGeminiImage(args: {
   prompt: string;
@@ -437,7 +457,9 @@ export async function handleCloudflareImage(args: {
   }
   if (data.result?.image) {
     return {
-      downloadUrl: `data:image/png;base64,${data.result.image}`,
+      // flux-1-schnell returns JPEG bytes — the label must match or the
+      // workspace auto-insert rejects the payload as "truncated or corrupt".
+      downloadUrl: base64ImageDataUrl(data.result.image, "image/png"),
       id: `cloudflare_${Date.now()}`,
       status: "complete",
       title: args.prompt.slice(0, 60),
@@ -677,7 +699,7 @@ async function handleTogetherImage(
   const url = data.data?.[0]?.url;
   if (b64) {
     return {
-      downloadUrl: `data:image/png;base64,${b64}`,
+      downloadUrl: base64ImageDataUrl(b64, "image/png"),
       id: `together_${Date.now()}`,
       status: "complete",
       title: prompt.slice(0, 60),
@@ -722,7 +744,7 @@ export function openAIImageResultFromPayload(
   if (!encoded && !url) throw new Error("OpenAI returned no image data");
 
   return {
-    downloadUrl: encoded ? `data:image/png;base64,${encoded}` : url!,
+    downloadUrl: encoded ? base64ImageDataUrl(encoded, "image/png") : url!,
     id: `openai_${Date.now()}`,
     status: "complete",
     title: prompt.slice(0, 60),
