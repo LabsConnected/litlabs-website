@@ -102,6 +102,29 @@ describe("createMissionEvidenceTracker", () => {
     expect(tracker.isReadOnly()).toBe(false);
   });
 
+  it("a DENIED mutation attempt stays read-only", () => {
+    const tracker = createMissionEvidenceTracker(MUTATION);
+    tracker.recordToolCall("project.write_file", { path: "x.ts", content: "y" });
+    tracker.recordToolCall("project.run", { command: "npm", args: ["install"] });
+    tracker.recordToolResult("project.write_file", false, "Approval denied or not available");
+    tracker.recordToolResult("project.run", false, "Approval denied or not available");
+    expect(tracker.isReadOnly()).toBe(true);
+  });
+
+  it("a failed mutation that may have run still counts as mutating", () => {
+    const tracker = createMissionEvidenceTracker(MUTATION);
+    tracker.recordToolCall("project.run", { command: "npm", args: ["install"] });
+    tracker.recordToolResult("project.run", false, "Exit code 1 — partial install");
+    expect(tracker.isReadOnly()).toBe(false);
+  });
+
+  it("a read-only project.run command stays read-only", () => {
+    const tracker = createMissionEvidenceTracker(MUTATION, { cwd: process.cwd() });
+    tracker.recordToolCall("project.run", { command: "git", args: ["status"] });
+    tracker.recordToolResult("project.run", true, "on branch main — clean");
+    expect(tracker.isReadOnly()).toBe(true);
+  });
+
   it("a failed tool never counts as evidence", () => {
     const tracker = createMissionEvidenceTracker(MUTATION);
     tracker.recordToolResult("project.status", false, "git status failed");
