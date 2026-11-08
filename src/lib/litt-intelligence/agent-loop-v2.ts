@@ -4280,9 +4280,24 @@ async function resumeAgentLoopV2Inner(
     )
   ) {
     try {
-      const { verifyProjectArtifacts } = await import("./launch-flow");
+      const { verifyProjectArtifacts, isRunnableEntryPath } = await import("./launch-flow");
+      // The marker gate skips only when an ENTRY file was touched — a run
+      // whose sole mutations were asset inserts or unrelated files still
+      // fails as "blank starter screen" instead of passing as built.
+      // call.paths carries the declared+result mutation targets.
+      // site.compose/site.patch write the site entry by construction —
+      // their declared paths may not name index.html.
+      const entryFileMutated = toolCallLog.some(
+        (call) =>
+          call.success &&
+          call.mutating &&
+          (call.toolId === "site.compose" ||
+            call.toolId === "site.patch" ||
+            (call.paths ?? []).some(isRunnableEntryPath)),
+      );
       const artifacts = await verifyProjectArtifacts(transport, {
         hadSuccessfulMutation: true,
+        entryFileMutated,
       });
       if (artifacts.ok) noteBuildArtifacts(qualitySession, artifacts.files);
     } catch {
