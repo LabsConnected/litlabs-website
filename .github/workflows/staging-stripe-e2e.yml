@@ -1,0 +1,104 @@
+name: Staging Stripe TEST-mode E2E
+
+# Manual-dispatch ONLY. Runs scripts/final-acceptance/stripe-test-checkout.mjs
+# against the deployed STAGING app: a fresh disposable Clerk TEST user buys a
+# subscription on Stripe's hosted Checkout with the 4242 test card, and the
+# run asserts the webhook chain — subscription activation + one monthly
+# credit grant, exactly once — through the same user-facing APIs a real
+# subscriber uses. Forged webhook bodies are proven rejected.
+#
+# Safety contract:
+#   - STAGING_URL is hardcoded and the script itself refuses any production
+#     host before anything runs.
+#   - The script aborts if the checkout session is not cs_test_* — a live
+#     session would be a REAL charge. Stripe TEST mode charges nothing.
+#   - No Stripe secret keys, no card secrets: the only secret used is the
+#     Clerk TEST instance key already consumed by staging-acceptance.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      plan_id:
+        description: "Subscription plan to purchase (monthly subscription plans only)"
+        required: false
+        default: "creator_lite"
+        type: choice
+        options:
+          - creator_lite
+          - creator_beta
+          - pro_builder_beta
+      expected_staging_sha:
+        description: "Optional 40-char SHA staging must serve before the run (drift aborts early)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-stripe-e2e
+  cancel-in-progress: false
+
+env:
+  STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
+
+jobs:
+  stripe-e2e:
+    name: Stripe TEST-mode checkout → webhook → grant E2E (staging)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_staging_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Install Playwright chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify staging is healthy before the run
+        run: |
+          body="$(curl -fsS --max-time 30 "$STAGING_URL/api/health")"
+          echo "$body" | jq -e '.status == "ok"' > /dev/null \
+            || { echo "::error::staging not healthy — refusing paid-flow run"; echo "$body" | head -c 500; exit 1; }
+          echo "staging healthy: $(echo "$body" | jq -r .commit)"
+          if [ -n "$EXPECTED_SHA" ]; then
+            detail="$(echo "$body" | jq -r '.checks.build.detail')"
+            [ "$detail" = "$EXPECTED_SHA" ] \
+              || { echo "::error::staging serves $detail, expected $EXPECTED_SHA — redeploy first"; exit 1; }
+          fi
+
+      - name: Create disposable Clerk TEST user
+        id: user
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+        run: echo "user_id=$(node scripts/final-acceptance/create-fresh-user.mjs)" >> "$GITHUB_OUTPUT"
+
+      - name: Run Stripe test-mode checkout E2E
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+          LITT_PROD_BASE_URL: ${{ env.STAGING_URL }}
+          LITT_ACCEPTANCE_USER_ID: ${{ steps.user.outputs.user_id }}
+          LITT_E2E_PLAN_ID: ${{ inputs.plan_id }}
+        run: node scripts/final-acceptance/stripe-test-checkout.mjs
+
+      - name: Upload evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stripe-e2e-${{ github.run_id }}
+          path: artifacts/stripe-e2e/**
+          retention-days: 14
+          if-no-files-found: ignore
