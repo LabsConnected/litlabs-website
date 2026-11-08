@@ -2,8 +2,8 @@ import PricingClient from "./PricingClient";
 import { buildMetadata } from "@/lib/seo";
 
 export const metadata = buildMetadata({
-  title: "Pricing",
-  description: "Simple, transparent pricing for creators and builders at LiTTree LabStudios.",
+  title: "AI Project Operator Pricing",
+  description: "Compare LiTT AI Project Operator plans, included LiTTBits, project limits, and creator or builder features.",
   path: "/pricing",
 });
 

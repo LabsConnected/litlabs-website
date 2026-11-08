@@ -4,7 +4,7 @@ import { SafeEmailText } from "@/components/SafeEmail";
 
 export const metadata: Metadata = buildMetadata({
   title: "Privacy Policy",
-  description: "Privacy Policy for LiTTree LabStudios AI creative operating system and social creator platform.",
+  description: "Privacy Policy for LiTT, LiTTree LabStudios' AI Project Operator, and related project, AI, media, and marketplace features.",
   path: "/privacy",
   index: true,
 });
@@ -34,6 +34,12 @@ export default function PrivacyPage() {
           </p>
         </div>
 
+        <p className="mb-8 text-xs leading-relaxed opacity-80">
+          LiTT is LiTTree LabStudios&apos; AI Project Operator for planning,
+          building, and verifying projects in one workspace. This policy covers
+          LiTT, LiTT Studio, and related AI, media, voice, and marketplace features.
+        </p>
+
         <div className="space-y-8 text-xs leading-relaxed opacity-90">
           <section>
             <h2
@@ -60,8 +66,8 @@ export default function PrivacyPage() {
               <li>
                 <strong>Local Storage:</strong>{" "}Theme preferences, UI state,
                 and cached session metadata stored locally in your browser.
-                AI credit balances are <strong>not</strong>{" "}stored in local
-                storage — they are stored server-side in our Supabase credit
+                LiTTBits balances are <strong>not</strong>{" "}stored in local
+                storage — they are stored server-side in our Supabase LiTTBits
                 ledger.
               </li>
               <li>
@@ -72,9 +78,9 @@ export default function PrivacyPage() {
                 projects, and persist across sessions.
               </li>
               <li>
-                <strong>AI Credit Ledger:</strong>{" "}Your AI credit balance,
+                <strong>LiTTBits Ledger:</strong>{" "}Your LiTTBits balance,
                 transaction history (grants, spending, purchases), and billing
-                records are stored server-side in our Supabase credit ledger.
+                records are stored server-side in our Supabase LiTTBits ledger.
               </li>
               <li>
                 <strong>Uploaded Media &amp; Attachments:</strong>{" "}Files,
@@ -120,7 +126,7 @@ export default function PrivacyPage() {
               <li>Providing and maintaining the Platform functionality.</li>
               <li>Authenticating users and securing accounts via Clerk.</li>
               <li>
-                Processing subscriptions, AI credit grants, and marketplace
+                Processing subscriptions, LiTTBits grants, and marketplace
                 transactions via Stripe.
               </li>
               <li>
@@ -236,7 +242,7 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>Database:</strong>{" "}Supabase (PostgreSQL) stores user
-                accounts, conversations, project memory, AI credit
+                accounts, conversations, project memory, LiTTBits
                 ledger, subscriptions, and marketplace data.
               </li>
               <li>
@@ -274,7 +280,7 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>Supabase:</strong>{" "}Database, conversations, project
-                memory, and AI credit ledger.
+                memory, and LiTTBits ledger.
               </li>
               <li>
                 <strong>Stripe:</strong>{" "}Payment processing for subscriptions
@@ -325,7 +331,7 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>Local storage:</strong>{" "}Theme preferences, UI state,
-                and cached session metadata. AI credit balances are fetched from
+                and cached session metadata. LiTTBits balances are fetched from
                 the server, not stored locally.
               </li>
               <li>
@@ -354,7 +360,7 @@ export default function PrivacyPage() {
                 for the lifetime of your account unless you delete them.
               </li>
               <li>
-                <strong>AI credit ledger:</strong>{" "}Transaction history is
+                <strong>LiTTBits ledger:</strong>{" "}Transaction history is
                 retained for billing and audit purposes.
               </li>
               <li>

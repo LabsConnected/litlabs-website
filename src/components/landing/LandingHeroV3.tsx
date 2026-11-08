@@ -62,12 +62,12 @@ export function LandingHeroV3() {
           </div>
 
           <h1 className="litt-hero-reveal litt-hero-step-2 mt-7 max-w-[820px] text-[clamp(3.4rem,7.3vw,7.4rem)] font-black leading-[0.86] tracking-[-0.075em] text-white">
-            Bring the idea.
-            <span className="litt-hero-title-gradient mt-2 block">LiTT builds the rest.</span>
+            Your AI Project Operator.{" "}
+            <span className="litt-hero-title-gradient mt-2 block">From idea to ship.</span>
           </h1>
 
           <p className="litt-hero-reveal litt-hero-step-3 mt-7 max-w-2xl text-lg leading-8 text-white/58 sm:text-xl sm:leading-9">
-            LiTT plans, builds, edits real projects, uses tools, verifies the work, and helps you ship—all from one workspace.
+            LiTT plans work, builds and edits real files, verifies the result, and helps you prepare to ship—all in one workspace.
           </p>
 
           <div className="litt-hero-reveal litt-hero-step-4 mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -83,7 +83,7 @@ export function LandingHeroV3() {
           </div>
 
           <div className="litt-hero-reveal litt-hero-step-5 mt-7 flex flex-wrap gap-x-5 gap-y-2 text-[11px] font-bold text-white/38 sm:text-xs">
-            {["Free starter plan", "No credit card required", "Connect GitHub", "Your files stay yours"].map((fact) => (
+            {["Free starter plan", "No credit card required", "GitHub on Creator and Pro Builder", "Your files stay yours"].map((fact) => (
               <span key={fact} className="inline-flex items-center gap-1.5">
                 <Check size={12} className="text-accent" /> {fact}
               </span>
@@ -123,7 +123,7 @@ export function LandingHeroV3() {
             <div className="relative aspect-[0.75/1] overflow-hidden sm:aspect-[1.32/1]">
               <Image
                 src="/brand/litt-agent-hero-v2.png"
-                alt="LiTT, the LiTTree AI operator, working inside a neon digital workspace"
+                alt="LiTT, the AI Project Operator, working inside a neon digital workspace"
                 fill
                 priority
                 loading="eager"

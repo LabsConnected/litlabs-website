@@ -34,7 +34,8 @@ const homeSchema = {
         height: 512,
       },
       image: absoluteUrl("/opengraph-image.png"),
-      description: DEFAULT_DESCRIPTION,
+      description:
+        "LiTTree LabStudios is the company behind LiTT, an AI Project Operator for planning, building, and verifying real projects in one workspace.",
     },
     {
       "@type": "WebSite",
@@ -48,7 +49,8 @@ const homeSchema = {
         "LiTTree Labs",
         "litlabs.net",
       ],
-      description: DEFAULT_DESCRIPTION,
+      description:
+        "LiTT is an AI Project Operator for planning, building, and verifying projects in one workspace.",
       publisher: {
         "@id": `${SITE_URL}/#organization`,
       },
@@ -62,7 +64,7 @@ const homeSchema = {
       operatingSystem: "Web",
       url: SITE_URL,
       description:
-        "LiTT plans, builds, edits real projects, uses tools, verifies the work, and helps you ship—all from one workspace.",
+        "LiTT is an AI Project Operator for planning, building, and verifying projects in one workspace.",
       publisher: {
         "@id": `${SITE_URL}/#organization`,
       },
@@ -92,7 +94,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Research, write, and market with AI agents. 7,500 AI credits monthly, 5 active projects.",
+            "Research, write, and market with AI agents. 7,500 LiTTBits monthly, 5 active projects.",
         },
         {
           "@type": "Offer",
@@ -101,7 +103,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Build, debug, and deploy with full AI tooling. 18,000 AI credits monthly, 25 active projects.",
+            "Build, debug, and deploy with full AI tooling. 18,000 LiTTBits monthly, 25 active projects.",
         },
       ],
     },
@@ -226,6 +228,16 @@ describe("Homepage structured data (JSON-LD)", () => {
       expect(o.priceCurrency).toBe("USD");
       expect(o.url).toBe(absoluteUrl("/pricing"));
     });
+  });
+
+  it("positions LiTT as an AI Project Operator and labels plan balances LiTTBits", () => {
+    const app = (homeSchema["@graph"] as Array<Record<string, unknown>>)[2];
+    expect(app.description).toContain("AI Project Operator");
+
+    const offers = app.offers as Array<Record<string, string>>;
+    expect(offers[0].description).toContain("LiTTBits");
+    expect(offers[2].description).toContain("LiTTBits");
+    expect(offers[3].description).toContain("LiTTBits");
   });
 
   it("DEFAULT_TITLE contains LitLabs", () => {

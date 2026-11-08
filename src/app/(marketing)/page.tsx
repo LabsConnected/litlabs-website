@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import HomePageClient from "@/app/HomePageClient";
 import { JsonLd } from "@/components/seo/JsonLd";
 import {
-  DEFAULT_DESCRIPTION,
   SITE_NAME,
   SITE_URL,
   absoluteUrl,
@@ -18,13 +17,13 @@ export const revalidate = 60;
 
 export const metadata: Metadata = {
   ...buildMetadata({
-    title: "LiTT — AI Project Operator & Creative Workspace",
+    title: "LiTT — AI Project Operator",
     description:
-      "LiTT plans, builds, edits real projects, uses tools, verifies work, and helps you ship from one workspace. Build apps, media, and workflows at litlabs.net.",
+      "LiTT is your AI Project Operator. It plans work, builds and edits real files, verifies results, and helps you prepare projects to ship.",
     path: "/",
     index: true,
   }),
-  title: { absolute: "LiTT — AI Project Operator & Creative Workspace | LiTTree LabStudios · litlabs.net" },
+  title: { absolute: "LiTT — AI Project Operator | LiTTree LabStudios · litlabs.net" },
 };
 
 const homeSchema = {
@@ -65,7 +64,7 @@ const homeSchema = {
         height: 512,
       },
       image: absoluteUrl("/opengraph-image.png"),
-      description: DEFAULT_DESCRIPTION,
+      description: "LiTTree LabStudios is the company behind LiTT, an AI Project Operator for planning, building, and verifying real projects in one workspace.",
     },
     {
       "@type": "WebSite",
@@ -79,11 +78,11 @@ const homeSchema = {
         "LiTTree Labs",
         "litlabs.net",
       ],
-      description: DEFAULT_DESCRIPTION,
       publisher: {
         "@id": `${SITE_URL}/#organization`,
       },
       inLanguage: "en-US",
+      description: "LiTT is an AI Project Operator for planning, building, and verifying projects in one workspace.",
     },
     {
       "@type": "SoftwareApplication",
@@ -93,7 +92,7 @@ const homeSchema = {
       operatingSystem: "Web",
       url: SITE_URL,
       description:
-        "LiTT plans, builds, edits real projects, uses tools, verifies the work, and helps you ship—all from one workspace.",
+        "LiTT is an AI Project Operator for planning, building, and verifying projects in one workspace.",
       publisher: {
         "@id": `${SITE_URL}/#organization`,
       },
@@ -123,7 +122,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            `Research, write, and market with AI agents. ${formatBits(getPlanCreditAllowance("creator_beta"))} AI credits monthly, 5 active projects.`,
+            `Research, write, and market with AI agents. ${formatBits(getPlanCreditAllowance("creator_beta"))} LiTTBits monthly, 5 active projects.`,
         },
         {
           "@type": "Offer",
@@ -132,7 +131,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            `Build, debug, and deploy with full AI tooling. ${formatBits(getPlanCreditAllowance("pro_builder_beta"))} AI credits monthly, 25 active projects.`,
+            `Build, debug, and deploy with full AI tooling. ${formatBits(getPlanCreditAllowance("pro_builder_beta"))} LiTTBits monthly, 25 active projects.`,
         },
       ],
     },
