@@ -27,7 +27,7 @@ import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage
 export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
-import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
+import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -783,6 +783,8 @@ const LOCAL_SMALL_TOOL_IDS = new Set([
   "files.delete",
   "files.rename",
   "files.mkdir",
+  "site.compose",
+  "site.patch",
   "preview.start",
   "preview.status",
 ]);
@@ -820,21 +822,38 @@ const LOCAL_SMALL_LANE_PROMPT =
   "You are LiTT, a website-building agent. You act by emitting tool calls.\n" +
   "This model has no native tool channel — emit EACH call as a fenced block:\n\n" +
   "```tool_call\n" +
-  '{"name":"files.write","arguments":{"path":"index.html","content":"<!doctype html>..."}}\n' +
+  '{"name":"site.compose","arguments":{"title":"Ember Roast","theme":"warm","sections":[{"kind":"features","heading":"Why us","items":[{"title":"Fresh","text":"Roasted daily"}]},{"kind":"footer","text":"Open daily"}]}}\n' +
   "```\n\n" +
   "Rules:\n" +
-  "- Emit EVERY files.write the site needs in ONE response, then emit preview.start.\n" +
-  "- Emit only tool_call blocks — no prose, no explanations.\n" +
+  "- To CREATE a new website page, emit ONE site.compose call — never write raw HTML for a new page.\n" +
+  "  title MUST be the site or brand name the user asked for, verbatim — never a generic label. " +
+  "Give it: title, theme (light/dark/warm/forest/ocean/mono), accentHue 0-360, a hero " +
+  "{heading,subheading,cta,image keywords}, and 4-8 sections using the section kinds in the tool " +
+  "schema. Write real copy for the user's request — never lorem ipsum or 'text here'. " +
+  "Photos come from the plan's image keywords automatically — no image tools exist.\n" +
+  "- If site.compose returns a validation error, fix the plan and emit it again corrected.\n" +
+  "- site.compose REPLACES THE WHOLE PAGE — it is for new pages (or an explicit full redesign) " +
+  "only. NEVER use it for an edit to an existing page: text, color, or single-section changes " +
+  "go through files.read + apply_patch like any other edit.\n" +
   "- To MODIFY an existing file: files.read it FIRST, then prefer apply_patch with a " +
   "search/replace for just the requested change — NEVER rewrite the whole file from " +
   "scratch. Keep all existing styling, classes, and structure unless the request asks to remove them.\n" +
+  "- On a page built by site.compose, a WHOLE-SECTION change (footer text, hero heading, a " +
+  "section's content) is easier with site.patch: {section: \"footer\", text: \"…\"} — " +
+  "no search strings needed. For small precise edits, apply_patch still works.\n" +
+  "- If apply_patch is rejected, the tool result already contains the CURRENT FILE CONTENT — " +
+  "copy the search text verbatim from it and emit apply_patch again; do not stop.\n" +
+  "- files.write still exists for full manual control (new non-page files, or when the user " +
+  "explicitly wants hand-written HTML) — but for a new site page, site.compose is the default.\n" +
   "- Do EVERY part of a multi-part request: if asked to change the heading AND the theme, " +
   "emit one apply_patch for EACH change in the SAME response. A request is not done until " +
   "every requested change is applied.\n" +
   "- When the request specifies exact text to add or change, the patch's replace MUST contain " +
   "that text verbatim — never paraphrase it or substitute different content.\n" +
   "- A files.write that strips an existing file's styling is refused — patch instead.\n" +
-  "- Available: files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.\n\n" +
+  "- After the page exists emit preview.start, then stop.\n" +
+  "- Emit only tool_call blocks — no prose, no explanations.\n" +
+  "- Available: site.compose, site.patch, files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.\n\n" +
   LOCAL_SITE_QUALITY_CONTRACT;
 
 /**
@@ -1323,7 +1342,7 @@ function noteReadBackToSession(
  */
 async function maybeEnrichStaticSiteVisuals(
   transport: WorkspaceTransport,
-  call: { toolId: string; inputs: unknown; success: boolean; readOnly: boolean },
+  call: { toolId: string; inputs: unknown; success: boolean; readOnly: boolean; result?: unknown },
   qualitySession: QualityLoopSession | null,
   isStaticWorkspace: boolean | undefined,
   localProgress: ProgressEmitter,
@@ -1332,7 +1351,7 @@ async function maybeEnrichStaticSiteVisuals(
   try {
     const inputs = (call.inputs ?? {}) as { path?: unknown };
     const declared =
-      declaredMutationPaths(call.inputs as Record<string, unknown> | undefined, undefined) ?? [];
+      declaredMutationPaths(call.inputs as Record<string, unknown> | undefined, call.result) ?? [];
     const htmlTouched =
       /\.html?$/i.test(typeof inputs.path === "string" ? inputs.path : "") ||
       declared.some((p) => /\.html?$/i.test(p));
@@ -1348,11 +1367,14 @@ async function maybeEnrichStaticSiteVisuals(
           `Visual enrichment: ${report.imagesResolved} image(s) resolved` +
           (report.imagesFailed > 0 ? `, ${report.imagesFailed} unavailable` : "") +
           (report.placeholdersUsed > 0 ? `, ${report.placeholdersUsed} placeholder fallback(s)` : "") +
-          ` (${report.providersUsed.join(", ") || "no providers"}).`,
+          ` (${report.providersUsed.join(", ") || "no providers"}` +
+          (report.providersFailed.length > 0 ? `; failed: ${report.providersFailed.join(", ")}` : "") +
+          `).`,
       });
     }
-  } catch {
+  } catch (err) {
     // Enrichment is additive — it must never break the run.
+    console.warn("[enrich] maybeEnrichStaticSiteVisuals failed:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -2000,7 +2022,13 @@ async function runAgentLoopV2Inner(
       }
       const zeroCallText = llmResponse.text ?? "";
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
-        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Small lane exists to mutate files: until a mutation lands, a
+        // prose-only reply can never be the final answer — bounded nudges
+        // then an honest failure, never a silent fake-complete.
+        requiredToolCallPending:
+          (cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) &&
+          !emittedToolCalls &&
+          !hasInterveningMutation,
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides
@@ -2227,12 +2255,65 @@ async function runAgentLoopV2Inner(
       // fail on resume or persist the token verbatim. Feed the error back
       // as a tool result so the model re-reads and regenerates.
       if (permResult.allowed) {
-        const writeError =
+        let writeError =
           toolCall.toolId === "apply_patch"
             ? await validateApplyPatchInputs(toolCall.inputs, transport)
             : toolCall.toolId === "files.write"
               ? validateFilesWriteInputs(toolCall.inputs)
               : null;
+        // Small-lane full-overwrite gate: a files.write or site.compose that
+        // replaces an existing page must declare allowOverwrite or take the
+        // apply_patch path — whole-document regeneration is how small
+        // models silently drop the requested edit.
+        if (
+          !writeError &&
+          isLocalSmallLane() &&
+          (toolCall.toolId === "files.write" || toolCall.toolId === "site.compose")
+        ) {
+          writeError = await existingPageOverwriteError(toolCall.inputs, transport);
+          if (writeError) writeError = `${toolCall.toolId} ${writeError}`;
+        }
+        // site.compose plan validation runs pre-approval too — the approval
+        // freezes the plan, so a malformed one can only die post-approval
+        // ("approved workspace operation failed"). Feeding the errors back
+        // lets the model fix the plan and re-emit instead.
+        if (!writeError && toolCall.toolId === "site.compose") {
+          const { validateSitePlan } = await import("./site-compose");
+          const planInput =
+            toolCall.inputs.plan !== undefined
+              ? toolCall.inputs.plan
+              : Object.fromEntries(
+                  Object.entries(toolCall.inputs).filter(([k]) => k !== "path" && k !== "projectId" && k !== "allowOverwrite"),
+                );
+          const v = validateSitePlan(planInput);
+          if (!v.ok) writeError = `site.compose invalid plan: ${v.errors.join("; ")} — fix the plan and emit it again.`;
+        }
+        // site.patch dry-run: read the target and run the splice in memory —
+        // a missing region or no-op edit must fail here with feedback, not
+        // post-approval where the run dies with "approved workspace
+        // operation failed".
+        if (!writeError && toolCall.toolId === "site.patch") {
+          const patchPath =
+            typeof toolCall.inputs.path === "string" && toolCall.inputs.path.trim()
+              ? toolCall.inputs.path.trim()
+              : "index.html";
+          const section = toolCall.inputs.section;
+          if (typeof section !== "string" || !section.trim()) {
+            writeError = 'site.patch requires "section" (e.g. "hero", "footer", "features-1")';
+          } else {
+            try {
+              const { content } = await transport.readFile(patchPath);
+              const { applySectionEdit } = await import("./site-compose");
+              const fields = Object.fromEntries(
+                Object.entries(toolCall.inputs).filter(([k]) => k !== "path" && k !== "projectId" && k !== "section" && k !== "allowOverwrite"),
+              );
+              const probe = applySectionEdit(content, section, fields);
+              if (!probe.ok) writeError = `site.patch failed: ${probe.error}`;
+            } catch {
+              writeError = `site.patch: cannot read ${patchPath} — files.read it first or check the path.`;
+            }
+          }
+        }
         if (writeError) {
           const recoveryKey = `${toolCall.toolId}:${String(toolCall.inputs.path ?? "")}`;
           const recoveryAttempt = (patchRecoveryAttempts.get(recoveryKey) ?? 0) + 1;
@@ -2248,12 +2329,18 @@ async function runAgentLoopV2Inner(
             error: recoveryMessage,
           };
           llmMessages.push(buildToolResultMessage(result));
-          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: recoveryAttempt >= 2 ? "invalid write — stopped safely" : "invalid write — re-read and regenerate", mutating: false });
+          const invalidWriteSummary =
+            toolCall.toolId === "apply_patch"
+              ? recoveryAttempt >= 2
+                ? "Invalid patch repeated after disk re-read; stopped without mutation"
+                : "Invalid patch re-read from disk; regenerate or use files.write"
+              : `${toolCall.toolId} rejected pre-approval — model retries with corrected inputs`;
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: invalidWriteSummary, mutating: false });
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
             success: false,
-            summary: recoveryAttempt >= 2 ? "Invalid patch repeated after disk re-read; stopped without mutation" : "Invalid patch re-read from disk; regenerate or use files.write",
+            summary: invalidWriteSummary,
             durationMs: 0,
           });
           if (toolCall.toolId === "apply_patch" && recoveryAttempt >= 2) {
@@ -2516,7 +2603,7 @@ async function runAgentLoopV2Inner(
       }
       await maybeEnrichStaticSiteVisuals(
         transport,
-        { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly },
+        { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly, result: result.result },
         qualitySession,
         cfg.isStaticWorkspace,
         localProgress,
@@ -3220,7 +3307,7 @@ export async function executeDeferredToolCalls(
     }
     await maybeEnrichStaticSiteVisuals(
       ctx.transport,
-      { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly },
+      { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly, result: result.result },
       ctx.qualitySession,
       ctx.isStaticWorkspace,
       ctx.localProgress,
@@ -3577,7 +3664,7 @@ async function resumeAgentLoopV2Inner(
     }
     await maybeEnrichStaticSiteVisuals(
       transport,
-      { toolId: resume.toolId, inputs: resume.inputs, success: result.success, readOnly: resumedReadOnly },
+      { toolId: resume.toolId, inputs: resume.inputs, success: result.success, readOnly: resumedReadOnly, result: result.result },
       qualitySession,
       cfg.isStaticWorkspace,
       localProgress,
@@ -3598,6 +3685,25 @@ async function resumeAgentLoopV2Inner(
     // be cached as executed work or weaken loop detection.
     if (toolDef && !toolDef.readOnly && result.success) {
       hasInterveningMutation = true;
+      // Ledger the call the user just approved. The resume rebuilds
+      // executedMutations empty and seedToolCallRecordsFromHistory only
+      // counts calls with a tool result in the paused history — the gated
+      // call had none — so without this the approved execution is
+      // invisible to dedupe: an identical call deferred from the same
+      // batch (models repeat the same tool call in one batch) or
+      // re-emitted on the next step re-enters the permission gate and
+      // asks the user to approve the exact same action a second time.
+      const approvedInputsHash = hashInputs(resume.inputs);
+      toolCallRecords.push({
+        toolId: resume.toolId,
+        inputsHash: approvedInputsHash,
+        resultHash: hashResult(result.result),
+        step: stepsUsed,
+      });
+      executedMutations.set(`${resume.toolId}:${approvedInputsHash}`, {
+        result,
+        persisted: mutationCheck?.verified ?? undefined,
+      });
     }
   } else {
     // Rejected — inject rejection as tool result
@@ -3820,7 +3926,13 @@ async function resumeAgentLoopV2Inner(
       }
       const zeroCallText = llmResponse.text ?? "";
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
-        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Small lane exists to mutate files: until a mutation lands, a
+        // prose-only reply can never be the final answer — bounded nudges
+        // then an honest failure, never a silent fake-complete.
+        requiredToolCallPending:
+          (cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) &&
+          !emittedToolCalls &&
+          !hasInterveningMutation,
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides
@@ -4091,7 +4203,7 @@ async function resumeAgentLoopV2Inner(
       }
       await maybeEnrichStaticSiteVisuals(
         transport,
-        { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly },
+        { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly, result: result.result },
         qualitySession,
         cfg.isStaticWorkspace,
         localProgress,

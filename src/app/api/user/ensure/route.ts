@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { clerkClient } from "@clerk/nextjs/server";
-import { getOrCreateUser, getUserWallet } from "@/lib/user-db";
+import { ensureUserProvisioned, getUserWallet } from "@/lib/user-db";
 
 export const dynamic = "force-dynamic";
 
@@ -12,24 +11,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Fetch real Clerk user data
-    let email = `${clerkId}@placeholder.local`;
-    let name = "";
-    try {
-      const clerk = await clerkClient();
-      const clerkUser = await clerk.users.getUser(clerkId);
-      email = clerkUser.emailAddresses[0]?.emailAddress ?? email;
-      name =
-        [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
-        email.split("@")[0];
-    } catch {
-      // Clerk API unavailable — proceed with placeholder
-    }
-
-    // getOrCreateUser uses admin client server-side (bypasses RLS).
+    // ensureUserProvisioned resolves real Clerk profile data (placeholder
+    // fallback) and uses the admin client server-side (bypasses RLS).
     // The Starter one-time grant lives in credit_ledger, issued lazily by
     // getCreditBalances below — idempotent via starter:v1:{userId}.
-    const { user, isNew } = await getOrCreateUser(clerkId, email, name);
+    const { user, isNew } = await ensureUserProvisioned(clerkId);
 
     if (!user) {
       return NextResponse.json({ error: "Failed to create user" }, { status: 500 });

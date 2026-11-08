@@ -12,8 +12,19 @@ async function ensureDbUser(clerkId: string): Promise<string | null> {
     .from("users")
     .select("id")
     .eq("clerk_id", clerkId)
-    .single();
-  return user?.id ?? null;
+    .maybeSingle();
+  if (user?.id) return user.id;
+  // First access can outrun the Clerk user.created webhook — provision the
+  // row lazily (same path as /api/user/ensure), then re-select so a
+  // concurrent insert resolves to the same single row.
+  const { ensureUserProvisioned } = await import("@/lib/user-db");
+  await ensureUserProvisioned(clerkId).catch(() => ({ user: null }));
+  const { data: retried } = await supabaseAdmin
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .maybeSingle();
+  return retried?.id ?? null;
 }
 
 async function handler(req: NextRequest) {
@@ -80,10 +91,22 @@ async function handler(req: NextRequest) {
       }
 
       if (action === "stop" && conversationId) {
+        // Ownership check: the job row must belong to the caller.
+        const { data: owned } = await supabaseAdmin
+          .from("orchestration_jobs")
+          .select("conversation_id")
+          .eq("conversation_id", conversationId)
+          .eq("user_id", dbUserId)
+          .maybeSingle();
+        if (!owned) {
+          return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+        }
+
         const { error } = await supabaseAdmin
           .from("orchestration_jobs")
           .update({ status: "paused" })
-          .eq("conversation_id", conversationId);
+          .eq("conversation_id", conversationId)
+          .eq("user_id", dbUserId);
 
         if (error) {
           return NextResponse.json(
@@ -101,6 +124,17 @@ async function handler(req: NextRequest) {
       }
 
       if (action === "status" && conversationId) {
+        // Ownership check: the job row must belong to the caller.
+        const { data: owned } = await supabaseAdmin
+          .from("orchestration_jobs")
+          .select("conversation_id")
+          .eq("conversation_id", conversationId)
+          .eq("user_id", dbUserId)
+          .maybeSingle();
+        if (!owned) {
+          return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+        }
+
         const conversation = orchestrator.getConversation(conversationId);
         if (!conversation) {
           const { data } = await supabaseAdmin
@@ -141,14 +175,24 @@ async function handler(req: NextRequest) {
   }
 
   if (req.method === "GET") {
-    const conversations = orchestrator.getActiveConversations().map((c) => ({
-      id: c.id,
-      participants: c.participants,
-      topic: c.topic,
-      status: c.status,
-      messageCount: c.messages.length,
-      startedAt: c.startedAt,
-      lastMessageAt: c.lastMessageAt,
+    // Scope to the caller's jobs — global conversation state is not
+    // shareable across users.
+    const { data: jobs, error: listErr } = await supabaseAdmin
+      .from("orchestration_jobs")
+      .select("conversation_id, agent1_id, agent2_id, topic, status, message_count, created_at")
+      .eq("user_id", dbUserId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (listErr) {
+      return NextResponse.json({ error: "Failed to list conversations" }, { status: 500 });
+    }
+    const conversations = (jobs ?? []).map((j) => ({
+      id: j.conversation_id,
+      participants: [j.agent1_id, j.agent2_id].filter(Boolean),
+      topic: j.topic,
+      status: j.status,
+      messageCount: j.message_count,
+      startedAt: j.created_at,
     }));
 
     return NextResponse.json({ activeConversations: conversations, totalActive: conversations.length });

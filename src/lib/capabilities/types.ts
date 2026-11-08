@@ -58,6 +58,7 @@ export type TerminalFailureStage =
   | "pty_creation_failed" // session:ready never arrived or returned error
   | "pty_timeout" // PTY connection timed out waiting for session:ready
   | "cwd_verification_failed" // PTY cwd does not match expected workspace
+  | "isolation_disabled" // Server refused the session: terminal execution disabled by isolation policy
   | "heartbeat_stale"; // Heartbeat timed out
 
 export interface TerminalDiagnostics {

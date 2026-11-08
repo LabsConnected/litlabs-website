@@ -65,7 +65,12 @@ const SEED_INDEX_HTML = `<!DOCTYPE html>
 </html>
 `;
 
-async function createSignInUrl(secretKey) {
+// Returns the raw ticket token (not the magic-link URL). The magic link
+// redeems through Clerk's Frontend API and lands on the instance's
+// configured sign-in page — the production host, not BASE — so redeem the
+// ticket directly on BASE's own /sign-in page instead (see main). The
+// prebuilt <SignIn> component consumes __clerk_ticket.
+async function createSignInToken(secretKey) {
   const resp = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
     method: "POST",
     headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
@@ -73,8 +78,8 @@ async function createSignInUrl(secretKey) {
   });
   if (!resp.ok) throw new Error(`sign_in_tokens failed: ${resp.status}`);
   const data = await resp.json();
-  if (!data.url) throw new Error("sign_in_tokens response missing url");
-  return data.url;
+  if (!data.token) throw new Error("sign_in_tokens response missing token");
+  return data.token;
 }
 
 async function main() {
@@ -82,9 +87,20 @@ async function main() {
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  const signInUrl = await createSignInUrl(CLERK_SECRET_KEY);
-  await page.goto(signInUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await page.waitForURL(/litlabs\.net/, { timeout: 60_000 });
+  const signInToken = await createSignInToken(CLERK_SECRET_KEY);
+  const baseOrigin = new URL(BASE).origin;
+  await page.goto(`${BASE}/sign-in?__clerk_ticket=${encodeURIComponent(signInToken)}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  // Wait until the browser has left /sign-in for a post-login page on BASE's
+  // origin, then verify it. A landing anywhere else means the session
+  // belongs to another host and the auth probe below would be meaningless.
+  await page.waitForURL((url) => {
+    const u = new URL(url);
+    return u.origin === baseOrigin && !u.pathname.startsWith("/sign-in");
+  }, { timeout: 60_000 });
+  const landed = new URL(page.url());
+  if (landed.origin !== baseOrigin) {
+    throw new Error(`sign-in landed on ${landed.origin}, expected origin ${baseOrigin}`);
+  }
   await page.waitForTimeout(4000);
   const authProbe = await page.request.get(`${BASE}/api/studio-projects`, { timeout: 60_000 });
   if (authProbe.status() !== 200) throw new Error(`auth failed: /api/studio-projects → ${authProbe.status()}`);

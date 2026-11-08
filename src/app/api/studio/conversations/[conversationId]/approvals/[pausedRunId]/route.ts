@@ -785,6 +785,26 @@ export async function POST(
       // existed on disk.
       const successfulMutation = result.toolCalls.some((call) => call.mutating && call.success);
       const failedMutation = result.toolCalls.some((call) => call.mutating && !call.success);
+      // The welcome-screen marker escape hatch exists for an edit to real
+      // project files (the agent changed the starter or added real site
+      // files while keeping the entry marker). A mutation that only drops
+      // downloaded assets — e.g. an approved image.stock fetch into
+      // assets/ — is not a site edit and must not waive the marker check:
+      // the placeholder would then pass the artifact gate and the run
+      // would report "completed" on an unbuilt site.
+      const successfulSiteFileMutation = result.toolCalls.some((call) =>
+        call.mutating &&
+        call.success &&
+        // site.compose/site.patch write index.html through files.write
+        // internally — the log records the outer tool id, so they are not
+        // covered by isFileWritingTool but are site-file mutations.
+        (isFileWritingTool(call.toolId) ||
+          call.toolId === "site.compose" ||
+          call.toolId === "site.patch") &&
+        (call.paths?.some((path) =>
+          !/^assets?\//i.test(path.replace(/\\/g, "/").replace(/^(\.\/)+/, "")),
+        ) ?? (call.toolId === "site.compose" || call.toolId === "site.patch")),
+      );
       let resumeFailure: string | undefined;
       let resumePreview: Awaited<ReturnType<typeof ensureProjectPreviewReady>> | null = null;
       if (!result.pendingApproval && !result.cancelled) {
@@ -798,7 +818,19 @@ export async function POST(
             result.modelFailureText ??
             `The resumed run could not complete: ${result.modelFailed}`;
         } else if (failedMutation && !successfulMutation) {
-          resumeFailure = "The approved workspace operation failed, so the project was not completed.";
+          // Name the failed call and its recorded error so the transcript
+          // and run record carry the real reason (provider error, schema
+          // rejection, transport) instead of only the generic sentence —
+          // the 2026-11-08 staging acceptance died on an approved
+          // image.generate whose Cloudflare payload rejection was
+          // invisible in this message.
+          const failedCall = [...result.toolCalls]
+            .reverse()
+            .find((call) => call.mutating && !call.success);
+          const detail = failedCall
+            ? ` (${failedCall.toolId}: ${failedCall.summary || "failed"})`
+            : "";
+          resumeFailure = `The approved workspace operation failed${detail}, so the project was not completed.`;
         } else if (successfulMutation) {
           // Scope the artifact gate with the resumed run's own workspace
           // evidence: a "changed" diff proves the approved mutation landed,
@@ -811,7 +843,7 @@ export async function POST(
           // (or wrote to the wrong workspace) still fails honestly.
           resumePreview = await ensureProjectPreviewReady(
             transport,
-            { workspaceChange: result.workspaceChange ?? null, hadSuccessfulMutation: successfulMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
+            { workspaceChange: successfulSiteFileMutation ? result.workspaceChange ?? null : null, hadSuccessfulMutation: successfulSiteFileMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
             undefined,
             actionContext,
           );
@@ -825,7 +857,7 @@ export async function POST(
         // nested gate merely because a later file has not been written yet.
         resumePreview = await ensureProjectPreviewReady(
           transport,
-          { hadSuccessfulMutation: successfulMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
+          { hadSuccessfulMutation: successfulSiteFileMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
           undefined,
           actionContext,
         ).catch(() => null);

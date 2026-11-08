@@ -199,16 +199,35 @@ export async function maybeAutoInsertGeneratedImage(
           `do NOT call project.insert_asset again and do NOT invent another path.`,
       };
     }
+    // Save failed. Drop insertHint: it instructs the model to call
+    // project.insert_asset "with this downloadUrl", but free providers
+    // return multi-KB data: URLs that are redacted from the model's
+    // context — the instruction is unfollowable, and the model responded
+    // by re-calling image.generate under a fresh approval every time
+    // (2026-11-08 staging approval loop). Keep markdown so the generated
+    // image still renders in chat.
+    const { insertHint: _insertHint, ...rest } = r;
+    const saveError = saved.error ?? "Failed to save image into project";
     return {
-      ...r,
+      ...rest,
       savedToProject: false,
-      saveError: saved.error ?? "Failed to save image into project",
+      saveError,
+      recovery:
+        `The image was generated but could not be saved into the project ` +
+        `workspace (${saveError}). Continue building the site without this ` +
+        `image — do not call image.generate again for the same asset.`,
     };
   } catch (err) {
+    const { insertHint: _insertHint, ...rest } = r;
+    const saveError = err instanceof Error ? err.message : "Failed to save image into project";
     return {
-      ...r,
+      ...rest,
       savedToProject: false,
-      saveError: err instanceof Error ? err.message : "Failed to save image into project",
+      saveError,
+      recovery:
+        `The image was generated but could not be saved into the project ` +
+        `workspace (${saveError}). Continue building the site without this ` +
+        `image — do not call image.generate again for the same asset.`,
     };
   }
 }
@@ -219,6 +238,8 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   "files.list": workspaceTool("files.list", (m) => m.handleFilesList),
   "files.read": workspaceTool("files.read", (m) => m.handleFilesRead),
   "files.write": workspaceTool("files.write", (m) => m.handleFilesWrite),
+  "site.patch": workspaceTool("site.patch", (m) => m.handleSitePatch),
+  "site.compose": workspaceTool("site.compose", (m) => m.handleSiteCompose),
   "git.status": workspaceTool("git.status", (m) => m.handleGitStatus),
   "terminal.execute": workspaceTool("terminal.execute", (m) => m.handleTerminalExecute),
   "project.health": workspaceTool("project.health", (m) => m.handleProjectHealth),
@@ -1381,6 +1402,105 @@ export function registerInternalTools(): void {
         enabled: true,
       },
       handler: lazyHandlers["files.write"],
+    },
+    {
+      tool: {
+        id: "site.compose",
+        name: "Compose Site",
+        description:
+          "Generate a complete styled website page from a compact JSON plan (title, theme, ordered sections with copy). The server assembles the design system + section library — prefer this over files.write for a NEW page. Use files.write for full manual control or apply_patch for edits.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Workspace-relative output path; defaults to index.html" },
+            title: { type: "string", description: "Site name" },
+            description: { type: "string", description: "One-line site summary" },
+            theme: { type: "string", enum: ["light", "dark", "warm", "forest", "ocean", "mono"] },
+            accentHue: { type: "number", description: "Accent color hue 0-360" },
+            hero: {
+              type: "object",
+              properties: {
+                variant: { type: "string", enum: ["center", "split", "banner"] },
+                heading: { type: "string" },
+                subheading: { type: "string" },
+                cta: { type: "string" },
+                href: { type: "string" },
+                image: { type: "string", description: "Short keywords for the hero photo, e.g. 'coffee roastery'" },
+              },
+            },
+            sections: {
+              type: "array",
+              description:
+                "Ordered page sections. kinds: features/services/cards/menu {heading,items:[{title,text,icon?}]}; gallery {heading,images:[keywords]}; testimonials {items:[{quote,author}]}; pricing {plans:[{name,price,features[]}]}; stats {items:[{value,label}]}; about {heading,text,image?}; cta {heading,button,href}; contact {items:[{label,value}]}; footer {text,links?}",
+              // Deliberately shapeless: small local models mirror nested
+              // JSON-Schema keywords ({"type":"object","properties":{…}})
+              // into the plan instead of emitting data. The validator in
+              // site-compose is authoritative — the kinds and per-kind
+              // fields live in the `sections` description above, where the
+              // model reads them as content shapes, not schema syntax.
+              items: { type: "object" },
+            },
+          },
+          required: ["title", "sections"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "high",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        // Local-lane only: registered disabled unless the small-lane env is
+        // set at process start (same predicate as isLocalSmallLane, inlined
+        // to avoid a tool-registry -> agent-loop import cycle), so
+        // production tool catalogs and prompts are byte-identical — the
+        // tool never exists where cloud models run.
+        enabled: !!(process.env.LITT_LOCAL_SMALL === "1" || /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "")),
+      },
+      handler: lazyHandlers["site.compose"],
+    },
+    {
+      tool: {
+        id: "site.patch",
+        name: "Patch Site Section",
+        description:
+          "Edit one region of a site.compose-generated page by name — hero, footer, or a section kind/id (menu, features-2, …). Give the fields to change (heading, subheading, text, cta, image, or items/plans/images for a full section rebuild); the server splices the update in. Easier and more reliable than apply_patch for section-level changes.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Page file; defaults to index.html" },
+            section: { type: "string", description: "Region to edit: hero, footer, or a section kind/id like menu or features-2" },
+            heading: { type: "string" },
+            subheading: { type: "string" },
+            text: { type: "string" },
+            cta: { type: "string" },
+            button: { type: "string" },
+            image: { type: "string", description: "Image keywords for the region's photo slot" },
+            items: { type: "array", items: { type: "object" } },
+            plans: { type: "array", items: { type: "object" } },
+            images: { type: "array", items: { type: "string" } },
+            links: { type: "array", items: { type: "object" } },
+          },
+          required: ["section"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "high",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: !!(process.env.LITT_LOCAL_SMALL === "1" || /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "")),
+      },
+      handler: lazyHandlers["site.patch"],
     },
     {
       tool: {

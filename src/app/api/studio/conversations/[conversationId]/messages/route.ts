@@ -336,6 +336,27 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let effectiveProjectId = conversation.projectId;
 
   if (!ctx) {
+    // A conversation that was NEVER bound to a project (legacy/general chat)
+    // must not be silently re-bound to whatever project happens to be active.
+    // Its history is foreign context — rebinding would let an unrelated
+    // conversation (e.g. a general assistant thread) execute mutations inside
+    // this project's workspace and answer in the wrong domain. Refuse with
+    // the same explicit error as PROJECT_MISMATCH below.
+    // Stale NON-NULL projectIds keep the repair fallback: that conversation
+    // was project-scoped once, so re-binding to the active project repairs a
+    // deleted-project reference rather than importing foreign context.
+    if (!conversation.projectId && clientProjectId) {
+      return NextResponse.json(
+        {
+          error: "Project mismatch",
+          code: "PROJECT_MISMATCH",
+          detail:
+            "This chat isn't linked to a project, so it can't run project tasks. " +
+            "Start a new chat in this project instead.",
+        },
+        { status: 409 },
+      );
+    }
     // Stale conversation.projectId — try the active project
     const activeProject = await resolveCurrentProject({ userId });
     if (activeProject && activeProject.projectId !== conversation.projectId) {

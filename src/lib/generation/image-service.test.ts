@@ -367,3 +367,137 @@ describe("handlePollinationsImage", () => {
     expect(result.downloadUrl).toMatch(/^https:\/\/image\.pollinations\.ai\//);
   });
 });
+
+describe("handleCloudflareImage", () => {
+  // Regression for the 2026-11-08 staging acceptance failure: the request
+  // body sent width/height/seed/num_steps, which the flux-1-schnell schema
+  // rejects with HTTP 400 code 5006 — every approved image.generate died
+  // in ~650ms and the resumed run settled "approved workspace operation
+  // failed" with zero files written. The schema accepts ONLY `prompt`.
+  const realFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function importHandler() {
+    vi.resetModules();
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "acct_test_123");
+    vi.stubEnv("CLOUDFLARE_AI_API_TOKEN", "tok_test_456");
+    const mod = await import("./image-service");
+    return mod.handleCloudflareImage;
+  }
+
+  function mockCfJson(status: number, payload: unknown) {
+    const fetchMock = vi.fn(async () => ({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === "content-type" ? "application/json" : null,
+      },
+      text: async () => JSON.stringify(payload),
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    return fetchMock;
+  }
+
+  it("sends only the prompt field — no width/height/seed/num_steps", async () => {
+    const handleCloudflareImage = await importHandler();
+    const fetchMock = mockCfJson(200, {
+      success: true,
+      result: { image: "aGVsbG8=" },
+    });
+
+    const result = await handleCloudflareImage({
+      prompt: "  a red apple  ",
+      width: 1024,
+      height: 768,
+      seed: 7,
+    });
+
+    expect(result.status).toBe("complete");
+    expect(result.downloadUrl).toBe("data:image/png;base64,aGVsbG8=");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { body: string }];
+    expect(url).toContain("acct_test_123");
+    expect(url).toContain("ai/run/");
+    // The exact regression: extra properties are a hard 400 from Workers AI.
+    expect(JSON.parse(init.body)).toEqual({ prompt: "a red apple" });
+  });
+
+  it("labels JPEG payloads image/jpeg — flux-1-schnell does not return PNG", async () => {
+    // Regression for the 2026-11-08 staging approval loop: the JSON path
+    // hardcoded data:image/png, but Workers AI returns JPEG bytes. The
+    // mislabeled URL failed insertAssetFromUrl's PNG structural check as
+    // "truncated or corrupt", so every approved image.generate saved
+    // nothing and the model re-asked under a fresh approval each time.
+    const handleCloudflareImage = await importHandler();
+    const jpeg = Buffer.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46,
+      0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+      0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
+    ]);
+    mockCfJson(200, {
+      success: true,
+      result: { image: jpeg.toString("base64") },
+    });
+
+    const result = await handleCloudflareImage({
+      prompt: "a red apple",
+      width: 1024,
+      height: 768,
+    });
+
+    expect(result.downloadUrl).toMatch(/^data:image\/jpeg;base64,/);
+    expect(
+      Buffer.from(result.downloadUrl.split(",")[1], "base64"),
+    ).toEqual(jpeg);
+  });
+
+  it("keeps the fallback label for payloads matching no known image format", async () => {
+    const handleCloudflareImage = await importHandler();
+    mockCfJson(200, {
+      success: true,
+      result: { image: "aGVsbG8=" }, // "hello" — not an image
+    });
+
+    const result = await handleCloudflareImage({
+      prompt: "a red apple",
+      width: 1024,
+      height: 768,
+    });
+
+    expect(result.downloadUrl).toBe("data:image/png;base64,aGVsbG8=");
+  });
+
+  it("propagates the Workers AI schema rejection as an honest error", async () => {
+    const handleCloudflareImage = await importHandler();
+    mockCfJson(400, {
+      success: false,
+      errors: [
+        {
+          code: 5006,
+          message:
+            "AiError: Bad input: Additional or unevaluated properties '/width' at '/' not allowed",
+        },
+      ],
+    });
+
+    await expect(
+      handleCloudflareImage({ prompt: "a cat", width: 512, height: 512 }),
+    ).rejects.toThrow(/Bad input/);
+  });
+
+  it("fails closed when Cloudflare env is not configured", async () => {
+    vi.resetModules();
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "");
+    vi.stubEnv("CLOUDFLARE_AI_API_TOKEN", "");
+    const mod = await import("./image-service");
+    await expect(
+      mod.handleCloudflareImage({ prompt: "a cat", width: 512, height: 512 }),
+    ).rejects.toThrow(/not configured/);
+  });
+});

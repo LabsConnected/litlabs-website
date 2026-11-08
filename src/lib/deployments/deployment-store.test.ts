@@ -270,7 +270,7 @@ describe("readPublishedFile — public serving read path", () => {
     },
   );
 
-  it("retries once and throws on a persistent storage error — never a false 404", async () => {
+  it("retries twice and throws on a persistent storage error — never a false 404", async () => {
     handler = (table) => {
       if (table === DEPLOYMENTS) return { data: readyRow, error: null };
       if (table === FILES) {
@@ -281,8 +281,8 @@ describe("readPublishedFile — public serving read path", () => {
     await expect(readPublishedFile("dep-1", "index.html")).rejects.toThrow(
       "Published file read failed",
     );
-    // One retry for the transient case, then the error surfaces (route → 503).
-    expect(calls.filter((c) => c.table === FILES)).toHaveLength(2);
+    // Initial read + bounded retries, then the error surfaces (route → 503).
+    expect(calls.filter((c) => c.table === FILES)).toHaveLength(4);
   });
 
   it("heals a transient storage error with a single retry", async () => {
@@ -307,6 +307,28 @@ describe("readPublishedFile — public serving read path", () => {
     expect(calls.filter((c) => c.table === FILES)).toHaveLength(2);
   });
 
+  it("heals a multi-blip storage error within the bounded retry window", async () => {
+    // Staging acceptance 42447010290: the freshly deployed image 503'd at
+    // audit time (~1s post-deploy) and served 200 on re-probe — a blip
+    // window wider than a single 250ms retry. Two consecutive blips must
+    // still land on the file row.
+    let fileReads = 0;
+    handler = (table) => {
+      if (table === DEPLOYMENTS) return { data: readyRow, error: null };
+      if (table === FILES) {
+        fileReads += 1;
+        if (fileReads <= 2) {
+          return { data: null, error: { code: "XX000", message: "connection reset" } };
+        }
+        return { data: { content: "<img src='assets/a.jpeg'>", content_type: "text/html" }, error: null };
+      }
+      return { data: null, error: null };
+    };
+    const file = await readPublishedFile("dep-1", "index.html");
+    expect(file).not.toBeNull();
+    expect(calls.filter((c) => c.table === FILES)).toHaveLength(3);
+  });
+
   it("still returns null — a true 404 — when the file row is absent", async () => {
     handler = (table) =>
       table === DEPLOYMENTS ? { data: readyRow, error: null } : { data: null, error: null };
@@ -323,6 +345,28 @@ describe("readPublishedFile — public serving read path", () => {
       "Deployment lookup failed",
     );
     expect(calls.find((c) => c.table === FILES)).toBeUndefined();
+  });
+
+  it("heals a transient deployment-lookup error with a single retry", async () => {
+    // Golden 2026-11-06: deployed image refs 503'd on a PostgREST blip in
+    // the deployment lookup seconds after deploy — the same transient the
+    // file read already survived one retry on. The lookup now gets the
+    // same healing read.
+    let lookups = 0;
+    handler = (table) => {
+      if (table === DEPLOYMENTS) {
+        lookups += 1;
+        if (lookups === 1) return { data: null, error: { code: "XX000", message: "timeout" } };
+        return { data: readyRow, error: null };
+      }
+      if (table === FILES) {
+        return { data: { content: "<h1>x</h1>", content_type: "text/html" }, error: null };
+      }
+      return { data: null, error: null };
+    };
+    const file = await readPublishedFile("dep-1", "index.html");
+    expect(file).toEqual({ content: "<h1>x</h1>", contentType: "text/html", encoding: undefined });
+    expect(calls.filter((c) => c.table === DEPLOYMENTS)).toHaveLength(2);
   });
 });
 
