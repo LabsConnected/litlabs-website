@@ -46,13 +46,16 @@ const jobs = [
 
 function query(table: string) {
   const filters = new Map<string, unknown>();
+  const neqs: [string, unknown][] = [];
   let isCount = false;
   let insertion: Record<string, unknown>[] | undefined;
   const rows = () => {
     const source: Record<string, unknown>[] = table === "users"
       ? [{ id: "db-alice", clerk_id: "alice" }, { id: "db-bob", clerk_id: "bob" }]
       : table === "orchestration_jobs" ? jobs : table === "agent_tasks" ? tasks : [];
-    return source.filter(row => [...filters].every(([column, value]) => row[column] === value));
+    return source
+      .filter(row => [...filters].every(([column, value]) => row[column] === value))
+      .filter(row => neqs.every(([column, value]) => row[column] !== value));
   };
   const result = () => ({ data: rows(), error: null, count: isCount ? rows().length : null });
   const builder = {
@@ -61,6 +64,7 @@ function query(table: string) {
       return builder;
     },
     eq: (column: string, value: unknown) => { filters.set(column, value); return builder; },
+    neq: (column: string, value: unknown) => { neqs.push([column, value]); return builder; },
     order: () => builder,
     limit: () => builder,
     filter: () => builder,
