@@ -138,7 +138,21 @@ export async function GET(
     };
     const manifest = entryHtml !== null
       ? await collectPreviewAssetManifest("index.html", entryHtml, readWorkspaceText)
-      : { assets: ["index.html"] };
+      : { assets: ["index.html"], complete: true };
+    // Fail closed like the serving route: an unverifiable closure means the
+    // signed token would 403 assets the page needs — report failed rather
+    // than "ready" over a preview that cannot render.
+    if (!manifest.complete) {
+      return NextResponse.json({
+        runtimeStatus: "failed",
+        previewUrl: null,
+        runtimeError: "Preview asset manifest could not be verified",
+        framework: "static",
+        developmentCommand: null,
+        packageManager: null,
+        logs: [],
+      });
+    }
     const token = createPreviewToken(userId, {
       projectId,
       workspaceId: project.workspaceId,
