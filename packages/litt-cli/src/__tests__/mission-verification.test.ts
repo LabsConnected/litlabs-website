@@ -95,6 +95,13 @@ describe("createMissionEvidenceTracker", () => {
     expect(tracker.isReadOnly()).toBe(true);
   });
 
+  it("a mutation call with no result yet stays non-read-only (uncertain)", () => {
+    const tracker = createMissionEvidenceTracker(MUTATION);
+    tracker.recordToolCall("project.run", { command: "npm", args: ["install"] });
+    // Result never recorded — the command may have run. Conservative.
+    expect(tracker.isReadOnly()).toBe(false);
+  });
+
   it("a failed tool never counts as evidence", () => {
     const tracker = createMissionEvidenceTracker(MUTATION);
     tracker.recordToolResult("project.status", false, "git status failed");

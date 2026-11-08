@@ -704,7 +704,10 @@ export function createMissionEvidenceTracker(
       if (results.length > MAX_EVIDENCE_RESULTS) results.shift();
     },
     isReadOnly(): boolean {
-      return executedMutations === 0;
+      // A queued mutation whose result never arrived is UNCERTAIN — it
+      // may have run. Stay conservative (not read-only) until the
+      // outcome is known; only a clean non-execution result clears it.
+      return executedMutations === 0 && pendingMutationCalls.length === 0;
     },
     hasSuccessfulEvidence(): boolean {
       return results.some((r) => r.success && !r.health);
