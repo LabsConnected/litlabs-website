@@ -59,17 +59,20 @@ export async function GET(
   // only entry file is still the seeded welcome screen reports not_started
   // (never "ready" — the preview must not imply generated content exists).
   if (project.framework === "static") {
+    let terminalBase: string;
+    let terminalToken: string;
+    let entryHtml = "";
     try {
-      const terminalBase = requireTerminalBaseUrl();
-      const { token } = createTerminalToken(userId, {
+      terminalBase = requireTerminalBaseUrl();
+      terminalToken = createTerminalToken(userId, {
         workspaceId: project.workspaceId,
         projectId,
-      });
+      }).token;
       const checkResp = await fetch(`${terminalBase}/ws-files/read`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
+          "Authorization": `Bearer ${terminalToken}`,
           "X-Workspace-Id": project.workspaceId,
         },
         body: JSON.stringify({ path: "index.html", encoding: "utf-8" }),
@@ -88,7 +91,8 @@ export async function GET(
         });
       }
       const entry = (await checkResp.json().catch(() => null)) as { content?: unknown } | null;
-      if (typeof entry?.content === "string" && entry.content.includes(WELCOME_SCREEN_MARKER)) {
+      entryHtml = typeof entry?.content === "string" ? entry.content : "";
+      if (entryHtml.includes(WELCOME_SCREEN_MARKER)) {
         return NextResponse.json({
           runtimeStatus: "not_started",
           previewUrl: null,
@@ -113,17 +117,48 @@ export async function GET(
       });
     }
 
-    const manifest = await collectPreviewAssetManifest("index.html", "<html></html>", async () => null);
-    const token = createPreviewToken(userId, {
+    // Mint the preview token against the REAL asset closure — the same
+    // manifest the /api/preview serving route computes for session-mode
+    // documents. A stub manifest (entry doc only) would authorize
+    // index.html while every CSS/JS/image subrequest 403s in the
+    // opaque-origin iframe, which cannot carry the session cookie.
+    const readWorkspaceText = async (path: string): Promise<string | null> => {
+      const asset = await fetch(`${terminalBase}/ws-files/read`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${terminalToken}`,
+          "X-Workspace-Id": project.workspaceId!,
+        },
+        body: JSON.stringify({ path, encoding: "utf-8" }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!asset.ok) return null;
+      const payload = (await asset.json().catch(() => null)) as { content?: unknown } | null;
+      return typeof payload?.content === "string" ? payload.content : null;
+    };
+    const manifest = await collectPreviewAssetManifest("index.html", entryHtml, readWorkspaceText);
+    if (!manifest.complete) {
+      return NextResponse.json({
+        runtimeStatus: "failed",
+        previewUrl: null,
+        runtimeError: "Preview asset manifest could not be verified",
+        framework: "static",
+        developmentCommand: null,
+        packageManager: null,
+        logs: [],
+      });
+    }
+    const previewToken = createPreviewToken(userId, {
       projectId,
       workspaceId: project.workspaceId,
       assets: manifest.assets,
     });
     return NextResponse.json({
       runtimeStatus: "ready",
-      previewUrl: `/api/preview/${encodeURIComponent(projectId)}/t/${token.token}/index.html`,
-      previewToken: token.token,
-      previewTokenExpiresAt: token.expiresAt,
+      previewUrl: `/api/preview/${encodeURIComponent(projectId)}/t/${previewToken.token}/index.html`,
+      previewToken: previewToken.token,
+      previewTokenExpiresAt: previewToken.expiresAt,
       runtimeError: null,
       framework: "static",
       developmentCommand: null,

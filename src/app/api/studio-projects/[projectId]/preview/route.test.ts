@@ -139,6 +139,42 @@ describe("studio-projects preview route — static guards", () => {
     );
   });
 
+  it("GET mints the preview token against the real asset closure, not a stub manifest", async () => {
+    // Regression: the status endpoint previously minted the token from a
+    // placeholder "<html></html>" + null reader, so the signed manifest
+    // contained only index.html — every script/asset subrequest from the
+    // opaque-origin iframe then 403'd. The token must cover the same
+    // closure the serving route computes.
+    const files: Record<string, string> = {
+      "index.html": '<html><head><script src="/app.js"></script></head><body>hi</body></html>',
+      "app.js": "console.log(1);",
+    };
+    const fetchMock = vi.fn(async (url: string | URL | Request, opts?: RequestInit) => {
+      const body = JSON.parse(String(opts?.body ?? "{}")) as { path?: string };
+      const content = files[body.path ?? ""];
+      return content === undefined
+        ? new Response(JSON.stringify({ error: "not found" }), { status: 404 })
+        : new Response(JSON.stringify({ content }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await GET(
+      new Request("https://x.test/api/studio-projects/proj-1/preview") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("ready");
+    expect(createPreviewTokenMock).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({
+        projectId: "proj-1",
+        workspaceId: "ws-1",
+        assets: expect.arrayContaining(["index.html", "app.js"]),
+      }),
+    );
+  });
+
   it("GET returns not_started when the terminal is unreachable", async () => {
     // The static GET path regressed to waiting on the terminal service before
     // returning static preview URLs. Prove that a missing terminal now returns
