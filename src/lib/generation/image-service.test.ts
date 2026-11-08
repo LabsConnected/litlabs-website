@@ -428,6 +428,51 @@ describe("handleCloudflareImage", () => {
     expect(JSON.parse(init.body)).toEqual({ prompt: "a red apple" });
   });
 
+  it("labels JPEG payloads image/jpeg — flux-1-schnell does not return PNG", async () => {
+    // Regression for the 2026-11-08 staging approval loop: the JSON path
+    // hardcoded data:image/png, but Workers AI returns JPEG bytes. The
+    // mislabeled URL failed insertAssetFromUrl's PNG structural check as
+    // "truncated or corrupt", so every approved image.generate saved
+    // nothing and the model re-asked under a fresh approval each time.
+    const handleCloudflareImage = await importHandler();
+    const jpeg = Buffer.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46,
+      0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+      0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
+    ]);
+    mockCfJson(200, {
+      success: true,
+      result: { image: jpeg.toString("base64") },
+    });
+
+    const result = await handleCloudflareImage({
+      prompt: "a red apple",
+      width: 1024,
+      height: 768,
+    });
+
+    expect(result.downloadUrl).toMatch(/^data:image\/jpeg;base64,/);
+    expect(
+      Buffer.from(result.downloadUrl.split(",")[1], "base64"),
+    ).toEqual(jpeg);
+  });
+
+  it("keeps the fallback label for payloads matching no known image format", async () => {
+    const handleCloudflareImage = await importHandler();
+    mockCfJson(200, {
+      success: true,
+      result: { image: "aGVsbG8=" }, // "hello" — not an image
+    });
+
+    const result = await handleCloudflareImage({
+      prompt: "a red apple",
+      width: 1024,
+      height: 768,
+    });
+
+    expect(result.downloadUrl).toBe("data:image/png;base64,aGVsbG8=");
+  });
+
   it("propagates the Workers AI schema rejection as an honest error", async () => {
     const handleCloudflareImage = await importHandler();
     mockCfJson(400, {
