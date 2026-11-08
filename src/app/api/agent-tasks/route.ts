@@ -89,16 +89,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Session ownership: if the session already has tasks, they must
-    // belong to the caller — otherwise this write would inject into
-    // another user's task stream.
-    const { data: existingTask } = await supabaseAdmin
+    // 3. Session ownership: if the session already has tasks belonging to
+    // a different user, this write would inject into their task stream.
+    // Query for a foreign row directly — order-agnostic — and fail closed
+    // on any lookup error rather than skipping the check.
+    const { data: foreignTask, error: ownershipError } = await supabaseAdmin
       .from("agent_tasks")
-      .select("user_id")
+      .select("id")
       .eq("session_id", sessionId)
+      .neq("user_id", userId)
       .limit(1)
       .maybeSingle();
-    if (existingTask && existingTask.user_id !== userId) {
+    if (ownershipError) {
+      return NextResponse.json(
+        { error: "Failed to verify session ownership" },
+        { status: 500 },
+      );
+    }
+    if (foreignTask) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
