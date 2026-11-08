@@ -68,6 +68,15 @@ jobs:
               || { echo "::error::staging serves $detail, expected $EXPECTED_SHA — redeploy first"; exit 1; }
           fi
 
+      - name: Clean up tagged disposable acceptance users
+        # The Clerk TEST instance caps at 100 users and every iteration
+        # permanently creates one — prior runs' leftovers blocked dispatch
+        # (HTTP 403 user_quota_exceeded, run 42446254903). The script only
+        # ever deletes public_metadata.littAcceptance === true users.
+        run: node scripts/final-acceptance/cleanup-acceptance-users.mjs
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+
       - name: Run 10 consecutive golden journeys
         env:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
@@ -101,6 +110,16 @@ jobs:
           done
           echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"
           echo "ALL $ACCEPTANCE_RUNS consecutive acceptance runs PASSED"
+
+      - name: Clean up tagged disposable acceptance users (post-run)
+        # Every iteration's user is disposable by design — removing them
+        # keeps the 100-user TEST instance from accumulating quota debt for
+        # the next run. Runs even on fail-fast/cancel (if: always()). The
+        # same tagged-only predicate protects all other users.
+        if: always()
+        run: node scripts/final-acceptance/cleanup-acceptance-users.mjs || echo "::warning::acceptance user cleanup failed (non-fatal)"
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
 
       - name: Report consecutive-pass count
         if: always()

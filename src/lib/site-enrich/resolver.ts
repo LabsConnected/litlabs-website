@@ -25,6 +25,14 @@ export interface ResolvedImage {
   attribution: string | null;
 }
 
+/** One provider-lane outcome for run evidence: "unconfigured" means the
+ *  provider's credential env was absent (never attempted); "failed" means
+ *  it was probed and did not yield a fetchable image. */
+export type ProviderAttempt = {
+  provider: string;
+  status: "resolved" | "failed" | "unconfigured";
+};
+
 const PROBE_TIMEOUT_MS = 12_000;
 const PEXELS_API_URL = "https://api.pexels.com/v1/search";
 const LOREMFLICKR_BASE = "https://loremflickr.com";
@@ -102,9 +110,16 @@ async function probe(url: string, overall?: AbortSignal): Promise<boolean> {
   return false;
 }
 
-async function tryPexels(keywords: string, overall?: AbortSignal): Promise<ResolvedImage | null> {
+async function tryPexels(
+  keywords: string,
+  overall?: AbortSignal,
+  attempts?: ProviderAttempt[],
+): Promise<ResolvedImage | null> {
   const key = process.env.PEXELS_API_KEY?.trim();
-  if (!key) return null;
+  if (!key) {
+    attempts?.push({ provider: "pexels", status: "unconfigured" });
+    return null;
+  }
   if (overall?.aborted) return null;
   try {
     const url = new URL(PEXELS_API_URL);
@@ -125,7 +140,10 @@ async function tryPexels(keywords: string, overall?: AbortSignal): Promise<Resol
       const transient = resp === null || resp.status === 408 || resp.status === 429 || resp.status >= 500;
       if (!transient) break;
     }
-    if (!resp?.ok) return null;
+    if (!resp?.ok) {
+      attempts?.push({ provider: "pexels", status: "failed" });
+      return null;
+    }
     const data = (await resp.json()) as {
       photos?: Array<{
         src?: { large?: string; large2x?: string; original?: string };
@@ -134,13 +152,18 @@ async function tryPexels(keywords: string, overall?: AbortSignal): Promise<Resol
     };
     const photo = data.photos?.[0];
     const download = photo?.src?.large2x ?? photo?.src?.large ?? photo?.src?.original;
-    if (!download) return null;
+    if (!download) {
+      attempts?.push({ provider: "pexels", status: "failed" });
+      return null;
+    }
+    attempts?.push({ provider: "pexels", status: "resolved" });
     return {
       url: download,
       provider: "pexels",
       attribution: photo?.photographer ? `Photo by ${photo.photographer} on Pexels` : "Pexels",
     };
   } catch {
+    attempts?.push({ provider: "pexels", status: "failed" });
     return null;
   }
 }
@@ -170,11 +193,12 @@ export async function resolveSlotImage(
   keywords: string,
   seed: number,
   overall?: AbortSignal,
+  attempts?: ProviderAttempt[],
 ): Promise<ResolvedImage | null> {
   const kw = keywords.trim() || "professional photography";
   if (overall?.aborted) return null;
 
-  const pexels = await tryPexels(kw, overall);
+  const pexels = await tryPexels(kw, overall, attempts);
   if (pexels) return pexels;
   if (overall?.aborted) return null;
 
@@ -188,7 +212,9 @@ export async function resolveSlotImage(
   ];
   for (const c of candidates) {
     if (overall?.aborted) return null;
-    if (await probe(c.url, overall)) {
+    const ok = await probe(c.url, overall);
+    attempts?.push({ provider: c.provider, status: ok ? "resolved" : "failed" });
+    if (ok) {
       return { url: c.url, provider: c.provider, attribution: null };
     }
   }

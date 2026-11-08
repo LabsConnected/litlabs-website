@@ -1367,7 +1367,9 @@ async function maybeEnrichStaticSiteVisuals(
           `Visual enrichment: ${report.imagesResolved} image(s) resolved` +
           (report.imagesFailed > 0 ? `, ${report.imagesFailed} unavailable` : "") +
           (report.placeholdersUsed > 0 ? `, ${report.placeholdersUsed} placeholder fallback(s)` : "") +
-          ` (${report.providersUsed.join(", ") || "no providers"}).`,
+          ` (${report.providersUsed.join(", ") || "no providers"}` +
+          (report.providersFailed.length > 0 ? `; failed: ${report.providersFailed.join(", ")}` : "") +
+          `).`,
       });
     }
   } catch (err) {

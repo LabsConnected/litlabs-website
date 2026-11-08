@@ -193,29 +193,40 @@ export interface PublishedFile {
  * Only `ready` deployments serve: a building/deploying/failed deployment has
  * no business answering public requests.
  */
+// Bounded retries on transient store errors — a PostgREST blip seconds
+// after deploy must not surface as a public 503/404 for an asset that
+// exists (observed live: deployed image refs 503'd seconds after deploy,
+// then served 200). Three attempts with a growing gap cover a ~1s blip
+// window; a persistent outage still surfaces as an error (route → 503),
+// never a false "not found". Null results are never retried — a real
+// 404 stays honest and fast.
+const READ_RETRY_DELAYS_MS = [250, 750] as const;
+
+async function readWithRetries<R extends { error: unknown }>(
+  read: () => PromiseLike<R>,
+): Promise<R> {
+  let result = await read();
+  for (const delay of READ_RETRY_DELAYS_MS) {
+    if (!result.error) break;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    result = await read();
+  }
+  return result;
+}
+
 export async function readPublishedFile(
   deploymentId: string,
   path: string,
 ): Promise<PublishedFile | null> {
   if (!supabaseAdmin) return null;
 
-  let { data: deployment, error: deploymentError } = await supabaseAdmin
-    .from(TABLE)
-    .select("id,status")
-    .eq("id", deploymentId)
-    .maybeSingle();
-  if (deploymentError) {
-    // One short-delay retry on the deployment lookup — a transient
-    // PostgREST blip must not surface as a public 503 for an asset that
-    // exists (observed live: deployed image refs 503'd seconds after
-    // deploy, then served 200).
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    ({ data: deployment, error: deploymentError } = await supabaseAdmin
+  const { data: deployment, error: deploymentError } = await readWithRetries(() =>
+    supabaseAdmin
       .from(TABLE)
       .select("id,status")
       .eq("id", deploymentId)
-      .maybeSingle());
-  }
+      .maybeSingle(),
+  );
   if (deploymentError) {
     // A store error must not masquerade as a missing file — the golden
     // acceptance run proved that collapsing errors into null turns a
@@ -225,44 +236,45 @@ export async function readPublishedFile(
   if (!deployment) return null;
   if ((deployment as { status: string }).status !== "ready") return null;
 
-  let { data, error } = await supabaseAdmin
-    .from(FILES_TABLE)
-    .select("content,content_type,encoding")
-    .eq("deployment_id", deploymentId)
-    .eq("path", path)
-    .maybeSingle();
+  // Two literal selects — PostgREST's type-level parser needs the literal
+  // column string, a dynamic one degrades to ParserError.
+  const readFileRow = () =>
+    supabaseAdmin
+      .from(FILES_TABLE)
+      .select("content,content_type,encoding")
+      .eq("deployment_id", deploymentId)
+      .eq("path", path)
+      .maybeSingle();
+  const readFileRowNoEncoding = () =>
+    supabaseAdmin
+      .from(FILES_TABLE)
+      .select("content,content_type")
+      .eq("deployment_id", deploymentId)
+      .eq("path", path)
+      .maybeSingle();
+  let usedEncoding = true;
+  // Declared row shape covers both selects (no-encoding omits the column).
+  let data: { content: string; content_type: string; encoding?: string | null } | null;
+  let error: { code?: string; message: string } | null;
+  ({ data, error } = await readFileRow());
   if (error?.code === "PGRST204" || error?.code === "42703") {
     // Encoding column not yet applied — read without it and let the serving
     // route infer binary payloads from the content type. PostgREST surfaces
     // a missing select column as the passthrough Postgres code 42703
     // (PGRST204 is only produced for unknown insert payload keys) — both
     // mean exactly "the column is absent" and nothing else.
-    ({ data, error } = await supabaseAdmin
-      .from(FILES_TABLE)
-      .select("content,content_type")
-      .eq("deployment_id", deploymentId)
-      .eq("path", path)
-      .maybeSingle());
+    usedEncoding = false;
+    ({ data, error } = await readFileRowNoEncoding());
   }
   if (error) {
-    // One retry for transient store errors after a short delay — an
-    // immediate retry hits the same blip window; a second failure
-    // surfaces as a thrown error (the route answers 503) — never a
-    // false "not found".
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    ({ data, error } = await supabaseAdmin
-      .from(FILES_TABLE)
-      .select("content,content_type,encoding")
-      .eq("deployment_id", deploymentId)
-      .eq("path", path)
-      .maybeSingle());
+    ({ data, error } = await readWithRetries(usedEncoding ? readFileRow : readFileRowNoEncoding));
     if (error) {
       throw new Error(`Published file read failed: ${error.message}`);
     }
   }
   if (!data) return null;
 
-  const row = data as { content: string; content_type: string; encoding?: string | null };
+  const row = data;
   return { content: row.content, contentType: row.content_type, encoding: row.encoding };
 }
 

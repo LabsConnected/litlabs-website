@@ -234,6 +234,9 @@ describe("enrichStaticSiteVisuals", () => {
   });
 
   it("gives up within its overall budget when providers never answer (CI #820)", async () => {
+    // Pin a small budget — the mechanism under test is the abort, not the
+    // default value (30s would outlast vitest's own 5s timeout).
+    vi.stubEnv("ENRICH_TOTAL_TIMEOUT_MS", "1500");
     const transport = makeTransport({
       "index.html": `<img data-litt-image="anything" alt="x">`,
     });
@@ -493,6 +496,25 @@ describe("enrichStaticSiteVisuals", () => {
     expect(html).not.toContain("<img");
     expect(report.imagesResolved).toBe(0);
     expect(report.imagesFailed).toBeGreaterThan(0);
+  });
+
+  it("names the failed provider lanes in the report (staging 2026-11-08 evidence)", async () => {
+    // The staging acceptance run's status line could only say "1
+    // unavailable (picsum)" — diagnosis needed provider-level evidence.
+    // providersFailed records every lane that did not produce an image,
+    // including a pexels key that is simply absent (unconfigured).
+    const transport = makeTransport({
+      "index.html": `<html><body><h1>Ember</h1></body></html>`,
+    });
+    mockInsertAssetFromUrl.mockResolvedValue({ success: false, error: "download failed" });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503, headers: new Map() })));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    // No PEXELS_API_KEY in the test env → reported as unconfigured, not failed.
+    expect(report.providersFailed).toContain("pexels(unconfigured)");
+    expect(report.providersFailed).toContain("loremflickr");
+    expect(report.providersFailed).toContain("picsum");
+    expect(report.providersFailed).toContain("pollinations");
   });
 
   it("keeps filling the photo floor after a transient resolve failure", async () => {

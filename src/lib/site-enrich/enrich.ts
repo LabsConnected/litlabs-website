@@ -23,7 +23,7 @@ import "server-only";
 import { createHash } from "crypto";
 import { insertAssetFromUrl } from "@/lib/litt-intelligence/tool-handlers-v2";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
-import { resolveSlotImage } from "./resolver";
+import { resolveSlotImage, type ProviderAttempt } from "./resolver";
 import { auditStaticSiteHtml, extractImageRefs, type VisualAudit } from "./audit";
 
 export interface EnrichReport {
@@ -32,6 +32,10 @@ export interface EnrichReport {
   imagesFailed: number;
   placeholdersUsed: number;
   providersUsed: string[];
+  /** Providers that were attempted but did not produce an image —
+   *  "unconfigured" means the provider's credential env is absent. Lets
+   *  run evidence name exactly which lane failed instead of guessing. */
+  providersFailed: string[];
   filesChanged: string[];
   audit: VisualAudit | null;
 }
@@ -89,19 +93,22 @@ export async function enrichStaticSiteVisuals(
     imagesFailed: 0,
     placeholdersUsed: 0,
     providersUsed: [],
+    providersFailed: [],
     filesChanged: [],
     audit: null,
   };
   const budget = opts.maxImages ?? MAX_IMAGES_PER_RUN;
   const topic = opts.topicKeywords ?? "professional photography";
   // One overall deadline for every network call in this run. Enrichment
-  // is additive — it must never stall the build. Each probe already has
-  // its own 12s timeout, but #820's retries multiply it across providers
-  // and slots, so the total was unbounded: in CI the resume loop hung
-  // past vitest's 5s timeout while providers never answered. The budget
-  // is deliberately short (free-tier probes answer in well under a
-  // second when healthy); override with ENRICH_TOTAL_TIMEOUT_MS to tune.
-  const totalTimeoutMs = Number(process.env.ENRICH_TOTAL_TIMEOUT_MS) || 3_000;
+  // is additive — it must never stall the build, but the budget must
+  // still fit the real-photo floor: each resolve is provider probes plus
+  // a full image download, and the floor can need three of them. The
+  // 2026-11-08 staging run proved 3s is physically incapable — a single
+  // resolve consumed it and the floor shipped 1/3 photos. 30s still
+  // bounds pathological providers (each probe keeps its own 12s timeout)
+  // while giving the floor room to do its job. Override with
+  // ENRICH_TOTAL_TIMEOUT_MS to tune.
+  const totalTimeoutMs = Number(process.env.ENRICH_TOTAL_TIMEOUT_MS) || 30_000;
   const overallSignal = AbortSignal.timeout(totalTimeoutMs);
   try {
     const root = await transport.listFiles("");
@@ -142,6 +149,7 @@ export async function enrichStaticSiteVisuals(
         return null;
       }
     };
+    const providerAttempts: ProviderAttempt[] = [];
     const resolve = async (keywords: string) => {
       if (overallSignal.aborted) return null;
       if (report.imagesResolved + report.imagesFailed >= budget) return null;
@@ -150,7 +158,7 @@ export async function enrichStaticSiteVisuals(
       // images) — hash the saved bytes and retry once with a bumped seed
       // and varied keywords; a still-identical image counts as a failure
       // so the slot falls back to the honest placeholder.
-      let resolved = await resolveSlotImage(keywords, seed, overallSignal);
+      let resolved = await resolveSlotImage(keywords, seed, overallSignal, providerAttempts);
       let saved = resolved
         ? await insertAssetFromUrl(resolved.url, { nameHint: keywords.slice(0, 30), signal: overallSignal }, transport)
         : null;
@@ -158,7 +166,7 @@ export async function enrichStaticSiteVisuals(
       if (hash && usedHashes.has(hash)) {
         seed += 1000;
         const varied = `${keywords} scene`;
-        resolved = await resolveSlotImage(varied, seed, overallSignal);
+        resolved = await resolveSlotImage(varied, seed, overallSignal, providerAttempts);
         saved = resolved
           ? await insertAssetFromUrl(resolved.url, { nameHint: varied.slice(0, 30), signal: overallSignal }, transport)
           : null;
@@ -367,6 +375,18 @@ export async function enrichStaticSiteVisuals(
           await transport.writeFile(entry, html);
           if (!report.filesChanged.includes(entry)) report.filesChanged.push(entry);
         }
+      }
+    }
+
+    // Surface which provider lanes failed (or were never configured) —
+    // run evidence must name the failing lane, not just the count.
+    const seenFailed = new Set<string>();
+    for (const a of providerAttempts) {
+      if (a.status === "resolved") continue;
+      const label = a.status === "unconfigured" ? `${a.provider}(unconfigured)` : a.provider;
+      if (!seenFailed.has(label)) {
+        seenFailed.add(label);
+        report.providersFailed.push(label);
       }
     }
 
