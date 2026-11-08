@@ -59,6 +59,38 @@ export interface SettleResult {
 }
 
 /**
+ * Reservation lifetime passed to reserve_bits as p_expires_seconds.
+ *
+ * Must exceed the longest reachable billable segment: the agent loop's
+ * hard runtime cap is 30 minutes (maxRuntimeMs = 1_800_000 in
+ * agent-loop-v2), so 3,600s gives 2x headroom over that cap. With the
+ * reserve_bits default of 600s, any segment running longer than
+ * 10 minutes outlived its reservation and settle_bits rejected the
+ * settlement as reservation_expired — the completed work was delivered
+ * with zero debit. Do not lower this below the loop cap without also
+ * lowering the cap.
+ */
+export const RESERVATION_TTL_SECONDS = 3600;
+
+/**
+ * PostgREST returns RETURNS TABLE RPC results as an array of rows, not a
+ * single object. reserve_bits/settle_bits/release_bits all return tables,
+ * so `.rpc()` `data` is `Row[]`. Reading `.success`/`.reservation_id`
+ * directly off the array yields undefined — which this module previously
+ * treated as "unknown reason" failures, aborting every paid run with 503
+ * or mis-reporting every settle as rejected. Row 0 is the row; anything
+ * else is treated as absent so callers fail closed rather than assume a
+ * debit or release happened.
+ */
+function unwrapRpcRow<T extends Record<string, unknown>>(data: unknown): T | null {
+  const candidate = Array.isArray(data) ? data[0] : data;
+  if (candidate == null || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return null;
+  }
+  return candidate as T;
+}
+
+/**
  * Reserve BITS BEFORE the model call.
  *
  * Flow:
@@ -142,6 +174,7 @@ export async function reserveCredits(
       p_reference_type: "agent_instance",
       p_reference_id: ctx.agentInstanceId,
       p_description: `Agent run: ${ctx.agentInstanceId}`,
+      p_expires_seconds: RESERVATION_TTL_SECONDS,
     });
 
     if (reserveError) {
@@ -156,8 +189,14 @@ export async function reserveCredits(
       };
     }
 
-    if (!reserveData?.success) {
-      const reason = reserveData?.reason ?? "unknown";
+    const reserveRow = unwrapRpcRow<{
+      success?: boolean;
+      reason?: string;
+      reservation_id?: string;
+    }>(reserveData);
+
+    if (!reserveRow?.success) {
+      const reason = reserveRow?.reason ?? "unknown";
       if (reason === "insufficient_balance") {
         return {
           ok: false,
@@ -169,8 +208,8 @@ export async function reserveCredits(
         };
       }
       // Idempotent retry — reservation already exists
-      if (reason === "already_reserved") {
-        reservationId = reserveData.reservation_id;
+      if (reason === "already_reserved" && reserveRow?.reservation_id) {
+        reservationId = reserveRow.reservation_id;
         // Fall through to create/find the run row
       } else {
         return {
@@ -183,7 +222,7 @@ export async function reserveCredits(
         };
       }
     } else {
-      reservationId = reserveData.reservation_id;
+      reservationId = reserveRow.reservation_id ?? null;
     }
   }
 
@@ -266,13 +305,25 @@ export async function settleRun(
 
   if (result.status === "completed" && reservationId && result.actualCredits > 0) {
     // Settle: debit actual cost, release remainder
+    // The RPC appends ':settle' to this key when writing the ledger row,
+    // so pass the bare run id: the ledger key becomes `runId:settle`,
+    // which is what emitSettleMetering looks up to stamp usage_event_id.
+    // (Passing `runId + ":settle"` produced `runId:settle:settle` and the
+    // evidence link silently never matched.)
     const { data: settleData, error: settleError } = await supabaseAdmin.rpc("settle_bits", {
       p_reservation_id: reservationId,
       p_actual_amount: result.actualCredits,
-      p_idempotency_key: runId + ":settle",
+      p_idempotency_key: runId,
       p_overage_policy: "reject",
       p_description: `Agent run settled: ${runId}`,
     });
+
+    const settleRow = unwrapRpcRow<{
+      success?: boolean;
+      reason?: string;
+      settled_amount?: number;
+      released_amount?: number;
+    }>(settleData);
 
     if (settleError) {
       console.error(`[agent-billing] CRITICAL: settle_bits failed for run ${runId}. Error: ${settleError.message}`);
@@ -283,16 +334,16 @@ export async function settleRun(
         settleError.message,
         reservationId,
       );
-    } else if (settleData?.success) {
-      creditsCharged = settleData.settled_amount;
-      creditsRefunded = settleData.released_amount;
+    } else if (settleRow?.success) {
+      creditsCharged = settleRow.settled_amount ?? 0;
+      creditsRefunded = settleRow.released_amount ?? 0;
     } else {
-      console.error(`[agent-billing] settle_bits returned failure for run ${runId}: ${settleData?.reason}`);
+      console.error(`[agent-billing] settle_bits returned failure for run ${runId}: ${settleRow?.reason}`);
       await createReconciliationRecord(
         { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
         result.actualCredits,
         "settle_rejected",
-        settleData?.reason ?? "unknown",
+        settleRow?.reason ?? "unknown",
         reservationId,
       );
     }
