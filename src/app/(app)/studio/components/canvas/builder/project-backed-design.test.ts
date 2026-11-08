@@ -9,7 +9,7 @@ describe("project-backed Design surface", () => {
   it("never mounts the new-project greeter when an active project exists", () => {
     const builder = read("src/app/(app)/studio/components/canvas/builder/VisualCanvasBuilder.tsx");
     expect(builder).toContain("activeProjectId || serverProjectId");
-    expect(builder).toContain("<ProjectDesignSurface />");
+    expect(builder).toContain("<ProjectDesignSurface");
   });
 
   it("keeps the greeter only in the project-less canvas path", () => {

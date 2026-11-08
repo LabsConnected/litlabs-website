@@ -29,6 +29,18 @@ import {
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
+/**
+ * The terminal-server refuses socket sessions with "Terminal unavailable:
+ * isolation not verified" when execution is disabled by fail-closed
+ * isolation policy (production without verified sandbox). That is NOT a
+ * socket/connectivity failure — surface it as `unavailable` with its own
+ * failure stage so diagnostics and LiTT don't misreport it as
+ * "socket unavailable".
+ */
+function isIsolationRefusal(message: string | undefined): boolean {
+  return /isolation not verified|Terminal unavailable/i.test(message ?? "");
+}
+
 interface TerminalPanelProps {
   projectId?: string;
   repositoryName?: string | null;
@@ -420,10 +432,11 @@ export const TerminalPanel = forwardRef<
               socketRef.current = retrySocket;
               retrySocket.on("connect_error", (nextErr: Error) => {
                 const isAuth = /unauthorized|forbidden|auth/i.test(nextErr.message || "");
+                const isIsolation = isIsolationRefusal(nextErr.message);
                 terminalStore.setError(nextErr.message);
-                terminalStore.setStatus(isAuth ? "auth_failed" : "pty_failed");
-                terminalStore.setFailureStage(isAuth ? "auth" : "pty_creation_failed");
-                term.writeln(`\x1b[31m❌ ${isAuth ? "Authentication failed" : "PTY connection failed"}: ${nextErr.message}\x1b[0m`);
+                terminalStore.setStatus(isAuth ? "auth_failed" : isIsolation ? "unavailable" : "pty_failed");
+                terminalStore.setFailureStage(isAuth ? "auth" : isIsolation ? "isolation_disabled" : "pty_creation_failed");
+                term.writeln(`\x1b[31m❌ ${isAuth ? "Authentication failed" : isIsolation ? "Terminal unavailable" : "PTY connection failed"}: ${nextErr.message}\x1b[0m`);
                 onLog?.(`[WS] Connect error: ${nextErr.message}`);
               });
               retrySocket.on("session:ready", (readyData: { sessionId: string; cwd: string; shell: string; workspaceId?: string | null; projectId?: string | null }) => {
@@ -455,10 +468,11 @@ export const TerminalPanel = forwardRef<
             clearTimeout(connectTimeoutRef.current);
             connectTimeoutRef.current = null;
           }
+          const isIsolation = isIsolationRefusal(err.message);
           terminalStore.setError(err.message);
-          terminalStore.setStatus(isUnauthorized ? "auth_failed" : "pty_failed");
-          terminalStore.setFailureStage(isUnauthorized ? "auth" : "socket_unavailable");
-          term.writeln(`\x1b[31m❌ ${isUnauthorized ? "Authentication failed" : "PTY connection failed"}: ${err.message}\x1b[0m`);
+          terminalStore.setStatus(isUnauthorized ? "auth_failed" : isIsolation ? "unavailable" : "pty_failed");
+          terminalStore.setFailureStage(isUnauthorized ? "auth" : isIsolation ? "isolation_disabled" : "socket_unavailable");
+          term.writeln(`\x1b[31m❌ ${isUnauthorized ? "Authentication failed" : isIsolation ? "Terminal unavailable" : "PTY connection failed"}: ${err.message}\x1b[0m`);
           onLog?.(`[WS] Connect error: ${err.message}`);
         });
 
@@ -578,10 +592,11 @@ export const TerminalPanel = forwardRef<
 
                     retrySocket.on("connect_error", (nextErr: Error) => {
                       const isAuth = /unauthorized|forbidden|auth/i.test(nextErr.message || "");
+                      const isIsolation = isIsolationRefusal(nextErr.message);
                       terminalStore.setError(nextErr.message);
-                      terminalStore.setStatus(isAuth ? "auth_failed" : "pty_failed");
-                      terminalStore.setFailureStage(isAuth ? "auth" : "socket_unavailable");
-                      term.writeln(`\x1b[31m❌ ${isAuth ? "Authentication failed" : "PTY connection failed"}: ${nextErr.message}\x1b[0m`);
+                      terminalStore.setStatus(isAuth ? "auth_failed" : isIsolation ? "unavailable" : "pty_failed");
+                      terminalStore.setFailureStage(isAuth ? "auth" : isIsolation ? "isolation_disabled" : "socket_unavailable");
+                      term.writeln(`\x1b[31m❌ ${isAuth ? "Authentication failed" : isIsolation ? "Terminal unavailable" : "PTY connection failed"}: ${nextErr.message}\x1b[0m`);
                       onLog?.(`[WS] Connect error: ${nextErr.message}`);
                     });
 
@@ -833,9 +848,15 @@ export const TerminalPanel = forwardRef<
               <AlertCircle size={10} /> Authentication failed
             </span>
           ) : terminalStore.status === "unavailable" ? (
-            <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
-              <AlertCircle size={10} /> PTY server unavailable
-            </span>
+            <div className="flex flex-col gap-1">
+              <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
+                <AlertCircle size={10} /> Terminal unavailable
+                {terminalStore.failureStage && <span className="ml-1 text-[9px] text-red-300/70">({terminalStore.failureStage.replace(/_/g, " ")})</span>}
+              </span>
+              {terminalStore.error && (
+                <span className="text-[9px] text-red-300/60" title={terminalStore.error}>{terminalStore.error.slice(0, 120)}</span>
+              )}
+            </div>
           ) : terminalStore.status === "project_context_missing" ? (
             <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded bg-amber-500/15 px-2 py-1 text-[10px] font-bold text-amber-300">
               <AlertCircle size={10} /> No project context

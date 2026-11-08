@@ -62,11 +62,16 @@ async function creditCreditPack(
     return;
   }
   const sb = getAdminSupabase();
-  const { data: user } = await sb
+  const { data: user, error: userError } = await sb
     .from("users")
     .select("id")
     .eq("clerk_id", clerkId)
-    .single();
+    .maybeSingle();
+  if (userError) {
+    // Do not mark a paid event processed while its recipient is unknown.
+    // A redelivery uses the same grant idempotency key after DB recovery.
+    throw new Error("Credit-pack user lookup failed");
+  }
   if (!user) {
     // No entitlement target — permanent condition, do not retry.
     return;
