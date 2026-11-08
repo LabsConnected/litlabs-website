@@ -12,8 +12,19 @@ async function ensureDbUser(clerkId: string): Promise<string | null> {
     .from("users")
     .select("id")
     .eq("clerk_id", clerkId)
-    .single();
-  return user?.id ?? null;
+    .maybeSingle();
+  if (user?.id) return user.id;
+  // First access can outrun the Clerk user.created webhook — provision the
+  // row lazily (same path as /api/user/ensure), then re-select so a
+  // concurrent insert resolves to the same single row.
+  const { ensureUserProvisioned } = await import("@/lib/user-db");
+  await ensureUserProvisioned(clerkId).catch(() => ({ user: null }));
+  const { data: retried } = await supabaseAdmin
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .maybeSingle();
+  return retried?.id ?? null;
 }
 
 async function handler(req: NextRequest) {
