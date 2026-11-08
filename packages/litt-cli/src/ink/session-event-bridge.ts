@@ -326,6 +326,20 @@ export class SessionEventBridge {
           return { type: mappedType, runId, ts, data };
         }
 
+        // Evidence collection — mission:evidence_recorded was previously
+        // dropped, so the operator could not see WHICH evidence the
+        // mission actually gathered. Map it to a first-class event.
+        if (subtype === "mission:evidence_recorded") {
+          return { type: "mission.evidence", runId, ts, data };
+        }
+
+        // Verification-gate repair feedback — the loop's "gate not
+        // proven, fix and retry" nudge. Surface it so the operator sees
+        // verification results live instead of a silent retry.
+        if (subtype === "verification_failed_repair") {
+          return { type: "verification.repair", runId, ts, data };
+        }
+
         // other litt_event subtypes (verification_failed_repair, etc.)
         return null;
       }

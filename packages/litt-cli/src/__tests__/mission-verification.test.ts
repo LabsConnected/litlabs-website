@@ -295,6 +295,10 @@ describe("MissionVerificationGate", () => {
       store,
       isReadOnly: () => true,
       hasSuccessfulEvidence: () => true,
+      // The step declares repository_status required — satisfy the
+      // mission-scoped contract so the gate can prove (this test is
+      // about step recovery, not evidence acquisition).
+      hasSuccessfulEvidenceType: () => true,
       evidenceSummary: () => "project.list_files: ok",
       hasFailedEvidence: () => false,
       failedSummary: () => "",

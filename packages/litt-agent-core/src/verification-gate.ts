@@ -52,6 +52,7 @@ import type {
   ShellExecutor,
 } from "./types.js";
 import type { RuntimeStore } from "./state.js";
+import type { EvidenceType } from "./missions/mission-types.js";
 import type { CommandExecutor, CommandExecutorResult } from "./command-executor.js";
 import { redactSecrets } from "./execution.js";
 
@@ -216,6 +217,16 @@ export interface VerificationResult {
   ranChecks: VerificationCheckId[];
   /** Which checks were skipped. */
   skippedChecks: VerificationCheckId[];
+  /**
+   * Required evidence types that were never successfully collected.
+   * Populated by evidence-style gates (e.g. read-only inspection);
+   * the full check gate leaves it unset.
+   */
+  missingEvidence?: EvidenceType[];
+  /** Required evidence types whose producer tool ran and failed. */
+  failedEvidence?: EvidenceType[];
+  /** Titles of mission steps that produced no successful evidence. */
+  uncoveredSteps?: string[];
 }
 
 /**

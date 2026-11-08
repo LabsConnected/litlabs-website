@@ -27,11 +27,13 @@ import { join, basename } from "node:path";
 import {
   runAgentLoop,
   planMission,
+  normalizeSemanticPlan,
   resolveStepForTool,
   attachToolToStep,
   updateToolResultOnStep,
   progressMissionStepAfterTool,
   toolToEvidenceType,
+  detectMutationRequest,
   MissionPlanningError,
   type RuntimeEvent,
   type StreamChunk,
@@ -40,6 +42,7 @@ import {
   type ToolDefinition,
 } from "@litt/agent-core";
 import type { RuntimeSession } from "../lib/runtime-session.js";
+import { missionTimeoutFromEnv } from "../lib/runtime-session.js";
 import type { RuntimeClient } from "../lib/runtime-client.js";
 import { RemoteModelProvider, RemoteExecutionError } from "../lib/remote-model-provider.js";
 import { RemoteConnectionTimeoutError } from "../lib/runtime-client.js";
@@ -71,6 +74,7 @@ import {
   localRoutePolicy,
   resolveLocalModel,
   resolveRequestedLocalModel,
+  resolveMissionLocalModelRequest,
   resolveModelArg,
   remoteSelectionOf,
   type LocalRoutePolicy,
@@ -95,8 +99,9 @@ import {
   createMissionEvidenceTracker,
   requiresProjectHealth,
   isShipCommitAllowed,
-  markInspectionStepsComplete,
+  uncoveredMissionSteps,
 } from "../lib/mission-verification.js";
+import { finalizeMissionRun } from "../lib/mission-finalize.js";
 import { buildPromptWithContext } from "../lib/context-resolver.js";
 import { getGitState } from "../lib/git-state.js";
 import {
@@ -191,6 +196,7 @@ function routeForTarget(
   signedIn: boolean | null | undefined,
   lane: LocalLaneStatus | null,
   input: string,
+  requestedOverride?: string | null,
 ): RoutedModel {
   const policy = resolveRoutePolicy(store, signedIn);
   if (policy.kind === "local-required") {
@@ -199,7 +205,10 @@ function routeForTarget(
         "LOCAL execution requires the local model daemon, but its status was not probed for this request.",
       );
     }
-    return modelRuntime.routeLocal(lane, requestedLocalModel(store.state.selectedModel));
+    return modelRuntime.routeLocal(
+      lane,
+      requestedOverride ?? requestedLocalModel(store.state.selectedModel),
+    );
   }
   return modelRuntime.route(store.state.routingMode, store.state.selectedModel, input);
 }
@@ -945,6 +954,20 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   const currentRemoteModelRef = useRef<RemoteModelProvider | null>(null);
   const cancelRemoteModel = useCallback(() => {
     currentRemoteModelRef.current?.cancel();
+  }, []);
+
+  // Per-turn abort — Esc/Ctrl+C reaches inside runAgentLoop, not just
+  // the shell executor. Without this a local-model loop kept running
+  // after cancel and later finalized the mission complete/failed.
+  const activeRunAbortRef = useRef<AbortController | null>(null);
+  const cancelActiveRun = useCallback(() => {
+    activeRunAbortRef.current?.abort();
+  }, []);
+  const beginAbort = useCallback((): AbortSignal => {
+    activeRunAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    activeRunAbortRef.current = ctrl;
+    return ctrl.signal;
   }, []);
 
   // ─── @mention context logs ──────────────────────────────────────
@@ -2644,6 +2667,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // holoState stays IDLE throughout — CHAT never enters mission
       // states like UNDERSTANDING/PLANNING/etc.
       if (!isMission) {
+        // A new turn resets terminal UI truth (stale COMPLETE/FAILED
+        // from a previous mission/chat) before this turn's state is set.
+        store.actions.beginTurn();
         // Refresh branch from the same cwd the tools use — ensures
         // the header branch matches what project.status reports.
         const freshBranch = refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
@@ -2772,11 +2798,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // is split across many stream deltas.
           const toolCallFilter = createToolCallStreamFilter();
 
+          const chatAbort = beginAbort();
           const result = await runAgentLoop(modelInput, {
             model, tools, shell: session.getShell(),
             gateway,
             cwd: projectRoot, userId: "cli-user",
             mode: session.getMode(), maxRounds: 4,
+            abortSignal: chatAbort,
             projectContext: { name: projectName ?? "chat", root: projectRoot, branch: freshBranch ?? branch ?? "unknown" },
             store: agentStore,
             // Prior completed turns from THIS cockpit session — without
@@ -2856,13 +2884,20 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             id: `act_${Date.now()}_done`,
             ts: Date.now(),
             type: result.termination === "complete" ? "agent.complete" : "agent.stopped",
-            tag: "DONE",
+            tag: result.termination === "complete" ? "DONE" : "FAIL",
             text: `LiTT responded · ${seconds}s${chatToolCallCount > 0 ? ` · ${chatToolCallCount} tools` : ""}`,
           });
-          // CHAT complete — the tool events above pushed holoState to
-          // RUNNING mid-run; a successful chat must return it to IDLE
-          // (the composer/status reconcile out of Working). Cleanup in finally.
-          store.actions.setHoloState("IDLE");
+          // CHAT terminal truth: a non-complete termination is a real
+          // failure/cancellation, never IDLE-over-a-stale-mission. The
+          // next turn's beginTurn() resets a terminal state to IDLE; no
+          // idle timer is scheduled here so the outcome stays visible.
+          if (result.termination === "complete") {
+            store.actions.setHoloState("IDLE");
+          } else {
+            store.actions.setHoloState(
+              result.termination === "cancelled" ? "CANCELLED" : "FAILED",
+            );
+          }
         } catch (err) {
           const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
           store.actions.addActivity({
@@ -2899,6 +2934,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       }
 
       // MISSION intent — full agent lifecycle with real Mission state
+      // A new turn resets terminal UI truth (stale COMPLETE/FAILED from
+      // a previous mission/chat) before this turn's state is set.
+      store.actions.beginTurn();
       // Refresh branch from the same cwd the tools use
       const freshBranch = refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
       perf.mark("branch_refreshed");
@@ -2942,6 +2980,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // terminal state; the finally is the guarantee for anything that
       // escapes (e.g. a cleanup call itself throwing).
       let settled = false;
+      // Per-turn abort — covers planning AND the agent loop.
+      const missionAbort = beginAbort();
       // Captured once the MISSION assistant message is opened below —
       // every appendAssistantDelta/finalizeAssistantMessage call for
       // this turn (including the catch block) must target THIS id
@@ -2981,7 +3021,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           text: "Mission created",
         });
 
-        const routed = routeForTarget(store, modelRuntime, signedIn, localLane, modelInput);
+        // Mission lane model default: tool-execution missions prefer
+        // litt-tools:4k (litt-coder:8k cannot sustain multi-round tool
+        // use — verified in dogfood). Explicit env overrides win;
+        // remote/catalog routing is untouched.
+        const routed = routeForTarget(
+          store, modelRuntime, signedIn, localLane, modelInput,
+          resolveMissionLocalModelRequest(localLane, store.state.selectedModel),
+        );
         perf.mark("route");
         // Routing trace — requested (brain/policy) vs resolved (route()).
         const requestedModel = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
@@ -3061,6 +3108,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         let plan: { source: string; fallbackDomain?: string };
         let plannedSteps: Array<{ id: string; title: string; allowedActionScope: string[] }>;
 
+        const checksRequired = requiresProjectHealth(input) || detectMutationRequest(input);
+
         if (shouldSkipPlanning(input)) {
           // Simple mission — skip planning, create a default step.
           perf.mark("plan_skipped");
@@ -3073,13 +3122,22 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             text: `Direct execution (simple mission) — skipping planning round`,
           });
 
-          // Create a single default step on the mission.
+          // Create a single default step on the mission. The step spec
+          // still runs through normalizeSemanticPlan so a check-oriented
+          // request ("run the typecheck") gets its evidence contract —
+          // without it the gate cannot name the missing evidence and the
+          // full health gate would run instead of the required check.
+          const [defaultStepSpec] = normalizeSemanticPlan(
+            [{ title: input.slice(0, 80), description: input, scope: "act" }],
+            { checksRequired },
+          );
           const missionNow = agentStore.getMission();
-          if (missionNow) {
+          if (missionNow && defaultStepSpec) {
             await agentStore.addMissionStep({
-              title: input.slice(0, 80),
-              description: input,
-              allowedActionScope: ["act"],
+              title: defaultStepSpec.title,
+              description: defaultStepSpec.description,
+              requiredEvidence: defaultStepSpec.requiredEvidence,
+              allowedActionScope: defaultStepSpec.scope ? [defaultStepSpec.scope] : ["act"],
             });
           }
           plan = { source: "skip", fallbackDomain: undefined };
@@ -3111,6 +3169,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             model,
             store: agentStore,
             goal: input,
+            checksRequired,
+            // Read-only goals get read-only plans: mutation-dependent
+            // steps can never earn evidence and would guarantee a
+            // verification failure (observed: "scan" failed on
+            // "Apply approved repairs" having no possible evidence).
+            mutationRequested: detectMutationRequest(input),
             projectContext: {
               name: projectName ?? "unnamed",
               root: projectRoot,
@@ -3202,11 +3266,29 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // separates planning (plan_start → plan_end) from execution.
         perf.mark("agent_loop_start");
 
+        // Cancel during planning must not roll into execution.
+        if (missionAbort.aborted) {
+          await agentStore.cancelMission("Cancelled by user").catch(() => {});
+          store.actions.setHoloState("CANCELLED");
+          store.actions.updateMissionState("CANCELLED", "Cancelled by user");
+          store.actions.setMissionRuntimeProven(false);
+          store.actions.failToolProgressMission();
+          settled = true;
+          store.actions.stopBusy();
+          store.actions.scheduleIdle(2000);
+          return;
+        }
+
         const result = await runAgentLoop(modelInput, {
           model, tools, shell: session.getShell(),
           gateway,
           cwd: projectRoot, userId: "cli-user",
           mode: session.getMode(), maxRounds: 10,
+          abortSignal: missionAbort,
+          // LITT_MISSION_TIMEOUT_MS bounds the WHOLE loop — without it a
+          // hung tool call or stalled stream spins "verifying" forever
+          // (observed in dogfood). 0 = unbounded, previous behavior.
+          totalTimeoutMs: missionTimeoutFromEnv(),
           projectContext: {
             name: projectName ?? "unnamed",
             root: projectRoot,
@@ -3235,6 +3317,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             hasSuccessfulEvidence: evidenceTracker.hasSuccessfulEvidence,
         hasSuccessfulEvidenceType: evidenceTracker.hasSuccessfulEvidenceType,
             hasFailedEvidence: evidenceTracker.hasFailedEvidence,
+            evidenceTypeState: evidenceTracker.evidenceTypeState,
+            uncoveredStepTitles: () => uncoveredMissionSteps(agentStore.getMission()),
             evidenceSummary: evidenceTracker.summary,
             failedSummary: evidenceTracker.failedSummary,
             healthRequested: () => healthRequested,
@@ -3318,7 +3402,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
               // Track UI artifacts — projection only, not lifecycle inference.
               const MUTATION_TOOLS = new Set(["project.edit_file", "project.write_file", "project.run"]);
-              const EXECUTION_TOOLS = new Set(["project.build", "project.test", "project.typecheck", "project.run"]);
+              const EXECUTION_TOOLS = new Set(["project.build", "project.test", "project.typecheck", "project.check", "project.run"]);
               if (MUTATION_TOOLS.has(toolId)) {
                 // Record the REAL file path (inputs.file/path), never the
                 // tool id — filesTouched is a file list, not a tool list.
@@ -3374,18 +3458,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                   }).catch(() => {});
                 }
 
-                // A failed tool marks the current step as failed.
+                // A failed tool does NOT fail the step here — the
+                // failure is recorded on the action record + evidence,
+                // and finalizeMissionRun owns terminal step truth. A
+                // step can recover through the state machine when a
+                // later call succeeds.
                 if (!success) {
                   evidenceRecorded.catch(() => {});
-                  agentStore.updateMissionStepStatus(
-                    currentStepId,
-                    "failed",
-                    {
-                      failureReason: message.slice(0, 300),
-                      verificationPassed: false,
-                      verificationEvidence: message.slice(0, 500),
-                    },
-                  ).catch(() => {});
                 } else {
                   // Successful tool — check if the current step's
                   // requiredEvidence is now satisfied. If so, advance
@@ -3440,20 +3519,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.appendAssistantDelta(missionAssistantMsgId, missionTail);
         }
 
-        // When the agent loop finishes, mark the current step passed
-        // (the model moved past it) and let the VerificationGate own
-        // the final mission COMPLETE/FAILED truth.
-        if (currentStepId) {
-          const m = agentStore.getMission();
-          const step = m?.steps.find((s) => s.id === currentStepId);
-          if (step && step.status === "working") {
-            await agentStore.updateMissionStepStatus(currentStepId, "passed", {
-              verificationPassed: true,
-              verificationEvidence: "Agent loop completed this step",
-            }).catch(() => {});
-          }
-        }
-
+        // The loop finishing must NEVER pass a step — only real tool
+        // evidence (progressMissionStepAfterTool) or the proven
+        // verification path may advance a step.
         if (model.activeModel) store.actions.setActiveModel(model.activeModel);
         // Re-affirm the served provider post-completion (idempotent —
         // already set pre-stream from model.providerId execution truth).
@@ -3499,7 +3567,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         await agentStore.setMissionVerifying();
 
         let verificationSummary = "Verification not run";
-        let missionComplete = false;
+        let verification: VerificationResult | null = null;
 
         try {
           // Use the loop's verification result if it ran the gate.
@@ -3508,7 +3576,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // must fail honestly — never fall back to the full build/test
           // gate, which would spend minutes and could "prove" the
           // mission complete via an unrelated passing build.
-          const verification: VerificationResult = result.verification
+          // Surface WHY the loop ended — "(error)" alone hides whether it
+          // was unknown-tool retries, an empty response, or a deadline.
+          // result.content carries the loop's own honest explanation.
+          const loopDetail =
+            result.termination !== "complete" && result.content.trim()
+              ? ` Loop ended (${result.termination}): ${result.content.trim().slice(0, 400)}`
+              : "";
+          verification = result.verification
             ? { ...result.verification, message: result.verification.message }
             : evidenceTracker.isReadOnly()
               ? {
@@ -3516,14 +3591,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                   status: "failed",
                   checks: [],
                   totalDurationMs: 0,
-                  message: `Repository inspection did not complete (${result.termination}) — no successful tool evidence was collected.`,
+                  message: `Repository inspection did not complete (${result.termination}) — no successful tool evidence was collected.${loopDetail}`,
                   runId: "verify_not_run",
                   ranChecks: [],
                   skippedChecks: [],
                 }
               : await session.verify();
           verificationSummary = verification.message;
-          missionComplete = verification.proven;
 
           await agentStore.addMissionEvidence({
             stepId: null,
@@ -3557,7 +3631,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           });
         } catch (verifyErr) {
           verificationSummary = `Verification error: ${verifyErr instanceof Error ? verifyErr.message : String(verifyErr)}`;
-          missionComplete = false;
           store.actions.addActivity({
             id: `act_${Date.now()}_verr`,
             ts: Date.now(),
@@ -3593,28 +3666,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const agentLoopMs = result.durationMs;
         const seconds = (missionTotalMs / 1000).toFixed(1);
         const agentSeconds = (agentLoopMs / 1000).toFixed(1);
-        if (missionComplete) {
-          // Read-only inspection missions: the plan steps (inspect →
-          // verify → report) are satisfied by the collected evidence +
-          // the delivered answer. Mark them passed so the canonical
-          // mission can honestly reach "complete" instead of stalling
-          // at "verifying" (which would resurrect on restart).
-          //
-          // IMPORTANT: only mark steps complete when there are NO failed
-          // objectives. If any tool failed (e.g., weather lookup failed
-          // while repo inspection succeeded), the gate returns
-          // proven=false and this branch is not reached — the mission
-          // fails honestly with a truthful partial-success message.
-          if (evidenceTracker.isReadOnly()) {
-            await markInspectionStepsComplete(
-              agentStore,
-              `Inspection verified: ${verificationSummary.slice(0, 120)}`,
-            );
-          }
-          await agentStore.completeMission(
-            `Verified by VerificationGate: ${verificationSummary.slice(0, 200)}`,
-            verificationSummary,
-          );
+        const finalized = await finalizeMissionRun({
+          store: agentStore,
+          termination: result.termination,
+          verification,
+          readOnly: evidenceTracker.isReadOnly(),
+        });
+        if (finalized.outcome === "complete") {
           store.actions.setHoloState("COMPLETE");
           store.actions.updateMissionState("COMPLETE");
           store.actions.setMissionRuntimeProven(true);
@@ -3630,11 +3688,23 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             fullText: `Mission ${mission.id} completed with runtime verification.\n${verificationSummary}`,
           });
           store.actions.scheduleIdle(2000);
+        } else if (finalized.outcome === "cancelled") {
+          store.actions.setHoloState("CANCELLED");
+          store.actions.updateMissionState("CANCELLED", finalized.summary);
+          store.actions.setMissionRuntimeProven(false);
+          store.actions.failToolProgressMission();
+          settled = true;
+          store.actions.stopBusy();
+          store.actions.addActivity({
+            id: `act_${Date.now()}_done`,
+            ts: Date.now(),
+            type: "agent.stopped",
+            tag: "CANCEL",
+            text: `Mission cancelled · ${seconds}s`,
+            fullText: `Mission ${mission.id} cancelled by user.`,
+          });
+          store.actions.scheduleIdle(2000);
         } else {
-          await agentStore.failMission(
-            `Verification not proven: ${verificationSummary.slice(0, 200)}`,
-            verificationSummary,
-          );
           store.actions.setHoloState("FAILED");
           store.actions.updateMissionState("FAILED", verificationSummary);
           store.actions.setMissionRuntimeProven(false);
@@ -3777,5 +3847,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     runShipVerify,
     runShipCommit,
     cancelRemoteModel,
+    cancelActiveRun,
   };
 }

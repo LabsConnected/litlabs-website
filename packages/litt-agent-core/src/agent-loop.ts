@@ -52,6 +52,8 @@ import type { RuntimeStore } from "./state.js";
 import type { CommandExecutor } from "./command-executor.js";
 import type { ExecutionGateway } from "./execution-gateway.js";
 import type { VerificationResult } from "./verification-gate.js";
+import type { EvidenceType } from "./missions/mission-types.js";
+import { EVIDENCE_PRODUCER_TOOLS } from "./mission-planner.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -811,6 +813,29 @@ function isPlaceholderValue(trimmed: string): boolean {
 }
 
 /**
+ * Best-effort "did you mean" for a hallucinated tool id. Weak local
+ * models invent plausible names ("typecheck", "run_tests") instead of
+ * the canonical ids ("project.check", "project.test"). Matching is
+ * deliberately conservative — exact id, then namespace-suffix or
+ * substring containment — so we never steer the model toward an
+ * unrelated tool. Returns null when nothing plausible exists.
+ */
+function suggestToolName(toolId: string, toolDefs: ToolDefinition[]): string | null {
+  const lower = toolId.toLowerCase();
+  const exact = toolDefs.find((t) => t.id.toLowerCase() === lower);
+  if (exact) return exact.id;
+  const candidates = toolDefs.filter((t) => {
+    const id = t.id.toLowerCase();
+    const leaf = id.split(".").pop() ?? id;
+    return leaf === lower || id.endsWith(`.${lower}`) || id.includes(lower);
+  });
+  if (candidates.length === 0) return null;
+  // Prefer the shortest id (most specific canonical name) for display.
+  candidates.sort((a, b) => a.id.length - b.id.length);
+  return candidates.slice(0, 3).map((t) => t.id).join(", ");
+}
+
+/**
  * Validate a parsed tool call's arguments before dispatch. Returns an
  * error message string when the arguments are invalid (placeholders,
  * missing required fields, malformed values), or null when valid.
@@ -823,6 +848,13 @@ export function validateToolCallArgs(
   inputs: Record<string, unknown>,
   toolDefs: ToolDefinition[],
 ): string | null {
+  // A provider that could not parse the tool-call JSON marks the call
+  // with this key — the raw text is never executed, only reported back.
+  const malformed = inputs.__litt_invalid_arguments__;
+  if (typeof malformed === "string") {
+    return `Malformed tool arguments (invalid JSON): ${malformed}`;
+  }
+
   const def = toolDefs.find((t) => t.id === toolId);
   if (!def) return null; // unknown tool — handled separately
 
@@ -911,10 +943,60 @@ function unwrapNestedInputs(inputs: Record<string, unknown>): Record<string, unk
   return cur;
 }
 
+/**
+ * Aliases a weak model emits for the project root when asked for a
+ * filesystem path ("project root", "<root>", "/"). All mean "." — the
+ * tool's cwd-relative root. Compared case-insensitively.
+ */
+const PROJECT_ROOT_PATH_ALIASES: ReadonlySet<string> = new Set([
+  "project root",
+  "project_root",
+  "root",
+  "repo root",
+  "repository root",
+  "<project root>",
+  "<root>",
+  "/",
+  "./",
+  ".\\",
+]);
+
+/**
+ * Normalize a filesystem-path argument for a project tool:
+ *   - strip surrounding quotes/backticks
+ *   - project-root aliases → "."
+ *   - absolute path inside cwd → the cwd-relative path (the sandbox
+ *     re-validates it downstream)
+ *   - absolute path outside cwd → unchanged (the sandbox still blocks it)
+ * Returns null when no normalization applied.
+ */
+function normalizeToolPathArg(
+  toolId: string,
+  raw: string,
+  cwd?: string,
+): string | null {
+  if (toolId !== "project.list_files" && toolId !== "project.read_file") {
+    return null;
+  }
+  const trimmed = raw.trim().replace(/^["'`]+|["'`]+$/g, "");
+  if (trimmed !== raw && trimmed === "") return ".";
+  if (PROJECT_ROOT_PATH_ALIASES.has(trimmed.toLowerCase())) return ".";
+  if (cwd && /^[a-z]:[\\/]|^\\\\|^\//i.test(trimmed)) {
+    const rel = path.relative(path.resolve(cwd), path.resolve(trimmed));
+    if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) return rel;
+    if (rel === "") return ".";
+    // Absolute path outside cwd — leave unchanged (quotes included)
+    // so the sandbox still blocks it.
+    return null;
+  }
+  return trimmed !== raw ? trimmed : null;
+}
+
 export function normalizeToolCallArgs(
   toolId: string,
   inputs: Record<string, unknown>,
   toolDefs: ToolDefinition[],
+  cwd?: string,
 ): { inputs: Record<string, unknown>; renames: Array<[string, string]>; changed: boolean } {
   const def = toolDefs.find((t) => t.id === toolId);
   const base = unwrapNestedInputs(inputs);
@@ -942,6 +1024,21 @@ export function normalizeToolCallArgs(
       renames.push([donors[0], field]);
     }
   }
+
+  // Bounded path normalization — a project-root alias or an in-tree
+  // absolute path becomes the cwd-relative path the tools expect.
+  // Recorded the same way donor renames are (from → to on the "path"
+  // argument). Paths outside the sandbox are left untouched so
+  // resolveSandboxedPath still blocks them.
+  const rawPath = out.path;
+  if (typeof rawPath === "string") {
+    const normalized = normalizeToolPathArg(toolId, rawPath, cwd);
+    if (normalized !== null && normalized !== rawPath) {
+      out.path = normalized;
+      renames.push([`path:${rawPath}`, `path:${normalized}`]);
+    }
+  }
+
   return { inputs: out, renames, changed: changed || renames.length > 0 };
 }
 
@@ -977,6 +1074,65 @@ export function filterRedundantToolCalls(
   return calls.filter(
     (c) => !succeededKeys.has(`${c.toolId}::${JSON.stringify(c.inputs)}`),
   );
+}
+
+// ─── Mutation-intent detection ─────────────────────────────────────
+
+const ARTIFACT_FILENAME_RE = /\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|html?|py|rs|go|java|rb|php|sh|yaml|yml|toml)\b/gi;
+const CREATION_VERB_RE = /\b(?:create|write|build|scaffold|generate|construct|set\s*up|make)\b/i;
+const CREATION_TARGET_RE = /\b(?:build|scaffold|generate|set\s*up|create|make)\s+(?:me\s+|us\s+)?(?:a\s+|the\s+|this\s+|an\s+)?(?:\w+\s+){0,3}(?:website|web\s*site|web\s*app|webpage|web\s*page|homepage|home\s*page|landing\s*page|app|application|project|server|api)\b/i;
+const MUTATION_REQUEST_RES: readonly RegExp[] = [
+  // "edit/change/modify ... file/component/function/module/code/UI"
+  /\b(?:edit|change|modify|update|create|write|add|delete|remove|refactor|patch|insert|replace|rename|move)\s+(?:a\s+|the\s+|this\s+|one\s+)?(?:file|component|function|module|code|line|class|interface|type|variable|constant|export|import|UI)\b/i,
+  // "make/apply/perform a tiny/small/safe/visible edit/change"
+  /\b(?:make|apply|perform)\s+(?:a\s+|one\s+|the\s+)?(?:tiny\s+|small\s+|safe\s+|visible\s+)?(?:edit|change|modification|update|mutation)\b/i,
+  // "edit/change/modify <filename>" — verb followed by a file path
+  /\b(?:edit|change|modify|update|create|write|patch|refactor)\s+\S+\.(?:ts|tsx|js|jsx|json|md|css|html|py|rs|go|java|rb|php|sh|yaml|yml|toml)\b/i,
+  // "make a tiny safe visible UI change" — the acceptance test phrasing
+  /\bmake\s+one\s+tiny\s+safe\s+visible\s+UI\s+change\b/i,
+];
+
+/**
+ * A mutation-verb match does not count when it is explicitly negated —
+ * "do not modify", "don't create", "never edit", "without changing".
+ * The negation phrase must appear within ~3 words before the verb.
+ */
+const NEGATION_RE = /\b(?:do not|don't|dont|never|not|without|no need to|no need for)\b/i;
+const CLAUSE_DELIMITER_RE = /[,;.!?:\n]/;
+
+function hasUnnegatedMatch(prompt: string, re: RegExp): boolean {
+  for (const m of prompt.matchAll(new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g"))) {
+    const idx = m.index ?? 0;
+    // A negation only scopes within its own clause: "don't touch tests;
+    // edit the file" is still a mutation request. Take the text after
+    // the last clause delimiter and look at its last ~3 words only.
+    const clause = prompt.slice(0, idx).split(CLAUSE_DELIMITER_RE).pop() ?? "";
+    const words = clause.trim().split(/\s+/).filter(Boolean).slice(-3).join(" ");
+    if (!NEGATION_RE.test(words)) return true;
+  }
+  return false;
+}
+
+/**
+ * Did the prompt ask for a NEW artifact to come into existence?
+ * "build/scaffold/generate/create/make ... a website/app/file" —
+ * narrower than detectMutationRequest because it also gates the
+ * on-disk artifact existence check.
+ */
+export function detectCreationRequest(prompt: string): boolean {
+  const mentioned = prompt.match(ARTIFACT_FILENAME_RE) !== null;
+  return hasUnnegatedMatch(prompt, CREATION_TARGET_RE)
+    || (mentioned && hasUnnegatedMatch(prompt, CREATION_VERB_RE));
+}
+
+/**
+ * Did the prompt ask for a mutation (edit/create/delete/write)?
+ * Negated requests ("do not modify the file", "read-only — don't
+ * create a file") return false; only unnegated mutation verbs count.
+ */
+export function detectMutationRequest(prompt: string): boolean {
+  return detectCreationRequest(prompt)
+    || MUTATION_REQUEST_RES.some((re) => hasUnnegatedMatch(prompt, re));
 }
 
 // ─── Mission Planning ──────────────────────────────────────────────
@@ -1231,7 +1387,7 @@ export async function runAgentLoop(
         );
       } catch { /* debug only */ }
     }
-    const normalized = normalizeToolCallArgs(parsed.toolId, parsed.inputs, toolDefs);
+    const normalized = normalizeToolCallArgs(parsed.toolId, parsed.inputs, toolDefs, options.cwd);
     const inputs = normalized.changed ? normalized.inputs : parsed.inputs;
 
     let res: ToolResult;
@@ -1423,6 +1579,9 @@ export async function runAgentLoop(
   // truthfully returns. If the tool is not registered, the caller falls
   // back to the pre-existing re-prompt path (still fail-closed).
   let projectEvidenceAttempted = false;
+  /** Evidence types whose producer tool the runtime already dispatched
+   *  once this loop — bounds auto-acquisition to one run per type. */
+  const autoAcquiredEvidence = new Set<EvidenceType>();
   const acquireProjectEvidence = async (): Promise<AgentToolCallRecord | null> => {
     if (projectEvidenceAttempted) return null;
     projectEvidenceAttempted = true;
@@ -1489,9 +1648,8 @@ export async function runAgentLoop(
   // "complete". `creationRequested` (below) closes that gap, scoped
   // deliberately narrower than general mutation detection — see there
   // for why.
-  const ARTIFACT_FILENAME_RE = /\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|html?|py|rs|go|java|rb|php|sh|yaml|yml|toml)\b/gi;
   const mentionedArtifactFiles = Array.from(
-    new Set(Array.from(prompt.matchAll(ARTIFACT_FILENAME_RE), (m) => m[0])),
+    new Set(Array.from(prompt.matchAll(new RegExp(ARTIFACT_FILENAME_RE.source, "gi")), (m) => m[0])),
   );
   // Verbs that imply a NEW artifact should come into existence, as
   // opposed to edit/change/modify/update/... which imply a file that
@@ -1502,21 +1660,8 @@ export async function runAgentLoop(
   // there, and in a mocked/remote tool environment checking THIS
   // process's disk for it is meaningless — only whether the mutation
   // ran matters, which mutationSucceeded/mutationFailed already track).
-  const CREATION_VERB_RE = /\b(?:create|write|build|scaffold|generate|construct|set\s*up|make)\b/i;
-  const creationRequested =
-    (mentionedArtifactFiles.length > 0 && CREATION_VERB_RE.test(prompt))
-    // "build/scaffold/generate/set up/create/make me a website/app/project/page/server"
-    || /\b(?:build|scaffold|generate|set\s*up|create|make)\s+(?:me\s+|us\s+)?(?:a\s+|the\s+|this\s+|an\s+)?(?:\w+\s+){0,3}(?:website|web\s*site|web\s*app|webpage|web\s*page|homepage|home\s*page|landing\s*page|app|application|project|server|api)\b/i.test(prompt);
-  const mutationRequested =
-    // "edit/change/modify ... file/component/function/module/code/UI"
-    /\b(?:edit|change|modify|update|create|write|add|delete|remove|refactor|patch|insert|replace|rename|move)\s+(?:a\s+|the\s+|this\s+|one\s+)?(?:file|component|function|module|code|line|class|interface|type|variable|constant|export|import|UI)\b/i.test(prompt)
-    // "make/apply/perform a tiny/small/safe/visible edit/change"
-    || /\b(?:make|apply|perform)\s+(?:a\s+|one\s+|the\s+)?(?:tiny\s+|small\s+|safe\s+|visible\s+)?(?:edit|change|modification|update|mutation)\b/i.test(prompt)
-    // "edit/change/modify <filename>" — verb followed by a file path
-    || /\b(?:edit|change|modify|update|create|write|patch|refactor)\s+\S+\.(?:ts|tsx|js|jsx|json|md|css|html|py|rs|go|java|rb|php|sh|yaml|yml|toml)\b/i.test(prompt)
-    // "make a tiny safe visible UI change" — the acceptance test phrasing
-    || /\bmake\s+one\s+tiny\s+safe\s+visible\s+UI\s+change\b/i.test(prompt)
-    || creationRequested;
+  const creationRequested = detectCreationRequest(prompt);
+  const mutationRequested = detectMutationRequest(prompt);
   let mutationSucceeded = false;
   let mutationFailed = false;
 
@@ -2057,6 +2202,20 @@ export async function runAgentLoop(
         };
       }
 
+      // A cancelled turn never evaluates the gate — the mission's
+      // terminal truth is "cancelled", not proven/failed.
+      if (options.abortSignal?.aborted) {
+        return {
+          content: "Agent cancelled by user.",
+          toolCalls,
+          rounds,
+          durationMs: Date.now() - startTime,
+          usage: { total_tokens: totalTokens },
+          termination: "cancelled",
+          escalations: escalationEvents.length ? escalationEvents : undefined,
+        };
+      }
+
       // Run the gate — the runtime truth boundary.
       const verification = await options.verificationGate.verify();
       lastVerification = verification;
@@ -2102,7 +2261,104 @@ export async function runAgentLoop(
         tryEscalate();
       }
 
+      // ─── Runtime evidence acquisition for missing required evidence ──
+      // The gate names evidence types a step contract requires that were
+      // never collected. Asking a weak model to infer WHICH tool produces
+      // typecheck_result is what left missions stuck at max_rounds — the
+      // runtime knows the producer, so it dispatches it once through the
+      // same path as a model-selected call and hands back real evidence.
+      const acquiredEvidence: AgentToolCallRecord[] = [];
+      for (const type of verification.missingEvidence ?? []) {
+        if (autoAcquiredEvidence.has(type)) continue;
+        const producer = EVIDENCE_PRODUCER_TOOLS[type];
+        if (!producer) continue;
+        // The tool was already run (by the model or the runtime) — its
+        // real failure is the evidence, do not pay for a repeat.
+        if (toolCalls.some((tc) => tc.toolId === producer)) continue;
+        const entry = options.tools.get(producer);
+        if (!entry) continue;
+        autoAcquiredEvidence.add(type);
+        const call: ParsedToolCall = { toolId: producer, inputs: {} };
+        let exec: Awaited<ReturnType<typeof dispatchToolCall>>;
+        try {
+          exec = await withTotalDeadline(
+            dispatchToolCall(call, entry),
+            "required evidence",
+            () => void options.shell.cancel(),
+          );
+        } catch (err) {
+          if (err instanceof AgentDeadlineError) {
+            return timeoutResult("required evidence");
+          }
+          throw err;
+        }
+        acquiredEvidence.push(recordToolOutcome(call, entry, exec));
+      }
+      if (acquiredEvidence.length > 0) {
+        messages.push({ role: "assistant", content: modelContent });
+        messages.push({
+          role: "user",
+          content:
+            acquiredEvidence
+              .map((tc) => {
+                const entry = options.tools.get(tc.toolId);
+                return (
+                  (entry ? renderToolResult(entry, tc.result) : `Tool "${tc.toolName}" returned:\n${tc.result.message}`) +
+                  `\nLiTT ran ${tc.toolId} to collect required evidence for the plan — it is real runtime evidence, success or failure.`
+                );
+              })
+              .join("\n\n") +
+            `\n\nCall the tools that gather this evidence now. Do not describe what you ` +
+            `will do — call the tool in this reply, or state plainly what could not be done.`,
+        });
+        continue;
+      }
+
       messages.push({ role: "assistant", content: modelContent });
+
+      // Typed evidence gaps (missing/failed required evidence, uncovered
+      // steps) get a repair request that names exactly what is missing
+      // and which tool produces it — the generic "checks failed" text
+      // cannot tell a weak model what to do next.
+      const missingEvidence = verification.missingEvidence ?? [];
+      const failedEvidence = verification.failedEvidence ?? [];
+      const uncoveredSteps = verification.uncoveredSteps ?? [];
+      const typedGaps = missingEvidence.length + failedEvidence.length + uncoveredSteps.length > 0;
+      if (typedGaps) {
+        const parts: string[] = [
+          "Verification gate result: NOT PROVEN. You are NOT done.\n",
+          verification.message,
+        ];
+        if (missingEvidence.length > 0) {
+          parts.push(
+            `Missing required evidence:\n` +
+            missingEvidence
+              .map((type) => `- ${type}${EVIDENCE_PRODUCER_TOOLS[type] ? ` (run ${EVIDENCE_PRODUCER_TOOLS[type]})` : ""}`)
+              .join("\n"),
+          );
+        }
+        if (failedEvidence.length > 0) {
+          parts.push(
+            `Required checks that failed:\n` +
+            verification.checks
+              .filter((c) => c.status !== "skipped" && c.status !== "success")
+              .map((c) => `- ${c.id}: ${c.message}`)
+              .join("\n"),
+          );
+        }
+        if (uncoveredSteps.length > 0) {
+          parts.push(
+            `Steps without evidence:\n` + uncoveredSteps.map((t) => `- ${t}`).join("\n"),
+          );
+        }
+        parts.push(
+          `Call the tools that gather this evidence now. Do not describe what you ` +
+          `will do — call the tool in this reply, or state plainly what could not be done.`,
+        );
+        messages.push({ role: "user", content: parts.join("\n\n") });
+        continue;
+      }
+
       messages.push({
         role: "user",
         content:
@@ -2165,6 +2421,7 @@ export async function runAgentLoop(
     // an unrelated fallback tool, and never loops forever.
     if (callsToExecute.length > 0 && callsToExecute[0].entry === null) {
       unknownToolRetries++;
+      const suggestion = suggestToolName(callsToExecute[0].call.toolId, toolDefs);
       if (unknownToolRetries > MAX_UNKNOWN_TOOL_RETRIES) {
         return {
           content:
@@ -2186,8 +2443,9 @@ export async function runAgentLoop(
         role: "user",
         content: `Error: Unknown tool "${callsToExecute[0].call.toolId}". ` +
           `This tool does not exist and was NOT substituted with another tool. ` +
-          `Available tools: ${toolDefs.map((t) => t.id).join(", ")}. ` +
-          `Retry with one of the available tools, or state plainly that the task cannot be completed.`,
+          `Available tools: ${toolDefs.map((t) => t.id).join(", ")}.` +
+          (suggestion ? ` Did you mean: ${suggestion}?` : "") +
+          ` Retry with one of the available tools, or state plainly that the task cannot be completed.`,
       });
       continue;
     }
@@ -2357,7 +2615,8 @@ Rules:
 - Use project tools before claiming project, git, build, test, or file state.
 - Discover a path with project.list_files or project.search before project.read_file unless that exact path was already returned earlier in this run.
 - Never invent paths or claim an edit/test/build succeeded without tool evidence.
-- To edit, use project.run. ${editHint}
+- To create or overwrite a file, use project.write_file. For other edits, project.run (${editHint}) — it has no shell, so redirection will not work.
+- If you intend to take a next step, call the tool in the same reply — never end a reply by announcing what you will do.
 - After edits, use project.diff and project.check or project.build.
 - If a tool fails, report the real failure.
 ${compactProject ? `\n${compactProject}` : ""}
@@ -2377,10 +2636,12 @@ CRITICAL OPERATOR RULES:
 - If a tool fails, report the actual failure instead of pretending the inspection succeeded.
 
 HOW TO MAKE EDITS (CRITICAL):
-- To edit a file, use project.run with a command that modifies the file.
+- To create or overwrite a file, use project.write_file.
+- For other edits, use project.run with a command that modifies the file. project.run executes one program with arguments — it has NO shell, so redirection and pipes do not write files.
 ${platform === "windows" ? `- You are on WINDOWS. Do NOT use sed, grep, or other Unix-only commands. Use node -e, powershell -Command, or cmd /c for file edits.
   Example: project.run with command "node" and args ["-e", "const fs=require('fs');const f='path/to/file';const c=fs.readFileSync(f,'utf8');fs.writeFileSync(f,'// comment\\n'+c)"]` : `- You are on ${platform ?? "linux"}. Use sed, node -e, or other available commands for file edits.`}
 - NEVER describe an edit in prose without actually running the command. A diff shown in prose is NOT a real edit.
+- If you intend to take a next step, call the tool in the same reply — never end a reply by announcing what you will do.
 - After making an edit, use project.diff to show the REAL git diff of the change.
 - After making an edit, use project.check or project.build to verify the change did not break anything.
 - If you cannot make the edit (tool fails, command not available), state plainly that the edit failed. Do NOT claim success.

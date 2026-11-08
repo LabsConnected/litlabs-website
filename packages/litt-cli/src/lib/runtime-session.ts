@@ -319,6 +319,15 @@ export class RuntimeSession {
     browserVerifier?: BrowserVerifier | null,
   ): VerificationGate {
     if (this._verificationGate && !config && !browserVerifier) return this._verificationGate;
+    // LITT_VERIFICATION_TIMEOUT_MS overrides the per-check timeout
+    // (default 180s in VerificationGate). Explicit config.timeoutMs
+    // still wins; an invalid/out-of-range env value is ignored, never
+    // silently converted — timeouts still FAIL checks, never pass.
+    const envTimeout = verificationTimeoutFromEnv();
+    const mergedConfig: VerificationConfig = {
+      ...(envTimeout !== undefined ? { timeoutMs: envTimeout } : {}),
+      ...(config ?? {}),
+    };
     this._verificationGate = new VerificationGate({
       executor: this._executor,
       shell: this._shell,
@@ -326,7 +335,7 @@ export class RuntimeSession {
       emitter: (event) => this._handleEvent(event),
       cwd: this._cwd,
       browserVerifier: browserVerifier ?? null,
-      config: config ?? {},
+      config: mergedConfig,
       evidenceCache: this._verificationEvidence,
     });
     return this._verificationGate;
@@ -454,6 +463,47 @@ export class RuntimeSession {
 /**
  * Create a RuntimeSession for the CLI.
  */
+/**
+ * LITT_VERIFICATION_TIMEOUT_MS — per-check timeout override for the
+ * VerificationGate (default 180_000ms in agent-core). Bounded to
+ * [10s, 60min]; unset, malformed, or out-of-range values yield
+ * undefined so the gate default applies. Exported for tests.
+ */
+export function verificationTimeoutFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+  const raw = env.LITT_VERIFICATION_TIMEOUT_MS?.trim();
+  if (!raw) return undefined;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 10_000 || n > 3_600_000) return undefined;
+  return n;
+}
+
+/**
+ * Default total agent-loop deadline for a mission: 45 minutes.
+ * Generous for real multi-step missions on local hardware, but finite —
+ * a stalled tool call or model stream can no longer spin "verifying"
+ * forever (observed: 16+ min hang with no live process).
+ */
+export const DEFAULT_MISSION_TIMEOUT_MS = 45 * 60_000;
+
+/**
+ * LITT_MISSION_TIMEOUT_MS — total agent-loop deadline for a mission, in
+ * ms. Bounded to [60s, 4h]. Unset → DEFAULT_MISSION_TIMEOUT_MS (every
+ * mission now terminates); malformed or out-of-range → the default,
+ * never silently unbounded. A deadline terminates the loop as "error"
+ * → truthful mission failure, never a pass. Exported for tests.
+ */
+export function missionTimeoutFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env.LITT_MISSION_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_MISSION_TIMEOUT_MS;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 60_000 || n > 14_400_000) return DEFAULT_MISSION_TIMEOUT_MS;
+  return n;
+}
+
 export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSession {
   return new RuntimeSession(options);
 }
