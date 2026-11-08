@@ -16,6 +16,12 @@ process.env.GROQ_API_KEY = process.env.GROQ_API_KEY ?? "test-groq-key";
 process.env.AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID ?? "test-aws-key";
 process.env.AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY ?? "test-aws-secret";
 
+// Enrichment's network budget: production default is 30s, but resume-loop
+// tests legitimately await real-network enrichment per approved write and
+// were calibrated against a ~3s deadline — 30s blows every vitest timeout.
+// Pin the test-env default; individual tests override with vi.stubEnv.
+process.env.ENRICH_TOTAL_TIMEOUT_MS = process.env.ENRICH_TOTAL_TIMEOUT_MS ?? "3000";
+
 class MemoryStorage implements Storage {
   private values = new Map<string, string>();
 

@@ -60,8 +60,14 @@ export async function GET(
   try {
     file = await readPublishedFile(deploymentId, artifactPath);
   } catch {
-    // Never leak storage errors to a public visitor.
-    return new NextResponse("Service unavailable", { status: 503 });
+    // Never leak storage errors to a public visitor. Retry-After marks
+    // this as propagation/blip latency rather than a permanent failure —
+    // freshly deployed assets legitimately blip for ~1s while the file
+    // rows settle (readPublishedFile retries cover most of that window).
+    return new NextResponse("Service unavailable", {
+      status: 503,
+      headers: { "Retry-After": "1" },
+    });
   }
 
   if (!file) {

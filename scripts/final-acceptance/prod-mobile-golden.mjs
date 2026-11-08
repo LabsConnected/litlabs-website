@@ -810,9 +810,25 @@ async function main() {
           const resolveRef = (s) => (/^https?:\/\//i.test(s) ? s : new URL(s, productionUrl).href);
           const results = [];
           for (const src of [...new Set(imgSrcs)].slice(0, 20)) {
-            const resp = await page.request.get(resolveRef(src), { timeout: 30_000 }).catch(() => null);
-            const bytes = resp ? Number((await resp.body().catch(() => null))?.length ?? 0) : 0;
-            results.push({ src, status: resp?.status() ?? -1, bytes });
+            // Freshly deployed assets blip 503 for ~1s while the file rows
+            // settle — the audit runs immediately after deploy approval,
+            // so it must retry transient statuses instead of recording a
+            // false "broken image". Bounded: 3 attempts on 5xx/429/network
+            // failures only; a definitive 4xx fails fast (real breakages
+            // must not hide behind retries). Same discipline as the
+            // production_url_verified fetch above.
+            let resp = null;
+            let status = -1;
+            let bytes = 0;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              if (attempt > 0) await page.waitForTimeout(3000);
+              resp = await page.request.get(resolveRef(src), { timeout: 30_000 }).catch(() => null);
+              status = resp?.status() ?? -1;
+              const transient = status === -1 || status === 408 || status === 429 || status >= 500;
+              if (!transient) break;
+            }
+            if (resp && status === 200) bytes = Number((await resp.body().catch(() => null))?.length ?? 0);
+            results.push({ src, status, bytes });
           }
           const broken = results.filter((r) => r.status !== 200);
           const photos = results.filter((r) => r.status === 200 && !r.src.toLowerCase().endsWith(".svg") && r.bytes > 8000);
