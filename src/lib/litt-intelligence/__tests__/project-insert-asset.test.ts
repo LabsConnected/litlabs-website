@@ -265,6 +265,30 @@ describe("insertAssetFromUrl (shared core)", () => {
     expect(result.sitePath).toMatch(/\.jpeg$/);
   });
 
+  it("saves JPEG bytes mislabeled as image/png — the staging approval-loop payload", async () => {
+    // Regression for 2026-11-08: Cloudflare flux-1-schnell returns JPEG
+    // bytes but the provider wrapped them as data:image/png. The declared
+    // label drove the PNG structural check, which rejected valid JPEG as
+    // "truncated or corrupt" — every approved image.generate reported
+    // savedToProject:false and the model retried under fresh approvals.
+    const transport = spyTransport();
+    const jpeg = Buffer.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46,
+      0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+      0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
+    ]);
+    const result = await insertAssetFromUrl(
+      `data:image/png;base64,${jpeg.toString("base64")}`,
+      { nameHint: "hero" },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    expect(result.sitePath).toMatch(/\.jpe?g$/);
+    expect(result.contentType).toBe("image/jpeg");
+    const [, b64] = transport.writeBinaryFile.mock.calls[0];
+    expect(Buffer.from(b64 as string, "base64")).toEqual(jpeg);
+  });
+
   it("rejects a truncated image payload — decodes but is corrupt", async () => {
     // A model re-emitting a clipped data: URL produces a JPEG with a valid
     // header but no EOI marker — writing it ships a broken site asset.

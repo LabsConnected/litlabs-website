@@ -17,6 +17,7 @@ import "server-only";
 import { destructiveRewriteViolation, existingPageOverwriteError, placeholderViolation, simulatePatchResult, tailwindViolation } from "./patch-validation";
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
 import { fitImageForPublish, PUBLISH_MAX_IMAGE_BYTES } from "./asset-image-fit";
+import { sniffImageMimeType } from "@/lib/image-sniff";
 import type { WorkspaceTransport } from "./workspace-transport";
 
 // ─── Tool Handler Signature ───────────────────────────────────────
@@ -975,6 +976,23 @@ export async function insertAssetFromUrl(
       }
       contentType = resp.headers.get("content-type") || "application/octet-stream";
       buffer = Buffer.from(await resp.arrayBuffer());
+    }
+    // The declared type (data: URL label or response header) is not
+    // authoritative within image/* — providers mislabel encodings
+    // (Cloudflare flux returns JPEG bytes that were wrapped as
+    // data:image/png, which the structural check below then rejected as
+    // "truncated or corrupt", failing every project auto-insert and
+    // looping image.generate approvals). The bytes are ground truth:
+    // when the magic bytes identify a concrete image format, validate
+    // and store under that type. Non-image declarations are still
+    // rejected below — sniffing never promotes them.
+    const sniffedMime = sniffImageMimeType(buffer);
+    if (
+      sniffedMime &&
+      contentType.toLowerCase().startsWith("image/") &&
+      sniffedMime !== contentType.toLowerCase()
+    ) {
+      contentType = sniffedMime;
     }
     if (!contentType.startsWith("image/")) {
       return { success: false, error: `Not an image (content-type: ${contentType})` };
