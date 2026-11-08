@@ -88,7 +88,6 @@ export function ThinkingBlock({ phase, steps, width }: ThinkingBlockProps): Reac
             <Text color={color} bold>{glyph} </Text>
             <Text
               color={step.status === "pending" ? COLORS.secondaryDim : COLORS.text}
-              dimColor={step.status === "pending"}
             >
               {truncateMid(step.label, maxLabel)}
             </Text>
@@ -257,7 +256,6 @@ export function MissionProgressBlock({
             <Text color={color} bold>{glyph} </Text>
             <Text
               color={step.status === "pending" ? COLORS.secondaryDim : COLORS.text}
-              dimColor={step.status === "pending"}
             >
               {truncateMid(step.label, maxLabel)}
             </Text>

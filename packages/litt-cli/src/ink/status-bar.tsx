@@ -112,7 +112,7 @@ export function StatusBar({
     );
   } else if (runtime === "completed") {
     right = (
-      <Text color={COLORS.success} dimColor>{`${runtimeGlyph(runtime)} ${runtimeLabel(runtime)}`}</Text>
+      <Text color={COLORS.success}>{`${runtimeGlyph(runtime)} ${runtimeLabel(runtime)}`}</Text>
     );
   } else if (runtime === "failed" || runtime === "cancelled" || runtime === "timeout") {
     const tests = missionState?.testResults && missionState.testResults.failed > 0
@@ -121,12 +121,12 @@ export function StatusBar({
     right = (
       <Text>
         <Text color={COLORS.error}>{`${runtimeGlyph(runtime)} ${runtimeLabel(runtime)}${tests}`}</Text>
-        <Text dimColor>  v View</Text>
+        <Text color={COLORS.secondary}>  v View</Text>
       </Text>
     );
   } else {
     right = (
-      <Text dimColor>{width >= 60 ? "/ commands  ? help" : "? help"}</Text>
+      <Text color={COLORS.secondary}>{width >= 60 ? "/ commands  ? help" : "? help"}</Text>
     );
   }
 
@@ -135,7 +135,7 @@ export function StatusBar({
     <Box justifyContent="space-between">
       <Text>
         <Text color={COLORS.brand} bold>{mode === "plan" ? "Plan" : "Act"}</Text>
-        <Text dimColor>{mode === "plan" ? " · read-only" : " · ask before changes"}</Text>
+        <Text color={COLORS.secondary}>{mode === "plan" ? " · read-only" : " · ask before changes"}</Text>
       </Text>
       {right}
     </Box>

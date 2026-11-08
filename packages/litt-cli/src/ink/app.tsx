@@ -43,6 +43,7 @@ import { WorkspacePicker } from "./overlays/workspace-picker.js";
 import { ResumePicker } from "./overlays/resume-picker.js";
 import { ShipFlow } from "./overlays/ship-flow.js";
 import { FailureView } from "./overlays/failure-view.js";
+import { ActivityHistoryOverlay } from "./overlays/activity-history.js";
 import { hasOpenRouterKey, hasAnyNativeProviderKey, providerLabel } from "../lib/model-provider.js";
 import {
   localRoutePolicy,
@@ -274,6 +275,29 @@ export function CockpitApp({
     },
   });
 
+  // Full cancel of whatever is executing — shared by Esc, Ctrl+C, and
+  // the approval panel's Esc ("deny + stop the mission"). Aborts the
+  // agent loop, kills remote model streams and shell process trees, and
+  // resolves any pending approval so nothing keeps running unheard.
+  const cancelActiveWork = useCallback(() => {
+    session.cancel().catch(() => {});
+    // Also cancel an in-flight REMOTE model stream — session.cancel()
+    // only stops local tool execution; the server-side model call
+    // would otherwise keep running (and being billed) unheard.
+    controller.cancelRemoteModel();
+    // Abort the agent loop itself — a local-model loop must stop at
+    // its next round boundary and terminate "cancelled", not finish
+    // and finalize the mission as complete/failed.
+    controller.cancelActiveRun();
+    approvalBridge.cancel();
+    store.actions.clearApproval();
+    store.actions.setIsProcessing(false);
+    store.actions.setHoloState("IDLE");
+    store.actions.clearMission();
+    store.actions.clearToolProgress();
+    store.actions.stopBusy();
+  }, [session, controller, approvalBridge, store]);
+
   // ─── App shortcuts (only when no overlay owns the keyboard) ─────
   const appShortcutHandler = useCallback<KeyboardHandler>((input, key) => {
     if (isRawF2(input)) {
@@ -299,20 +323,7 @@ export function CockpitApp({
       || store.state.holoState === "PLANNING"
       || store.state.holoState === "READING" || store.state.holoState === "EDITING"
       || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING")) {
-      session.cancel().catch(() => {});
-      // Also cancel an in-flight REMOTE model stream — session.cancel()
-      // only stops local tool execution; the server-side model call
-      // would otherwise keep running (and being billed) unheard.
-      controller.cancelRemoteModel();
-      // Abort the agent loop itself — a local-model loop must stop at
-      // its next round boundary and terminate "cancelled", not finish
-      // and finalize the mission as complete/failed.
-      controller.cancelActiveRun();
-      store.actions.setIsProcessing(false);
-      store.actions.setHoloState("IDLE");
-      store.actions.clearMission();
-      store.actions.clearToolProgress();
-      store.actions.stopBusy();
+      cancelActiveWork();
       return;
     }
     if (isCtrl(input, key, "c")) {
@@ -325,14 +336,7 @@ export function CockpitApp({
         || store.state.holoState === "PLANNING"
         || store.state.holoState === "READING" || store.state.holoState === "EDITING"
         || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING") {
-        session.cancel().catch(() => {});
-        controller.cancelRemoteModel();
-        controller.cancelActiveRun();
-        store.actions.setIsProcessing(false);
-        store.actions.setHoloState("IDLE");
-        store.actions.clearMission();
-        store.actions.clearToolProgress();
-        store.actions.stopBusy();
+        cancelActiveWork();
       } else {
         exit();
       }
@@ -375,7 +379,7 @@ export function CockpitApp({
     } else if (input === "?") {
       if (!store.state.isProcessing) store.actions.setOverlay("help");
     }
-  }, [controller, session, store, approvalBridge, exit]);
+  }, [controller, session, store, approvalBridge, exit, cancelActiveWork]);
 
   const disabled = store.state.isProcessing
     || store.state.holoState === "RUNNING"
@@ -559,12 +563,24 @@ export function CockpitApp({
               onClose={closeOverlay}
             />
           )}
+          {overlay === "activity" && (
+            <ActivityHistoryOverlay
+              entries={store.state.activityLog}
+              details={store.state.toolDetails}
+              expandedIds={store.state.expandedActivityIds}
+              onClose={closeOverlay}
+            />
+          )}
         </>
       ) : (
         <>
           {/* Approval UX (when needed) — registers as keyboard owner */}
           {store.state.approvalPrompt && (
-            <ApprovalUX prompt={store.state.approvalPrompt} onDecision={handleApproval} />
+            <ApprovalUX
+              prompt={store.state.approvalPrompt}
+              onDecision={handleApproval}
+              onCancelMission={cancelActiveWork}
+            />
           )}
 
           {/* The minimal shell — welcome/transcript, composer, status bar */}

@@ -72,6 +72,9 @@ export function ApprovalUX({ prompt, onDecision, onCancelMission }: ApprovalUXPr
     } else if (isEscape(key, input)) {
       // Esc = deny + stop the mission. Fail closed, always.
       onCancelMission?.();
+    } else if (key.ctrl && (input === "\x03" || input === "c" || input === "C")) {
+      // Ctrl+C while an approval owns the keyboard — same full cancel.
+      onCancelMission?.();
     }
   }, [onDecision, onCancelMission]));
 

@@ -35,7 +35,8 @@ import { ApprovalUX } from "../approval-ux.js";
 import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 import type { WorkstreamSnapshot } from "../workstream-store.js";
 import type { ExecutionTarget } from "../../lib/execution-target.js";
-import { WorkstreamDock } from "../workstream-dock.js";
+import { WorkstreamDock, estimateWorkstreamDockRows } from "../workstream-dock.js";
+import { ActivityStream, fitActivityFeed } from "../activity-stream.js";
 import { SectionDivider } from "../ui-primitives.js";
 
 /** Rows consumed by fixed chrome below the content region:
@@ -45,6 +46,12 @@ const CHROME_ROWS = 5;
 /** Rows consumed by the identity bar above the content region:
  *  mark + lane(1) + project/branch(1) + divider(1). */
 const HEADER_ROWS = 3;
+/** Activity groups the WorkstreamDock shows — the estimator and the
+ *  renderer MUST use the same cap or the height budget drifts. */
+const DOCK_MAX_ACTIVITY_ROWS = 7;
+/** Slack for the dock's inter-section marginTop rows that
+ *  estimateWorkstreamDockRows does not count (feed/verification/next). */
+const DOCK_MARGIN_SAFETY = 4;
 
 export interface LiTTShellProps {
   messages: ChatMessage[];
@@ -139,12 +146,24 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const rows = stdout?.rows ?? 24;
 
   // ── Workstream dock: when LiTT is actively working, the dock becomes
-  //    the primary center view. The transcript still renders below it
-  //    (conversation record), but the workstream is the hero.
+  //    the primary center view — with the detailed ActivityStream feed
+  //    beneath it (commands, files, evidence, verification). The
+  //    transcript still renders below it (conversation record).
   //    When idle, the Welcome or Transcript owns the center.
+  //
+  //    The dock must RELEASE when the turn settles: workstream activities
+  //    are never cleared (workstreamClear is unwired) and agent runs never
+  //    emit run.completed, so overallStatus stays "running" forever —
+  //    gating on it alone stranded the dock over the transcript after the
+  //    first tool-using turn. The live gate is the TURN, not the store:
+  //    isProcessing/working holoState, plus "blocked" for approval waits.
+  const turnActive = isProcessing
+    || holoState === "UNDERSTANDING" || holoState === "PLANNING" || holoState === "READING"
+    || holoState === "EDITING" || holoState === "RUNNING" || holoState === "TESTING"
+    || holoState === "VERIFYING";
   const hasWorkstream = workstream != null
     && workstream.activities.length > 0
-    && (workstream.hasRunning || workstream.overallStatus !== "idle");
+    && (turnActive || workstream.overallStatus === "blocked");
 
   // Guard for harnesses/surfaces that don't wire scroll yet.
   const anchor = transcriptAnchor ?? null;
@@ -176,6 +195,21 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   // Content measure: readable width on wide terminals, natural on narrow.
   const contentWidth = Math.max(32, Math.min(CONTENT_MEASURE, columns - 4));
   const contentRows = Math.max(8, rows - HEADER_ROWS - CHROME_ROWS);
+
+  // ── Workstream region budget: dock rows + live activity feed must fit
+  //    the fixed content region or Ink collides lines. The feed takes
+  //    whatever rows remain after the dock (and its uncounted margins).
+  const dockRows = hasWorkstream ? estimateWorkstreamDockRows(workstream!, DOCK_MAX_ACTIVITY_ROWS) : 0;
+  const feedRowBudget = hasWorkstream ? Math.max(0, contentRows - dockRows - DOCK_MARGIN_SAFETY) : 0;
+  const activityFeed = useMemo(
+    () => hasWorkstream
+      ? fitActivityFeed(activityLog, feedRowBudget, contentWidth, toolDetails, expandedActivityIds)
+      : { entries: [] as ActivityEntry[], rows: 0 },
+    [hasWorkstream, activityLog, feedRowBudget, contentWidth, toolDetails, expandedActivityIds],
+  );
+  const workstreamContentRows = hasWorkstream
+    ? dockRows + (activityFeed.rows > 0 ? activityFeed.rows + 1 : 0)
+    : 0;
 
   const layout = useMemo(() => layoutTranscript(messages, contentWidth), [messages, contentWidth]);
 
@@ -290,13 +324,31 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   return (
     <Box flexDirection="column" paddingX={2}>
       {/* The swap-in-place region: Welcome until the first message, then transcript.
-          When workstream is active, the dock takes the primary slot. */}
-      <Box flexDirection="column" height={viewport.fits ? contentRows : undefined}>
+          When workstream is active, the dock + live activity feed take the
+          primary slot; the fixed height follows whichever content is shown. */}
+      <Box flexDirection="column" height={(hasWorkstream ? workstreamContentRows <= contentRows : viewport.fits) ? contentRows : undefined}>
         {hasWorkstream ? (
-          <WorkstreamDock
-            snapshot={workstream!}
-            width={contentWidth}
-          />
+          <Box flexDirection="column">
+            <WorkstreamDock
+              snapshot={workstream!}
+              width={contentWidth}
+              maxActivityRows={DOCK_MAX_ACTIVITY_ROWS}
+              startedAt={busySince ?? missionState?.startedAt ?? null}
+              approvalSince={approvalSince}
+              approvalAccumMs={approvalAccumMs}
+            />
+            {activityFeed.entries.length > 0 && (
+              <Box flexDirection="column" marginTop={1}>
+                <ActivityStream
+                  entries={activityFeed.entries}
+                  maxEntries={activityFeed.entries.length}
+                  width={contentWidth}
+                  details={toolDetails}
+                  expandedIds={expandedActivityIds}
+                />
+              </Box>
+            )}
+          </Box>
         ) : hasConversation ? (
           <TranscriptArea
             messages={messages}

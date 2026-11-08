@@ -28,7 +28,8 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
-import { isReducedMotion } from "./motion.js";
+import { clockIntervalMs, isReducedMotion } from "./motion.js";
+import { formatDuration, busySecondsExcludingApproval } from "./runtime-state.js";
 import { LiTTMark, type MarkState } from "./litt-mark.js";
 import {
   type WorkstreamSnapshot,
@@ -130,18 +131,32 @@ function truncateTail(str: string, max: number): string {
 
 // ─── Sub-components ────────────────────────────────────────────────
 
-/** The header: LiTT mark + phase badge + objective. */
+/** Ticking clock — re-renders once per second only while `active`. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setNow(Date.now()), clockIntervalMs(1000));
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
+/** The header: LiTT mark + phase badge + objective + elapsed work time. */
 function WorkstreamHeader({
   snapshot,
   width,
+  elapsedSeconds,
 }: {
   snapshot: WorkstreamSnapshot;
   width: number;
+  elapsedSeconds: number | null;
 }): React.ReactElement {
   const markState = phaseToMarkState(snapshot.phase, snapshot.overallStatus);
   const color = phaseColor(snapshot.phase, snapshot.overallStatus);
   const phaseLabel = snapshot.phase ? PHASE_DISPLAY[snapshot.phase] : snapshot.currentPhase;
   const pulse = usePulse(snapshot.overallStatus === "running");
+  const live = snapshot.overallStatus === "running" || snapshot.overallStatus === "blocked";
 
   return (
     <Box flexDirection="column">
@@ -149,8 +164,11 @@ function WorkstreamHeader({
         <LiTTMark state={markState} showWordmark />
         <Text> </Text>
         <Text color={color} bold>
-          {snapshot.overallStatus === "running" ? pulse : "◈"} {phaseLabel}
+          {live ? pulse : "◈"} {phaseLabel}
         </Text>
+        {elapsedSeconds !== null && live && (
+          <Text color={COLORS.secondary}>{` · ${formatDuration(elapsedSeconds)}`}</Text>
+        )}
       </Box>
       {snapshot.objective && (
         <Box marginTop={0}>
@@ -197,7 +215,7 @@ function ActivityRow({
       {/* Show subject list when it adds information beyond the label */}
       {hasSubjects && (
         <Box paddingLeft={2}>
-          <Text dimColor>
+          <Text color={COLORS.secondary}>
             {truncateTail(visibleSubjects.join(", "), Math.max(10, width - 8))}
           </Text>
         </Box>
@@ -240,7 +258,7 @@ function VerificationBlock({
             <Text color={c}>{g} </Text>
             <Text color={COLORS.text}>{truncateTail(check.label, Math.max(10, width - 12))}</Text>
             {check.detail && (
-              <Text dimColor> {truncateTail(check.detail, Math.max(8, width - check.label.length - 14))}</Text>
+              <Text color={COLORS.secondary}> {truncateTail(check.detail, Math.max(8, width - check.label.length - 14))}</Text>
             )}
           </Box>
         );
@@ -263,7 +281,7 @@ function NextActionRow({ text, width }: { text: string; width: number }): React.
 function EarlierIndicator({ count }: { count: number }): React.ReactElement {
   if (count <= 0) return <></>;
   return (
-    <Text dimColor>↑ {count} earlier activities</Text>
+    <Text color={COLORS.secondary}>↑ {count} earlier activities</Text>
   );
 }
 
@@ -284,13 +302,13 @@ function CompletionCard({ snapshot, width }: { snapshot: WorkstreamSnapshot; wid
       )}
       <Box marginTop={1} flexDirection="column">
         {edits.length > 0 && (
-          <Text dimColor>  {edits.length} file{edits.length !== 1 ? "s" : ""} changed</Text>
+          <Text color={COLORS.secondary}>  {edits.length} file{edits.length !== 1 ? "s" : ""} changed</Text>
         )}
         {totalPassed > 0 && (
-          <Text dimColor>  {totalPassed} tests passed{totalSkipped > 0 ? ` · ${totalSkipped} skipped` : ""}</Text>
+          <Text color={COLORS.secondary}>  {totalPassed} tests passed{totalSkipped > 0 ? ` · ${totalSkipped} skipped` : ""}</Text>
         )}
         {lastSuccess?.label && (
-          <Text dimColor>  {truncateTail(lastSuccess.label, width - 4)}</Text>
+          <Text color={COLORS.secondary}>  {truncateTail(lastSuccess.label, width - 4)}</Text>
         )}
       </Box>
     </Box>
@@ -311,11 +329,11 @@ function FailureCard({ snapshot, width }: { snapshot: WorkstreamSnapshot; width:
         <Box marginTop={1} flexDirection="column">
           <Text color={COLORS.error}>  {failures.length} failure{failures.length !== 1 ? "s" : ""}</Text>
           {lastFailure?.reason && (
-            <Text dimColor>  {truncateTail(lastFailure.reason, width - 4)}</Text>
+            <Text color={COLORS.secondary}>  {truncateTail(lastFailure.reason, width - 4)}</Text>
           )}
         </Box>
       )}
-      <Box marginTop={1}><Text dimColor>  LiTT stopped before completing.</Text></Box>
+      <Box marginTop={1}><Text color={COLORS.secondary}>  LiTT stopped before completing.</Text></Box>
     </Box>
   );
 }
@@ -327,7 +345,7 @@ function BlockedCard({ snapshot, width }: { snapshot: WorkstreamSnapshot; width:
       {snapshot.objective && (
         <Text color={COLORS.text}>{truncateTail(snapshot.objective, width - 4)}</Text>
       )}
-      <Box marginTop={1}><Text dimColor>  Waiting for approval.</Text></Box>
+      <Box marginTop={1}><Text color={COLORS.secondary}>  Waiting for approval.</Text></Box>
     </Box>
   );
 }
@@ -340,6 +358,12 @@ export interface WorkstreamDockProps {
   width?: number;
   /** Max activity rows to show (default 7). */
   maxActivityRows?: number;
+  /** Epoch ms the current turn/mission started — drives the header clock. */
+  startedAt?: number | null;
+  /** Epoch ms the current approval window opened (excluded from work time). */
+  approvalSince?: number | null;
+  /** Total ms already spent waiting on resolved approvals this turn. */
+  approvalAccumMs?: number;
 }
 
 /**
@@ -356,9 +380,17 @@ export function WorkstreamDock({
   snapshot,
   width,
   maxActivityRows = 7,
+  startedAt = null,
+  approvalSince = null,
+  approvalAccumMs = 0,
 }: WorkstreamDockProps): React.ReactElement {
   const { stdout } = useStdout();
   const w = width ?? stdout?.columns ?? 80;
+  const live = snapshot.overallStatus === "running" || snapshot.overallStatus === "blocked";
+  const now = useNow(live);
+  const elapsedSeconds = startedAt !== null && live
+    ? busySecondsExcludingApproval(startedAt, approvalSince, approvalAccumMs, now) / 1000
+    : null;
 
   // Terminal states get special cards
   if (snapshot.overallStatus === "complete") {
@@ -388,7 +420,7 @@ export function WorkstreamDock({
 
   return (
     <Box flexDirection="column">
-      <WorkstreamHeader snapshot={snapshot} width={w} />
+      <WorkstreamHeader snapshot={snapshot} width={w} elapsedSeconds={elapsedSeconds} />
 
       {visibleGroups.length > 0 && (
         <Box flexDirection="column" marginTop={1}>

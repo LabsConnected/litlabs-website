@@ -49,8 +49,8 @@ describe("colors", () => {
       expect(COLORS.secondary).toBe("#8B8FA3");
     });
 
-    it("secondaryDim is dim gray", () => {
-      expect(COLORS.secondaryDim).toBe("#5C5F6E");
+    it("secondaryDim is dim gray with ≥4.5:1 contrast on brand black", () => {
+      expect(COLORS.secondaryDim).toBe("#78809A");
     });
 
     it("content text is clean neutral near-white — not pure white", () => {

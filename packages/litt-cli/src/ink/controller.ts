@@ -1795,10 +1795,16 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
     if (input === "/activity") {
-      // Show full (untruncated) activity log for debugging.
+      // Scrollable activity history — the full retained feed with
+      // expandable details (PgUp/PgDn, d, Esc). Works during missions.
+      store.actions.setOverlay("activity");
+      return;
+    }
+    if (input === "/activity dump") {
+      // Legacy debug dump: full (untruncated) activity log inline.
       // Filters out tool-call markup that was intentionally excluded
-      // from the normal feed — /activity is for human-readable debug,
-      // not raw model protocol internals.
+      // from the normal feed — /activity dump is for human-readable
+      // debug, not raw model protocol internals.
       const log = store.state.activityLog;
       if (log.length === 0) {
         store.actions.addActivity({ id: `act_${Date.now()}`, ts: Date.now(), type: "info", text: "No activity recorded yet." });
