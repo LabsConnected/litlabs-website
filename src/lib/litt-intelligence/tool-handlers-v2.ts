@@ -16,6 +16,7 @@ import "server-only";
 
 import { destructiveRewriteViolation, existingPageOverwriteError, placeholderViolation, simulatePatchResult, tailwindViolation } from "./patch-validation";
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
+import { fitImageForPublish, PUBLISH_MAX_IMAGE_BYTES } from "./asset-image-fit";
 import type { WorkspaceTransport } from "./workspace-transport";
 
 // ─── Tool Handler Signature ───────────────────────────────────────
@@ -987,6 +988,20 @@ export async function insertAssetFromUrl(
     if (buffer.length > MAX_INSERT_ASSET_BYTES) {
       return { success: false, error: `Asset exceeds max size (${MAX_INSERT_ASSET_BYTES} bytes)` };
     }
+
+    // Publish-safe sizing: an asset over the deploy per-file cap writes
+    // fine but can never be read back for publish — it surfaces at
+    // deploy time as a missing file. Normalize oversized rasters here so
+    // every inserted asset is deployable; refuse what cannot be fitted.
+    const fitted = await fitImageForPublish(buffer, contentType);
+    if (!fitted) {
+      return {
+        success: false,
+        error: `Image could not be reduced under the ${PUBLISH_MAX_IMAGE_BYTES}-byte publish limit`,
+      };
+    }
+    buffer = fitted.buffer;
+    contentType = fitted.contentType;
 
     const filename = sanitizeAssetName(opts.nameHint, contentType);
     const path = `${directory}/${filename}`;
