@@ -56,6 +56,7 @@ import { runsCommand } from "./commands/runs.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { repairCommand } from "./commands/repair.js";
+import { missionCommand } from "./commands/mission.js";
 import { explainCommand } from "./commands/explain.js";
 import { desktopCommand } from "./commands/desktop.js";
 import { loginCommand } from "./commands/login.js";
@@ -150,6 +151,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   inspect: inspectCommand,
   ask: askCommand,
   repair: repairCommand,
+  mission: missionCommand,
   explain: explainCommand,
   desktop: desktopCommand,
   login: loginCommand,
@@ -235,7 +237,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * features remain auth-gated at the provider level (resolveModelProvider
  * and awaitRemoteReady enforce this at call time, not at the gate).
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "repair", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "pc", "pc-status", "pc-perf", "pc-tasks"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "repair", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "pc", "pc-status", "pc-perf", "pc-tasks", "mission"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
