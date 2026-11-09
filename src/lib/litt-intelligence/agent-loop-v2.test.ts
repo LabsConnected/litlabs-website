@@ -2012,9 +2012,26 @@ describe("runAgentLoopV2 — replay carries the original persisted verdict", () 
     expect(writes[1].persisted).toBe(true);
     // The replayed message must carry the RESULT PAYLOAD, not the
     // ToolCallResult wrapper (would contain toolCallId/success fields).
-    const thirdCallMessages = JSON.stringify(vi.mocked(callLLMWithTools).mock.calls[2][2] ?? []);
-    expect(thirdCallMessages).toContain("saved");
-    expect(thirdCallMessages).not.toContain("tc-2");
+    // NOTE (tool-selection fix): this reads calls[2][1] — the MESSAGES of
+    // the third LLM call. It previously read [2][2] (the offered tool
+    // definitions), which only passed because a browser tool's description
+    // incidentally contained "saved"; the slim tool set for a file edit
+    // correctly excludes browser tools, which exposed the wrong index.
+    // The payload marker is "bytesWritten", not "saved": handleFilesWrite
+    // normalizes the transport's {saved:true} into
+    // {success, path, bytesWritten}. "tc-2" legitimately appears as the
+    // replayed message's tool_call_id, so the wrapper check is the absence
+    // of "toolCallId" inside the message CONTENT — and the replayed
+    // content must equal the original result verbatim.
+    const thirdCallMessages = (vi.mocked(callLLMWithTools).mock.calls[2][1] ?? []) as Array<{
+      role: string;
+      content: string;
+    }>;
+    const toolMessages = thirdCallMessages.filter((m) => m.role === "tool");
+    expect(toolMessages).toHaveLength(2);
+    expect(toolMessages[1].content).toContain("bytesWritten");
+    expect(toolMessages[1].content).not.toContain("toolCallId");
+    expect(toolMessages[1].content).toBe(toolMessages[0].content);
   });
 });
 
@@ -2562,5 +2579,75 @@ describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incide
 
     expect(result.cancelReason ?? "").not.toContain("Repeated tool call detected");
     expect(transport.applyPatch).toHaveBeenCalledTimes(8);
+  });
+});
+
+describe("runAgentLoopV2 — tool selection for explicit project-edit tasks (golden follow-up)", () => {
+  // Exact goal from production golden run 42318962387 on 0cb374ac. The model
+  // (gemini-2.5-flash-lite) called web.search once ("Ember Roast site footer
+  // content"), got an empty result, then asked the user for the footer
+  // content — zero file reads/writes, honest failure. Root cause: the
+  // capability plan was workspace-only, but the full ~60-tool catalog was
+  // offered to cloud models, so web.search was available to pick.
+  const GOLDEN_FOLLOW_UP_GOAL =
+    "Update the existing Ember Roast site footer to include exactly: Golden Acceptance follow-up verified. Keep the rest of the site unchanged and save the edit to index.html.";
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+    // Mimics the golden model's step 2: no tool calls, asks for the footer
+    // content instead of reading the file.
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Please provide the current footer content so I can update it.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "google/gemini-2.5-flash-lite",
+    });
+  });
+
+  it("never offers web.search for an explicit file-edit goal (golden run 42318962387)", async () => {
+    const result = await runAgentLoopV2(GOLDEN_FOLLOW_UP_GOAL, fakeTransport, {
+      model: "gemini-2.5-flash-lite",
+      systemPrompt: "You are LiTT.",
+      executionMode: "act",
+      enableBuildFix: false,
+    });
+
+    const offeredIds = (
+      vi.mocked(callLLMWithTools).mock.calls[0][2] as Array<{ id: string }>
+    ).map((t) => t.id);
+    expect(offeredIds).not.toContain("web.search");
+    expect(offeredIds).not.toContain("web.fetch");
+    expect(offeredIds).toContain("files.read");
+    expect(offeredIds).toContain("files.write");
+    expect(offeredIds).toContain("apply_patch");
+    expect(offeredIds).toContain("project.insert_asset");
+    // NOTE: files.patch is in the slim set but the tool health check
+    // degrades it in this test env, so it is not asserted here — it was
+    // already absent from the full-catalog offer before this change.
+    // Honest at the evidence level: no file-writing tool call executed, so
+    // there is no modification to claim success for (AgentLoopResult has no
+    // `success` field — the run's completion is finalText + toolCalls).
+    const writes = result.toolCalls.filter((t) =>
+      ["files.write", "files.patch", "apply_patch"].includes(t.toolId),
+    );
+    expect(writes).toHaveLength(0);
+  });
+
+  it("still offers web.search for a genuine research goal", async () => {
+    await runAgentLoopV2(
+      "Research the best coffee roasteries in Michigan and compare their roast styles",
+      fakeTransport,
+      {
+        model: "gemini-2.5-flash-lite",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    const offeredIds = (
+      vi.mocked(callLLMWithTools).mock.calls[0][2] as Array<{ id: string }>
+    ).map((t) => t.id);
+    expect(offeredIds).toContain("web.search");
   });
 });
