@@ -289,6 +289,98 @@ describe("finalizeMissionRun", () => {
     expect(mission?.steps.find((s) => s.id === s1?.id)?.status).toBe("failed");
   });
 
+  it("single goal-step worked + proven → complete (live false-negative repro: notes.txt written, tests PASS, reported failed)", async () => {
+    const store = new RuntimeStore({});
+    await store.createMission({ goal: "update notes.txt", mode: "act", projectRoot: "/tmp/x" });
+    const s1 = await store.addMissionStep({ title: "Update notes.txt so it contains v2 then run tests", allowedActionScope: ["act"] });
+    if (!s1) throw new Error("no step");
+    await store.setCurrentStep(s1.id).catch(() => {});
+    await store.setMissionVerifying().catch(() => {});
+    // The write_file success attributed to the step — exactly what the
+    // live mission recorded (command_result, source write_file).
+    await store.addMissionEvidence({
+      stepId: s1.id, type: "command_result", source: "write_file",
+      summary: "Wrote 18 bytes to notes.txt", success: true, metadata: {},
+    });
+    const out = await finalizeMissionRun({
+      store, termination: "complete",
+      verification: baseResult({ proven: true, status: "proven", message: "VERIFIED - all checks passed" }),
+      readOnly: false,
+    });
+    expect(out.outcome).toBe("complete");
+    const mission = store.getMission();
+    expect(mission?.status).toBe("complete");
+    expect(mission?.steps[0]?.status).toBe("passed");
+  });
+
+  it("worked step with UNMET requiredEvidence contract still blocks completion", async () => {
+    const store = new RuntimeStore({});
+    await store.createMission({ goal: "x", mode: "act", projectRoot: "/tmp/x" });
+    const s1 = await store.addMissionStep({ title: "Run tests and build", allowedActionScope: ["act"], requiredEvidence: ["test_result", "build_result"] });
+    if (!s1) throw new Error("no step");
+    await store.setCurrentStep(s1.id).catch(() => {});
+    await store.setMissionVerifying().catch(() => {});
+    // Only command_result evidence — the contracted types never arrived
+    // (model used project.run instead of project.test/project.build).
+    await store.addMissionEvidence({
+      stepId: s1.id, type: "command_result", source: "run",
+      summary: "npm test - exit 0", success: true, metadata: {},
+    });
+    const out = await finalizeMissionRun({
+      store, termination: "complete",
+      verification: baseResult({ proven: true, status: "proven", message: "VERIFIED" }),
+      readOnly: false,
+    });
+    expect(out.outcome).toBe("failed");
+    expect(store.getMission()?.status).toBe("failed");
+    expect(store.getMission()?.steps[0]?.status).not.toBe("passed");
+  });
+
+  it("working step with NO attributed evidence never passes — honest fail", async () => {
+    const store = new RuntimeStore({});
+    await store.createMission({ goal: "x", mode: "act", projectRoot: "/tmp/x" });
+    const s1 = await store.addMissionStep({ title: "Do the mutation", allowedActionScope: ["act"] });
+    if (!s1) throw new Error("no step");
+    await store.setCurrentStep(s1.id).catch(() => {});
+    await store.setMissionVerifying().catch(() => {});
+    // Evidence exists but attributed to NO step (stepId null) — the
+    // working step itself produced nothing.
+    await store.addMissionEvidence({
+      stepId: null, type: "command_result", source: "status",
+      summary: "ok", success: true, metadata: {},
+    });
+    const out = await finalizeMissionRun({
+      store, termination: "complete",
+      verification: baseResult({ proven: true, status: "proven", message: "VERIFIED" }),
+      readOnly: false,
+    });
+    expect(out.outcome).toBe("failed");
+    expect(store.getMission()?.steps[0]?.status).not.toBe("passed");
+  });
+
+  it("pending contract-less tail step passes when gate proved and sibling worked", async () => {
+    const store = new RuntimeStore({});
+    await store.createMission({ goal: "x", mode: "act", projectRoot: "/tmp/x" });
+    const s1 = await store.addMissionStep({ title: "Apply the change", allowedActionScope: ["act"] });
+    const s2 = await store.addMissionStep({ title: "Wrap up notes", allowedActionScope: [] });
+    if (!s1 || !s2) throw new Error("no steps");
+    await store.setCurrentStep(s1.id).catch(() => {});
+    await store.setMissionVerifying().catch(() => {});
+    await store.addMissionEvidence({
+      stepId: s1.id, type: "command_result", source: "write_file",
+      summary: "wrote", success: true, metadata: {},
+    });
+    const out = await finalizeMissionRun({
+      store, termination: "complete",
+      verification: baseResult({ proven: true, status: "proven", message: "VERIFIED" }),
+      readOnly: false,
+    });
+    expect(out.outcome).toBe("complete");
+    const steps = store.getMission()?.steps ?? [];
+    expect(steps.find((s) => s.id === s1.id)?.status).toBe("passed");
+    expect(steps.find((s) => s.id === s2.id)?.status).toBe("passed");
+  });
+
   it("synthesis step with its own evidence contract is never auto-passed", async () => {
     const store = new RuntimeStore({});
     await store.createMission({ goal: "x", mode: "act", projectRoot: "/tmp/x" });

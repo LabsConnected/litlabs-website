@@ -11,7 +11,7 @@
  */
 
 import type { RuntimeStore, VerificationResult } from "@litt/agent-core";
-import type { AgentLoopResult } from "@litt/agent-core";
+import { isStepEvidenceSatisfied, type AgentLoopResult } from "@litt/agent-core";
 import { isSynthesisStep, markInspectionStepsComplete } from "./mission-verification.js";
 
 export interface FinalizeMissionRunArgs {
@@ -67,6 +67,73 @@ async function markSynthesisStepsPassed(
   }
 }
 
+/**
+ * Pass NON-synthesis steps of a proven MUTATING mission whose work is
+ * evidenced — the counterpart to markSynthesisStepsPassed.
+ *
+ * Why this exists: progressMissionStepAfterTool deliberately never
+ * advances the LAST working step ("the gate/loop-end owns completion"),
+ * and steps with empty requiredEvidence advance only when a LATER
+ * pending step exists. So a single-step mission — or the final action
+ * step of a template — always reaches finalize still "working" even
+ * though its tool calls succeeded and the gate proved the run.
+ * completeMission() then refuses and the mission fails despite the
+ * work being done and verified (live repro: notes.txt written + tests
+ * PASS, mission reported failed).
+ *
+ * Truth rules (same bar the gate's uncovered-step check uses):
+ *   - Steps WITH requiredEvidence pass only when
+ *     isStepEvidenceSatisfied() finds successful attributed evidence —
+ *     an unmet contract still blocks completion.
+ *   - Steps that were actually worked (working/verifying/failed) pass
+ *     only when they have >=1 successful evidence record attributed to
+ *     them (e.stepId === step.id && e.success) — inspection evidence
+ *     counts, matching uncoveredMissionSteps.
+ *   - Never-worked pending/failed steps pass only when they declare no
+ *     evidence contract — same semantics as markInspectionStepsComplete
+ *     for the read-only path; the gate's proof covers bookkeeping steps.
+ *   - A working/verifying step with NO successful attributed evidence
+ *     is never passed — its work is unproven and must block completion.
+ */
+async function markWorkedMissionStepsPassed(
+  store: RuntimeStore,
+  reason: string,
+): Promise<void> {
+  const mission = store.getMission();
+  if (!mission) return;
+  for (const step of mission.steps) {
+    if (step.status === "passed" || step.status === "skipped") continue;
+    if (isSynthesisStep(step)) continue; // handled by markSynthesisStepsPassed
+
+    const hasContract =
+      Array.isArray(step.requiredEvidence) && step.requiredEvidence.length > 0;
+    if (hasContract && !isStepEvidenceSatisfied(step, mission.evidence)) {
+      continue;
+    }
+
+    const workedEvidence = mission.evidence.some(
+      (e) => e.stepId === step.id && e.success === true,
+    );
+    // Only never-started PENDING steps may pass without worked evidence.
+    // A FAILED step needs real successful evidence — failed attempts
+    // alone must never be laundered into a pass.
+    const neverWorked = !workedEvidence && step.status === "pending";
+    if (!workedEvidence && !neverWorked) continue;
+    if (neverWorked && hasContract) continue;
+
+    if (step.status === "pending" || step.status === "failed") {
+      await store.updateMissionStepStatus(step.id, "working").catch(() => {});
+    }
+    const current = store.getMission()?.steps.find((s) => s.id === step.id);
+    if (current?.status === "working" || current?.status === "verifying") {
+      await store.updateMissionStepStatus(step.id, "passed", {
+        verificationPassed: true,
+        verificationEvidence: reason.slice(0, 500),
+      }).catch(() => {});
+    }
+  }
+}
+
 export async function finalizeMissionRun(
   args: FinalizeMissionRunArgs,
 ): Promise<FinalizeMissionRunResult> {
@@ -89,6 +156,10 @@ export async function finalizeMissionRun(
       );
     } else {
       await markSynthesisStepsPassed(
+        store,
+        `Verification proved: ${summary.slice(0, 120)}`,
+      );
+      await markWorkedMissionStepsPassed(
         store,
         `Verification proved: ${summary.slice(0, 120)}`,
       );
