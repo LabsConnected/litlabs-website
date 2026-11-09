@@ -80,7 +80,10 @@ export function createPreviewToken(
   return created;
 }
 
-export function verifyPreviewToken(token: string): {
+export function verifyPreviewToken(
+  token: string,
+  options: { ignoreExpiry?: boolean } = {},
+): {
   userId: string;
   projectId: string;
   workspaceId: string;
@@ -118,7 +121,12 @@ export function verifyPreviewToken(token: string): {
   }
 
   const now = Math.floor(Date.now() / 1000);
-  if (typeof payload.exp !== "number" || payload.exp <= now) {
+  // ignoreExpiry exists for session-authenticated requests that arrive
+  // under an already-minted `/t/<token>/` URL prefix: the session cookie
+  // is the authority there (the owner can read any workspace path
+  // anyway), so an expired embedded token must not 404 the document.
+  // Signature, audience and scope are still verified in full.
+  if (!options.ignoreExpiry && (typeof payload.exp !== "number" || payload.exp <= now)) {
     throw new Error("Preview token expired");
   }
 

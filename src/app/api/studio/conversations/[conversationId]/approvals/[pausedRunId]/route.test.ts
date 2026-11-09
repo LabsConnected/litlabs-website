@@ -98,6 +98,7 @@ import {
   getRunOutcomeForPausedRun,
   createPausedRun,
 } from "@/lib/litt-intelligence/paused-run-store";
+import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2 } from "@/lib/litt-intelligence/agent-loop-v2";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getCheckpoint } from "@/lib/missions/mission-repository";
@@ -337,6 +338,27 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     );
   });
 
+  it.each([
+    ["image.stock", ["assets/hero.jpg"]],
+    ["files.write", ["./assets/hero.jpg"]],
+    ["files.write", ["assets\\hero.jpg"]],
+    ["files.write", undefined],
+  ])("does not complete an untouched welcome page after %s", async (toolId, paths) => {
+    const transport = await createWorkspaceTransport("ws-123", "user_123");
+    Object.assign(transport, {
+      readFile: vi.fn(async () => ({ content: '<html><body>LITT-WELCOME-SCREEN</body></html>' })),
+    });
+    vi.mocked(createWorkspaceTransport).mockResolvedValueOnce(transport);
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "Done", stepsUsed: 1, cancelled: false,
+      toolCalls: [{ toolId, success: true, summary: "asset saved", mutating: true, paths }],
+      workspaceChange: { status: "changed", changedPaths: ["assets/hero.jpg"] },
+    } as never);
+    expect((await POST(makeRequest("approved"), routeParams)).status).toBe(202);
+    await vi.waitFor(() => expect(settleCall("failed")).not.toBeNull());
+    expect(settleCall("completed")).toBeNull();
+  });
+
   it("reports the real model failure when the resumed loop dies after an approved mutation", async () => {
     // Production defect (2026-09-19 golden run): the resumed loop executed
     // the approved image.generate, then every provider route failed. The
@@ -369,6 +391,45 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
       expect.stringContaining("all currently available AI routes"),
     );
     // An honest loop failure is recorded as failed, never completed.
+    expect(settleCall("completed")).toBeNull();
+  });
+
+  it("names the failed tool and its error when the approved mutation fails", async () => {
+    // Production defect (2026-11-08 staging acceptance, pausedRun
+    // fa715c2e): an approved image.generate failed inside the provider
+    // (Cloudflare schema rejection) and the run settled with the generic
+    // "approved workspace operation failed" — the real reason was only
+    // visible in server logs. The failure message must carry the tool id
+    // and recorded error so users and acceptance evidence see the truth.
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "done",
+      stepsUsed: 2,
+      cancelled: false,
+      toolCalls: [
+        {
+          toolId: "image.generate",
+          success: false,
+          summary:
+            "Failed: Bad input: Additional or unevaluated properties '/width' at '/' not allowed",
+          mutating: true,
+        },
+      ],
+    } as any);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    await vi.waitFor(() => expect(settleCall("failed")).not.toBeNull());
+    const failed = settleCall("failed");
+    const failureMessage = failed!.args.patch?.failureMessage as string;
+    expect(failureMessage).toContain("image.generate");
+    expect(failureMessage).toContain("Bad input");
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      "msg-assistant-1",
+      "user_123",
+      "failed",
+      expect.stringContaining("image.generate"),
+    );
     expect(settleCall("completed")).toBeNull();
   });
 

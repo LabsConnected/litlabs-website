@@ -40,6 +40,14 @@ export interface ElementPatch {
   remove?: boolean;
   /** Duplicate the element after itself. */
   duplicate?: boolean;
+  /**
+   * Flow-layout reorder: move the element before/after `ref`, or append it
+   * as the last child of `ref` ("into"). The reference resolves with the
+   * same unique-match rules as the target — an ambiguous drop target is
+   * refused, never guessed. Preserves nesting: the node is reparented, not
+   * flattened into a sibling.
+   */
+  move?: { ref: ElementIdentity; position: "before" | "after" | "into" };
 }
 
 export interface ElementPatchResult {
@@ -184,6 +192,48 @@ export function applyElementPatch(html: string, sel: ElementIdentity, patch: Ele
     }
   }
 
+  if (patch.move) {
+    const { ref, position } = patch.move;
+    const refEl = locateElement(doc, ref);
+    if (!refEl) {
+      return {
+        ok: false,
+        html,
+        changed: [],
+        error: `Couldn't uniquely match the drop target <${ref.tagName}> in this file — refusing to guess.`,
+      };
+    }
+    if (refEl !== el) {
+      if (position === "into") {
+        if (el.contains(refEl)) {
+          return { ok: false, html, changed: [], error: "Cannot move an element into itself or its descendant." };
+        }
+        if (el.parentNode === refEl && refEl.lastElementChild === el) {
+          // Already the last child — truthful no-op.
+        } else {
+          refEl.appendChild(el);
+          changed.push(`moved <${sel.tagName}> into <${ref.tagName}>`);
+        }
+      } else {
+        if (el.contains(refEl)) {
+          return { ok: false, html, changed: [], error: "Cannot reorder relative to the element's own descendant." };
+        }
+        const refParent = refEl.parentNode;
+        if (!refParent) {
+          return { ok: false, html, changed: [], error: "Drop target has no parent — cannot reorder." };
+        }
+        const alreadyThere =
+          (position === "before" && el.nextSibling === refEl) ||
+          (position === "after" && el.previousSibling === refEl);
+        if (!alreadyThere) {
+          if (position === "before") refParent.insertBefore(el, refEl);
+          else refParent.insertBefore(el, refEl.nextSibling);
+          changed.push(`moved <${sel.tagName}> ${position} <${ref.tagName}>`);
+        }
+      }
+    }
+  }
+
   if (patch.remove) {
     el.remove();
     changed.push(`removed <${sel.tagName}>`);
@@ -199,6 +249,14 @@ export function applyElementPatch(html: string, sel: ElementIdentity, patch: Ele
 
   const doctype = html.trimStart().toLowerCase().startsWith("<!doctype") ? "<!DOCTYPE html>\n" : "";
   return { ok: true, html: `${doctype}${doc.documentElement.outerHTML}`, changed };
+}
+
+/** sha256 (hex) of a string's utf-8 bytes — the same basis the
+    terminal-server CAS check (workspace/cas.ts sha256Utf8) hashes, so a
+    write pinned to `expectedSha256` verifies against identical bytes. */
+export async function sha256HexUtf8(content: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Whether a file is a candidate for direct element editing. Only
@@ -217,5 +275,6 @@ export function describePatch(patch: ElementPatch): string {
   if (styles.length) bits.push(styles.map((s) => s.split("-")[0]).join("+"));
   if (patch.remove) bits.push("remove");
   if (patch.duplicate) bits.push("duplicate");
+  if (patch.move) bits.push(`move ${patch.move.position}`);
   return bits.join(" · ") || "edit";
 }

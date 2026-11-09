@@ -236,6 +236,10 @@ export default function StudioPreviewPanel({
   refreshKey = 0,
   startGraceMs = STUCK_NOT_STARTED_MS,
   onSelectionChange,
+  lockSelection = false,
+  inspectorTool = "select",
+  snapEnabled = true,
+  onBridgeMessage,
 }: {
   projectId: string | null;
   projectName: string | null;
@@ -253,6 +257,14 @@ export default function StudioPreviewPanel({
   /** How long a not_started preview may sit idle before it fails visibly. Overridable for tests. */
   startGraceMs?: number;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
+  /** Canvas mode: selection stays on regardless of the toolbar toggle. */
+  lockSelection?: boolean;
+  /** Active canvas tool forwarded to the in-frame inspector bridge. */
+  inspectorTool?: "select" | "pan" | "edit";
+  /** Whether in-frame drag/resize gestures snap to alignment lines. */
+  snapEnabled?: boolean;
+  /** Every recognized bridge message (select/hover/geometry-commit/…). */
+  onBridgeMessage?: (type: string, payload: unknown) => void;
 }) {
   const { getToken } = useClerkAuth();
   const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_started");
@@ -274,6 +286,19 @@ export default function StudioPreviewPanel({
   // v4 @import trap) must never keep the green "Preview ready" badge.
   const [styleProbe, setStyleProbe] = useState<{ tailwindDetected: boolean; styled: boolean } | null>(null);
   const [selectionMode, setSelectionMode] = useState(true);
+  // Canvas hosts (Design surface) lock selection on and drive the
+  // in-frame tool/snap state through props rather than the toolbar.
+  const effectiveSelectionMode = lockSelection || selectionMode;
+  const inspectorToolRef = useRef(inspectorTool);
+  const snapEnabledRef = useRef(snapEnabled);
+  const onBridgeMessageRef = useRef(onBridgeMessage);
+  // Refs mirror the latest props for the postMessage bridge callbacks,
+  // which outlive individual renders (attachSelection, message handler).
+  useEffect(() => {
+    inspectorToolRef.current = inspectorTool;
+    snapEnabledRef.current = snapEnabled;
+    onBridgeMessageRef.current = onBridgeMessage;
+  }, [inspectorTool, snapEnabled, onBridgeMessage]);
   const [selectedElement, setSelectedElement] = useState<PreviewSelection | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -332,15 +357,27 @@ export default function StudioPreviewPanel({
   // ready also reloads the iframe (a "stale" preview must actually refresh).
   const reloadFrameOnNextReadyRef = useRef(false);
 
-  const postInspectorCommand = useCallback((type: "enable" | "disable" | "clear") => {
+  const postInspectorCommand = useCallback((type: string, extra?: Record<string, unknown>) => {
     const bridge = bridgeRef.current;
     if (!bridge?.target) return;
     try {
-      bridge.target.postMessage({ source: "litt-inspector", type, token: bridge.token }, bridge.origin);
+      bridge.target.postMessage({ source: "litt-inspector", type, token: bridge.token, ...(extra ?? {}) }, bridge.origin);
     } catch {
       // Frame navigated away mid-flight — the next load re-attaches.
     }
   }, []);
+
+  /** Push the current tool/snap state into the frame (idempotent). */
+  const pushInspectorState = useCallback(() => {
+    postInspectorCommand("tool", { tool: inspectorToolRef.current });
+    postInspectorCommand("snap", { enabled: snapEnabledRef.current });
+  }, [postInspectorCommand]);
+
+  // Prop-driven tool/snap changes reach the frame immediately; the
+  // "ready" handshake inside attachSelection re-sends them after reloads.
+  useEffect(() => {
+    pushInspectorState();
+  }, [inspectorTool, snapEnabled, pushInspectorState]);
 
   const clearSelection = useCallback((notify = true) => {
     postInspectorCommand("clear");
@@ -360,7 +397,7 @@ export default function StudioPreviewPanel({
   const attachSelection = useCallback(() => {
     selectionCleanupRef.current?.();
     selectionCleanupRef.current = null;
-    if (!selectionMode) return;
+    if (!effectiveSelectionMode) return;
     let documentInFrame: Document | null = null;
     try {
       documentInFrame = iframeRef.current?.contentDocument ?? null;
@@ -402,8 +439,10 @@ export default function StudioPreviewPanel({
             bridgeTimerRef.current = null;
           }
           setSelectionError(null);
+          pushInspectorState();
           return;
         }
+        onBridgeMessageRef.current?.(data.type, data.payload);
         if (data.type === "select") {
           const p = data.payload as Record<string, unknown> | null;
           if (p && typeof p.label === "string" && typeof p.selector === "string" && typeof p.tagName === "string") {
@@ -430,6 +469,7 @@ export default function StudioPreviewPanel({
       // server) — surface that truthfully.
       try {
         target.postMessage({ source: "litt-inspector", type: "enable", token }, origin);
+        pushInspectorState();
       } catch {
         // Frame navigated away; the load handler will re-attach.
       }
@@ -480,7 +520,7 @@ export default function StudioPreviewPanel({
     };
     documentInFrame.addEventListener("click", handleClick, true);
     selectionCleanupRef.current = () => documentInFrame.removeEventListener("click", handleClick, true);
-  }, [clearSelection, onSelectionChange, selectionMode, previewUrl]);
+  }, [clearSelection, onSelectionChange, effectiveSelectionMode, previewUrl, pushInspectorState]);
 
   const handleIframeLoad = useCallback(() => {
     setIframeFailed(false);
@@ -1199,7 +1239,7 @@ export default function StudioPreviewPanel({
           </div>
         )}
         {/* Lightweight visual selection — the preview remains the source of truth. */}
-        {isLive && (
+        {isLive && !lockSelection && (
           <button
             type="button"
             onClick={() => {

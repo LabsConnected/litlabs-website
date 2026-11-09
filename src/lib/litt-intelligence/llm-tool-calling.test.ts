@@ -714,6 +714,7 @@ describe("callLLMWithTools — failure classification and failover", () => {
 
   it("a hanging provider attempt times out and the next provider continues", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("GEMINI_TIMEOUT_MS", "30000");
     vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     mockFetch
       .mockImplementationOnce(() => new Promise(() => {})) // Gemini hangs
@@ -1310,6 +1311,7 @@ describe("callLLMWithTools — deadline and abort", () => {
 
   it("the whole chain shares one absolute deadline — a short budget stops it early", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("GEMINI_TIMEOUT_MS", "30000");
     vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     mockFetch.mockImplementation(() => new Promise(() => {})); // every call hangs
 

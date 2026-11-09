@@ -125,6 +125,18 @@ describe("sites route — form deploymentId injection", () => {
     expect(Buffer.from(await res.arrayBuffer())).toEqual(jpeg);
   });
 
+  it("answers a store error with 503 + Retry-After (propagation hint)", async () => {
+    // Freshly deployed assets blip ~1s while file rows settle; the 503
+    // tells an automated verifier to come back rather than record a
+    // permanent "broken image" (staging acceptance 42447010290).
+    mockRead.mockRejectedValue(new Error("PostgREST blip"));
+    const res = await GET(req("/sites/dep_abc123"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123" }),
+    });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("1");
+  });
+
   it("serves encoding=utf-8 rows verbatim even under a binary content type", async () => {
     // The stored encoding is authoritative — an explicit utf-8 row is text,
     // never base64-decoded.

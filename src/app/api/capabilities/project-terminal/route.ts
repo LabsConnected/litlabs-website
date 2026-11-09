@@ -81,6 +81,23 @@ async function handler(req: NextRequest) {
       });
     }
 
+    // The server can be alive (status:"ok") while terminal EXECUTION is
+    // disabled by fail-closed isolation policy — production currently runs
+    // this way until verified sandbox isolation exists. Reporting that as a
+    // merely-disconnected terminal hides the real state; surface it.
+    if (health?.terminal?.execution === "disabled") {
+      const reason = typeof health?.terminal?.reason === "string"
+        ? health.terminal.reason
+        : "Terminal execution is disabled on this server.";
+      return NextResponse.json({
+        ...baseCapability,
+        status: "unavailable",
+        terminalStatus: "unavailable",
+        serverReachable: true,
+        error: reason.slice(0, 300),
+      });
+    }
+
     // Server is alive — but we can't verify a specific client session from
     // server-side without session tracking. Return "disconnected" so the UI
     // shows the truthful state: the server exists but no PTY session is

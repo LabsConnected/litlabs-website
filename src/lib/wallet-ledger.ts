@@ -34,9 +34,26 @@ async function getUserId(clerkId: string): Promise<string> {
     .from("users")
     .select("id")
     .eq("clerk_id", clerkId)
-    .single();
-  if (error || !data?.id) throw new Error("Wallet user was not found");
-  return data.id;
+    .maybeSingle();
+  if (data?.id) return data.id;
+  // A real lookup error must not masquerade as a missing user — fail
+  // loudly instead of attempting to provision a duplicate row.
+  if (error) throw new Error(`Wallet user lookup failed: ${error.message}`);
+
+  // The first read can outrun the Clerk user.created webhook — provision
+  // the users row the same way /api/user/ensure does. The re-select (not
+  // the insert result) is authoritative, so a concurrent insert racing us
+  // still resolves to the same single row.
+  const { ensureUserProvisioned } = await import("@/lib/user-db");
+  await ensureUserProvisioned(clerkId);
+
+  const { data: retried } = await admin
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .maybeSingle();
+  if (!retried?.id) throw new Error("Wallet user was not found");
+  return retried.id;
 }
 
 type SupabaseAdmin = NonNullable<ReturnType<typeof getSupabaseAdmin>>;

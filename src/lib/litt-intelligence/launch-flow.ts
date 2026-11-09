@@ -326,6 +326,21 @@ const WEBSITE_ENTRY_FILES = new Set([
  */
 const WELCOME_SCREEN_MARKER = "LITT-WELCOME-SCREEN";
 
+/** Normalize a workspace-relative path for entry-file comparison. */
+function normalizeEntryPath(p: string): string {
+  return p
+    .replace(/\\/g, "/")
+    .replace(/^\.?\//, "")
+    .replace(/\/+/g, "/")
+    .replace(/\/$/, "")
+    .toLowerCase();
+}
+
+/** True when a workspace-relative path is a runnable website entry file. */
+export function isRunnableEntryPath(path: string): boolean {
+  return WEBSITE_ENTRY_FILES.has(normalizeEntryPath(path));
+}
+
 /**
  * Verify that a website build produced a real entry artifact in the bound
  * workspace. This deliberately asks the workspace transport rather than
@@ -341,18 +356,30 @@ const WELCOME_SCREEN_MARKER = "LITT-WELCOME-SCREEN";
  * evidence keeps the strict gate: an unverifiable workspace must not loosen
  * the launch check.
  *
- * Defense in depth (hadSuccessfulMutation): approval-resume callers pass
- * whether the resumed run's own tool-call log shows a successful file
- * mutation. When it does and the workspace diff did not affirmatively
- * prove the workspace untouched ("unchanged"), the marker rejection is
- * skipped — an additive edit to the starter legitimately keeps the marker.
- * Tool success alone is deliberately NOT enough: "unchanged" keeps the
- * strict gate so a tool that lied (or wrote to the wrong workspace) still
- * fails honestly instead of passing as a fake success.
+ * Defense in depth (entryFileMutated / diff entry paths): approval-resume
+ * callers pass whether the resumed run's own tool-call log shows a
+ * successful mutation DECLARED against a runnable entry file, and the
+ * workspace diff's file list is checked for entry paths. Only then is the
+ * marker rejection skipped — an additive edit to the starter legitimately
+ * keeps the marker. Any other mutation (asset inserts, notes, unrelated
+ * files) leaves the strict gate: a workspace that still shows only the
+ * blank starter fails honestly instead of passing as a fake success.
  */
 export async function verifyProjectArtifacts(
   transport: Pick<WorkspaceTransport, "listFiles" | "readFile">,
-  options?: { workspaceChange?: WorkspaceChangeEvidence | null; hadSuccessfulMutation?: boolean },
+  options?: {
+    workspaceChange?: WorkspaceChangeEvidence | null;
+    hadSuccessfulMutation?: boolean;
+    /**
+     * The run's tool-call log shows a successful mutation DECLARED against
+     * a runnable entry file (files.write index.html, apply_patch on
+     * app/page.tsx, …). This — not merely "some file changed" — is what
+     * permits the welcome-marker rejection to be skipped: an additive edit
+     * to the starter legitimately keeps the marker, but a run that only
+     * wrote assets/notes must still fail as "blank starter screen".
+     */
+    entryFileMutated?: boolean;
+  },
 ): Promise<ProjectArtifactCheck> {
   const files: string[] = [];
   const queue: Array<{ path: string; depth: number }> = [{ path: ".", depth: 0 }];
@@ -415,11 +442,16 @@ export async function verifyProjectArtifacts(
   // shows a successful file mutation and the diff did not affirmatively
   // prove the workspace untouched (see the doc comment above). The
   // entry-file-exists check above still applies in every scope.
-  const workspaceChanged = options?.workspaceChange?.status === "changed";
   const provenUntouched = options?.workspaceChange?.status === "unchanged";
-  const hadSuccessfulMutation = options?.hadSuccessfulMutation === true;
-  const skipMarkerRejection =
-    workspaceChanged || (hadSuccessfulMutation && !provenUntouched);
+  // Skip the marker rejection ONLY when an entry file itself was touched:
+  // the workspace diff names an entry path, or the caller's mutation log
+  // declared one. A bare "something changed" (an asset insert, a notes
+  // file) leaves the starter unedited — treating that as a build would
+  // report success for a workspace that still shows the blank starter.
+  const entryTouched =
+    (options?.workspaceChange?.files ?? []).some(isRunnableEntryPath) ||
+    options?.entryFileMutated === true;
+  const skipMarkerRejection = entryTouched && !provenUntouched;
   let realEntryFound = false;
   let welcomeOnly = false;
   for (const entry of entryFiles) {
@@ -501,11 +533,12 @@ export async function ensureProjectPreviewReady(
     workspaceChange?: WorkspaceChangeEvidence | null;
     /**
      * The resumed run's own tool-call log shows a successful file
-     * mutation. Threads into verifyProjectArtifacts so an approved
-     * additive edit to the starter (marker legitimately kept) is not
-     * failed by the welcome-screen gate.
+     * mutation. Superseded by entryFileMutated for the marker gate — kept
+     * for callers that only know "a mutation happened".
      */
     hadSuccessfulMutation?: boolean;
+    /** Successful mutation declared against a runnable entry file. */
+    entryFileMutated?: boolean;
     /** Server-derived static workspace: preview is served by the file route. */
     isStaticWorkspace?: boolean;
   } = {},
@@ -523,6 +556,7 @@ export async function ensureProjectPreviewReady(
     artifacts = await verifyProjectArtifacts(transport, {
       workspaceChange: options.workspaceChange ?? null,
       hadSuccessfulMutation: options.hadSuccessfulMutation,
+      entryFileMutated: options.entryFileMutated,
     });
     if (artifacts.ok) break;
     if (attempt < 2) await sleep(250);

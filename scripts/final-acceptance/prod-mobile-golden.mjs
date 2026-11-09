@@ -4,7 +4,7 @@
  * Drives a REAL authenticated session on https://www.litlabs.net from a
  * Pixel-7-class mobile context:
  *
- *   sign-in (Clerk sign_in_token magic link)
+ *   sign-in (Clerk sign_in_token redeemed on BASE's /sign-in page)
  *   → Studio → mobile LiTT sheet → real build request
  *   → SSE stream capture (tool_execution, preview, deploy events)
  *   → live preview iframe verification (CSP frame-src / XFO proof)
@@ -160,7 +160,12 @@ async function openMobileSheet(page) {
 }
 
 // ─── Clerk sign-in token ───────────────────────────────────────
-async function createSignInUrl(secretKey) {
+// Returns the raw ticket token (not the magic-link URL). The magic link
+// redeems through Clerk's Frontend API and lands on the instance's
+// configured sign-in page — the production host, not BASE — so the harness
+// redeems the ticket directly on BASE's own /sign-in page instead (see
+// Step 1). The prebuilt <SignIn> component consumes __clerk_ticket.
+async function createSignInToken(secretKey) {
   const resp = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
     method: "POST",
     headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
@@ -168,8 +173,8 @@ async function createSignInUrl(secretKey) {
   });
   if (!resp.ok) throw new Error(`sign_in_tokens failed: ${resp.status}`);
   const data = await resp.json();
-  if (!data.url) throw new Error("sign_in_tokens response missing url");
-  return data.url;
+  if (!data.token) throw new Error("sign_in_tokens response missing token");
+  return data.token;
 }
 
 // ─── SSE parser ────────────────────────────────────────────────
@@ -195,7 +200,7 @@ function parseSSE(raw) {
 // ─── Main ──────────────────────────────────────────────────────
 async function main() {
   const secretKey = loadSecret();
-  const signInUrl = await createSignInUrl(secretKey);
+  const signInToken = await createSignInToken(secretKey);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -291,10 +296,41 @@ async function main() {
   });
 
   try {
-    // ── Step 1: sign in via magic link ──
-    await page.goto(signInUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
-    // Clerk processes the ticket and redirects through the site.
-    await page.waitForURL(/litlabs\.net/, { timeout: 60_000 });
+    // ── Step 1: sign in via ticket on the configured origin ──
+    // Redeem the ticket on BASE's own /sign-in page: the prebuilt <SignIn>
+    // component consumes __clerk_ticket and the session cookie is set on
+    // BASE's origin. (Visiting Clerk's magic-link URL instead redeems
+    // through Clerk's Frontend API and lands on the instance's configured
+    // sign-in page — the production host — so the session would belong to
+    // the wrong origin and the auth probe below would fail.)
+    // After success the page redirects to /studio, the app's default
+    // post-login destination.
+    const baseOrigin = new URL(BASE).origin;
+    const signInPage = `${BASE}/sign-in?__clerk_ticket=${encodeURIComponent(signInToken)}`;
+    await page.goto(signInPage, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    // Wait until the browser has left /sign-in for a post-login page, then
+    // verify the landing URL's origin is exactly BASE. A landing anywhere
+    // else means the session belongs to another host and the auth probe
+    // below would be meaningless — fail fast with the actual URL recorded.
+    let landedUrl = page.url();
+    try {
+      await page.waitForURL((url) => {
+        const u = new URL(url);
+        return u.origin === baseOrigin && !u.pathname.startsWith("/sign-in");
+      }, { timeout: 60_000 });
+      landedUrl = page.url();
+    } catch (err) {
+      landedUrl = page.url();
+      step("sign_in_origin", false,
+        `never left /sign-in on ${baseOrigin} (still at ${landedUrl}): ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
+    const landed = new URL(landedUrl);
+    step("sign_in_origin", landed.origin === baseOrigin,
+      `landed ${landedUrl} (origin ${landed.origin}, expected ${baseOrigin})`);
+    if (landed.origin !== baseOrigin) {
+      throw new Error(`sign-in landed on ${landed.origin}, expected origin ${baseOrigin}`);
+    }
     await page.waitForTimeout(4000);
     const authProbe = await page.request.get(`${BASE}/api/studio-projects`, { timeout: 60_000 });
     step("sign_in", authProbe.status() === 200, `GET /api/studio-projects → ${authProbe.status()}`);
@@ -774,9 +810,25 @@ async function main() {
           const resolveRef = (s) => (/^https?:\/\//i.test(s) ? s : new URL(s, productionUrl).href);
           const results = [];
           for (const src of [...new Set(imgSrcs)].slice(0, 20)) {
-            const resp = await page.request.get(resolveRef(src), { timeout: 30_000 }).catch(() => null);
-            const bytes = resp ? Number((await resp.body().catch(() => null))?.length ?? 0) : 0;
-            results.push({ src, status: resp?.status() ?? -1, bytes });
+            // Freshly deployed assets blip 503 for ~1s while the file rows
+            // settle — the audit runs immediately after deploy approval,
+            // so it must retry transient statuses instead of recording a
+            // false "broken image". Bounded: 3 attempts on 5xx/429/network
+            // failures only; a definitive 4xx fails fast (real breakages
+            // must not hide behind retries). Same discipline as the
+            // production_url_verified fetch above.
+            let resp = null;
+            let status = -1;
+            let bytes = 0;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              if (attempt > 0) await page.waitForTimeout(3000);
+              resp = await page.request.get(resolveRef(src), { timeout: 30_000 }).catch(() => null);
+              status = resp?.status() ?? -1;
+              const transient = status === -1 || status === 408 || status === 429 || status >= 500;
+              if (!transient) break;
+            }
+            if (resp && status === 200) bytes = Number((await resp.body().catch(() => null))?.length ?? 0);
+            results.push({ src, status, bytes });
           }
           const broken = results.filter((r) => r.status !== 200);
           const photos = results.filter((r) => r.status === 200 && !r.src.toLowerCase().endsWith(".svg") && r.bytes > 8000);

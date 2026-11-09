@@ -15,7 +15,7 @@
 
 import "server-only";
 
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
 import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
@@ -27,7 +27,7 @@ import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage
 export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
-import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
+import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -417,14 +417,98 @@ interface ToolCallRecord {
   inputsHash: string;
   resultHash: string;
   step: number;
+  // Set by the resume path when it records an approved execution (§6.1)
+  // and by seedToolCallRecordsFromHistory when it rebuilds the ledger
+  // from paused history: success = the loop-level result (a generated
+  // image that never saved counts as failed), mutating = the tool is
+  // not read-only. Seeded records whose tool result is unparseable
+  // leave success undefined — unknown, never a proven success.
+  success?: boolean;
+  mutating?: boolean;
 }
 
-function hashInputs(inputs: Record<string, unknown>): string {
+// Canonical JSON for hashing: object keys sorted recursively, so two
+// inputs that differ only by key order hash identically. Without this,
+// the model re-emitting the same tool call with reordered keys produces
+// a different hash, defeats the replay dedupe, and re-pauses instead of
+// replaying (approval-loop R3).
+function canonicalizeForHash(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeForHash);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = canonicalizeForHash((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+export function hashInputs(inputs: Record<string, unknown>): string {
   try {
-    return JSON.stringify(inputs).slice(0, 500);
+    const json = JSON.stringify(canonicalizeForHash(inputs));
+    // Long inputs are hashed, not truncated: truncation loses the tail
+    // that distinguishes two prompts, so distinct calls could collide
+    // and replay the wrong result.
+    return json.length > 500 ? `sha256:${createHash("sha256").update(json).digest("hex")}` : json;
   } catch {
     return String(inputs).slice(0, 500);
   }
+}
+
+// ─── Gated-repeat loop breaker (§6.1) ─────────────────────────────
+// A gated mutation that keeps failing to save re-enters its approval
+// gate forever: the permission pause runs before loop detection (R1),
+// and the old detector is disabled once any mutation executed (R2).
+// The breaker counts trailing executions of the same tool + canonical
+// inputs, resetting at the most recent successful mutation of a
+// DIFFERENT tool. It trips at 2 priors — the 3rd identical request is
+// failed honestly instead of creating another gate. It deliberately
+// does NOT consult hasInterveningMutation for same-tool repeats (R2):
+// a failing image.generate is not rescued by an earlier files.write.
+
+export const GATED_REPEAT_LIMIT = 2;
+
+export function gatedRepeatLoopError(toolId: string): string {
+  return `${toolId} requested 3 times without a successful save; stopping instead of re-asking`;
+}
+
+export function countGatedRepeatExecutions(
+  records: ToolCallRecord[],
+  toolId: string,
+  inputsHash: string,
+): number {
+  let count = 0;
+  for (let i = records.length - 1; i >= 0; i--) {
+    const record = records[i];
+    if (record.toolId === toolId && record.inputsHash === inputsHash) {
+      // A successful same-tool execution ends the streak: anything older
+      // belongs to a request that already completed.
+      if (record.success === true) return count;
+      count += 1;
+      continue;
+    }
+    // A successful mutation of a different tool ends the streak: the run
+    // made progress elsewhere, so the repeat is a fresh request. Only a
+    // PROVEN success resets — a seeded record with an unknown outcome
+    // (success undefined: the tool result was not JSON) must not.
+    if (record.mutating && record.success === true) return count;
+  }
+  return count;
+}
+
+// A generated image that never landed in the project is not a
+// successful mutation, even when the handler reports success: true
+// (maybeAutoInsertGeneratedImage preserves success on a failed save).
+// The breaker and the approved-call ledger must count it as failed,
+// or a failing save leaves no trace and re-gates forever.
+function mutationSucceeded(result: ToolCallResult): boolean {
+  if (result.success === false) return false;
+  const payload = result.result;
+  if (payload && typeof payload === "object" && (payload as Record<string, unknown>).savedToProject === false) {
+    return false;
+  }
+  return true;
 }
 
 function hashResult(result: unknown): string {
@@ -506,12 +590,38 @@ export function seedToolCallRecordsFromHistory(
   messages: LLMMessage[],
 ): ToolCallRecord[] {
   const wireNameToToolId = new Map<string, string>();
+  const toolIdToReadOnly = new Map<string, boolean>();
   for (const tool of toolRegistry.listEnabled()) {
     wireNameToToolId.set(tool.id.replace(/\./g, "_"), tool.id);
+    toolIdToReadOnly.set(tool.id, tool.readOnly);
   }
   const executedCallIds = new Set<string>();
+  // Map each executed call to its parsed tool-result JSON, so the
+  // seeded record carries the outcome the breaker counts on (§6.1):
+  // a result that reports success: false — or an image result whose
+  // bytes never landed in the project (savedToProject: false) — is a
+  // failed execution, not a success. Unparseable results stay
+  // undefined: unknown, not a success.
+  const callIdToResult = new Map<string, Record<string, unknown>>();
   for (const m of messages) {
-    if (m.role === "tool" && m.tool_call_id) executedCallIds.add(m.tool_call_id);
+    if (m.role === "tool" && m.tool_call_id) {
+      executedCallIds.add(m.tool_call_id);
+      const content = m.content ?? "";
+      // A failed call's tool result is not JSON — buildToolResultMessage
+      // renders it as "Error: <message>". That prefix IS the failure
+      // marker; without it a failed execution seeds as "unknown" and the
+      // breaker cannot count it.
+      if (content.startsWith("Error:")) {
+        callIdToResult.set(m.tool_call_id, { success: false });
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(content) as Record<string, unknown>;
+        if (parsed && typeof parsed === "object") callIdToResult.set(m.tool_call_id, parsed);
+      } catch {
+        // Non-JSON tool result — outcome unknown, leave unflagged.
+      }
+    }
   }
   const records: ToolCallRecord[] = [];
   let step = 0;
@@ -525,11 +635,19 @@ export function seedToolCallRecordsFromHistory(
       } catch {
         inputs = {};
       }
+      const toolId = wireNameToToolId.get(call.function.name) ?? call.function.name;
+      const resultJson = callIdToResult.get(call.id);
+      const success =
+        resultJson === undefined
+          ? undefined
+          : resultJson.success !== false && resultJson.savedToProject !== false;
       records.push({
-        toolId: wireNameToToolId.get(call.function.name) ?? call.function.name,
+        toolId,
         inputsHash: hashInputs(inputs),
         resultHash: "",
         step: step++,
+        success,
+        mutating: toolIdToReadOnly.has(toolId) ? !toolIdToReadOnly.get(toolId) : undefined,
       });
     }
   }
@@ -783,6 +901,8 @@ const LOCAL_SMALL_TOOL_IDS = new Set([
   "files.delete",
   "files.rename",
   "files.mkdir",
+  "site.compose",
+  "site.patch",
   "preview.start",
   "preview.status",
 ]);
@@ -820,21 +940,38 @@ const LOCAL_SMALL_LANE_PROMPT =
   "You are LiTT, a website-building agent. You act by emitting tool calls.\n" +
   "This model has no native tool channel — emit EACH call as a fenced block:\n\n" +
   "```tool_call\n" +
-  '{"name":"files.write","arguments":{"path":"index.html","content":"<!doctype html>..."}}\n' +
+  '{"name":"site.compose","arguments":{"title":"Ember Roast","theme":"warm","sections":[{"kind":"features","heading":"Why us","items":[{"title":"Fresh","text":"Roasted daily"}]},{"kind":"footer","text":"Open daily"}]}}\n' +
   "```\n\n" +
   "Rules:\n" +
-  "- Emit EVERY files.write the site needs in ONE response, then emit preview.start.\n" +
-  "- Emit only tool_call blocks — no prose, no explanations.\n" +
+  "- To CREATE a new website page, emit ONE site.compose call — never write raw HTML for a new page.\n" +
+  "  title MUST be the site or brand name the user asked for, verbatim — never a generic label. " +
+  "Give it: title, theme (light/dark/warm/forest/ocean/mono), accentHue 0-360, a hero " +
+  "{heading,subheading,cta,image keywords}, and 4-8 sections using the section kinds in the tool " +
+  "schema. Write real copy for the user's request — never lorem ipsum or 'text here'. " +
+  "Photos come from the plan's image keywords automatically — no image tools exist.\n" +
+  "- If site.compose returns a validation error, fix the plan and emit it again corrected.\n" +
+  "- site.compose REPLACES THE WHOLE PAGE — it is for new pages (or an explicit full redesign) " +
+  "only. NEVER use it for an edit to an existing page: text, color, or single-section changes " +
+  "go through files.read + apply_patch like any other edit.\n" +
   "- To MODIFY an existing file: files.read it FIRST, then prefer apply_patch with a " +
   "search/replace for just the requested change — NEVER rewrite the whole file from " +
   "scratch. Keep all existing styling, classes, and structure unless the request asks to remove them.\n" +
+  "- On a page built by site.compose, a WHOLE-SECTION change (footer text, hero heading, a " +
+  "section's content) is easier with site.patch: {section: \"footer\", text: \"…\"} — " +
+  "no search strings needed. For small precise edits, apply_patch still works.\n" +
+  "- If apply_patch is rejected, the tool result already contains the CURRENT FILE CONTENT — " +
+  "copy the search text verbatim from it and emit apply_patch again; do not stop.\n" +
+  "- files.write still exists for full manual control (new non-page files, or when the user " +
+  "explicitly wants hand-written HTML) — but for a new site page, site.compose is the default.\n" +
   "- Do EVERY part of a multi-part request: if asked to change the heading AND the theme, " +
   "emit one apply_patch for EACH change in the SAME response. A request is not done until " +
   "every requested change is applied.\n" +
   "- When the request specifies exact text to add or change, the patch's replace MUST contain " +
   "that text verbatim — never paraphrase it or substitute different content.\n" +
   "- A files.write that strips an existing file's styling is refused — patch instead.\n" +
-  "- Available: files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.\n\n" +
+  "- After the page exists emit preview.start, then stop.\n" +
+  "- Emit only tool_call blocks — no prose, no explanations.\n" +
+  "- Available: site.compose, site.patch, files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.\n\n" +
   LOCAL_SITE_QUALITY_CONTRACT;
 
 /**
@@ -1323,7 +1460,7 @@ function noteReadBackToSession(
  */
 async function maybeEnrichStaticSiteVisuals(
   transport: WorkspaceTransport,
-  call: { toolId: string; inputs: unknown; success: boolean; readOnly: boolean },
+  call: { toolId: string; inputs: unknown; success: boolean; readOnly: boolean; result?: unknown },
   qualitySession: QualityLoopSession | null,
   isStaticWorkspace: boolean | undefined,
   localProgress: ProgressEmitter,
@@ -1332,7 +1469,7 @@ async function maybeEnrichStaticSiteVisuals(
   try {
     const inputs = (call.inputs ?? {}) as { path?: unknown };
     const declared =
-      declaredMutationPaths(call.inputs as Record<string, unknown> | undefined, undefined) ?? [];
+      declaredMutationPaths(call.inputs as Record<string, unknown> | undefined, call.result) ?? [];
     const htmlTouched =
       /\.html?$/i.test(typeof inputs.path === "string" ? inputs.path : "") ||
       declared.some((p) => /\.html?$/i.test(p));
@@ -1348,11 +1485,14 @@ async function maybeEnrichStaticSiteVisuals(
           `Visual enrichment: ${report.imagesResolved} image(s) resolved` +
           (report.imagesFailed > 0 ? `, ${report.imagesFailed} unavailable` : "") +
           (report.placeholdersUsed > 0 ? `, ${report.placeholdersUsed} placeholder fallback(s)` : "") +
-          ` (${report.providersUsed.join(", ") || "no providers"}).`,
+          ` (${report.providersUsed.join(", ") || "no providers"}` +
+          (report.providersFailed.length > 0 ? `; failed: ${report.providersFailed.join(", ")}` : "") +
+          `).`,
       });
     }
-  } catch {
+  } catch (err) {
     // Enrichment is additive — it must never break the run.
+    console.warn("[enrich] maybeEnrichStaticSiteVisuals failed:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -2000,7 +2140,13 @@ async function runAgentLoopV2Inner(
       }
       const zeroCallText = llmResponse.text ?? "";
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
-        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Small lane exists to mutate files: until a mutation lands, a
+        // prose-only reply can never be the final answer — bounded nudges
+        // then an honest failure, never a silent fake-complete.
+        requiredToolCallPending:
+          (cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) &&
+          !emittedToolCalls &&
+          !hasInterveningMutation,
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides
@@ -2227,12 +2373,65 @@ async function runAgentLoopV2Inner(
       // fail on resume or persist the token verbatim. Feed the error back
       // as a tool result so the model re-reads and regenerates.
       if (permResult.allowed) {
-        const writeError =
+        let writeError =
           toolCall.toolId === "apply_patch"
             ? await validateApplyPatchInputs(toolCall.inputs, transport)
             : toolCall.toolId === "files.write"
               ? validateFilesWriteInputs(toolCall.inputs)
               : null;
+        // Small-lane full-overwrite gate: a files.write or site.compose that
+        // replaces an existing page must declare allowOverwrite or take the
+        // apply_patch path — whole-document regeneration is how small
+        // models silently drop the requested edit.
+        if (
+          !writeError &&
+          isLocalSmallLane() &&
+          (toolCall.toolId === "files.write" || toolCall.toolId === "site.compose")
+        ) {
+          writeError = await existingPageOverwriteError(toolCall.inputs, transport);
+          if (writeError) writeError = `${toolCall.toolId} ${writeError}`;
+        }
+        // site.compose plan validation runs pre-approval too — the approval
+        // freezes the plan, so a malformed one can only die post-approval
+        // ("approved workspace operation failed"). Feeding the errors back
+        // lets the model fix the plan and re-emit instead.
+        if (!writeError && toolCall.toolId === "site.compose") {
+          const { validateSitePlan } = await import("./site-compose");
+          const planInput =
+            toolCall.inputs.plan !== undefined
+              ? toolCall.inputs.plan
+              : Object.fromEntries(
+                  Object.entries(toolCall.inputs).filter(([k]) => k !== "path" && k !== "projectId" && k !== "allowOverwrite"),
+                );
+          const v = validateSitePlan(planInput);
+          if (!v.ok) writeError = `site.compose invalid plan: ${v.errors.join("; ")} — fix the plan and emit it again.`;
+        }
+        // site.patch dry-run: read the target and run the splice in memory —
+        // a missing region or no-op edit must fail here with feedback, not
+        // post-approval where the run dies with "approved workspace
+        // operation failed".
+        if (!writeError && toolCall.toolId === "site.patch") {
+          const patchPath =
+            typeof toolCall.inputs.path === "string" && toolCall.inputs.path.trim()
+              ? toolCall.inputs.path.trim()
+              : "index.html";
+          const section = toolCall.inputs.section;
+          if (typeof section !== "string" || !section.trim()) {
+            writeError = 'site.patch requires "section" (e.g. "hero", "footer", "features-1")';
+          } else {
+            try {
+              const { content } = await transport.readFile(patchPath);
+              const { applySectionEdit } = await import("./site-compose");
+              const fields = Object.fromEntries(
+                Object.entries(toolCall.inputs).filter(([k]) => k !== "path" && k !== "projectId" && k !== "section" && k !== "allowOverwrite"),
+              );
+              const probe = applySectionEdit(content, section, fields);
+              if (!probe.ok) writeError = `site.patch failed: ${probe.error}`;
+            } catch {
+              writeError = `site.patch: cannot read ${patchPath} — files.read it first or check the path.`;
+            }
+          }
+        }
         if (writeError) {
           const recoveryKey = `${toolCall.toolId}:${String(toolCall.inputs.path ?? "")}`;
           const recoveryAttempt = (patchRecoveryAttempts.get(recoveryKey) ?? 0) + 1;
@@ -2248,12 +2447,18 @@ async function runAgentLoopV2Inner(
             error: recoveryMessage,
           };
           llmMessages.push(buildToolResultMessage(result));
-          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: recoveryAttempt >= 2 ? "invalid write — stopped safely" : "invalid write — re-read and regenerate", mutating: false });
+          const invalidWriteSummary =
+            toolCall.toolId === "apply_patch"
+              ? recoveryAttempt >= 2
+                ? "Invalid patch repeated after disk re-read; stopped without mutation"
+                : "Invalid patch re-read from disk; regenerate or use files.write"
+              : `${toolCall.toolId} rejected pre-approval — model retries with corrected inputs`;
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: invalidWriteSummary, mutating: false });
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
             success: false,
-            summary: recoveryAttempt >= 2 ? "Invalid patch repeated after disk re-read; stopped without mutation" : "Invalid patch re-read from disk; regenerate or use files.write",
+            summary: invalidWriteSummary,
             durationMs: 0,
           });
           if (toolCall.toolId === "apply_patch" && recoveryAttempt >= 2) {
@@ -2452,6 +2657,8 @@ async function runAgentLoopV2Inner(
         inputsHash,
         resultHash: hashResult(result.result),
         step: stepsUsed,
+        success: mutationSucceeded(result),
+        mutating: !toolDef.readOnly,
       });
 
       // Track mutations
@@ -2516,7 +2723,7 @@ async function runAgentLoopV2Inner(
       }
       await maybeEnrichStaticSiteVisuals(
         transport,
-        { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly },
+        { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly, result: result.result },
         qualitySession,
         cfg.isStaticWorkspace,
         localProgress,
@@ -2945,6 +3152,13 @@ export interface DeferredToolBatchState {
   completedDeployment: CompletedDeployment | null;
   /** Bounded read-loop nudges spent — shared with the resumed loop. */
   readLoopNudges?: number;
+  /**
+   * Set when the gated-repeat breaker trips inside the deferred batch:
+   * the same gated mutation was requested a third time without a
+   * successful save. The resume path copies it into `failedHonestly`
+   * and settles the run failed instead of creating another gate.
+   */
+  failedHonestly?: string;
 }
 
 export interface DeferredToolBatchContext {
@@ -3071,6 +3285,21 @@ export async function executeDeferredToolCalls(
       }
     }
 
+    const inputsHash = hashInputs(toolCall.inputs);
+
+    // Gated-repeat breaker (§6.1): a gated mutation that keeps failing
+    // to save must not re-enter its approval gate forever. This runs
+    // AFTER the replay dedupe above (an identical successful call
+    // replays and never gates) and BEFORE the permission pause (R1) —
+    // and it does NOT consult hasInterveningMutation for same-tool
+    // repeats (R2). On trip, the batch stops and the resume path
+    // settles the run failed via state.failedHonestly.
+    if (!toolDef.readOnly && countGatedRepeatExecutions(ctx.toolCallRecords, toolCall.toolId, inputsHash) >= GATED_REPEAT_LIMIT) {
+      state.failedHonestly = gatedRepeatLoopError(toolCall.toolId);
+      ctx.localProgress.emit({ type: "status", summary: state.failedHonestly });
+      break;
+    }
+
     const permInfo = toPermissionInfo(toolDef);
     const permResult = permissionEngine.check(permInfo, toolCall.inputs, ctx.executionMode);
 
@@ -3137,7 +3366,7 @@ export async function executeDeferredToolCalls(
 
     // Loop detection — same bounded read-loop nudge as the main loop;
     // nudge budget lives on `state` so it carries across the boundary.
-    const inputsHash = hashInputs(toolCall.inputs);
+    // inputsHash was computed above, before the permission check.
     if (detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, state.hasInterveningMutation)) {
       if (toolDef.readOnly && (state.readLoopNudges ?? 0) < READ_LOOP_NUDGE_MAX) {
         state.readLoopNudges = (state.readLoopNudges ?? 0) + 1;
@@ -3193,7 +3422,7 @@ export async function executeDeferredToolCalls(
       result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: err instanceof Error ? err.message : String(err) };
     }
 
-    ctx.toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: ctx.stepsUsed });
+    ctx.toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: ctx.stepsUsed, success: mutationSucceeded(result), mutating: !toolDef.readOnly });
 
     if (!toolDef.readOnly) {
       state.hasInterveningMutation = true;
@@ -3231,7 +3460,7 @@ export async function executeDeferredToolCalls(
     }
     await maybeEnrichStaticSiteVisuals(
       ctx.transport,
-      { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly },
+      { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly, result: result.result },
       ctx.qualitySession,
       ctx.isStaticWorkspace,
       ctx.localProgress,
@@ -3588,7 +3817,7 @@ async function resumeAgentLoopV2Inner(
     }
     await maybeEnrichStaticSiteVisuals(
       transport,
-      { toolId: resume.toolId, inputs: resume.inputs, success: result.success, readOnly: resumedReadOnly },
+      { toolId: resume.toolId, inputs: resume.inputs, success: result.success, readOnly: resumedReadOnly, result: result.result },
       qualitySession,
       cfg.isStaticWorkspace,
       localProgress,
@@ -3605,10 +3834,34 @@ async function resumeAgentLoopV2Inner(
     llmMessages.push(buildToolResultMessage(result));
 
     const toolDef = availableTools.find((t) => t.id === resume.toolId);
-    // Only a successful mutation counts: a failed approved call must not
-    // be cached as executed work or weaken loop detection.
-    if (toolDef && !toolDef.readOnly && result.success) {
-      hasInterveningMutation = true;
+    // Ledger the approved execution EVEN WHEN IT FAILED: the resume
+    // rebuilds executedMutations empty and seedToolCallRecordsFromHistory
+    // only counts calls with a tool result in the paused history — the
+    // gated call had none — so without this the approved execution is
+    // invisible to the repeat count: a failing gated call leaves no
+    // trace and re-enters the gate forever (§6.1/R3). Only a successful
+    // mutation counts as executed work: a failed approved call must not
+    // be cached in executedMutations or weaken loop detection. A
+    // generated image that never saved (savedToProject: false) is a
+    // failed mutation even when the handler reports success: true.
+    if (toolDef && !toolDef.readOnly) {
+      const approvedInputsHash = hashInputs(resume.inputs);
+      const succeeded = mutationSucceeded(result);
+      toolCallRecords.push({
+        toolId: resume.toolId,
+        inputsHash: approvedInputsHash,
+        resultHash: hashResult(result.result),
+        step: stepsUsed,
+        success: succeeded,
+        mutating: true,
+      });
+      if (succeeded) {
+        hasInterveningMutation = true;
+        executedMutations.set(`${resume.toolId}:${approvedInputsHash}`, {
+          result,
+          persisted: mutationCheck?.verified ?? undefined,
+        });
+      }
     }
   } else {
     // Rejected — inject rejection as tool result
@@ -3693,6 +3946,13 @@ async function resumeAgentLoopV2Inner(
     batchHasMutation = deferredState.batchHasMutation;
     completedDeployment = deferredState.completedDeployment;
     readLoopNudges = deferredState.readLoopNudges ?? readLoopNudges;
+    // The gated-repeat breaker (§6.1) may have tripped inside the
+    // deferred batch: settle the run failed instead of entering the
+    // main loop or creating another gate.
+    if (deferredState.failedHonestly) {
+      failedHonestly = deferredState.failedHonestly;
+      finalText = deferredState.failedHonestly;
+    }
 
     if (deferredResult.nestedApproval) {
       // A nested gate on a file-writing tool carries 0 — write intent is
@@ -3726,7 +3986,7 @@ async function resumeAgentLoopV2Inner(
   }
 
   // Continue the loop
-  while (stepsUsed < cfg.maxSteps && !cancelled) {
+  while (stepsUsed < cfg.maxSteps && !cancelled && !failedHonestly) {
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
       cancelled = true;
@@ -3831,7 +4091,13 @@ async function resumeAgentLoopV2Inner(
       }
       const zeroCallText = llmResponse.text ?? "";
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
-        requiredToolCallPending: cfg.requireToolCallOnFirstStep === true && !emittedToolCalls,
+        // Small lane exists to mutate files: until a mutation lands, a
+        // prose-only reply can never be the final answer — bounded nudges
+        // then an honest failure, never a silent fake-complete.
+        requiredToolCallPending:
+          (cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) &&
+          !emittedToolCalls &&
+          !hasInterveningMutation,
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides
@@ -3930,6 +4196,20 @@ async function resumeAgentLoopV2Inner(
           localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — already executed", durationMs: 0 });
           continue;
         }
+      }
+
+      // Gated-repeat breaker (§6.1): a gated mutation that keeps failing
+      // to save must not re-enter its approval gate forever. This runs
+      // AFTER the replay dedupe above (an identical successful call
+      // replays and never gates) and BEFORE the permission pause (R1) —
+      // and it does NOT consult hasInterveningMutation for same-tool
+      // repeats (R2). On trip, the run settles failed with a truthful
+      // error instead of creating another gate.
+      if (!toolDef.readOnly && countGatedRepeatExecutions(toolCallRecords, toolCall.toolId, hashInputs(toolCall.inputs)) >= GATED_REPEAT_LIMIT) {
+        failedHonestly = gatedRepeatLoopError(toolCall.toolId);
+        finalText = failedHonestly;
+        localProgress.emit({ type: "status", summary: failedHonestly });
+        break;
       }
 
       const permInfo = toPermissionInfo(toolDef);
@@ -4064,7 +4344,7 @@ async function resumeAgentLoopV2Inner(
         result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: err instanceof Error ? err.message : String(err) };
       }
 
-      toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: stepsUsed });
+      toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: stepsUsed, success: mutationSucceeded(result), mutating: !toolDef.readOnly });
 
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
@@ -4102,7 +4382,7 @@ async function resumeAgentLoopV2Inner(
       }
       await maybeEnrichStaticSiteVisuals(
         transport,
-        { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly },
+        { toolId: toolCall.toolId, inputs: toolCall.inputs, success: result.success, readOnly: toolDef.readOnly, result: result.result },
         qualitySession,
         cfg.isStaticWorkspace,
         localProgress,
@@ -4121,6 +4401,10 @@ async function resumeAgentLoopV2Inner(
     }
 
     if (cancelled) break;
+    // The gated-repeat breaker (§6.1) already settled the run failed —
+    // exit before the build-capability guard below can overwrite the
+    // loop error with a less specific one.
+    if (failedHonestly) break;
     if (cfg.buildCapabilityGuard) {
       const wroteFile = toolCallLog.slice(logBeforeBatch).some((call) => call.success && isFileWritingTool(call.toolId));
       resumeZeroWriteSteps = wroteFile ? 0 : resumeZeroWriteSteps + 1;
@@ -4179,9 +4463,24 @@ async function resumeAgentLoopV2Inner(
     )
   ) {
     try {
-      const { verifyProjectArtifacts } = await import("./launch-flow");
+      const { verifyProjectArtifacts, isRunnableEntryPath } = await import("./launch-flow");
+      // The marker gate skips only when an ENTRY file was touched — a run
+      // whose sole mutations were asset inserts or unrelated files still
+      // fails as "blank starter screen" instead of passing as built.
+      // call.paths carries the declared+result mutation targets.
+      // site.compose/site.patch write the site entry by construction —
+      // their declared paths may not name index.html.
+      const entryFileMutated = toolCallLog.some(
+        (call) =>
+          call.success &&
+          call.mutating &&
+          (call.toolId === "site.compose" ||
+            call.toolId === "site.patch" ||
+            (call.paths ?? []).some(isRunnableEntryPath)),
+      );
       const artifacts = await verifyProjectArtifacts(transport, {
         hadSuccessfulMutation: true,
+        entryFileMutated,
       });
       if (artifacts.ok) noteBuildArtifacts(qualitySession, artifacts.files);
     } catch {

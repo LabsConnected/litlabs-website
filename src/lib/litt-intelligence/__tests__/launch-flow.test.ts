@@ -1143,21 +1143,38 @@ describe("Launch Flow: artifact gate mutation-aware marker skip (#551b2)", () =>
     });
   }
 
-  it("passes a marker-bearing entry when the run's tool log shows a successful mutation and the diff is unknown", async () => {
+  it("passes a marker-bearing entry when the run's tool log shows a successful ENTRY mutation and the diff is unknown", async () => {
     const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
     const check = await verifyProjectArtifacts(markerEditTransport(), {
       workspaceChange: { status: "unknown", files: [] },
       hadSuccessfulMutation: true,
+      entryFileMutated: true,
     });
     expect(check.ok).toBe(true);
   });
 
-  it("passes a marker-bearing entry when the run's tool log shows a successful mutation and no evidence exists", async () => {
+  it("passes a marker-bearing entry when the run's tool log shows a successful ENTRY mutation and no evidence exists", async () => {
     const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
     const check = await verifyProjectArtifacts(markerEditTransport(), {
       hadSuccessfulMutation: true,
+      entryFileMutated: true,
     });
     expect(check.ok).toBe(true);
+  });
+
+  it("fails a marker-bearing entry when mutations touched only non-entry files — asset inserts must not waive the starter check", async () => {
+    // Regression (staging project c3de8415): image.generate auto-saved a
+    // JPEG into assets/ and the run reported mutation success — the
+    // workspace still showed only the blank starter, and the old blanket
+    // hadSuccessfulMutation skip let it pass as "built".
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "changed", files: ["assets/images/generated.jpeg"] },
+      hadSuccessfulMutation: true,
+      entryFileMutated: false,
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
   });
 
   it("still fails when the diff affirmatively proves the workspace untouched — a lying tool must not pass", async () => {
@@ -1192,7 +1209,7 @@ describe("Launch Flow: artifact gate mutation-aware marker skip (#551b2)", () =>
     });
     const result = await ensureProjectPreviewReady(
       transport as any,
-      { workspaceChange: { status: "unknown", files: [] }, hadSuccessfulMutation: true },
+      { workspaceChange: { status: "unknown", files: [] }, hadSuccessfulMutation: true, entryFileMutated: true },
       undefined,
       undefined,
     );

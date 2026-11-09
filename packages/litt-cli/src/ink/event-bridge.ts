@@ -110,6 +110,77 @@ function resultMessage(data: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+/**
+ * Salient invocation detail for a tool.started row — the actual command
+ * or target argument, not just the tool name. "project.run" without its
+ * command is exactly the generic-message problem this exists to fix.
+ * Returns null when the event carries no usable inputs.
+ */
+export function toolInvocationDetail(data: Record<string, unknown>): string | null {
+  const inputs = data.inputs;
+  if (typeof inputs !== "object" || inputs === null) return null;
+  const rec = inputs as Record<string, unknown>;
+  const cmd = rec.command;
+  if (typeof cmd === "string" && cmd.length > 0) {
+    const args = Array.isArray(rec.args)
+      ? rec.args.filter((a): a is string => typeof a === "string").join(" ")
+      : "";
+    return `${cmd}${args ? ` ${args}` : ""}`.slice(0, 140);
+  }
+  for (const key of ["path", "file", "query", "pattern", "script", "url"] as const) {
+    const v = rec[key];
+    if (typeof v === "string" && v.length > 0) {
+      return `${key === "path" || key === "file" ? "" : `${key}=`}${v}`.slice(0, 140);
+    }
+  }
+  return null;
+}
+
+/** Pretty-printed tool inputs for the expandable detail — capped so a
+ *  huge args blob cannot flood the feed. Redaction happens at render. */
+export function toolInvocationFullText(data: Record<string, unknown>): string | undefined {
+  const inputs = data.inputs;
+  if (typeof inputs !== "object" || inputs === null) return undefined;
+  try {
+    return JSON.stringify(inputs, null, 2).slice(0, 4000);
+  } catch {
+    return undefined;
+  }
+}
+
+const TERMINAL_HOLO_STATES: ReadonlySet<HoloState> = new Set([
+  "COMPLETE", "FAILED", "CANCELLED", "TIMEOUT",
+]);
+
+/**
+ * Decide whether an incoming holo transition may be applied.
+ *
+ * RUNNING (from run.started/tool.started/tool.completed) must never
+ * overwrite VERIFYING or a terminal state: tool events emitted by the
+ * verification gate's checks, or straggler evidence events arriving
+ * after the mission already reached COMPLETE/FAILED/CANCELLED/TIMEOUT,
+ * would otherwise resurrect "RUNNING" forever — the observed dogfood
+ * hang where the canonical mission was complete but the shell spun
+ * RUNNING. Once missionState itself is terminal, NO event-driven
+ * transition applies — the canonical mission is the truth; only a NEW
+ * turn (beginTurn/clearMission/startMission) reopens the holo panel.
+ */
+export function resolveHoloTransition(
+  current: HoloState,
+  incoming: HoloState,
+  missionTerminal?: HoloState | null,
+): HoloState | null {
+  // A terminal mission is the canonical truth — no lifecycle event may
+  // move the holo panel afterwards (straggler tool/run events observed
+  // resurrecting RUNNING over a completed mission). The controller's own
+  // direct setHoloState calls bypass this guard; beginTurn/clearMission
+  // reset the terminal record for the next turn.
+  if (missionTerminal && TERMINAL_HOLO_STATES.has(missionTerminal)) return null;
+  if (incoming !== "RUNNING") return incoming;
+  if (current === "VERIFYING" || TERMINAL_HOLO_STATES.has(current)) return null;
+  return incoming;
+}
+
 function holoFromEvent(event: LifecycleEvent): HoloState | null {
   switch (event.type) {
     case "run.started": return "RUNNING";
@@ -213,9 +284,19 @@ export function useEventBridge(
         entry = makeEntry("run.started", `${event.data.command ?? "command"}`, event, undefined, undefined, "RUN");
         store.actions.setCurrentRunId(event.runId);
         break;
-      case "tool.started":
-        entry = makeEntry("tool.started", toolLabel(event.data), event, undefined, undefined, toolTag(event.data) ?? "RUN");
+      case "tool.started": {
+        const detail = toolInvocationDetail(event.data);
+        const fullText = toolInvocationFullText(event.data);
+        entry = makeEntry(
+          "tool.started",
+          `${toolLabel(event.data)}${detail ? ` · ${detail}` : ""}`,
+          event,
+          undefined,
+          fullText,
+          toolTag(event.data) ?? "RUN",
+        );
         break;
+      }
       case "tool.stdout": {
         const chunk = String(event.data.chunk ?? "");
         entry = makeEntry("tool.stdout", chunk.length > 60 ? chunk.slice(0, 59) + "…" : chunk, event, "stdout", chunk);
@@ -292,19 +373,84 @@ export function useEventBridge(
         // Icon-free text — renderer prepends ✓ via SEMANTIC_GLYPH.success.
         entry = makeEntry("mission.step_passed", missionStepText(event.data), event, undefined, undefined, "PASS");
         break;
-      case "mission.step_failed":
+      case "mission.step_failed": {
         // Icon-free text — renderer prepends × via SEMANTIC_GLYPH.failed.
-        entry = makeEntry("mission.step_failed", missionStepText(event.data), event, undefined, undefined, "FAIL");
+        // The failure reason belongs in the expandable detail, not the
+        // one-line feed text.
+        const reason = event.data.failureReason ?? event.data.reason ?? event.data.blockingReason;
+        entry = makeEntry(
+          "mission.step_failed",
+          missionStepText(event.data),
+          event,
+          undefined,
+          typeof reason === "string" && reason ? reason.slice(0, 2000) : undefined,
+          "FAIL",
+        );
         break;
+      }
       case "mission.verifying":
         entry = makeEntry("mission.verifying", "Verifying mission", event, undefined, undefined, "VERIFY");
         break;
       case "mission.completed":
         entry = makeEntry("mission.completed", `Mission COMPLETE: ${event.data.completionReason ?? ""}`, event, undefined, undefined, "DONE");
         break;
-      case "mission.failed":
-        entry = makeEntry("mission.failed", `Mission FAILED: ${event.data.failureReason ?? ""}`, event, undefined, undefined, "FAIL");
+      case "mission.failed": {
+        const reason = String(event.data.failureReason ?? event.data.completionReason ?? "");
+        entry = makeEntry(
+          "mission.failed",
+          `Mission FAILED: ${reason || "verification not proven"}`.slice(0, 200),
+          event,
+          undefined,
+          reason ? reason.slice(0, 3000) : undefined,
+          "FAIL",
+        );
         break;
+      }
+      case "mission.evidence": {
+        // Real evidence collection — type, success, summary. This is the
+        // "what did the mission actually prove" row the operator asked
+        // for; previously mission:evidence_recorded was dropped entirely.
+        const ok = event.data.success !== false;
+        const evType = String(event.data.type ?? "evidence");
+        const summary = String(event.data.summary ?? "");
+        const stepId = event.data.stepId ? `step:${String(event.data.stepId)}` : null;
+        const source = event.data.source ? `via ${String(event.data.source)}` : null;
+        entry = makeEntry(
+          "mission.evidence",
+          `${evType} ${ok ? "collected" : "FAILED"}${summary ? ` — ${summary.slice(0, 90)}` : ""}`,
+          event,
+          undefined,
+          [summary, stepId, source].filter(Boolean).join("\n").slice(0, 2000) || undefined,
+          "EVIDENCE",
+        );
+        entry.semantic = ok ? "success" : "failed";
+        break;
+      }
+      case "verification.repair": {
+        // The gate's "not proven — fix and retry" feedback. Shows the
+        // operator that verification ran and what it rejected, live.
+        const msg = String(event.data.message ?? "verification not proven");
+        const failedChecks = Array.isArray(event.data.failedChecks)
+          ? (event.data.failedChecks as Array<Record<string, unknown>>)
+          : [];
+        const detail = [
+          msg.slice(0, 1500),
+          ...failedChecks.slice(0, 8).map((c) =>
+            `- ${String(c.id ?? "check")}: ${String(c.status ?? "?")} ${String(c.message ?? "").slice(0, 200)}` +
+            (typeof c.stderr === "string" && c.stderr ? `\n  stderr: ${c.stderr.slice(0, 800)}` : ""),
+          ),
+        ].join("\n");
+        entry = makeEntry(
+          "verification.repair",
+          "Verification gate: not proven — repair feedback sent to model",
+          event,
+          undefined,
+          detail.slice(0, 3000),
+          "VERIFY",
+        );
+        entry.semantic = "warning";
+        break;
+      }
       case "mission.restored":
         entry = makeEntry("mission.restored", "Mission restored", event, undefined, undefined, "MISSION");
         break;
@@ -424,20 +570,27 @@ export function useEventBridge(
     // with friendly per-tool blocks instead of an empty streaming area.
     updateToolProgress(event);
 
-    // Map event to Holo state
+    // Map event to Holo state. The decision is computed from the
+    // synchronous refs (getHoloState/getTerminalMissionState) and a plain
+    // VALUE is dispatched — never a functional updater. React evaluates
+    // functional updaters against the last-rendered state via its eager
+    // path, so a updater dispatched just after setHoloState("COMPLETE")
+    // can still see prev=RUNNING and its stale result lands AFTER
+    // COMPLETE in the queue (observed dogfood hang). Value dispatch keeps
+    // last-writer-wins ordering intact.
     const holo = holoFromEvent(event);
     if (holo) {
-      // During VERIFYING, tool events emitted by the verification gate's
-      // checks must not regress the display back to RUNNING — the mission
-      // has finished executing and the runtime is proving it. Terminal
-      // states (FAILED etc.) still apply.
-      const isVerifying = store.state.holoState === "VERIFYING";
-      if (!(holo === "RUNNING" && isVerifying)) {
-        store.actions.setHoloState(holo);
+      const applied = resolveHoloTransition(
+        store.actions.getHoloState(),
+        holo,
+        store.actions.getTerminalMissionState(),
+      );
+      if (applied !== null) {
+        store.actions.setHoloState(applied);
         // Auto-return to IDLE after terminal states (except APPROVAL which stays).
         // Use scheduleIdle so a new run started during the delay window does
         // not get clobbered by a stale terminal→IDLE timer (runtime-state P0).
-        if (holo === "COMPLETE" || holo === "FAILED" || holo === "CANCELLED" || holo === "TIMEOUT") {
+        if (applied === "COMPLETE" || applied === "FAILED" || applied === "CANCELLED" || applied === "TIMEOUT") {
           store.actions.scheduleIdle(2000);
         }
       }

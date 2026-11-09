@@ -88,10 +88,38 @@ describe("collectPreviewAssetManifest", () => {
     expect(manifest.assets).toEqual(["app.js", "index.html", "pages/helper.js", "pages/two.html", "pages/two.js", "three.html"]);
   });
 
-  it("never sweeps stylesheets, images, or unreferenced files", async () => {
-    const files = { ...SENSITIVE, "index.html": '<link rel="stylesheet" href="style.css"><img src="logo.png"><script src="app.js"></script>', "style.css": "body {}", "logo.png": "binary", "app.js": "window.a = 1;" };
+  it("authorizes referenced renderable assets but never stylesheets, unreferenced files, or sensitive paths", async () => {
+    const files = { ...SENSITIVE, "index.html": '<link rel="stylesheet" href="style.css"><img src="logo.png" srcset="logo@2x.png 2x"><img src="https://cdn.example.com/ext.png"><script src="app.js"></script>', "style.css": "body {}", "logo.png": "binary", "logo@2x.png": "binary2", "app.js": "window.a = 1;" };
     const manifest = await collectPreviewAssetManifest("index.html", files["index.html"], reader(files));
-    expect(manifest.assets).toEqual(["app.js", "index.html"]);
+    // logo.png + its srcset candidate are publishable renderable assets the
+    // transform rewrites onto the token prefix; style.css stays out (it is
+    // embedded, never fetched by URL); external and unreferenced files too.
+    expect(manifest.assets).toEqual(["app.js", "index.html", "logo.png", "logo@2x.png"]);
+  });
+
+  it("authorizes url() targets inside embedded stylesheets, resolved document-relative", async () => {
+    const files = {
+      "index.html": '<link rel="stylesheet" href="css/site.css"><div style="background:url(images/hero.webp)"></div>',
+      "css/site.css": "@font-face{src:url(../fonts/inter.woff2)} .hero{background:url(bg.png)}",
+      "fonts/inter.woff2": "font",
+      "bg.png": "img",
+      "images/hero.webp": "img",
+    };
+    const manifest = await collectPreviewAssetManifest("index.html", files["index.html"], reader(files));
+    // css url()s resolve against the served DOCUMENT (index.html), matching
+    // browser semantics for embedded CSS: ../fonts/inter.woff2 from
+    // index.html clamps to fonts/inter.woff2; bg.png resolves to bg.png.
+    expect(manifest.assets).toContain("fonts/inter.woff2");
+    expect(manifest.assets).toContain("bg.png");
+    expect(manifest.assets).toContain("images/hero.webp");
+    expect(manifest.assets).not.toContain("css/site.css");
+  });
+
+  it("does not fail the manifest when a referenced stylesheet is missing", async () => {
+    const files = { "index.html": '<link rel="stylesheet" href="missing.css"><img src="ok.png">', "ok.png": "img" };
+    const manifest = await collectPreviewAssetManifest("index.html", files["index.html"], reader(files));
+    expect(manifest.assets).toEqual(["index.html", "ok.png"]);
+    expect(manifest.complete).toBe(true);
   });
 
   it("fails closed when a referenced file cannot be read", async () => {

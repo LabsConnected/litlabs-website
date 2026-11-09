@@ -135,12 +135,12 @@ export function hasPlanAccess(userPlan: PlanId, requiredPlan: PlanId): boolean {
 
 export function formatPrice(cents: number | null): string {
   if (cents === null || cents === 0) return "Free";
-  return `$${(cents / 100).toFixed(0)}`;
+  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
 }
 
 export function formatPriceMonthly(cents: number | null): string {
   if (cents === null || cents === 0) return "Free";
-  return `$${(cents / 100).toFixed(0)}/month`;
+  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}/month`;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +169,7 @@ export interface CreditPolicyEntry {
 export const CREDIT_POLICY: Record<CreditCategory, CreditPolicyEntry> = {
   starter: {
     category: "starter",
-    source: "500 once at account creation",
+    source: "1,500 once at account creation",
     expiration: "Does not expire",
     rollover: "N/A (one-time grant)",
   },
@@ -256,7 +256,7 @@ export const POLICY_STATUSES = {
   creditPacks: "NOT APPROVED — no catalog exists",
   monthlyRefresh: "APPROVED — per billing cycle for paid plans",
   creditExpiration: "APPROVED — monthly resets, starter/purchased do not expire",
-  founderCheckout: "ENABLED — $149 one-time purchase",
+  founderCheckout: "RETIRED — no longer sold; $149 price object retained for historical purchases",
   refunds: "NO POLICY — do not promise refunds",
   automaticTax: "DISABLED — awaiting Stripe Tax configuration",
 } as const;
