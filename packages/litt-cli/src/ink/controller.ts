@@ -1258,6 +1258,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         store.actions.setHoloState("APPROVAL");
         store.actions.setOverlay("none");
+      } else {
+        // Queue drained without a UI decision reaching handleApproval
+        // (bridge.cancel(), or any resolve path that bypassed the prompt).
+        // Never leave a dead approval prompt owning the keyboard.
+        store.actions.clearApproval();
+        if (store.state.holoState === "APPROVAL") {
+          store.actions.setHoloState(store.state.isProcessing ? "RUNNING" : "IDLE");
+        }
       }
     });
   }, [approvalBridge, store]);
@@ -3856,7 +3864,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     submitRef.current = submit;
   }, [submit]);
 
-  const handleApproval = useCallback(async (approved: boolean) => {
+  const handleApproval = useCallback(async (approved: boolean, scope: "once" | "session" = "once") => {
     const prompt = store.state.approvalPrompt;
     if (!prompt) return;
 
@@ -3885,7 +3893,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // Resolve the gateway's pending approval promise.
     // The gateway will then verifyApproval() → VerifiedApproval → continue.
     // The UI only provides the boolean — never the VerifiedApproval itself.
-    approvalBridge.decide(approved);
+    // "session" scope records a command-class grant so identical safe-class
+    // requests stop re-prompting (Approve similar / [⇧a]).
+    approvalBridge.decide(approved, scope);
 
     // Don't set IDLE here — the gateway execution is still in flight.
     // The submit() callback will set the final holo state when
