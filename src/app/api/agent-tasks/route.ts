@@ -63,6 +63,13 @@ export async function POST(request: NextRequest) {
       meta?: Record<string, unknown>;
     };
 
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
+      return NextResponse.json(
+        { error: "Invalid session_id — must be a UUID" },
+        { status: 400 },
+      );
+    }
+
     // 1. Run structural schema validation checks on the task input payload
     const validation = validateAgentTaskInput(taskInput);
     if (!validation.ok) {
@@ -82,7 +89,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Resolve sequence order mapping
+    // 3. Session ownership: if the session already has tasks belonging to
+    // a different user, this write would inject into their task stream.
+    // Query for a foreign row directly — order-agnostic — and fail closed
+    // on any lookup error rather than skipping the check.
+    const { data: foreignTask, error: ownershipError } = await supabaseAdmin
+      .from("agent_tasks")
+      .select("id")
+      .eq("session_id", sessionId)
+      .neq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+    if (ownershipError) {
+      return NextResponse.json(
+        { error: "Failed to verify session ownership" },
+        { status: 500 },
+      );
+    }
+    if (foreignTask) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // 4. Resolve sequence order mapping
     const { count, error: countError } = await supabaseAdmin
       .from("agent_tasks")
       .select("*", { count: "exact", head: true })

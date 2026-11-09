@@ -20,9 +20,10 @@ import "server-only";
  * loremflickr → picsum). No paid API is ever called from here.
  */
 
+import { createHash } from "crypto";
 import { insertAssetFromUrl } from "@/lib/litt-intelligence/tool-handlers-v2";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
-import { resolveSlotImage } from "./resolver";
+import { resolveSlotImage, type ProviderAttempt } from "./resolver";
 import { auditStaticSiteHtml, extractImageRefs, type VisualAudit } from "./audit";
 
 export interface EnrichReport {
@@ -31,6 +32,10 @@ export interface EnrichReport {
   imagesFailed: number;
   placeholdersUsed: number;
   providersUsed: string[];
+  /** Providers that were attempted but did not produce an image —
+   *  "unconfigured" means the provider's credential env is absent. Lets
+   *  run evidence name exactly which lane failed instead of guessing. */
+  providersFailed: string[];
   filesChanged: string[];
   audit: VisualAudit | null;
 }
@@ -88,11 +93,23 @@ export async function enrichStaticSiteVisuals(
     imagesFailed: 0,
     placeholdersUsed: 0,
     providersUsed: [],
+    providersFailed: [],
     filesChanged: [],
     audit: null,
   };
   const budget = opts.maxImages ?? MAX_IMAGES_PER_RUN;
   const topic = opts.topicKeywords ?? "professional photography";
+  // One overall deadline for every network call in this run. Enrichment
+  // is additive — it must never stall the build, but the budget must
+  // still fit the real-photo floor: each resolve is provider probes plus
+  // a full image download, and the floor can need three of them. The
+  // 2026-11-08 staging run proved 3s is physically incapable — a single
+  // resolve consumed it and the floor shipped 1/3 photos. 30s still
+  // bounds pathological providers (each probe keeps its own 12s timeout)
+  // while giving the floor room to do its job. Override with
+  // ENRICH_TOTAL_TIMEOUT_MS to tune.
+  const totalTimeoutMs = Number(process.env.ENRICH_TOTAL_TIMEOUT_MS) || 30_000;
+  const overallSignal = AbortSignal.timeout(totalTimeoutMs);
   try {
     const root = await transport.listFiles("");
     const htmlFiles = root.entries
@@ -128,26 +145,53 @@ export async function enrichStaticSiteVisuals(
         if (path) smallImages.add(path.replace(/^\//, ""));
       }
     };
+    const usedHashes = new Set<string>();
+    const contentHash = async (sitePath: string) => {
+      try {
+        const { content } = await transport.readFile(sitePath);
+        return createHash("md5").update(content).digest("hex");
+      } catch {
+        return null;
+      }
+    };
+    const providerAttempts: ProviderAttempt[] = [];
     const resolve = async (keywords: string) => {
+      if (overallSignal.aborted) return null;
       if (report.imagesResolved + report.imagesFailed >= budget) return null;
-      const resolved = await resolveSlotImage(keywords, seed++);
-      if (!resolved) {
+      // Dedupe: distinct keywords can still resolve to the same photo
+      // (provider seed collisions shipped visibly duplicated gallery
+      // images) — hash the saved bytes and retry once with a bumped seed
+      // and varied keywords; a still-identical image counts as a failure
+      // so the slot falls back to the honest placeholder.
+      let resolved = await resolveSlotImage(keywords, seed, overallSignal, providerAttempts);
+      // Static workspaces are served from the workspace ROOT — pin the
+      // insert dir so a stray package.json (or a transient listFiles
+      // failure, which falls back to public/) can never land the asset
+      // where the emitted site-relative ref cannot resolve.
+      let saved = resolved
+        ? await insertAssetFromUrl(resolved.url, { nameHint: keywords.slice(0, 30), directory: "assets/images", signal: overallSignal }, transport)
+        : null;
+      let hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
+      if (hash && usedHashes.has(hash)) {
+        seed += 1000;
+        const varied = `${keywords} scene`;
+        resolved = await resolveSlotImage(varied, seed, overallSignal, providerAttempts);
+        saved = resolved
+          ? await insertAssetFromUrl(resolved.url, { nameHint: varied.slice(0, 30), directory: "assets/images", signal: overallSignal }, transport)
+          : null;
+        hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
+        if (hash && usedHashes.has(hash)) {
+          seed += 1;
+          report.imagesFailed += 1;
+          return null;
+        }
+      }
+      seed += 1;
+      if (!resolved || !saved?.success || !saved.sitePath) {
         report.imagesFailed += 1;
         return null;
       }
-      const saved = await insertAssetFromUrl(
-        resolved.url,
-        // Static workspaces are served from the workspace ROOT — pin the
-        // insert dir so a stray package.json (or a transient listFiles
-        // failure, which falls back to public/) can never land the asset
-        // where the emitted site-relative ref cannot resolve.
-        { nameHint: keywords.slice(0, 30), directory: "assets/images" },
-        transport,
-      );
-      if (!saved.success || !saved.sitePath) {
-        report.imagesFailed += 1;
-        return null;
-      }
+      if (hash) usedHashes.add(hash);
       report.imagesResolved += 1;
       if (!report.providersUsed.includes(resolved.provider)) {
         report.providersUsed.push(resolved.provider);
@@ -310,11 +354,19 @@ export async function enrichStaticSiteVisuals(
         const base = `${title} ${h1}`.trim() || topic;
         const vary = ["", " detail", " texture", " interior"];
         const imgs: string[] = [];
-        for (let i = 0; i < needed; i++) {
+        // A single failed resolve must not starve the floor: providers are
+        // free-tier and flake, so keep trying with rotated keywords — the
+        // shared image budget still bounds total work, and a null resolve
+        // already counted itself against it.
+        let floorAttempts = 0;
+        const maxFloorAttempts = needed * 2;
+        for (let i = 0; i < needed && floorAttempts < maxFloorAttempts && !overallSignal.aborted; ) {
+          floorAttempts += 1;
           const sitePath = await resolve(`${base}${vary[i % vary.length]}`.trim());
-          if (!sitePath) break;
+          if (!sitePath) continue;
           const alt = `${title || h1 || "Site"} — photo ${i + 1}`.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
           imgs.push(`<img src="${sitePath}" alt="${alt}" style="width:100%;height:220px;object-fit:cover;border-radius:12px;display:block;" loading="lazy">`);
+          i += 1;
         }
         if (imgs.length > 0) {
           const section =
@@ -322,12 +374,28 @@ export async function enrichStaticSiteVisuals(
             `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">` +
             imgs.join("") +
             `</div></section>`;
-          html = /<\/body>/i.test(html)
-            ? html.replace(/<\/body>/i, `${section}</body>`)
-            : html + section;
+          // Above the footer when one exists — a trailing photo grid reads
+          // as content; after the footer it reads as a rendering bug.
+          html = /<footer[\s>]/i.test(html)
+            ? html.replace(/<footer[\s>]/i, (m) => `${section}${m}`)
+            : /<\/body>/i.test(html)
+              ? html.replace(/<\/body>/i, `${section}</body>`)
+              : html + section;
           await transport.writeFile(entry, html);
           if (!report.filesChanged.includes(entry)) report.filesChanged.push(entry);
         }
+      }
+    }
+
+    // Surface which provider lanes failed (or were never configured) —
+    // run evidence must name the failing lane, not just the count.
+    const seenFailed = new Set<string>();
+    for (const a of providerAttempts) {
+      if (a.status === "resolved") continue;
+      const label = a.status === "unconfigured" ? `${a.provider}(unconfigured)` : a.provider;
+      if (!seenFailed.has(label)) {
+        seenFailed.add(label);
+        report.providersFailed.push(label);
       }
     }
 
@@ -339,7 +407,8 @@ export async function enrichStaticSiteVisuals(
     for (const e of assets?.entries ?? []) if (e.type === "file") postFiles.add(`assets/images/${e.name}`);
     report.audit = auditStaticSiteHtml(finalHtml, postFiles);
     return report;
-  } catch {
+  } catch (err) {
+    console.warn("[enrich] enrichStaticSiteVisuals aborted:", err instanceof Error ? err.message : err);
     return report;
   }
 }

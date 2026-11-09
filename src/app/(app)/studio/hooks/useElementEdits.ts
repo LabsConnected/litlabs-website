@@ -17,13 +17,14 @@
  * are individually reversible within the session.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import {
   applyElementPatch,
   candidateHtmlFiles,
   describePatch,
   locateElement,
+  sha256HexUtf8,
   type ElementIdentity,
   type ElementPatch,
 } from "../lib/element-edits";
@@ -42,11 +43,18 @@ export type ElementEditStatus =
   | "ready"
   | "unavailable"
   | "applying"
+  | "conflict"
   | "error";
 
 interface FileCache {
   path: string;
   content: string;
+}
+
+interface WriteResult {
+  ok: boolean;
+  /** Server rejected the write because the file changed since our read. */
+  conflict?: boolean;
 }
 
 async function filesAction(
@@ -74,6 +82,24 @@ export function useElementEdits(projectId: string | null) {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const cacheRef = useRef<FileCache | null>(null);
   const selectionRef = useRef<ElementIdentity | null>(null);
+  const routeRef = useRef<string | null | undefined>(undefined);
+  // Latest projectId — async continuations from a previous project must
+  // never write state for the project the user switched away from.
+  const projectRef = useRef(projectId);
+
+  // Project switch: drop every piece of per-project state so nothing
+  // (cache, selection, undo history, in-flight writes) bleeds across.
+  useEffect(() => {
+    projectRef.current = projectId;
+    cacheRef.current = null;
+    selectionRef.current = null;
+    routeRef.current = undefined;
+    setStatus("idle");
+    setStatusReason(null);
+    setFilePath(null);
+    setHistory([]);
+    setHistoryIndex(-1);
+  }, [projectId]);
 
   const readFile = useCallback(async (path: string): Promise<string | null> => {
     if (!projectId) return null;
@@ -83,10 +109,20 @@ export function useElementEdits(projectId: string | null) {
     return typeof data?.content === "string" ? data.content : null;
   }, [projectId, getToken]);
 
-  const writeFile = useCallback(async (path: string, content: string): Promise<boolean> => {
-    if (!projectId) return false;
-    const res = await filesAction(projectId, getToken, { action: "write", path, content });
-    return res.ok;
+  const writeFile = useCallback(async (
+    path: string,
+    content: string,
+    expectedSha256?: string,
+  ): Promise<WriteResult> => {
+    if (!projectId) return { ok: false };
+    const res = await filesAction(projectId, getToken, {
+      action: "write",
+      path,
+      content,
+      expectedSha256,
+    });
+    if (res.status === 409) return { ok: false, conflict: true };
+    return { ok: res.ok };
   }, [projectId, getToken]);
 
   /** Resolve a preview selection to a workspace .html file that uniquely
@@ -98,6 +134,7 @@ export function useElementEdits(projectId: string | null) {
       return;
     }
     selectionRef.current = selection;
+    routeRef.current = route;
     setStatus("resolving");
     setStatusReason(null);
     setFilePath(null);
@@ -105,6 +142,7 @@ export function useElementEdits(projectId: string | null) {
 
     try {
       const listRes = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/files`);
+      if (projectRef.current !== projectId) return;
       if (!listRes.ok) {
         setStatus("unavailable");
         setStatusReason("Workspace file list unavailable.");
@@ -124,6 +162,7 @@ export function useElementEdits(projectId: string | null) {
           const doc = new DOMParser().parseFromString(content, "text/html");
           if (doc.querySelector("parsererror")) continue;
           if (locateElement(doc, selection)) {
+            if (projectRef.current !== projectId) return;
             cacheRef.current = { path: candidate, content };
             setFilePath(candidate);
             setStatus("ready");
@@ -162,8 +201,26 @@ export function useElementEdits(projectId: string | null) {
       return true; // no-op — truthful, nothing written
     }
 
-    const saved = await writeFile(cache.path, result.html);
-    if (!saved) {
+    // CAS: pin the write to the exact bytes we patched. If the file moved
+    // on disk (agent edit, another tab) the server returns 409 and the
+    // local edit is preserved as an honest conflict — never a silent
+    // overwrite.
+    const expectedSha256 = await sha256HexUtf8(cache.content);
+    if (projectRef.current !== projectId) return false;
+    const saved = await writeFile(cache.path, result.html, expectedSha256);
+    if (projectRef.current !== projectId) return false;
+    if (saved.conflict) {
+      // The cached content is now known-stale: drop it so no later patch
+      // is computed against bytes the server no longer has.
+      cacheRef.current = null;
+      setStatus("conflict");
+      setStatusReason(
+        "This file changed on disk (an agent edit or another session) after it was loaded. " +
+        "Your change was NOT saved — re-select the element to reload the latest version, then try again.",
+      );
+      return false;
+    }
+    if (!saved.ok) {
       setStatus("error");
       setStatusReason("The edit didn't reach the workspace file.");
       return false;
@@ -186,13 +243,35 @@ export function useElementEdits(projectId: string | null) {
     return true;
   }, [projectId, status, writeFile, historyIndex]);
 
+  /** sha256 of the content we believe the file currently holds — the CAS
+      precondition for undo/redo writes. */
+  const expectedShaFor = useCallback(async (path: string): Promise<string | undefined> => {
+    if (cacheRef.current?.path === path) return sha256HexUtf8(cacheRef.current.content);
+    for (let i = historyIndex; i >= 0; i--) {
+      if (history[i].filePath === path) return sha256HexUtf8(history[i].after);
+    }
+    return undefined;
+  }, [cacheRef, history, historyIndex]);
+
   const step = useCallback(async (dir: -1 | 1): Promise<boolean> => {
     const target = dir === -1 ? historyIndex : historyIndex + 1;
     const record = history[target];
     if (!record) return false;
     const content = dir === -1 ? record.before : record.after;
-    const ok = await writeFile(record.filePath, content);
-    if (!ok) return false;
+    const expectedSha256 = await expectedShaFor(record.filePath);
+    if (projectRef.current !== projectId) return false;
+    const saved = await writeFile(record.filePath, content, expectedSha256);
+    if (projectRef.current !== projectId) return false;
+    if (saved.conflict) {
+      cacheRef.current = null;
+      setStatus("conflict");
+      setStatusReason(
+        "This file changed on disk since your last edit — undo/redo was NOT applied. " +
+        "Re-select the element to reload the latest version.",
+      );
+      return false;
+    }
+    if (!saved.ok) return false;
     if (cacheRef.current?.path === record.filePath) {
       cacheRef.current = { path: record.filePath, content };
     }
@@ -201,7 +280,7 @@ export function useElementEdits(projectId: string | null) {
       new CustomEvent("studio:files-changed", { detail: { projectId, source: "element-edit" } }),
     );
     return true;
-  }, [history, historyIndex, projectId, writeFile]);
+  }, [history, historyIndex, projectId, writeFile, expectedShaFor]);
 
   return useMemo(() => ({
     status,
@@ -221,6 +300,7 @@ export function useElementEdits(projectId: string | null) {
       setFilePath(null);
       cacheRef.current = null;
       selectionRef.current = null;
+      routeRef.current = undefined;
     },
   }), [status, statusReason, filePath, history, historyIndex, resolve, applyPatch, step]);
 }

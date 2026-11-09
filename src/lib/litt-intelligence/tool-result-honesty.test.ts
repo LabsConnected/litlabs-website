@@ -81,3 +81,47 @@ describe("failed browser tool calls are narrated truthfully", () => {
     expect(text).toContain("example.com");
   });
 });
+
+describe("image.generate save failures are narrated truthfully", () => {
+  // Regression for the 2026-11-08 staging approval loop: provider
+  // generation succeeded but the project auto-save failed, and the
+  // summary was just the leading base64 of downloadUrl — the saveError
+  // never reached progress events, prior_tool_calls, or the UI.
+  const generatedButUnsaved = {
+    success: true,
+    providerId: "cloudflare",
+    downloadUrl: `data:image/png;base64,${"A".repeat(600_000)}`,
+    savedToProject: false,
+    saveError: "Image data is truncated or corrupt",
+    insertHint: "call project.insert_asset with this downloadUrl",
+  };
+
+  it("summarizeToolResult names the project save failure, not the base64 blob", () => {
+    const summary = summarizeToolResult("image.generate", generatedButUnsaved);
+    expect(summary).toContain("save failed");
+    expect(summary).toContain("truncated or corrupt");
+    expect(summary).not.toContain("base64");
+    expect(summary.length).toBeLessThanOrEqual(200);
+  });
+
+  it("summarizeToolResult reports a successful project save cleanly", () => {
+    const summary = summarizeToolResult("image.generate", {
+      success: true,
+      providerId: "cloudflare",
+      downloadUrl: "data:image/jpeg;base64,AAAA",
+      savedToProject: true,
+      sitePath: "/assets/images/hero-abc123.jpeg",
+    });
+    expect(summary).toBe("Image generated and saved to project");
+  });
+
+  it("summarizeToolResult summarizes chat-context media without the data URL", () => {
+    const summary = summarizeToolResult("image.generate", {
+      success: true,
+      providerId: "cloudflare",
+      downloadUrl: "data:image/jpeg;base64,AAAA",
+      markdown: "![x](data:image/jpeg;base64,AAAA)",
+    });
+    expect(summary).toBe("Media generated via cloudflare");
+  });
+});

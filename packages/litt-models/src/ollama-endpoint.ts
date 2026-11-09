@@ -53,6 +53,9 @@ export function normalizeOllamaEndpoint(raw: string | undefined): string | null 
   const trimmed = raw?.trim().replace(/\/+$/, "");
   if (!trimmed || /[\s\\?#@]/.test(trimmed)) return null;
 
+  // Bare unspecified IPv6 — a bind address, not a connect target.
+  if (trimmed === "::" || trimmed === "[::]") return "http://[::1]:11434";
+
   const hasScheme = /^https?:\/\//i.test(trimmed);
   // Bare endpoints must be host[:port], including bracketed IPv6. Only
   // explicit URLs may carry a reverse-proxy path prefix.
@@ -64,6 +67,21 @@ export function normalizeOllamaEndpoint(raw: string | undefined): string | null 
   try {
     const url = new URL(hasScheme ? trimmed : `http://${trimmed}`);
     if (!url.hostname || url.port === "0") return null;
+    // An unspecified bind address is not a connect target: OLLAMA_HOST
+    // is commonly a server bind (0.0.0.0 / ::), which is not connectable
+    // — normalize it to loopback so a copied server config still works.
+    if (url.hostname === "0.0.0.0") {
+      url.hostname = "127.0.0.1";
+    } else if (url.hostname === "[::]") {
+      url.hostname = "[::1]";
+    }
+    // Schemeless host without a port inherits Ollama's own OLLAMA_HOST
+    // semantics: the port defaults to 11434, not the URL's implicit 80.
+    // Explicit http(s):// URLs keep whatever the URL declares — a
+    // reverse-proxy https://host/path must not gain :11434.
+    if (!hasScheme && url.port === "") {
+      url.port = "11434";
+    }
     return url.href.replace(/\/+$/, "");
   } catch {
     return null;

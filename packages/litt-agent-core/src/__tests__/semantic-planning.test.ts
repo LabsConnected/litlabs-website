@@ -22,6 +22,7 @@ import {
   fallbackPlan,
   classifyGoalDomain,
   isMutationStep,
+  dropMutationDependentSteps,
   MissionPlanningError,
   resolveStepForTool,
   attachToolToStep,
@@ -274,6 +275,104 @@ describe("Semantic Mission Planning", () => {
     it("classifies ambiguous goals as unknown", () => {
       assert.equal(classifyGoalDomain("Analyze performance"), "unknown");
       assert.equal(classifyGoalDomain("Something totally unclear"), "unknown");
+    });
+  });
+
+  // ─── Read-only plan safety (mutationRequested === false) ────────
+
+  describe("read-only plan filtering", () => {
+    it("drops mutation-dependent steps, keeps inspection/report steps", () => {
+      const steps = [
+        { title: "Inspect repository baseline" },
+        { title: "Typecheck" },
+        { title: "Run tests" },
+        { title: "Diagnose failures" },
+        { title: "Apply approved repairs", description: "Fix the diagnosed issues" },
+        { title: "Revalidate", description: "Re-run typecheck, tests, and build after repairs" },
+        { title: "Verify production readiness" },
+      ];
+      const kept = dropMutationDependentSteps(steps);
+      const titles = kept.map((s) => s.title);
+      assert.ok(!titles.includes("Apply approved repairs"));
+      assert.ok(!titles.includes("Revalidate"));
+      assert.ok(titles.includes("Inspect repository baseline"));
+      assert.ok(titles.includes("Typecheck"));
+      assert.ok(titles.includes("Diagnose failures"));
+      assert.ok(titles.includes("Verify production readiness"));
+    });
+
+    it("keeps report-style steps that merely mention fixes", () => {
+      const steps = [
+        { title: "Diagnose failures and propose fixes" },
+        { title: "Report findings and recommended actions" },
+      ];
+      assert.equal(dropMutationDependentSteps(steps).length, 2);
+    });
+
+    it("drops mutation-scoped steps even with innocuous titles", () => {
+      const steps = [
+        { title: "Do the needful", scope: "repair" },
+        { title: "Take action", scope: "act" },
+        { title: "Inspect baseline", scope: "inspect" },
+      ];
+      const kept = dropMutationDependentSteps(steps);
+      assert.deepEqual(kept.map((s) => s.title), ["Inspect baseline"]);
+    });
+
+    it("never returns an empty plan — falls back to the original", () => {
+      const steps = [{ title: "Apply approved repairs" }];
+      assert.equal(dropMutationDependentSteps(steps).length, 1);
+    });
+
+    it("planMission strips model-planned mutation steps when mutationRequested is false", async () => {
+      const store = new RuntimeStore({ projectRoot: tmpDir });
+      await store.createMission({
+        goal: "scan",
+        mode: "act",
+        projectRoot: tmpDir,
+      });
+
+      const model = createMockPlannerModel(`[
+        { "title": "Inspect repository baseline", "description": "Capture git status" },
+        { "title": "Typecheck", "description": "Run the type checker" },
+        { "title": "Apply approved repairs", "description": "Fix the diagnosed issues" },
+        { "title": "Verify production readiness", "description": "Final gate" }
+      ]`);
+
+      const { steps } = await planMission({
+        model,
+        store,
+        goal: "scan",
+        mutationRequested: false,
+      });
+
+      const titles = steps.map((s) => s.title);
+      assert.ok(!titles.includes("Apply approved repairs"));
+      assert.ok(titles.includes("Inspect repository baseline"));
+      assert.ok(titles.includes("Verify production readiness"));
+    });
+
+    it("planMission keeps mutation steps when mutationRequested is true", async () => {
+      const store = new RuntimeStore({ projectRoot: tmpDir });
+      await store.createMission({
+        goal: "scan and fix what you find",
+        mode: "act",
+        projectRoot: tmpDir,
+      });
+
+      const model = createMockPlannerModel(`[
+        { "title": "Inspect repository baseline" },
+        { "title": "Apply approved repairs", "description": "Fix the diagnosed issues" }
+      ]`);
+
+      const { steps } = await planMission({
+        model,
+        store,
+        goal: "scan and fix what you find",
+        mutationRequested: true,
+      });
+
+      assert.ok(steps.some((s) => s.title === "Apply approved repairs"));
     });
   });
 

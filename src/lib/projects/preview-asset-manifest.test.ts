@@ -99,8 +99,9 @@ describe("collectPreviewAssetManifest", () => {
     };
     const manifest = await collectPreviewAssetManifest("index.html", files["index.html"], reader(files));
     // Referenced subresources the opaque origin must fetch under the token:
-    // the imgs/srcset/poster, the linked sheet, and the sheet's own url()
-    // closure. Unreferenced files and sensitive docs stay out.
+    // the imgs/srcset/poster, the linked sheet (its path stays authorized so
+    // a non-embedded link falls back to a token fetch), and the sheet's own
+    // url() closure. Unreferenced files and sensitive docs stay out.
     expect(manifest.assets).toEqual([
       "a.webp",
       "app.js",
@@ -120,6 +121,34 @@ describe("collectPreviewAssetManifest", () => {
     const manifest = await collectPreviewAssetManifest("index.html", files["index.html"], reader(files));
     expect(manifest.assets).toEqual(["index.html", "missing.css", "ok.png"]);
     expect(manifest.complete).toBe(true);
+  });
+
+  it("authorizes referenced renderable assets and their stylesheets, never unreferenced files or sensitive paths", async () => {
+    const files = { ...SENSITIVE, "index.html": '<link rel="stylesheet" href="style.css"><img src="logo.png" srcset="logo@2x.png 2x"><img src="https://cdn.example.com/ext.png"><script src="app.js"></script>', "style.css": "body {}", "logo.png": "binary", "logo@2x.png": "binary2", "app.js": "window.a = 1;" };
+    const manifest = await collectPreviewAssetManifest("index.html", files["index.html"], reader(files));
+    // logo.png + its srcset candidate are publishable renderable assets the
+    // transform rewrites onto the token prefix; style.css is authorized so a
+    // non-embedded link falls back to a token fetch; external and
+    // unreferenced files stay out.
+    expect(manifest.assets).toEqual(["app.js", "index.html", "logo.png", "logo@2x.png", "style.css"]);
+  });
+
+  it("authorizes url() targets inside embedded stylesheets, resolved document-relative", async () => {
+    const files = {
+      "index.html": '<link rel="stylesheet" href="css/site.css"><div style="background:url(images/hero.webp)"></div>',
+      "css/site.css": "@font-face{src:url(../fonts/inter.woff2)} .hero{background:url(bg.png)}",
+      "fonts/inter.woff2": "font",
+      "bg.png": "img",
+      "images/hero.webp": "img",
+    };
+    const manifest = await collectPreviewAssetManifest("index.html", files["index.html"], reader(files));
+    // css url()s resolve against the served DOCUMENT (index.html), matching
+    // browser semantics for embedded CSS: ../fonts/inter.woff2 from
+    // index.html clamps to fonts/inter.woff2; bg.png resolves to bg.png.
+    expect(manifest.assets).toContain("fonts/inter.woff2");
+    expect(manifest.assets).toContain("bg.png");
+    expect(manifest.assets).toContain("images/hero.webp");
+    expect(manifest.assets).toContain("css/site.css");
   });
 
   it("fails closed when a referenced file cannot be read", async () => {

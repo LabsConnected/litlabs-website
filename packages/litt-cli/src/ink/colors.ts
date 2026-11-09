@@ -129,6 +129,7 @@ export function activityColor(tag: string): string {
     case "GIT":
     case "MISSION":
     case "STEP":
+    case "EVIDENCE":
       return COLORS.working;
     case "PASS":
     case "DONE":

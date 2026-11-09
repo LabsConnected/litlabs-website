@@ -114,7 +114,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Entry paid tier — creator tools at a lower price. 3 active projects.",
+            `Entry paid tier — creator tools at a lower price. ${formatBits(getPlanCreditAllowance("creator_lite"))} LiTTBits monthly, 3 active projects.`,
         },
         {
           "@type": "Offer",

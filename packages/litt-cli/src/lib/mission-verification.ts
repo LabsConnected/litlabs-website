@@ -41,6 +41,7 @@ const HEALTH_CHECK_TOOLS: ReadonlySet<string> = new Set([
   "project.test",
   "project.build",
   "project.typecheck",
+  "project.check",
 ]);
 
 /** Package-manager script names that mean "run project health checks". */
@@ -175,6 +176,19 @@ export interface MissionVerificationGateOptions {
    *  evidence gate must NOT prove the mission complete — a failed
    *  objective means the user's request was only partially fulfilled. */
   hasFailedEvidence: () => boolean;
+  /**
+   * Per-type evidence state for the mission's required-evidence
+   * contract. "attempted" = the producer tool ran at least once;
+   * "failed" = it ran and every result failed (none succeeded).
+   * Required for the mission-scoped requiredEvidence check.
+   */
+  evidenceTypeState?: (type: EvidenceType) => { attempted: boolean; succeeded: boolean; failed: boolean; lastFailureMessage: string };
+  /**
+   * Titles of mission steps that still lack successful evidence.
+   * Synthesis steps (report/verify/plan/summarize scopes or titles) are
+   * excluded by the implementation.
+   */
+  uncoveredStepTitles?: () => string[];
   /** Human summary of the collected evidence (tool results). */
   evidenceSummary: () => string;
   /** Human summary of FAILED results only (for truthful failure messages). */
@@ -205,6 +219,10 @@ export class MissionVerificationGate implements VerificationGateLike {
     | (() => readonly EvidenceType[])
     | null;
   private readonly _hasFailedEvidence: () => boolean;
+  private readonly _evidenceTypeState:
+    | ((type: EvidenceType) => { attempted: boolean; succeeded: boolean; failed: boolean; lastFailureMessage: string })
+    | null;
+  private readonly _uncoveredStepTitles: (() => string[]) | null;
   private readonly _evidenceSummary: () => string;
   private readonly _failedSummary: () => string;
   private readonly _healthRequested: () => boolean;
@@ -222,6 +240,8 @@ export class MissionVerificationGate implements VerificationGateLike {
     this._stepRequiredEvidence =
       options.stepRequiredEvidence ?? null;
     this._hasFailedEvidence = options.hasFailedEvidence;
+    this._evidenceTypeState = options.evidenceTypeState ?? null;
+    this._uncoveredStepTitles = options.uncoveredStepTitles ?? null;
     this._evidenceSummary = options.evidenceSummary;
     this._failedSummary = options.failedSummary;
     this._healthRequested = options.healthRequested ?? (() => false);
@@ -237,8 +257,16 @@ export class MissionVerificationGate implements VerificationGateLike {
 
     // The user explicitly asked about project health. Then the suite IS
     // the requested objective, not an optional extra, and only the full
-    // gate can answer it.
-    if (this._healthRequested()) {
+    // gate can answer it — UNLESS the plan already narrowed that request
+    // to declared check evidence (a step requiring typecheck_result is
+    // satisfied by project.check alone; the full suite is not the ask).
+    const missionSteps = this._store?.getMission()?.steps ?? [];
+    const declaresCheckEvidence = missionSteps.some((s) =>
+      (s.requiredEvidence ?? []).some((e) =>
+        e === "typecheck_result" || e === "test_result" || e === "build_result",
+      ),
+    );
+    if (this._healthRequested() && !declaresCheckEvidence) {
       return this._fullGate.verify();
     }
 
@@ -257,11 +285,9 @@ export class MissionVerificationGate implements VerificationGateLike {
     const hasFailures = this._hasFailedEvidence();
     const summary = this._evidenceSummary();
 
-    // Resolve the exact step whose contract is being verified.
-    //
-    // Tests and specialized callers may explicitly provide
-    // stepRequiredEvidence. In the real runtime, the canonical store is
-    // authoritative and supplies the active working/verifying step.
+    // Required evidence is the union of every mission step's contract —
+    // a step's evidence proves the mission, not just that step. The
+    // VerificationGate's own output type is never a step contract.
     const mission = this._store?.getMission();
     const activeStep = mission?.steps.find(
       (step) =>
@@ -269,21 +295,39 @@ export class MissionVerificationGate implements VerificationGateLike {
         step.status === "verifying",
     ) ?? null;
 
-    const requiredEvidence = this._stepRequiredEvidence
+    const requiredEvidence: EvidenceType[] = this._stepRequiredEvidence
       ? [...this._stepRequiredEvidence()]
-      : [...(activeStep?.requiredEvidence ?? [])];
+      : [...new Set(
+          (mission?.steps ?? [])
+            .flatMap((s) => s.requiredEvidence ?? [])
+            .filter((e) => e !== "verification_result"),
+        )];
 
-    const evidenceStepId = activeStep?.id ?? null;
-
-    // Fail closed: if a step declares requiredEvidence but no typed
+    // Fail closed: if the mission declares requiredEvidence but no typed
     // evidence checker exists, every declared type remains missing.
-    const missingRequiredEvidence = requiredEvidence.filter(
-      (type) =>
-        !this._hasSuccessfulEvidenceType?.(
-          type,
-          evidenceStepId,
-        ),
-    );
+    const missingRequiredEvidence: EvidenceType[] = [];
+    const failedRequiredEvidence: EvidenceType[] = [];
+    const failedEvidenceDetails: string[] = [];
+    for (const type of requiredEvidence) {
+      if (this._evidenceTypeState) {
+        const state = this._evidenceTypeState(type);
+        if (state.succeeded) continue;
+        if (state.attempted || state.failed) {
+          failedRequiredEvidence.push(type);
+          if (state.lastFailureMessage) failedEvidenceDetails.push(`${type} — ${state.lastFailureMessage}`);
+        } else {
+          missingRequiredEvidence.push(type);
+        }
+      } else if (!this._hasSuccessfulEvidenceType?.(type, activeStep?.id ?? null)) {
+        missingRequiredEvidence.push(type);
+      }
+    }
+
+    // Coverage: every non-synthesis step must have produced successful
+    // evidence. A report step is allowed to have none — it IS the
+    // synthesis of the others' evidence.
+    const uncoveredSteps = this._uncoveredStepTitles?.() ?? [];
+
     const failedSummary = this._failedSummary();
     const healthFailed = this._hasFailedHealthCheck();
     const healthSummary = this._healthSummary();
@@ -298,19 +342,28 @@ export class MissionVerificationGate implements VerificationGateLike {
     // existing inspection rule.
     const positiveEvidence =
       requiredEvidence.length > 0
-        ? missingRequiredEvidence.length === 0
+        ? missingRequiredEvidence.length === 0 && failedRequiredEvidence.length === 0
         : hasSuccess;
 
-    const proven = positiveEvidence && !hasFailures;
+    const proven =
+      positiveEvidence &&
+      !hasFailures &&
+      failedRequiredEvidence.length === 0 &&
+      uncoveredSteps.length === 0;
 
     this._emit("verification_start", { runId, checks: ["evidence"] }, runId);
     if (this._store) this._store.setPhase("verifying");
 
     let message: string;
-    if (missingRequiredEvidence.length > 0) {
+    if (failedRequiredEvidence.length > 0) {
+      message =
+        `Required check failed: ${failedEvidenceDetails.length > 0 ? failedEvidenceDetails.join("; ") : failedRequiredEvidence.join(", ")}`;
+    } else if (missingRequiredEvidence.length > 0) {
       message =
         `Missing required evidence: ${missingRequiredEvidence.join(", ")}. ` +
         `Collected: ${summary}`;
+    } else if (uncoveredSteps.length > 0) {
+      message = `Steps without evidence: ${uncoveredSteps.join(", ")}`;
     } else if (proven && healthFailed) {
       // Requirement: never silently redefine an inspection mission as
       // "project fully healthy". Report both facts, separately.
@@ -361,6 +414,9 @@ export class MissionVerificationGate implements VerificationGateLike {
       runId,
       ranChecks: ["evidence"],
       skippedChecks: [],
+      ...(missingRequiredEvidence.length > 0 ? { missingEvidence: missingRequiredEvidence } : {}),
+      ...(failedRequiredEvidence.length > 0 ? { failedEvidence: failedRequiredEvidence } : {}),
+      ...(uncoveredSteps.length > 0 ? { uncoveredSteps } : {}),
     };
 
     this._emit(
@@ -438,8 +494,15 @@ export interface MissionEvidenceTracker {
     type: EvidenceType,
     stepId?: string | null,
   ): boolean;
-  /** True when at least one OBJECTIVE tool result FAILED. */
+  /** True when at least one OBJECTIVE tool result FAILED and was never
+   *  recovered by a later success of the same tool. */
   hasFailedEvidence(): boolean;
+  /**
+   * Per-type evidence state for the mission's required-evidence
+   * contract. attempted = any record of that type; succeeded = at least
+   * one successful record; failed = records exist and none succeeded.
+   */
+  evidenceTypeState(type: EvidenceType): { attempted: boolean; succeeded: boolean; failed: boolean; lastFailureMessage: string };
   /** True when an optional project-health check failed. */
   hasFailedHealthCheck(): boolean;
   /** Human summary of results. */
@@ -468,6 +531,45 @@ export interface MissionEvidenceTracker {
  * attempt is recorded history, not a blocker. Blocked steps are left
  * untouched.
  */
+/** Steps whose job is to synthesize other steps' evidence — they are
+ *  covered by the final answer itself, not by tool evidence. */
+const SYNTHESIS_SCOPES: ReadonlySet<string> = new Set([
+  "report",
+  "verify",
+  "plan",
+  "summarize",
+]);
+const SYNTHESIS_TITLE_RE =
+  /\b(report|summar\w*|recommend\w*|propos\w*|design\w*|verif\w*|conclu\w*|present\w*|deliver\w*)\b/i;
+
+export function isSynthesisStep(step: {
+  title: string;
+  allowedActionScope: readonly string[];
+}): boolean {
+  return (
+    step.allowedActionScope.some((s) => SYNTHESIS_SCOPES.has(s)) ||
+    SYNTHESIS_TITLE_RE.test(step.title)
+  );
+}
+
+/**
+ * Titles of mission steps that produced no successful evidence.
+ * Synthesis steps are exempt — a "Report findings" step's output is
+ * the final answer, not a tool call.
+ */
+export function uncoveredMissionSteps(
+  mission: { steps: readonly { id: string; title: string; allowedActionScope: readonly string[] }[]; evidence: readonly { stepId: string | null; success?: boolean }[] } | null | undefined,
+): string[] {
+  if (!mission) return [];
+  return mission.steps
+    .filter((s) => !isSynthesisStep(s))
+    .filter(
+      (s) =>
+        !mission.evidence.some((e) => e.stepId === s.id && e.success === true),
+    )
+    .map((s) => s.title);
+}
+
 export async function markInspectionStepsComplete(
   store: RuntimeStore,
   reason: string,
@@ -530,6 +632,20 @@ export function createMissionEvidenceTracker(
   // A tool is an optional health check only if its CALL said so; the
   // result event carries no inputs, so remember the classification.
   const healthTools = new Set<string>();
+  /**
+   * Mutating calls awaiting their result, in call order. recordToolCall
+   * classifies with inputs (project.run needs the actual command);
+   * recordToolResult consumes one entry per result so a DENIED or
+   * cancelled mutation attempt never counts as an executed mutation.
+   */
+  const pendingMutationCalls: string[] = [];
+  let executedMutations = 0;
+  /**
+   * Failures that prove the command NEVER ran — approval denied or
+   * cancelled before spawn. Anything else (exit codes, timeouts,
+   * partial output) may have changed the project and stays conservative.
+   */
+  const NON_EXECUTION_RE = /approval denied|cancelled by user|not available/i;
   const results: {
     toolId: string;
     evidenceType: EvidenceType;
@@ -542,9 +658,12 @@ export function createMissionEvidenceTracker(
   return {
     recordToolCall(toolId: string, inputs?: Record<string, unknown> | null): void {
       if (isHealthCheckTool(toolId, inputs)) healthTools.add(toolId);
-      if (!mutated && isMutatingToolCall(toolId, mutationTools, inputs, cwd)) {
-        mutated = true;
-        onMutation?.();
+      if (isMutatingToolCall(toolId, mutationTools, inputs, cwd)) {
+        pendingMutationCalls.push(toolId);
+        if (!mutated) {
+          mutated = true;
+          onMutation?.();
+        }
       }
     },
     recordToolResult(
@@ -553,6 +672,27 @@ export function createMissionEvidenceTracker(
       message: string,
       stepId?: string | null,
     ): void {
+      const idx = pendingMutationCalls.indexOf(toolId);
+      const wasMutatingAttempt = idx !== -1;
+      if (wasMutatingAttempt) pendingMutationCalls.splice(idx, 1);
+
+      // The mission counts as MUTATING only when a mutation could have
+      // actually changed the project: a success, or a failure that is
+      // not a clean non-execution. A denied project.write_file during a
+      // "scan" must not escalate the mission to the full check gate —
+      // nothing was written (observed: approval-denied writes flipped
+      // isReadOnly() and sent verification into a 14-min stall).
+      // project.run is classified per-CALL (a `git status` is read-only,
+      // `npm install` is not) — it only counts when THIS call was queued
+      // as mutating at recordToolCall time. Always-mutating tools count
+      // on any non-denied result.
+      const mutatingResult =
+        wasMutatingAttempt ||
+        (toolId !== "project.run" && mutationTools.has(toolId));
+      if (mutatingResult && (success || !NON_EXECUTION_RE.test(message))) {
+        executedMutations++;
+      }
+
       results.push({
         toolId,
         evidenceType: toolToEvidenceType(toolId),
@@ -564,7 +704,10 @@ export function createMissionEvidenceTracker(
       if (results.length > MAX_EVIDENCE_RESULTS) results.shift();
     },
     isReadOnly(): boolean {
-      return !mutated;
+      // A queued mutation whose result never arrived is UNCERTAIN — it
+      // may have run. Stay conservative (not read-only) until the
+      // outcome is known; only a clean non-execution result clears it.
+      return executedMutations === 0 && pendingMutationCalls.length === 0;
     },
     hasSuccessfulEvidence(): boolean {
       return results.some((r) => r.success && !r.health);
@@ -581,13 +724,31 @@ export function createMissionEvidenceTracker(
       );
     },
     hasFailedEvidence(): boolean {
-      return results.some((r) => !r.success && !r.health);
+      // Only UNRECOVERED failures count — a tool that failed and later
+      // succeeded is recorded history, not an outstanding objective.
+      const succeeded = new Set(results.filter((r) => r.success).map((r) => r.toolId));
+      return results.some((r) => !r.success && !r.health && !succeeded.has(r.toolId));
+    },
+    evidenceTypeState(type: EvidenceType): { attempted: boolean; succeeded: boolean; failed: boolean; lastFailureMessage: string } {
+      // Required-evidence tracking sees every record of the type —
+      // the health/objective split only applies to unrequested checks,
+      // never to a type the mission's contract requires.
+      const ofType = results.filter((r) => r.evidenceType === type);
+      const succeeded = ofType.some((r) => r.success);
+      const lastFail = ofType.filter((r) => !r.success).at(-1);
+      return {
+        attempted: ofType.length > 0,
+        succeeded,
+        failed: ofType.some((r) => !r.success) && !succeeded,
+        lastFailureMessage: lastFail ? `${lastFail.toolId}: ${lastFail.message}` : "",
+      };
     },
     hasFailedHealthCheck(): boolean {
       return results.some((r) => !r.success && r.health);
     },
     failedSummary(): string {
-      const failed = results.filter((r) => !r.success && !r.health);
+      const succeeded = new Set(results.filter((r) => r.success).map((r) => r.toolId));
+      const failed = results.filter((r) => !r.success && !r.health && !succeeded.has(r.toolId));
       if (failed.length === 0) return "";
       return failed
         .map((r) => `${r.toolId}: ${r.message.slice(0, 100)}`)

@@ -304,6 +304,10 @@ export function CockpitApp({
       // only stops local tool execution; the server-side model call
       // would otherwise keep running (and being billed) unheard.
       controller.cancelRemoteModel();
+      // Abort the agent loop itself — a local-model loop must stop at
+      // its next round boundary and terminate "cancelled", not finish
+      // and finalize the mission as complete/failed.
+      controller.cancelActiveRun();
       store.actions.setIsProcessing(false);
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
@@ -323,6 +327,7 @@ export function CockpitApp({
         || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING") {
         session.cancel().catch(() => {});
         controller.cancelRemoteModel();
+        controller.cancelActiveRun();
         store.actions.setIsProcessing(false);
         store.actions.setHoloState("IDLE");
         store.actions.clearMission();

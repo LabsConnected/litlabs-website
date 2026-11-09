@@ -308,6 +308,7 @@ export default function CommandStudioHeader({
             repoName={capabilities.repositoryName}
             ptyState={capabilities.terminalStatus}
             writesAllowed={writesAllowed}
+            executionMode={executionMode}
             modelLabel={selectedModel.label}
             modelHealth={modelHealth}
             fallbackNotice={fallbackNotice}
@@ -475,6 +476,7 @@ function WorkspaceStatusPopover({
   repoName,
   ptyState,
   writesAllowed,
+  executionMode,
   modelLabel,
   modelHealth,
   fallbackNotice,
@@ -489,6 +491,7 @@ function WorkspaceStatusPopover({
   repoName: string | null;
   ptyState: string;
   writesAllowed: boolean;
+  executionMode: StudioTopBarMode;
   modelLabel: string;
   /** Undefined while provider health is unverified — renders "Checking". */
   modelHealth: ProviderHealth | undefined;
@@ -515,6 +518,19 @@ function WorkspaceStatusPopover({
     ptyState === "connecting" ? "Connecting…" :
     ptyState === "idle" ? "Ready · no session" :
     ptyState === "error" ? "Error" : "Disconnected";
+
+  // Write permission must state BOTH truths: whether a writable surface
+  // exists (writesAllowed = "a write surface exists", not "writes bypass
+  // approval") and what the active execution mode does with it. ACT gates
+  // every mutation; AUTO applies the routine-write safe set but still
+  // gates sensitive actions; PLAN writes nothing.
+  const writePermission = !writesAllowed
+    ? { value: "No write surface", ok: false, warn: true, detail: "No writable workspace is available yet" }
+    : executionMode === "plan"
+      ? { value: "Read-only", ok: false, warn: true, detail: "PLAN mode runs no file writes" }
+      : executionMode === "act"
+        ? { value: "Writes require approval", ok: false, warn: true, detail: "Every file write asks first in ACT mode" }
+        : { value: "Writes allowed", ok: true, warn: false, detail: "Routine file writes apply without approval — sensitive actions still ask" };
 
   const left = Math.min(rect.left, window.innerWidth - 320);
   const top = rect.bottom + 6;
@@ -594,10 +610,10 @@ function WorkspaceStatusPopover({
         )}
         <StatusRow
           label="Write Permission"
-          value={writesAllowed ? "Writes allowed" : "Writes require approval"}
-          ok={writesAllowed}
-          warn={!writesAllowed}
-          detail={writesAllowed ? "File writes apply without approval" : "Approvals required before applying edits"}
+          value={writePermission.value}
+          ok={writePermission.ok}
+          warn={writePermission.warn}
+          detail={writePermission.detail}
         />
         <StatusRow
           label="Wallet"

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { apiFetch } from "@/lib/social-server";
+import { absoluteUrl } from "@/lib/seo";
 import type { PostDTO } from "@/components/feed/types";
 import PostThreadClient from "./PostThreadClient";
 
@@ -44,6 +45,7 @@ export async function generateMetadata({
   return {
     title: `${authorName} on LiTTree`,
     description: excerpt,
+    alternates: { canonical: absoluteUrl(`/post/${post.id}`) },
   };
 }
 

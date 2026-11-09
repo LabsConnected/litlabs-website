@@ -205,7 +205,7 @@ export async function resolveAgentEntitlement(
 }
 
 function isValidPlan(p: string): p is PlanId {
-  return ["starter", "creator_beta", "pro_builder_beta", "founder", "owner"].includes(p);
+  return ["starter", "creator_lite", "creator_beta", "pro_builder_beta", "founder", "owner"].includes(p);
 }
 
 function denied(

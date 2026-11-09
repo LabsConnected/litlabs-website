@@ -193,6 +193,7 @@ import {
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { buildCanonicalRuntimeContext } from "@/lib/litt-intelligence/canonical-runtime-context";
 import { buildStudioContext } from "@/lib/studio/project-resolver";
+import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getConversation, insertMessage, listMessages, updateMessageStatus } from "@/lib/studio/conversation-service";
 import { createPausedRun, getPendingPausedRunForConversation, getLatestPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
 import { persistMemory } from "@/lib/studio/memory-service";
@@ -1902,5 +1903,63 @@ describe("POST /api/studio/conversations/[conversationId]/messages — project r
       const body = await res.json().catch(() => null);
       expect(body?.code).not.toBe("PROJECT_MISMATCH");
     }
+  });
+});
+
+describe("POST /api/studio/conversations/[conversationId]/messages — never-bound conversation guard", () => {
+  // A conversation with projectId=null (legacy/general chat) viewed inside a
+  // project must NOT be silently re-bound to the active project: its history
+  // is foreign context and rebinding would let an unrelated thread execute
+  // mutations inside this project's workspace. The server refuses instead.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetExecutionRegistryForTests();
+
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv-123",
+      projectId: null,
+      revision: 1,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    } as any);
+    // The unbound conversation resolves no project context…
+    vi.mocked(buildStudioContext).mockResolvedValue(null as any);
+    // …while a different project is active for this user.
+    vi.mocked(resolveCurrentProject).mockResolvedValue({ projectId: "proj-active" } as any);
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: true,
+      workspaceId: "ws-123",
+      executionMode: "auto",
+    } as any);
+    vi.mocked(insertMessage).mockImplementation(async (args: any) => ({
+      message: { id: `msg-${args.role}`, ...args },
+      duplicate: false,
+      error: null,
+    }) as any);
+  });
+
+  const routeParams = { params: Promise.resolve({ conversationId: "conv-123" }) };
+
+  it("refuses to silently re-bind a project-less chat into the active project", async () => {
+    const req = makeRequest({ projectId: "proj-active", message: "edit index.html" });
+    const res = await POST(req, routeParams);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("PROJECT_MISMATCH");
+    // The repair fallback must not run for never-bound chats — no silent
+    // rebind, no workspace transport, no execution against the wrong project.
+    expect(resolveCurrentProject).not.toHaveBeenCalled();
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+  });
+
+  it("still allows the legacy rebind path when the client omits projectId", async () => {
+    const req = makeRequest({});
+    const res = await POST(req, routeParams);
+
+    // Older clients keep the previous behavior: the fallback may rebind.
+    expect(resolveCurrentProject).toHaveBeenCalled();
+    expect(res.status).not.toBe(500);
   });
 });

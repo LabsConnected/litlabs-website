@@ -241,7 +241,7 @@ export async function POST(
 
   const { projectId } = await params;
 
-  let body: { action?: string; path?: string; newPath?: string; content?: string; encoding?: string };
+  let body: { action?: string; path?: string; newPath?: string; content?: string; encoding?: string; expectedSha256?: string };
   try {
     body = await request.json();
   } catch {
@@ -299,6 +299,10 @@ export async function POST(
       newPath: action === "rename" ? newPath : undefined,
       content: body.content,
       encoding: body.encoding,
+      // CAS precondition forwarded verbatim; terminal-server rejects stale
+      // writes with 409 REVISION_CONFLICT so visual edits can't clobber
+      // concurrent agent/file changes.
+      expectedSha256: action === "write" ? body.expectedSha256 : undefined,
     });
 
     let resp: Response;

@@ -21,17 +21,27 @@
  *   (import("./x.js")) — classic scripts are scanned too, because they
  *   can also dynamic-import at runtime;
  * - same-workspace HTML documents linked from any included document
- *   (in-frame navigation targets), with their own closures, recursively.
+ *   (in-frame navigation targets), with their own closures, recursively;
+ * - every same-workspace renderable subresource the documents reference
+ *   by URL — images, srcset candidates, media, posters, fonts and other
+ *   asset-typed references — because the transform rewrites those URLs
+ *   onto the token-authorized prefix for the opaque-origin iframe;
+ * - url(...) references inside <style> bodies, style attributes, and the
+ *   same-workspace stylesheets the transform embeds, resolved
+ *   document-relative exactly as the served document resolves them.
  *
  * Stylesheets: linked sheets are embedded into the document during the
- * authenticated read — their path is authorized (a non-embedded link falls
- * back to a token fetch) and their url() reference closure is included so
- * embedded-CSS asset requests authenticate. Images and other non-script
- * subresources are authorized the same way: the opaque-origin iframe can
- * carry neither the session cookie nor any other credential, so the
- * transform reissues every same-workspace subresource reference under the
- * token prefix — an image that the page legitimately fetches must be in
- * this manifest or it fails to load.
+ * authenticated read — their own path is still authorized so a sheet that
+ * cannot be embedded (unreadable, oversized) falls back to a token fetch
+ * instead of the guaranteed-401 session URL, and their url() reference
+ * closure is included so embedded-CSS asset requests authenticate.
+ * Images and other non-script subresources are authorized the same way:
+ * the opaque-origin iframe can carry neither the session cookie nor any
+ * other credential, so the transform reissues every same-workspace
+ * subresource reference under the token prefix — an image that the page
+ * legitimately fetches must be in this manifest or it fails to load.
+ * Logs, notes, env-style files and unreferenced assets remain
+ * unreachable through the token.
  *
  * Bounds: at most MAX_DOCUMENTS documents and MAX_ASSETS total paths,
  * reference depth at most MAX_DEPTH. Bounds never widen authorization. A
@@ -39,7 +49,7 @@
  * diagnostics and fails closed before a bearer token is minted.
  */
 import { parse } from "acorn";
-import { scanPreviewDocument, extractCssUrls } from "./static-preview-document";
+import { cssAssetPaths, scanPreviewDocument } from "./static-preview-document";
 
 const MAX_DOCUMENTS = 32;
 const MAX_ASSETS = 128;
@@ -144,13 +154,10 @@ export async function collectPreviewAssetManifest(
   const scannedScripts = new Set<string>();
   const documentQueue: Array<{ path: string; html: string; depth: number }> = [{ path: entryPath, html: entryHtml, depth: 0 }];
   const scriptQueue: Array<{ path: string; depth: number }> = [];
-  // Stylesheets are embedded at transform time; the subresources their
-  // url() rules reference are fetched by URL from the opaque origin, so the
-  // manifest must authorize them. A stylesheet that cannot be read adds no
-  // urls (its own fetch fails closed per-request) but must not veto the
-  // document — a dead stylesheet link has never vetoed a preview.
-  const stylesheetQueue: string[] = [];
-  const visitedStylesheets = new Set<string>();
+  // Stylesheets are embedded at serve time, so their url() references must
+  // still be authorized — resolved against each linking document's path,
+  // matching how the browser resolves them inside the served document.
+  const stylesheetJobs = new Map<string, { cssPath: string; docPaths: Set<string> }>();
   const reasons = new Set<TruncationReason>();
   let readFailures = 0;
   let parseFailures = 0;
@@ -220,16 +227,17 @@ export async function collectPreviewAssetManifest(
       const linked: Array<{ path: string; depth: number }> = [];
       for (const { path, html, depth } of documents) {
         const scanned = scanPreviewDocument(html, path);
+        for (const asset of scanned.assets) addAsset(asset);
         for (const script of scanned.scripts) {
           if (addAsset(script.path)) scriptQueue.push({ path: script.path, depth });
         }
-        for (const sub of scanned.subresources) addAsset(sub);
-        for (const css of scanned.stylesheets) {
-          addAsset(css);
-          if (!visitedStylesheets.has(css)) {
-            visitedStylesheets.add(css);
-            stylesheetQueue.push(css);
-          }
+        for (const cssPath of scanned.stylesheets.slice(0, 16)) {
+          // Authorize the sheet itself: a link the transform cannot embed
+          // (unreadable or oversized) falls back to a token fetch.
+          addAsset(cssPath);
+          const job = stylesheetJobs.get(cssPath) ?? { cssPath, docPaths: new Set<string>() };
+          job.docPaths.add(path);
+          stylesheetJobs.set(cssPath, job);
         }
         if (depth >= MAX_DEPTH) {
           if (scanned.linkedDocuments.length > 0) reasons.add("depth");
@@ -249,19 +257,45 @@ export async function collectPreviewAssetManifest(
       for (let i = 0; i < linked.length; i++) {
         if (contents[i] !== null) documentQueue.push({ ...linked[i], html: contents[i]! });
       }
-    }
-
-    if (stylesheetQueue.length > 0 && !timedOut) {
-      const cssPaths = stylesheetQueue.splice(0, concurrency);
-      // Stylesheet reads are deliberately non-fatal: a missing/dead <link>
-      // has never vetoed the document (it stays an external fetch and fails
-      // closed per-request). Only successfully read sheets contribute their
-      // url() closure to the manifest.
-      const contents = await Promise.all(cssPaths.map((p) => readWithDeadline(p)));
-      for (let i = 0; i < cssPaths.length; i++) {
-        const content = contents[i];
+      // Read each referenced stylesheet once, then authorize the assets its
+      // url() references resolve to for every document that embeds it.
+      // Stylesheet reads are BEST-EFFORT: a missing or unreadable sheet is
+      // something the transform also skips (the <link> simply stays), so it
+      // must not truncate the whole manifest — only the assets inside that
+      // one sheet stay unauthorized. Bounded by the same deadline and a
+      // hard job cap so optional reads cannot stall token minting.
+      const pendingCss = [...stylesheetJobs.values()].slice(0, 64);
+      stylesheetJobs.clear();
+      const cssContents = new Array<string | null>(pendingCss.length).fill(null);
+      let cssNext = 0;
+      const cssWorker = async () => {
+        while (cssNext < pendingCss.length) {
+          const index = cssNext++;
+          const remaining = Math.max(1, deadlineAt - Date.now());
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            cssContents[index] = await Promise.race([
+              readTextFile(pendingCss[index].cssPath),
+              new Promise<null>((resolve) => {
+                timer = setTimeout(() => resolve(null), remaining);
+              }),
+            ]);
+          } catch {
+            cssContents[index] = null;
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(concurrency, pendingCss.length) }, cssWorker),
+      );
+      for (let i = 0; i < pendingCss.length; i++) {
+        const content = cssContents[i];
         if (content === null) continue;
-        for (const sub of extractCssUrls(content, cssPaths[i])) addAsset(sub);
+        for (const docPath of pendingCss[i].docPaths) {
+          for (const asset of cssAssetPaths(content, docPath)) addAsset(asset);
+        }
       }
     }
 
