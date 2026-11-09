@@ -15,7 +15,7 @@
 
 import "server-only";
 
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
 import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
@@ -417,14 +417,98 @@ interface ToolCallRecord {
   inputsHash: string;
   resultHash: string;
   step: number;
+  // Set by the resume path when it records an approved execution (§6.1)
+  // and by seedToolCallRecordsFromHistory when it rebuilds the ledger
+  // from paused history: success = the loop-level result (a generated
+  // image that never saved counts as failed), mutating = the tool is
+  // not read-only. Seeded records whose tool result is unparseable
+  // leave success undefined — unknown, never a proven success.
+  success?: boolean;
+  mutating?: boolean;
 }
 
-function hashInputs(inputs: Record<string, unknown>): string {
+// Canonical JSON for hashing: object keys sorted recursively, so two
+// inputs that differ only by key order hash identically. Without this,
+// the model re-emitting the same tool call with reordered keys produces
+// a different hash, defeats the replay dedupe, and re-pauses instead of
+// replaying (approval-loop R3).
+function canonicalizeForHash(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeForHash);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = canonicalizeForHash((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+export function hashInputs(inputs: Record<string, unknown>): string {
   try {
-    return JSON.stringify(inputs).slice(0, 500);
+    const json = JSON.stringify(canonicalizeForHash(inputs));
+    // Long inputs are hashed, not truncated: truncation loses the tail
+    // that distinguishes two prompts, so distinct calls could collide
+    // and replay the wrong result.
+    return json.length > 500 ? `sha256:${createHash("sha256").update(json).digest("hex")}` : json;
   } catch {
     return String(inputs).slice(0, 500);
   }
+}
+
+// ─── Gated-repeat loop breaker (§6.1) ─────────────────────────────
+// A gated mutation that keeps failing to save re-enters its approval
+// gate forever: the permission pause runs before loop detection (R1),
+// and the old detector is disabled once any mutation executed (R2).
+// The breaker counts trailing executions of the same tool + canonical
+// inputs, resetting at the most recent successful mutation of a
+// DIFFERENT tool. It trips at 2 priors — the 3rd identical request is
+// failed honestly instead of creating another gate. It deliberately
+// does NOT consult hasInterveningMutation for same-tool repeats (R2):
+// a failing image.generate is not rescued by an earlier files.write.
+
+export const GATED_REPEAT_LIMIT = 2;
+
+export function gatedRepeatLoopError(toolId: string): string {
+  return `${toolId} requested 3 times without a successful save; stopping instead of re-asking`;
+}
+
+export function countGatedRepeatExecutions(
+  records: ToolCallRecord[],
+  toolId: string,
+  inputsHash: string,
+): number {
+  let count = 0;
+  for (let i = records.length - 1; i >= 0; i--) {
+    const record = records[i];
+    if (record.toolId === toolId && record.inputsHash === inputsHash) {
+      // A successful same-tool execution ends the streak: anything older
+      // belongs to a request that already completed.
+      if (record.success === true) return count;
+      count += 1;
+      continue;
+    }
+    // A successful mutation of a different tool ends the streak: the run
+    // made progress elsewhere, so the repeat is a fresh request. Only a
+    // PROVEN success resets — a seeded record with an unknown outcome
+    // (success undefined: the tool result was not JSON) must not.
+    if (record.mutating && record.success === true) return count;
+  }
+  return count;
+}
+
+// A generated image that never landed in the project is not a
+// successful mutation, even when the handler reports success: true
+// (maybeAutoInsertGeneratedImage preserves success on a failed save).
+// The breaker and the approved-call ledger must count it as failed,
+// or a failing save leaves no trace and re-gates forever.
+function mutationSucceeded(result: ToolCallResult): boolean {
+  if (result.success === false) return false;
+  const payload = result.result;
+  if (payload && typeof payload === "object" && (payload as Record<string, unknown>).savedToProject === false) {
+    return false;
+  }
+  return true;
 }
 
 function hashResult(result: unknown): string {
@@ -506,12 +590,38 @@ export function seedToolCallRecordsFromHistory(
   messages: LLMMessage[],
 ): ToolCallRecord[] {
   const wireNameToToolId = new Map<string, string>();
+  const toolIdToReadOnly = new Map<string, boolean>();
   for (const tool of toolRegistry.listEnabled()) {
     wireNameToToolId.set(tool.id.replace(/\./g, "_"), tool.id);
+    toolIdToReadOnly.set(tool.id, tool.readOnly);
   }
   const executedCallIds = new Set<string>();
+  // Map each executed call to its parsed tool-result JSON, so the
+  // seeded record carries the outcome the breaker counts on (§6.1):
+  // a result that reports success: false — or an image result whose
+  // bytes never landed in the project (savedToProject: false) — is a
+  // failed execution, not a success. Unparseable results stay
+  // undefined: unknown, not a success.
+  const callIdToResult = new Map<string, Record<string, unknown>>();
   for (const m of messages) {
-    if (m.role === "tool" && m.tool_call_id) executedCallIds.add(m.tool_call_id);
+    if (m.role === "tool" && m.tool_call_id) {
+      executedCallIds.add(m.tool_call_id);
+      const content = m.content ?? "";
+      // A failed call's tool result is not JSON — buildToolResultMessage
+      // renders it as "Error: <message>". That prefix IS the failure
+      // marker; without it a failed execution seeds as "unknown" and the
+      // breaker cannot count it.
+      if (content.startsWith("Error:")) {
+        callIdToResult.set(m.tool_call_id, { success: false });
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(content) as Record<string, unknown>;
+        if (parsed && typeof parsed === "object") callIdToResult.set(m.tool_call_id, parsed);
+      } catch {
+        // Non-JSON tool result — outcome unknown, leave unflagged.
+      }
+    }
   }
   const records: ToolCallRecord[] = [];
   let step = 0;
@@ -525,11 +635,19 @@ export function seedToolCallRecordsFromHistory(
       } catch {
         inputs = {};
       }
+      const toolId = wireNameToToolId.get(call.function.name) ?? call.function.name;
+      const resultJson = callIdToResult.get(call.id);
+      const success =
+        resultJson === undefined
+          ? undefined
+          : resultJson.success !== false && resultJson.savedToProject !== false;
       records.push({
-        toolId: wireNameToToolId.get(call.function.name) ?? call.function.name,
+        toolId,
         inputsHash: hashInputs(inputs),
         resultHash: "",
         step: step++,
+        success,
+        mutating: toolIdToReadOnly.has(toolId) ? !toolIdToReadOnly.get(toolId) : undefined,
       });
     }
   }
@@ -2539,6 +2657,8 @@ async function runAgentLoopV2Inner(
         inputsHash,
         resultHash: hashResult(result.result),
         step: stepsUsed,
+        success: mutationSucceeded(result),
+        mutating: !toolDef.readOnly,
       });
 
       // Track mutations
@@ -3021,6 +3141,13 @@ export interface DeferredToolBatchState {
   completedDeployment: CompletedDeployment | null;
   /** Bounded read-loop nudges spent — shared with the resumed loop. */
   readLoopNudges?: number;
+  /**
+   * Set when the gated-repeat breaker trips inside the deferred batch:
+   * the same gated mutation was requested a third time without a
+   * successful save. The resume path copies it into `failedHonestly`
+   * and settles the run failed instead of creating another gate.
+   */
+  failedHonestly?: string;
 }
 
 export interface DeferredToolBatchContext {
@@ -3147,6 +3274,21 @@ export async function executeDeferredToolCalls(
       }
     }
 
+    const inputsHash = hashInputs(toolCall.inputs);
+
+    // Gated-repeat breaker (§6.1): a gated mutation that keeps failing
+    // to save must not re-enter its approval gate forever. This runs
+    // AFTER the replay dedupe above (an identical successful call
+    // replays and never gates) and BEFORE the permission pause (R1) —
+    // and it does NOT consult hasInterveningMutation for same-tool
+    // repeats (R2). On trip, the batch stops and the resume path
+    // settles the run failed via state.failedHonestly.
+    if (!toolDef.readOnly && countGatedRepeatExecutions(ctx.toolCallRecords, toolCall.toolId, inputsHash) >= GATED_REPEAT_LIMIT) {
+      state.failedHonestly = gatedRepeatLoopError(toolCall.toolId);
+      ctx.localProgress.emit({ type: "status", summary: state.failedHonestly });
+      break;
+    }
+
     const permInfo = toPermissionInfo(toolDef);
     const permResult = permissionEngine.check(permInfo, toolCall.inputs, ctx.executionMode);
 
@@ -3213,7 +3355,7 @@ export async function executeDeferredToolCalls(
 
     // Loop detection — same bounded read-loop nudge as the main loop;
     // nudge budget lives on `state` so it carries across the boundary.
-    const inputsHash = hashInputs(toolCall.inputs);
+    // inputsHash was computed above, before the permission check.
     if (detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, state.hasInterveningMutation)) {
       if (toolDef.readOnly && (state.readLoopNudges ?? 0) < READ_LOOP_NUDGE_MAX) {
         state.readLoopNudges = (state.readLoopNudges ?? 0) + 1;
@@ -3269,7 +3411,7 @@ export async function executeDeferredToolCalls(
       result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: err instanceof Error ? err.message : String(err) };
     }
 
-    ctx.toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: ctx.stepsUsed });
+    ctx.toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: ctx.stepsUsed, success: mutationSucceeded(result), mutating: !toolDef.readOnly });
 
     if (!toolDef.readOnly) {
       state.hasInterveningMutation = true;
@@ -3681,29 +3823,34 @@ async function resumeAgentLoopV2Inner(
     llmMessages.push(buildToolResultMessage(result));
 
     const toolDef = availableTools.find((t) => t.id === resume.toolId);
-    // Only a successful mutation counts: a failed approved call must not
-    // be cached as executed work or weaken loop detection.
-    if (toolDef && !toolDef.readOnly && result.success) {
-      hasInterveningMutation = true;
-      // Ledger the call the user just approved. The resume rebuilds
-      // executedMutations empty and seedToolCallRecordsFromHistory only
-      // counts calls with a tool result in the paused history — the gated
-      // call had none — so without this the approved execution is
-      // invisible to dedupe: an identical call deferred from the same
-      // batch (models repeat the same tool call in one batch) or
-      // re-emitted on the next step re-enters the permission gate and
-      // asks the user to approve the exact same action a second time.
+    // Ledger the approved execution EVEN WHEN IT FAILED: the resume
+    // rebuilds executedMutations empty and seedToolCallRecordsFromHistory
+    // only counts calls with a tool result in the paused history — the
+    // gated call had none — so without this the approved execution is
+    // invisible to the repeat count: a failing gated call leaves no
+    // trace and re-enters the gate forever (§6.1/R3). Only a successful
+    // mutation counts as executed work: a failed approved call must not
+    // be cached in executedMutations or weaken loop detection. A
+    // generated image that never saved (savedToProject: false) is a
+    // failed mutation even when the handler reports success: true.
+    if (toolDef && !toolDef.readOnly) {
       const approvedInputsHash = hashInputs(resume.inputs);
+      const succeeded = mutationSucceeded(result);
       toolCallRecords.push({
         toolId: resume.toolId,
         inputsHash: approvedInputsHash,
         resultHash: hashResult(result.result),
         step: stepsUsed,
+        success: succeeded,
+        mutating: true,
       });
-      executedMutations.set(`${resume.toolId}:${approvedInputsHash}`, {
-        result,
-        persisted: mutationCheck?.verified ?? undefined,
-      });
+      if (succeeded) {
+        hasInterveningMutation = true;
+        executedMutations.set(`${resume.toolId}:${approvedInputsHash}`, {
+          result,
+          persisted: mutationCheck?.verified ?? undefined,
+        });
+      }
     }
   } else {
     // Rejected — inject rejection as tool result
@@ -3788,6 +3935,13 @@ async function resumeAgentLoopV2Inner(
     batchHasMutation = deferredState.batchHasMutation;
     completedDeployment = deferredState.completedDeployment;
     readLoopNudges = deferredState.readLoopNudges ?? readLoopNudges;
+    // The gated-repeat breaker (§6.1) may have tripped inside the
+    // deferred batch: settle the run failed instead of entering the
+    // main loop or creating another gate.
+    if (deferredState.failedHonestly) {
+      failedHonestly = deferredState.failedHonestly;
+      finalText = deferredState.failedHonestly;
+    }
 
     if (deferredResult.nestedApproval) {
       // A nested gate on a file-writing tool carries 0 — write intent is
@@ -3821,7 +3975,7 @@ async function resumeAgentLoopV2Inner(
   }
 
   // Continue the loop
-  while (stepsUsed < cfg.maxSteps && !cancelled) {
+  while (stepsUsed < cfg.maxSteps && !cancelled && !failedHonestly) {
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
       cancelled = true;
@@ -4033,6 +4187,20 @@ async function resumeAgentLoopV2Inner(
         }
       }
 
+      // Gated-repeat breaker (§6.1): a gated mutation that keeps failing
+      // to save must not re-enter its approval gate forever. This runs
+      // AFTER the replay dedupe above (an identical successful call
+      // replays and never gates) and BEFORE the permission pause (R1) —
+      // and it does NOT consult hasInterveningMutation for same-tool
+      // repeats (R2). On trip, the run settles failed with a truthful
+      // error instead of creating another gate.
+      if (!toolDef.readOnly && countGatedRepeatExecutions(toolCallRecords, toolCall.toolId, hashInputs(toolCall.inputs)) >= GATED_REPEAT_LIMIT) {
+        failedHonestly = gatedRepeatLoopError(toolCall.toolId);
+        finalText = failedHonestly;
+        localProgress.emit({ type: "status", summary: failedHonestly });
+        break;
+      }
+
       const permInfo = toPermissionInfo(toolDef);
       const permResult = permissionEngine.check(permInfo, toolCall.inputs, cfg.executionMode, availableCapabilities);
 
@@ -4165,7 +4333,7 @@ async function resumeAgentLoopV2Inner(
         result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: err instanceof Error ? err.message : String(err) };
       }
 
-      toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: stepsUsed });
+      toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: stepsUsed, success: mutationSucceeded(result), mutating: !toolDef.readOnly });
 
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
@@ -4222,6 +4390,10 @@ async function resumeAgentLoopV2Inner(
     }
 
     if (cancelled) break;
+    // The gated-repeat breaker (§6.1) already settled the run failed —
+    // exit before the build-capability guard below can overwrite the
+    // loop error with a less specific one.
+    if (failedHonestly) break;
     if (cfg.buildCapabilityGuard) {
       const wroteFile = toolCallLog.slice(logBeforeBatch).some((call) => call.success && isFileWritingTool(call.toolId));
       resumeZeroWriteSteps = wroteFile ? 0 : resumeZeroWriteSteps + 1;
