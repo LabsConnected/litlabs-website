@@ -84,6 +84,21 @@ export interface PlanMissionOptions {
   onModelStream?: (event: ModelStreamEvent) => void;
   /** Max tokens to spend on planning (default 800). */
   maxPlanTokens?: number;
+  /**
+   * Whether project-health check evidence (typecheck/test/build) is a
+   * legitimate part of the plan contract. Default true — the historical
+   * behavior. When false (read-only inspection goals), check evidence is
+   * stripped from model and fallback plans and never inferred from titles.
+   */
+  checksRequired?: boolean;
+  /**
+   * Whether the goal actually asks for changes (fix/implement/deploy...).
+   * Default true — preserves historical behavior. When false, the plan
+   * must contain ONLY inspection/check/diagnose/report steps: mutation
+   * steps ("Apply approved repairs") can never earn evidence in a
+   * read-only mission and would guarantee a verification failure.
+   */
+  mutationRequested?: boolean;
 }
 
 export interface PlanMissionResult {
@@ -97,6 +112,7 @@ export interface PlanMissionResult {
 function buildPlanningPrompt(
   goal: string,
   project: ProjectContext | null,
+  mutationRequested = true,
 ): string {
   const projectSection = project
     ? `\nProject context (canonical — do not guess):\n  - Name: ${project.name}\n  - Root: ${project.root}\n  - Branch: ${project.branch ?? "unknown"}\n`
@@ -118,7 +134,11 @@ Rules:
   inspection (CPU, memory, disk, processes) — never repository steps.
   For an informational goal, plan research/summary steps. Never copy
   repository steps into a plan for a goal that is not about a repository.
-
+${mutationRequested ? "" : `- READ-ONLY MISSION: the user did NOT ask for any changes.
+  Plan ONLY inspection, checks, diagnosis, and reporting steps. Do NOT
+  include repair/fix/apply/edit/write/deploy steps — there is nothing
+  to change. End with a report/verify step, not a mutation step.
+`}
 Output ONLY a JSON array, no prose, no code fences:
 [
   { "title": "Inspect repository baseline", "description": "Capture git status, branch, and current state" },
@@ -197,11 +217,35 @@ export function parseSemanticPlan(text: string): SemanticStepSpec[] | null {
  * This runs after parseSemanticPlan so that explicitly provided
  * requiredEvidence is preserved, and only undefined values are filled in.
  */
-export function normalizeSemanticPlan(steps: SemanticStepSpec[]): SemanticStepSpec[] {
+/** Evidence types produced only by project-health check tools. */
+const CHECK_EVIDENCE: ReadonlySet<EvidenceType> = new Set<EvidenceType>([
+  "typecheck_result",
+  "test_result",
+  "build_result",
+]);
+
+export function normalizeSemanticPlan(
+  steps: SemanticStepSpec[],
+  opts?: { checksRequired?: boolean },
+): SemanticStepSpec[] {
+  const checksRequired = opts?.checksRequired !== false;
   return steps.map((step) => {
-    // Explicit model/planner contracts always win.
-    if (step.requiredEvidence !== undefined) {
-      return step;
+    // "verification_result" is produced by the VerificationGate itself —
+    // it can never be a step contract. Check evidence is stripped when
+    // the goal did not ask for project-health checks.
+    let current = step;
+    if (current.requiredEvidence !== undefined) {
+      const kept = current.requiredEvidence.filter(
+        (e) => e !== "verification_result" && (checksRequired || !CHECK_EVIDENCE.has(e)),
+      );
+      current = { ...current, requiredEvidence: kept.length > 0 ? kept : undefined };
+    }
+    // Explicit model/planner contracts always win — nothing to infer.
+    if (current.requiredEvidence !== undefined) {
+      return current;
+    }
+    if (!checksRequired) {
+      return current;
     }
 
     const title = step.title.toLowerCase();
@@ -325,6 +369,70 @@ export function isMutationStep(step: SemanticStepSpec): boolean {
   return MUTATION_SCOPES.has(step.scope ?? "");
 }
 
+// ─── Read-only plan safety ─────────────────────────────────────────
+
+/**
+ * Scopes that only make sense when the mission will actually change
+ * something. "revalidate" exists to re-check AFTER repairs — with no
+ * mutation step in the plan it can never earn evidence either.
+ */
+const READ_ONLY_BLOCKING_SCOPES: ReadonlySet<string> = new Set([
+  "repair",
+  "implement",
+  "act",
+  "revalidate",
+]);
+
+/**
+ * A step whose TITLE BEGINS with a mutation verb requests a change.
+ * Anchored at the start deliberately: "Diagnose failures and propose
+ * fixes" reports on problems (kept), while "Apply approved repairs"
+ * mutates (dropped). Mid-title verbs are left alone — the planning
+ * prompt is the primary defense; this filter only removes the
+ * high-confidence cases a weak model still emits.
+ */
+const MUTATION_TITLE_RE =
+  /^\s*(?:apply|fix|repair|implement|patch|refactor|resolve|edit|write|deploy|modify|merge|commit|push|update|create|add|remove|delete|install|change)\b/i;
+
+/** "Revalidate"/"Re-run checks" steps whose description ties them to repairs. */
+const REPAIR_DEPENDENT_TITLE_RE = /^\s*re-?validat/i;
+const REPAIR_DEPENDENT_DESC_RE =
+  /\b(repairs?|fix(?:es|ed|ing)?|patch(?:es|ed)?|after\s+(?:the\s+)?changes?)\b/i;
+
+/**
+ * True when a planned step can only be satisfied by mutating the
+ * project. In a READ-ONLY mission (the goal never asked for changes)
+ * such a step can never earn evidence — the verification gate counts
+ * every non-synthesis step without successful evidence as uncovered,
+ * so one stray "Apply approved repairs" guarantees failure even when
+ * every achievable step passed (observed: goal "scan" failed on
+ * "Steps without evidence: Apply approved repairs, Revalidate").
+ */
+export function isMutationDependentPlanStep(step: SemanticStepSpec): boolean {
+  if (step.scope && READ_ONLY_BLOCKING_SCOPES.has(step.scope)) return true;
+  if (MUTATION_TITLE_RE.test(step.title)) return true;
+  if (
+    REPAIR_DEPENDENT_TITLE_RE.test(step.title) &&
+    (!step.description || REPAIR_DEPENDENT_DESC_RE.test(step.description))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Remove mutation-dependent steps from a plan for a read-only goal.
+ * Returns the filtered list, or the ORIGINAL list when filtering would
+ * empty it — a plan that loses every step is worse than an imperfect
+ * one (the caller fails closed on an empty plan).
+ */
+export function dropMutationDependentSteps(
+  steps: SemanticStepSpec[],
+): SemanticStepSpec[] {
+  const kept = steps.filter((s) => !isMutationDependentPlanStep(s));
+  return kept.length > 0 ? kept : steps;
+}
+
 /**
  * Replace an auto-mutation step with a read-only approval-proposal step.
  * The user's intent is preserved ("fix what is safe") but nothing is
@@ -379,8 +487,26 @@ function infoFallbackPlan(): SemanticStepSpec[] {
  * returned "repo" — the goal is explicitly about a repository, project,
  * app, or code, so repository steps are intent-safe.
  */
-function repoFallbackPlan(goal: string): SemanticStepSpec[] {
+/** Read-only audit plan — no checks, no mutations. Used when the goal
+ *  did not ask for project-health checks (checksRequired === false). */
+function repoAuditFallbackPlan(): SemanticStepSpec[] {
+  return [
+    { title: "Inspect repository baseline", description: "Capture git status, branch, and current project state", scope: "inspect" },
+    { title: "Inspect project structure and configuration", description: "List and read the relevant files and configuration", scope: "inspect" },
+    { title: "Investigate the goal with targeted reads and searches", description: "Gather the specific evidence the goal asks for", scope: "investigate" },
+    { title: "Report findings and recommendations", description: "Present the audit findings — no changes are applied", scope: "report" },
+  ];
+}
+
+function repoFallbackPlan(
+  goal: string,
+  opts?: { checksRequired?: boolean },
+): SemanticStepSpec[] {
   const g = goal.toLowerCase();
+
+  if (opts?.checksRequired === false) {
+    return repoAuditFallbackPlan();
+  }
 
   const stabilizeKeywords = ["stable", "stabilize", "stability", "production", "ready", "fix", "broken", "deploy"];
   const isStabilize = stabilizeKeywords.some((k) => g.includes(k));
@@ -435,7 +561,11 @@ function repoFallbackPlan(goal: string): SemanticStepSpec[] {
  * mutate (repair/implement/act scopes) become read-only approval
  * proposals.
  */
-export function fallbackPlan(goal: string, mode?: "plan" | "act" | "auto"): SemanticStepSpec[] {
+export function fallbackPlan(
+  goal: string,
+  mode?: "plan" | "act" | "auto",
+  opts?: { checksRequired?: boolean },
+): SemanticStepSpec[] {
   const domain = classifyGoalDomain(goal);
 
   let steps: SemanticStepSpec[];
@@ -447,7 +577,7 @@ export function fallbackPlan(goal: string, mode?: "plan" | "act" | "auto"): Sema
       steps = infoFallbackPlan();
       break;
     case "repo":
-      steps = repoFallbackPlan(goal);
+      steps = repoFallbackPlan(goal, opts);
       break;
     default:
       // unknown — fail closed. Never invent work for an intent the
@@ -486,23 +616,51 @@ export async function planMission(
 
   // 1. Ask the model for a semantic plan
   let plan: SemanticPlan;
+  let planAttempts = 0;
   try {
     const messages: ChatMessage[] = [
       { role: "system", content: "You are LiTT's mission planner. Output only a JSON array of semantic steps." },
-      { role: "user", content: buildPlanningPrompt(options.goal, options.projectContext ?? null) },
+      { role: "user", content: buildPlanningPrompt(options.goal, options.projectContext ?? null, options.mutationRequested !== false) },
     ];
 
-    let modelText = "";
-    await options.model.stream(messages, (event) => {
-      if (options.onModelStream) {
-        try { options.onModelStream(event); } catch { /* listener errors don't crash planning */ }
-      }
-      if (event.type === "delta") {
-        modelText += event.text;
-      }
-    });
+    const askModel = async (): Promise<{ text: string; steps: SemanticStepSpec[] | null }> => {
+      planAttempts++;
+      let deltaText = "";
+      const result = await options.model.stream(messages, (event) => {
+        if (options.onModelStream) {
+          try { options.onModelStream(event); } catch { /* listener errors don't crash planning */ }
+        }
+        if (event.type === "delta") {
+          deltaText += event.text;
+        }
+      });
+      // The streamed deltas only carry prose — native tool_call blocks
+      // live in the provider's canonical ModelResult.content. A planner
+      // model that called a tool instead of answering still produces a
+      // non-empty content that must be recorded, never reported as "".
+      const text = deltaText.trim() ? deltaText : (result?.content ?? "");
+      return { text, steps: parseSemanticPlan(text) };
+    };
 
-    const modelSteps = parseSemanticPlan(modelText);
+    let { text: modelText, steps: modelSteps } = await askModel();
+
+    // One bounded retry when the model answered with no parseable plan
+    // (e.g. it called a tool or emitted only prose). A weak local model
+    // must not silently fall through to the fallback on the first miss.
+    if (!modelSteps || modelSteps.length === 0) {
+      messages.push({
+        role: "user",
+        content: "Do not call tools. Output only the JSON array.",
+      });
+      const retry = await askModel();
+      if (retry.steps && retry.steps.length > 0) {
+        modelText = retry.text;
+        modelSteps = retry.steps;
+      } else if (!modelText.trim()) {
+        modelText = retry.text;
+      }
+    }
+
     if (modelSteps && modelSteps.length > 0) {
       plan = { steps: modelSteps, source: "model", rawModelText: modelText };
     } else {
@@ -518,8 +676,20 @@ export async function planMission(
   }
 
   // 2. Persist each step on the canonical mission
+  // Read-only goals: strip mutation-dependent steps the model (or a
+  // fallback plan) still emitted — they can never earn evidence and
+  // would guarantee a verification failure. Applies to BOTH model and
+  // fallback plans; the prompt instruction above is the primary defense,
+  // this is the safety net.
+  const planSteps =
+    options.mutationRequested === false
+      ? dropMutationDependentSteps(plan.steps)
+      : plan.steps;
+
   // Normalize requiredEvidence for any steps the model omitted.
-  const normalizedSteps = normalizeSemanticPlan(plan.steps);
+  const normalizedSteps = normalizeSemanticPlan(planSteps, {
+    checksRequired: options.checksRequired,
+  });
 
   const steps: MissionStep[] = [];
   for (const spec of normalizedSteps) {
@@ -544,6 +714,7 @@ export async function planMission(
       domain: plan.fallbackDomain ?? null,
       stepCount: plan.steps.length,
       rawModelText: plan.rawModelText ?? null,
+      attempts: planAttempts || undefined,
     },
   };
   await options.store.persistMissionNow();
@@ -566,7 +737,9 @@ async function buildFallbackOrBlock(
 ): Promise<SemanticPlan> {
   const mission = options.store.getMission();
   const domain = classifyGoalDomain(options.goal);
-  const steps = fallbackPlan(options.goal, mission?.mode);
+  const steps = fallbackPlan(options.goal, mission?.mode, {
+    checksRequired: options.checksRequired,
+  });
 
   if (steps.length === 0) {
     const failureReason =
@@ -643,8 +816,16 @@ function toolToScope(toolId: string): string | null {
   ) {
     return "inspect";
   }
+  if (toolId === "project.inspect_package") {
+    return "inspect";
+  }
   // Check tools
-  if (toolId === "project.typecheck" || toolId === "project.test" || toolId === "project.build") {
+  if (
+    toolId === "project.typecheck" ||
+    toolId === "project.check" ||
+    toolId === "project.test" ||
+    toolId === "project.build"
+  ) {
     return "check";
   }
   // Mutation tools → repair/implement/act
@@ -776,6 +957,7 @@ export function toolToEvidenceType(toolId: string): EvidenceType {
     case "project.diff":
       return "diff";
     case "project.typecheck":
+    case "project.check":
       return "typecheck_result";
     case "project.test":
       return "test_result";
@@ -783,6 +965,11 @@ export function toolToEvidenceType(toolId: string): EvidenceType {
       return "build_result";
     case "project.read_file":
       return "file_read";
+    case "project.inspect_package":
+      return "file_read";
+    case "project.log":
+    case "project.branch":
+      return "repository_status";
     case "project.search":
       return "search_result";
     case "project.list_files":
@@ -791,6 +978,19 @@ export function toolToEvidenceType(toolId: string): EvidenceType {
       return "command_result";
   }
 }
+
+/**
+ * The canonical producer tool for each evidence type a step contract
+ * may legitimately require. When a verification gate reports missing
+ * evidence, the runtime can acquire it itself by dispatching THIS tool
+ * once — through the same dispatch path the model's calls use.
+ */
+export const EVIDENCE_PRODUCER_TOOLS: Readonly<Partial<Record<EvidenceType, string>>> = {
+  typecheck_result: "project.check",
+  test_result: "project.test",
+  build_result: "project.build",
+  repository_status: "project.status",
+};
 
 /**
  * Check if a mission step's required evidence has been satisfied by

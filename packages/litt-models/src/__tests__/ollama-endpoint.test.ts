@@ -60,8 +60,12 @@ describe("normalizeOllamaEndpoint", () => {
     assert.equal(normalizeOllamaEndpoint("192.168.0.77:11434"), "http://192.168.0.77:11434");
   });
 
-  it("normalizes bare hostname to http://", () => {
-    assert.equal(normalizeOllamaEndpoint("ollama.local"), "http://ollama.local");
+  // A schemeless host without a port inherits Ollama's default port
+  // (OLLAMA_HOST semantics) — not the URL's implicit port 80.
+  it("normalizes bare hostname to http:// with the default port", () => {
+    assert.equal(normalizeOllamaEndpoint("ollama.local"), "http://ollama.local:11434");
+    assert.equal(normalizeOllamaEndpoint("localhost"), "http://localhost:11434");
+    assert.equal(normalizeOllamaEndpoint("192.168.0.77"), "http://192.168.0.77:11434");
   });
 
   it("preserves http:// URL", () => {
@@ -239,5 +243,19 @@ describe("resolveOllamaEndpoint — unreachable endpoint does not fabricate", ()
   it("resolves to the configured endpoint even if unreachable (probe is caller's job)", () => {
     const env = envFromMap({ LITT_OLLAMA_URL: "http://192.168.99.99:11434" });
     assert.equal(resolveOllamaEndpoint(env), "http://192.168.99.99:11434");
+  });
+});
+
+describe("normalizeOllamaEndpoint — unspecified bind hosts", () => {
+  it("maps 0.0.0.0 (OLLAMA_HOST bind address) to 127.0.0.1, preserving port", () => {
+    assert.equal(normalizeOllamaEndpoint("0.0.0.0"), "http://127.0.0.1:11434");
+    assert.equal(normalizeOllamaEndpoint("0.0.0.0:11434"), "http://127.0.0.1:11434");
+    assert.equal(normalizeOllamaEndpoint("http://0.0.0.0:11434"), "http://127.0.0.1:11434");
+  });
+
+  it("maps [::] / :: to [::1]", () => {
+    assert.equal(normalizeOllamaEndpoint("[::]"), "http://[::1]:11434");
+    assert.equal(normalizeOllamaEndpoint("::"), "http://[::1]:11434");
+    assert.equal(normalizeOllamaEndpoint("http://[::]:11434"), "http://[::1]:11434");
   });
 });

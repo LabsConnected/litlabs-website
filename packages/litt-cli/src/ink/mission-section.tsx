@@ -13,6 +13,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { COLORS, stateColor } from "./colors.js";
+import { redactSecrets } from "./activity-redact.js";
 import type { HoloState, MissionState } from "./cockpit-store.js";
 
 export interface MissionSectionProps {
@@ -87,6 +88,11 @@ export function MissionSection({ holoState, missionState, lastCompletedMission }
               <Text color={m.runtimeProven ? COLORS.success : COLORS.error}>
                 Runtime verification {m.runtimeProven ? "PROVEN" : "NOT PROVEN"}
               </Text>
+            </Box>
+          )}
+          {!isComplete && m.failureReason && (
+            <Box>
+              <Text color={COLORS.error} wrap="wrap">{`Reason: ${redactSecrets(m.failureReason)}`}</Text>
             </Box>
           )}
           <Box>
