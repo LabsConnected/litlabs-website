@@ -124,6 +124,30 @@ export async function getOrCreateUser(
   return { user: user as UserProfile, isNew: true };
 }
 
+/**
+ * Lazily provision the users row for an authenticated Clerk user.
+ * Server-side only. Resolves real email/name via the Clerk API, falling
+ * back to a placeholder when Clerk is unreachable — the user.updated
+ * webhook reconciles the placeholder later. Used by paths whose first
+ * access can outrun the user.created webhook (wallet, orchestrate).
+ */
+export async function ensureUserProvisioned(clerkId: string) {
+  let email = `${clerkId}@placeholder.local`;
+  let name = "";
+  try {
+    const { clerkClient } = await import("@clerk/nextjs/server");
+    const clerk = await clerkClient();
+    const clerkUser = await clerk.users.getUser(clerkId);
+    email = clerkUser.emailAddresses[0]?.emailAddress ?? email;
+    name =
+      [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
+      email.split("@")[0];
+  } catch {
+    // Clerk API unavailable — getOrCreateUser still writes a usable row.
+  }
+  return getOrCreateUser(clerkId, email, name);
+}
+
 /** Get user profile by Clerk ID */
 export async function getUserByClerkId(
   clerkId: string,

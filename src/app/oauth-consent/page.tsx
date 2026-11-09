@@ -5,6 +5,7 @@ import { CustomConsentForm } from './custom-consent-form'
 
 export const metadata: Metadata = {
   referrer: 'strict-origin-when-cross-origin',
+  robots: { index: false, follow: false },
 }
 
 export default function OAuthConsentPage() {

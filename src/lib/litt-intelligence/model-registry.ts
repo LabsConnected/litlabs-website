@@ -113,6 +113,10 @@ function seedRecords(): Map<string, ModelRecord> {
       provider: "gemini",
       canonicalId: "gemini-flash",
       // Alias, not a versioned slug: self-heals as Google rotates versions.
+      // Demoted behind the pinned gemini-2.5-flash (Nov 2026): the alias
+      // timed out at 60s on staging while the pinned model served the same
+      // window — the verified model is the primary pick, the alias is the
+      // self-healing fallback if Google deprecates the pin.
       providerModelId: "gemini-flash-latest",
       enabled: true,
       capabilities: {
@@ -123,7 +127,7 @@ function seedRecords(): Map<string, ModelRecord> {
         vision: true,
         contextWindow: 1_048_576,
       },
-      priority: 10,
+      priority: 20,
       healthState: "unknown",
     },
     {
@@ -139,7 +143,10 @@ function seedRecords(): Map<string, ModelRecord> {
         vision: true,
         contextWindow: 1_048_576,
       },
-      priority: 20,
+      // Priority 10 — the version-pinned model verified serving agent
+      // tool-calls on staging (2026-11-08): gemini-2.5-flash completed
+      // build + modify runs while gemini-flash-latest timed out at 60s.
+      priority: 10,
       healthState: "unknown",
     },
     {

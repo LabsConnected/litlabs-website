@@ -265,6 +265,30 @@ describe("insertAssetFromUrl (shared core)", () => {
     expect(result.sitePath).toMatch(/\.jpeg$/);
   });
 
+  it("saves JPEG bytes mislabeled as image/png — the staging approval-loop payload", async () => {
+    // Regression for 2026-11-08: Cloudflare flux-1-schnell returns JPEG
+    // bytes but the provider wrapped them as data:image/png. The declared
+    // label drove the PNG structural check, which rejected valid JPEG as
+    // "truncated or corrupt" — every approved image.generate reported
+    // savedToProject:false and the model retried under fresh approvals.
+    const transport = spyTransport();
+    const jpeg = Buffer.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46,
+      0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+      0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
+    ]);
+    const result = await insertAssetFromUrl(
+      `data:image/png;base64,${jpeg.toString("base64")}`,
+      { nameHint: "hero" },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    expect(result.sitePath).toMatch(/\.jpe?g$/);
+    expect(result.contentType).toBe("image/jpeg");
+    const [, b64] = transport.writeBinaryFile.mock.calls[0];
+    expect(Buffer.from(b64 as string, "base64")).toEqual(jpeg);
+  });
+
   it("rejects a truncated image payload — decodes but is corrupt", async () => {
     // A model re-emitting a clipped data: URL produces a JPEG with a valid
     // header but no EOI marker — writing it ships a broken site asset.
@@ -388,5 +412,52 @@ describe("insertAssetFromUrl (shared core)", () => {
     const result = await insertAssetFromUrl("https://cdn.example.com/hero.png", {}, transport);
     expect(result.success).toBe(false);
     expect(result.error).toBe("boom");
+  });
+
+  it("normalizes an oversized hotlink under the publish cap before writing", async () => {
+    // Golden run 42455260375: a >2MB rehosted image wrote fine but could
+    // never be read back for publish — deploy failed "missing file".
+    const sharp = (await import("sharp")).default;
+    const { randomBytes } = await import("node:crypto");
+    const raw = randomBytes(2600 * 1700 * 3);
+    const bigPng = await sharp(raw, { raw: { width: 2600, height: 1700, channels: 3 } })
+      .png()
+      .toBuffer();
+    expect(bigPng.length).toBeGreaterThan(2 * 1024 * 1024);
+
+    globalThis.fetch = vi.fn(async () =>
+      mockImageResponse({ contentType: "image/png", bytes: bigPng }),
+    ) as unknown as typeof fetch;
+    const transport = spyTransport();
+    const result = await insertAssetFromUrl(
+      "https://images.example.com/photo-123",
+      { nameHint: "external-image" },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    expect(transport.writeBinaryFile).toHaveBeenCalledTimes(1);
+    const [writtenPath, b64] = transport.writeBinaryFile.mock.calls[0];
+    const written = Buffer.from(b64 as string, "base64");
+    expect(written.length).toBeLessThanOrEqual(2 * 1024 * 1024);
+    expect(written.length).toBe(result.sizeBytes);
+    // Photo PNG without alpha normalizes to JPEG — extension follows.
+    expect(writtenPath).toMatch(/\.jpe?g$/);
+    expect(result.sitePath).toMatch(/\.jpe?g$/);
+  });
+
+  it("refuses an oversized image it cannot fit instead of writing an undeployable asset", async () => {
+    const gif = Buffer.concat([
+      Buffer.from("GIF89a", "ascii"),
+      Buffer.alloc(2 * 1024 * 1024 + 2048, 0x41),
+      Buffer.from([0x3b]),
+    ]);
+    globalThis.fetch = vi.fn(async () =>
+      mockImageResponse({ contentType: "image/gif", bytes: gif }),
+    ) as unknown as typeof fetch;
+    const transport = spyTransport();
+    const result = await insertAssetFromUrl("https://example.com/huge.gif", {}, transport);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/publish limit/i);
+    expect(transport.writeBinaryFile).not.toHaveBeenCalled();
   });
 });

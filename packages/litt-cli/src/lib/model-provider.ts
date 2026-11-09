@@ -794,7 +794,7 @@ export class OpenRouterModelProvider implements ModelProvider {
             try {
               inputs = JSON.parse(tc.args);
             } catch {
-              inputs = {};
+              inputs = { __litt_invalid_arguments__: String(tc.args).slice(0, 200) };
             }
           }
           const canonicalToolId = resolveCanonicalToolId(tc.name, this._toolNameMap);
@@ -1212,7 +1212,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
         .map((tc) => {
           let inputs: unknown = {};
           if (tc.args) {
-            try { inputs = JSON.parse(tc.args); } catch { inputs = {}; }
+            try { inputs = JSON.parse(tc.args); } catch { inputs = { __litt_invalid_arguments__: String(tc.args).slice(0, 200) }; }
           }
           const canonicalToolId = resolveCanonicalToolId(tc.name, this._toolNameMap);
           return `\`\`\`tool_call\n${JSON.stringify({ tool: canonicalToolId, inputs }, null, 2)}\n\`\`\``;

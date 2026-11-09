@@ -66,6 +66,8 @@ import { mobileDiag, isMobileDiagEnabled } from "../lib/mobileDiagnostics";
 import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
 import AssetsPanel from "./context/AssetsPanel";
 import { StudioContextProvider, isStudioSelectionPayload, type StudioSelectionPayload, type StudioSelectionValue } from "../context/StudioContext";
+import { ElementEditsContext } from "../context/ElementEditsContext";
+import { useElementEdits } from "../hooks/useElementEdits";
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier } from "../hooks/useViewportTier";
@@ -75,6 +77,7 @@ import type { StudioTask } from "@/lib/studio/task-types";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
 import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult } from "../lib/approval-polling";
+import { createApprovalOutcomeGuard } from "../lib/approval-outcome-guard";
 import { StudioActivityPanel, StudioInspector } from "./StudioWorkspaceFrame";
 import StudioShell from "./shell/StudioShell";
 import WorkspaceRail from "./shell/WorkspaceRail";
@@ -374,6 +377,10 @@ function CommandStudioContent() {
       ? previewSelection
       : { elementId: previewSelection.selector, componentName: previewSelection.tagName, content: previewSelection.label }
     : null;
+  // ONE element-edit write path for the whole Studio tree: the inspector
+  // panel and the Design canvas gestures share file cache + undo history
+  // through ElementEditsContext (provided below).
+  const elementEdits = useElementEdits(capabilities.projectId ?? null);
   const [completion, setCompletion] = useState<{ changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null>(null);
 
   // Safety: clear any stuck body styles from resize handles that didn't
@@ -1595,6 +1602,12 @@ function CommandStudioContent() {
   // silently clears, nothing auto re-requests.
   // Exception: a resumed run that pauses on a NEW gate stays on Live so the
   // fresh Approve/Reject card is visible.
+  // Single-flight guard for approval outcomes (§6.3): the poller and
+  // the watcher both observe the same paused-run outcome, and the
+  // second observer must not re-apply it once a nested gate is mounted
+  // (that duplicates the "Approved" entry). The guard lives in a ref
+  // so it survives re-renders and both observers share one set.
+  const approvalOutcomeGuardRef = useRef(createApprovalOutcomeGuard());
   const applyApprovalOutcome = useCallback((opts: {
     conversationId: string;
     resolution: "approved" | "rejected" | "expired" | "gone";
@@ -1604,7 +1617,18 @@ function CommandStudioContent() {
     expired?: boolean;
     /** Whether the approval decision reached the server (see approval-polling). */
     decisionRecorded?: boolean;
+    /** Paused run this outcome belongs to — the single-flight key. */
+    pausedRunId?: string;
   }) => {
+    // The poller and the watcher both report the same outcome. Only the
+    // first observer processes a given pausedRunId; the second is a
+    // no-op, so a nested gate mounted in between cannot collect a
+    // phantom "Approved" entry. Failure outcomes stay retryable: a
+    // failed POST re-issues the same pausedRunId and its later success
+    // must still apply.
+    if (!approvalOutcomeGuardRef.current.shouldProcess(opts.pausedRunId, { resolution: opts.resolution, runError: opts.runError })) {
+      return;
+    }
     const exec = useExecutionStore.getState();
     if (opts.resolution === "rejected") {
       if (opts.runError) {
@@ -1704,13 +1728,13 @@ function CommandStudioContent() {
           // A rejection runs nothing server-side — settle immediately so the
           // user lands back on the composer instead of a dead Live tab.
           if (decision === "rejected") {
-            applyApprovalOutcome({ conversationId: convId, resolution: "rejected" });
+            applyApprovalOutcome({ conversationId: convId, resolution: "rejected", pausedRunId: pending.pausedRunId });
           } else {
             exec.approvalAccepted();
           }
         },
         onCompleted: (result) => {
-          applyApprovalOutcome({ conversationId: convId, resolution: decision, runResult: result });
+          applyApprovalOutcome({ conversationId: convId, resolution: decision, runResult: result, pausedRunId: pending.pausedRunId });
         },
         onFailed: (error, info) => {
           applyApprovalOutcome({
@@ -1720,6 +1744,7 @@ function CommandStudioContent() {
             retryable: info?.retryable,
             expired: info?.expired,
             decisionRecorded: info?.decisionRecorded,
+            pausedRunId: pending.pausedRunId,
           });
         },
       });
@@ -1831,6 +1856,7 @@ function CommandStudioContent() {
           // The watcher only observes post-decision states: a failed
           // runStatus means the decision was recorded, so the gate is dead.
           decisionRecorded: outcome.runStatus === "failed" ? true : undefined,
+          pausedRunId: watchPausedRunId,
         });
       },
     });
@@ -2032,9 +2058,17 @@ function CommandStudioContent() {
     workspace: capabilities.projectName ?? "Private LiTT workspace — created when you send",
     repo: capabilities.repositoryName ?? undefined,
     branch: capabilities.activeBranch ?? (typeof window !== "undefined" ? (searchParams.get("branch") ?? undefined) : undefined),
-    permissionMode: capabilities.writeAccess ? "Writes allowed" : "Writes require approval",
+    // writeAccess means "a writable surface exists", not "writes bypass
+    // approval" — the label must agree with the ACT/AUTO gate policy.
+    permissionMode: !capabilities.writeAccess
+      ? "No write surface"
+      : executionMode === "plan"
+        ? "Read-only (PLAN mode)"
+        : executionMode === "act"
+          ? "Writes require approval"
+          : "Writes allowed",
     selectedElement: previewSelection?.label,
-  }), [capabilities.activeBranch, capabilities.projectName, capabilities.repositoryName, capabilities.writeAccess, previewSelection?.label, searchParams]);
+  }), [capabilities.activeBranch, capabilities.projectName, capabilities.repositoryName, capabilities.writeAccess, executionMode, previewSelection?.label, searchParams]);
 
   // P0.13: Select a conversation from the empty state's Recent Chats section.
   const handleSelectConversation = useCallback((conversationId: string) => {
@@ -2804,7 +2838,7 @@ function CommandStudioContent() {
           />
         );
       case "design":
-        return <VisualCanvasBuilder />;
+        return <VisualCanvasBuilder onPreviewSelectionChange={(sel) => setPreviewSelection(sel)} />;
       case "preview":
         return (
           <StudioPreviewPanel
@@ -2976,6 +3010,7 @@ function CommandStudioContent() {
         }
       }}
     >
+    <ElementEditsContext.Provider value={elementEdits}>
     <>
       <AgentVoiceSync />
 
@@ -3117,6 +3152,8 @@ function CommandStudioContent() {
                 })}
               </>
             }
+            inspectorOpen={inspectorOpen}
+            onOpenInspector={() => setInspectorOpen(true)}
             inspector={
               <ContextInspector
                 open={inspectorOpen}
@@ -3194,6 +3231,7 @@ function CommandStudioContent() {
                     onTabChange={setInspectorTab}
                     data={{
                       capabilities,
+                      executionMode,
                       modelLabel,
                       modelHealth,
                       activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
@@ -3211,6 +3249,11 @@ function CommandStudioContent() {
                 }
               />
             }
+            leftWidth={littCollapsed ? 64 : littDockResize.width}
+            onResetLeftWidth={() => {
+              littDockResize.reset();
+              setLittCollapsed(false);
+            }}
             leftPanel={
               chatDock === "left" ? (
                 <LiTTPanel
@@ -3385,7 +3428,7 @@ function CommandStudioContent() {
                   </div>
                 ) : isCanvas ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    <VisualCanvasBuilder />
+                    <VisualCanvasBuilder onPreviewSelectionChange={(sel) => setPreviewSelection(sel)} />
                   </div>
                 ) : isCode ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -3534,6 +3577,7 @@ function CommandStudioContent() {
                   onTabChange={setInspectorTab}
                   data={{
                     capabilities,
+                    executionMode,
                     modelLabel,
                     modelHealth,
                     activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
@@ -3604,6 +3648,7 @@ function CommandStudioContent() {
                   onTabChange={setInspectorTab}
                   data={{
                     capabilities,
+                    executionMode,
                     modelLabel,
                     modelHealth,
                     activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
@@ -3870,6 +3915,7 @@ function CommandStudioContent() {
       )}
 
     </>
+    </ElementEditsContext.Provider>
     </StudioContextProvider>
   );
 }

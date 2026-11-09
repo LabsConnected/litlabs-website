@@ -53,6 +53,7 @@ import {
 import { resolveWorkspacePath as resolveWorkspacePathSecure, validateWritePayload } from "./workspace/WorkspaceSecurity";
 import { deleteResolvedPath } from "./workspace/FileService";
 import { replaceScaffoldingForWrite, SCAFFOLD_DIR_NAME } from "./workspace/scaffold";
+import { checkExpectedSha256 } from "./workspace/cas";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
   startPreview,
@@ -1582,6 +1583,21 @@ app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
   }
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
+    // Compare-and-swap: when the caller pins a revision, refuse the write if
+    // the file changed since — a visual edit must never silently clobber a
+    // concurrent agent/user write. Synchronous check → no interleaving.
+    const expectedSha256 =
+      typeof req.body.expectedSha256 === "string" ? req.body.expectedSha256 : undefined;
+    if (expectedSha256 !== undefined) {
+      const cas = checkExpectedSha256(target, expectedSha256);
+      if (!cas.ok) {
+        return res.status(409).json({
+          error: `Revision conflict: "${filePath}" ${cas.reason}`,
+          code: "REVISION_CONFLICT",
+          currentSha256: cas.currentSha256,
+        });
+      }
+    }
     // ─── Starter-scaffolding replacement (brief §7) ─────────────────
     // Deterministic complement to the prompt-text rule: the `scaffolded`
     // manifest — not text matching — is the authority on whether this

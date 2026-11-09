@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { apiFetch, type ProfileDTO } from "@/lib/social-server";
+import { absoluteUrl } from "@/lib/seo";
 import ProfileClient from "./ProfileClient";
 
 async function getProfile(handle: string): Promise<ProfileDTO | null> {
@@ -52,6 +53,7 @@ export async function generateMetadata({
   return {
     title: `${name} (@${profile.username}) | LiTTree`,
     description: profile.bio ?? `${name} on LiTTree`,
+    alternates: { canonical: absoluteUrl(`/u/${profile.username}`) },
   };
 }
 

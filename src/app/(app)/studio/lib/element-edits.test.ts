@@ -114,6 +114,70 @@ describe("applyElementPatch", () => {
   });
 });
 
+describe("move (flow reorder)", () => {
+  const LIST = `<!DOCTYPE html>
+<html><body>
+  <ul id="list"><li id="a">A</li><li id="b">B</li><li id="c">C</li></ul>
+  <div id="wrap"><section id="s1"><p id="p1">one</p><p id="p2">two</p></section></div>
+</body></html>`;
+
+  it("moves an element before a sibling", () => {
+    const r = applyElementPatch(LIST,
+      { selector: "#c", tagName: "li", attrs: { id: "c" } },
+      { move: { ref: { selector: "#a", tagName: "li", attrs: { id: "a" } }, position: "before" } });
+    expect(r.ok).toBe(true);
+    expect(r.html.indexOf('id="c"')).toBeLessThan(r.html.indexOf('id="a"'));
+    expect(r.changed.join(" ")).toContain("move");
+  });
+
+  it("moves an element after a sibling", () => {
+    const r = applyElementPatch(LIST,
+      { selector: "#a", tagName: "li", attrs: { id: "a" } },
+      { move: { ref: { selector: "#c", tagName: "li", attrs: { id: "c" } }, position: "after" } });
+    expect(r.ok).toBe(true);
+    expect(r.html.indexOf('id="a"')).toBeGreaterThan(r.html.indexOf('id="c"'));
+  });
+
+  it("moves into a container as last child (preserves nesting)", () => {
+    const r = applyElementPatch(LIST,
+      { selector: "#p1", tagName: "p", attrs: { id: "p1" } },
+      { move: { ref: { selector: "#wrap", tagName: "div", attrs: { id: "wrap" } }, position: "into" } });
+    expect(r.ok).toBe(true);
+    // p1 is now a direct child of #wrap, AFTER section#s1 — not flattened
+    // into a sibling of its old parent.
+    const wrapIdx = r.html.indexOf('id="wrap"');
+    const s1Idx = r.html.indexOf('id="s1"');
+    const p1Idx = r.html.indexOf('id="p1"');
+    expect(wrapIdx).toBeLessThan(s1Idx);
+    expect(s1Idx).toBeLessThan(p1Idx);
+  });
+
+  it("refuses an ambiguous drop target instead of guessing", () => {
+    const r = applyElementPatch(LIST,
+      { selector: "#a", tagName: "li", attrs: { id: "a" } },
+      { move: { ref: { selector: "p", tagName: "p" }, position: "before" } });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/drop target/i);
+    expect(r.html).toBe(LIST);
+  });
+
+  it("refuses moving into its own descendant", () => {
+    const r = applyElementPatch(LIST,
+      { selector: "#s1", tagName: "section", attrs: { id: "s1" } },
+      { move: { ref: { selector: "#p1", tagName: "p", attrs: { id: "p1" } }, position: "into" } });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/descendant/i);
+  });
+
+  it("reports a truthful no-op when already in position", () => {
+    const r = applyElementPatch(LIST,
+      { selector: "#a", tagName: "li", attrs: { id: "a" } },
+      { move: { ref: { selector: "#b", tagName: "li", attrs: { id: "b" } }, position: "before" } });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toHaveLength(0);
+  });
+});
+
 describe("candidateHtmlFiles", () => {
   const files = ["index.html", "about.html", "docs/index.html", "style.css", "app/page.tsx"];
 

@@ -199,18 +199,90 @@ export async function maybeAutoInsertGeneratedImage(
           `do NOT call project.insert_asset again and do NOT invent another path.`,
       };
     }
+    // Save failed. Drop insertHint: it instructs the model to call
+    // project.insert_asset "with this downloadUrl", but free providers
+    // return multi-KB data: URLs that are redacted from the model's
+    // context — the instruction is unfollowable, and the model responded
+    // by re-calling image.generate under a fresh approval every time
+    // (2026-11-08 staging approval loop). Keep markdown so the generated
+    // image still renders in chat.
+    const { insertHint: _insertHint, ...rest } = r;
+    const rawSaveError = saved.error ?? "Failed to save image into project";
+    // Name the failed save step in the error itself: the run record
+    // must be self-diagnosing. The approval-loop diagnosis had to
+    // reconstruct which save step failed forensically because the
+    // saveError carried no step information.
+    const saveError = saved.saveStep ? `[${saved.saveStep}] ${rawSaveError}` : rawSaveError;
     return {
-      ...r,
+      ...rest,
       savedToProject: false,
-      saveError: saved.error ?? "Failed to save image into project",
+      saveError,
+      saveStep: saved.saveStep,
+      recovery:
+        `The image was generated but could not be saved into the project ` +
+        `workspace (${saveError}). Continue building the site without this ` +
+        `image — do not call image.generate again for the same asset.`,
     };
   } catch (err) {
+    const { insertHint: _insertHint, ...rest } = r;
+    const saveError = err instanceof Error ? err.message : "Failed to save image into project";
     return {
-      ...r,
+      ...rest,
       savedToProject: false,
-      saveError: err instanceof Error ? err.message : "Failed to save image into project",
+      saveError,
+      recovery:
+        `The image was generated but could not be saved into the project ` +
+        `workspace (${saveError}). Continue building the site without this ` +
+        `image — do not call image.generate again for the same asset.`,
     };
   }
+}
+
+/**
+ * Budget for the post-generation auto-insert save, decoupled from the
+ * generating tool's own deadline. Aligned with the workspace
+ * transport's binary-write timeout (120s): the save gets the time its
+ * own transport allows, no more, no less.
+ */
+export const AUTO_INSERT_SAVE_TIMEOUT_MS = 120_000;
+
+/**
+ * Run a tool handler under the tool's declared deadline, then the
+ * image.generate auto-insert save under its OWN deadline.
+ *
+ * The registry deadline used to wrap generation AND the save in a
+ * single budget: a generation that consumed most of its 60s left the
+ * save no time at all, and because a deadline only rejects the awaited
+ * promise, a cut-off save could still land in the background — run
+ * state and workspace disagreeing about whether the asset exists. Now
+ * the declared deadline governs the handler alone; once generation has
+ * completed, the save runs under AUTO_INSERT_SAVE_TIMEOUT_MS. For
+ * every tool except image.generate the save step is a pass-through.
+ *
+ * Exported for unit tests.
+ */
+export async function executeHandlerThenAutoInsert(
+  toolId: string,
+  runHandler: () => Promise<unknown>,
+  transport: unknown,
+  options: {
+    handlerTimeoutMs: number;
+    saveTimeoutMs?: number;
+    signal?: AbortSignal;
+  },
+): Promise<unknown> {
+  const handlerResult = await withExecutionDeadline(
+    runHandler,
+    options.handlerTimeoutMs,
+    toolId,
+    options.signal,
+  );
+  return withExecutionDeadline(
+    () => maybeAutoInsertGeneratedImage(toolId, handlerResult, transport),
+    options.saveTimeoutMs ?? AUTO_INSERT_SAVE_TIMEOUT_MS,
+    toolId,
+    options.signal,
+  );
 }
 
 const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
@@ -802,20 +874,16 @@ class ToolRegistry {
         }
       }
       try {
-        const finalResult = await withExecutionDeadline(
-          async () =>
-            maybeAutoInsertGeneratedImage(
-              id,
-              await handler(inputs, options.transport, {
-                actionRunId: explicitActionRunId ?? undefined,
-                actionContext,
-                userId: actionContext?.userId ?? inputUserId ?? undefined,
-              }),
-              options.transport,
-            ),
-          timeoutMs,
+        const finalResult = await executeHandlerThenAutoInsert(
           id,
-          options.signal,
+          () =>
+            handler(inputs, options.transport, {
+              actionRunId: explicitActionRunId ?? undefined,
+              actionContext,
+              userId: actionContext?.userId ?? inputUserId ?? undefined,
+            }),
+          options.transport,
+          { handlerTimeoutMs: timeoutMs, signal: options.signal },
         );
         if (runtime && browserContext) {
           try {

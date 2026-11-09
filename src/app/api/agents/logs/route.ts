@@ -46,6 +46,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json([]);
   }
 
+  // General agent logs are global telemetry (user message text lands in
+  // agent_logs.metadata) — owner-only, same boundary as type=commands.
+  const { userId } = await auth(req);
+  if (!isOwnerClerkId(userId)) {
+    return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  }
+
   // General agent logs (existing behaviour)
   try {
     const { data: rows, error } = await supabaseAdmin
