@@ -18,6 +18,17 @@ import type { ShellExecutor, ShellExecuteOptions, ShellResult, StreamChunk } fro
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 
+/**
+ * After a child emits "exit", stdio streams can stay open indefinitely
+ * when an orphaned grandchild inherited the pipe handles — "close" then
+ * never fires and execute() hangs forever (observed: mission stuck in
+ * "verifying" 16+ min with no live process). Give streams this long to
+ * flush, then force-destroy them.
+ */
+const STDIO_CLOSE_GRACE_MS = 2_000;
+/** Hard fallback if "close" still hasn't fired after streams destroyed. */
+const EXIT_FALLBACK_MS = 1_000;
+
 // On Windows, npm/pnpm/yarn/npx are .CMD or .PS1 shims, not real executables.
 // execFile without shell:true cannot run .CMD files. We resolve the actual
 // executable by checking for common extensions in PATH.
@@ -34,10 +45,16 @@ const WINDOWS_EXTS = [".exe", ".cmd", ".bat"];
 const WINDOWS_BUILTINS = new Set([
   "echo", "dir", "set", "cd", "type", "cls", "copy", "move",
   "del", "erase", "md", "mkdir", "rd", "rmdir", "ren", "rename",
-  "path", "prompt", "title", "ver", "vol", "label", "chdir",
-  "chcp", "chkntfs", "color", "date", "time", "tree", "where",
+  "path", "prompt", "title", "ver", "vol", "chdir",
+  "chcp", "chkntfs", "color", "tree", "where",
   "assoc", "ftype", "pushd", "popd", "setlocal", "endlocal",
   "call", "exit", "rem", "if", "for", "goto",
+  // NOTE: "date", "time", and "label" are deliberately absent — the
+  // cmd.exe builtins are interactive setters that PROMPT for input
+  // (e.g. `date +%Y` hangs at "Enter the new date:"). Resolving them
+  // via PATH finds real executables (Git's date.exe/time.exe) whose
+  // read semantics match what agents expect; with none installed the
+  // command fails cleanly instead of hanging until the timeout.
 ]);
 
 function resolveCommand(command: string): { command: string; args: string[]; useShell: boolean } {
@@ -82,6 +99,39 @@ function resolveCommand(command: string): { command: string; args: string[]; use
 
   // Fallback: use shell:true with the original command
   return { command, args: [], useShell: true };
+}
+
+/**
+ * cmd.exe metacharacters and whitespace that require quoting. Inside a
+ * quoted cmd token, & | < > are literal; "%VAR%" still expands (cmd has
+ * no escape for it) but quoting keeps the token grouped. A literal '"'
+ * cannot be escaped for cmd's own parser — we double it ("") which
+ * CommandLineToArgvW/MSVCRT argv collapse back to a single '"' for the
+ * child while cmd's separator scan stays inside quotes.
+ */
+const CMD_NEEDS_QUOTES_RE = /[\s"&|<>^%]/;
+
+function quoteCmdToken(token: string): string {
+  if (token === "") return '""';
+  if (CMD_NEEDS_QUOTES_RE.test(token)) {
+    return `"${token.replace(/"/g, '""')}"`;
+  }
+  return token;
+}
+
+/**
+ * Build the full cmd.exe command line for a shell-resolved invocation.
+ *
+ * Node's spawn({shell:true}) joins file+args with bare spaces and hands
+ * the result to `cmd.exe /d /s /c "..."` — it does NOT quote the file.
+ * A .cmd shim under a path with spaces (e.g. "C:\Program Files\
+ * nodejs\npm.cmd") then fails with `'C:\Program' is not recognized`,
+ * and raw args let cmd metacharacters (& | < > ^ %) inject commands —
+ * silently breaking the documented "no shell" contract of project.run.
+ * Quoting every token restores that contract.
+ */
+function buildCmdCommandLine(command: string, args: string[]): string {
+  return [quoteCmdToken(command), ...args.map(quoteCmdToken)].join(" ");
 }
 
 // ─── Process-tree killing ──────────────────────────────────────────
@@ -196,8 +246,15 @@ export class NodeShellExecutor implements ShellExecutor {
   private _cwd: string;
   private _env: Record<string, string>;
   private _platform: NodeJS.Platform;
-  private _child: import("child_process").ChildProcess | null = null;
-  private _cancelled = false;
+  /**
+   * ALL in-flight children. A single slot was a real bug: the agent
+   * loop dispatches parallel read-only tool calls, each overwrote
+   * `_child`, and cancel() then killed only the last spawn — earlier
+   * children became untracked orphans that could hang forever.
+   * `_cancelled` was likewise shared: a later execute() reset the flag
+   * mid-cancel for every in-flight command.
+   */
+  private _active = new Set<{ child: import("child_process").ChildProcess; cancelled: boolean }>();
 
   constructor(cwd?: string, env?: Record<string, string>) {
     this._cwd = cwd ?? process.cwd();
@@ -238,17 +295,26 @@ export class NodeShellExecutor implements ShellExecutor {
     // Resolve the actual executable path (handles Windows .CMD shims)
     const resolved = resolveCommand(command);
 
-    this._cancelled = false;
+    // Lets the catch path release the tracking slot if anything throws
+    // between spawn and the settle await — otherwise a dead entry would
+    // linger in _active (harmless to cancel(), but a slow leak).
+    let releaseActive: (() => void) | null = null;
 
     try {
       // Use spawn for streaming support.
-      // For Windows .CMD shims, we set shell:true (required for .cmd/.bat).
+      // For Windows .CMD shims, we set shell:true (required for .cmd/.bat)
+      // but must build the command line ourselves — see buildCmdCommandLine.
       // For real executables (.exe, git, node), shell is false.
-      const child = spawn(resolved.command, [...resolved.args, ...args], {
+      const useShell = resolved.useShell;
+      const spawnFile = useShell
+        ? buildCmdCommandLine(resolved.command, [...resolved.args, ...args])
+        : resolved.command;
+      const spawnArgs = useShell ? [] : [...resolved.args, ...args];
+      const child = spawn(spawnFile, spawnArgs, {
         cwd,
         env: mergedEnv,
         windowsHide: true,
-        shell: resolved.useShell,
+        shell: useShell,
         // detached=true allows process-tree kill (taskkill /T on Windows,
         // pkill -P on Linux). On Linux, this creates a new process group
         // which may fail in restricted containers. We catch the error and
@@ -256,7 +322,9 @@ export class NodeShellExecutor implements ShellExecutor {
         detached: process.platform !== "win32",
       });
 
-      this._child = child;
+      const active = { child, cancelled: false };
+      this._active.add(active);
+      releaseActive = () => { this._active.delete(active); };
 
       // Pipe explicit stdin to the child, then EOF. Without this, commands
       // that read stdin (e.g. `git commit --file=-`) block forever.
@@ -305,23 +373,51 @@ export class NodeShellExecutor implements ShellExecutor {
         : null;
 
       const exitCode: number = await new Promise((resolve) => {
-        child.on("close", (code) => resolve(code ?? -1));
+        let procExitCode: number | null = null;
+        let settled = false;
+        let graceTimer: ReturnType<typeof setTimeout> | undefined;
+        let hardTimer: ReturnType<typeof setTimeout> | undefined;
+        const finish = (code: number | null) => {
+          if (settled) return;
+          settled = true;
+          if (graceTimer) clearTimeout(graceTimer);
+          if (hardTimer) clearTimeout(hardTimer);
+          resolve(code ?? -1);
+        };
         child.on("error", (err) => {
           // Log the actual spawn error for debugging — the default
           // behavior silently returns -1 which masks the root cause.
           console.error(`[ShellExecutor] spawn error for "${resolved.command}":`, err.message);
-          resolve(-1);
+          finish(-1);
         });
+        child.on("exit", (code) => {
+          procExitCode = code ?? -1;
+          // "close" waits for stdio streams to end. An orphaned
+          // grandchild that inherited our pipes keeps them open after
+          // the process tree is dead — "close" then NEVER fires and
+          // execute() hangs forever (the observed mission stall). Give
+          // streams a grace period to flush, then force-destroy them;
+          // a hard fallback resolves even if "close" still doesn't fire.
+          graceTimer = setTimeout(() => {
+            try { child.stdout?.destroy(); } catch { /* already closed */ }
+            try { child.stderr?.destroy(); } catch { /* already closed */ }
+            try { child.stdin?.destroy(); } catch { /* already closed */ }
+            hardTimer = setTimeout(() => finish(procExitCode), EXIT_FALLBACK_MS);
+            hardTimer.unref?.();
+          }, STDIO_CLOSE_GRACE_MS);
+          graceTimer.unref?.();
+        });
+        child.on("close", (code) => finish(procExitCode ?? code ?? -1));
       });
 
       if (timeoutHandle) clearTimeout(timeoutHandle);
-      this._child = null;
+      releaseActive?.();
       const durationMs = Date.now() - t0;
       const truncated = stdout.length > maxOutputBytes;
 
       // Determine discrete status
       let status: ShellResult["status"];
-      if (this._cancelled) {
+      if (active.cancelled) {
         status = "cancelled";
       } else if (timedOut) {
         status = "timeout";
@@ -341,11 +437,11 @@ export class NodeShellExecutor implements ShellExecutor {
         command,
         args,
         truncated,
-        error: status !== "success" ? (timedOut ? `Timeout after ${timeoutMs}ms` : this._cancelled ? "Cancelled by user" : `Exit code ${exitCode}`) : undefined,
+        error: status !== "success" ? (timedOut ? `Timeout after ${timeoutMs}ms` : active.cancelled ? "Cancelled by user" : `Exit code ${exitCode}`) : undefined,
         pid: child.pid ?? null,
       };
     } catch (err) {
-      this._child = null;
+      releaseActive?.();
       const durationMs = Date.now() - t0;
       return {
         ok: false,
@@ -364,19 +460,26 @@ export class NodeShellExecutor implements ShellExecutor {
   }
 
   /**
-   * Cancel the currently running command.
-   * Kills the entire process tree to guarantee zero orphan processes.
-   * Returns the list of PIDs that were killed.
+   * Cancel ALL currently running commands on this executor.
+   * Kills every tracked process tree to guarantee zero orphan processes.
+   * Each in-flight execute() resolves with status: "cancelled".
+   * Returns the combined list of PIDs that were killed.
    */
   async cancel(): Promise<number[]> {
-    this._cancelled = true;
-    if (this._child?.pid) {
-      const killed = await killProcessTree(this._child.pid);
-      this._child = null;
-      return killed;
+    const active = [...this._active];
+    const killed: number[] = [];
+    for (const a of active) {
+      a.cancelled = true;
+      if (a.child.pid) {
+        try {
+          killed.push(...await killProcessTree(a.child.pid));
+        } catch {
+          // tree already gone — the execute() promise still resolves
+          // via exit/close/fallback timers
+        }
+      }
     }
-    this._child = null;
-    return [];
+    return killed;
   }
 }
 

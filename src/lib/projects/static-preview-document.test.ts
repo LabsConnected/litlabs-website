@@ -82,4 +82,40 @@ describe("authenticated static preview document", () => {
     expect(result).toContain('href="missing.css"');
     expect(result).toContain('content: "\\3c /style>"; }');
   });
+
+  it("rewrites renderable subresources onto the token-authorized prefix", async () => {
+    const readStylesheet = vi.fn(async () => null);
+    const html = [
+      '<img src="assets/hero.png">',
+      '<img srcset="assets/a.png 1x, assets/b.png 2x" src="assets/a.png">',
+      '<video poster="assets/poster.webp" src="assets/clip.mp4"></video>',
+      '<source src="assets/clip.webm">',
+      '<div style="background:url(images/bg.jpeg)"></div>',
+      '<style>.x{background:url(fonts/icon.svg)}</style>',
+      '<img src="https://cdn.example.com/ext.png">',
+      '<img src="notes.md">',
+    ].join("");
+    const { html: result } = await prepareStaticPreviewDocument(html, "index.html", { assetBase: ASSET_BASE, readStylesheet });
+    expect(result).toContain(`src="${ASSET_BASE}assets/hero.png"`);
+    expect(result).toContain(`srcset="${ASSET_BASE}assets/a.png 1x, ${ASSET_BASE}assets/b.png 2x"`);
+    expect(result).toContain(`poster="${ASSET_BASE}assets/poster.webp"`);
+    expect(result).toContain(`src="${ASSET_BASE}assets/clip.mp4"`);
+    expect(result).toContain(`src="${ASSET_BASE}assets/clip.webm"`);
+    expect(result).toContain(`background:url(${ASSET_BASE}images/bg.jpeg)`);
+    expect(result).toContain(`background:url(${ASSET_BASE}fonts/icon.svg)`);
+    // External URLs and non-asset types are never rewritten.
+    expect(result).toContain('src="https://cdn.example.com/ext.png"');
+    expect(result).toContain('src="notes.md"');
+  });
+
+  it("rewrites url() targets inside embedded stylesheets document-relative", async () => {
+    const readStylesheet = vi.fn(async () => "@font-face{src:url(../fonts/inter.woff2)} .hero{background:url(bg.png)}");
+    const html = '<link rel="stylesheet" href="css/site.css">';
+    const { html: result } = await prepareStaticPreviewDocument(html, "index.html", { assetBase: ASSET_BASE, readStylesheet });
+    // url()s resolve against the served document (index.html): ../fonts
+    // clamps to fonts/, bg.png stays at root — exactly what the manifest
+    // authorizes for the same document.
+    expect(result).toContain(`url(${ASSET_BASE}fonts/inter.woff2)`);
+    expect(result).toContain(`url(${ASSET_BASE}bg.png)`);
+  });
 });

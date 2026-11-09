@@ -59,12 +59,16 @@ export async function GET(
   // only entry file is still the seeded welcome screen reports not_started
   // (never "ready" — the preview must not imply generated content exists).
   if (project.framework === "static") {
+    let terminalBase: string;
+    let terminalToken: string;
+    let entryHtml: string | null = null;
     try {
-      const terminalBase = requireTerminalBaseUrl();
+      terminalBase = requireTerminalBaseUrl();
       const { token } = createTerminalToken(userId, {
         workspaceId: project.workspaceId,
         projectId,
       });
+      terminalToken = token;
       const checkResp = await fetch(`${terminalBase}/ws-files/read`, {
         method: "POST",
         headers: {
@@ -88,17 +92,20 @@ export async function GET(
         });
       }
       const entry = (await checkResp.json().catch(() => null)) as { content?: unknown } | null;
-      if (typeof entry?.content === "string" && entry.content.includes(WELCOME_SCREEN_MARKER)) {
-        return NextResponse.json({
-          runtimeStatus: "not_started",
-          previewUrl: null,
-          runtimeError: null,
-          starterContent: true,
-          framework: "static",
-          developmentCommand: null,
-          packageManager: null,
-          logs: [],
-        });
+      if (typeof entry?.content === "string") {
+        entryHtml = entry.content;
+        if (entry.content.includes(WELCOME_SCREEN_MARKER)) {
+          return NextResponse.json({
+            runtimeStatus: "not_started",
+            previewUrl: null,
+            runtimeError: null,
+            starterContent: true,
+            framework: "static",
+            developmentCommand: null,
+            packageManager: null,
+            logs: [],
+          });
+        }
       }
     } catch {
       // Terminal unavailable — report not_started rather than broken ready
@@ -113,7 +120,39 @@ export async function GET(
       });
     }
 
-    const manifest = await collectPreviewAssetManifest("index.html", "<html></html>", async () => null);
+    // The capability token must authorize the REAL document's asset
+    // closure — scripts, linked pages, and every renderable subresource
+    // (images, fonts, media, css url() targets) the opaque-origin iframe
+    // will request without a session cookie. Minting from a stub document
+    // would sign an empty manifest and 403 every asset.
+    const readWorkspaceText = async (path: string): Promise<string | null> => {
+      const asset = await fetch(`${terminalBase}/ws-files/read`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${terminalToken}`, "X-Workspace-Id": project.workspaceId! },
+        body: JSON.stringify({ path, encoding: "utf-8" }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!asset.ok) return null;
+      const payload = (await asset.json().catch(() => null)) as { content?: unknown } | null;
+      return typeof payload?.content === "string" ? payload.content : null;
+    };
+    const manifest = entryHtml !== null
+      ? await collectPreviewAssetManifest("index.html", entryHtml, readWorkspaceText)
+      : { assets: ["index.html"], complete: true };
+    // Fail closed like the serving route: an unverifiable closure means the
+    // signed token would 403 assets the page needs — report failed rather
+    // than "ready" over a preview that cannot render.
+    if (!manifest.complete) {
+      return NextResponse.json({
+        runtimeStatus: "failed",
+        previewUrl: null,
+        runtimeError: "Preview asset manifest could not be verified",
+        framework: "static",
+        developmentCommand: null,
+        packageManager: null,
+        logs: [],
+      });
+    }
     const token = createPreviewToken(userId, {
       projectId,
       workspaceId: project.workspaceId,

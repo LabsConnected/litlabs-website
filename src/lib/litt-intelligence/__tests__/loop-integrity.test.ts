@@ -145,8 +145,10 @@ describe("loop-integrity: stop stops in-flight tools", () => {
   });
 
   it("resume continuation loop exits when cancelled", () => {
+    // §6.1: the condition also exits when the gated-repeat breaker
+    // settled the run failed — the !cancelled exit is unchanged.
     expect(AGENT_LOOP_SRC).toMatch(
-      /while \(stepsUsed < cfg\.maxSteps && !cancelled\)/,
+      /while \(stepsUsed < cfg\.maxSteps && !cancelled(?: && !failedHonestly)?\)/,
     );
   });
 });
