@@ -52,20 +52,6 @@ export async function GET(
   // traversal attempt, including percent-encoded ones.
   const requestPath = Array.isArray(path) ? path.join("/") : "";
 
-  // Deployed markup references assets RELATIVELY (assets/images/x) so one
-  // artifact serves under any mount — but relative resolution needs a
-  // directory base. "/sites/{id}" (no trailing slash) resolves
-  // "assets/images/x" to "/sites/assets/images/x", escaping the deployment
-  // entirely: the segment "assets" is then parsed as a deploymentId and
-  // every asset request fails (staging acceptance 42693622298 — both
-  // generated photos 503'd while index.html served fine). Canonicalize the
-  // slash-less root to the trailing-slash URL before serving the document.
-  if (requestPath === "" && !_request.nextUrl.pathname.endsWith("/")) {
-    const target = new URL(_request.url);
-    target.pathname = `${target.pathname}/`;
-    return NextResponse.redirect(target, 308);
-  }
-
   const artifactPath = deploymentPublicPath(deploymentId, requestPath);
   if (!artifactPath) {
     return new NextResponse("Not found", { status: 404 });
@@ -118,6 +104,39 @@ export async function GET(
       'name="deploymentId" value=""',
       `name="deploymentId" value="${deploymentId}"`,
     );
+  }
+
+  // Deployed markup references assets RELATIVELY (assets/images/x) so one
+  // artifact serves under any mount — but relative resolution needs a
+  // directory base, and the served URL does not always provide one:
+  // "/sites/{id}" (no trailing slash) resolves "assets/images/x" to
+  // "/sites/assets/images/x", escaping the deployment entirely ("assets"
+  // parses as a deploymentId → every asset request failed; staging
+  // acceptance 42693622298). A redirect cannot fix this — Next.js
+  // trailing-slash normalization strips "/" before this handler runs, so
+  // canonicalizing here loops forever (and rebuilding the target from
+  // request.url leaks the internal bind address, e.g. https://0.0.0.0:8080,
+  // which made the deploy verifier's fetch fail outright). Instead inject
+  // <base> into served HTML: relative refs then resolve against the
+  // artifact's real directory under ANY request URL form — slash-less
+  // root, trailing-slash (normalized away upstream), or explicit
+  // /index.html — with no redirects at all. An author-supplied <base>
+  // always wins.
+  if (
+    file.contentType.includes("text/html") &&
+    typeof content === "string" &&
+    !/<base[\s>]/i.test(content)
+  ) {
+    const dir = artifactPath.includes("/")
+      ? artifactPath.slice(0, artifactPath.lastIndexOf("/") + 1)
+      : "";
+    const baseHref = encodeURI(`/sites/${deploymentId}/${dir}`);
+    const baseTag = `<base href="${baseHref}">`;
+    if (/<head[^>]*>/i.test(content)) {
+      content = content.replace(/<head[^>]*>/i, (m) => `${m}${baseTag}`);
+    } else if (/<\/head\s*>/i.test(content)) {
+      content = content.replace(/<\/head\s*>/i, `${baseTag}</head>`);
+    }
   }
 
   // LiTT branding: inject a subtle, dismissible "Built with LiTT" badge

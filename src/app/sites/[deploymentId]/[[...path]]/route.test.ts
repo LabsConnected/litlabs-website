@@ -152,35 +152,84 @@ describe("sites route — form deploymentId injection", () => {
   });
 });
 
-describe("sites route — canonical trailing-slash redirect", () => {
-  // Regression: staging acceptance 42693622298. Deployed markup references
+describe("sites route — <base> injection for relative asset resolution", () => {
+  // Regression: staging acceptance 42693622298 — deployed markup references
   // assets relatively (assets/images/x); at the slash-less URL "/sites/{id}"
   // the browser resolves them to "/sites/assets/images/x" — "assets" is then
-  // parsed as a deploymentId and every asset request failed (503 via the
-  // uuid lookup error) while index.html itself served 200.
-  it("redirects the slash-less deployment root to the trailing-slash URL", async () => {
+  // parsed as a deploymentId and every asset request failed while
+  // index.html itself served 200. A redirect cannot fix this (Next.js
+  // trailing-slash normalization strips "/" upstream → redirect loop; and
+  // rebuilding the target from request.url leaked https://0.0.0.0:8080,
+  // failing the deploy verifier's fetch — acceptance 42704026836). The
+  // route instead injects <base> so relative refs resolve against the
+  // artifact's real directory under every URL form.
+  const HEAD_HTML = `<!DOCTYPE html><html><head><title>t</title></head><body><img src="assets/images/x.jpeg"></body></html>`;
+
+  it("serves the slash-less root with 200 + <base>, never a redirect", async () => {
+    mockRead.mockResolvedValue({ content: HEAD_HTML, contentType: "text/html" });
     const res = await GET(req("/sites/dep_abc123"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
-    expect(res.status).toBe(308);
-    expect(res.headers.get("location")).toBe("http://localhost/sites/dep_abc123/");
-    expect(mockRead).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    const text = await res.text();
+    expect(text).toContain('<base href="/sites/dep_abc123/">');
+    expect(text.indexOf("<base")).toBeLessThan(text.indexOf("<img"));
   });
 
-  it("serves the root document at the trailing-slash URL without redirecting", async () => {
-    mockRead.mockResolvedValue({ content: "<html><body>ok</body></html>", contentType: "text/html" });
+  it("serves the trailing-slash root identically (no redirect loop)", async () => {
+    mockRead.mockResolvedValue({ content: HEAD_HTML, contentType: "text/html" });
     const res = await GET(req("/sites/dep_abc123/"), {
       params: Promise.resolve({ deploymentId: "dep_abc123", path: [] }),
     });
     expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.text()).toContain('<base href="/sites/dep_abc123/">');
   });
 
-  it("does not redirect sub-path requests", async () => {
-    mockRead.mockResolvedValue({ content: "body{}", contentType: "text/html" });
-    const res = await GET(req("/sites/dep_abc123/assets/app.css"), {
-      params: Promise.resolve({ deploymentId: "dep_abc123", path: ["assets", "app.css"] }),
+  it("serves explicit index.html with the same deployment-root base", async () => {
+    mockRead.mockResolvedValue({ content: HEAD_HTML, contentType: "text/html" });
+    const res = await GET(req("/sites/dep_abc123/index.html"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123", path: ["index.html"] }),
     });
     expect(res.status).toBe(200);
-    expect(mockRead).toHaveBeenCalledWith("dep_abc123", "assets/app.css");
+    expect(res.headers.get("location")).toBeNull();
+    expect(mockRead).toHaveBeenCalledWith("dep_abc123", "index.html");
+    expect(await res.text()).toContain('<base href="/sites/dep_abc123/">');
+  });
+
+  it("bases nested documents on their own artifact directory", async () => {
+    mockRead.mockResolvedValue({ content: HEAD_HTML, contentType: "text/html" });
+    const res = await GET(req("/sites/dep_abc123/guide/index.html"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123", path: ["guide", "index.html"] }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('<base href="/sites/dep_abc123/guide/">');
+  });
+
+  it("respects an author-supplied <base> tag", async () => {
+    const authored = HEAD_HTML.replace("<head>", '<head><base href="/custom/">');
+    mockRead.mockResolvedValue({ content: authored, contentType: "text/html" });
+    const res = await GET(req("/sites/dep_abc123"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123" }),
+    });
+    const text = await res.text();
+    expect(text).toContain('<base href="/custom/">');
+    expect(text).not.toContain("/sites/dep_abc123/");
+    expect(text.match(/<base/g)).toHaveLength(1);
+  });
+
+  it("does not inject <base> into non-HTML artifacts", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    mockRead.mockResolvedValue({
+      content: png.toString("base64"),
+      contentType: "image/png",
+      encoding: "base64",
+    });
+    const res = await GET(req("/sites/dep_abc123/assets/logo.png"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123", path: ["assets", "logo.png"] }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
   });
 });
