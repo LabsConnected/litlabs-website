@@ -237,4 +237,81 @@ describe("finalizeMissionRun", () => {
     await finalizeMissionRun({ store, termination: "max_rounds", verification: null, readOnly: true });
     expect(store.getMission()?.steps.every((s) => s.status !== "passed")).toBe(true);
   });
+
+  it("mutating mission + proven + trailing verify step working w/o contract → complete (live stuck-verifying repro)", async () => {
+    const store = new RuntimeStore({});
+    await store.createMission({ goal: "build app", mode: "act", projectRoot: "/tmp/x" });
+    const s1 = await store.addMissionStep({ title: "Inspect repository baseline", allowedActionScope: [] });
+    const s2 = await store.addMissionStep({ title: "Run tests", allowedActionScope: [], requiredEvidence: ["test_result"] });
+    const s3 = await store.addMissionStep({ title: "Verify production readiness", allowedActionScope: [] });
+    for (const s of [s1, s2]) {
+      if (!s) continue;
+      // pending → working → passed (pending→passed is not a legal transition)
+      await store.updateMissionStepStatus(s.id, "working").catch(() => {});
+      await store.updateMissionStepStatus(s.id, "passed", { verificationPassed: true, verificationEvidence: "evidence" }).catch(() => {});
+    }
+    // Drive the mission to "verifying" with s3 as the live step — the
+    // exact state the stuck production mission was in.
+    if (s3) await store.setCurrentStep(s3.id).catch(() => {});
+    await store.setMissionVerifying().catch(() => {});
+    const out = await finalizeMissionRun({
+      store,
+      termination: "complete",
+      verification: baseResult({ proven: true, status: "proven", message: "VERIFIED - all checks passed" }),
+      readOnly: false, // mutating mission — the live bug path
+    });
+    expect(out.outcome).toBe("complete");
+    const mission = store.getMission();
+    expect(mission?.status).toBe("complete");
+    expect(mission?.steps.find((s) => s.id === s3?.id)?.status).toBe("passed");
+  });
+
+  it("mutating mission + proven + NON-synthesis step still working → failed honestly, never fake-complete", async () => {
+    const store = new RuntimeStore({});
+    await store.createMission({ goal: "x", mode: "act", projectRoot: "/tmp/x" });
+    const s1 = await store.addMissionStep({ title: "Apply approved repairs", allowedActionScope: ["edit"] });
+    const s2 = await store.addMissionStep({ title: "Verify production readiness", allowedActionScope: [] });
+    if (s2) await store.setCurrentStep(s2.id).catch(() => {});
+    await store.setMissionVerifying().catch(() => {});
+    if (s1) await store.updateMissionStepStatus(s1.id, "working").catch(() => {});
+    const out = await finalizeMissionRun({
+      store,
+      termination: "complete",
+      verification: baseResult({ proven: true, status: "proven", message: "VERIFIED" }),
+      readOnly: false,
+    });
+    expect(out.outcome).toBe("failed");
+    expect(out.summary).toContain("steps incomplete");
+    const mission = store.getMission();
+    expect(mission?.status).toBe("failed");
+    // The synthesis step was legitimately passed; the mutating step was NOT.
+    expect(mission?.steps.find((s) => s.id === s2?.id)?.status).toBe("passed");
+    expect(mission?.steps.find((s) => s.id === s1?.id)?.status).toBe("failed");
+  });
+
+  it("synthesis step with its own evidence contract is never auto-passed", async () => {
+    const store = new RuntimeStore({});
+    await store.createMission({ goal: "x", mode: "act", projectRoot: "/tmp/x" });
+    // "Verify deployment" is synthesis-titled BUT carries a contract —
+    // it must not be auto-passed by finalize.
+    const s1 = await store.addMissionStep({
+      title: "Verify deployment",
+      allowedActionScope: ["verify"],
+      requiredEvidence: ["verification_result"],
+    });
+    if (s1) await store.setCurrentStep(s1.id).catch(() => {});
+    await store.setMissionVerifying().catch(() => {});
+    const out = await finalizeMissionRun({
+      store,
+      termination: "complete",
+      verification: baseResult({ proven: true, status: "proven", message: "VERIFIED" }),
+      readOnly: false,
+    });
+    // completeMission tolerates a WORKING verify-contract step, so this
+    // may still complete — but the step must not be marked "passed"
+    // without its own evidence having arrived.
+    const step = store.getMission()?.steps.find((s) => s.id === s1?.id);
+    expect(step?.status).not.toBe("passed");
+    expect(["complete", "failed"]).toContain(out.outcome);
+  });
 });
