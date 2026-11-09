@@ -233,6 +233,46 @@ describe("enrichStaticSiteVisuals", () => {
     expect(html).not.toContain("data-litt-image");
   });
 
+  it("falls through to the next provider when a probe-ok download fails", async () => {
+    // 2026-11-09 staging: picsum probes passed but downloads failed, and
+    // the remaining providers were never tried — runs shipped 2/3 photos.
+    const transport = makeTransport({
+      "index.html": `<img data-litt-image="coffee beans" alt="Beans">`,
+    });
+    mockInsertAssetFromUrl.mockImplementation(async (url: string) =>
+      String(url).includes("loremflickr")
+        ? { success: false, error: "HTTP 502" }
+        : { success: true, path: "assets/images/picsum.jpg", sitePath: "assets/images/picsum.jpg" });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    // Slot resolve + floor fills must not dead-end on the loremflickr
+    // download failure — picsum (next provider) serves them.
+    expect(report.imagesResolved).toBeGreaterThanOrEqual(1);
+    expect(report.providersUsed).toContain("picsum");
+    expect(html).toContain('src="assets/images/picsum.jpg"');
+    expect(html).not.toContain("data-litt-image");
+  });
+
+  it("falls through when insertAssetFromUrl throws instead of aborting enrichment", async () => {
+    const transport = makeTransport({
+      "index.html": `<img data-litt-image="coffee beans" alt="Beans">`,
+    });
+    let calls = 0;
+    mockInsertAssetFromUrl.mockImplementation(async (url: string) => {
+      calls += 1;
+      if (String(url).includes("loremflickr")) throw new Error("socket hangup");
+      return { success: true, path: "assets/images/picsum.jpg", sitePath: "assets/images/picsum.jpg" };
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    expect(report.imagesResolved).toBeGreaterThanOrEqual(1);
+    expect(calls).toBeGreaterThan(1);
+    expect(transport.files.get("index.html")).toContain('src="assets/images/picsum.jpg"');
+  });
+
   it("gives up within its overall budget when providers never answer (CI #820)", async () => {
     // Pin a small budget — the mechanism under test is the abort, not the
     // default value (30s would outlast vitest's own 5s timeout).
@@ -524,10 +564,13 @@ describe("enrichStaticSiteVisuals", () => {
     const transport = makeTransport({
       "index.html": `<html><head><title>Ember Roast</title></head><body><h1>Ember Roast</h1></body></html>`,
     });
+    // Fail every provider lane for the first resolve — a single dead
+    // resolve must not starve the floor, but probe-ok download failures
+    // now fall through to the next provider before counting as failed.
     let n = 0;
     mockInsertAssetFromUrl.mockImplementation(async () => {
       n += 1;
-      if (n === 1) return { success: false, error: "HTTP 503" };
+      if (n <= 3) return { success: false, error: "HTTP 503" };
       return { success: true, path: `assets/images/g${n}.jpg`, sitePath: `assets/images/g${n}.jpg`, sizeBytes: 120_000 };
     });
     vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));

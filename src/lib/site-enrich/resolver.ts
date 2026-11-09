@@ -188,19 +188,26 @@ function picsumUrl(keywords: string): string {
  * Resolve one image slot to a fetchable URL. `seed` dedupes identical
  * keywords so two "coffee" slots don't return the same photo. Network
  * failures degrade to the next provider — never throws.
+ *
+ * `exclude` skips providers the caller already tried and whose DOWNLOAD
+ * failed after a successful probe — a provider that serves a broken or
+ * oversized payload must not be re-selected for the same slot.
  */
 export async function resolveSlotImage(
   keywords: string,
   seed: number,
   overall?: AbortSignal,
   attempts?: ProviderAttempt[],
+  exclude?: ReadonlySet<string>,
 ): Promise<ResolvedImage | null> {
   const kw = keywords.trim() || "professional photography";
   if (overall?.aborted) return null;
 
-  const pexels = await tryPexels(kw, overall, attempts);
-  if (pexels) return pexels;
-  if (overall?.aborted) return null;
+  if (!exclude?.has("pexels")) {
+    const pexels = await tryPexels(kw, overall, attempts);
+    if (pexels) return pexels;
+    if (overall?.aborted) return null;
+  }
 
   // Free fallbacks — probe each before committing so a flaky host can't
   // write a broken reference into the site. Real photography first; the
@@ -212,6 +219,7 @@ export async function resolveSlotImage(
   ];
   for (const c of candidates) {
     if (overall?.aborted) return null;
+    if (exclude?.has(c.provider)) continue;
     const ok = await probe(c.url, overall);
     attempts?.push({ provider: c.provider, status: ok ? "resolved" : "failed" });
     if (ok) {

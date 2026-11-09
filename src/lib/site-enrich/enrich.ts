@@ -21,9 +21,9 @@ import "server-only";
  */
 
 import { createHash } from "crypto";
-import { insertAssetFromUrl } from "@/lib/litt-intelligence/tool-handlers-v2";
+import { insertAssetFromUrl, type InsertAssetResult } from "@/lib/litt-intelligence/tool-handlers-v2";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
-import { resolveSlotImage, type ProviderAttempt } from "./resolver";
+import { resolveSlotImage, type ProviderAttempt, type ResolvedImage } from "./resolver";
 import { auditStaticSiteHtml, extractImageRefs, type VisualAudit } from "./audit";
 
 export interface EnrichReport {
@@ -150,6 +150,35 @@ export async function enrichStaticSiteVisuals(
       }
     };
     const providerAttempts: ProviderAttempt[] = [];
+    // One resolve = one persisted image. A provider can pass the URL probe
+    // and still fail the download (HTTP 5xx, non-image payload, oversize),
+    // and insertAssetFromUrl can throw on network errors — neither may
+    // dead-end the slot or abort the whole pass: exclude that provider and
+    // try the next, bounded by the provider count. (2026-11-09 staging:
+    // picsum probes passed but downloads failed after the probe, the
+    // remaining providers were never tried, and runs shipped 2/3 photos.)
+    const downloadViaProviders = async (
+      kw: string,
+      nameHint: string,
+    ): Promise<{ resolved: ResolvedImage; saved: InsertAssetResult; sitePath: string; hash: string | null } | null> => {
+      const excluded = new Set<string>();
+      for (let round = 0; round < 4 && !overallSignal.aborted; round++) {
+        const resolved = await resolveSlotImage(kw, seed + round, overallSignal, providerAttempts, excluded);
+        if (!resolved) return null;
+        let saved: InsertAssetResult | null = null;
+        try {
+          saved = await insertAssetFromUrl(resolved.url, { nameHint, signal: overallSignal }, transport);
+        } catch {
+          saved = null;
+        }
+        if (saved?.success && saved.sitePath) {
+          return { resolved, saved, sitePath: saved.sitePath, hash: await contentHash(saved.sitePath) };
+        }
+        excluded.add(resolved.provider);
+        seed += 1;
+      }
+      return null;
+    };
     const resolve = async (keywords: string) => {
       if (overallSignal.aborted) return null;
       if (report.imagesResolved + report.imagesFailed >= budget) return null;
@@ -158,19 +187,13 @@ export async function enrichStaticSiteVisuals(
       // images) — hash the saved bytes and retry once with a bumped seed
       // and varied keywords; a still-identical image counts as a failure
       // so the slot falls back to the honest placeholder.
-      let resolved = await resolveSlotImage(keywords, seed, overallSignal, providerAttempts);
-      let saved = resolved
-        ? await insertAssetFromUrl(resolved.url, { nameHint: keywords.slice(0, 30), signal: overallSignal }, transport)
-        : null;
-      let hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
+      let attempt = await downloadViaProviders(keywords, keywords.slice(0, 30));
+      let hash = attempt?.hash ?? null;
       if (hash && usedHashes.has(hash)) {
         seed += 1000;
         const varied = `${keywords} scene`;
-        resolved = await resolveSlotImage(varied, seed, overallSignal, providerAttempts);
-        saved = resolved
-          ? await insertAssetFromUrl(resolved.url, { nameHint: varied.slice(0, 30), signal: overallSignal }, transport)
-          : null;
-        hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
+        attempt = await downloadViaProviders(varied, varied.slice(0, 30));
+        hash = attempt?.hash ?? null;
         if (hash && usedHashes.has(hash)) {
           seed += 1;
           report.imagesFailed += 1;
@@ -178,10 +201,11 @@ export async function enrichStaticSiteVisuals(
         }
       }
       seed += 1;
-      if (!resolved || !saved?.success || !saved.sitePath) {
+      if (!attempt) {
         report.imagesFailed += 1;
         return null;
       }
+      const { resolved, saved, sitePath } = attempt;
       if (hash) usedHashes.add(hash);
       report.imagesResolved += 1;
       if (!report.providersUsed.includes(resolved.provider)) {
@@ -189,10 +213,10 @@ export async function enrichStaticSiteVisuals(
       }
       // Treat the just-materialized file as on-disk so the repair pass
       // below does not "fix" it as a missing relative ref.
-      fileSet.add(saved.sitePath.replace(/^\//, ""));
+      fileSet.add(sitePath.replace(/^\//, ""));
       if (saved.path) fileSet.add(saved.path.replace(/^\//, ""));
-      trackSize(saved.sitePath, saved.path, saved.sizeBytes);
-      return saved.sitePath;
+      trackSize(sitePath, saved.path, saved.sizeBytes);
+      return sitePath;
     };
 
     for (const file of htmlFiles) {
