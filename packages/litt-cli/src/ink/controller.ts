@@ -1545,7 +1545,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
     if (input === "/help") {
-      act(store, "Commands: /new /resume /inspect /plan /act /fix /verify /diff /ship /workspace /branch /files /model /status /doctor /settings /run /route /providers /clear /help /exit", "help", "decision", "HELP");
+      act(store, "Commands: /new /resume /inspect /plan /act /fix /verify /diff /ship /workspace /branch /files /model /status /activity /doctor /settings /run /route /providers /clear /help /exit", "help", "decision", "HELP");
       return;
     }
     // ─── Mode commands — real Plan/Act policy ─────────────────────

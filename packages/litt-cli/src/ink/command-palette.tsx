@@ -228,6 +228,7 @@ export const DEFAULT_ACTIONS: PaletteAction[] = [
   { id: "/model", label: "Select model", group: "LiTT" },
   { id: "/routing", label: "Routing settings", group: "LiTT" },
   { id: "/status", label: "Runtime details", group: "LiTT" },
+  { id: "/activity", label: "Activity feed - live mission events", group: "LiTT" },
   { id: "/doctor", label: "Diagnose LiTT", group: "LiTT" },
   { id: "/settings", label: "Shell settings", group: "LiTT" },
   { id: "/run", label: "Run arbitrary command", group: "SHELL" },
