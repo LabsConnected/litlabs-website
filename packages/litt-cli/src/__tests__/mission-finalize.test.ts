@@ -406,4 +406,96 @@ describe("finalizeMissionRun", () => {
     expect(step?.status).not.toBe("passed");
     expect(["complete", "failed"]).toContain(out.outcome);
   });
+
+  it("gate-proven test/build checks satisfy the contract when model used project.run", async () => {
+    // Live repro mission_1794262955495: model ran `npm test`/`npm run
+    // build` via project.run (command_result only), gate verified all
+    // checks — mission must complete, not fail on evidence-type trivia.
+    const store = new RuntimeStore({});
+    await store.createMission({ goal: "x", mode: "act", projectRoot: "/tmp/x" });
+    const s1 = await store.addMissionStep({ title: "Run tests and build", allowedActionScope: ["act"], requiredEvidence: ["test_result", "build_result"] });
+    if (!s1) throw new Error("no step");
+    await store.setCurrentStep(s1.id).catch(() => {});
+    await store.setMissionVerifying().catch(() => {});
+    await store.addMissionEvidence({
+      stepId: s1.id, type: "command_result", source: "run",
+      summary: "npm test - exit 0", success: true, metadata: {},
+    });
+    const check = (id: "typecheck" | "test" | "build", success: boolean) => ({
+      id, status: success ? "success" as const : "failed" as const, success,
+      exitCode: success ? 0 : 1, message: "", durationMs: 1,
+      runId: "r", toolCallId: "t",
+    });
+    const out = await finalizeMissionRun({
+      store, termination: "complete",
+      verification: baseResult({
+        proven: true, status: "proven", message: "VERIFIED",
+        checks: [check("test", true), check("build", true)],
+        ranChecks: ["test", "build"],
+      }),
+      readOnly: false,
+    });
+    expect(out.outcome).toBe("complete");
+    expect(store.getMission()?.status).toBe("complete");
+    expect(store.getMission()?.steps[0]?.status).toBe("passed");
+  });
+
+  it("skipped gate checks do NOT satisfy evidence contracts", async () => {
+    const store = new RuntimeStore({});
+    await store.createMission({ goal: "x", mode: "act", projectRoot: "/tmp/x" });
+    const s1 = await store.addMissionStep({ title: "Run tests", allowedActionScope: ["act"], requiredEvidence: ["test_result"] });
+    if (!s1) throw new Error("no step");
+    await store.setCurrentStep(s1.id).catch(() => {});
+    await store.setMissionVerifying().catch(() => {});
+    await store.addMissionEvidence({
+      stepId: s1.id, type: "command_result", source: "run",
+      summary: "ok", success: true, metadata: {},
+    });
+    const out = await finalizeMissionRun({
+      store, termination: "complete",
+      verification: baseResult({
+        proven: true, status: "proven", message: "VERIFIED",
+        // test check SKIPPED (no test script) — proves nothing.
+        checks: [{
+          id: "test", status: "skipped" as const, success: false,
+          exitCode: null, message: "no test script", durationMs: 0,
+          skippedReason: "not configured", runId: "r", toolCallId: "t",
+        }],
+        skippedChecks: ["test"],
+      }),
+      readOnly: false,
+    });
+    expect(out.outcome).toBe("failed");
+    expect(store.getMission()?.steps[0]?.status).not.toBe("passed");
+  });
+
+  it("gate-proven contract still requires the step to have done work", async () => {
+    // Contract satisfied by the gate, but the step itself produced no
+    // attributed evidence — it must NOT pass (worked-evidence bar).
+    const store = new RuntimeStore({});
+    await store.createMission({ goal: "x", mode: "act", projectRoot: "/tmp/x" });
+    const s1 = await store.addMissionStep({ title: "Run tests", allowedActionScope: ["act"], requiredEvidence: ["test_result"] });
+    if (!s1) throw new Error("no step");
+    await store.setCurrentStep(s1.id).catch(() => {});
+    await store.setMissionVerifying().catch(() => {});
+    // Evidence attributed to NO step.
+    await store.addMissionEvidence({
+      stepId: null, type: "command_result", source: "status",
+      summary: "ok", success: true, metadata: {},
+    });
+    const out = await finalizeMissionRun({
+      store, termination: "complete",
+      verification: baseResult({
+        proven: true, status: "proven", message: "VERIFIED",
+        checks: [{
+          id: "test", status: "success" as const, success: true,
+          exitCode: 0, message: "", durationMs: 1, runId: "r", toolCallId: "t",
+        }],
+        ranChecks: ["test"],
+      }),
+      readOnly: false,
+    });
+    expect(out.outcome).toBe("failed");
+    expect(store.getMission()?.steps[0]?.status).not.toBe("passed");
+  });
 });
