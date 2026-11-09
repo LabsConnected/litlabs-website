@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { CONSENT_CHANGED_EVENT } from "@/lib/cookie-consent";
 
 export default function CookieConsent() {
   const { resolvedColors: T } = useTheme();
@@ -32,6 +33,7 @@ export default function CookieConsent() {
         timestamp: Date.now(),
       }),
     );
+    window.dispatchEvent(new Event(CONSENT_CHANGED_EVENT));
     setAnimateIn(false);
     setTimeout(() => setVisible(false), 300);
   };
@@ -47,6 +49,7 @@ export default function CookieConsent() {
         timestamp: Date.now(),
       }),
     );
+    window.dispatchEvent(new Event(CONSENT_CHANGED_EVENT));
     setAnimateIn(false);
     setTimeout(() => setVisible(false), 300);
   };

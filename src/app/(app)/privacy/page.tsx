@@ -329,9 +329,11 @@ export default function PrivacyPage() {
                 the server, not stored locally.
               </li>
               <li>
-                <strong>Analytics:</strong>{" "}Vercel Analytics may collect basic
-                usage metrics (page views, performance). No cross-site
-                tracking or advertising cookies are used.
+                <strong>Analytics:</strong>{" "}With your consent we use Umami
+                (cloud.umami.is), a privacy-focused, cookieless analytics
+                service, to collect basic usage metrics (page views,
+                referrers). No cross-site tracking or advertising cookies are
+                used.
               </li>
             </ul>
             <p className="mt-2">
