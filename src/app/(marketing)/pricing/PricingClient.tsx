@@ -113,7 +113,7 @@ const usageRules = [
   },
   {
     title: "Credits per billing cycle",
-    copy: `Paid plans grant AI credits after each successful billing cycle. Starter includes a one-time ${formatBits(getPlanCreditAllowance("starter"))}-credit grant that does not expire.`,
+    copy: `Paid plans grant AI credits after each successful billing cycle; unused monthly credits expire at the end of that cycle and do not roll over. Starter includes a one-time ${formatBits(getPlanCreditAllowance("starter"))}-credit grant that does not expire.`,
   },
   {
     title: "Fair usage tracking",
@@ -135,7 +135,7 @@ const faq = [
   {
     question: "Do I keep my existing Beta credits?",
     answer:
-      "Yes. Existing balances remain visible. Monthly plan credits are used first, followed by promotional and purchased credits.",
+      "Yes. Existing balances remain visible. Monthly plan credits are used first, followed by promotional and purchased credits. Unused monthly credits expire at the end of each billing cycle and do not roll over.",
   },
   {
     question: "Can I cancel anytime?",
@@ -342,7 +342,7 @@ export default function PricingClient() {
       <section className={styles.hero}>
         <div className={styles.heroBadge}>
           <span className={styles.liveDot} />
-          Founder Beta Pricing
+          Beta pricing
         </div>
 
         <h1>
@@ -371,7 +371,7 @@ export default function PricingClient() {
             <h2>Simple plans. Real limits. No billing tricks.</h2>
           </div>
           <p>
-            Founder pricing stays lower during beta. Cancel anytime — your work and credits are always yours.
+            Beta pricing stays lower during the beta period. Cancel anytime — your work and credits are always yours.
           </p>
         </div>
 
