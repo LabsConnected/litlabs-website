@@ -10,8 +10,7 @@
  *                             stay pending — never "passed without evidence"
  */
 
-import type { RuntimeStore, VerificationResult } from "@litt/agent-core";
-import { isStepEvidenceSatisfied, type AgentLoopResult } from "@litt/agent-core";
+import type { AgentLoopResult, RuntimeStore, VerificationResult } from "@litt/agent-core";
 import { isSynthesisStep, markInspectionStepsComplete } from "./mission-verification.js";
 
 export interface FinalizeMissionRunArgs {
@@ -68,6 +67,33 @@ async function markSynthesisStepsPassed(
 }
 
 /**
+ * Evidence types the VerificationGate itself proves when it reports
+ * `proven`. A step contract demanding test_result is satisfied by the
+ * gate's own successful `test` check — the runtime ran the real suite,
+ * which is stronger proof than whichever tool the model happened to
+ * pick (project.run "npm test" produces command_result, not
+ * test_result, and used to fail missions whose verification passed).
+ * Skipped/failed checks prove nothing and never satisfy a contract.
+ */
+const GATE_CHECK_TO_EVIDENCE: Readonly<Record<string, string>> = {
+  typecheck: "typecheck_result",
+  test: "test_result",
+  build: "build_result",
+};
+
+function gateProvenEvidenceTypes(
+  verification: VerificationResult,
+): ReadonlySet<string> {
+  const proven = new Set<string>(["verification_result"]);
+  for (const check of verification.checks) {
+    if (!check.success) continue;
+    const type = GATE_CHECK_TO_EVIDENCE[check.id];
+    if (type) proven.add(type);
+  }
+  return proven;
+}
+
+/**
  * Pass NON-synthesis steps of a proven MUTATING mission whose work is
  * evidenced — the counterpart to markSynthesisStepsPassed.
  *
@@ -82,9 +108,10 @@ async function markSynthesisStepsPassed(
  * PASS, mission reported failed).
  *
  * Truth rules (same bar the gate's uncovered-step check uses):
- *   - Steps WITH requiredEvidence pass only when
- *     isStepEvidenceSatisfied() finds successful attributed evidence —
- *     an unmet contract still blocks completion.
+ *   - Steps WITH requiredEvidence pass only when every required type is
+ *     proven — either by successful attributed evidence for that step,
+ *     or by a successful VerificationGate check of the matching kind
+ *     (gateProven). An unmet contract still blocks completion.
  *   - Steps that were actually worked (working/verifying/failed) pass
  *     only when they have >=1 successful evidence record attributed to
  *     them (e.stepId === step.id && e.success) — inspection evidence
@@ -98,6 +125,7 @@ async function markSynthesisStepsPassed(
 async function markWorkedMissionStepsPassed(
   store: RuntimeStore,
   reason: string,
+  gateProven: ReadonlySet<string> = new Set(),
 ): Promise<void> {
   const mission = store.getMission();
   if (!mission) return;
@@ -107,9 +135,16 @@ async function markWorkedMissionStepsPassed(
 
     const hasContract =
       Array.isArray(step.requiredEvidence) && step.requiredEvidence.length > 0;
-    if (hasContract && !isStepEvidenceSatisfied(step, mission.evidence)) {
-      continue;
-    }
+    const contractMet =
+      !hasContract ||
+      (step.requiredEvidence ?? []).every(
+        (type) =>
+          gateProven.has(type) ||
+          mission.evidence.some(
+            (e) => e.stepId === step.id && e.type === type && e.success === true,
+          ),
+      );
+    if (!contractMet) continue;
 
     const workedEvidence = mission.evidence.some(
       (e) => e.stepId === step.id && e.success === true,
@@ -162,6 +197,7 @@ export async function finalizeMissionRun(
       await markWorkedMissionStepsPassed(
         store,
         `Verification proved: ${summary.slice(0, 120)}`,
+        gateProvenEvidenceTypes(verification),
       );
     }
     await store.completeMission(
