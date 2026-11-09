@@ -161,7 +161,7 @@ describe("OpenRouterModelProvider — native tool_calls translate to the interna
     expect(result.content).toContain("project.branch");
   });
 
-  it("a malformed arguments string degrades to empty inputs, never a crash", async () => {
+  it("a malformed arguments string carries the invalid-arguments sentinel, never a crash", async () => {
     const lines = [
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"project_status\",\"arguments\":\"NOT-JSON\"}}]}}]}",
       "data: [DONE]",
@@ -176,7 +176,9 @@ describe("OpenRouterModelProvider — native tool_calls translate to the interna
     const result = await provider.stream([{ role: "user", content: "hi" }], () => {});
     const parsed = parseToolCall(result.content);
     expect(parsed?.toolId).toBe("project.status");
-    expect(parsed?.inputs).toEqual({});
+    // Malformed JSON surfaces a sentinel the loop rejects pre-dispatch —
+    // it must NOT silently become empty inputs.
+    expect(parsed?.inputs).toEqual({ __litt_invalid_arguments__: "NOT-JSON" });
   });
 });
 

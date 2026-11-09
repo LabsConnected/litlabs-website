@@ -16,6 +16,8 @@ import "server-only";
 
 import { destructiveRewriteViolation, existingPageOverwriteError, placeholderViolation, simulatePatchResult, tailwindViolation } from "./patch-validation";
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
+import { fitImageForPublish, PUBLISH_MAX_IMAGE_BYTES } from "./asset-image-fit";
+import { sniffImageMimeType } from "@/lib/image-sniff";
 import type { WorkspaceTransport } from "./workspace-transport";
 
 // ─── Tool Handler Signature ───────────────────────────────────────
@@ -780,7 +782,15 @@ export interface InsertAssetResult {
   contentType?: string;
   sizeBytes?: number;
   error?: string;
+  /** Which save step failed, when success is false. Lets a failed
+   *  auto-insert name itself in the run record (the approval-loop
+   *  diagnosis had to forensically reconstruct this) instead of
+   *  surfacing as an undifferentiated saveError. */
+  saveStep?: InsertSaveStep;
 }
+
+/** The ordered steps of insertAssetFromUrl that can fail a save. */
+export type InsertSaveStep = "decode" | "validate" | "size" | "fit" | "write";
 
 /**
  * Structural completeness check for a binary image payload. A truncated
@@ -790,23 +800,37 @@ export interface InsertAssetResult {
  * 1KB JPEG stub with no EOI marker. Verify the format's required head and
  * tail markers for the formats we accept; unknown image types pass
  * through rather than being over-rejected.
+ *
+ * The tail markers (JPEG EOI, PNG IEND) are located within the final
+ * TERMINAL_MARKER_SCAN_BYTES rather than required at the exact end of
+ * the buffer: some providers append padding or extra chunks after the
+ * terminal marker, and rejecting those payloads failed otherwise-valid
+ * generated images at save time. A payload with NO terminal marker in
+ * its tail is still rejected — that is the truncated-stub case.
  */
+const TERMINAL_MARKER_SCAN_BYTES = 4096;
+const JPEG_EOI_MARKER = Buffer.from([0xff, 0xd9]);
+const PNG_IEND_TRAILER = Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
+
+function hasTerminalMarker(buffer: Buffer, marker: Buffer): boolean {
+  const start = Math.max(0, buffer.length - TERMINAL_MARKER_SCAN_BYTES);
+  return buffer.subarray(start).includes(marker);
+}
+
 function imagePayloadLooksComplete(buffer: Buffer, contentType: string): boolean {
   const mime = contentType.toLowerCase();
   if (mime === "image/jpeg" || mime === "image/jpg") {
     return (
       buffer.length > 4 &&
       buffer[0] === 0xff && buffer[1] === 0xd8 &&
-      buffer[buffer.length - 2] === 0xff && buffer[buffer.length - 1] === 0xd9
+      hasTerminalMarker(buffer, JPEG_EOI_MARKER)
     );
   }
   if (mime === "image/png") {
     return (
       buffer.length > 16 &&
       buffer[0] === 0x89 && buffer[1] === 0x50 &&
-      buffer.subarray(-8).equals(
-        Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]),
-      )
+      hasTerminalMarker(buffer, PNG_IEND_TRAILER)
     );
   }
   if (mime === "image/gif") {
@@ -909,19 +933,23 @@ export async function insertAssetFromUrl(
   const directory = await resolveInsertDirectory(opts, transport);
   const isDataImage = /^data:image\//i.test(url);
   if (!isDataImage && !url.startsWith("https://")) {
-    return { success: false, error: "Asset URL must be a public HTTPS URL or a data:image/* URL" };
+    return { success: false, error: "Asset URL must be a public HTTPS URL or a data:image/* URL", saveStep: "validate" };
   }
   if (!isSafeInsertDir(directory)) {
-    return { success: false, error: "Invalid directory: must be a safe relative path" };
+    return { success: false, error: "Invalid directory: must be a safe relative path", saveStep: "validate" };
   }
 
+  // Tracks the save step in flight so a THROWN failure is tagged with
+  // the step that raised it; explicit failure returns carry their own
+  // tag. Starts at "decode": the try block begins by acquiring bytes.
+  let saveStep: InsertSaveStep = "decode";
   try {
     let buffer: Buffer;
     let contentType: string;
     if (isDataImage) {
       const decoded = decodeDataImageUrl(url);
       if ("error" in decoded) {
-        return { success: false, error: decoded.error };
+        return { success: false, error: decoded.error, saveStep: "decode" };
       }
       buffer = decoded.buffer;
       contentType = decoded.contentType;
@@ -970,26 +998,62 @@ export async function insertAssetFromUrl(
         throw lastErr instanceof Error ? lastErr : new Error("Failed to download asset: network error");
       }
       if (!resp.ok) {
-        return { success: false, error: `Failed to download asset: HTTP ${resp.status}` };
+        return { success: false, error: `Failed to download asset: HTTP ${resp.status}`, saveStep: "decode" };
       }
       contentType = resp.headers.get("content-type") || "application/octet-stream";
       buffer = Buffer.from(await resp.arrayBuffer());
     }
+    // Bytes are in hand — everything up to the size cap is validation.
+    saveStep = "validate";
+    // The declared type (data: URL label or response header) is not
+    // authoritative within image/* — providers mislabel encodings
+    // (Cloudflare flux returns JPEG bytes that were wrapped as
+    // data:image/png, which the structural check below then rejected as
+    // "truncated or corrupt", failing every project auto-insert and
+    // looping image.generate approvals). The bytes are ground truth:
+    // when the magic bytes identify a concrete image format, validate
+    // and store under that type. Non-image declarations are still
+    // rejected below — sniffing never promotes them.
+    const sniffedMime = sniffImageMimeType(buffer);
+    if (
+      sniffedMime &&
+      contentType.toLowerCase().startsWith("image/") &&
+      sniffedMime !== contentType.toLowerCase()
+    ) {
+      contentType = sniffedMime;
+    }
     if (!contentType.startsWith("image/")) {
-      return { success: false, error: `Not an image (content-type: ${contentType})` };
+      return { success: false, error: `Not an image (content-type: ${contentType})`, saveStep: "validate" };
     }
     if (buffer.length === 0) {
-      return { success: false, error: "Downloaded asset is empty" };
+      return { success: false, error: "Downloaded asset is empty", saveStep: "decode" };
     }
     if (!imagePayloadLooksComplete(buffer, contentType)) {
-      return { success: false, error: "Image data is truncated or corrupt" };
+      return { success: false, error: "Image data is truncated or corrupt", saveStep: "validate" };
     }
     if (buffer.length > MAX_INSERT_ASSET_BYTES) {
-      return { success: false, error: `Asset exceeds max size (${MAX_INSERT_ASSET_BYTES} bytes)` };
+      return { success: false, error: `Asset exceeds max size (${MAX_INSERT_ASSET_BYTES} bytes)`, saveStep: "size" };
     }
+
+    saveStep = "fit";
+    // Publish-safe sizing: an asset over the deploy per-file cap writes
+    // fine but can never be read back for publish — it surfaces at
+    // deploy time as a missing file. Normalize oversized rasters here so
+    // every inserted asset is deployable; refuse what cannot be fitted.
+    const fitted = await fitImageForPublish(buffer, contentType);
+    if (!fitted) {
+      return {
+        success: false,
+        error: `Image could not be reduced under the ${PUBLISH_MAX_IMAGE_BYTES}-byte publish limit`,
+        saveStep: "fit",
+      };
+    }
+    buffer = fitted.buffer;
+    contentType = fitted.contentType;
 
     const filename = sanitizeAssetName(opts.nameHint, contentType);
     const path = `${directory}/${filename}`;
+    saveStep = "write";
     // Transient workspace errors (a volume blip or mid-prepare window can
     // briefly ENOENT the workspace root) must not lose the generated
     // asset — retry the write once before reporting saveError.
@@ -1016,6 +1080,7 @@ export async function insertAssetFromUrl(
     return {
       success: false,
       error: err instanceof Error ? err.message : "Failed to insert asset",
+      saveStep,
     };
   }
 }

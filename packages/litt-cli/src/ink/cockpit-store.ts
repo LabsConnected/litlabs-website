@@ -349,7 +349,19 @@ export function idleTransitionFromTerminal(prev: HoloState): HoloState {
 
 export function useCockpitStore() {
   const [selectedPanel, setSelectedPanel] = useState<CockpitPanel>("runtime");
-  const [holoState, setHoloState] = useState<HoloState>("IDLE");
+  const [holoStateRaw, setHoloStateRaw] = useState<HoloState>("IDLE");
+  // Synchronous mirror of holoState. React functional updaters are
+  // evaluated against the last RENDERED state — dispatch-time queued
+  // updates are invisible to them (observed: an event-bridge updater
+  // dispatched 3ms after setHoloState("COMPLETE") still saw prev=RUNNING
+  // via React's eager-state path, and its stale result overwrote
+  // COMPLETE). Event handlers must read this ref, never store.state.
+  const holoStateRef = useRef<HoloState>("IDLE");
+  const setHoloState = useCallback((v: HoloState | ((prev: HoloState) => HoloState)) => {
+    const next = typeof v === "function" ? v(holoStateRef.current) : v;
+    holoStateRef.current = next;
+    setHoloStateRaw(next);
+  }, []);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [approvalPrompt, setApprovalPrompt] = useState<ApprovalPrompt | null>(null);
@@ -371,6 +383,13 @@ export function useCockpitStore() {
   // startMission increments it exactly once per new mission; setCurrentRunId
   // does NOT touch it (backend runId assignment is not a new mission).
   const missionEpochRef = useRef(0);
+  // Synchronous mirror of "the current mission reached a terminal state".
+  // store.state is a render-time snapshot — event callbacks can observe a
+  // stale missionState for a tick after finalize, letting a straggler
+  // tool/run event resurrect RUNNING over a completed mission (observed
+  // dogfood hang: footer "✓ Complete" + holo RUNNING forever). This ref is
+  // written inside the same state transitions, so it is never stale.
+  const terminalMissionStateRef = useRef<HoloState | null>(null);
   const setCurrentRunId = useCallback((runId: string | null) => {
     setCurrentRunIdState(runId);
   }, []);
@@ -716,6 +735,7 @@ export function useCockpitStore() {
     // setCurrentRunId does NOT advance this counter; a backend runId learned
     // later belongs to the same logical mission.
     missionEpochRef.current += 1;
+    terminalMissionStateRef.current = null;
     setMission(text);
     setMissionState({
       text,
@@ -765,6 +785,13 @@ export function useCockpitStore() {
    *  persisted for terminal FAILED/CANCELLED/TIMEOUT states so the
    *  failure view can show an honest, actionable report. */
   const updateMissionState = useCallback((state: HoloState, reason?: string) => {
+    // Record terminal synchronously — React may defer updater evaluation,
+    // and event handlers must never observe a stale "mission still live".
+    // Callers only reach this with a live mission (startMission ran);
+    // beginTurn/clearMission/startMission reset the ref for the next turn.
+    if (state === "COMPLETE" || state === "FAILED" || state === "CANCELLED" || state === "TIMEOUT") {
+      terminalMissionStateRef.current = state;
+    }
     setMissionState((prev) => {
       if (!prev) return prev;
       if (state === "COMPLETE" || state === "FAILED" || state === "CANCELLED" || state === "TIMEOUT") {
@@ -820,8 +847,24 @@ export function useCockpitStore() {
 
   /** Clear the mission (after completion display) */
   const clearMission = useCallback(() => {
+    terminalMissionStateRef.current = null;
     setMission(null);
     setMissionState(null);
+  }, []);
+
+  /** Synchronous read of the current mission's terminal holo state (or
+   *  null while the mission is live / no mission exists). Event handlers
+   *  must use this instead of store.state.missionState — the render
+   *  snapshot can lag a tick behind the transition that set it. */
+  const getTerminalMissionState = useCallback((): HoloState | null => {
+    return terminalMissionStateRef.current;
+  }, []);
+
+  /** Synchronous read of the live holo state — same staleness contract
+   *  as getTerminalMissionState: event handlers must not read
+   *  store.state.holoState (render snapshot). */
+  const getHoloState = useCallback((): HoloState => {
+    return holoStateRef.current;
   }, []);
 
   const addCommand = useCallback((cmd: string) => {
@@ -952,6 +995,32 @@ export function useCockpitStore() {
     }, delayMs);
   }, []);
 
+  /**
+   * A new model turn begins. Cancels any pending idle timer and resets
+   * terminal UI truth: a leftover COMPLETE/FAILED/CANCELLED/TIMEOUT
+   * holoState returns to IDLE and a terminal missionState is cleared
+   * (lastCompletedMission is preserved — it is history, not state).
+   * Without this a failed chat turn after a completed mission showed
+   * the OLD mission's COMPLETE footer.
+   */
+  const beginTurn = useCallback(() => {
+    if (terminalIdleTimerRef.current) {
+      clearTimeout(terminalIdleTimerRef.current);
+      terminalIdleTimerRef.current = null;
+    }
+    terminalMissionStateRef.current = null;
+    setHoloState((prev) =>
+      prev === "COMPLETE" || prev === "FAILED" || prev === "CANCELLED" || prev === "TIMEOUT"
+        ? "IDLE"
+        : prev,
+    );
+    setMissionState((prev) =>
+      prev && (prev.state === "COMPLETE" || prev.state === "FAILED" || prev.state === "CANCELLED" || prev.state === "TIMEOUT")
+        ? null
+        : prev,
+    );
+  }, []);
+
   /** Explicit focus restoration (e.g. typing returns from history). */
   const bumpFocus = useCallback(() => {
     const tracker = focusTrackerRef.current!;
@@ -983,15 +1052,15 @@ export function useCockpitStore() {
 
   // Auto-clear approval prompt when holoState transitions away from APPROVAL
   useEffect(() => {
-    if (holoState !== "APPROVAL" && approvalPrompt) {
+    if (holoStateRaw !== "APPROVAL" && approvalPrompt) {
       setApprovalPrompt(null);
     }
-  }, [holoState, approvalPrompt]);
+  }, [holoStateRaw, approvalPrompt]);
 
   return {
     state: {
       selectedPanel,
-      holoState,
+      holoState: holoStateRaw,
       commandHistory,
       historyIndex,
       approvalPrompt,
@@ -1055,6 +1124,8 @@ export function useCockpitStore() {
       setMission,
       startMission,
       updateMissionState,
+      getTerminalMissionState,
+      getHoloState,
       addMissionFile,
       addMissionCommand,
       setMissionTestResults,
@@ -1093,6 +1164,7 @@ export function useCockpitStore() {
       pauseBusyForApproval,
       resumeBusyAfterApproval,
       scheduleIdle,
+      beginTurn,
       bumpFocus,
       setTranscriptAnchor,
       setTranscriptPage,

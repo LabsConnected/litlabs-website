@@ -23,11 +23,14 @@ afterEach(() => {
 });
 
 describe("model registry — eligibility", () => {
-  it("orders build models by priority: gemini-flash first", () => {
+  it("orders build models by priority: pinned gemini-2.5-flash first, -latest alias fallback", () => {
     const models = getEligibleModels({ tools: true, reliableFileWriting: true });
     const ids = models.map((m) => m.canonicalId);
-    expect(ids[0]).toBe("gemini-flash");
-    expect(ids[1]).toBe("gemini-2.5-flash");
+    // Nov 2026 staging evidence: gemini-flash-latest timed out at 60s while
+    // pinned gemini-2.5-flash served the same window — the verified pin is
+    // the primary build pick; the self-healing alias is the fallback.
+    expect(ids[0]).toBe("gemini-2.5-flash");
+    expect(ids[1]).toBe("gemini-flash");
     // Chat-only models are NEVER build models.
     expect(ids).not.toContain("openrouter-north-mini-code");
     // nemotron-3.5-lightning is a proven writer (Nov 2026 probe: 7
@@ -56,8 +59,8 @@ describe("model registry — eligibility", () => {
     // planBasicRoutes still withholds the LITT_PAID route from unentitled
     // runs, and selectBuildModel does the same.
     expect(vision.map((m) => m.canonicalId)).toEqual([
-      "gemini-flash",
       "gemini-2.5-flash",
+      "gemini-flash",
       "gemini-2.5-pro",
       "openai-gpt-4o",
     ]);
@@ -65,8 +68,8 @@ describe("model registry — eligibility", () => {
 
   it("selectBuildModel returns the highest-priority build model", () => {
     const m = selectBuildModel();
-    expect(m?.canonicalId).toBe("gemini-flash");
-    expect(m?.providerModelId).toBe("gemini-flash-latest");
+    expect(m?.canonicalId).toBe("gemini-2.5-flash");
+    expect(m?.providerModelId).toBe("gemini-2.5-flash");
   });
 
   it("selectBuildModel withholds LITT_PAID models from unentitled runs", () => {
@@ -105,7 +108,7 @@ describe("model registry — eligibility", () => {
     // Entitlement must not reorder anything: managed OpenAI is last-resort,
     // so a free build model is still the first pick for an entitled run.
     expect(selectBuildModel(undefined, { allowLittPaidProviders: true })?.canonicalId).toBe(
-      "gemini-flash",
+      "gemini-2.5-flash",
     );
   });
 
@@ -267,7 +270,7 @@ describe("model registry — capacity vs capability (golden 41948852260)", () =>
     }
     const ids = getEligibleModels({ tools: true, reliableFileWriting: true }).map((m) => m.canonicalId);
     expect(ids).toContain("openrouter-nemotron-3.5-lightning");
-    expect(selectBuildModel()?.canonicalId).toBe("gemini-flash");
+    expect(selectBuildModel()?.canonicalId).toBe("gemini-2.5-flash");
   });
 
   it.each(["timeout", "server_error", "network", "aborted", "budget_exhausted"] as const)(

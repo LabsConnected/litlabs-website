@@ -198,6 +198,8 @@ export {
   buildDefaultSystemPrompt,
   classifyAgentFailure,
   sanitizePriorMessages,
+  detectMutationRequest,
+  detectCreationRequest,
   PROJECT_EVIDENCE_TOOL_ID,
 } from "./agent-loop.js";
 export type {
@@ -225,11 +227,14 @@ export {
   fallbackPlan,
   classifyGoalDomain,
   isMutationStep,
+  isMutationDependentPlanStep,
+  dropMutationDependentSteps,
   MissionPlanningError,
   resolveStepForTool,
   attachToolToStep,
   progressMissionStepAfterTool,
   toolToEvidenceType,
+  EVIDENCE_PRODUCER_TOOLS,
   isStepEvidenceSatisfied,
   updateToolResultOnStep,
 } from "./mission-planner.js";

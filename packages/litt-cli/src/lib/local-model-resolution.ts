@@ -88,6 +88,55 @@ export function resolveRequestedLocalModel(
   return { model: null, source: "none" };
 }
 
+// ─── 0b. Mission/tool-execution lane model default ──────────────────
+
+/**
+ * Default model for the mission lane (agent loop + tool execution).
+ *
+ * Real dogfood evidence: litt-coder:8k reliably answers single-shot
+ * coding prompts but cannot sustain multi-round tool use — a "scan"
+ * mission called project.status once, then emitted text or hallucinated
+ * tool ids ("typecheck") until max_rounds. litt-tools:4k is the build
+ * tuned for exactly this lane.
+ */
+export const MISSION_DEFAULT_LOCAL_MODEL = "ollama:litt-tools:4k";
+
+/** Env override scoped to the mission lane only. */
+export const MISSION_MODEL_ENV = "LITT_MISSION_MODEL";
+
+/**
+ * Resolve which local model a MISSION should request.
+ *
+ * Precedence:
+ *   1. LITT_MISSION_MODEL env — explicit mission-lane override.
+ *   2. LITT_MODEL env — explicit operator request for the session.
+ *   3. litt-tools:4k — the mission-lane default, but ONLY when the
+ *      probed daemon actually has it installed. Absent → fall through
+ *      to the normal request resolution so an uninstalled default can
+ *      never hard-fail a mission.
+ *   4. The normal request chain (persisted ollama: selection, else
+ *      the lane preference order).
+ *
+ * The persisted picker selection is the GENERAL/coding default — the
+ * mission lane deliberately prefers its own tool-tuned build unless
+ * the operator named a model explicitly via env.
+ */
+export function resolveMissionLocalModelRequest(
+  lane: LocalLaneStatus | null,
+  prefsSelectedModel: string | null | undefined,
+): string | null {
+  const missionEnv = process.env[MISSION_MODEL_ENV]?.trim();
+  if (missionEnv) return missionEnv;
+  const env = process.env.LITT_MODEL?.trim();
+  if (env) return env;
+  const toolsTag = ollamaTagOf(MISSION_DEFAULT_LOCAL_MODEL);
+  const installed = lane?.available === true && lane.models.some(
+    (m) => m === toolsTag || m.startsWith(`${toolsTag}:`),
+  );
+  if (installed) return MISSION_DEFAULT_LOCAL_MODEL;
+  return resolveRequestedLocalModel(prefsSelectedModel).model;
+}
+
 // ─── 1. Policy: must the local daemon serve this request? ───────────
 
 export interface LocalRoutePolicyInput {

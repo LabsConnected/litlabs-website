@@ -394,6 +394,45 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     expect(settleCall("completed")).toBeNull();
   });
 
+  it("names the failed tool and its error when the approved mutation fails", async () => {
+    // Production defect (2026-11-08 staging acceptance, pausedRun
+    // fa715c2e): an approved image.generate failed inside the provider
+    // (Cloudflare schema rejection) and the run settled with the generic
+    // "approved workspace operation failed" — the real reason was only
+    // visible in server logs. The failure message must carry the tool id
+    // and recorded error so users and acceptance evidence see the truth.
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "done",
+      stepsUsed: 2,
+      cancelled: false,
+      toolCalls: [
+        {
+          toolId: "image.generate",
+          success: false,
+          summary:
+            "Failed: Bad input: Additional or unevaluated properties '/width' at '/' not allowed",
+          mutating: true,
+        },
+      ],
+    } as any);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    await vi.waitFor(() => expect(settleCall("failed")).not.toBeNull());
+    const failed = settleCall("failed");
+    const failureMessage = failed!.args.patch?.failureMessage as string;
+    expect(failureMessage).toContain("image.generate");
+    expect(failureMessage).toContain("Bad input");
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      "msg-assistant-1",
+      "user_123",
+      "failed",
+      expect.stringContaining("image.generate"),
+    );
+    expect(settleCall("completed")).toBeNull();
+  });
+
   it("a rejection closes the awaiting message with a truthful declined note and never resumes", async () => {
     const res = await POST(makeRequest("rejected"), routeParams);
     expect(res.status).toBe(200);
