@@ -898,6 +898,39 @@ const LOCAL_BUILD_TOOL_NOTE =
   "- For a new static site, a single files.write with complete inline-CSS HTML is acceptable and fastest.\n" +
   "- Call preview.start when the files are written to verify the render.";
 
+/**
+ * Plan-gated offering for the web tool family (web.search, web.fetch,
+ * weather.forecast, web.intelligence — every tool gated on the web_search
+ * capability). When the capability plan lists no web family, offering web
+ * tools on the full cloud catalog invites the model to "research" instead
+ * of doing the requested local work — the measured failure: a simple
+ * file-edit goal produced web.search calls instead of files.read /
+ * files.write. Same scoping principle as browser.* above (no session →
+ * not offered): offering is narrowed by plan, never permission — the
+ * executor gates are unchanged. Research/reference/URL goals keep the
+ * family because the planner lists it as useful.
+ */
+const WEB_CAPABILITY_FAMILIES = new Set(["web_search", "web_fetch"]);
+
+export function slimWebToolsForPlan(
+  tools: LiTTToolDefinition[],
+  capabilityPlan: import("./capability-planner").CapabilityPlan | undefined,
+): LiTTToolDefinition[] {
+  if (!capabilityPlan) return tools;
+  const planned = [
+    ...capabilityPlan.requiredCapabilities,
+    ...capabilityPlan.usefulCapabilities,
+  ];
+  if (planned.some((c) => WEB_CAPABILITY_FAMILIES.has(c))) return tools;
+  const slim = tools.filter(
+    (t) =>
+      !(t.requiredCapabilities ?? []).some((c) =>
+        WEB_CAPABILITY_FAMILIES.has(c),
+      ),
+  );
+  return slim.length > 0 ? slim : tools;
+}
+
 function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
   return {
     id: tool.id,
@@ -1803,7 +1836,10 @@ async function runAgentLoopV2Inner(
   // set. Every mutation still passes the SAME permission/approval gates
   // (this only narrows what is OFFERED, never what is permitted), and
   // tasks needing terminal/deploy/web/image keep the full catalog.
-  const offerableTools = slimToolsForLocalBuild(healthCheckedTools, capabilityPlan);
+  const offerableTools = slimToolsForLocalBuild(
+    slimWebToolsForPlan(healthCheckedTools, capabilityPlan),
+    capabilityPlan,
+  );
   const toolsSlimmedForLocal = offerableTools !== healthCheckedTools;
   if (toolsSlimmedForLocal) {
     cfg.systemPrompt += "\n\n" + LOCAL_BUILD_TOOL_NOTE;
@@ -3483,7 +3519,7 @@ async function resumeAgentLoopV2Inner(
   // build/edit tasks so a post-approval continuation cannot suddenly
   // re-advertise the ~60-tool catalog mid-run.
   const resumeOfferableTools = slimToolsForLocalBuild(
-    resumeHealthCheckedTools,
+    slimWebToolsForPlan(resumeHealthCheckedTools, resumeCapabilityPlan),
     resumeCapabilityPlan,
   );
   if (resumeOfferableTools !== resumeHealthCheckedTools) {

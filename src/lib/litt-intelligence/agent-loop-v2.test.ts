@@ -6,7 +6,8 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
   callLLMWithTools: vi.fn(),
 }));
 
-import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, type ResumeInput } from "./agent-loop-v2";
+import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, slimWebToolsForPlan, type ResumeInput } from "./agent-loop-v2";
+import { planCapabilities } from "./capability-planner";
 import type { ProgressEvent } from "./progress-events";
 import { callLLMWithTools, AgentBudgetExhaustedError } from "./llm-tool-calling";
 import { toolRegistry } from "./tool-registry";
@@ -2562,5 +2563,94 @@ describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incide
 
     expect(result.cancelReason ?? "").not.toContain("Repeated tool call detected");
     expect(transport.applyPatch).toHaveBeenCalledTimes(8);
+  });
+});
+
+describe("runAgentLoopV2 — web tools are plan-gated for local edit goals", () => {
+  it("edit goal: web tools are not offered; read → write → approval → write executes", async () => {
+    const writes: Array<{ path: string; content: string }> = [];
+    const transport = {
+      ...fakeTransport,
+      readFile: vi.fn().mockResolvedValue({ content: "<h1>Old heading</h1>", size: 24 }),
+      writeFile: vi.fn(async (path: string, content: string) => {
+        writes.push({ path, content });
+        return { saved: true };
+      }),
+    } as unknown as WorkspaceTransport;
+
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-r1",
+          toolId: "files.read",
+          inputs: { projectId: "p-test", path: "index.html" },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-w1",
+          toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "<h1>New heading</h1>" },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "change the heading text",
+      transport,
+      { model: "test-model", systemPrompt: "You are LiTT.", executionMode: "act", enableBuildFix: false },
+    );
+
+    // The offered tool list must not include the web family for a local
+    // edit goal — this is the #551-class failure: the model called
+    // web.search instead of files.read/files.write.
+    const offered = (vi.mocked(callLLMWithTools).mock.calls[0]?.[2] ?? []) as { id: string }[];
+    expect(offered.some((t) => t.id === "web.search")).toBe(false);
+    expect(offered.some((t) => t.id === "web.fetch")).toBe(false);
+    expect(offered.some((t) => t.id === "files.write")).toBe(true);
+
+    expect(result.pendingApproval?.toolId).toBe("files.write");
+    expect(result.pendingApproval?.toolCallId).toBe("tc-w1");
+    expect(transport.readFile).toHaveBeenCalled();
+
+    // Approval resumes the run; the write must actually persist.
+    await resumeAgentLoopV2(
+      {
+        pausedMessages: [{ role: "user" as const, content: "change the heading text" }],
+        toolId: "files.write",
+        toolCallId: "tc-w1",
+        inputs: { projectId: "p-test", path: "index.html", content: "<h1>New heading</h1>" },
+        decision: "approved",
+        config: { model: "test-model", systemPrompt: "You are LiTT.", executionMode: "act", enableBuildFix: false },
+        stepsUsedBeforePause: 2,
+        hadInterveningMutation: false,
+      },
+      transport,
+    );
+
+    expect(writes).toEqual([{ path: "index.html", content: "<h1>New heading</h1>" }]);
+  });
+
+  it("research goal keeps the web family in the offered set", () => {
+    const plan = planCapabilities("research roofing companies and build a landing page");
+    const tools = toolRegistry.listEnabled();
+    const out = slimWebToolsForPlan(tools, plan);
+    expect(out).toBe(tools); // plan lists web_search — nothing slimmed
+  });
+
+  it("minimal edit plan drops only the web family, keeps workspace tools", () => {
+    const plan = planCapabilities("change the heading text");
+    const tools = toolRegistry.listEnabled();
+    const out = slimWebToolsForPlan(tools, plan);
+    expect(out.some((t) => t.id === "web.search")).toBe(false);
+    expect(out.some((t) => t.id === "web.fetch")).toBe(false);
+    expect(out.some((t) => t.id === "weather.forecast")).toBe(false);
+    expect(out.some((t) => t.id === "files.write")).toBe(true);
+    expect(out.some((t) => t.id === "files.read")).toBe(true);
   });
 });
