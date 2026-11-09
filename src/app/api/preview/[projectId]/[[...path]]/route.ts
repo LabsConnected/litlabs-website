@@ -129,6 +129,25 @@ export async function GET(
   const { userId: sessionUserId } = await auth(_req);
   if (sessionUserId) {
     userId = sessionUserId;
+    // A session request may still arrive under a minted `/t/<token>/`
+    // prefix — that is the URL shape preview-status hands to the Studio
+    // panel and other session clients. The session is authoritative (the
+    // owner can already read any workspace path), so a valid in-scope
+    // token prefix is stripped for path resolution WITHOUT engaging
+    // manifest enforcement; signature, audience, project and workspace
+    // scope are still verified, and expiry is ignored because the token
+    // here is only URL decoration. An invalid prefix falls through to be
+    // treated as a literal path, exactly as before.
+    if (segments[0] === "t" && segments[1]) {
+      try {
+        const claims = verifyPreviewToken(segments[1], { ignoreExpiry: true });
+        if (claims.projectId === projectId) {
+          segments.splice(0, 2);
+        }
+      } catch {
+        // Not a preview token — leave the literal path untouched.
+      }
+    }
   } else if (segments[0] === "t" && segments[1]) {
     try {
       const claims = verifyPreviewToken(segments[1]);

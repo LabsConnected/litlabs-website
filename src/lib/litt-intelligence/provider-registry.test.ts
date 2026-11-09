@@ -51,6 +51,20 @@ afterEach(() => {
 });
 
 describe("provider registry — Basic cost policy", () => {
+  it.each([undefined, "", "invalid", "-1", "0", "Infinity"])("uses a finite Gemini timeout for invalid override %s", (override) => {
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("GEMINI_TIMEOUT_MS", override);
+    const gemini = planBasicRoutes(TOOL_REQ).providers.find(route => route.provider === "gemini");
+    expect(gemini?.timeoutMs).toBe(60_000);
+  });
+
+  it("honors a positive Gemini timeout override", () => {
+    vi.stubEnv("GEMINI_API_KEY", "x");
+    vi.stubEnv("GEMINI_TIMEOUT_MS", "45000");
+    const gemini = planBasicRoutes(TOOL_REQ).providers.find(route => route.provider === "gemini");
+    expect(gemini?.timeoutMs).toBe(45_000);
+  });
+
   it("includes FREE_MANAGED routes when credentials are present", () => {
     vi.stubEnv("GEMINI_API_KEY", "x");
     vi.stubEnv("OPENROUTER_API_KEY", "x");

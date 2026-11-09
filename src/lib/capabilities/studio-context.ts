@@ -32,7 +32,14 @@ async function checkTerminalServerHealth(): Promise<boolean> {
     clearTimeout(timeout);
     if (!resp.ok) return false;
     const data = await resp.json();
-    return data?.status === "ok" && data?.readiness === "ready";
+    // /health reports status:"ok"/readiness:"ready" whenever the server
+    // process is up — INCLUDING when terminal execution is disabled by
+    // fail-closed isolation policy (production without verified sandbox).
+    // A reachable-but-execution-disabled server cannot run PTYs, so it is
+    // NOT a healthy terminal for capability purposes.
+    if (data?.status !== "ok" || data?.readiness !== "ready") return false;
+    if (data?.terminal?.execution === "disabled") return false;
+    return true;
   } catch {
     return false;
   }

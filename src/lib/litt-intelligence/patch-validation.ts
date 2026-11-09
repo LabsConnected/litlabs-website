@@ -302,7 +302,8 @@ export async function buildPatchRecoveryMessage(
       `SAFE PATCH RECOVERY ATTEMPT ${attempt}: The file was re-read from disk. ` +
       `Do not repeat the rejected patch. Either use files.write with the complete ` +
       `literal contents, or use apply_patch with search text copied exactly from ` +
-      `CURRENT FILE CONTENT below.\n\n` +
+      `CURRENT FILE CONTENT below. Use a SHORT search string (5-15 words or one ` +
+      `tag) that appears exactly once — long search strings are easy to mistype.\n\n` +
       `CURRENT FILE CONTENT (${path}):\n${bounded}`
     );
   } catch (readError) {
@@ -404,6 +405,102 @@ export async function validateApplyPatchInputs(
 }
 
 /**
+ * Structural styling markers — the SHAPE of the page's presentation
+ * (style blocks, stylesheet links, class/style attributes, media
+ * queries, fonts, semantic layout), not its VALUES. A legitimate
+ * theme change alters colors but keeps these; a destructive rewrite
+ * drops most of them.
+ */
+function stylingSignature(html: string): Set<string> {
+  const sig = new Set<string>();
+  const count = (re: RegExp) => (html.match(re) ?? []).length;
+  if (/<style[\s>]/i.test(html)) sig.add("style-tag");
+  if (/rel\s*=\s*["']?stylesheet/i.test(html)) sig.add("stylesheet-link");
+  if (count(/class\s*=/gi) >= 2) sig.add("class-attrs");
+  if (/style\s*=\s*["']/i.test(html)) sig.add("inline-style");
+  if (/@media/i.test(html)) sig.add("media-query");
+  if (/--[\w-]+\s*:/i.test(html)) sig.add("css-vars");
+  if (/font(-family)?\s*[:=]|font-(family|sans|serif|mono)/i.test(html)) sig.add("font");
+  if (/<script[\s>]/i.test(html)) sig.add("script");
+  if (/<(header|nav|main|section|footer|article|aside)[\s>]/i.test(html)) sig.add("semantic-layout");
+  if (/@tailwind|tailwind/i.test(html)) sig.add("tailwind");
+  return sig;
+}
+
+/**
+ * Returns a refusal message when `next` destructively rewrites `prev`
+ * (strips most of its structural styling), else null. Only meaningful
+ * when prev was actually styled — a signature below the floor is an
+ * already-plain file where rewriting is harmless.
+ */
+export function destructiveRewriteViolation(prev: string, next: string): string | null {
+  const prevSig = stylingSignature(prev);
+  if (prevSig.size < 3) return null;
+  let kept = 0;
+  for (const marker of prevSig) {
+    if (stylingSignature(next).has(marker)) kept += 1;
+  }
+  const retention = kept / prevSig.size;
+  if (retention >= 0.4) return null;
+  const lost = [...prevSig].filter((m) => !stylingSignature(next).has(m)).join(", ");
+  return (
+    `Refusing this full-file rewrite: it removes the existing page structure/styling ` +
+    `(${lost}). The file already exists — do NOT emit files.write for it. ` +
+    `Emit apply_patch instead: set path to this file and patches to a list of ` +
+    `{search, replace} pairs where each search is an exact substring copied ` +
+    `verbatim from the current file content and replace is that same substring ` +
+    `with only the requested change applied.`
+  );
+}
+
+/**
+ * Full-overwrite gate for the local small lane. A 1.5B-class model answers
+ * "change the footer text" by regenerating the whole document — and drops
+ * the requested text (confirmed live: an 11KB rewrite landed with the edit
+ * silently missing). Structural styling guards can't detect a missing
+ * edit, so overwriting an existing real page must be an explicit choice:
+ * refuse unless the call declared `allowOverwrite: true`, and steer the
+ * retry to apply_patch. Applies to files.write AND site.compose — a
+ * recompose over an existing page is the same destructive overwrite.
+ * Returns null for new files, non-HTML targets, the replaceable
+ * LITT-WELCOME-SCREEN scaffold, and declared overwrites.
+ */
+export async function existingPageOverwriteError(
+  inputs: { path?: unknown; allowOverwrite?: unknown },
+  transport: WorkspaceTransport,
+): Promise<string | null> {
+  if (inputs.allowOverwrite === true) return null;
+  // site.compose defaults an absent path to index.html at write time —
+  // resolve the same default here or that call would skip the gate.
+  const path = typeof inputs.path === "string" && inputs.path.trim() ? inputs.path.trim() : "index.html";
+  if (!/\.x?html?$/i.test(path)) return null;
+  let prev: string;
+  try {
+    ({ content: prev } = await transport.readFile(path));
+  } catch {
+    return null; // Unreadable target = a new file — nothing to preserve.
+  }
+  if (prev.includes("LITT-WELCOME-SCREEN")) return null;
+  // A provably destructive rewrite (structure/styling stripped) is owned by
+  // the merge-or-refuse path in handleFilesWrite — refusing here would
+  // preempt a repairable merge that is supposed to land.
+  if (
+    typeof (inputs as { content?: unknown }).content === "string" &&
+    destructiveRewriteViolation(prev, (inputs as { content: string }).content)
+  ) {
+    return null;
+  }
+  return (
+    `Refused: ${path} already exists — a full-file overwrite is not the edit path. ` +
+    `Emit apply_patch instead: patches is a list of {search, replace} pairs where each ` +
+    `search is an exact substring copied verbatim from the current file content ` +
+    `(files.read the file first if you have not), and replace is that same substring ` +
+    `with ONLY the requested change applied. Retry this write with "allowOverwrite": true ` +
+    `ONLY if the user explicitly asked for the whole page to be rebuilt.`
+  );
+}
+
+/**
  * Validate files.write inputs before they reach the approval gate.
  *
  * A full-file write has no search string to verify — the only provable
@@ -413,6 +510,10 @@ export async function validateApplyPatchInputs(
  * model substituted a template slot for the literal brand name, and the
  * apply_patch-only guard never saw it. The approval gate freezes inputs,
  * so a placeholder write can only persist the token verbatim.
+ *
+ * The local small lane's full-overwrite gate lives in
+ * existingPageOverwriteError — the loop applies it to files.write and
+ * site.compose separately (it needs the workspace transport).
  */
 export function validateFilesWriteInputs(inputs: FilesWriteInputs): string | null {
   const path = typeof inputs.path === "string" ? inputs.path : null;

@@ -384,15 +384,18 @@ describe("PLAN escape — runCommand enforces end to end", () => {
     execFileSync("git", ["init", "-q"], { cwd: ws });
     fs.writeFileSync(path.join(ws, "in.txt"), "b\na\n");
     const shell = createShellExecutor(ws);
-    for (const [cmd, args] of [
+    const cmds: Array<[string, string[]]> = [
       ["git", ["status"]],
       ["git", ["-C", ws, "status"]],
       ["env", ["FOO=1"]],
       ["env", ["FOO=1", "git", "status"]],
-      ["find", [".", "-name", "*.ts"]],
+      // Windows System32 find.exe shadows Git's Unix find and rejects -name;
+      // it is a different tool, so only assert Unix-find behavior elsewhere.
+      ...(process.platform === "win32" ? [] : ([["find", [".", "-name", "*.ts"]]] as Array<[string, string[]]>)),
       ["sort", ["in.txt"]],
       ["date", ["+%Y"]],
-    ] as Array<[string, string[]]>) {
+    ];
+    for (const [cmd, args] of cmds) {
       const res = await runCommandSecure(shell, cmd, args, {
         mode: "plan",
         cwd: ws,

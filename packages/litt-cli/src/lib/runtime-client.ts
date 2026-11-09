@@ -86,7 +86,9 @@ export interface LifecycleEvent {
     | "mission.verifying"
     | "mission.completed"
     | "mission.failed"
-    | "mission.restored";
+    | "mission.restored"
+    | "mission.evidence"
+    | "verification.repair";
   runId: string;
   toolCallId?: string;
   ts: number;

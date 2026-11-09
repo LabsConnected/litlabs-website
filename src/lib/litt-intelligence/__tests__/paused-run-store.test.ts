@@ -78,16 +78,23 @@ function makeDb() {
         limit(n: number) { limitN = n; return chain; },
         async maybeSingle() {
           if (mode === "insert" && payload) {
-            rows.push(payload);
-            return { data: payload, error: null };
+            // The real DB assigns gen_random_uuid() on insert when the row
+            // carries no id — the fake must too, or inserted-row identity
+            // (pausedRunId references) is undefined.
+            const row = { id: `paused-${rows.length + 1}`, ...payload };
+            row.id = (payload.id as string | undefined) ?? (row.id as string);
+            rows.push(row);
+            return { data: row, error: null };
           }
           const result = run();
           return { data: result[0] ?? null, error: null };
         },
         async single() {
           if (mode === "insert" && payload) {
-            rows.push(payload);
-            return { data: payload, error: null };
+            const row = { id: `paused-${rows.length + 1}`, ...payload };
+            row.id = (payload.id as string | undefined) ?? (row.id as string);
+            rows.push(row);
+            return { data: row, error: null };
           }
           const result = run();
           return { data: result[0] ?? null, error: result[0] ? null : { message: "not found" } };
@@ -105,10 +112,120 @@ vi.mock("@/lib/supabase", () => ({
   supabaseAdmin: makeDb(),
 }));
 
+/** Minimal action_runs fake — enough surface for the expiry settle and
+ *  re-request parent-attach paths under test. */
+type FakeRun = {
+  id: string;
+  user_id: string;
+  project_id: string | null;
+  conversation_id: string | null;
+  kind: string;
+  status: string;
+  approval_reference: string | null;
+  failure_code: string | null;
+  failure_message: string | null;
+  current_activity: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+const runRows: FakeRun[] = [];
+
+function fakeRun(overrides: Partial<FakeRun> = {}): FakeRun {
+  const run: FakeRun = {
+    id: `run-${runRows.length + 1}`,
+    user_id: "user_1",
+    project_id: "proj_1",
+    conversation_id: "conv_1",
+    kind: "agent",
+    status: "waiting_for_user",
+    approval_reference: null,
+    failure_code: null,
+    failure_message: null,
+    current_activity: null,
+    started_at: null,
+    completed_at: null,
+    ...overrides,
+  };
+  runRows.push(run);
+  return run;
+}
+
+vi.mock("@/lib/action-runtime", () => ({
+  isTerminalActionRunStatus: (status: string) =>
+    status === "completed" || status === "failed" || status === "cancelled",
+  getActionRun: async (runId: string, userId: string) => {
+    const r = runRows.find((row) => row.id === runId && row.user_id === userId);
+    return r
+      ? {
+          id: r.id,
+          status: r.status,
+          approvalReference: r.approval_reference,
+          failureCode: r.failure_code,
+          failureMessage: r.failure_message,
+          currentActivity: r.current_activity,
+          startedAt: r.started_at,
+          completedAt: r.completed_at,
+        }
+      : null;
+  },
+  createActionRun: async (input: {
+    userId: string;
+    projectId?: string | null;
+    conversationId?: string | null;
+    kind: string;
+    currentActivity?: string;
+  }) => {
+    const run = fakeRun({
+      user_id: input.userId,
+      project_id: input.projectId ?? null,
+      conversation_id: input.conversationId ?? null,
+      kind: input.kind,
+      status: "queued",
+      current_activity: input.currentActivity ?? null,
+    });
+    return { id: run.id, status: run.status };
+  },
+  patchActionRun: async (
+    runId: string,
+    userId: string,
+    patch: { approvalReference?: string | null; currentActivity?: string | null },
+  ) => {
+    const r = runRows.find((row) => row.id === runId && row.user_id === userId);
+    if (!r) throw new Error("Action run not found");
+    if (patch.approvalReference !== undefined) r.approval_reference = patch.approvalReference;
+    if (patch.currentActivity !== undefined) r.current_activity = patch.currentActivity;
+    return { id: r.id, status: r.status };
+  },
+  transitionActionRun: async (
+    runId: string,
+    userId: string,
+    status: string,
+    patch: Record<string, unknown> = {},
+  ) => {
+    const r = runRows.find((row) => row.id === runId && row.user_id === userId);
+    if (!r) throw new Error("Action run not found");
+    if (r.status === "completed" || r.status === "failed" || r.status === "cancelled") {
+      throw new Error("Terminal action runs cannot be mutated");
+    }
+    r.status = status;
+    if (patch.approvalReference !== undefined) r.approval_reference = patch.approvalReference as string | null;
+    if (patch.currentActivity !== undefined) r.current_activity = patch.currentActivity as string | null;
+    if (patch.failureCode !== undefined) r.failure_code = patch.failureCode as string | null;
+    if (patch.failureMessage !== undefined) r.failure_message = patch.failureMessage as string | null;
+    if (status === "cancelled" || status === "failed" || status === "completed") {
+      r.completed_at = new Date().toISOString();
+    }
+    return { id: r.id, status: r.status };
+  },
+  listActionEvents: async () => [],
+}));
+
 import {
   getPausedRun,
   getPendingPausedRunForConversation,
   getLatestPausedRunForConversation,
+  listPausedRunsForActionRun,
   resolvePausedRun,
   resetRunForRetry,
 } from "@/lib/litt-intelligence/paused-run-store";
@@ -429,5 +546,119 @@ describe("paused-run-store — reRequestExpiredRun (2026-09-18)", () => {
     expect(await reRequestExpiredRun("nope", USER)).toBeNull();
     expect(await reRequestExpiredRun(other.id as string, USER)).toBeNull();
     expect(rows.length).toBe(1);
+  });
+});
+
+describe("paused-run-store — expired gate settles the parked run", () => {
+  beforeEach(() => {
+    rows.length = 0;
+    runRows.length = 0;
+  });
+
+  it("cancels a run still parked on a gate read as expired", async () => {
+    // The 2026-11 stall: a gate that outlived its TTL left the parent run
+    // waiting_for_user forever — badge "working", "Run in progress", Idle.
+    const row = seedRow({
+      expires_at: new Date(Date.now() - 1_000).toISOString(),
+      action_run_id: "run-parked",
+    });
+    const run = fakeRun({ id: "run-parked", approval_reference: row.id as string });
+
+    const record = await getPausedRun(row.id as string, USER);
+
+    expect(record?.status).toBe("expired");
+    expect(run.status).toBe("cancelled");
+    expect(run.failure_code).toBe("APPROVAL_EXPIRED");
+    expect(run.failure_message).toBe("Approval expired before a decision was made");
+    expect(run.approval_reference).toBeNull();
+  });
+
+  it("settles a gate that is already durable-expired (resolve-path expiry)", async () => {
+    // resolvePausedRun flips decision-past-TTL rows to expired without the
+    // lazy flip — the settle must still fire on the next read.
+    const row = seedRow({ status: "expired", action_run_id: "run-parked" });
+    const run = fakeRun({ id: "run-parked", approval_reference: row.id as string });
+
+    await getPausedRun(row.id as string, USER);
+    expect(run.status).toBe("cancelled");
+  });
+
+  it("never cancels a run parked on a DIFFERENT gate (nested handoff)", async () => {
+    const row = seedRow({
+      expires_at: new Date(Date.now() - 1_000).toISOString(),
+      action_run_id: "run-parked",
+    });
+    const run = fakeRun({ id: "run-parked", approval_reference: "other-gate" });
+
+    const record = await getPausedRun(row.id as string, USER);
+    expect(record?.status).toBe("expired");
+    // The run moved on to a newer gate — an old gate's TTL must not kill it.
+    expect(run.status).toBe("waiting_for_user");
+  });
+
+  it("leaves a terminal parent untouched", async () => {
+    seedRow({
+      expires_at: new Date(Date.now() - 1_000).toISOString(),
+      action_run_id: "run-done",
+    });
+    const run = fakeRun({ id: "run-done", status: "completed" });
+
+    await listPausedRunsForActionRun("run-done", USER);
+    expect(run.status).toBe("completed");
+  });
+
+  it("a past-TTL decision ALSO settles the parked run", async () => {
+    const row = seedRow({
+      expires_at: new Date(Date.now() - 1_000).toISOString(),
+      action_run_id: "run-parked",
+    });
+    const run = fakeRun({ id: "run-parked", approval_reference: row.id as string });
+
+    const resolved = await resolvePausedRun(row.id as string, USER, "approved");
+    expect(resolved).toBeNull();
+    expect(run.status).toBe("cancelled");
+    expect(run.failure_code).toBe("APPROVAL_EXPIRED");
+  });
+});
+
+describe("paused-run-store — re-request attaches a live canonical parent", () => {
+  beforeEach(() => {
+    rows.length = 0;
+    runRows.length = 0;
+  });
+
+  it("mints a fresh run when the expired gate's run was settled", async () => {
+    const { reRequestExpiredRun } = await import("@/lib/litt-intelligence/paused-run-store");
+    const expired = seedRow({
+      status: "expired",
+      action_run_id: "run-dead",
+      expires_at: new Date(Date.now() - 60_000).toISOString(),
+    });
+    fakeRun({ id: "run-dead", status: "cancelled", approval_reference: expired.id as string });
+
+    const fresh = await reRequestExpiredRun(expired.id as string, USER);
+
+    expect(fresh).not.toBeNull();
+    // One run = one execution attempt: never repoint at the dead run, and
+    // never leave the fresh gate parentless (approving it could not settle).
+    expect(fresh!.actionRunId).not.toBe("run-dead");
+    expect(fresh!.actionRunId).toBeTruthy();
+    const minted = runRows.find((r) => r.id === fresh!.actionRunId);
+    expect(minted?.status).toBe("queued");
+    // The new run records WHICH gate it parks on — the expiry settle can
+    // find and cancel this wait if the fresh TTL lapses too.
+    expect(minted?.approval_reference).toBe(fresh!.id);
+  });
+
+  it("mints a fresh parent for a legacy gate with no action_run_id", async () => {
+    const { reRequestExpiredRun } = await import("@/lib/litt-intelligence/paused-run-store");
+    const expired = seedRow({
+      status: "expired",
+      expires_at: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    const fresh = await reRequestExpiredRun(expired.id as string, USER);
+    expect(fresh!.actionRunId).toBeTruthy();
+    expect(runRows.some((r) => r.id === fresh!.actionRunId)).toBe(true);
   });
 });

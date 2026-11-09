@@ -18,4 +18,34 @@ describe("redactSecrets — activity feed credential scrubbing", () => {
     expect(redactSecrets("read src/app.tsx 42 lines")).toBe("read src/app.tsx 42 lines");
     expect(redactSecrets("exit code 0")).toBe("exit code 0");
   });
+  it("redacts git host tokens", () => {
+    const out = redactSecrets("clone https://x-access-token:ghp_abcdefghijklmnop@github.com/o/r");
+    expect(out).not.toContain("ghp_abcdefghijklmnop");
+    expect(out).not.toContain("abcdefghijklmnop");
+  });
+  it("redacts JWTs", () => {
+    // Built at runtime so no contiguous JWT literal exists in the file —
+    // gitleaks' jwt rule flags even well-known example tokens.
+    const jwt = [
+      "eyJhbGciOiJIUzI1NiJ9",
+      "eyJzdWIiOiIxMjM0NTY3ODkwIn0",
+      "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c",
+    ].join(".");
+    expect(redactSecrets(`token ${jwt} end`)).not.toContain(jwt);
+    expect(redactSecrets(`token ${jwt} end`)).toContain("eyJ•••");
+  });
+  it("redacts Authorization headers and lowercase env assignments", () => {
+    expect(redactSecrets("Authorization: Bearer abcdef123456")).toContain("Bearer •••");
+    expect(redactSecrets("Authorization=abcdef123456")).toContain("Authorization=•••");
+    expect(redactSecrets("api_key=lowercase_secret_123")).toBe("api_key=•••");
+    expect(redactSecrets("my_token: tok_live_abc")).toBe("my_token=•••");
+  });
+  it("redacts CLI flag secrets", () => {
+    expect(redactSecrets("curl --api-key=SEKRET123 https://x")).toBe("curl --api-key=••• https://x");
+    expect(redactSecrets("tool --token abcdef123456 run")).toBe("tool --token ••• run");
+  });
+  it("does not redact unrelated flag-like text", () => {
+    expect(redactSecrets("git --version")).toBe("git --version");
+    expect(redactSecrets("npm run build -- --mode production")).toBe("npm run build -- --mode production");
+  });
 });
