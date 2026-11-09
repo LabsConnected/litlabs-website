@@ -71,22 +71,42 @@ describe("PricingClient plan cards", () => {
 
     const starter = cardFor("Starter");
     within(starter).getByText("Free");
+    within(starter).getByText("LiTTBits (one-time)");
 
     const lite = cardFor("Creator Lite");
     within(lite).getByText("$9.99");
     within(lite).getByText("/month");
     within(lite).getByText("2,500");
+    within(lite).getByText("LiTTBits monthly");
     within(lite).getByText("Choose Creator Lite");
 
     const creator = cardFor("Creator");
     within(creator).getByText("$19.99");
+    within(creator).getByText("LiTTBits monthly");
     within(creator).getByText("Most popular");
 
     const pro = cardFor("Pro Builder");
     within(pro).getByText("$39");
+    within(pro).getByText("LiTTBits monthly");
 
     // Regression guard: the 1999-cent plan must not render the rounded "$20".
     expect(screen.queryByText("$20")).toBeNull();
+  });
+
+  it("explains LiTTBits with active video-tier prices and Starter-only usage examples", () => {
+    signedOut();
+    render(<PricingClient />);
+
+    const answer = screen.getByText(/LiTTBits are used for billable AI and runtime actions/);
+    expect(answer.textContent).toContain("5-second Draft Video: 79 LiTTBits");
+    expect(answer.textContent).toContain("5-second Quality Video: 129 LiTTBits");
+    expect(answer.textContent).toContain("5-second Video with Audio: 199 LiTTBits");
+    expect(answer.textContent).toContain(
+      "1,500 LiTTBits cover up to 18 Draft clips, 11 Quality clips, 7 Video with Audio clips",
+    );
+    expect(screen.getByText(/Cinema and 4K are coming soon/).textContent).toContain(
+      "Cinema and 4K are coming soon",
+    );
   });
 
   it("routes a signed-out Creator Lite click through the pending-plan sign-in flow", () => {

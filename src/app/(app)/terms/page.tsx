@@ -6,7 +6,7 @@ import { SafeEmailLink, SafeEmailText } from "@/components/SafeEmail";
 
 export const metadata: Metadata = buildMetadata({
   title: "Terms of Service",
-  description: "Terms of service for LiTTree LabStudios AI creative operating system and social creator platform.",
+  description: "Terms for LiTT, LiTTree LabStudios' AI Project Operator, and related creative tools, marketplace, and community features.",
   path: "/terms",
   index: true,
 });
@@ -20,8 +20,9 @@ const sections = [
     body: (
       <>
         <p>
-          LiTTree LabStudios is an AI creative operating system and social creator platform.
-          It provides creative AI tools, agent workflows, gallery features, a
+          LiTTree LabStudios provides LiTT, an AI Project Operator that helps you
+          plan, build, and verify projects in one workspace. The Platform also
+          includes creative AI tools, agent workflows, gallery features, a
           community marketplace, remix and collaboration features, and related
           services (the &ldquo;Platform&rdquo;). You may use the Platform only for
           lawful purposes and in a way that does not infringe the rights of, restrict,
@@ -101,17 +102,17 @@ const sections = [
   },
   {
     id: "credits-and-payments",
-    title: "Payments and Credits",
+    title: "Payments and LiTTBits",
     body: (
       <>
         <p>
-          The Platform offers a free tier with starter credits and optional paid
-          plans, credit packs, and marketplace listings. Generation costs, credit
-          values, plan pricing, and marketplace fees may change as the Platform
+          The Platform offers a free tier with starter LiTTBits and optional paid
+          plans, LiTTBits packs, and marketplace listings. Generation costs,
+          LiTTBits amounts, plan pricing, and marketplace fees may change as the Platform
           evolves. Any paid feature will clearly show its cost before purchase or use.
         </p>
         <p className="mt-4">
-          Credits have no cash value, are non-refundable unless required by law, and
+          LiTTBits have no cash value, are non-refundable unless required by law, and
           do not expire unless stated at the time of purchase. Refunds for paid
           plans, where applicable, are handled per the plan&apos;s terms and
           applicable consumer law.
@@ -214,10 +215,10 @@ export default function TermsPage() {
             Terms of Service
           </h1>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-white/60">
-            The rules of the road for LiTTree LabStudios—our AI creative
-            operating system and social creator platform. Build apps, make art,
-            launch projects, and remix with your AI crew, all under terms that
-            keep the community fair and your work yours.
+            The rules for LiTT, LiTTree LabStudios&apos; AI Project Operator, and
+            related creative and community features. Plan, build, and verify
+            projects in one workspace, with terms that keep the community fair
+            and your work yours.
           </p>
           <p className="mt-6 text-xs font-bold uppercase tracking-[.22em] text-white/40">
             Last updated:{" "}{UPDATED}

@@ -88,7 +88,7 @@ function saveTranscript(messages: ChatMessage[]) {
 const WELCOME_MESSAGE: ChatMessage = {
   role: "assistant",
   content:
-    "Hey — I'm LiTT. In the full Studio I turn ideas into working software: I build, preview, and deploy real projects with you. This is a limited demo, so I can chat and answer questions, but building, previews, and deploys unlock after you sign up. What are you thinking of building?",
+    "Hey — I'm LiTT, your AI Project Operator. In the full Studio I plan work, build and edit real project files, verify results, and help you prepare to ship. This is a limited demo, so I can chat and answer questions, but building, previews, agents, and deploys unlock after you sign up. What are you thinking of building?",
 };
 
 /**

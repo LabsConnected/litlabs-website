@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildMetadata({
-  title: "Plans and Pricing",
+  title: "AI Project Operator Plans and Pricing",
   description:
-    "Compare LiTTree LabStudios plans, creative tools, AI features, credits, and workspace options.",
+    "Compare LiTT AI Project Operator plans, LiTTBits, project limits, and included builder features.",
   path: "/pricing",
   index: true,
 });

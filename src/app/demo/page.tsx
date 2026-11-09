@@ -4,9 +4,9 @@ import { getDemoConfig } from "@/lib/demo/config";
 import DemoStudio from "./DemoStudio";
 
 export const metadata: Metadata = {
-  title: "Try LiTT — Limited Demo | LiTT",
+  title: "Try LiTT — AI Project Operator Demo | LiTTree LabStudios",
   description:
-    "Chat with LiTT in a limited public demo inside the real Studio. Sign up free to unlock building, previews, agents, and deploys.",
+    "Try LiTT, the AI Project Operator, in a limited chat-only demo. Building, previews, agents, and deploys unlock after signup.",
   robots: { index: false, follow: false },
 };
 

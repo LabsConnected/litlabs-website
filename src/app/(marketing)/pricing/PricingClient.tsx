@@ -16,6 +16,7 @@ import {
   formatBits,
   getPlanCreditAllowance,
 } from "@/config/plan-entitlements";
+import { VIDEO_TIERS } from "@/config/video-tiers";
 import {
   pricingGuestCheckoutUrl,
   savePendingPlanCheckout,
@@ -52,7 +53,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: "No credit card required",
     description: PLANS.starter.description,
     credits: PLANS.starter.monthlyCredits.toLocaleString(),
-    creditLabel: "AI credits (one-time)",
+    creditLabel: "LiTTBits (one-time)",
     projectLimit: PLANS.starter.activeProjectLimit,
     accent: "neutral",
     cta: "Start free",
@@ -67,7 +68,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: "Beta pricing — cancel anytime",
     description: PLANS.creator_lite.description,
     credits: PLANS.creator_lite.monthlyCredits.toLocaleString(),
-    creditLabel: "AI credits monthly",
+    creditLabel: "LiTTBits monthly",
     projectLimit: PLANS.creator_lite.activeProjectLimit,
     accent: "neutral",
     cta: "Choose Creator Lite",
@@ -82,7 +83,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: "Beta pricing — cancel anytime",
     description: PLANS.creator_beta.description,
     credits: PLANS.creator_beta.monthlyCredits.toLocaleString(),
-    creditLabel: "AI credits monthly",
+    creditLabel: "LiTTBits monthly",
     projectLimit: PLANS.creator_beta.activeProjectLimit,
     featured: true,
     accent: "cyan",
@@ -98,7 +99,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: "Beta pricing — cancel anytime",
     description: PLANS.pro_builder_beta.description,
     credits: PLANS.pro_builder_beta.monthlyCredits.toLocaleString(),
-    creditLabel: "AI credits monthly",
+    creditLabel: "LiTTBits monthly",
     projectLimit: PLANS.pro_builder_beta.activeProjectLimit,
     accent: "purple",
     cta: "Choose Pro",
@@ -109,11 +110,11 @@ const CARD_PLANS: CardPlan[] = [
 const usageRules = [
   {
     title: "One visible balance",
-    copy: "See all your AI credits in one place — no hidden balances or surprise charges.",
+    copy: "See your LiTTBits balance in one place — no hidden balances or surprise charges.",
   },
   {
-    title: "Credits per billing cycle",
-    copy: `Paid plans grant AI credits after each successful billing cycle. Starter includes a one-time ${formatBits(getPlanCreditAllowance("starter"))}-credit grant that does not expire.`,
+    title: "LiTTBits per billing cycle",
+    copy: `Paid plans grant LiTTBits after each successful billing cycle. Starter includes a one-time allowance of ${formatBits(getPlanCreditAllowance("starter"))} LiTTBits that does not expire.`,
   },
   {
     title: "Fair usage tracking",
@@ -121,21 +122,33 @@ const usageRules = [
   },
 ];
 
+const starterLiTTBits = getPlanCreditAllowance("starter");
+const videoUsageExamples = [
+  `5-second Draft Video: ${formatBits(VIDEO_TIERS.draft.priceLiTTBits)} LiTTBits (about ${formatPrice(VIDEO_TIERS.draft.priceLiTTBits)})`,
+  `5-second Quality Video: ${formatBits(VIDEO_TIERS.quality.priceLiTTBits)} LiTTBits (about ${formatPrice(VIDEO_TIERS.quality.priceLiTTBits)})`,
+  `5-second Video with Audio: ${formatBits(VIDEO_TIERS.video_audio.priceLiTTBits)} LiTTBits (about ${formatPrice(VIDEO_TIERS.video_audio.priceLiTTBits)})`,
+].join("; ");
+const starterVideoExamples = [
+  `${Math.floor(starterLiTTBits / VIDEO_TIERS.draft.priceLiTTBits)} Draft clips`,
+  `${Math.floor(starterLiTTBits / VIDEO_TIERS.quality.priceLiTTBits)} Quality clips`,
+  `${Math.floor(starterLiTTBits / VIDEO_TIERS.video_audio.priceLiTTBits)} Video with Audio clips`,
+].join(", ");
+
 const faq = [
   {
-    question: "What are AI credits?",
+    question: "What are LiTTBits?",
     answer:
-      "AI credits are platform credits used for billable AI actions such as chat, code generation, image creation, video generation, media processing, and terminal runtime.",
+      `LiTTBits are used for billable AI and runtime actions such as chat, code generation, image creation, video generation, media processing, and terminal runtime. Examples: ${videoUsageExamples}. If you spend the Starter allowance only on video, ${formatBits(starterLiTTBits)} LiTTBits cover up to ${starterVideoExamples}. The exact cost is shown before you run an action.`,
   },
   {
     question: "How does video generation work?",
     answer:
-      "Video is metered usage. Create a 5-second clip starting at $0.79 in AI credits. Choose Draft, Quality, or Video with Audio. The exact cost is shown before you generate. Cinema and 4K are coming soon.",
+      `Video is metered usage. Examples: ${videoUsageExamples}. Choose Draft, Quality, or Video with Audio. The exact cost is shown before you generate. Cinema and 4K are coming soon.`,
   },
   {
-    question: "Do I keep my existing Beta credits?",
+    question: "Do I keep my existing Beta LiTTBits?",
     answer:
-      "Yes. Existing balances remain visible. Monthly plan credits are used first, followed by promotional and purchased credits.",
+      "Yes. Existing balances remain visible. Monthly plan LiTTBits are used first, followed by promotional and purchased LiTTBits.",
   },
   {
     question: "Can I cancel anytime?",
@@ -145,7 +158,7 @@ const faq = [
   {
     question: "Is this unlimited AI?",
     answer:
-      "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Expensive actions show an estimate before they run.",
+      "No. Billable AI and runtime actions use LiTTBits. Free navigation, project organization, and local editing do not. Expensive actions show an estimate before they run.",
   },
 ];
 
@@ -346,20 +359,20 @@ export default function PricingClient() {
         </div>
 
         <h1>
-          Your AI creative studio.
-          <span> Build apps, media, and projects with LiTT.</span>
+          Your AI Project Operator.
+          <span> Plan, build, verify, and ship with LiTT.</span>
         </h1>
 
         <p className={styles.heroCopy}>
-          One workspace with LiTT, your project operator and creative partner —
-          sharing one runtime and one memory. Start free, then unlock research,
+          LiTT plans work, builds and edits real project files, verifies results,
+          and helps you prepare to ship from one workspace. Start free, then unlock research,
           writing, and marketing skills with Creator — or add coding and
           analytics skills with Pro Builder.
         </p>
 
         <div className={styles.heroMeta}>
           <span>LiTT</span>
-          <span>Clear LiTTBit allowances</span>
+          <span>Clear LiTTBits allowances</span>
           <span>Projects stay yours</span>
         </div>
       </section>
@@ -371,7 +384,7 @@ export default function PricingClient() {
             <h2>Simple plans. Real limits. No billing tricks.</h2>
           </div>
           <p>
-            Founder pricing stays lower during beta. Cancel anytime — your work and credits are always yours.
+            Founder pricing stays lower during beta. Cancel anytime — your work and LiTTBits are always yours.
           </p>
         </div>
 
@@ -400,7 +413,7 @@ export default function PricingClient() {
         <div className={styles.trustGrid}>
           {[
             { title: "Cancel anytime", copy: "Cancellation stops future renewals. Access continues through the paid period." },
-            { title: "No surprise charges", copy: "Expensive actions show an estimate before they run. Credits are used predictably." },
+            { title: "No surprise charges", copy: "Expensive actions show an estimate before they run. LiTTBits are used predictably." },
             { title: "Your assets stay yours", copy: "Downgrades and cancellations never delete projects, media, or data." },
             { title: "Support channel", copy: "Need help? Open an issue at github.com/LabsConnected — we read every one." },
           ].map((item) => (
@@ -435,7 +448,7 @@ export default function PricingClient() {
       <section className={styles.protectionSection}>
         <div>
           <p className={styles.eyebrow}>Beta protection</p>
-          <h2>Your work and credits do not vanish when a plan changes.</h2>
+          <h2>Your work and LiTTBits do not vanish when a plan changes.</h2>
         </div>
 
         <ul>
@@ -453,7 +466,7 @@ export default function PricingClient() {
           </li>
           <li>
             <CheckIcon />
-            Credits use an immutable ledger with no silent balance changes.
+            LiTTBits use an immutable ledger with no silent balance changes.
           </li>
         </ul>
       </section>
