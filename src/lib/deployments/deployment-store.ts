@@ -228,6 +228,14 @@ export async function readPublishedFile(
       .maybeSingle(),
   );
   if (deploymentError) {
+    // A non-UUID deploymentId cannot match the uuid primary key — Postgres
+    // raises 22P02 (invalid_text_representation). That is a malformed
+    // request path, not a store outage: report "not found" so the route
+    // answers 404 instead of the 503 a thrown error produces. Observed
+    // live on staging (acceptance 42693622298): slash-less deployment URLs
+    // resolved relative asset refs to /sites/assets/..., and every one of
+    // those requests 503'd rather than 404ing.
+    if (deploymentError.code === "22P02") return null;
     // A store error must not masquerade as a missing file — the golden
     // acceptance run proved that collapsing errors into null turns a
     // transient PostgREST blip into a public 404 for an asset that exists.

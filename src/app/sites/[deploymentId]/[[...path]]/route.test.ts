@@ -41,7 +41,7 @@ beforeEach(() => {
 describe("sites route — form deploymentId injection", () => {
   it("fills the empty deploymentId input for HTML pages with a LiTT form", async () => {
     mockRead.mockResolvedValue({ content: FORM_HTML, contentType: "text/html" });
-    const res = await GET(req("/sites/dep_abc123"), {
+    const res = await GET(req("/sites/dep_abc123/"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
     expect(res.status).toBe(200);
@@ -53,7 +53,7 @@ describe("sites route — form deploymentId injection", () => {
   it("injects the Built with LiTT badge into HTML pages", async () => {
     const plain = "<!DOCTYPE html><html><body><p>Hello</p></body></html>";
     mockRead.mockResolvedValue({ content: plain, contentType: "text/html" });
-    const res = await GET(req("/sites/dep_abc123"), {
+    const res = await GET(req("/sites/dep_abc123/"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
     const text = await res.text();
@@ -64,7 +64,7 @@ describe("sites route — form deploymentId injection", () => {
   it("does not inject the badge when data-litt-badge=\"0\" is present", async () => {
     const optedOut = '<!DOCTYPE html><html><body data-litt-badge="0"><p>Hello</p></body></html>';
     mockRead.mockResolvedValue({ content: optedOut, contentType: "text/html" });
-    const res = await GET(req("/sites/dep_abc123"), {
+    const res = await GET(req("/sites/dep_abc123/"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
     const text = await res.text();
@@ -75,7 +75,7 @@ describe("sites route — form deploymentId injection", () => {
   it("injects the badge with uppercase or spaced </body> tags", async () => {
     const upper = "<!DOCTYPE html><html><body><p>Hello</p></BODY></html>";
     mockRead.mockResolvedValue({ content: upper, contentType: "text/html" });
-    const res = await GET(req("/sites/dep_abc123"), {
+    const res = await GET(req("/sites/dep_abc123/"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
     const text = await res.text();
@@ -85,7 +85,7 @@ describe("sites route — form deploymentId injection", () => {
   it("does not inject when the form already carries a deployment id", async () => {
     const filled = FORM_HTML.replace('value=""', 'value="dep_other"');
     mockRead.mockResolvedValue({ content: filled, contentType: "text/html" });
-    const res = await GET(req("/sites/dep_abc123"), {
+    const res = await GET(req("/sites/dep_abc123/"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
     const text = await res.text();
@@ -101,7 +101,7 @@ describe("sites route — form deploymentId injection", () => {
       content: png.toString("base64"),
       contentType: "image/png",
     });
-    const res = await GET(req("/sites/dep_abc123"), {
+    const res = await GET(req("/sites/dep_abc123/"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
     expect(res.status).toBe(200);
@@ -117,7 +117,7 @@ describe("sites route — form deploymentId injection", () => {
       contentType: "image/jpeg",
       encoding: "base64",
     });
-    const res = await GET(req("/sites/dep_abc123"), {
+    const res = await GET(req("/sites/dep_abc123/"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
     expect(res.status).toBe(200);
@@ -130,7 +130,7 @@ describe("sites route — form deploymentId injection", () => {
     // tells an automated verifier to come back rather than record a
     // permanent "broken image" (staging acceptance 42447010290).
     mockRead.mockRejectedValue(new Error("PostgREST blip"));
-    const res = await GET(req("/sites/dep_abc123"), {
+    const res = await GET(req("/sites/dep_abc123/"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
     expect(res.status).toBe(503);
@@ -145,9 +145,42 @@ describe("sites route — form deploymentId injection", () => {
       contentType: "image/png",
       encoding: "utf-8",
     });
-    const res = await GET(req("/sites/dep_abc123"), {
+    const res = await GET(req("/sites/dep_abc123/"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
     expect(await res.text()).toBe("plain stored text");
+  });
+});
+
+describe("sites route — canonical trailing-slash redirect", () => {
+  // Regression: staging acceptance 42693622298. Deployed markup references
+  // assets relatively (assets/images/x); at the slash-less URL "/sites/{id}"
+  // the browser resolves them to "/sites/assets/images/x" — "assets" is then
+  // parsed as a deploymentId and every asset request failed (503 via the
+  // uuid lookup error) while index.html itself served 200.
+  it("redirects the slash-less deployment root to the trailing-slash URL", async () => {
+    const res = await GET(req("/sites/dep_abc123"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123" }),
+    });
+    expect(res.status).toBe(308);
+    expect(res.headers.get("location")).toBe("http://localhost/sites/dep_abc123/");
+    expect(mockRead).not.toHaveBeenCalled();
+  });
+
+  it("serves the root document at the trailing-slash URL without redirecting", async () => {
+    mockRead.mockResolvedValue({ content: "<html><body>ok</body></html>", contentType: "text/html" });
+    const res = await GET(req("/sites/dep_abc123/"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123", path: [] }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("does not redirect sub-path requests", async () => {
+    mockRead.mockResolvedValue({ content: "body{}", contentType: "text/html" });
+    const res = await GET(req("/sites/dep_abc123/assets/app.css"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123", path: ["assets", "app.css"] }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockRead).toHaveBeenCalledWith("dep_abc123", "assets/app.css");
   });
 });
