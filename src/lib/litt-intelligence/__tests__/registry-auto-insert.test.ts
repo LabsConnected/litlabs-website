@@ -134,7 +134,8 @@ describe("maybeAutoInsertGeneratedImage", () => {
     )) as Record<string, unknown>;
 
     expect(out.savedToProject).toBe(false);
-    expect(out.saveError).toBe("download failed");
+    expect(out.saveError).toBe("[decode] download failed");
+    expect(out.saveStep).toBe("decode");
     expect(out.sitePath).toBeUndefined();
     // The unfollowable insertHint (its downloadUrl is redacted from model
     // context) must not survive a failed save — it drove the approval
@@ -155,7 +156,8 @@ describe("maybeAutoInsertGeneratedImage", () => {
     )) as Record<string, unknown>;
 
     expect(out.savedToProject).toBe(false);
-    expect(out.saveError).toBe("terminal 413");
+    expect(out.saveError).toBe("[write] terminal 413");
+    expect(out.saveStep).toBe("write");
     expect(out.insertHint).toBeUndefined();
     expect(out.recovery).toContain("terminal 413");
   });
