@@ -1222,7 +1222,7 @@ describe("runAgentLoopV2 — build capability guard", () => {
         text: "Done — wrote the files.",
         toolCalls: [],
         finishReason: "stop",
-        model: "gemini-flash-latest",
+        model: "gemini-2.5-flash",
         provider: "gemini",
       });
 
@@ -1249,9 +1249,10 @@ describe("runAgentLoopV2 — build capability guard", () => {
       reason: "no_file_write_calls_in_window",
     });
 
-    // The 4th step was routed to the next eligible registry build model.
+    // The 4th step was routed to the next eligible registry build model —
+    // the pinned gemini-2.5-flash is the primary build pick (Nov 2026).
     const fourthCall = vi.mocked(callLLMWithTools).mock.calls[3];
-    expect(fourthCall[3]).toMatchObject({ model: "gemini-flash-latest" });
+    expect(fourthCall[3]).toMatchObject({ model: "gemini-2.5-flash" });
 
     // The run continued the same conversation instead of failing.
     expect(result.failedHonestly).toContain("no successful file-writing operation");
@@ -1293,7 +1294,7 @@ describe("runAgentLoopV2 — build capability guard", () => {
 
     expect(result.modelFailed).toBe("NO_BUILD_CAPABLE_MODEL");
     expect(result.modelFailureText).toContain("No build-capable model is available");
-    // Chain: north-mini-code → gemini-flash → gemini-2.5-flash →
+    // Chain: north-mini-code → gemini-2.5-flash → gemini-flash →
     // gemini-2.5-flash-lite → nemotron-3.5-lightning → nemotron-3-super →
     // gemma-4-26b → nemotron-3-ultra → gemma-4-31b → gemini-2.5-pro →
     // exhausted.
@@ -1369,14 +1370,14 @@ describe("runAgentLoopV2 — build capability guard", () => {
           inputs: { projectId: "p-test", path: "index.html", content: "<h1>hi</h1>" },
         }],
         finishReason: "tool_calls",
-        model: "gemini-flash-latest",
+        model: "gemini-2.5-flash",
         provider: "gemini",
       })
       .mockResolvedValue({
         text: "Done.",
         toolCalls: [],
         finishReason: "stop",
-        model: "gemini-flash-latest",
+        model: "gemini-2.5-flash",
         provider: "gemini",
       });
 
@@ -1397,7 +1398,7 @@ describe("runAgentLoopV2 — build capability guard", () => {
     expect(incompatible).toHaveLength(1);
     expect(incompatible[0]).toMatchObject({ canonicalId: "openrouter-north-mini-code" });
     const fourthCall = vi.mocked(callLLMWithTools).mock.calls[3];
-    expect(fourthCall[3]).toMatchObject({ model: "gemini-flash-latest" });
+    expect(fourthCall[3]).toMatchObject({ model: "gemini-2.5-flash" });
 
     // The switched model emitted a file write and it actually executed.
     expect(writeFile).toHaveBeenCalledTimes(1);

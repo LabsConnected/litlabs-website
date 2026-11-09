@@ -30,7 +30,7 @@ export default function PrivacyPage() {
             🛡️ Privacy Policy
           </div>
           <p className="text-[10px] opacity-60 uppercase tracking-widest">
-            Last Updated: August 10, 2026
+            Last Updated: November 7, 2026
           </p>
         </div>
 
@@ -285,11 +285,12 @@ export default function PrivacyPage() {
                 assets.
               </li>
               <li>
-                <strong>Vercel:</strong>{" "}Hosting and deployment infrastructure.
+                <strong>Railway:</strong>{" "}Application hosting, terminal
+                workspace provisioning, and voice proxy.
               </li>
               <li>
-                <strong>Railway:</strong>{" "}Terminal workspace provisioning and
-                voice proxy.
+                <strong>Sentry:</strong>{" "}Error and performance monitoring
+                (active when error reporting is enabled).
               </li>
               <li>
                 <strong>GitHub:</strong>{" "}Repository connections for project
@@ -329,9 +330,11 @@ export default function PrivacyPage() {
                 the server, not stored locally.
               </li>
               <li>
-                <strong>Analytics:</strong>{" "}Vercel Analytics may collect basic
-                usage metrics (page views, performance). No cross-site
-                tracking or advertising cookies are used.
+                <strong>Analytics:</strong>{" "}We use privacy-conscious,
+                first-party analytics to measure funnel events such as page
+                views and feature usage. Analytics events are only sent after
+                you consent via our cookie banner. No cross-site tracking or
+                advertising cookies are used.
               </li>
             </ul>
             <p className="mt-2">
@@ -511,8 +514,8 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>AI providers (BYOK):</strong>{" "}When you provide your own
-                API keys (OpenAI, Anthropic), those keys are stored encrypted
-                and used only for your requests.
+                API keys (OpenAI, Anthropic), those keys are used only to
+                authenticate your requests to that provider.
               </li>
             </ul>
           </section>

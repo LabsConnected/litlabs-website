@@ -53,6 +53,221 @@ function invoiceLinePriceId(inv: Stripe.Invoice): string | null {
   return typeof priceId === "string" && priceId ? priceId : null;
 }
 
+interface RefundContext {
+  clerkId?: string;
+  /** Plan id claimed by checkout/invoice/PI metadata (never price-derived). */
+  metaPlanId?: PlanId;
+  /** Effective plan for sizing the credit debit. */
+  planId?: PlanId | null;
+  productType?: string;
+  coinAmount?: number;
+  /** Stripe subscription id when the charge paid a subscription invoice. */
+  subscriptionId?: string | null;
+  /** Internal user id resolved from the subscriptions row, when found. */
+  userId?: string | null;
+}
+
+function metaString(
+  meta: Record<string, string | undefined> | null | undefined,
+  key: string,
+): string | undefined {
+  const v = meta?.[key];
+  return typeof v === "string" && v ? v : undefined;
+}
+
+/**
+ * The Stripe subscription id behind an invoice, tolerating both the basil
+ * `parent.subscription_details.subscription` shape and the legacy
+ * `invoice.subscription` field (string id or expanded object).
+ */
+function subscriptionIdFromInvoice(inv: Stripe.Invoice): string | null {
+  const parentSub = inv.parent?.subscription_details?.subscription;
+  const candidate =
+    parentSub ??
+    (inv as unknown as { subscription?: string | Stripe.Subscription | null })
+      .subscription ??
+    null;
+  if (!candidate) return null;
+  return typeof candidate === "string" ? candidate : candidate.id ?? null;
+}
+
+/**
+ * Resolve what a refunded charge actually purchased.
+ *
+ * In the Basil API, Charge.invoice / PaymentIntent.invoice no longer exist —
+ * the PaymentIntent → InvoicePayment → Invoice chain is the supported link.
+ * Subscription invoice charges do NOT carry checkout metadata either: the
+ * reliable path is payment_intent → invoicePayments → invoice
+ * .subscription_details → the subscriptions row keyed by
+ * stripe_subscription_id. One-time charges (Founder, credit packs) carry
+ * their metadata on the PaymentIntent. Charge metadata is still read first
+ * for legacy/direct flows.
+ *
+ * Stripe lookups are allowed to throw: a transient failure returns 500 so
+ * Stripe redelivers the refund event instead of silently dropping it.
+ */
+async function resolveRefundContext(
+  sb: NonNullable<ReturnType<typeof getAdminSupabase>>,
+  stripe: Stripe,
+  charge: Stripe.Charge,
+): Promise<RefundContext> {
+  const meta = (charge.metadata || {}) as Record<string, string | undefined>;
+  const coinFrom = (v: string | undefined) => {
+    if (!v) return undefined;
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const ctx: RefundContext = {
+    clerkId: metaString(meta, "clerk_id"),
+    metaPlanId: metaString(meta, "plan_id") as PlanId | undefined,
+    productType: metaString(meta, "product_type"),
+    coinAmount: coinFrom(metaString(meta, "coin_amount")),
+    subscriptionId: null,
+    userId: null,
+  };
+
+  const piRef = charge.payment_intent;
+  const piId = typeof piRef === "string" ? piRef : piRef?.id ?? null;
+
+  // PaymentIntent → InvoicePayment → Invoice. A PI can settle multiple
+  // invoices (partial payments); prefer the first that pins a subscription.
+  if (piId) {
+    const ipList = await stripe.invoicePayments.list({
+      payment: { type: "payment_intent", payment_intent: piId },
+      expand: ["data.invoice"],
+      limit: 3,
+    });
+    let inv: Stripe.Invoice | null = null;
+    for (const ip of ipList.data ?? []) {
+      const invRef = ip.invoice;
+      let candidate: Stripe.Invoice | null = null;
+      if (typeof invRef === "string") {
+        candidate = await stripe.invoices.retrieve(invRef);
+      } else if (
+        invRef &&
+        typeof invRef === "object" &&
+        !("deleted" in invRef && invRef.deleted)
+      ) {
+        candidate = invRef as Stripe.Invoice;
+      }
+      if (!candidate) continue;
+      inv = candidate;
+      if (subscriptionIdFromInvoice(candidate)) break;
+    }
+
+    if (inv) {
+      const invMeta = (inv.parent?.subscription_details?.metadata ??
+        {}) as Record<string, string | undefined>;
+      ctx.subscriptionId = subscriptionIdFromInvoice(inv);
+      ctx.clerkId ??= metaString(invMeta, "clerk_id");
+      ctx.metaPlanId ??= metaString(invMeta, "plan_id") as PlanId | undefined;
+      ctx.productType ??= metaString(invMeta, "product_type");
+      ctx.coinAmount ??= coinFrom(metaString(invMeta, "coin_amount"));
+
+      // The billed line price is the entitlement truth for this cycle; the
+      // stored plan is the fallback when the price is not one we sell.
+      const billedPlanId = planIdForStripePrice(invoiceLinePriceId(inv));
+      if (ctx.subscriptionId) {
+        const { data: subRow } = await sb
+          .from("subscriptions")
+          .select("user_id, plan")
+          .eq("stripe_subscription_id", ctx.subscriptionId)
+          .maybeSingle();
+        if (subRow) {
+          ctx.userId = subRow.user_id;
+          ctx.planId =
+            billedPlanId ??
+            ((subRow.plan as PlanId | undefined) || null) ??
+            ctx.metaPlanId ??
+            null;
+        } else {
+          ctx.planId = billedPlanId ?? ctx.metaPlanId ?? null;
+        }
+      } else {
+        ctx.planId = billedPlanId ?? ctx.metaPlanId ?? null;
+      }
+    }
+  }
+
+  // One-time charges are not linked to any invoice — their metadata lives
+  // on the PaymentIntent. Fetch it only when what we have so far cannot
+  // classify the purchase.
+  const needsPiLookup =
+    !!piId &&
+    (!ctx.clerkId ||
+      !ctx.productType ||
+      (ctx.productType === "plan" && !ctx.metaPlanId && !ctx.planId) ||
+      (ctx.productType === "credit_pack" && !ctx.coinAmount));
+  if (needsPiLookup) {
+    const pi = await stripe.paymentIntents.retrieve(piId);
+    const piMeta = (pi.metadata || {}) as Record<string, string | undefined>;
+    ctx.productType ??= metaString(piMeta, "product_type");
+    ctx.clerkId ??= metaString(piMeta, "clerk_id");
+    ctx.metaPlanId ??= metaString(piMeta, "plan_id") as PlanId | undefined;
+    ctx.coinAmount ??= coinFrom(metaString(piMeta, "coin_amount"));
+  }
+
+  ctx.planId ??= ctx.metaPlanId ?? null;
+  return ctx;
+}
+
+/**
+ * Debit LiTTBits for a refunded charge.
+ *
+ * Each embedded Stripe refund object gets its own ledger idempotency key so
+ * multiple partial refunds each debit their own prorated share exactly
+ * once; when the refund list is not embedded, fall back to the cumulative
+ * amount_refunded under the charge-level key (the pre-hardening behavior).
+ * Debit failures are logged but not thrown — entitlement revocation is the
+ * critical side effect and the ledger may legitimately refuse a debit when
+ * the balance was already spent.
+ */
+async function debitRefundedCredits(
+  sb: NonNullable<ReturnType<typeof getAdminSupabase>>,
+  userId: string,
+  creditsBase: number,
+  charge: Stripe.Charge,
+): Promise<void> {
+  if (charge.amount <= 0 || creditsBase <= 0) return;
+  const embedded = charge.refunds?.data ?? [];
+  const attempts: { amount: number; key: string }[] = [];
+  if (embedded.length > 0) {
+    for (const r of embedded) {
+      attempts.push({
+        amount: Math.round((r.amount / charge.amount) * creditsBase),
+        key: `refund_${r.id}`,
+      });
+    }
+  } else if (charge.amount_refunded > 0) {
+    attempts.push({
+      amount: Math.round((charge.amount_refunded / charge.amount) * creditsBase),
+      key: `refund_${charge.id}`,
+    });
+  }
+  for (const a of attempts) {
+    if (a.amount <= 0) continue;
+    try {
+      const { error } = await sb.rpc("debit_credits", {
+        p_user_id: userId,
+        p_amount: a.amount,
+        p_category: "refund",
+        p_description: `Refund for charge ${charge.id}`,
+        p_idempotency_key: a.key,
+      });
+      if (error) {
+        console.warn(
+          `[stripe.webhook] refund debit failed for charge ${charge.id}: ${error.message}`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[stripe.webhook] refund debit threw for charge ${charge.id}:`,
+        err,
+      );
+    }
+  }
+}
+
 async function creditCreditPack(
   clerkId: string,
   creditAmount: number,
@@ -571,9 +786,6 @@ export async function POST(req: NextRequest) {
       case "charge.refunded": {
         if (!sb) break;
         const charge = event.data.object as Stripe.Charge;
-        const refundMeta = charge.metadata || {};
-        const refundProductType = refundMeta.product_type;
-        const refundClerkId = refundMeta.clerk_id;
         const paymentIntentId = charge.payment_intent as string | undefined;
 
         // ── Agent refund: revoke entitlement, do NOT debit LBC ──
@@ -605,7 +817,8 @@ export async function POST(req: NextRequest) {
         }
 
         // Fallback: use metadata product_type as secondary evidence
-        if (refundProductType === "agent" && paymentIntentId) {
+        const refundMeta = charge.metadata || {};
+        if (refundMeta.product_type === "agent" && paymentIntentId) {
           const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
             p_stripe_event_id: event.id,
             p_stripe_event_type: event.type,
@@ -618,92 +831,107 @@ export async function POST(req: NextRequest) {
           break;
         }
 
+        // ── Resolve the refunded purchase ──
+        // Subscription invoice charges carry no checkout metadata — resolve
+        // via payment_intent → invoicePayments → subscription_details →
+        // subscriptions row. One-time charges resolve via PaymentIntent
+        // metadata.
+        const refundCtx = await resolveRefundContext(sb, stripe, charge);
+        const refundPlanId = refundCtx.planId ?? null;
+        const refundPlan = refundPlanId ? PLANS[refundPlanId] : undefined;
+        const isCreditPack = refundCtx.productType === "credit_pack";
+        const isPlanRefund =
+          !isCreditPack &&
+          refundPlan != null &&
+          (refundCtx.productType === "plan" ||
+            refundCtx.subscriptionId != null ||
+            refundCtx.metaPlanId != null);
+
         // ── Plan / Founder refund: revoke entitlement ──
         // For plan refunds (including Founder), revoke the subscription
         // entitlement. Do NOT debit LiTTBits for Founder refunds — Founder
-        // has 0 LiTTBits. For subscription plans, the credits were already
-        // consumed; revoking access is the correct action.
-        const refundPlanId = refundMeta.plan_id as PlanId | undefined;
-        if (refundPlanId && refundClerkId) {
-          const plan = PLANS[refundPlanId];
-          if (plan) {
+        // has 0 LiTTBits. For subscription plans, debit the prorated share
+        // of the monthly credit grant for the refunded amount.
+        if (isPlanRefund && refundPlanId && refundPlan) {
+          // Resolve the internal user: the subscriptions row already carries
+          // it for subscription charges; metadata/PI paths resolve via
+          // clerk_id → users.
+          let refundUserId = refundCtx.userId ?? null;
+          if (!refundUserId && refundCtx.clerkId) {
             const { data: refundUser } = await sb
               .from("users")
               .select("id")
-              .eq("clerk_id", refundClerkId)
-              .single();
-            if (refundUser) {
-              // Revoke the subscription/entitlement
-              await sb
-                .from("subscriptions")
-                .update({
-                  status: "refunded",
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("user_id", refundUser.id)
-                .eq("plan", refundPlanId);
+              .eq("clerk_id", refundCtx.clerkId)
+              .maybeSingle();
+            refundUserId = refundUser?.id ?? null;
+          }
 
-              // For one_time plans (Founder), do NOT debit LiTTBits —
-              // Founder has 0 LiTTBits. For subscription plans, debit
-              // a prorated amount of the monthly credit grant based on the
-              // fraction of the charge that was refunded.
-              if (plan.billingType === "subscription" && plan.monthlyCredits > 0 && charge.amount > 0) {
-                const debitBits = Math.round(
-                  (charge.amount_refunded / charge.amount) * plan.monthlyCredits,
-                );
-                if (debitBits > 0) {
-                  try {
-                    await sb.rpc("debit_credits", {
-                      p_user_id: refundUser.id,
-                      p_amount: debitBits,
-                      p_category: "refund",
-                      p_description: `Refund for charge ${charge.id}`,
-                      p_idempotency_key: `refund_${charge.id}`,
-                    });
-                  } catch {
-                    // Ledger not available — skip
-                  }
-                }
-              }
-            }
+          // Revoke the entitlement. When the refunded charge pinned a Stripe
+          // subscription, revoke exactly that subscription's row — a customer
+          // who has since resubscribed keeps the NEW subscription's
+          // entitlement. Metadata-only (one-time) purchases fall back to
+          // user+plan matching, the pre-hardening behavior.
+          const revokeBase = sb.from("subscriptions").update({
+            status: "refunded",
+            updated_at: new Date().toISOString(),
+          });
+          const { error: revokeError } = refundCtx.subscriptionId
+            ? await revokeBase.eq(
+                "stripe_subscription_id",
+                refundCtx.subscriptionId,
+              )
+            : refundUserId
+              ? await revokeBase
+                  .eq("user_id", refundUserId)
+                  .eq("plan", refundCtx.metaPlanId ?? refundPlanId)
+              : { error: null };
+          if (revokeError) {
+            // A failed revoke must be retryable — returning 500 lets Stripe
+            // redeliver instead of leaving paid access active after a refund.
+            throw new Error(
+              `subscription refund revoke failed: ${revokeError.message}`,
+            );
+          }
+
+          if (
+            refundUserId &&
+            refundPlan.billingType === "subscription" &&
+            refundPlan.monthlyCredits > 0
+          ) {
+            await debitRefundedCredits(
+              sb,
+              refundUserId,
+              refundPlan.monthlyCredits,
+              charge,
+            );
           }
           break;
         }
 
         // ── Credit pack refund: debit LBC ──
         // Only debit LBC for credit_pack refunds — never for agents or plans.
-        if (refundProductType === "credit_pack" && refundClerkId) {
-          const { data: refundUser } = await sb
-            .from("users")
-            .select("id")
-            .eq("clerk_id", refundClerkId)
-            .single();
-          if (refundUser) {
-            // The original credit pack's LiTTBit grant is stored on the
-            // PaymentIntent/Charge metadata. Debit the same fraction of
-            // that grant as the refunded amount / original charge amount.
-            const coinAmount = refundMeta.coin_amount
-              ? parseInt(refundMeta.coin_amount, 10)
-              : NaN;
-            if (coinAmount > 0 && charge.amount > 0) {
-              const debitBits = Math.round(
-                (charge.amount_refunded / charge.amount) * coinAmount,
-              );
-              if (debitBits > 0) {
-                try {
-                  await sb.rpc("debit_credits", {
-                    p_user_id: refundUser.id,
-                    p_amount: debitBits,
-                    p_category: "refund",
-                    p_description: `Refund for charge ${charge.id}`,
-                    p_idempotency_key: `refund_${charge.id}`,
-                  });
-                } catch {
-                  // Ledger not available — skip
-                }
-              }
-            }
+        if (isCreditPack && refundCtx.clerkId) {
+          let refundUserId = refundCtx.userId ?? null;
+          if (!refundUserId) {
+            const { data: refundUser } = await sb
+              .from("users")
+              .select("id")
+              .eq("clerk_id", refundCtx.clerkId)
+              .maybeSingle();
+            refundUserId = refundUser?.id ?? null;
           }
+          if (refundUserId && refundCtx.coinAmount) {
+            await debitRefundedCredits(
+              sb,
+              refundUserId,
+              refundCtx.coinAmount,
+              charge,
+            );
+          }
+        } else if (!isPlanRefund && !isCreditPack) {
+          console.warn(
+            `[stripe.webhook] charge.refunded ${charge.id}: could not classify refunded charge`,
+          );
         }
         break;
       }

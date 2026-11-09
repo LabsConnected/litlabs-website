@@ -496,5 +496,62 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
       expect(await secret.text()).not.toContain("WORKSPACE-SECRET");
       assertZeroSubprocesses();
     });
+
+    it("session request under a minted /t/<token>/ prefix serves the file (prefix stripped, not literal)", async () => {
+      authMock.mockResolvedValue({ userId: "user-1" } as never);
+      // Any literal path beginning t/ 404s, so a 200 proves the prefix was
+      // recognized and stripped rather than looked up as a file path.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url, opts) => {
+          const body = JSON.parse((opts as RequestInit).body as string);
+          if (body.path.startsWith("t/")) return new Response(JSON.stringify({ error: "nf" }), { status: 404 });
+          return new Response(JSON.stringify({ content: "<h1>Hello</h1>" }), { status: 200 });
+        }),
+      );
+      const token = tokenFor({ assets: ["index.html"] });
+      const res = await GET(
+        new Request(`https://x.test/api/preview/proj-1/t/x/index.html`) as unknown as import("next/server").NextRequest,
+        makeParams("proj-1", ["t", token, "index.html"]),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain("Hello");
+      assertZeroSubprocesses();
+    });
+
+    it("session request under an EXPIRED token prefix still serves (session is authoritative)", async () => {
+      authMock.mockResolvedValue({ userId: "user-1" } as never);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url, opts) => {
+          const body = JSON.parse((opts as RequestInit).body as string);
+          if (body.path.startsWith("t/")) return new Response(JSON.stringify({ error: "nf" }), { status: 404 });
+          return new Response(JSON.stringify({ content: "<h1>Hello</h1>" }), { status: 200 });
+        }),
+      );
+      const token = tokenFor({ ttl: -5, assets: ["index.html"] });
+      const res = await GET(
+        new Request(`https://x.test/api/preview/proj-1/t/x/index.html`) as unknown as import("next/server").NextRequest,
+        makeParams("proj-1", ["t", token, "index.html"]),
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it("session request with a token scoped to another project is NOT stripped (literal path 404s)", async () => {
+      authMock.mockResolvedValue({ userId: "user-1" } as never);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url, opts) => {
+          const body = JSON.parse((opts as RequestInit).body as string);
+          return new Response(JSON.stringify({ error: "nf" }), { status: 404 });
+        }),
+      );
+      const token = tokenFor({ projectId: "proj-2", assets: ["index.html"] });
+      const res = await GET(
+        new Request(`https://x.test/api/preview/proj-1/t/x/index.html`) as unknown as import("next/server").NextRequest,
+        makeParams("proj-1", ["t", token, "index.html"]),
+      );
+      expect(res.status).toBe(404);
+    });
   });
 });

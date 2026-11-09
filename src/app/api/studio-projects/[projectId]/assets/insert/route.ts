@@ -5,6 +5,8 @@ import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
 import { ensureWorkspaceAlive, normalizeFileError } from "@/lib/studio/workspace-recovery";
 import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
+import { fitImageForPublish, PUBLISH_MAX_IMAGE_BYTES } from "@/lib/litt-intelligence/asset-image-fit";
+import { sniffImageMimeType } from "@/lib/image-sniff";
 
 /**
  * POST /api/studio-projects/[projectId]/assets/insert
@@ -160,6 +162,22 @@ export async function POST(
       buffer = Buffer.from(arrayBuf);
     }
 
+    // The declared type (data: URL label or response header) is not
+    // authoritative within image/* — providers mislabel encodings
+    // (Cloudflare flux returns JPEG bytes wrapped as data:image/png).
+    // The bytes are ground truth: when magic bytes identify a concrete
+    // image format, validate and store under that type. Non-image
+    // declarations keep their existing handling — sniffing never
+    // promotes them into image/*.
+    const sniffedMime = sniffImageMimeType(buffer);
+    if (
+      sniffedMime &&
+      contentType.toLowerCase().startsWith("image/") &&
+      sniffedMime !== contentType.toLowerCase()
+    ) {
+      contentType = sniffedMime;
+    }
+
     if (contentType.startsWith("image/") && !imagePayloadLooksComplete(buffer, contentType)) {
       return NextResponse.json(
         { error: "Image data is truncated or corrupt" },
@@ -172,6 +190,21 @@ export async function POST(
         { error: `Asset exceeds max size (${MAX_ASSET_SIZE} bytes)` },
         { status: 413 },
       );
+    }
+
+    // Publish-safe sizing — the same rule insertAssetFromUrl applies:
+    // an image over the deploy per-file cap can never be read back for
+    // publish and would surface as a missing file at deploy time.
+    if (contentType.startsWith("image/")) {
+      const fitted = await fitImageForPublish(buffer, contentType);
+      if (!fitted) {
+        return NextResponse.json(
+          { error: `Image could not be reduced under the ${PUBLISH_MAX_IMAGE_BYTES}-byte publish limit` },
+          { status: 422 },
+        );
+      }
+      buffer = fitted.buffer;
+      contentType = fitted.contentType;
     }
 
     // 2. Convert to base64 for the terminal server's binary write
