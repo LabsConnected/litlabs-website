@@ -51,6 +51,21 @@ export async function GET(
   // Resolve the request path against the artifact. Returns null for any
   // traversal attempt, including percent-encoded ones.
   const requestPath = Array.isArray(path) ? path.join("/") : "";
+
+  // Deployed markup references assets RELATIVELY (assets/images/x) so one
+  // artifact serves under any mount — but relative resolution needs a
+  // directory base. "/sites/{id}" (no trailing slash) resolves
+  // "assets/images/x" to "/sites/assets/images/x", escaping the deployment
+  // entirely: the segment "assets" is then parsed as a deploymentId and
+  // every asset request fails (staging acceptance 42693622298 — both
+  // generated photos 503'd while index.html served fine). Canonicalize the
+  // slash-less root to the trailing-slash URL before serving the document.
+  if (requestPath === "" && !_request.nextUrl.pathname.endsWith("/")) {
+    const target = new URL(_request.url);
+    target.pathname = `${target.pathname}/`;
+    return NextResponse.redirect(target, 308);
+  }
+
   const artifactPath = deploymentPublicPath(deploymentId, requestPath);
   if (!artifactPath) {
     return new NextResponse("Not found", { status: 404 });
