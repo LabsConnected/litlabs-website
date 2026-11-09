@@ -32,10 +32,16 @@ vi.mock("@/lib/rate-limiter", () => ({
 // Controllable Stripe mock — constructEvent is a spy we can set per-test
 const mockConstructEvent = vi.fn();
 const mockRetrieveSubscription = vi.fn();
+const mockRetrieveInvoice = vi.fn();
+const mockRetrievePaymentIntent = vi.fn();
+const mockListInvoicePayments = vi.fn();
 vi.mock("stripe", () => ({
   default: vi.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
     subscriptions: { retrieve: mockRetrieveSubscription },
+    invoices: { retrieve: mockRetrieveInvoice },
+    invoicePayments: { list: mockListInvoicePayments },
+    paymentIntents: { retrieve: mockRetrievePaymentIntent },
   })),
 }));
 
@@ -180,6 +186,11 @@ beforeEach(() => {
   vi.mocked(getAdminSupabase).mockReturnValue(null as any);
   mockConstructEvent.mockReset();
   mockRetrieveSubscription.mockReset();
+  mockRetrieveInvoice.mockReset();
+  mockRetrievePaymentIntent.mockReset();
+  mockListInvoicePayments.mockReset();
+  // Default: the PaymentIntent is not linked to any invoice (one-time charge).
+  mockListInvoicePayments.mockResolvedValue({ data: [] });
 });
 
 afterEach(() => {
@@ -1149,6 +1160,279 @@ describe("Webhook event processing — state mutations", () => {
     expect(debits.length).toBe(1);
     // Creator Beta: 7500 credits over $15 (1500c). Refunding 750c = 50% → 3750 credits.
     expect(debits[0].params.p_amount).toBe(3750);
+  });
+
+  // ── charge.refunded resolution hardening ──────────────────────────
+  // Subscription invoice charges carry NO checkout metadata — the reliable
+  // chain is payment_intent → invoicePayments → invoice.subscription_details
+  // → the subscriptions row keyed by stripe_subscription_id. These tests
+  // pin that renewal refunds revoke the right entitlement and debit
+  // idempotently.
+  describe("charge.refunded — subscription renewal resolution", () => {
+    const renewalInvoice = {
+      id: "in_renewal_1",
+      parent: {
+        subscription_details: {
+          subscription: "sub_renewal_1",
+          metadata: {
+            clerk_id: "clerk_123",
+            plan_id: "creator_beta",
+            product_type: "plan",
+          },
+        },
+      },
+      lines: {
+        data: [
+          {
+            pricing: { price_details: { price: "price_test_creator" } },
+          },
+        ],
+      },
+    };
+
+    const renewalCharge = (overrides: any = {}) => ({
+      id: "ch_renewal_1",
+      amount: 1999,
+      amount_refunded: 1999,
+      currency: "usd",
+      payment_intent: "pi_renewal_1",
+      metadata: {},
+      ...overrides,
+    });
+
+    // Basil API: charge.invoice no longer exists — the invoice is reached
+    // via invoicePayments.list({ payment: { payment_intent } }) with the
+    // invoice expanded on each InvoicePayment.
+    const linkInvoicePayment = (invoice: any = renewalInvoice) =>
+      mockListInvoicePayments.mockResolvedValue({ data: [{ invoice }] });
+
+    it("renewal refund with empty charge metadata → resolves via invoicePayments → subscription row, revokes by stripe_subscription_id, debits monthly grant", async () => {
+      process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+      const { sb, rpcCalls, updates } = buildTrackingSupabase();
+      vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+      vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+      linkInvoicePayment();
+
+      mockConstructEvent.mockReturnValue(
+        makeStripeEvent("charge.refunded", { object: renewalCharge() }),
+      );
+
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+      expect(res.status).toBe(200);
+      expect(mockListInvoicePayments).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payment: {
+            type: "payment_intent",
+            payment_intent: "pi_renewal_1",
+          },
+        }),
+      );
+
+      // Revocation is scoped to the refunded Stripe subscription — not a
+      // stale user+plan match that could hit a different plan row.
+      const revoke = updates.find(
+        (u) => u.table === "subscriptions" && u.patch.status === "refunded",
+      );
+      expect(revoke).toBeDefined();
+      expect(revoke!.matches).toContainEqual({
+        col: "stripe_subscription_id",
+        val: "sub_renewal_1",
+      });
+
+      // Full refund of a $19.99 Creator charge → full 7,500 monthly grant.
+      const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
+      expect(debits.length).toBe(1);
+      expect(debits[0].params.p_amount).toBe(7500);
+      expect(debits[0].params.p_user_id).toBe("user_internal_123");
+      expect(debits[0].params.p_idempotency_key).toBe("refund_ch_renewal_1");
+    });
+
+    it("renewal refund when the subscriptions row is gone (resubscribe) → still revokes by sub id (0 rows) and debits the resolved user, never the new sub", async () => {
+      process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+      const { sb, rpcCalls, updates } = buildTrackingSupabase(false, {
+        subscriptionRow: null,
+      });
+      vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+      vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+      linkInvoicePayment();
+
+      mockConstructEvent.mockReturnValue(
+        makeStripeEvent("charge.refunded", { object: renewalCharge() }),
+      );
+
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+      expect(res.status).toBe(200);
+      const revoke = updates.find(
+        (u) => u.table === "subscriptions" && u.patch.status === "refunded",
+      );
+      expect(revoke).toBeDefined();
+      // The update must be scoped by stripe_subscription_id — a user_id
+      // fallback here would revoke the customer's NEW subscription.
+      expect(revoke!.matches).toContainEqual({
+        col: "stripe_subscription_id",
+        val: "sub_renewal_1",
+      });
+      expect(revoke!.matches.find((m) => m.col === "user_id")).toBeUndefined();
+
+      // User still resolved via invoice metadata clerk_id → credits debited.
+      const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
+      expect(debits.length).toBe(1);
+      expect(debits[0].params.p_user_id).toBe("user_internal_123");
+    });
+
+    it("multiple partial refunds → one debit per embedded refund id, each idempotent", async () => {
+      process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+      const { sb, rpcCalls } = buildTrackingSupabase();
+      vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+      vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+      linkInvoicePayment();
+
+      mockConstructEvent.mockReturnValue(
+        makeStripeEvent("charge.refunded", {
+          object: renewalCharge({
+            amount_refunded: 999,
+            refunds: {
+              data: [
+                { id: "re_part_1", amount: 500 },
+                { id: "re_part_2", amount: 499 },
+              ],
+            },
+          }),
+        }),
+      );
+
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+      expect(res.status).toBe(200);
+      const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
+      expect(debits.length).toBe(2);
+      // Each refund debits its own prorated share of the 7,500 grant.
+      expect(debits[0].params.p_amount).toBe(Math.round((500 / 1999) * 7500));
+      expect(debits[0].params.p_idempotency_key).toBe("refund_re_part_1");
+      expect(debits[1].params.p_amount).toBe(Math.round((499 / 1999) * 7500));
+      expect(debits[1].params.p_idempotency_key).toBe("refund_re_part_2");
+    });
+
+    it("redelivery of the same refund (new event id) reuses the same debit key → ledger dedupes", async () => {
+      process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+      const { sb, rpcCalls } = buildTrackingSupabase();
+      vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+      vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+      linkInvoicePayment();
+
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      for (const evtId of ["evt_refund_a", "evt_refund_b"]) {
+        mockConstructEvent.mockReturnValue(
+          makeStripeEvent("charge.refunded", {
+            id: evtId,
+            object: renewalCharge(),
+          }),
+        );
+        const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+        expect(res.status).toBe(200);
+      }
+
+      const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
+      expect(debits.length).toBe(2);
+      expect(debits[0].params.p_idempotency_key).toBe("refund_ch_renewal_1");
+      expect(debits[1].params.p_idempotency_key).toBe("refund_ch_renewal_1");
+    });
+
+    it("one-time Founder refund → resolves via PaymentIntent metadata, revokes entitlement, NO credit debit", async () => {
+      const { sb, rpcCalls, updates } = buildTrackingSupabase();
+      vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+      vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+      mockRetrievePaymentIntent.mockResolvedValue({
+        id: "pi_founder_1",
+        metadata: {
+          product_type: "plan",
+          clerk_id: "clerk_123",
+          plan_id: "founder",
+        },
+      });
+
+      mockConstructEvent.mockReturnValue(
+        makeStripeEvent("charge.refunded", {
+          object: {
+            id: "ch_founder_refund",
+            amount: 14900,
+            amount_refunded: 14900,
+            currency: "usd",
+            payment_intent: "pi_founder_1",
+            metadata: {},
+          },
+        }),
+      );
+
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+      expect(res.status).toBe(200);
+      expect(mockRetrievePaymentIntent).toHaveBeenCalledWith("pi_founder_1");
+      const revoke = updates.find(
+        (u) => u.table === "subscriptions" && u.patch.status === "refunded",
+      );
+      expect(revoke).toBeDefined();
+      expect(revoke!.matches).toContainEqual({ col: "user_id", val: "user_internal_123" });
+      expect(revoke!.matches).toContainEqual({ col: "plan", val: "founder" });
+      // Founder is one_time with 0 monthly credits — never debit LBC.
+      expect(rpcCalls.filter((c) => c.fn === "debit_credits")).toHaveLength(0);
+    });
+
+    it("unclassifiable refund (e.g. booking charge) → 200, no entitlement or ledger mutation", async () => {
+      const { sb, rpcCalls, updates } = buildTrackingSupabase();
+      vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+      vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+      mockRetrievePaymentIntent.mockResolvedValue({
+        id: "pi_booking_1",
+        metadata: { booking_id: "bk_1", owner_id: "own_1" },
+      });
+
+      mockConstructEvent.mockReturnValue(
+        makeStripeEvent("charge.refunded", {
+          object: {
+            id: "ch_booking_refund",
+            amount: 5000,
+            amount_refunded: 5000,
+            currency: "usd",
+            payment_intent: "pi_booking_1",
+            metadata: {},
+          },
+        }),
+      );
+
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+      expect(res.status).toBe(200);
+      expect(updates.filter((u) => u.table === "subscriptions")).toHaveLength(0);
+      expect(rpcCalls.filter((c) => c.fn === "debit_credits")).toHaveLength(0);
+    });
+
+    it("invoice lookup failure → 500 so Stripe retries instead of dropping the refund", async () => {
+      const { sb, inserts } = buildTrackingSupabase();
+      vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+      vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+      // InvoicePayment carries the invoice as an id (not expanded) → the
+      // handler must retrieve it, and a Stripe failure must be retryable.
+      linkInvoicePayment("in_renewal_1");
+      mockRetrieveInvoice.mockRejectedValue(new Error("Stripe API unreachable"));
+
+      mockConstructEvent.mockReturnValue(
+        makeStripeEvent("charge.refunded", { object: renewalCharge() }),
+      );
+
+      const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+      expect(res.status).toBe(500);
+      expect(inserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
+    });
   });
 
   // ── grant_credits RPC fault injection ─────────────────────────────
