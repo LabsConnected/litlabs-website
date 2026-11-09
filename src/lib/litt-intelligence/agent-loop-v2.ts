@@ -419,9 +419,28 @@ interface ToolCallRecord {
   step: number;
 }
 
-function hashInputs(inputs: Record<string, unknown>): string {
+// Canonicalize before hashing: JSON.stringify preserves insertion order,
+// so the same tool inputs emitted with keys in a different order hashed
+// differently — the repeat detector missed the 4th identical files.read in
+// the 2026-11-06 golden follow-up (keys reversed: ['projectId','path'] vs
+// ['path','projectId']), the read-loop nudge never fired, and the run burned
+// both Nemotron models on re-reads. Sorting keys makes the hash order-free.
+// Arrays keep their order (element order is semantically significant).
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => [k, canonicalize(v)]),
+    );
+  }
+  return value;
+}
+
+export function hashInputs(inputs: Record<string, unknown>): string {
   try {
-    return JSON.stringify(inputs).slice(0, 500);
+    return JSON.stringify(canonicalize(inputs)).slice(0, 500);
   } catch {
     return String(inputs).slice(0, 500);
   }
@@ -429,7 +448,7 @@ function hashInputs(inputs: Record<string, unknown>): string {
 
 function hashResult(result: unknown): string {
   try {
-    return JSON.stringify(result).slice(0, 500);
+    return JSON.stringify(canonicalize(result)).slice(0, 500);
   } catch {
     return String(result).slice(0, 500);
   }
@@ -440,7 +459,7 @@ function hashResult(result: unknown): string {
  * (same tool + same inputs + same result) with no intervening
  * workspace mutation or materially different result.
  */
-function detectRepeatedCalls(
+export function detectRepeatedCalls(
   records: ToolCallRecord[],
   currentToolId: string,
   currentInputsHash: string,

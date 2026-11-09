@@ -6,7 +6,7 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
   callLLMWithTools: vi.fn(),
 }));
 
-import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, type ResumeInput } from "./agent-loop-v2";
+import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, hashInputs, detectRepeatedCalls, type ResumeInput } from "./agent-loop-v2";
 import type { ProgressEvent } from "./progress-events";
 import { callLLMWithTools, AgentBudgetExhaustedError } from "./llm-tool-calling";
 import { toolRegistry } from "./tool-registry";
@@ -2386,6 +2386,38 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
       writeTransport,
     );
     expect(result.failedHonestly).toContain("3 steps");
+  });
+});
+
+describe("hashInputs / detectRepeatedCalls — canonical key order (golden follow-up 2026-11-06)", () => {
+  // Regression: the 2026-11-06 golden follow-up read index.html 6 times and
+  // never wrote. The read-loop nudge never fired because hashInputs was
+  // JSON.stringify — key-order-sensitive — and the 4th identical files.read
+  // arrived with its keys reversed (['projectId','path'] vs ['path','projectId']).
+  it("hashes the same inputs identically regardless of key order", () => {
+    expect(hashInputs({ path: "index.html", projectId: "p-test" })).toBe(
+      hashInputs({ projectId: "p-test", path: "index.html" }),
+    );
+    expect(hashInputs({ z: { b: 2, a: 1 } })).toBe(hashInputs({ z: { a: 1, b: 2 } }));
+    // Array order is semantically significant and still matters.
+    expect(hashInputs({ items: [1, 2] })).not.toBe(hashInputs({ items: [2, 1] }));
+  });
+
+  it("detects a repeat when the 4th identical call reverses key order", () => {
+    const records = [0, 1, 2].map((step) => ({
+      toolId: "files.read",
+      inputsHash: hashInputs({ path: "index.html", projectId: "p-test" }),
+      resultHash: "r",
+      step,
+    }));
+    expect(
+      detectRepeatedCalls(
+        records,
+        "files.read",
+        hashInputs({ projectId: "p-test", path: "index.html" }),
+        false,
+      ),
+    ).toBe(true);
   });
 });
 
