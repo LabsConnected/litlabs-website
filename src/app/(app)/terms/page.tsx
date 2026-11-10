@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { buildMetadata } from "@/lib/seo";
 import { SafeEmailLink, SafeEmailText } from "@/components/SafeEmail";
+import "@/app/public-pages-tlc.css";
 
 export const metadata: Metadata = buildMetadata({
   title: "Terms of Service",
@@ -204,10 +205,10 @@ const sections = [
 
 export default function TermsPage() {
   return (
-    <main className="min-h-screen bg-[#03050a] text-white selection:bg-[#a970ff] selection:text-white">
+    <main className="litt-public-light min-h-screen bg-white text-[#0e1510] selection:bg-[#8fd14f]/50 selection:text-[#0e1510]">
       {/* Hero header band */}
-      <section className="relative border-b border-white/10 px-5 pt-28 pb-14 lg:px-10 lg:pt-32 lg:pb-16">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_30%,rgba(168,255,47,.12),transparent_32%),radial-gradient(circle_at_82%_60%,rgba(169,112,255,.14),transparent_34%)]" />
+      <section className="relative border-b border-[#cfdec4] px-5 pt-28 pb-14 lg:px-10 lg:pt-32 lg:pb-16">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_30%,rgba(168,255,47,.12),transparent_32%),radial-gradient(circle_at_82%_60%,rgba(23,122,54,.10),transparent_34%)]" />
         <div className="relative mx-auto max-w-screen-2xl">
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/25 bg-accent/8 px-4 py-2 text-xs font-black uppercase tracking-[.18em] text-accent">
             <Sparkles size={13} /> Terms
@@ -215,13 +216,13 @@ export default function TermsPage() {
           <h1 className="max-w-4xl text-4xl font-black leading-[.95] tracking-[-.045em] sm:text-5xl lg:text-6xl">
             Terms of Service
           </h1>
-          <p className="mt-5 max-w-2xl text-lg leading-8 text-white/60">
+          <p className="mt-5 max-w-2xl text-lg leading-8 text-[#37463a]">
             The rules of the road for LiTTree LabStudios—our AI creative
             operating system and social creator platform. Build apps, make art,
             launch projects, and remix with your AI crew, all under terms that
             keep the community fair and your work yours.
           </p>
-          <p className="mt-6 text-xs font-bold uppercase tracking-[.22em] text-white/40">
+          <p className="mt-6 text-xs font-bold uppercase tracking-[.22em] text-[#63745f]">
             Last updated:{" "}{UPDATED}
           </p>
         </div>
@@ -233,7 +234,7 @@ export default function TermsPage() {
           {/* Sticky TOC — desktop only */}
           <aside className="hidden lg:block">
             <div className="sticky top-10">
-              <div className="mb-4 text-xs font-black uppercase tracking-[.2em] text-[#65f4ff]">
+              <div className="mb-4 text-xs font-black uppercase tracking-[.2em] text-[#0c5a26]">
                 On this page
               </div>
               <nav className="space-y-2 text-sm">
@@ -241,7 +242,7 @@ export default function TermsPage() {
                   <a
                     key={s.id}
                     href={`#${s.id}`}
-                    className="block rounded-lg px-3 py-2 text-white/55 transition hover:bg-white/5 hover:text-accent"
+                    className="block rounded-lg px-3 py-2 text-[#37463a] transition hover:bg-[#e4f2d6] hover:text-accent"
                   >
                     {s.title}
                   </a>
@@ -262,18 +263,18 @@ export default function TermsPage() {
               <section
                 key={s.id}
                 id={s.id}
-                className="scroll-mt-24 rounded-2xl border border-white/10 bg-white/[.02] p-6 sm:p-8"
+                className="scroll-mt-24 rounded-2xl border border-[#cfdec4] bg-white p-6 shadow-[0_20px_54px_rgba(14,60,26,0.08)] sm:p-8"
               >
-                <h2 className="mb-3 text-xl font-black tracking-tight text-slate-50 sm:text-2xl">
+                <h2 className="mb-3 text-xl font-black tracking-tight text-[#0e1510] sm:text-2xl">
                   {s.title}
                 </h2>
-                <div className="space-y-4 text-sm leading-7 text-white/65 sm:text-[15px] sm:leading-8">
+                <div className="space-y-4 text-sm leading-7 text-[#37463a] sm:text-[15px] sm:leading-8">
                   {s.body}
                 </div>
               </section>
             ))}
 
-            <p className="rounded-2xl border border-accent/20 bg-accent/4 p-5 text-xs leading-6 text-white/45">
+            <p className="rounded-2xl border border-accent/20 bg-accent/4 p-5 text-xs leading-6 text-[#63745f]">
               This document is a summary of the terms that govern use of LiTTree
               LabStudios. It is not legal advice. If something here conflicts with a
               signed agreement, that agreement controls where it applies.

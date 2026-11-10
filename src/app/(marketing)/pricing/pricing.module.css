@@ -1,21 +1,29 @@
+/* Pricing — re-dressed in the approved homepage design language
+   (homepage-tlc.css): white worked into green, lime accents, glow/depth,
+   LIGHT-LOCKED. Same selectors and layout as the original dark module;
+   only colors, shadows and surface treatments changed. The plan accent
+   class names (accent_cyan / accent_purple) are kept because PricingClient
+   maps plan ids to them — their colors are now the brand greens. */
 .page {
-  --bg: #07070b;
-  --panel: rgba(13, 13, 19, 0.82);
-  --panel-strong: rgba(16, 16, 23, 0.95);
-  --line: rgba(255, 255, 255, 0.09);
-  --muted: #9ca3af;
-  --text: #f7f7fb;
-  --cyan: #30e7ff;
-  --purple: #9a63ff;
-  --orange: #ff7a1a;
-  --gold: #ffc82f;
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --panel-strong: #ffffff;
+  --line: #cfdec4;
+  --muted: #63745f;
+  --text: #0e1510;
+  --cyan: #177a36;
+  --purple: #0c5a26;
+  --orange: #e8a317;
+  --gold: #e8a317;
+  color-scheme: light;
   position: relative;
   isolation: isolate;
   overflow: hidden;
   min-height: 100dvh;
   background:
-    linear-gradient(180deg, rgba(7, 7, 11, 0.45), #07070b 36%),
-    #07070b;
+    radial-gradient(circle at 85% 4%, rgba(143, 209, 79, 0.1), transparent 26rem),
+    radial-gradient(circle at 10% 30%, rgba(23, 122, 54, 0.05), transparent 24rem),
+    var(--bg);
   color: var(--text);
   padding: clamp(5rem, 7vw, 8rem) 1.25rem 5rem;
 }
@@ -27,19 +35,19 @@
   pointer-events: none;
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% -10%, rgba(48, 231, 255, 0.14), transparent 35%),
-    radial-gradient(circle at 84% 20%, rgba(154, 99, 255, 0.12), transparent 30%),
-    radial-gradient(circle at 12% 40%, rgba(255, 122, 26, 0.08), transparent 26%),
-    linear-gradient(180deg, #090910 0%, #07070b 42%, #07070b 100%);
+    radial-gradient(circle at 50% -10%, rgba(143, 209, 79, 0.16), transparent 35%),
+    radial-gradient(circle at 84% 20%, rgba(23, 122, 54, 0.1), transparent 30%),
+    radial-gradient(circle at 12% 40%, rgba(232, 163, 23, 0.07), transparent 26%),
+    linear-gradient(180deg, #ffffff 0%, #f2f7ea 42%, #ffffff 100%);
 }
 
 .grid {
   position: absolute;
   inset: 0;
-  opacity: 0.2;
+  opacity: 0.18;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    linear-gradient(rgba(23, 122, 54, 0.4) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 122, 54, 0.4) 1px, transparent 1px);
   background-size: 64px 64px;
   mask-image: linear-gradient(to bottom, black 0%, transparent 66%);
 }
@@ -50,7 +58,7 @@
   position: absolute;
   border-radius: 999px;
   filter: blur(80px);
-  opacity: 0.24;
+  opacity: 0.18;
 }
 
 .orbOne {
@@ -58,7 +66,7 @@
   height: 34rem;
   left: -14rem;
   top: 7rem;
-  background: rgba(48, 231, 255, 0.45);
+  background: rgba(143, 209, 79, 0.5);
 }
 
 .orbTwo {
@@ -66,7 +74,7 @@
   height: 30rem;
   right: -10rem;
   top: 13rem;
-  background: rgba(154, 99, 255, 0.42);
+  background: rgba(23, 122, 54, 0.35);
 }
 
 .orbThree {
@@ -74,7 +82,7 @@
   height: 24rem;
   left: 38%;
   top: 38rem;
-  background: rgba(255, 122, 26, 0.18);
+  background: rgba(232, 163, 23, 0.3);
 }
 
 .brandTree {
@@ -85,7 +93,7 @@
   height: 420px;
   transform: translateX(-50%);
   opacity: 0.23;
-  filter: drop-shadow(0 0 40px rgba(48, 231, 255, 0.12));
+  filter: drop-shadow(0 0 40px rgba(23, 122, 54, 0.14));
 }
 
 .treeCrown {
@@ -95,12 +103,12 @@
   width: 300px;
   height: 220px;
   transform: translateX(-50%);
-  border: 1px solid rgba(48, 231, 255, 0.5);
+  border: 1px solid rgba(23, 122, 54, 0.45);
   border-radius: 52% 48% 46% 54% / 58% 46% 54% 42%;
   box-shadow:
-    0 0 0 18px rgba(154, 99, 255, 0.03),
-    0 0 70px rgba(48, 231, 255, 0.14),
-    inset 0 0 60px rgba(154, 99, 255, 0.08);
+    0 0 0 18px rgba(143, 209, 79, 0.05),
+    0 0 70px rgba(143, 209, 79, 0.16),
+    inset 0 0 60px rgba(23, 122, 54, 0.07);
 }
 
 .treeCrown::before,
@@ -108,14 +116,14 @@
   content: "";
   position: absolute;
   inset: 22px;
-  border: 1px dashed rgba(154, 99, 255, 0.38);
+  border: 1px dashed rgba(23, 122, 54, 0.35);
   border-radius: inherit;
   transform: rotate(14deg);
 }
 
 .treeCrown::after {
   inset: 46px;
-  border-color: rgba(255, 122, 26, 0.28);
+  border-color: rgba(232, 163, 23, 0.35);
   transform: rotate(-18deg);
 }
 
@@ -128,13 +136,13 @@
   transform: translateX(-50%);
   background: linear-gradient(
     to bottom,
-    rgba(48, 231, 255, 0.78),
-    rgba(154, 99, 255, 0.45),
+    rgba(23, 122, 54, 0.75),
+    rgba(143, 209, 79, 0.45),
     transparent
   );
   box-shadow:
-    -28px 18px 0 -1px rgba(48, 231, 255, 0.25),
-    30px 30px 0 -1px rgba(154, 99, 255, 0.24);
+    -28px 18px 0 -1px rgba(23, 122, 54, 0.25),
+    30px 30px 0 -1px rgba(143, 209, 79, 0.24);
 }
 
 .treeRootOne,
@@ -145,7 +153,7 @@
   top: 335px;
   height: 1px;
   transform-origin: left center;
-  background: linear-gradient(90deg, rgba(48, 231, 255, 0.7), transparent);
+  background: linear-gradient(90deg, rgba(23, 122, 54, 0.6), transparent);
 }
 
 .treeRootOne {
@@ -185,16 +193,15 @@
   gap: 0.55rem;
   min-height: 2.15rem;
   padding: 0.35rem 0.8rem;
-  border: 1px solid rgba(48, 231, 255, 0.22);
+  border: 1px solid #cfdec4;
   border-radius: 999px;
-  background: rgba(8, 13, 17, 0.72);
-  color: #dffcff;
+  background: #e4f2d6;
+  color: #0c5a26;
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  box-shadow: 0 10px 50px rgba(48, 231, 255, 0.06);
-  backdrop-filter: blur(18px);
+  box-shadow: 0 10px 30px rgba(14, 60, 26, 0.08);
 }
 
 .liveDot {
@@ -202,7 +209,7 @@
   height: 0.46rem;
   border-radius: 999px;
   background: var(--cyan);
-  box-shadow: 0 0 15px var(--cyan);
+  box-shadow: 0 0 15px rgba(143, 209, 79, 0.9);
 }
 
 .hero h1 {
@@ -216,7 +223,7 @@
 
 .hero h1 span {
   display: block;
-  background: linear-gradient(100deg, var(--cyan), #c5b8ff 52%, var(--orange));
+  background: linear-gradient(105deg, #0c5a26 5%, #177a36 48%, #8fd14f 98%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -225,7 +232,7 @@
 .heroCopy {
   max-width: 760px;
   margin: 0 auto;
-  color: #b7bac4;
+  color: #37463a;
   font-size: clamp(0.95rem, 1.4vw, 1.1rem);
   line-height: 1.75;
   text-wrap: balance;
@@ -243,10 +250,10 @@
   padding: 0.48rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(10, 10, 15, 0.66);
-  color: #c3c6cf;
+  background: #ffffff;
+  color: #37463a;
   font-size: 0.78rem;
-  backdrop-filter: blur(14px);
+  box-shadow: 0 8px 22px rgba(14, 60, 26, 0.07);
 }
 
 .pricingSection,
@@ -305,10 +312,9 @@
   border: 1px solid var(--line);
   border-radius: 1.4rem;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 35%),
+    linear-gradient(180deg, #f2f7ea, transparent 35%),
     var(--panel);
-  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(22px);
+  box-shadow: 0 20px 54px rgba(14, 60, 26, 0.1);
   transition:
     transform 180ms ease,
     border-color 180ms ease,
@@ -317,19 +323,19 @@
 
 .planCard:hover {
   transform: translateY(-4px);
-  border-color: rgba(255, 255, 255, 0.17);
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.46);
+  border-color: rgba(23, 122, 54, 0.45);
+  box-shadow: 0 28px 70px rgba(14, 60, 26, 0.16);
 }
 
 .accent_cyan {
-  border-color: rgba(48, 231, 255, 0.46);
+  border-color: rgba(23, 122, 54, 0.5);
   box-shadow:
-    0 22px 80px rgba(0, 0, 0, 0.44),
-    0 0 50px rgba(48, 231, 255, 0.08);
+    0 22px 60px rgba(14, 60, 26, 0.14),
+    0 0 50px rgba(143, 209, 79, 0.18);
 }
 
 .accent_purple {
-  border-color: rgba(154, 99, 255, 0.33);
+  border-color: rgba(12, 90, 38, 0.4);
 }
 
 .featured {
@@ -344,8 +350,8 @@
   position: absolute;
   inset: 0 12% auto;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
-  box-shadow: 0 0 30px rgba(48, 231, 255, 0.75);
+  background: linear-gradient(90deg, transparent, #8fd14f, transparent);
+  box-shadow: 0 0 30px rgba(143, 209, 79, 0.75);
 }
 
 .planHeader {
@@ -364,15 +370,15 @@
 
 .planLabel {
   margin-bottom: 0.4rem;
-  color: #9ca3af;
+  color: #63745f;
 }
 
 .popularBadge {
   flex: 0 0 auto;
   padding: 0.4rem 0.58rem;
   border-radius: 999px;
-  background: var(--cyan);
-  color: #001216;
+  background: linear-gradient(135deg, #2f9e4f 0%, #177a36 52%, #0c5a26 115%);
+  color: #ffffff;
   font-size: 0.64rem;
   font-weight: 950;
   letter-spacing: 0.07em;
@@ -395,21 +401,21 @@
 
 .priceSuffix {
   padding-bottom: 0.35rem;
-  color: #aeb2bd;
+  color: #63745f;
   font-size: 0.9rem;
 }
 
 .futurePrice {
   min-height: 1.15rem;
   margin: 0.75rem 0 0;
-  color: #727884;
+  color: #63745f;
   font-size: 0.78rem;
 }
 
 .planDescription {
   min-height: 4.3rem;
   margin: 1rem 0 1.2rem;
-  color: #b3b7c2;
+  color: #37463a;
   line-height: 1.6;
 }
 
@@ -424,7 +430,7 @@
   padding: 0.85rem;
   border: 1px solid var(--line);
   border-radius: 1rem;
-  background: rgba(0, 0, 0, 0.2);
+  background: #f2f7ea;
 }
 
 .allowance strong,
@@ -442,12 +448,12 @@
 }
 
 .accent_purple .allowance strong {
-  color: #b693ff;
+  color: #0c5a26;
 }
 
 .allowance span {
   margin-top: 0.18rem;
-  color: #808692;
+  color: #63745f;
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -466,7 +472,7 @@
   grid-template-columns: 1rem minmax(0, 1fr);
   gap: 0.55rem;
   align-items: start;
-  color: #d7dae1;
+  color: #37463a;
   font-size: 0.88rem;
   line-height: 1.45;
 }
@@ -479,7 +485,7 @@
 }
 
 .accent_purple .check {
-  color: #ac89ff;
+  color: #0c5a26;
 }
 
 .planButton,
@@ -504,20 +510,28 @@
   margin-top: auto;
   padding: 0.85rem 1rem;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.035);
-  color: white;
+  background: #ffffff;
+  color: #0e1510;
+  box-shadow: 0 8px 22px rgba(14, 60, 26, 0.07);
 }
 
 .accent_cyan .planButton {
   border-color: transparent;
-  background: var(--cyan);
-  color: #001216;
+  background: linear-gradient(135deg, #2f9e4f 0%, #177a36 52%, #0c5a26 115%);
+  color: #ffffff;
+  box-shadow:
+    0 14px 32px rgba(23, 122, 54, 0.28),
+    0 0 26px rgba(143, 209, 79, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .accent_purple .planButton {
   border-color: transparent;
-  background: linear-gradient(100deg, #7a4ee8, #a66cff);
-  color: white;
+  background: linear-gradient(135deg, #177a36 0%, #0c5a26 60%, #0b3d1c 115%);
+  color: #ffffff;
+  box-shadow:
+    0 14px 32px rgba(12, 90, 38, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .planButton:hover,
@@ -543,14 +557,13 @@
   align-items: center;
   margin-top: 1rem;
   padding: 1.2rem;
-  border: 1px solid rgba(255, 200, 47, 0.35);
+  border: 1px solid rgba(232, 163, 23, 0.45);
   border-radius: 1.4rem;
   background:
-    radial-gradient(circle at 12% 0%, rgba(255, 200, 47, 0.1), transparent 30%),
-    linear-gradient(90deg, rgba(255, 200, 47, 0.045), rgba(255, 255, 255, 0.018)),
+    radial-gradient(circle at 12% 0%, rgba(232, 163, 23, 0.12), transparent 30%),
+    linear-gradient(90deg, rgba(232, 163, 23, 0.06), rgba(255, 255, 255, 0.4)),
     var(--panel);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(22px);
+  box-shadow: 0 24px 60px rgba(14, 60, 26, 0.12);
 }
 
 .founderMark {
@@ -558,17 +571,17 @@
   width: 4.6rem;
   height: 4.6rem;
   place-items: center;
-  border: 1px solid rgba(255, 200, 47, 0.42);
+  border: 1px solid rgba(232, 163, 23, 0.5);
   border-radius: 1.2rem;
   background:
-    radial-gradient(circle at 32% 25%, rgba(255, 255, 255, 0.2), transparent 23%),
-    linear-gradient(145deg, #2a2105, #110f08);
-  color: var(--gold);
+    radial-gradient(circle at 32% 25%, rgba(255, 255, 255, 0.5), transparent 23%),
+    linear-gradient(145deg, #fff8e6, #f3e5bd);
+  color: #9a6b0f;
   font-size: 2rem;
   font-weight: 950;
   box-shadow:
-    inset 0 0 30px rgba(255, 200, 47, 0.08),
-    0 0 38px rgba(255, 200, 47, 0.08);
+    inset 0 0 30px rgba(232, 163, 23, 0.1),
+    0 0 38px rgba(232, 163, 23, 0.1);
 }
 
 .founderCopy h2 {
@@ -578,12 +591,12 @@
 }
 
 .founderCopy h2 strong {
-  color: var(--gold);
+  color: #9a6b0f;
 }
 
 .founderCopy > p {
   margin: 0;
-  color: #aeb2bc;
+  color: #63745f;
   line-height: 1.6;
 }
 
@@ -595,7 +608,7 @@
 
 .founderTitleRow p {
   margin: 0;
-  color: var(--gold);
+  color: #9a6b0f;
   font-size: 0.73rem;
   font-weight: 900;
   letter-spacing: 0.14em;
@@ -633,14 +646,15 @@
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 1.2rem;
-  background: rgba(14, 14, 20, 0.72);
+  background: #ffffff;
+  box-shadow: 0 16px 44px rgba(14, 60, 26, 0.08);
 }
 
 .ruleNumber {
   position: absolute;
   top: 0.3rem;
   right: 0.7rem;
-  color: rgba(255, 255, 255, 0.05);
+  color: rgba(23, 122, 54, 0.08);
   font-size: 4.6rem;
   font-weight: 950;
   letter-spacing: -0.08em;
@@ -666,12 +680,12 @@
   align-items: center;
   margin-top: 1rem;
   padding: clamp(1.4rem, 4vw, 2.3rem);
-  border: 1px solid rgba(48, 231, 255, 0.18);
+  border: 1px solid rgba(23, 122, 54, 0.3);
   border-radius: 1.6rem;
   background:
-    radial-gradient(circle at 0% 0%, rgba(48, 231, 255, 0.08), transparent 38%),
-    rgba(13, 13, 19, 0.78);
-  box-shadow: 0 25px 90px rgba(0, 0, 0, 0.35);
+    radial-gradient(circle at 0% 0%, rgba(143, 209, 79, 0.14), transparent 38%),
+    #f2f7ea;
+  box-shadow: 0 25px 70px rgba(14, 60, 26, 0.12);
 }
 
 .protectionSection ul {
@@ -686,7 +700,7 @@
   display: grid;
   grid-template-columns: 1rem minmax(0, 1fr);
   gap: 0.65rem;
-  color: #d8dbe2;
+  color: #37463a;
   line-height: 1.5;
 }
 
@@ -704,12 +718,12 @@
 .faqItem {
   border: 1px solid var(--line);
   border-radius: 1rem;
-  background: rgba(13, 13, 19, 0.72);
+  background: #ffffff;
   padding: 0 1rem;
 }
 
 .faqItem[open] {
-  border-color: rgba(48, 231, 255, 0.24);
+  border-color: rgba(23, 122, 54, 0.4);
 }
 
 .faqItem summary {
@@ -725,6 +739,8 @@
   line-height: 1.65;
 }
 
+/* Closing CTA — the intentional dark panel, same treatment as the
+   homepage's closing panel (deep green-black, lime glow). */
 .finalCta {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -732,19 +748,24 @@
   align-items: center;
   margin-top: 1rem;
   padding: clamp(1.5rem, 5vw, 3rem);
-  border: 1px solid rgba(154, 99, 255, 0.26);
+  border: 1px solid rgba(143, 209, 79, 0.3);
   border-radius: 1.8rem;
   background:
-    radial-gradient(circle at 90% 10%, rgba(154, 99, 255, 0.16), transparent 36%),
-    radial-gradient(circle at 10% 90%, rgba(48, 231, 255, 0.1), transparent 34%),
-    rgba(15, 14, 23, 0.9);
-  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.38);
+    radial-gradient(circle at 90% 10%, rgba(143, 209, 79, 0.16), transparent 36%),
+    radial-gradient(circle at 10% 90%, rgba(23, 122, 54, 0.14), transparent 34%),
+    #0b120d;
+  box-shadow: 0 30px 100px rgba(11, 18, 13, 0.35);
+  color: #eaf3e8;
+}
+
+.finalCta .eyebrow {
+  color: #8fd14f;
 }
 
 .finalCta p:not(.eyebrow) {
   max-width: 680px;
   margin-bottom: 0;
-  color: var(--muted);
+  color: #b9c9b4;
   line-height: 1.68;
 }
 
@@ -761,24 +782,27 @@
 }
 
 .primaryCta {
-  background: var(--cyan);
-  color: #001216;
+  background: linear-gradient(135deg, #2f9e4f 0%, #177a36 52%, #0c5a26 115%);
+  color: #ffffff;
+  box-shadow:
+    0 14px 32px rgba(23, 122, 54, 0.28),
+    0 0 26px rgba(143, 209, 79, 0.22);
 }
 
 .secondaryCta {
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.035);
-  color: white;
+  border: 1px solid rgba(234, 243, 232, 0.25);
+  background: rgba(234, 243, 232, 0.06);
+  color: #eaf3e8;
 }
 
 .errorBanner {
   width: min(1400px, 100%);
   margin: 1rem auto 0;
   padding: 0.85rem 1rem;
-  border: 1px solid rgba(248, 113, 113, 0.4);
+  border: 1px solid rgba(185, 28, 28, 0.35);
   border-radius: 0.9rem;
-  background: rgba(248, 113, 113, 0.1);
-  color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
   font-size: 0.85rem;
   font-weight: 700;
   text-align: center;
@@ -884,20 +908,20 @@
   gap: 1rem;
 }
 .trustCard {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid #cfdec4;
   border-radius: 1rem;
   padding: 1rem;
-  background: rgba(255, 255, 255, 0.03);
+  background: #f2f7ea;
 }
 .trustCard h3 {
   margin: 0 0 0.25rem;
   font-size: 0.85rem;
-  color: white;
+  color: #0e1510;
 }
 .trustCard p {
   margin: 0;
   font-size: 0.72rem;
-  color: #9ca3af;
+  color: #63745f;
   line-height: 1.45;
 }
 @media (max-width: 720px) {
