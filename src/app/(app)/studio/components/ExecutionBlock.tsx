@@ -133,7 +133,10 @@ export function ExecutionBlock({
             style={{ backgroundColor: verdict.color }}
             aria-hidden
           />
-          <span className="min-w-0 truncate">Work log · {verdict.label}</span>
+          {/* No truncate: the verdict is the run's one-line truth (for a
+              failed run it can carry the rollback warning) — clipping it
+              in the collapsed view hides exactly what the user needs. */}
+          <span className="min-w-0 break-words">Work log · {verdict.label}</span>
         </div>
       </div>
       <ExecutionDetailsExpander details={details} />

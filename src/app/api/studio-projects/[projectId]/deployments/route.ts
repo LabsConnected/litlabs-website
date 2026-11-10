@@ -46,6 +46,20 @@ export async function GET(
   const hostingCheck = getHostingBackend().isConfigured();
   return NextResponse.json({
     deployment,
+    // Canonical project state, so the Studio inspector can show preview
+    // truth from the SAME derivation /projects uses (describeProjectState)
+    // next to the deployment record. Without it the inspector could only
+    // say "Not deployed yet / No preview yet" about a project whose
+    // preview is ready — deployment and preview are different facts and
+    // the response now carries both.
+    project: {
+      workspaceStatus: project.workspaceStatus,
+      runtimeStatus: project.runtimeStatus,
+      workspaceError: project.workspaceError,
+      runtimeError: project.runtimeError,
+      previewUrl: project.previewUrl,
+      updatedAt: project.updatedAt,
+    },
     hosting: {
       name: HOSTING_DISPLAY_NAME,
       target: HOSTING_TARGET,

@@ -23,7 +23,10 @@ interface RecentWorkProps {
 
 const STATUS_CONFIG: Record<DashboardProject["status"], { label: string; color: string }> = {
   live: { label: "Live", color: "#34d399" },
+  preview: { label: "Preview ready", color: "#34d399" },
+  ready: { label: "Ready", color: "#a3e635" },
   building: { label: "Building", color: "#f59e0b" },
+  stalled: { label: "Stalled", color: "#f59e0b" },
   failed: { label: "Failed", color: "#ef4444" },
   draft: { label: "Draft", color: "#71717a" },
   unknown: { label: "Unknown", color: "#71717a" },

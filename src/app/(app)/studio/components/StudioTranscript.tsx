@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
 import { parseJarvisActions } from "@/lib/litt-context";
@@ -544,8 +544,33 @@ function CodeBlockWithCopy({ code, children }: { code: string; children: React.R
   );
 }
 
+/**
+ * Render order for the transcript: chronological by createdAt, stable
+ * for ties. The store's array order is insertion order, and persisted
+ * replacement swaps a message's id/createdAt IN PLACE (see
+ * useCanonicalConversation's updateMessage calls) without repositioning
+ * it — so array order can invert causality, e.g. a run's failure card
+ * rendering before an earlier progress message from the same run.
+ * Messages without a usable timestamp keep their relative position.
+ */
+export function orderMessagesChronologically(
+  messages: ChatMessage[],
+): ChatMessage[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const ta = a.message.createdAt ?? NaN;
+      const tb = b.message.createdAt ?? NaN;
+      const va = Number.isNaN(ta) ? null : ta;
+      const vb = Number.isNaN(tb) ? null : tb;
+      if (va === null || vb === null || va === vb) return a.index - b.index;
+      return va - vb;
+    })
+    .map(({ message }) => message);
+}
+
 export default function StudioTranscript({
-  messages,
+  messages: rawMessages,
   busy,
   activeAgentId,
   onRouteToolAction,
@@ -579,6 +604,10 @@ export default function StudioTranscript({
    */
   ptyUsable?: boolean;
 }) {
+  const messages = useMemo(
+    () => orderMessagesChronologically(rawMessages),
+    [rawMessages],
+  );
   const { speakText } = useVoiceSession();
   // ptyUsable comes from the canonical runtime truth via props (the parent
   // passes runtime.terminal.usable). The "Run in terminal" button genuinely

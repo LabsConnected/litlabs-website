@@ -18,6 +18,7 @@ import { resolveSelectedModelHealth } from "../lib/model-health";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
 import { downloadProjectExport } from "../lib/export-project";
 import { isOptimisticConversationId } from "../lib/optimistic-conversation";
+import { latestRunOutcome, latestRunActivity } from "../lib/last-run-outcome";
 import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
@@ -2652,6 +2653,14 @@ function CommandStudioContent() {
     </div>
   ) : null;
 
+  // Settled-run truth from the persisted conversation. The execution
+  // store is live-only — after a reload it reports idle/empty even when
+  // the last run failed — so the header pill, operator bar, and Activity
+  // tab all derive the settled outcome from the messages instead, and
+  // can never disagree with the transcript.
+  const lastRunFailed = latestRunOutcome(conversation.messages) === "failed";
+  const lastRunActivity = latestRunActivity(conversation.messages);
+
   // The LiTT command layer: transcript region (expanded) + composer bar
   // (always visible). Shared with the mobile sheet / classic panel paths
   // via littChatContent = transcript + composer.
@@ -2754,6 +2763,7 @@ function CommandStudioContent() {
 
   const littLiveContent = (
     <LiTTLiveActivity
+      lastRun={lastRunActivity}
       onOpenFile={(_filePath) => {
         setDestination("studio");
         setStudioMode("code");
@@ -2790,6 +2800,7 @@ function CommandStudioContent() {
       onResolveApproval={handleResolveApproval}
       terminalStatus={terminalHealthOf(capabilities).label}
       modelLabel={modelLabel}
+      lastRunFailed={lastRunFailed}
     />
   );
 
@@ -3056,6 +3067,7 @@ function CommandStudioContent() {
           capabilities={capabilities}
           busy={conversation.busy}
           approvalPending={Boolean(pendingApproval)}
+          lastRunFailed={lastRunFailed}
           executionMode={executionMode}
           onExecutionModeChange={setExecutionMode}
         />

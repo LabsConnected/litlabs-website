@@ -324,7 +324,10 @@ export async function getProject(
     .maybeSingle();
 
   if (studioRow) {
-    const project = rowToCanonical(studioRow as StudioProjectRow);
+    const project = await recoverIfStaleProvisioning(
+      rowToCanonical(studioRow as StudioProjectRow),
+      userId,
+    );
     return reconcileStaleStartingStatus(project);
   }
 
@@ -426,6 +429,71 @@ export async function reconcileStaleStartingStatus(
 }
 
 /**
+ * In-memory mirror of the write recoverStaleProvisioning persists, so a
+ * just-recovered row reads settled without a refetch.
+ */
+function settleRecoveredProvisioning(
+  project: CanonicalProject,
+): CanonicalProject {
+  return {
+    ...project,
+    workspaceStatus: "failed",
+    workspaceError: project.workspaceError
+      ? `${project.workspaceError} | Provisioning timed out`
+      : "Provisioning timed out",
+    workspaceProvisioningToken: null,
+  };
+}
+
+/**
+ * Settle a provably dead provisioning row on read.
+ *
+ * The provisioning subsystem's own dead-lock window is 5 minutes
+ * (recoverStaleProvisioning's default): a live lock owner heartbeats
+ * updatedAt via touchProvisioningHeartbeat, so a "provisioning" row
+ * older than that is dead — its owner crashed and will never settle it.
+ * Recovery persists provisioning → failed ("Provisioning timed out").
+ * Fresh rows are returned untouched and cost no query.
+ */
+async function recoverIfStaleProvisioning(
+  project: CanonicalProject,
+  userId: string,
+): Promise<CanonicalProject> {
+  if (
+    project.workspaceStatus !== "provisioning" ||
+    Number.isNaN(Date.parse(project.updatedAt)) ||
+    Date.now() - Date.parse(project.updatedAt) <= 300_000
+  ) {
+    return project;
+  }
+  const recovered = await recoverStaleProvisioning(project.id, userId).catch(
+    () => false,
+  );
+  return recovered ? settleRecoveredProvisioning(project) : project;
+}
+
+/**
+ * Read-reconciliation for list reads, mirroring what getProject does for
+ * a single project. Without it, a project whose provisioning died stayed
+ * "provisioning" in the row forever — /projects derived an eternal
+ * amber "Stalled" from it and the dashboard derived "Building" — because
+ * recoverStaleProvisioning was only ever invoked from the prepare path,
+ * i.e. only when someone retried. Reads now settle the row the same way
+ * a retry would, so every surface sees the same settled truth.
+ */
+async function reconcileListedProjects(
+  projects: CanonicalProject[],
+  userId: string,
+): Promise<CanonicalProject[]> {
+  const out: CanonicalProject[] = [];
+  for (const project of projects) {
+    const recovered = await recoverIfStaleProvisioning(project, userId);
+    out.push(await reconcileStaleStartingStatus(recovered));
+  }
+  return out;
+}
+
+/**
  * Explicit column lists for listProjects. These mirror exactly the fields
  * consumed by rowToCanonical / legacyRowToCanonical — no more, no less.
  * An explicit list (instead of select("*")) keeps future wide columns
@@ -486,7 +554,10 @@ export async function listProjects(userId: string): Promise<ProjectListResult> {
       .map((p) => p.github_repository_id),
   );
 
-  const canonical = studioProjects.map(rowToCanonical);
+  const canonical = await reconcileListedProjects(
+    studioProjects.map(rowToCanonical),
+    userId,
+  );
   const legacyOnly = legacyProjects
     .filter((p) => !studioGithubRepoIds.has(p.repository_id))
     .map(legacyRowToCanonical);

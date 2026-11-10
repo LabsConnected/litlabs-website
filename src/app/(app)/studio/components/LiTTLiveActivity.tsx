@@ -24,6 +24,11 @@ import {
   type ExecutionEvent,
   type ExecutionPhase,
 } from "../stores/useExecutionStore";
+import { toolActivityDotColor } from "./ExecutionBlock";
+import type {
+  RunOutcome,
+  ToolActivityRecord,
+} from "../lib/last-run-outcome";
 import { useStudioRuntime } from "../context/LiTTRuntimeContext";
 import { runtimeFreshnessLabel } from "@/lib/projects/runtime-state";
 
@@ -55,6 +60,17 @@ interface LiTTLiveActivityProps {
   onStop?: () => void;
   /** Called when the user clicks Rollback to the last checkpoint. */
   onRollback?: () => void;
+  /**
+   * The most recent settled run's recorded activity, derived by the
+   * parent from the persisted conversation. The execution store is
+   * live-only: after a reload it is empty and this panel would claim
+   * "No activity yet" even when a run happened and failed. When live
+   * events exist they always win — this is a fallback, never a merge.
+   */
+  lastRun?: {
+    outcome: RunOutcome;
+    records: ToolActivityRecord[];
+  } | null;
 }
 
 const PHASE_CONFIG: Record<ExecutionPhase, { label: string; icon: typeof Activity; color: string }> = {
@@ -86,6 +102,7 @@ export default function LiTTLiveActivity({
   onResolveApproval,
   onStop,
   onRollback,
+  lastRun,
 }: LiTTLiveActivityProps) {
   const events = useExecutionStore((s) => s.events);
   const phase = useExecutionStore((s) => s.phase);
@@ -360,7 +377,11 @@ export default function LiTTLiveActivity({
       {/* ── Scrollable Activity Feed ── */}
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2 studio-scroll">
         {events.length === 0 ? (
-          <EmptyState />
+          lastRun && !isRunning ? (
+            <LastRunSummary outcome={lastRun.outcome} records={lastRun.records} />
+          ) : (
+            <EmptyState />
+          )
         ) : (
           <>
             {/* Toolbar */}
@@ -417,6 +438,59 @@ export default function LiTTLiveActivity({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ── Last Run (persisted fallback) ──────────────────────────────── */
+/**
+ * The last settled run's recorded activity, shown when the live
+ * execution store is empty (e.g. after a reload). These are the run's
+ * factual per-step records from the persisted conversation — the same
+ * records the transcript's Details expander shows — never a fabricated
+ * live feed.
+ */
+function LastRunSummary({
+  outcome,
+  records,
+}: {
+  outcome: RunOutcome;
+  records: ToolActivityRecord[];
+}) {
+  const failed = outcome === "failed";
+  return (
+    <div className="flex flex-col gap-1.5 py-3" data-testid="litt-last-run">
+      <div className="flex items-center gap-1.5 px-1">
+        {failed ? (
+          <XCircle size={12} className="pointer-events-none shrink-0" style={{ color: "var(--error)" }} />
+        ) : (
+          <CheckCircle2 size={12} className="pointer-events-none shrink-0" style={{ color: "var(--litt-primary)" }} />
+        )}
+        <span className="text-[11px] font-bold" style={{ color: "var(--text-secondary)" }}>
+          Last run · {failed ? "Failed" : "Completed"}
+        </span>
+      </div>
+      <div className="px-1 text-[9px] leading-tight" style={{ color: "var(--text-muted)" }}>
+        Recorded from the conversation. Live activity appears here while a run is in progress.
+      </div>
+      {records.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {records.map((record, index) => (
+            <li
+              key={`${record.toolId}-${index}`}
+              className="flex items-start gap-1.5 px-1 text-[10px] leading-4"
+              style={{ color: "var(--text-muted)" }}
+            >
+              <span
+                className="mt-1 inline-block h-1 w-1 shrink-0 rounded-full"
+                style={{ backgroundColor: toolActivityDotColor(record.success) }}
+                aria-hidden
+              />
+              <span className="min-w-0 flex-1">{record.summary}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

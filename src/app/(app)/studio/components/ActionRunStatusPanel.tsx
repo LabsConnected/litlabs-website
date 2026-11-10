@@ -195,7 +195,10 @@ export function ActionRunStatusPanel({
           <span className="shrink-0 text-[9px] font-black uppercase tracking-[.14em]" style={{ color: "var(--text-muted)" }}>
             Runtime · {stateLabel}
           </span>
-          <span className="min-w-0 flex-1 truncate text-[10px] font-bold" style={{ color: "var(--text-secondary)" }}>
+          {/* No truncate: for a failed run this line carries the current
+              activity / failure context — it must stay fully readable in
+              the collapsed strip instead of clipping to an ellipsis. */}
+          <span className="min-w-0 flex-1 break-words text-[10px] font-bold" style={{ color: "var(--text-secondary)" }}>
             {headline}
           </span>
           <span className="hidden shrink-0 text-[8px] font-bold sm:inline" style={{ color: "var(--text-muted)" }}>
