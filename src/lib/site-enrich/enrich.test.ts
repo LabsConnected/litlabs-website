@@ -11,6 +11,20 @@ import { auditStaticSiteHtml } from "./audit";
 import { enrichStaticSiteVisuals } from "./enrich";
 import { resolveSlotImage } from "./resolver";
 
+// Openverse is a JSON API, not an image URL — default it to an empty
+// result set so provider-order tests exercise the image lanes only.
+function openverseEmpty() {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Map([["content-type", "application/json"]]),
+    json: async () => ({ results: [] }),
+  };
+}
+function isOpenverse(url: string) {
+  return url.includes("api.openverse.org");
+}
+
 // A tiny valid JPEG header so nothing downstream complains about content.
 function fakeImageResponse(url = "https://img.example/photo.jpg") {
   const body = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
@@ -112,7 +126,8 @@ describe("audit", () => {
 
 describe("resolveSlotImage", () => {
   it("prefers a real-photo provider before the AI generator", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => fakeImageResponse(String(url))));
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) =>
+      isOpenverse(String(url)) ? openverseEmpty() : fakeImageResponse(String(url))));
     const resolved = await resolveSlotImage("coffee beans", 1);
     expect(resolved).not.toBeNull();
     // Real photography first — pollinations (AI generation) is the
@@ -121,9 +136,63 @@ describe("resolveSlotImage", () => {
     expect(resolved!.url).toContain("loremflickr");
   });
 
+  it("resolves via Openverse with commercial-license filtering and attribution", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (isOpenverse(u)) {
+        expect(u).toContain("license_type=commercial");
+        expect(u).toContain("size=large");
+        return {
+          ok: true,
+          status: 200,
+          headers: new Map([["content-type", "application/json"]]),
+          json: async () => ({
+            results: [
+              { url: "https://live.staticflickr.com/abc.jpg", title: "Coffee", creator: "Jane", license: "by", license_version: "2.0" },
+              { url: "http://insecure.example/x.jpg", title: "bad", license: "by" },
+              { url: "https://commons.wikimedia.org/y.jpg", title: "Roast", creator: "John", license: "cc0" },
+            ],
+          }),
+        };
+      }
+      return fakeImageResponse(u);
+    }));
+    const resolved = await resolveSlotImage("coffee", 0);
+    expect(resolved?.provider).toBe("openverse");
+    expect(resolved?.url).toBe("https://live.staticflickr.com/abc.jpg");
+    expect(resolved?.attribution).toContain("by 2.0");
+    expect(resolved?.attribution).toContain("Jane");
+    expect(resolved?.attribution).toContain("openverse.org");
+  });
+
+  it("rotates Openverse results by seed and skips avoided URLs", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (isOpenverse(u)) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Map([["content-type", "application/json"]]),
+          json: async () => ({
+            results: [
+              { url: "https://a.example/1.jpg", license: "by" },
+              { url: "https://b.example/2.jpg", license: "by" },
+            ],
+          }),
+        };
+      }
+      return fakeImageResponse(u);
+    }));
+    const avoid = new Set(["https://a.example/1.jpg"]);
+    const resolved = await resolveSlotImage("coffee", 0, undefined, undefined, undefined, avoid);
+    expect(resolved?.provider).toBe("openverse");
+    expect(resolved?.url).toBe("https://b.example/2.jpg");
+  });
+
   it("falls through to the next provider when a probe fails", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
       const u = String(url);
+      if (isOpenverse(u)) return openverseEmpty();
       if (u.includes("loremflickr") || u.includes("picsum")) return { ok: false, status: 503, headers: new Map() };
       return fakeImageResponse(u);
     }));
@@ -136,13 +205,19 @@ describe("resolveSlotImage", () => {
     // most probes, so the provider is skipped only on a repeat failure.
     let fetches = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (isOpenverse(u)) {
+        fetches += 1;
+        return openverseEmpty();
+      }
       fetches += 1;
-      if (fetches === 1) return { ok: false, status: 503, headers: new Map() };
-      return fakeImageResponse(String(url));
+      if (fetches === 2) return { ok: false, status: 503, headers: new Map() };
+      return fakeImageResponse(u);
     }));
     const resolved = await resolveSlotImage("coffee", 1);
     expect(resolved?.provider).toBe("loremflickr");
-    expect(fetches).toBe(2);
+    // openverse(1) + loremflickr transient(1) + loremflickr retry(1)
+    expect(fetches).toBe(3);
   });
 });
 
@@ -248,9 +323,10 @@ describe("enrichStaticSiteVisuals", () => {
     const report = await enrichStaticSiteVisuals(transport as never, {});
     const html = transport.files.get("index.html")!;
     // Slot resolve + floor fills must not dead-end on the loremflickr
-    // download failure — picsum (next provider) serves them.
+    // download failure — the next provider in chain (pollinations)
+    // serves them.
     expect(report.imagesResolved).toBeGreaterThanOrEqual(1);
-    expect(report.providersUsed).toContain("picsum");
+    expect(report.providersUsed).toContain("pollinations");
     expect(html).toContain('src="assets/images/picsum.jpg"');
     expect(html).not.toContain("data-litt-image");
   });

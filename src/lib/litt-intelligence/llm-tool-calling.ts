@@ -1855,6 +1855,19 @@ export async function callLLMWithTools(
      * OpenAI) are eligible as last-resort fallback.
      */
     allowLittPaidProviders?: boolean;
+    /**
+     * INTERNAL: set by the bounded whole-plan retry below — never pass
+     * from callers. Caps transient-storm retries at exactly one.
+     */
+    _wholePlanRetried?: boolean;
+    /**
+     * Opt-in: when EVERY route attempt fails with a transient class
+     * (timeout/network/5xx/429), wait briefly and re-run the whole plan
+     * once — free-tier providers fail in correlated windows. Off by
+     * default so auxiliary callers (visual judge, voice) keep strict
+     * single-pass cost semantics; the agent loop opts in.
+     */
+    allowTransientPlanRetry?: boolean;
   },
 ): Promise<LLMToolCallResponse> {
   const requirements: RouteRequirements = {
@@ -2238,6 +2251,41 @@ export async function callLLMWithTools(
         recordModelAttemptOutcome(route.provider, model, false, failure.class);
       }
     }
+  }
+
+  // Bounded whole-plan retry for transient provider storms. Free-tier
+  // lanes time out in correlated windows (2026-11-10 staging golden:
+  // gemini-flash-latest AND cloudflare llama both timed out for ~2min,
+  // then recovered) — one fresh pass after a short pause converts that
+  // window into a success instead of failing a user-visible call.
+  // Permanent failures (auth/billing/model_unavailable/forbidden) and
+  // token-ceiling skips never qualify; the internal flag caps this at
+  // exactly one retry per call.
+  const TRANSIENT_WHOLE_PLAN = new Set(["timeout", "network", "server_error", "rate_limited"]);
+  const isTokenCeilingSkip = (f: RouteAttemptFailure) =>
+    f.class === "model_unavailable" &&
+    typeof f.message === "string" &&
+    f.message.includes("token ceiling");
+  const retryableStorm =
+    failures.length > 0 &&
+    failures.every((f) => TRANSIENT_WHOLE_PLAN.has(f.class) || isTokenCeilingSkip(f));
+  const remainingForRetry = options?.deadlineMs ? options.deadlineMs - Date.now() : Number.POSITIVE_INFINITY;
+  if (
+    retryableStorm &&
+    options?.allowTransientPlanRetry === true &&
+    options?._wholePlanRetried !== true &&
+    remainingForRetry > 20_000
+  ) {
+    logRoute("whole_plan_retry", {
+      attempts: failures.length,
+      classes: [...new Set(failures.map((f) => f.class))].join(","),
+      remainingBudgetMs: Math.max(0, remainingForRetry),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    return callLLMWithTools(systemPrompt, messages, tools, {
+      ...options,
+      _wholePlanRetried: true,
+    });
   }
 
   throw new AllRoutesFailedError(failures, plan.excluded);
