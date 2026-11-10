@@ -55,7 +55,7 @@ const STATUS_LABELS: Record<VoiceState, string> = {
   muted: "Muted",
   permission_denied: "Microphone permission denied",
   unsupported: "Voice not supported in this browser",
-  error: "",
+  error: "Voice unavailable",
 };
 
 export interface ComposerContextLine {
@@ -196,6 +196,7 @@ export default function CommandComposer({
     errorMessage,
     stopSpeaking,
     voiceOutputState,
+    voiceAvailable,
   } = useVoiceSession();
 
   // Canonical voice pipeline: final transcript -> onSend -> speakText.
@@ -337,23 +338,69 @@ export default function CommandComposer({
   // Note: legacy handleFile removed — universal attachment system handles all file types.
   // Camera snapshots from CameraTool still use the `snapshots` state directly.
 
-  // Mic button state.
+  // Mic button state. The button itself carries the voice truth via its
+  // aria-label and title: when the session has failed — including the
+  // auth/close-4001 class, whose self-diagnosed explanation the session
+  // context puts in errorMessage — the button says "Voice unavailable"
+  // and its title carries that diagnosis, instead of the failure living
+  // only in a status line (or nowhere visible at all).
   const micState = (() => {
     switch (voiceState) {
-      case "idle": return { icon: Mic, color: "var(--text-muted)", disabled: false, onClick: startVoice };
+      case "idle": return {
+        icon: Mic, color: "var(--text-muted)", disabled: false, onClick: startVoice,
+        ariaLabel: "Start voice",
+        title: voiceAvailable
+          ? "Start voice"
+          : "Voice unavailable — the voice service could not be reached on this deployment. Tap to try again.",
+      };
       case "requesting_permission":
-      case "connecting": return { icon: Loader2, color: "var(--text-muted)", disabled: true, onClick: undefined };
+      case "connecting": return {
+        icon: Loader2, color: "var(--text-muted)", disabled: true, onClick: undefined,
+        ariaLabel: STATUS_LABELS[voiceState], title: STATUS_LABELS[voiceState],
+      };
       case "listening":
-      case "user_speaking": return { icon: Mic, color: "var(--color-accent)", disabled: false, onClick: stopVoice };
-      case "processing": return { icon: Loader2, color: "var(--color-accent)", disabled: true, onClick: undefined };
-      case "transcript_ready": return { icon: Mic, color: "var(--color-accent)", disabled: false, onClick: startVoice };
-      case "sending": return { icon: Loader2, color: "var(--color-accent)", disabled: true, onClick: undefined };
-      case "assistant_speaking": return { icon: Square, color: "#e3b341", disabled: false, onClick: interrupt };
-      case "muted": return { icon: MicOff, color: "#e3b341", disabled: false, onClick: toggleMute };
-      case "permission_denied": return { icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice };
-      case "unsupported": return { icon: MicOff, color: "#ef4444", disabled: true, onClick: undefined };
-      case "error": return { icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice };
-      default: return { icon: Mic, color: "var(--text-muted)", disabled: false, onClick: startVoice };
+      case "user_speaking": return {
+        icon: Mic, color: "var(--color-accent)", disabled: false, onClick: stopVoice,
+        ariaLabel: "Stop voice", title: "Stop voice",
+      };
+      case "processing": return {
+        icon: Loader2, color: "var(--color-accent)", disabled: true, onClick: undefined,
+        ariaLabel: STATUS_LABELS.processing, title: STATUS_LABELS.processing,
+      };
+      case "transcript_ready": return {
+        icon: Mic, color: "var(--color-accent)", disabled: false, onClick: startVoice,
+        ariaLabel: "Start voice", title: "Start voice",
+      };
+      case "sending": return {
+        icon: Loader2, color: "var(--color-accent)", disabled: true, onClick: undefined,
+        ariaLabel: STATUS_LABELS.sending, title: STATUS_LABELS.sending,
+      };
+      case "assistant_speaking": return {
+        icon: Square, color: "#e3b341", disabled: false, onClick: interrupt,
+        ariaLabel: "Stop voice", title: "Stop voice",
+      };
+      case "muted": return {
+        icon: MicOff, color: "#e3b341", disabled: false, onClick: toggleMute,
+        ariaLabel: "Stop voice", title: "Muted — tap to unmute",
+      };
+      case "permission_denied": return {
+        icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice,
+        ariaLabel: "Microphone permission denied — tap to retry",
+        title: errorMessage ?? "Microphone permission denied — allow microphone access, then tap to retry.",
+      };
+      case "unsupported": return {
+        icon: MicOff, color: "#ef4444", disabled: true, onClick: undefined,
+        ariaLabel: STATUS_LABELS.unsupported, title: STATUS_LABELS.unsupported,
+      };
+      case "error": return {
+        icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice,
+        ariaLabel: "Voice unavailable — tap to retry",
+        title: errorMessage ?? "Voice unavailable — connection rejected. Tap to retry.",
+      };
+      default: return {
+        icon: Mic, color: "var(--text-muted)", disabled: false, onClick: startVoice,
+        ariaLabel: "Start voice", title: "Start voice",
+      };
     }
   })();
   const MicIcon = micState.icon;
@@ -785,7 +832,8 @@ export default function CommandComposer({
                 ? "0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent)"
                 : undefined,
           }}
-          aria-label={voiceState === "idle" ? "Start voice" : "Stop voice"}
+          aria-label={micState.ariaLabel}
+          title={micState.title}
         >
           <MicIcon
             size={18}
