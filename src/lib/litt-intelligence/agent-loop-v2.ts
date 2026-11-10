@@ -670,6 +670,43 @@ export function hasSuccessfulFileWriteInHistory(messages: LLMMessage[]): boolean
   });
 }
 
+/**
+ * Server-persisted tool results showing a successful MUTATION — any
+ * non-readOnly tool, not just file writes. The approval-resume
+ * premature-completion check uses this so paused histories that predate
+ * priorToolCalls seeding (legacy rows) still count pre-pause work.
+ * Mirrors seedToolCallRecordsFromHistory's success semantics: a JSON
+ * payload that does not report failure counts as applied.
+ */
+export function hasSuccessfulMutationInHistory(messages: LLMMessage[]): boolean {
+  const mutatingWireNames = new Set(
+    toolRegistry
+      .listEnabled()
+      .filter((tool) => !tool.readOnly)
+      .map((tool) => tool.id.replace(/\./g, "_")),
+  );
+  const mutationCallIds = new Set(
+    messages.flatMap((message) =>
+      message.role === "assistant"
+        ? (message.tool_calls ?? [])
+            .filter((call) => mutatingWireNames.has(call.function.name))
+            .map((call) => call.id)
+        : [],
+    ),
+  );
+  return messages.some((message) => {
+    if (message.role !== "tool" || !message.tool_call_id || !mutationCallIds.has(message.tool_call_id)) return false;
+    try {
+      const parsed: unknown = JSON.parse(message.content);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+      const rec = parsed as Record<string, unknown>;
+      return rec.success !== false && rec.savedToProject !== false;
+    } catch {
+      return false;
+    }
+  });
+}
+
 // ─── Mid-build stall recovery ─────────────────────────────────────
 
 /**
@@ -828,6 +865,21 @@ export function resolveZeroToolCalls(
   }
   return { action: "stall" };
 }
+
+/**
+ * Bounded reprompt for the approval-resume premature-completion hole: the
+ * run paused on an approved mutation, yet the resumed model answered in
+ * prose claiming completion while ZERO mutations succeeded — the required
+ * project files were never created. One reprompt per resume segment
+ * demands the missing work; a repeated prose-only "done" then fails
+ * honestly instead of reporting a completion that never happened.
+ */
+const PREMATURE_COMPLETION_REPROMPT =
+  "STOP — do not report completion yet. This run resumed after an approved workspace change, " +
+  "but no mutation has succeeded, so the required project files still do not exist. " +
+  "Emit the file tool calls needed to complete the work now (e.g. files.write, apply_patch, or site.compose). " +
+  "Only summarize after the writes succeed. If a required action is impossible or was rejected, " +
+  "state exactly what failed instead of claiming success.";
 
 // ─── Tool definition conversion ───────────────────────────────────
 
@@ -3677,6 +3729,10 @@ async function resumeAgentLoopV2Inner(
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
   let readLoopNudges = 0;
+  // One bounded reprompt for the premature-completion hole: an approved
+  // execution resume that reaches a prose-only final answer with zero
+  // successful mutations has not applied the sanctioned work.
+  let prematureCompletionReprompted = false;
   // A paused run exists BECAUSE the model emitted an approval-gated tool
   // call — the required-first-call contract was satisfied pre-pause, so
   // the resumed loop runs under "auto" tool choice throughout.
@@ -4081,6 +4137,9 @@ async function resumeAgentLoopV2Inner(
         continue;
       }
       const zeroCallText = llmResponse.text ?? "";
+      const executionRequestedTurn =
+        (cfg.executionRequested ?? cfg.requireToolCallOnFirstStep) === true &&
+        cfg.executionMode !== "plan";
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
         // Small lane exists to mutate files: until a mutation lands, a
         // prose-only reply can never be the final answer — bounded nudges
@@ -4094,7 +4153,7 @@ async function resumeAgentLoopV2Inner(
         // final answer, not a missing tool call. Execution intent rides
         // its own flag so it survives approval resumes — the first-call
         // requirement is inert once any call has been emitted.
-        executionRequested: (cfg.executionRequested ?? cfg.requireToolCallOnFirstStep) === true && cfg.executionMode !== "plan",
+        executionRequested: executionRequestedTurn,
       });
       if (resolution.action === "nudge") {
         continuationNudges++;
@@ -4130,6 +4189,44 @@ async function resumeAgentLoopV2Inner(
         localProgress.emit({
           type: "status",
           summary: "Stopping: the model asked for approval in prose instead of emitting the tool call — no approval card was created.",
+        });
+        break;
+      }
+      // Premature-completion recovery: this resume exists because a gated
+      // mutation was approved, so a prose-only "final" answer with ZERO
+      // successful mutations means the sanctioned work never landed —
+      // the required project files were never created. With remaining
+      // capacity, spend ONE bounded reprompt demanding the missing work;
+      // once spent (or with no capacity left) the run fails honestly
+      // instead of reporting a completion that never happened.
+      if (
+        resume.decision === "approved" &&
+        executionRequestedTurn &&
+        !toolCallLog.some((call) => call.success && call.mutating) &&
+        !hasSuccessfulMutationInHistory(resume.pausedMessages)
+      ) {
+        if (
+          !prematureCompletionReprompted &&
+          stepsUsed < cfg.maxSteps &&
+          Date.now() - startTime < cfg.maxRuntimeMs
+        ) {
+          prematureCompletionReprompted = true;
+          localProgress.emit({
+            type: "status",
+            summary:
+              "Completion claimed with no applied workspace changes — asking the model to finish the missing work...",
+          });
+          llmMessages.push({ role: "assistant", content: zeroCallText });
+          llmMessages.push({ role: "user", content: PREMATURE_COMPLETION_REPROMPT });
+          continue;
+        }
+        failedHonestly =
+          "I could not complete the requested changes: the run ended without any successful workspace mutation, " +
+          "so the required project files were never created. Everything completed so far is preserved — please try again.";
+        finalText = failedHonestly;
+        localProgress.emit({
+          type: "status",
+          summary: "Stopping: completion was claimed but no workspace mutations were applied.",
         });
         break;
       }
