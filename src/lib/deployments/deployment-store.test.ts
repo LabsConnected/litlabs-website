@@ -118,6 +118,10 @@ const readyRow = {
 beforeEach(() => {
   calls.length = 0;
   handler = () => ({ data: null, error: null });
+  // Compress the production retry ladder ([250,750,1500,3000]) to the same
+  // length in near-zero ms — the retry-path tests exercise the full
+  // sequence without exceeding the 5s test timeout.
+  vi.stubEnv("LITT_PUBLISHED_READ_RETRY_MS", "1,1,1,1");
 });
 
 describe("supabaseDeploymentStore — table targeting", () => {
@@ -243,6 +247,21 @@ describe("readPublishedFile — public serving read path", () => {
     expect(calls.find((c) => c.table === FILES)).toBeUndefined();
   });
 
+  it("returns null (404) for a malformed deployment id — never a 503", async () => {
+    // Postgres raises 22P02 when a non-UUID id hits the uuid primary key.
+    // That is a bad request path, not a store outage: collapsing it into
+    // null lets the route answer 404 instead of throwing into a public 503.
+    // Observed live: /sites/assets/images/x (relative refs escaping a
+    // slash-less deployment URL) 503'd on every retry (staging run
+    // 42693622298).
+    handler = (table) =>
+      table === DEPLOYMENTS
+        ? { data: null, error: { code: "22P02", message: 'invalid input syntax for type uuid: "assets"' } }
+        : { data: null, error: null };
+    expect(await readPublishedFile("assets", "images/x.jpeg")).toBeNull();
+    expect(calls.find((c) => c.table === FILES)).toBeUndefined();
+  });
+
   // PostgREST emits PGRST204 for an unknown INSERT payload key but the
   // passthrough Postgres code 42703 for an unknown SELECT column — the
   // missing-encoding compatibility path must accept both.
@@ -270,7 +289,7 @@ describe("readPublishedFile — public serving read path", () => {
     },
   );
 
-  it("retries twice and throws on a persistent storage error — never a false 404", async () => {
+  it("exhausts the bounded retry budget and throws on a persistent storage error — never a false 404", async () => {
     handler = (table) => {
       if (table === DEPLOYMENTS) return { data: readyRow, error: null };
       if (table === FILES) {
@@ -281,8 +300,10 @@ describe("readPublishedFile — public serving read path", () => {
     await expect(readPublishedFile("dep-1", "index.html")).rejects.toThrow(
       "Published file read failed",
     );
-    // Initial read + bounded retries, then the error surfaces (route → 503).
-    expect(calls.filter((c) => c.table === FILES)).toHaveLength(4);
+    // Initial read + bounded retries (initial probe, then first read plus
+    // one retry per READ_RETRY_DELAYS_MS entry), then the error surfaces
+    // (route → 503).
+    expect(calls.filter((c) => c.table === FILES)).toHaveLength(6);
   });
 
   it("heals a transient storage error with a single retry", async () => {
