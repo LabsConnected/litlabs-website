@@ -582,4 +582,82 @@ describe("enrichStaticSiteVisuals", () => {
     expect(html).toContain("litt-gallery");
     expect(html).toContain('src="assets/images/g4.jpg"');
   });
+
+  it("gives the photo floor its own deadline when earlier phases burn the shared budget", async () => {
+    // Golden run 42726578836: phases 1–3 share one deadline with the
+    // floor, and a slow-failing provider lane (LoremFlickr's probe
+    // retries alone can burn ~24s of the 30s) spent it before the floor
+    // started — the floor inherited a nearly-dead signal and shipped
+    // 2/3 photos. Here the slot phase's first probe hangs until the
+    // shared deadline kills it; the floor must still resolve all of its
+    // photos afterwards under a fresh deadline of its own.
+    process.env.ENRICH_TOTAL_TIMEOUT_MS = "200";
+    try {
+      const transport = makeTransport({
+        "index.html": `<html><head><title>Ember Roast</title></head><body>
+          <h1>Ember Roast Coffee</h1><img data-litt-image="coffee beans" alt="beans"></body></html>`,
+      });
+      let n = 0;
+      mockInsertAssetFromUrl.mockImplementation(async () => {
+        n += 1;
+        return { success: true, path: `assets/images/f${n}.jpg`, sitePath: `assets/images/f${n}.jpg`, sizeBytes: 120_000 };
+      });
+      let fetches = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((url: RequestInfo | URL, init?: { signal?: AbortSignal }) => {
+          fetches += 1;
+          if (fetches === 1) {
+            // A stalled provider: never answers, dies only when the
+            // caller's signal aborts it — exactly how real fetch behaves.
+            return new Promise((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => reject(new Error("AbortError")), { once: true });
+            });
+          }
+          return Promise.resolve(fakeImageResponse(String(url)));
+        }),
+      );
+
+      const report = await enrichStaticSiteVisuals(transport as never, {});
+      const html = transport.files.get("index.html")!;
+      // The slot burned the whole shared budget and fell back to the
+      // placeholder SVG; the floor still delivered all 3 of its photos.
+      expect(report.placeholdersUsed).toBe(1);
+      expect(report.imagesResolved).toBe(3);
+      expect(html).toContain("litt-gallery");
+      expect(html).toContain('src="assets/images/f3.jpg"');
+    } finally {
+      delete process.env.ENRICH_TOTAL_TIMEOUT_MS;
+    }
+  });
+
+  it("lets the photo floor retry beyond needed*2 attempts when resolves keep failing", async () => {
+    // The other half of run 42726578836: needed=2 with the old needed*2
+    // cap gave the floor only 4 attempts — 1 success + 3 flaky failures
+    // shipped a 2-photo page. Each failed resolve below burns its 3
+    // provider lanes (probe ok, download fails, fall through) before it
+    // counts as failed, so 5 failed resolves = 15 failed downloads; the
+    // floor must keep going past the old cap and land both photos on
+    // attempts 6 and 7.
+    const transport = makeTransport({
+      "index.html": `<html><head><title>Ember Roast</title></head><body>
+        <h1>Ember Roast Coffee</h1><img src="assets/images/hero.jpg"></body></html>`,
+      "assets/images/hero.jpg": "binary-stub",
+    });
+    let n = 0;
+    mockInsertAssetFromUrl.mockImplementation(async () => {
+      n += 1;
+      if (n <= 15) return { success: false, error: "HTTP 503" };
+      return { success: true, path: `assets/images/g${n}.jpg`, sitePath: `assets/images/g${n}.jpg`, sizeBytes: 120_000 };
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    expect(report.imagesResolved).toBe(2);
+    expect(report.imagesFailed).toBe(5);
+    expect(html).toContain("litt-gallery");
+    expect(html).toContain('src="assets/images/g16.jpg"');
+    expect(html).toContain('src="assets/images/g17.jpg"');
+  });
 });
