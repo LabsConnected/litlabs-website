@@ -22,6 +22,8 @@ import {
   Workflow,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { EggHuntProvider } from "@/components/landing/EggHunt";
+import "@/app/homepage-tlc.css";
 // Above-the-fold sections stay in the main bundle.
 import { LandingHeroV3 } from "@/components/landing/LandingHeroV3";
 // Below-the-fold sections are code-split (ssr: true keeps them in the
@@ -47,8 +49,8 @@ const TrustSection = dynamic(
   () => import("@/components/landing/TrustSection").then((m) => m.TrustSection),
   { ssr: true },
 );
-const StudioTour = dynamic(
-  () => import("@/components/landing/StudioTour").then((m) => m.StudioTour),
+const HowItsMade = dynamic(
+  () => import("@/components/landing/HowItsMade").then((m) => m.HowItsMade),
   { ssr: true },
 );
 const OnboardingSteps = dynamic(
@@ -80,7 +82,7 @@ const CAPABILITIES = [
     copy: "Give LiTT a creative direction and coordinate visual direction, branding, images, copy, audio concepts, and campaign assets that stay on brand.",
     eyebrow: "Creative production",
     icon: Palette,
-    accent: "violet",
+    accent: "gold",
     size: "standard",
     points: ["Visual direction", "Branding", "Images and copy", "Audio concepts", "Campaign assets"],
   },
@@ -89,7 +91,7 @@ const CAPABILITIES = [
     copy: "LiTT plans the mission, selects tools, edits the project, and keeps the work moving across code, files, terminal, research, and deployment.",
     eyebrow: "Orchestration",
     icon: Workflow,
-    accent: "cyan",
+    accent: "deep",
     size: "standard",
     points: ["Mission planning", "Tool routing", "Multi-step execution"],
   },
@@ -98,7 +100,7 @@ const CAPABILITIES = [
     copy: "Goals, decisions, files, and project history carry forward. Return tomorrow without rebuilding the entire conversation.",
     eyebrow: "Project memory",
     icon: BrainCircuit,
-    accent: "violet",
+    accent: "gold",
     size: "standard",
     points: ["Persistent memory", "Project history", "Recoverable checkpoints"],
   },
@@ -116,7 +118,7 @@ const CAPABILITIES = [
     copy: "Your code, files, images, audio, and documents live in your workspace and remain exportable—ready to launch or take anywhere.",
     eyebrow: "Files + launch",
     icon: FileStack,
-    accent: "cyan",
+    accent: "deep",
     size: "wide",
     points: ["Real project files", "Export anytime", "Deployment workflow", "No lock-in"],
   },
@@ -138,17 +140,17 @@ function SectionHeading({
       <div className="litt-eyebrow justify-center data-[align=left]:justify-start" data-align={align}>
         <Sparkles size={13} /> {eyebrow}
       </div>
-      <h2 className="mt-5 text-[clamp(2.25rem,5vw,4.75rem)] font-black leading-[0.98] tracking-[-0.055em] text-white">
+      <h2 className="mt-5 text-[clamp(2.25rem,5vw,4.75rem)] font-black leading-[0.98] tracking-[-0.055em] text-[#0E1510]">
         {title}
       </h2>
-      <p className="mt-5 text-base leading-7 text-white/52 sm:text-lg sm:leading-8">{copy}</p>
+      <p className="mt-5 text-base leading-7 text-[#63745F] sm:text-lg sm:leading-8">{copy}</p>
     </div>
   );
 }
 
 export function CapabilityGrid() {
   return (
-    <section id="what-we-do" className="litt-section relative overflow-hidden border-t border-white/8">
+    <section id="what-we-do" className="litt-section relative overflow-hidden">
       <div className="litt-grid-fade pointer-events-none absolute inset-0 opacity-40" />
       <div className="relative mx-auto max-w-[1500px] px-5 lg:px-8">
         {/* Availability status (folded in from CapabilityStatus): the unique
@@ -162,12 +164,12 @@ export function CapabilityGrid() {
             </span>
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.2em] text-accent">Working now</div>
-              <div className="mt-0.5 text-xs font-semibold text-white/42">Core capabilities available in Studio</div>
+              <div className="mt-0.5 text-xs font-semibold text-[#63745F]">Core capabilities available in Studio</div>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-3 text-[10px] font-black uppercase tracking-[0.14em]">
-            <span className="rounded-full border border-amber-300/16 bg-amber-300/6 px-3 py-2 text-amber-200/78">Voice · Terminal · Deploy <span className="text-white/30">Beta</span></span>
-            <Link href="/pricing" className="hidden items-center gap-1.5 text-white/40 transition hover:text-white sm:inline-flex">
+            <span className="rounded-full border border-[#E8A317]/45 bg-[#E8A317]/10 px-3 py-2 text-[#9A6B0F]">Voice · Terminal · Deploy <span className="text-[#63745F]">Beta</span></span>
+            <Link href="/pricing" className="hidden items-center gap-1.5 text-[#63745F] transition hover:text-[#0C5A26] sm:inline-flex">
               Compare plans <ArrowUpRight size={12} />
             </Link>
           </div>
@@ -192,13 +194,13 @@ export function CapabilityGrid() {
                 <div className="relative z-10 flex h-full flex-col p-6 sm:p-7">
                   <div className="flex items-center justify-between gap-4">
                     <span className="litt-capability-icon"><Icon size={20} /></span>
-                    <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/30">{capability.eyebrow}</span>
+                    <span className="text-[10px] font-black uppercase tracking-[0.18em] text-[#63745F]">{capability.eyebrow}</span>
                   </div>
-                  <h3 className="mt-8 text-2xl font-black tracking-[-0.035em] text-white">{capability.title}</h3>
-                  <p className="mt-3 max-w-xl text-sm leading-6 text-white/52">{capability.copy}</p>
+                  <h3 className="mt-8 text-2xl font-black tracking-[-0.035em] text-[#0E1510]">{capability.title}</h3>
+                  <p className="mt-3 max-w-xl text-sm leading-6 text-[#63745F]">{capability.copy}</p>
                   <div className="mt-6 flex flex-wrap gap-2">
                     {capability.points.map((point) => (
-                      <span key={point} className="litt-capability-tag inline-flex items-center gap-1.5 rounded-full border border-white/8 bg-white/4 px-2.5 py-1 text-[10px] font-bold text-white/55">
+                      <span key={point} className="litt-capability-tag inline-flex items-center gap-1.5 rounded-full border border-[#CFDEC4] bg-[#EDF3E4] px-2.5 py-1 text-[10px] font-bold text-[#37463A]">
                         <Check size={10} className="text-current" /> {point}
                       </span>
                     ))}
@@ -215,8 +217,8 @@ export function CapabilityGrid() {
 
 function MissionDemo() {
   return (
-    <section id="how-it-works" className="litt-section relative overflow-hidden border-t border-white/8 bg-[#05070d]">
-      <div className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-violet-600/8 blur-[140px]" />
+    <section id="how-it-works" className="litt-section relative overflow-hidden">
+      <div className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-[#177A36]/6 blur-[140px]" />
       <div className="relative mx-auto max-w-[1500px] px-5 lg:px-8">
         <div className="grid items-end gap-8 lg:grid-cols-[1fr_auto]">
           <SectionHeading
@@ -227,7 +229,7 @@ function MissionDemo() {
           />
           <div className="flex flex-wrap gap-2 lg:justify-end">
             {[{ icon: Mic2, label: "Talk" }, { icon: ImageIcon, label: "Create" }, { icon: Braces, label: "Build" }, { icon: Rocket, label: "Launch" }].map(({ icon: Icon, label }) => (
-              <span key={label} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-bold text-white/60">
+              <span key={label} className="inline-flex items-center gap-2 rounded-full border border-[#CFDEC4] bg-white px-3 py-2 text-xs font-bold text-[#37463A]">
                 <Icon size={13} className="text-accent" /> {label}
               </span>
             ))}
@@ -241,23 +243,98 @@ function MissionDemo() {
   );
 }
 
+const SYSTEM_STEPS = [
+  {
+    icon: Sparkles,
+    title: "Build",
+    copy: "Describe the whole site — or just the next page — and watch it generate with real photos and real words, not lorem ipsum.",
+    points: ["Full sites or single pages", "Real images, checked as they load", "Your words, kept yours"],
+  },
+  {
+    icon: Palette,
+    title: "Refine",
+    copy: "See it live while you edit. Say “make the header bolder” or “move the menu up” — no settings maze, no code.",
+    points: ["Live preview, desktop & phone", "Edit by describing the change", "Every version saved"],
+  },
+  {
+    icon: Rocket,
+    title: "Ship",
+    copy: "LiTT runs its checks first — pages, photos, buttons — and only then publishes to your own LiTT address.",
+    points: ["Quality & safety checks before publish", "A real, working address", "Republish edits anytime"],
+  },
+] as const;
+
 function CreationsSection() {
   const handleWatchClick = () => {
     track("watch_litt_click", { source: "real_proof" });
   };
 
   return (
-    <section id="creations" className="litt-section relative overflow-hidden border-t border-white/8 bg-[#05070d]">
+    <section id="creations" className="litt-section relative overflow-hidden">
       <div className="pointer-events-none absolute left-1/2 top-0 h-[380px] w-[680px] -translate-x-1/2 rounded-full bg-accent/6 blur-[140px]" />
       <div className="relative mx-auto max-w-[1500px] px-5 lg:px-8">
-        {/* Creations: the product-demonstration cards */}
-        <div className="mt-20 sm:mt-24">
-          <SectionHeading
-            eyebrow="From prompt to project"
-            title={<>One system. <span className="litt-gradient-text">Very different outcomes.</span></>}
-            copy="Explore transparent product demonstrations that show how LiTTree approaches product builds, dashboards, campaigns, and creative work."
-          />
-          <div className="mt-12"><RealCreations /></div>
+        <SectionHeading
+          eyebrow="The Studio"
+          title={<>One system. <span className="litt-gradient-text">Every step in one place.</span></>}
+          copy="Building, fixing, and publishing used to be three different tools in three different tabs. In LiTT it's one connected workspace — what you change in one step carries into the next."
+        />
+
+        {/* One connected panel: Build → Refine → Ship, then the outcomes —
+            the mockup's #system structure replacing three loose cards. */}
+        <div data-reveal className="litt-system-panel mt-12 p-5 sm:p-8 lg:p-10">
+          <div className="grid items-stretch gap-4 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:gap-3">
+            {SYSTEM_STEPS.map((step, index) => {
+              const Icon = step.icon;
+              return (
+                <div key={step.title} className="contents">
+                  <article className="litt-system-step">
+                    <div className="flex items-center gap-2.5">
+                      <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#E4F2D6] text-[#0C5A26]">
+                        <Icon size={17} />
+                      </span>
+                      <h3 className="text-lg font-black tracking-[-0.02em] text-[#0E1510]">{step.title}</h3>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-[#37463A]">{step.copy}</p>
+                    <ul className="mt-4 space-y-1.5">
+                      {step.points.map((point) => (
+                        <li key={point} className="flex items-start gap-2 text-xs font-semibold leading-5 text-[#37463A]">
+                          <Check size={12} className="mt-1 shrink-0 text-[#177A36]" /> {point}
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                  {index < SYSTEM_STEPS.length - 1 ? (
+                    <div className="litt-system-arrow" aria-hidden="true">
+                      <ArrowRight size={20} className="rotate-90 lg:rotate-0" />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 border-t border-[#CFDEC4] pt-5 text-center text-xs font-bold text-[#63745F]">
+            <span>One workspace</span>
+            <span aria-hidden="true" className="text-[#177A36]">·</span>
+            <span>One project file</span>
+            <span aria-hidden="true" className="text-[#177A36]">·</span>
+            <span>One palette across every section</span>
+            <span aria-hidden="true" className="text-[#177A36]">·</span>
+            <span>Zero tab-hopping</span>
+          </div>
+
+          <div className="mt-10 border-t border-[#CFDEC4] pt-8">
+            <div className="max-w-2xl">
+              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#177A36]">Start from an idea</div>
+              <h3 className="mt-2 text-2xl font-black tracking-[-0.03em] text-[#0E1510] sm:text-3xl">
+                Bring an idea. <span className="litt-gradient-text">Leave with a working site.</span>
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-[#63745F]">
+                You don't need a plan, a designer, or a free weekend. You need one sentence about what you're making — each card below starts with a real first prompt.
+              </p>
+            </div>
+            <div className="mt-8"><RealCreations /></div>
+          </div>
         </div>
 
         <div data-reveal className="mt-12 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
@@ -292,18 +369,20 @@ function LandingPage() {
   useViewportReveals(landingRef);
 
   return (
-    <main ref={landingRef} id="main-content" className="litt-landing min-h-dvh overflow-hidden bg-[#03050a] text-white selection:bg-accent selection:text-on-accent">
-      <LandingHeroV3 />
-      <RealProjectWalkthrough />
-      <CapabilityGrid />
-      <MissionDemo />
-      <StudioTour />
-      <ComparisonTable />
-      <AgentCrew />
-      <CreationsSection />
-      <OnboardingSteps />
-      <TrustSection />
-      <FAQSection />
+    <main ref={landingRef} id="main-content" className="litt-landing litt-home min-h-dvh overflow-hidden bg-white text-[#0E1510] selection:bg-accent selection:text-on-accent">
+      <EggHuntProvider>
+        <LandingHeroV3 />
+        <RealProjectWalkthrough />
+        <CapabilityGrid />
+        <MissionDemo />
+        <HowItsMade />
+        <ComparisonTable />
+        <AgentCrew />
+        <CreationsSection />
+        <OnboardingSteps />
+        <TrustSection />
+        <FAQSection />
+      </EggHuntProvider>
     </main>
   );
 }
