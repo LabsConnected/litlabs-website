@@ -748,9 +748,18 @@ export async function POST(
     // a BUILD run. Resume with the guard enabled so a model that stops
     // writing files gets ruled out within 3 steps instead of burning the
     // run budget — the same protection the main loop gets via launch-flow.
-    buildCapabilityGuard: isFileWritingTool(resolved.toolId)
-      ? { maxStepsWithoutFileWrite: 3 }
-      : undefined,
+    // A build run's first gate is routinely a NON-writing tool, though —
+    // the golden journey pauses on image.stock before any file exists —
+    // so tool type alone misses exactly those builds. Use the route's
+    // existing build-intent test (the same one that enables the quality
+    // loop below: act/auto mode with a project) as the second arming
+    // condition, so an image-first build keeps its zero-write protection
+    // across the resume.
+    buildCapabilityGuard:
+      isFileWritingTool(resolved.toolId) ||
+      shouldEnableQualityLoop(resolved.executionMode, resolved.projectId)
+        ? { maxStepsWithoutFileWrite: 3 }
+        : undefined,
     // Quality loop: resume with a fresh evidence session so the resumed
     // run is gated the same way (agent markers re-harvest from history).
     // AUTO resumes opt in too — an AUTO run pauses for deploy approval,
