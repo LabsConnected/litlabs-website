@@ -35,6 +35,7 @@ export type ProgressEvent =
   | { type: "step_timing"; step: number; stepDurationMs: number; elapsedMs: number }
   | { type: "model_response"; provider: string; model: string; finishReason: string; contentType: string; contentLength: number; messageKeys: string[]; toolCalls: Array<{ name: string; idPresent: boolean; argumentsJsonValid: boolean; argumentKeys: string[]; argumentLength: number }> }
   | { type: "model_failed"; model: string; category: string; message: string }
+  | { type: "route_plan"; routes: Array<{ provider: string; models: string[] }>; excluded: Array<{ provider: string; reason: string }> }
   | { type: "reasoning"; summary: string }
   | { type: "status"; summary: string }
   | { type: "quality_verdict"; passed: boolean; missing: string[]; reason: string; designPasses: number };

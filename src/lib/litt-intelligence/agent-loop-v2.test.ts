@@ -2564,3 +2564,81 @@ describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incide
     expect(transport.applyPatch).toHaveBeenCalledTimes(8);
   });
 });
+
+describe("runAgentLoopV2 — route plan recording (route honesty)", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("records the run-start route plan exactly once across a multi-step run", async () => {
+    const planSummary = {
+      routes: [
+        { provider: "gemini", models: ["gemini-2.5-flash"], costClass: "free" },
+        { provider: "groq", models: ["openai/gpt-oss-120b"], costClass: "free" },
+      ],
+      excluded: [
+        {
+          provider: "groq",
+          reason: "request_exceeds_route_token_ceiling:openai/gpt-oss-120b",
+        },
+        { provider: "cloudflare", reason: "credential_missing" },
+      ],
+      estimatedRequestTokens: 9_100,
+    };
+    let call = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async (...args: unknown[]) => {
+      const options = args[3] as
+        | { onRoutePlan?: (summary: typeof planSummary) => void }
+        | undefined;
+      // The real router reports the plan on EVERY call; the loop must
+      // record only the run-start one.
+      options?.onRoutePlan?.(planSummary);
+      call++;
+      if (call === 1) {
+        return {
+          text: "",
+          toolCalls: [
+            {
+              toolCallId: "tc-rp1",
+              toolId: "files.write",
+              inputs: {
+                projectId: "p-test",
+                path: "index.html",
+                content: "<html><title>[PERSON_NAME] — Coffee</title></html>",
+              },
+            },
+          ],
+          finishReason: "tool_calls",
+          model: "test-model",
+        };
+      }
+      return {
+        text: "Done.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      };
+    });
+
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+    const planEvents = result.events.filter((e) => e.type === "route_plan");
+    expect(planEvents).toHaveLength(1);
+    const planEvent = planEvents[0] as Extract<ProgressEvent, { type: "route_plan" }>;
+    expect(planEvent.routes).toEqual([
+      { provider: "gemini", models: ["gemini-2.5-flash"] },
+      { provider: "groq", models: ["openai/gpt-oss-120b"] },
+    ]);
+    expect(planEvent.excluded).toEqual(planSummary.excluded);
+  });
+});

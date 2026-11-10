@@ -733,7 +733,9 @@ export function useCanonicalConversation({
           s.setMessages(conversation.id, optimisticMessages);
         }
       }
-      s.setConversations([conversation, ...s.conversations]);
+      // The server may return an existing empty conversation for a bare
+      // "New Chat" (empty-conversation reuse) — never list it twice.
+      s.setConversations([conversation, ...s.conversations.filter((c) => c.id !== conversation.id)]);
       s.selectConversation(conversation.id);
       if (!options?.optimisticConversationId) {
         s.setMessages(conversation.id, []);

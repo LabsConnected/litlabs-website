@@ -2,7 +2,7 @@ import "server-only";
 
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getProject } from "@/lib/projects/project-repository";
-import { createConversation, getConversation } from "./conversation-service";
+import { createConversation, findReusableEmptyConversation, getConversation } from "./conversation-service";
 import { dedupeTasksByConversation } from "./task-types";
 import type {
   CreateStudioTaskInput,
@@ -174,9 +174,32 @@ export async function createStudioTask(userId: string, input: CreateStudioTaskIn
       .maybeSingle();
     if (existing) return mapTask(existing as TaskRow);
   } else {
-    const conversation = await createConversation(userId, input.projectId, input.title ?? null, "litt");
-    if (!conversation) return null;
-    conversationId = conversation.id;
+    // Empty-conversation hygiene: a fresh worktab reuses an existing
+    // empty, untitled conversation in this project instead of minting
+    // another one on every click. If an open task already owns that
+    // conversation, return it (same idempotent shape as adoption
+    // above); otherwise bind the new task to the reused conversation.
+    const reusable = await findReusableEmptyConversation(userId, input.projectId, {
+      activeAgentSlug: "litt",
+    });
+    if (reusable) {
+      const { data: existingTask } = await admin()
+        .from("studio_tasks")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("project_id", input.projectId)
+        .eq("conversation_id", reusable.id)
+        .is("archived_at", null)
+        .order("last_opened_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      if (existingTask) return mapTask(existingTask as TaskRow);
+      conversationId = reusable.id;
+    } else {
+      const conversation = await createConversation(userId, input.projectId, input.title ?? null, "litt");
+      if (!conversation) return null;
+      conversationId = conversation.id;
+    }
   }
 
   const { data, error } = await admin()

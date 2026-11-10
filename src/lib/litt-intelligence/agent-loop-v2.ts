@@ -22,7 +22,7 @@ import { calculateLlmCost } from "@/lib/llm-cost-engine";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
-import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallRequest, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
+import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallRequest, type ToolCallResult, type LLMMessage, type RoutePlanSummary } from "./llm-tool-calling";
 // Re-exported so launch-flow can seed a continued loop's messages.
 export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
@@ -1645,6 +1645,32 @@ function attachEventPersistence(
   });
 }
 
+/**
+ * Route honesty — record the run-start route plan. The router reports
+ * the plan of EVERY LLM call through onRoutePlan; a run re-plans per
+ * step as health and context change, but the post-mortem anchor is the
+ * FIRST plan — the one that decided whether the run had any live route
+ * at all (2026-11-09 Sudsy run: a hollow chain was invisible because
+ * the plan was only ever logged when it was completely empty). Emits
+ * exactly one route_plan progress event per run; the event persists
+ * into the run's action_events record via persistEvent, alongside the
+ * run's steps.
+ */
+function makeRoutePlanRecorder(
+  progress: ProgressEmitter,
+): (summary: RoutePlanSummary) => void {
+  let recorded = false;
+  return (summary) => {
+    if (recorded) return;
+    recorded = true;
+    progress.emit({
+      type: "route_plan",
+      routes: summary.routes.map((r) => ({ provider: r.provider, models: r.models })),
+      excluded: summary.excluded,
+    });
+  };
+}
+
 // ─── Canonical metering (P0) ─────────────────────────────────────
 //
 // Every LLM call the loop makes is one metered provider attempt: one
@@ -2003,6 +2029,10 @@ async function runAgentLoopV2Inner(
   // Check if any mutations have been requested (for checkpoint logic)
   let mutationBatchPending = false;
 
+  // Route honesty: the first LLM call's route plan is persisted into
+  // this run's record (see makeRoutePlanRecorder).
+  const recordRoutePlan = makeRoutePlanRecorder(localProgress);
+
   while (stepsUsed < cfg.maxSteps) {
     // Check runtime limit
     const elapsed = Date.now() - startTime;
@@ -2043,6 +2073,7 @@ async function runAgentLoopV2Inner(
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
+          onRoutePlan: recordRoutePlan,
         },
       );
       const llmDurationMs = Date.now() - llmStartTime;
@@ -3975,6 +4006,10 @@ async function resumeAgentLoopV2Inner(
     resumeZeroWriteSteps = 0;
   }
 
+  // Route honesty: record the resumed run's first route plan too —
+  // a resume is a fresh observability record for the continuation.
+  const recordRoutePlan = makeRoutePlanRecorder(localProgress);
+
   // Continue the loop
   while (stepsUsed < cfg.maxSteps && !cancelled && !failedHonestly) {
     const elapsed = Date.now() - startTime;
@@ -4007,6 +4042,7 @@ async function resumeAgentLoopV2Inner(
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
+          onRoutePlan: recordRoutePlan,
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {
