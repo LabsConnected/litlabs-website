@@ -67,7 +67,9 @@ export function EggHuntProvider({ children }: { children: ReactNode }) {
   const [leaves, setLeaves] = useState<Leaf[]>([]);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foundRef = useRef(found);
-  foundRef.current = found;
+  useEffect(() => {
+    foundRef.current = found;
+  }, [found]);
 
   const burstLeaves = useCallback((count: number) => {
     if (prefersReducedMotion()) return;

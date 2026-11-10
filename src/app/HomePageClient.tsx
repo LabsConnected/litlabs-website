@@ -330,7 +330,7 @@ function CreationsSection() {
                 Bring an idea. <span className="litt-gradient-text">Leave with a working site.</span>
               </h3>
               <p className="mt-2 text-sm leading-6 text-[#63745F]">
-                You don't need a plan, a designer, or a free weekend. You need one sentence about what you're making — each card below starts with a real first prompt.
+                You don&apos;t need a plan, a designer, or a free weekend. You need one sentence about what you&apos;re making — each card below starts with a real first prompt.
               </p>
             </div>
             <div className="mt-8"><RealCreations /></div>
