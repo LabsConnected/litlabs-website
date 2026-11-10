@@ -16,6 +16,31 @@ import type { ChatMessage } from "../stores/useStudioAgentStore";
 
 export type RunOutcome = "failed" | "completed";
 
+/**
+ * Minimal settled-message shape shared by the UI transcript messages
+ * (useStudioAgentStore) and the canonical store messages
+ * (useConversationStore) — the scan below only ever reads these fields,
+ * so both message families feed the ONE derivation.
+ */
+type SettledMessageLike = {
+  role: string;
+  status?: string | null;
+  content?: string | null;
+};
+
+/** The latest settled run in one message list, with its raw content. */
+function scanLatestSettled(
+  messages: readonly SettledMessageLike[],
+): { outcome: RunOutcome; content: string } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role === "user") continue;
+    if (message.status === "failed") return { outcome: "failed", content: message.content ?? "" };
+    if (message.status === "completed") return { outcome: "completed", content: message.content ?? "" };
+  }
+  return null;
+}
+
 export type ToolActivityRecord = {
   toolId: string;
   success?: boolean;
@@ -31,11 +56,54 @@ export type ToolActivityRecord = {
 export function latestRunOutcome(
   messages: readonly ChatMessage[],
 ): RunOutcome | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message.role === "user") continue;
-    if (message.status === "failed") return "failed";
-    if (message.status === "completed") return "completed";
+  return scanLatestSettled(messages)?.outcome ?? null;
+}
+
+export interface ProjectRunTruth {
+  outcome: RunOutcome;
+  /** Why the run failed — the failed message's own words, bounded. Null
+   *  for a completed run or a failure that carried no explanation. */
+  failureNote: string | null;
+}
+
+const FAILURE_NOTE_MAX = 220;
+
+function toFailureNote(content: string): string | null {
+  const collapsed = content.replace(/\s+/g, " ").trim();
+  if (!collapsed) return null;
+  return collapsed.length > FAILURE_NOTE_MAX
+    ? `${collapsed.slice(0, FAILURE_NOTE_MAX)}…`
+    : collapsed;
+}
+
+/**
+ * The PROJECT's last run truth, across its conversations.
+ *
+ * Wave-3 Finding 3 (Larry's screenshot, 2026-11-10): the header derived
+ * run outcome from the OPEN conversation only, so a fresh conversation
+ * in a project whose only build had failed headlined a green "Ready".
+ * The project header must reflect the project's last run when the open
+ * conversation has none of its own.
+ *
+ * `messageSets` are given in recency order — the open conversation
+ * first, then the project's other conversations (the list is already
+ * updated_at-desc). The first set with a settled run IS the project's
+ * last run; every set is judged by the same scanLatestSettled
+ * derivation as latestRunOutcome, so surfaces can never disagree.
+ * Sets whose messages are not loaded yet are skipped — callers load
+ * them (bounded) and re-derive.
+ */
+export function projectLastRun(
+  messageSets: readonly (readonly SettledMessageLike[] | undefined)[],
+): ProjectRunTruth | null {
+  for (const messages of messageSets) {
+    if (!messages) continue;
+    const settled = scanLatestSettled(messages);
+    if (!settled) continue;
+    return {
+      outcome: settled.outcome,
+      failureNote: settled.outcome === "failed" ? toFailureNote(settled.content) : null,
+    };
   }
   return null;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { latestRunOutcome, latestRunActivity } from "./last-run-outcome";
+import { latestRunOutcome, latestRunActivity, projectLastRun } from "./last-run-outcome";
 import type { ChatMessage } from "../stores/useStudioAgentStore";
 
 function msg(overrides: Partial<ChatMessage>): ChatMessage {
@@ -70,5 +70,60 @@ describe("latestRunActivity", () => {
     ]);
     expect(result!.records).toEqual(newer);
     expect(result!.outcome).toBe("failed");
+  });
+});
+
+describe("projectLastRun — project-level fallback across conversations", () => {
+  it("returns null when no conversation has a settled run", () => {
+    expect(projectLastRun([[], undefined, [msg({ role: "user" })]])).toBeNull();
+  });
+
+  it("the current conversation's own outcome wins over other conversations", () => {
+    const result = projectLastRun([
+      [msg({ status: "completed" })],
+      [msg({ status: "failed", content: "older failure" })],
+    ]);
+    expect(result).toEqual({ outcome: "completed", failureNote: null });
+  });
+
+  it("falls back to the project's last run when the open conversation is fresh", () => {
+    // Larry's case: SUDSY's only build failed in another conversation;
+    // the open conversation is new/empty. Project truth must say failed.
+    const result = projectLastRun([
+      [],
+      [msg({ role: "user" }), msg({ status: "failed", content: "All routes were unavailable." })],
+    ]);
+    expect(result).toEqual({ outcome: "failed", failureNote: "All routes were unavailable." });
+  });
+
+  it("skips unsettled (streaming) runs while looking for the project's last run", () => {
+    const result = projectLastRun([
+      [msg({ status: "streaming" })],
+      [msg({ status: "completed" })],
+    ]);
+    expect(result).toEqual({ outcome: "completed", failureNote: null });
+  });
+
+  it("a later completed run in a more recent conversation supersedes an older failure", () => {
+    const result = projectLastRun([
+      [],
+      [msg({ status: "completed" })],
+      [msg({ status: "failed", content: "old failure" })],
+    ]);
+    expect(result).toEqual({ outcome: "completed", failureNote: null });
+  });
+
+  it("failureNote is whitespace-collapsed and bounded", () => {
+    const long = `Failed.\n\n${"x".repeat(400)}`;
+    const result = projectLastRun([[msg({ status: "failed", content: long })]]);
+    expect(result?.outcome).toBe("failed");
+    expect(result?.failureNote).not.toContain("\n");
+    expect(result!.failureNote!.length).toBeLessThanOrEqual(240);
+    expect(result?.failureNote).toContain("Failed.");
+  });
+
+  it("failureNote is null when the failed message carries no explanation", () => {
+    const result = projectLastRun([[msg({ status: "failed", content: "   " })]]);
+    expect(result).toEqual({ outcome: "failed", failureNote: null });
   });
 });

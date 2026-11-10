@@ -235,6 +235,7 @@ export default function StudioPreviewPanel({
   versionControl = "none",
   refreshKey = 0,
   startGraceMs = STUCK_NOT_STARTED_MS,
+  lastRunFailureNote = null,
   onSelectionChange,
   lockSelection = false,
   inspectorTool = "select",
@@ -256,6 +257,12 @@ export default function StudioPreviewPanel({
   refreshKey?: number;
   /** How long a not_started preview may sit idle before it fails visibly. Overridable for tests. */
   startGraceMs?: number;
+  /**
+   * Why the project's last build run failed (the failed message's own
+   * words), when it did. Lets the starter-template state say the build
+   * failed — and why — instead of presenting the scaffold as a site.
+   */
+  lastRunFailureNote?: string | null;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
   /** Canvas mode: selection stays on regardless of the toolbar toggle. */
   lockSelection?: boolean;
@@ -306,6 +313,12 @@ export default function StudioPreviewPanel({
   // Content truth gates auto-start. Starts as "unknown" (blocking) so the
   // very first render can never auto-start on an unresolved truth.
   const [workspaceTruth, setWorkspaceTruth] = useState<WorkspaceTruth>("unknown");
+  // Raw workspace-state content facts (same lookup as workspaceTruth):
+  // `starterContent` = the entry page is still the seeded welcome
+  // scaffold; `touched` = real activity beyond the seed commit. Null
+  // until the lookup resolves — starter labeling waits for the truth
+  // rather than guessing.
+  const [workspaceContent, setWorkspaceContent] = useState<{ touched: boolean; starterContent: boolean } | null>(null);
   // Project secrets editor (Clerk keys for the preview runtime). Toggled
   // from the toolbar; auto-opened from the auth-config error CTA.
   const [secretsOpen, setSecretsOpen] = useState(false);
@@ -406,6 +419,17 @@ export default function StudioPreviewPanel({
     }
 
     if (!documentInFrame) {
+      // Static previews can NEVER answer the bridge handshake: the frame
+      // is sandboxed to an opaque origin (no allow-same-origin — that
+      // sandbox is the security boundary for user content, see
+      // PREVIEW_SECURITY_HEADERS in the /api/preview route) and the
+      // static route injects no inspector. Say so immediately and
+      // precisely instead of timing out a doomed handshake and reporting
+      // a generic failure that reads as transient (wave-3 Finding 5).
+      if (framework === "static") {
+        setSelectionError("Element selection isn't available for static previews — it works on live dev-server previews.");
+        return;
+      }
       // Cross-origin preview (the normal case — previews are served by the
       // terminal-server host). Try the injected inspector bridge; if the
       // frame is not instrumented the bridge never answers and we report
@@ -520,7 +544,7 @@ export default function StudioPreviewPanel({
     };
     documentInFrame.addEventListener("click", handleClick, true);
     selectionCleanupRef.current = () => documentInFrame.removeEventListener("click", handleClick, true);
-  }, [clearSelection, onSelectionChange, effectiveSelectionMode, previewUrl, pushInspectorState]);
+  }, [clearSelection, onSelectionChange, effectiveSelectionMode, previewUrl, pushInspectorState, framework]);
 
   const handleIframeLoad = useCallback(() => {
     setIframeFailed(false);
@@ -615,10 +639,12 @@ export default function StudioPreviewPanel({
   useEffect(() => {
     if (!projectId) {
       setWorkspaceTruth("no_content");
+      setWorkspaceContent(null);
       return;
     }
     let cancelled = false;
     setWorkspaceTruth("unknown");
+    setWorkspaceContent(null);
     (async () => {
       try {
         const res = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace-state`, {
@@ -632,7 +658,7 @@ export default function StudioPreviewPanel({
           setWorkspaceTruth("no_content");
           return;
         }
-        const payload = await res.json().catch(() => null) as { scaffolded?: unknown; touched?: unknown } | null;
+        const payload = await res.json().catch(() => null) as { scaffolded?: unknown; touched?: unknown; starterContent?: unknown } | null;
         if (cancelled || !payload) {
           setWorkspaceTruth("no_content");
           return;
@@ -641,6 +667,10 @@ export default function StudioPreviewPanel({
         // scaffold manifest both mean real content exists.
         const hasContent = payload.touched === true || payload.scaffolded === false;
         setWorkspaceTruth(hasContent ? "has_content" : "no_content");
+        setWorkspaceContent({
+          touched: payload.touched === true,
+          starterContent: payload.starterContent === true,
+        });
       } catch {
         if (!cancelled) setWorkspaceTruth("no_content");
       }
@@ -1095,6 +1125,30 @@ export default function StudioPreviewPanel({
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
 
+  // Starter-template truth (wave-3 Finding 4 — Larry's screenshot
+  // 2026-11-10: a failed-build project rendered its seeded welcome
+  // scaffold under a green "Preview ready"). When the entry page is
+  // still the starter scaffold, the frame may still render (the welcome
+  // screen's starter prompts are a real onboarding surface) but it must
+  // be LABELED as the starter template everywhere — header, footer, and
+  // a notice strip — never as the project's built site.
+  const entryIsStarter = workspaceContent?.starterContent === true;
+  const starterTouched = entryIsStarter && workspaceContent?.touched === true;
+  const showStarterNotice = isLive && entryIsStarter;
+  const starterDetail = lastRunFailureNote
+    ? `The last build failed — ${lastRunFailureNote} Nothing has been built yet, so the preview still shows the starter template.`
+    : starterTouched
+      ? "This project's entry page is still the starter template — edits so far haven't replaced it. It is not a built site yet."
+      : "Nothing has been built in this project yet — the preview is showing the starter template. Build something and the real preview will replace it.";
+  const starterStripText = lastRunFailureNote
+    ? `Starter template — the last build failed: ${lastRunFailureNote}`
+    : starterTouched
+      ? "Starter template — the entry page hasn't been replaced by a build yet."
+      : "Starter template — nothing has been built in this project yet.";
+  const displayLabel = showStarterNotice ? "Starter template — not built yet" : label;
+  const displayDetail = showStarterNotice ? starterDetail : detail;
+  const displayDotColor = showStarterNotice ? STATUS_DOT_COLOR.not_started : dotColor;
+
   // Verify the preview address answers before calling it ready. Iframes do
   // not raise onError for HTTP 404/5xx, so the probe is what catches a
   // runtime that reports ready while serving nothing.
@@ -1184,10 +1238,10 @@ export default function StudioPreviewPanel({
         <div
           className="h-2 w-2 shrink-0 rounded-full"
           style={{
-            backgroundColor: dotColor,
-            boxShadow: isLive ? `0 0 6px ${dotColor}80` : "none",
+            backgroundColor: displayDotColor,
+            boxShadow: isLive ? `0 0 6px ${displayDotColor}80` : "none",
           }}
-          aria-label={`Runtime status: ${label}`}
+          aria-label={`Runtime status: ${displayLabel}`}
           data-testid="preview-status-dot"
         />
         <div className="min-w-[96px] flex-1">
@@ -1433,6 +1487,16 @@ export default function StudioPreviewPanel({
 
       {/* Preview surface */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
+        {showStarterNotice && (
+          <div
+            className="shrink-0 border-b px-3 py-1.5 text-[10px] font-bold"
+            style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)", color: "var(--text-secondary)" }}
+            role="status"
+            data-testid="preview-starter-notice"
+          >
+            {starterStripText}
+          </div>
+        )}
         {isLive && displayUrl && !frameFailed ? (
           <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-2">
             <iframe
@@ -1480,8 +1544,8 @@ export default function StudioPreviewPanel({
               )}
             </div>
             <div>
-              <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{label}</div>
-              <div className="mx-auto mt-1.5 max-w-[280px] text-xs leading-5" style={{ color: "var(--text-muted)" }}>{detail}</div>
+              <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{displayLabel}</div>
+              <div className="mx-auto mt-1.5 max-w-[280px] text-xs leading-5" style={{ color: "var(--text-muted)" }}>{displayDetail}</div>
             </div>
             {/* Staged loading — show honest progress while the preview starts. */}
             {(state === "starting" || state === "restarting") && startPhase && (
@@ -1560,12 +1624,12 @@ export default function StudioPreviewPanel({
         <div className="flex shrink-0 items-center gap-1.5 border-t px-2 py-1" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
           <span
             className="h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: dotColor }}
+            style={{ backgroundColor: displayDotColor }}
             aria-hidden
           />
           <span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: state === "stale" ? "#e3b341" : "var(--text-muted)" }}>
             {deviceMode !== "desktop" ? `${DEVICE_DIMENSIONS[deviceMode].label} · ` : ""}
-            {label}
+            {displayLabel}
             {devCommand && <span style={{ color: "var(--text-muted)", opacity: 0.7 }}> · {devCommand}</span>}
           </span>
           {logs.length > 0 && (
