@@ -18,10 +18,10 @@ interface StageDef { id: DemoStage; label: string; icon: typeof Send; accent: st
 
 const STAGES: StageDef[] = [
   { id: "mission", label: "Mission", icon: Sparkles, accent: brand.primary.DEFAULT, description: "LiTT turns your prompt into a structured mission with a clear goal." },
-  { id: "plan", label: "Plan", icon: CircleDot, accent: "#65f4ff", description: "A step-by-step execution plan appears before any work begins." },
-  { id: "build", label: "Build", icon: FileCode, accent: "#65f4ff", description: "Files, code, and assets are created in your project workspace." },
-  { id: "preview", label: "Preview", icon: Play, accent: "#b58cff", description: "See the result as it's being built." },
-  { id: "approval", label: "Approval", icon: Check, accent: "#b58cff", description: "Sensitive actions require your explicit approval before proceeding." },
+  { id: "plan", label: "Plan", icon: CircleDot, accent: "#8FD14F", description: "A step-by-step execution plan appears before any work begins." },
+  { id: "build", label: "Build", icon: FileCode, accent: "#8FD14F", description: "Files, code, and assets are created in your project workspace." },
+  { id: "preview", label: "Preview", icon: Play, accent: "#E8A317", description: "See the result as it's being built." },
+  { id: "approval", label: "Approval", icon: Check, accent: "#8FD14F", description: "Sensitive actions require your explicit approval before proceeding." },
   { id: "launch", label: "Launch", icon: Rocket, accent: brand.primary.DEFAULT, description: "Prepare the finished project for deployment when you're ready." },
 ];
 
@@ -61,8 +61,8 @@ export function InteractiveProductDemo() {
   return (
     <div className="w-full">
       {/* Honesty label — this walkthrough is a demo, not a live mission. */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/30">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-full bg-[#0B120D] px-4 py-2.5">
+        <span className="text-[10px] font-black uppercase tracking-[0.18em] text-[#EAF3E8]/60">
           Interactive product demonstration
         </span>
         <span className="text-[10px] font-bold text-white/20">Demo</span>
@@ -99,20 +99,20 @@ export function InteractiveProductDemo() {
         })}
       </div>
 
-      <div id="demo-stage-panel" role="tabpanel" aria-labelledby={`demo-tab-${active}`} aria-live="polite" className="overflow-hidden rounded-2xl border border-white/12 bg-[#0a0d14] shadow-[0_30px_80px_rgba(0,0,0,.5)]">
-        <div className="flex items-center gap-2 border-b border-white/8 bg-[#0d1018] px-4 py-3">
+      <div id="demo-stage-panel" role="tabpanel" aria-labelledby={`demo-tab-${active}`} aria-live="polite" className="overflow-hidden rounded-2xl border border-white/12 bg-[#0B120D] shadow-[0_30px_80px_rgba(0,0,0,.5)]">
+        <div className="flex items-center gap-2 border-b border-white/8 bg-[#131C14] px-4 py-3">
           <span className="h-3 w-3 rounded-full bg-red-400/60" /><span className="h-3 w-3 rounded-full bg-amber-400/60" /><span className="h-3 w-3 rounded-full bg-green-400/60" />
           <div className="ml-3 flex items-center gap-2 text-xs font-bold text-white/40"><span className="grid h-5 w-5 place-items-center rounded bg-accent/15 text-[10px] text-accent">L</span>LiTTree Studio &mdash;{" "}{current.label}</div>
           <div className="ml-auto flex items-center gap-1.5 text-[10px] font-bold text-white/30"><span className="h-1.5 w-1.5 rounded-full bg-accent" />Connected</div>
         </div>
 
         <div className="flex min-h-[360px]">
-          <div className="hidden w-48 shrink-0 border-r border-white/8 bg-[#080a10] p-3 sm:block">
+          <div className="hidden w-48 shrink-0 border-r border-white/8 bg-[#0B120D] p-3 sm:block">
             <div className="mb-3 text-[10px] font-black uppercase tracking-wider text-white/30">Workspace</div>
             <div className="space-y-1">
               {[{ name: "mission.md", active: active === "mission" }, { name: "index.html", active: active === "build" || active === "preview" }, { name: "styles.css", active: active === "build" || active === "preview" }, { name: "player.js", active: active === "build" || active === "preview" }, { name: "assets/", active: active === "build" || active === "preview" }].map((file) => (
                 <div key={file.name} className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs ${file.active ? "bg-white/5 text-white/70" : "text-white/20"}`}>
-                  {file.name.endsWith("/") ? <Folder size={12} className="shrink-0 text-[#65f4ff]/50" /> : <FileCode size={12} className="shrink-0 text-white/30" />}{file.name}
+                  {file.name.endsWith("/") ? <Folder size={12} className="shrink-0 text-[#8FD14F]/60" /> : <FileCode size={12} className="shrink-0 text-white/30" />}{file.name}
                 </div>
               ))}
             </div>
@@ -120,8 +120,8 @@ export function InteractiveProductDemo() {
               <div className="mb-2 text-[10px] font-black uppercase tracking-wider text-white/30">History</div>
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2 text-[10px] text-white/30"><GitBranch size={10} className="text-accent/50" />Initial commit</div>
-                {active !== "mission" && <div className="flex items-center gap-2 text-[10px] text-white/30"><GitBranch size={10} className="text-[#65f4ff]/50" />Checkpoint 1</div>}
-                {(active === "launch" || active === "approval") && <div className="flex items-center gap-2 text-[10px] text-white/30"><GitBranch size={10} className="text-[#b58cff]/50" />Deploy checkpoint</div>}
+                {active !== "mission" && <div className="flex items-center gap-2 text-[10px] text-white/30"><GitBranch size={10} className="text-[#8FD14F]/60" />Checkpoint 1</div>}
+                {(active === "launch" || active === "approval") && <div className="flex items-center gap-2 text-[10px] text-white/30"><GitBranch size={10} className="text-[#E8A317]/70" />Deploy checkpoint</div>}
               </div>
             </div>
           </div>
@@ -169,7 +169,7 @@ function DemoStageContent({
         <div className="space-y-2">
           {["Create visual direction for After Midnight", "Write release copy and artist bio", "Organize project files (HTML, CSS, assets)", "Produce responsive preview", "Request approval before deployment", "Prepare for deployment on approval"].map((step, i) => (
             <div key={step} className="flex items-center gap-3 rounded-lg border border-white/8 bg-white/3 px-3 py-2.5">
-              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[#65f4ff]/10 text-[10px] font-black text-[#65f4ff]">{i + 1}</span>
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[#8FD14F]/12 text-[10px] font-black text-[#8FD14F]">{i + 1}</span>
               <span className="text-xs text-white/70">{step}</span><Check size={12} className="ml-auto shrink-0 text-accent" />
             </div>
           ))}
@@ -179,22 +179,22 @@ function DemoStageContent({
       return (
         <div className="space-y-2">
           <div className="rounded-lg border border-white/8 bg-black/40 p-3 font-mono text-xs leading-5 text-white/60">
-            <div className="text-[#65f4ff]">$ Creating workspace files...</div>
+            <div className="text-[#8FD14F]">$ Creating workspace files...</div>
             <div className="text-white/40">  index.html &mdash; hero, bio, release section</div><div className="text-white/40">  styles.css &mdash; responsive layout, brand colors</div><div className="text-white/40">  assets/ &mdash; cover art, social images</div>
             <div className="mt-2 flex items-center gap-1.5 text-accent"><Check size={11} /> Project files organized</div>
           </div>
-          <div className="grid grid-cols-3 gap-2">{["index.html", "styles.css", "assets/"].map((f) => (<div key={f} className="rounded-lg border border-white/8 bg-white/3 p-2.5"><FileCode size={14} className="mb-1.5 text-[#65f4ff]/60" /><div className="text-[10px] font-bold text-white/60">{f}</div></div>))}</div>
+          <div className="grid grid-cols-3 gap-2">{["index.html", "styles.css", "assets/"].map((f) => (<div key={f} className="rounded-lg border border-white/8 bg-white/3 p-2.5"><FileCode size={14} className="mb-1.5 text-[#8FD14F]/70" /><div className="text-[10px] font-bold text-white/60">{f}</div></div>))}</div>
         </div>
       );
     case "preview":
       return (
         <div className="space-y-3">
-          <div className="overflow-hidden rounded-lg border border-white/10 bg-gradient-to-b from-purple-950/30 to-black/50">
+          <div className="overflow-hidden rounded-lg border border-white/10 bg-gradient-to-b from-[#0C5A26]/35 to-black/50">
             <div className="p-5">
-              <div className="mb-4 flex items-center justify-between"><div className="text-[10px] font-black uppercase tracking-wider text-[#b58cff]">Responsive Preview</div><div className="flex gap-1"><span className="h-2 w-2 rounded-full bg-[#b58cff]/40" /><span className="h-2 w-2 rounded-full bg-white/10" /><span className="h-2 w-2 rounded-full bg-white/10" /></div></div>
-              <div className="mb-4 h-28 rounded-lg bg-gradient-to-br from-[#1a0d2e] via-[#b58cff]/20 to-transparent" />
+              <div className="mb-4 flex items-center justify-between"><div className="text-[10px] font-black uppercase tracking-wider text-[#E8A317]">Responsive Preview</div><div className="flex gap-1"><span className="h-2 w-2 rounded-full bg-[#E8A317]/50" /><span className="h-2 w-2 rounded-full bg-white/10" /><span className="h-2 w-2 rounded-full bg-white/10" /></div></div>
+              <div className="mb-4 h-28 rounded-lg bg-gradient-to-br from-[#0B120D] via-[#E8A317]/20 to-transparent" />
               <div className="mb-2 h-3 w-3/4 rounded bg-white/15" /><div className="mb-4 h-2 w-full rounded bg-white/8" />
-              <div className="flex gap-3"><div className="h-10 w-10 rounded-full bg-[#b58cff]/25" /><div className="flex-1"><div className="h-2.5 w-24 rounded bg-white/15" /><div className="mt-1.5 h-1.5 w-16 rounded bg-white/8" /><div className="mt-1.5 h-1.5 w-20 rounded bg-white/8" /></div><Play size={16} className="mt-2 text-[#b58cff]" /></div>
+              <div className="flex gap-3"><div className="h-10 w-10 rounded-full bg-[#E8A317]/25" /><div className="flex-1"><div className="h-2.5 w-24 rounded bg-white/15" /><div className="mt-1.5 h-1.5 w-16 rounded bg-white/8" /><div className="mt-1.5 h-1.5 w-20 rounded bg-white/8" /></div><Play size={16} className="mt-2 text-[#E8A317]" /></div>
             </div>
           </div>
           <div className="text-xs text-white/40">Preview updates as files change.</div>
@@ -203,11 +203,11 @@ function DemoStageContent({
     case "approval":
       return (
         <div className="space-y-3">
-          <div className="rounded-xl border border-[#b58cff]/25 bg-[#b58cff]/5 p-5">
-            <div className="mb-3 flex items-center gap-2"><Check size={16} className="text-[#b58cff]" /><span className="text-xs font-black uppercase tracking-wider text-[#b58cff]">Approval Required</span></div>
+          <div className="rounded-xl border border-[#8FD14F]/30 bg-[#8FD14F]/6 p-5">
+            <div className="mb-3 flex items-center gap-2"><Check size={16} className="text-[#8FD14F]" /><span className="text-xs font-black uppercase tracking-wider text-[#8FD14F]">Approval Required</span></div>
             <div className="mb-4 text-sm text-white/80">LiTT wants to prepare the After Midnight launch page for deployment. Approve to proceed with deployment preparation.</div>
             <div className="mb-4 rounded-lg border border-white/8 bg-black/30 p-3 text-xs text-white/50"><div className="mb-1 font-bold text-white/70">What will happen:</div><div>&bull; Build the production bundle</div><div>&bull; Prepare for deployment</div><div>&bull; Save the project in your workspace</div></div>
-            <div className="flex flex-col gap-2 sm:flex-row"><button type="button" onClick={onAdvance} className="litt-demo-approve rounded-lg bg-[#b58cff] px-5 py-2.5 text-xs font-black text-black">Approve and continue</button><button type="button" onClick={onReview} className="litt-demo-review rounded-lg border border-white/15 px-5 py-2.5 text-xs font-bold text-white/60">Review changes first</button></div>
+            <div className="flex flex-col gap-2 sm:flex-row"><button type="button" onClick={onAdvance} className="litt-demo-approve rounded-lg bg-[#8FD14F] px-5 py-2.5 text-xs font-black text-black">Approve and continue</button><button type="button" onClick={onReview} className="litt-demo-review rounded-lg border border-white/15 px-5 py-2.5 text-xs font-bold text-white/60">Review changes first</button></div>
           </div>
           <div className="text-xs text-white/40">LiTT never deploys, deletes, or performs sensitive actions without your approval.</div>
         </div>
