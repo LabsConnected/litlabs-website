@@ -1380,3 +1380,106 @@ describe("Launch Flow: entitled paid fallback (real runLaunchFlow path)", () => 
     expect(result.error).toBeTruthy();
   });
 });
+
+// ─── Tests: quality-gate failure propagates to the run status ────
+
+describe("Launch Flow: failed quality verdict is not a completed run", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("an inner quality verdict that refused success fails the run — never preview_ready", async () => {
+    // The observed defect: the inner loop emitted agent.failed while the
+    // action run still reported completed/preview_ready. A verdict that
+    // refused success must propagate through launch-flow's status.
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockImplementation(async (dir: string) => {
+        if (dir === "" || dir === ".") {
+          return { entries: [{ name: "index.html", type: "file" }] };
+        }
+        return { entries: [] };
+      }),
+      readFile: vi.fn().mockResolvedValue({ content: "<html>ok</html>", size: 16 }),
+    });
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      toolCalls: [{ toolId: "files.write", success: true, summary: "wrote", mutating: true }],
+      qualityLoop: {
+        verdict: {
+          ok: false,
+          missing: ["run", "test"],
+          reason: "Cannot declare success: required run/test evidence is missing.",
+        },
+        stages: {},
+        designPasses: 0,
+      } as AgentLoopResult["qualityLoop"],
+    }));
+    const options = makeOptions({
+      transport,
+      runAgentLoop,
+      isStaticWorkspace: true,
+      requiresExecution: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.status).toBe("failed");
+    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+});
+
+// ─── Tests: static entry normalization (public/index.html) ──────
+
+describe("Launch Flow: static entry normalization", () => {
+  it("mirrors a misplaced public/index.html to the root entry for static previews", async () => {
+    const { normalizeStaticEntryFile } = await import("@/lib/litt-intelligence/launch-flow");
+    const files = new Map([["public/index.html", "<html>Built site</html>"]]);
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockImplementation(async (dir: string) => {
+        const prefix = dir ? `${dir}/` : "";
+        const names = new Map<string, string>();
+        for (const k of files.keys()) {
+          if (dir && !k.startsWith(prefix)) continue;
+          const rest = k.slice(prefix.length);
+          const seg = rest.split("/")[0];
+          names.set(seg, rest.includes("/") ? "directory" : "file");
+        }
+        return { entries: [...names].map(([name, type]) => ({ name, type })) };
+      }),
+      readFile: vi.fn().mockImplementation(async (p: string) => {
+        const c = files.get(p);
+        if (c === undefined) throw new Error(`ENOENT ${p}`);
+        return { content: c, size: c.length };
+      }),
+      writeFile: vi.fn().mockImplementation(async (p: string, c: string) => {
+        files.set(p, c);
+        return { saved: true };
+      }),
+    });
+
+    const ok = await normalizeStaticEntryFile(transport);
+
+    expect(ok).toBe(true);
+    expect(files.get("index.html")).toBe("<html>Built site</html>");
+    expect(transport.writeFile).toHaveBeenCalledWith("index.html", "<html>Built site</html>");
+  });
+
+  it("does not touch anything when a root entry already exists", async () => {
+    const { normalizeStaticEntryFile } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [
+          { name: "index.html", type: "file" },
+          { name: "public", type: "directory" },
+        ],
+      }),
+    });
+
+    const ok = await normalizeStaticEntryFile(transport);
+
+    expect(ok).toBe(true);
+    expect(transport.writeFile).not.toHaveBeenCalled();
+  });
+});

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls, stripEnvelopeMarkup } from "./tool-call-markup";
+import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls, stripEnvelopeMarkup, stripToolCallMarkupText } from "./tool-call-markup";
 
 /**
  * The agent loop executes native structured tool calls only — a model that
@@ -459,5 +459,39 @@ describe("findToolCallMarkup — pseudo-function-call syntax", () => {
     expect(
       findToolCallMarkup("Models sometimes emit `files.write(path='x')` instead.", TOOLS),
     ).toBeNull();
+  });
+});
+
+describe("stripToolCallMarkupText — truncated JSON tool envelopes", () => {
+  // The local-Ollama defect: a small model emits files_write JSON that
+  // outlives its output budget — the `{`-span never closes, so the
+  // balanced-span stripper could not see it and the raw JSON rendered as
+  // the assistant reply.
+  const TRUNCATED =
+    'Writing the file now.\n{"name": "files_write", "arguments": {"path": "index.html", "content": "<!DOCTYPE html><html><body><h1>Ember';
+
+  it("strips an unbalanced trailing JSON tool object", () => {
+    const out = stripToolCallMarkupText(TRUNCATED);
+    expect(out).toBe("Writing the file now.");
+    expect(out).not.toContain("files_write");
+    expect(out).not.toContain("{");
+  });
+
+  it("strips a truncated JSON tool object even as the whole payload", () => {
+    const out = stripToolCallMarkupText('{"name": "files_write", "arguments": {"path": "a.html"');
+    expect(out).toBe("");
+  });
+
+  it("still strips well-formed mid-prose tool JSON alongside prose", () => {
+    const out = stripToolCallMarkupText(
+      'Sure.\n{"name": "files_write", "arguments": {"path": "a.html", "content": "x"}}\nDone.',
+    );
+    expect(out).toBe("Sure.\n\nDone.");
+  });
+
+  it("leaves ordinary prose and non-tool JSON untouched", () => {
+    const text = 'The answer is {"name": "Ember Roast", "rating": 5}.';
+    expect(stripToolCallMarkupText(text)).toBe(text);
+    expect(stripToolCallMarkupText("Ends with a brace {")).toBe("Ends with a brace {");
   });
 });

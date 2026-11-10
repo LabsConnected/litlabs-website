@@ -1251,8 +1251,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
         v2Result = launchFlowResult.agentLoopResult ?? null;
 
-        // Stream the final text
-        assistantText = launchFlowResult.finalText;
+        // Stream the final text. The adapter boundary normalizes or
+        // rejects text-format tool calls and the recovered calls execute
+        // through the canonical gateway — but a residual fragment the
+        // normalizer could not classify (e.g. a truncated JSON envelope
+        // from a small local model) must never render as the assistant
+        // reply. Strip markup at projection, the same contract the V1
+        // lane applies below.
+        assistantText = stripToolCallMarkupText(launchFlowResult.finalText);
         safeEvent({ type: "text", text: assistantText });
 
         // If V2 paused for approval, persist the paused state and flag it

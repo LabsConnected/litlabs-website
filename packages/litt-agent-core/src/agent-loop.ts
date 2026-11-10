@@ -780,6 +780,20 @@ export function stripToolCallBlocks(content: string): string {
     }
     if (!removed) break;
   }
+  // Truncated tool objects: a model that runs out of output budget
+  // mid-write leaves a `{`-span that never balances — the loop above
+  // cannot see it, so the raw fragment leaks verbatim into the chat
+  // transcript (observed on the local Ollama lane with files_write JSON).
+  // Strip a trailing unbalanced span ONLY when it still looks like a tool
+  // call; ordinary prose ending in "{" is left alone.
+  for (let idx = 0; idx < stripped.length; idx++) {
+    if (stripped[idx] !== "{") continue;
+    if (balancedJsonSpan(stripped, idx) !== null) continue;
+    const tail = stripped.slice(idx);
+    if (!spanLooksLikeToolCall(tail)) continue;
+    stripped = stripped.slice(0, idx);
+    break;
+  }
   return stripped.trim();
 }
 

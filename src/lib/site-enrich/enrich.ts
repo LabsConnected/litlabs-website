@@ -130,6 +130,11 @@ export async function enrichStaticSiteVisuals(
     await collect("", "", 0);
 
     let seed = 1;
+    // URLs already materialized this run — the provider chain skips them
+    // so two slots can never persist the same image bytes (the identical-
+    // MD5 defect: identical or colliding keyword slots all resolved to
+    // the same provider hit).
+    const usedImageUrls = new Set<string>();
     // Site-relative paths of persisted images known to be too small to
     // satisfy the real-photo floor — they are kept (real content) but do
     // not count toward MIN_REAL_PHOTOS.
@@ -164,9 +169,6 @@ export async function enrichStaticSiteVisuals(
         hashedExisting += 1;
       }
     }
-    // Source URLs already resolved this run — providers skip them so two
-    // slots never embed the same photo.
-    const usedImageUrls = new Set<string>();
     const providerAttempts: ProviderAttempt[] = [];
     // One resolve = one persisted image. A provider can pass the URL probe
     // and still fail the download (HTTP 5xx, non-image payload, oversize),
