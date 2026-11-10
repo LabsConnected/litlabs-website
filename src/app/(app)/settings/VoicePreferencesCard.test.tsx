@@ -31,28 +31,35 @@ describe("VoicePreferencesCard — persistence wiring", () => {
     expect(screen.queryByText(/Spoken response length/i)).not.toBeInTheDocument();
   });
 
-  it("auto-send starts from the stored preference and writes the real key on toggle", () => {
+  it("auto-send starts on by default (nothing stored) and writes the real key on toggle", () => {
     render(<VoicePreferencesCard />);
     const toggle = toggleFor("Auto-send");
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-
-    fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(window.localStorage.getItem("litt:voice:autoSendEnabled")).toBe("1");
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(window.localStorage.getItem("litt:voice:autoSendEnabled")).toBe("0");
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(window.localStorage.getItem("litt:voice:autoSendEnabled")).toBe("1");
   });
 
   it("remount reads back the persisted auto-send value", () => {
     const first = render(<VoicePreferencesCard />);
     fireEvent.click(toggleFor("Auto-send"));
-    expect(window.localStorage.getItem("litt:voice:autoSendEnabled")).toBe("1");
+    expect(window.localStorage.getItem("litt:voice:autoSendEnabled")).toBe("0");
     first.unmount();
 
     render(<VoicePreferencesCard />);
-    expect(toggleFor("Auto-send")).toHaveAttribute("aria-checked", "true");
+    expect(toggleFor("Auto-send")).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("honours an explicit off previously written by the Studio session", () => {
+    // A stored "0" is an explicit user choice — it beats the new default-on.
+    window.localStorage.setItem("litt:voice:autoSendEnabled", "0");
+    render(<VoicePreferencesCard />);
+    expect(toggleFor("Auto-send")).toHaveAttribute("aria-checked", "false");
   });
 
   it("honours a value previously written by the Studio session", () => {

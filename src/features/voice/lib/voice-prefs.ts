@@ -17,6 +17,8 @@
  * No React dependencies — everything here is testable in jsdom.
  */
 
+import { VOICE_GATE_CONFIG } from "./voice-gate-config";
+
 /** localStorage key for the auto-send preference (shared with VoiceSessionContext). */
 export const AUTO_SEND_STORAGE_KEY = "litt:voice:autoSendEnabled";
 
@@ -44,11 +46,12 @@ function safeSet(key: string, value: string): void {
 
 /**
  * Read the auto-send preference exactly as VoiceSessionContext does:
- * only the literal "1" means enabled. Default is disabled, matching
- * VOICE_GATE_CONFIG.ptt.autoSendDefault (false) when nothing is stored.
+ * a stored value always wins ("1" = on, "0" = off); when nothing is
+ * stored, the default is VOICE_GATE_CONFIG.ptt.autoSendDefault (true).
  */
 export function readAutoSendEnabled(): boolean {
-  return safeGet(AUTO_SEND_STORAGE_KEY) === "1";
+  const stored = safeGet(AUTO_SEND_STORAGE_KEY);
+  return stored === null ? VOICE_GATE_CONFIG.ptt.autoSendDefault : stored === "1";
 }
 
 /** Persist the auto-send preference in the session context's format. */

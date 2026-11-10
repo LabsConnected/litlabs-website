@@ -23,8 +23,8 @@ describe("voice-prefs — shared keys with VoiceSessionContext", () => {
     expect(TTS_ENABLED_STORAGE_KEY).toBe("litt:voice:ttsEnabled");
   });
 
-  it("auto-send defaults to disabled when nothing is stored", () => {
-    expect(readAutoSendEnabled()).toBe(false);
+  it("auto-send defaults to enabled when nothing is stored", () => {
+    expect(readAutoSendEnabled()).toBe(true);
   });
 
   it("writeAutoSendEnabled stores the session context's '1'/'0' format", () => {
