@@ -22,6 +22,7 @@ import type { RuntimeClient, LifecycleEvent } from "../lib/runtime-client.js";
 import type { RuntimeState } from "@litt/agent-core";
 import type { CockpitStore, ActivityEntry, HoloState } from "./cockpit-store.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
+import type { WorkstreamStore } from "./workstream-store.js";
 import { toolKind, toolPhase, humanizeToolLabel } from "./workstream-normalizer.js";
 
 let entryCounter = 0;
@@ -200,6 +201,124 @@ function holoFromEvent(event: LifecycleEvent): HoloState | null {
              (event.data.status as string) === "cancelled" ? "CANCELLED" :
              (event.data.status as string) === "timeout" ? "TIMEOUT" : "FAILED";
     default: return null;
+  }
+}
+
+/**
+ * Project one lifecycle event onto the live workstream store — the
+ * operator-facing "watch LiTT work" feed. Extracted from useEventBridge
+ * so the mapping is unit-testable without a React renderer.
+ *
+ * Terminal truth: local turns never emit run.completed (that event is
+ * remote-runtime only), so mission.completed/mission.failed — and the
+ * controller's direct workstreamPush for chat turns — are what move
+ * overallStatus out of "running". Without them the dock's status stays
+ * "running" forever after the turn actually ended.
+ */
+export function projectLifecycleToWorkstream(
+  event: LifecycleEvent,
+  ws: WorkstreamStore,
+): void {
+  switch (event.type) {
+    case "run.started": {
+      const cmd = String(event.data.command ?? "task");
+      ws.setObjective(cmd);
+      ws.setWorkstreamPhase("understanding");
+      ws.addReason(`Working on ${cmd}`);
+      break;
+    }
+    case "tool.started": {
+      const toolName = String(event.data.tool ?? event.data.label ?? event.data.command ?? "tool");
+      const kind = toolKind(toolName);
+      const phase = toolPhase(toolName);
+      const label = humanizeToolLabel(toolName, event.data as Record<string, unknown>);
+      ws.setWorkstreamPhase(phase);
+      const wsId = ws.begin(kind, null, label, label);
+      if (event.toolCallId) toolWsIds.set(event.toolCallId, wsId);
+      break;
+    }
+    case "tool.completed": {
+      const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
+      if (wsId) {
+        ws.complete(wsId, {
+          elapsedMs: event.data.durationMs as number | undefined,
+          success: (event.data.success as boolean) ?? true,
+          command: event.data.command as string | undefined,
+        });
+      }
+      if (event.toolCallId) toolWsIds.delete(event.toolCallId);
+      break;
+    }
+    case "tool.failed": {
+      const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
+      if (wsId) ws.fail(wsId, String(event.data.error ?? "error"));
+      if (event.toolCallId) toolWsIds.delete(event.toolCallId);
+      break;
+    }
+    case "tool.cancelled": {
+      const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
+      if (wsId) ws.fail(wsId, "Cancelled");
+      if (event.toolCallId) toolWsIds.delete(event.toolCallId);
+      break;
+    }
+    case "tool.timeout": {
+      const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
+      if (wsId) ws.fail(wsId, `Timed out after ${String(event.data.timeoutMs ?? 0)}ms`);
+      if (event.toolCallId) toolWsIds.delete(event.toolCallId);
+      break;
+    }
+    case "run.completed": {
+      const status = (event.data.status as string) ?? "unknown";
+      const dur = event.data.durationMs as number | undefined;
+      if (status === "success") {
+        ws.addVerify(`Run complete`, true, dur);
+        ws.setComplete();
+      } else {
+        const id = ws.begin("failure", "FAILED", `Run ${status}`);
+        ws.fail(id, String(event.data.error ?? status));
+        ws.setFailed();
+      }
+      break;
+    }
+    case "mission.step_started": {
+      // Identity-based upsert: the same stepId may arrive multiple
+      // times (mission:step_started, mission:step_working,
+      // mission:step_verifying all map to this event type, and the
+      // dual sessionBridge + client subscription can redeliver).
+      // beginSource is a no-op if an activity with this sourceId
+      // already exists — one logical step = one workstream row.
+      const stepId = (event.data.stepId as string) ?? "";
+      const title = missionStepText(event.data);
+      ws.beginSource("reason", "WORKING", title, undefined, stepId || undefined);
+      break;
+    }
+    case "mission.step_passed": {
+      // Complete the existing step activity (don't create a new
+      // "verify" row). This is the same logical operation — the
+      // step transitioned from running to passed.
+      const stepId = (event.data.stepId as string) ?? "";
+      const title = missionStepText(event.data);
+      ws.completeSource(stepId, { success: true, label: title });
+      break;
+    }
+    case "mission.step_failed": {
+      // Fail the existing step activity (don't create a new
+      // "failure" row). Same logical operation — the step failed.
+      const stepId = (event.data.stepId as string) ?? "";
+      const title = missionStepText(event.data);
+      ws.failSource(stepId, "Step failed", title);
+      break;
+    }
+    case "mission.completed": {
+      ws.setComplete();
+      break;
+    }
+    case "mission.failed": {
+      ws.setFailed();
+      break;
+    }
+    default:
+      break;
   }
 }
 
@@ -469,99 +588,7 @@ export function useEventBridge(
     // The normalization layer (workstream-normalizer.ts) maps raw tool
     // names to semantic kinds + human-readable labels.
     store.actions.workstreamPush((ws) => {
-      switch (event.type) {
-        case "run.started": {
-          const cmd = String(event.data.command ?? "task");
-          ws.setObjective(cmd);
-          ws.setWorkstreamPhase("understanding");
-          ws.addReason(`Working on ${cmd}`);
-          break;
-        }
-        case "tool.started": {
-          const toolName = String(event.data.tool ?? event.data.label ?? event.data.command ?? "tool");
-          const kind = toolKind(toolName);
-          const phase = toolPhase(toolName);
-          const label = humanizeToolLabel(toolName, event.data as Record<string, unknown>);
-          ws.setWorkstreamPhase(phase);
-          const wsId = ws.begin(kind, null, label, label);
-          if (event.toolCallId) toolWsIds.set(event.toolCallId, wsId);
-          break;
-        }
-        case "tool.completed": {
-          const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
-          if (wsId) {
-            ws.complete(wsId, {
-              elapsedMs: event.data.durationMs as number | undefined,
-              success: (event.data.success as boolean) ?? true,
-              command: event.data.command as string | undefined,
-            });
-          }
-          if (event.toolCallId) toolWsIds.delete(event.toolCallId);
-          break;
-        }
-        case "tool.failed": {
-          const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
-          if (wsId) ws.fail(wsId, String(event.data.error ?? "error"));
-          if (event.toolCallId) toolWsIds.delete(event.toolCallId);
-          break;
-        }
-        case "tool.cancelled": {
-          const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
-          if (wsId) ws.fail(wsId, "Cancelled");
-          if (event.toolCallId) toolWsIds.delete(event.toolCallId);
-          break;
-        }
-        case "tool.timeout": {
-          const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
-          if (wsId) ws.fail(wsId, `Timed out after ${String(event.data.timeoutMs ?? 0)}ms`);
-          if (event.toolCallId) toolWsIds.delete(event.toolCallId);
-          break;
-        }
-        case "run.completed": {
-          const status = (event.data.status as string) ?? "unknown";
-          const dur = event.data.durationMs as number | undefined;
-          if (status === "success") {
-            ws.addVerify(`Run complete`, true, dur);
-            ws.setComplete();
-          } else {
-            const id = ws.begin("failure", "FAILED", `Run ${status}`);
-            ws.fail(id, String(event.data.error ?? status));
-            ws.setFailed();
-          }
-          break;
-        }
-        case "mission.step_started": {
-          // Identity-based upsert: the same stepId may arrive multiple
-          // times (mission:step_started, mission:step_working,
-          // mission:step_verifying all map to this event type, and the
-          // dual sessionBridge + client subscription can redeliver).
-          // beginSource is a no-op if an activity with this sourceId
-          // already exists — one logical step = one workstream row.
-          const stepId = (event.data.stepId as string) ?? "";
-          const title = missionStepText(event.data);
-          ws.beginSource("reason", "WORKING", title, undefined, stepId || undefined);
-          break;
-        }
-        case "mission.step_passed": {
-          // Complete the existing step activity (don't create a new
-          // "verify" row). This is the same logical operation — the
-          // step transitioned from running to passed.
-          const stepId = (event.data.stepId as string) ?? "";
-          const title = missionStepText(event.data);
-          ws.completeSource(stepId, { success: true, label: title });
-          break;
-        }
-        case "mission.step_failed": {
-          // Fail the existing step activity (don't create a new
-          // "failure" row). Same logical operation — the step failed.
-          const stepId = (event.data.stepId as string) ?? "";
-          const title = missionStepText(event.data);
-          ws.failSource(stepId, "Step failed", title);
-          break;
-        }
-        default:
-          break;
-      }
+      projectLifecycleToWorkstream(event, ws);
     });
 
     // ─── Tool progress updates ────────────────────────────────────

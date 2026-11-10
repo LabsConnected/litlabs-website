@@ -780,6 +780,21 @@ export function stripToolCallBlocks(content: string): string {
     }
     if (!removed) break;
   }
+  // Empty fenced blocks carry zero information — "```json\n```" as a
+  // model's entire response is markup residue, not an answer. Strip
+  // them so content checks measure what the user would actually see.
+  // Fences with real content (code, data, examples) are kept verbatim.
+  stripped = stripped.replace(
+    /```[a-zA-Z0-9_+.-]*[ \t]*\r?\n?([\s\S]*?)```/gi,
+    (match, inner: string) => (inner.trim() === "" ? "" : match),
+  );
+  // A trailing UNCLOSED fence opener with nothing after it is the same
+  // residue (a truncated empty fence). Requires a newline after the
+  // opener so a legitimate closing ``` at end-of-content is untouched.
+  stripped = stripped.replace(
+    /```(?:[a-zA-Z0-9_+.-]+[ \t]*)?\r?\n[ \t\r\n]*$/g,
+    "",
+  );
   return stripped.trim();
 }
 
@@ -1906,6 +1921,44 @@ export async function runAgentLoop(
 
       const hasSuccessfulToolEvidence = toolCalls.some((tc) => tc.result.success);
       const cleanContent = stripToolCallBlocks(modelContent);
+
+      // A response that strips down to nothing user-visible — an empty
+      // reply, or only protocol/markup residue such as an empty
+      // ```json fence — is NOT an answer. The raw modelContent check
+      // above cannot see this: the markup keeps modelContent non-empty
+      // while cleanContent (what the user actually gets) is blank.
+      // Treat it exactly like an empty model response: retry with an
+      // explicit instruction, then fail honestly — never report a
+      // markup-only turn as COMPLETE.
+      if (!cleanContent.trim()) {
+        if (missionId && escalation) {
+          escalation.recordFailure(missionId, "content", "empty visible response");
+        }
+        if (round >= maxRounds - 1) {
+          return {
+            content:
+              "LiTT's model returned no visible answer text — only formatting " +
+              "markup. The turn was not completed and no success is being claimed.",
+            toolCalls,
+            rounds,
+            durationMs: Date.now() - startTime,
+            usage: { total_tokens: totalTokens },
+            termination: "error",
+            escalations: escalationEvents.length ? escalationEvents : undefined,
+          };
+        }
+        messages.push({ role: "assistant", content: modelContent });
+        messages.push({
+          role: "user",
+          content:
+            "Your previous response contained no visible answer — only formatting " +
+            "markup such as an empty code fence. Retry now with plain-language text: " +
+            "either call an available tool using a valid tool_call block, or return " +
+            "a real final answer in normal prose. Do not emit empty code fences or " +
+            "raw protocol markup as your answer.",
+        });
+        continue;
+      }
 
       if (requiresProjectEvidence && !hasSuccessfulToolEvidence) {
 
