@@ -187,7 +187,7 @@ export default function StudioProjectPicker({
         ref={triggerRef}
         type="button"
         onClick={toggleOpen}
-        className="flex w-full min-w-0 max-w-[200px] items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1 text-[12px] font-bold transition hover:bg-white/5 sm:max-w-[240px]"
+        className="flex w-full min-w-0 max-w-[200px] items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1 text-[12px] font-bold transition hover:bg-black/5 sm:max-w-[240px]"
         style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)", backgroundColor: "var(--studio-surface)" }}
         aria-expanded={open}
         aria-haspopup="listbox"
@@ -296,8 +296,18 @@ function ProjectPickerMenu({
       style={{
         left,
         top,
-        borderColor: "var(--studio-border-strong)",
-        backgroundColor: "var(--studio-elevated)",
+        // Portaled to <body> — outside .studio-shell, so the light
+        // palette is carried explicitly (surface + text tokens).
+        borderColor: "#a9c48f",
+        backgroundColor: "#ffffff",
+        color: "#0e1510",
+        ["--text-primary" as string]: "#0e1510",
+        ["--text-secondary" as string]: "#47614a",
+        ["--text-muted" as string]: "#63745f",
+        ["--studio-elevated" as string]: "#ffffff",
+        ["--studio-border" as string]: "#cfdec4",
+        ["--studio-border-strong" as string]: "#a9c48f",
+        ["--litt-primary" as string]: "#177a36",
       }}
       role="listbox"
       aria-label="Projects"
@@ -306,7 +316,7 @@ function ProjectPickerMenu({
       {loading ? (
         <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>Loading projects…</div>
       ) : error ? (
-        <div className="px-2.5 py-3 text-[12px]" style={{ color: "#fca5a5" }}>{error}</div>
+        <div className="px-2.5 py-3 text-[12px]" style={{ color: "#b91c1c" }}>{error}</div>
       ) : projects.length === 0 ? (
         <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>No projects available.</div>
       ) : (
@@ -326,7 +336,7 @@ function ProjectPickerMenu({
                 This permanently deletes the project and its files. This can&rsquo;t be undone.
               </div>
               {deleteError && deletingId === null && (
-                <div className="mt-1.5 text-[11px] font-bold" style={{ color: "#fca5a5" }}>
+                <div className="mt-1.5 text-[11px] font-bold" style={{ color: "#b91c1c" }}>
                   {deleteError}
                 </div>
               )}
@@ -335,7 +345,7 @@ function ProjectPickerMenu({
                   type="button"
                   onClick={onCancelDelete}
                   disabled={deletingId === project.id}
-                  className="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition hover:bg-white/8 disabled:opacity-50"
+                  className="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition hover:bg-black/5 disabled:opacity-50"
                   style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
                 >
                   Cancel
@@ -356,7 +366,7 @@ function ProjectPickerMenu({
               key={project.id}
               role="option"
               aria-selected={project.id === projectId}
-              className="group flex w-full items-center gap-1 rounded-lg transition hover:bg-white/8"
+              className="group flex w-full items-center gap-1 rounded-lg transition hover:bg-black/5"
             >
               <button
                 type="button"
@@ -369,7 +379,7 @@ function ProjectPickerMenu({
                 <span className="shrink-0 text-[11px]" style={{ color: "var(--text-muted)" }}>{isManagedSourceType(project.sourceType ?? null) ? "LiTT Managed" : "GitHub"}</span>
               </button>
               {project.id === projectId && !project.legacy && (
-                <button type="button" onClick={() => onRequestRename(project)} aria-label={`Rename project ${project.name}`} title={`Rename project ${project.name}`} className="mr-0.5 shrink-0 rounded-md p-1.5 opacity-60 transition hover:bg-white/10 hover:opacity-100 focus-visible:opacity-100" style={{ color: "var(--text-muted)" }}>
+                <button type="button" onClick={() => onRequestRename(project)} aria-label={`Rename project ${project.name}`} title={`Rename project ${project.name}`} className="mr-0.5 shrink-0 rounded-md p-1.5 opacity-60 transition hover:bg-black/5 hover:opacity-100 focus-visible:opacity-100" style={{ color: "var(--text-muted)" }}>
                   <Pencil size={13} />
                 </button>
               )}
@@ -379,7 +389,7 @@ function ProjectPickerMenu({
                   onClick={() => onRequestDelete(project)}
                   aria-label={`Delete project ${project.name}`}
                   title={`Delete project ${project.name}`}
-                  className="mr-1 shrink-0 rounded-md p-1.5 opacity-60 transition hover:bg-white/10 hover:opacity-100 focus-visible:opacity-100"
+                  className="mr-1 shrink-0 rounded-md p-1.5 opacity-60 transition hover:bg-black/5 hover:opacity-100 focus-visible:opacity-100"
                   style={{ color: "#fca5a5" }}
                 >
                   <Trash2 size={13} />
@@ -397,7 +407,7 @@ function ProjectPickerMenu({
           <button
             type="button"
             onClick={onCreateProject}
-            className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 text-left transition hover:bg-white/8"
+            className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 text-left transition hover:bg-black/5"
             style={{ color: "var(--litt-primary)" }}
           >
             <Plus size={13} className="shrink-0" />
