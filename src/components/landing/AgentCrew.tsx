@@ -20,15 +20,15 @@ const TOOL_CHIPS = [
 
 export function AgentCrew() {
   return (
-    <section id="operator" className="litt-section relative overflow-hidden border-t border-white/8 bg-[#070912]">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_45%,rgba(168,255,47,.07),transparent_28%),radial-gradient(circle_at_85%_42%,rgba(181,140,255,.09),transparent_30%)]" />
+    <section id="operator" className="litt-section relative overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_45%,rgba(168,255,47,.07),transparent_28%),radial-gradient(circle_at_85%_42%,rgba(232,163,23,.07),transparent_30%)]" />
       <div className="relative mx-auto max-w-[1500px] px-5 lg:px-8">
         <div data-reveal className="mx-auto max-w-3xl text-center">
           <div className="litt-eyebrow"><Bot size={13} /> LiTT — your project operator</div>
-          <h2 className="mt-5 text-[clamp(2.3rem,5vw,4.8rem)] font-black leading-[0.98] tracking-[-0.055em] text-white">
+          <h2 className="mt-5 text-[clamp(2.3rem,5vw,4.8rem)] font-black leading-[0.98] tracking-[-0.055em] text-[#0E1510]">
             One operator. <span className="litt-gradient-text">The whole project loop.</span>
           </h2>
-          <p className="mt-5 text-base leading-7 text-white/52 sm:text-lg sm:leading-8">
+          <p className="mt-5 text-base leading-7 text-[#63745F] sm:text-lg sm:leading-8">
             LiTT coordinates every stage of the work — planning, building, creating, using tools, verifying, and shipping. You stay in charge of the outcome.
           </p>
         </div>
@@ -68,9 +68,9 @@ export function AgentCrew() {
           </div>
         </article>
 
-        <div data-reveal className="mt-5 flex flex-col gap-3 rounded-2xl border border-white/9 bg-white/[0.025] p-5 lg:flex-row lg:items-center lg:justify-between lg:p-7">
-          <div className="flex items-center gap-2 text-sm text-white/50">
-            <Boxes size={16} className="shrink-0 text-[#65f4ff]" />
+        <div data-reveal className="mt-5 flex flex-col gap-3 rounded-2xl border border-[#CFDEC4] bg-white shadow-[0_16px_40px_rgba(14,60,26,0.08)] p-5 lg:flex-row lg:items-center lg:justify-between lg:p-7">
+          <div className="flex items-center gap-2 text-sm text-[#37463A]">
+            <Boxes size={16} className="shrink-0 text-[#177A36]" />
             Bring internal specialists or Marketplace agents into the loop when a mission needs more depth.
           </div>
           <SmartLink href="/agents" signedOutHref="/agents" className="litt-secondary-button !min-h-11 !px-4 !py-2.5 text-xs lg:shrink-0">See the operator stack <ArrowRight size={13} /></SmartLink>

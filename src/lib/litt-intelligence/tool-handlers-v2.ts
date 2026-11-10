@@ -985,7 +985,10 @@ export async function insertAssetFromUrl(
         }
       };
       let resp = await download();
-      if (resp === null || resp.status === 408 || resp.status === 429 || resp.status >= 500) {
+      // 402 joins the retryable set: pollinations intermittently answers
+      // Payment Required for identical requests (observed 2026-11-10) —
+      // one blip must not dead-end an otherwise healthy image lane.
+      if (resp === null || resp.status === 402 || resp.status === 408 || resp.status === 429 || resp.status >= 500) {
         if (opts.signal?.aborted) {
           throw lastErr instanceof Error ? lastErr : new Error("Failed to download asset: aborted");
         }

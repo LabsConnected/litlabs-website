@@ -110,6 +110,10 @@ export interface PlannedProvider {
   perModelRateLimits?: boolean;
   /** See ProviderDef.requestTokenCeiling. */
   requestTokenCeiling?: number;
+  /** See ProviderDef.contextWindows. */
+  contextWindows?: Record<string, number>;
+  /** See ProviderDef.strictToolCallIds. */
+  strictToolCallIds?: boolean;
   health: ProviderHealthState;
   credentialState: CredentialState;
 }
@@ -234,6 +238,21 @@ interface ProviderDef {
    * of burning a guaranteed-failed attempt.
    */
   requestTokenCeiling?: number;
+  /**
+   * Total context window (input + output tokens) per model id, for
+   * providers whose models have meaningfully different or small windows.
+   * Requests whose adjusted estimate exceeds a model's window are skipped
+   * before the attempt — a guaranteed provider 400 that would also poison
+   * the model's cooldown. Models absent from the map get no pre-check.
+   */
+  contextWindows?: Record<string, number>;
+  /**
+   * True when the provider rejects tool_call ids outside a strict format
+   * (Cloudflare Workers AI: [A-Za-z0-9], length 9 — prod-verified 400
+   * "Tool call id was 44-mcs4r1 but must be a-z, A-Z, 0-9, with a length
+   * of 9"). The serializer normalizes ids per request when set.
+   */
+  strictToolCallIds?: boolean;
 }
 
 function envPresent(...names: string[]): boolean {
@@ -415,6 +434,17 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
         envPresent("CLOUDFLARE_ACCOUNT_ID") && envPresent("CLOUDFLARE_AI_API_TOKEN")
           ? "available"
           : "missing",
+      // Workers AI context windows (developers.cloudflare.com/workers-ai
+      // model pages): llama-3.3-70b-fp8-fast is only 24K total — a ~21K
+      // estimate that chars/4 undercounts became a guaranteed 400 at
+      // 24,001 actual tokens (staging iter-3, run 42751987160). The
+      // mistral-small sibling has a 128K window and becomes the
+      // long-context lane once tool-call ids are normalized.
+      contextWindows: {
+        "@cf/meta/llama-3.3-70b-instruct-fp8-fast": 24_000,
+        "@cf/mistralai/mistral-small-3.1-24b-instruct": 128_000,
+      },
+      strictToolCallIds: true,
       models: () => [
         process.env.CLOUDFLARE_AI_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         "@cf/mistralai/mistral-small-3.1-24b-instruct",
@@ -955,6 +985,8 @@ export function planBasicRoutes(
       timeoutMs: def.timeoutMs,
       perModelRateLimits: def.perModelRateLimits,
       requestTokenCeiling: def.requestTokenCeiling,
+      contextWindows: def.contextWindows,
+      strictToolCallIds: def.strictToolCallIds,
       health: health.state,
       credentialState: cred,
     });

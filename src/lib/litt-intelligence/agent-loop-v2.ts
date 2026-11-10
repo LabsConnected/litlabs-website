@@ -2042,6 +2042,7 @@ async function runAgentLoopV2Inner(
           requireReliableFileWriting: cfg.buildCapabilityGuard != null,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
+          allowTransientPlanRetry: true,
         },
       );
       const llmDurationMs = Date.now() - llmStartTime;
@@ -4016,6 +4017,7 @@ async function resumeAgentLoopV2Inner(
           requireReliableFileWriting: cfg.buildCapabilityGuard != null,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
+          allowTransientPlanRetry: true,
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {
@@ -4623,6 +4625,7 @@ export function createAutonomousRepairCallback(
           signal,
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders,
+          allowTransientPlanRetry: true,
         });
 
         if (response.toolCalls.length === 0) {
