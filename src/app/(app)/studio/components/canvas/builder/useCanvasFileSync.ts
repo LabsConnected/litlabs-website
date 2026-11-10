@@ -3,7 +3,11 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useCanvasBuilderStore } from "./store";
 import type { CanvasDocument } from "./types";
-import { CANVAS_DOC_FILE, readWorkspaceFile } from "./canvas-site-export";
+import {
+  CANVAS_DOC_FILE,
+  exportCanvasToSite,
+  readWorkspaceFile,
+} from "./canvas-site-export";
 
 const DEBOUNCE_MS = 1200;
 
@@ -37,6 +41,9 @@ function parseServerUpdatedAt(content: string | null): number | null {
 
 /**
  * File-backed persistence for VisualCanvas (.litt/canvas.json).
+ * Every successful save also compiles the document into the served
+ * index.html (see canvas-site-export) — canvas work is real site output,
+ * not only a persisted builder document.
  * Mirrors htmlProjectSyncPolicy pattern: server-wins on load, debounced writes.
  * Falls back to localStorage when no projectId (LOCAL without project).
  *
@@ -114,11 +121,27 @@ export function useCanvasFileSync(projectId: string | null) {
       }
 
       const ok = await writeCanvasFile(pid, serialized);
-      if (ok) {
-        lastSavedRef.current = serialized;
-        pendingRef.current = null;
+      if (!ok) {
+        setSaveState("error");
+        return;
       }
-      setSaveState(ok ? "saved" : "error");
+      lastSavedRef.current = serialized;
+      pendingRef.current = null;
+
+      // P0-1 compile step: a saved canvas must become the real site.
+      // Materialize the document into workspace index.html so the
+      // preview and publish pipelines serve the canvas work — not the
+      // starter scaffold. exportCanvasToSite refuses to overwrite a
+      // user-authored index.html ("conflict"); that state is surfaced,
+      // never silently bypassed.
+      const exported = await exportCanvasToSite(pid, doc);
+      setSaveState(
+        exported.status === "written"
+          ? "saved"
+          : exported.status === "conflict"
+            ? "conflict"
+            : "error",
+      );
     },
     [setSaveState],
   );
