@@ -640,9 +640,14 @@ describe("enrichStaticSiteVisuals", () => {
     const transport = makeTransport({
       "index.html": `<html><head><title>Ember Roast</title></head><body><h1>Ember Roast</h1></body></html>`,
     });
-    // Fail every provider lane for the first resolve — a single dead
-    // resolve must not starve the floor, but probe-ok download failures
-    // now fall through to the next provider before counting as failed.
+    // Fail the first three downloads — a single dead lane must not
+    // starve the floor: probe-ok download failures fall through to the
+    // next provider before counting as failed. The floor buys its 3
+    // owed photos as one concurrent batch, so the 3 failures land one
+    // per in-flight resolve (each absorbs its failure as a lane
+    // fallthrough and succeeds on the next lane) instead of
+    // sequentially burning one whole resolve — hence imagesFailed is 0,
+    // not the 1 the old sequential loop recorded.
     let n = 0;
     mockInsertAssetFromUrl.mockImplementation(async () => {
       n += 1;
@@ -654,7 +659,7 @@ describe("enrichStaticSiteVisuals", () => {
     const report = await enrichStaticSiteVisuals(transport as never, {});
     const html = transport.files.get("index.html")!;
     expect(report.imagesResolved).toBe(3);
-    expect(report.imagesFailed).toBe(1);
+    expect(report.imagesFailed).toBe(0);
     expect(html).toContain("litt-gallery");
     expect(html).toContain('src="assets/images/g4.jpg"');
   });
@@ -712,9 +717,12 @@ describe("enrichStaticSiteVisuals", () => {
     // cap gave the floor only 4 attempts — 1 success + 3 flaky failures
     // shipped a 2-photo page. Each failed resolve below burns its 3
     // provider lanes (probe ok, download fails, fall through) before it
-    // counts as failed, so 5 failed resolves = 15 failed downloads; the
-    // floor must keep going past the old cap and land both photos on
-    // attempts 6 and 7.
+    // counts as failed. The floor buys the 2 owed photos in concurrent
+    // batches of 2: two batches burn all 3 lanes each (12 failed
+    // downloads, 4 failed resolves), and in the third batch the last
+    // failed download (15th) is one resolve's first lane — the two
+    // photos then land on downloads 16 and 17 as lane fallthroughs. The
+    // floor must keep going past the old cap to get there.
     const transport = makeTransport({
       "index.html": `<html><head><title>Ember Roast</title></head><body>
         <h1>Ember Roast Coffee</h1><img src="assets/images/hero.jpg"></body></html>`,
@@ -731,9 +739,209 @@ describe("enrichStaticSiteVisuals", () => {
     const report = await enrichStaticSiteVisuals(transport as never, {});
     const html = transport.files.get("index.html")!;
     expect(report.imagesResolved).toBe(2);
-    expect(report.imagesFailed).toBe(5);
+    expect(report.imagesFailed).toBe(4);
     expect(html).toContain("litt-gallery");
     expect(html).toContain('src="assets/images/g16.jpg"');
     expect(html).toContain('src="assets/images/g17.jpg"');
+  });
+
+  it("tops the photo floor up from unreferenced workspace images before any network resolve", async () => {
+    // Acceptance run 42744941482, iteration 4: the build took the
+    // image.generate path, whose auto-insert persisted generated images
+    // under assets/images — but the model's HTML referenced only one of
+    // them, countPhotos counts HTML refs only, and the floor owed 2
+    // network photos it could not buy inside its clock. Files already
+    // on disk that are unreferenced, non-SVG and >8KB must be picked up
+    // by the floor first, at zero network cost.
+    const big = "x".repeat(12_000);
+    const transport = makeTransport({
+      "index.html": `<html><head><title>Ember Roast</title></head><body>
+        <h1>Ember Roast Coffee</h1><img src="assets/images/hero.jpg"></body></html>`,
+      "assets/images/hero.jpg": big,
+      "assets/images/gen-a.jpg": big,
+      "assets/images/gen-b.jpg": big,
+      // Decoys the top-up must skip: undersized, SVG, and the placeholder.
+      "assets/images/tiny.jpg": "x".repeat(100),
+      "assets/images/icon.svg": big,
+      "assets/images/placeholder.svg": big,
+    });
+    const fetchSpy = vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u)));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    // 1 referenced photo + 2 workspace top-ups = the floor of 3, with
+    // zero network resolves/downloads spent on the topped-up count.
+    expect(html).toContain("litt-gallery");
+    expect(html).toContain('src="assets/images/gen-a.jpg"');
+    expect(html).toContain('src="assets/images/gen-b.jpg"');
+    expect(html).not.toContain("tiny.jpg");
+    expect(html).not.toContain("icon.svg");
+    expect(html.match(/hero\.jpg/g)).toHaveLength(1);
+    expect(report.imagesResolved).toBe(0);
+    expect(mockInsertAssetFromUrl).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("buys owed floor photos concurrently so two slow resolutions fit one base budget", async () => {
+    // The other half of run 42744941482 iteration 4: #859 gave the floor
+    // a fresh 30s clock, but with needed=2 one worst-case resolution
+    // (LoremFlickr's probe gauntlet, then a download) can consume most
+    // of a single base budget, so SEQUENTIAL buying starved the second
+    // owed photo. v1 scaled the deadline by needed instead — that fixed
+    // the shortfall but multiplied the run's worst-case in-flight time,
+    // and the agent loop's 4000ms settle guard tripped on it in CI
+    // (PR #861, three runs). The floor must fit BOTH owed photos inside
+    // the single unscaled budget by resolving them concurrently.
+    // Here the base budget is 200ms and EVERY resolution takes ~160ms:
+    // sequential buying needs ~320ms+ (and on the flat #859 clock the
+    // second photo dies outright at 200ms); concurrent buying lands
+    // both in ~160ms.
+    process.env.ENRICH_TOTAL_TIMEOUT_MS = "200";
+    try {
+      const transport = makeTransport({
+        "index.html": `<html><head><title>Ember Roast</title></head><body>
+          <h1>Ember Roast Coffee</h1><img src="assets/images/hero.jpg"></body></html>`,
+        "assets/images/hero.jpg": "binary-stub",
+      });
+      let n = 0;
+      mockInsertAssetFromUrl.mockImplementation(async () => {
+        n += 1;
+        return { success: true, path: `assets/images/f${n}.jpg`, sitePath: `assets/images/f${n}.jpg`, sizeBytes: 120_000 };
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((url: RequestInfo | URL, init?: { signal?: AbortSignal }) => {
+          // Openverse is a JSON search API, not an image lane — answer
+          // it empty at once (as the resolver tests above do) so the
+          // ~160ms delay below measures only the image-lane probes the
+          // floor is racing against its budget.
+          if (isOpenverse(String(url))) return Promise.resolve(openverseEmpty());
+          // Every image lane answers only after ~160ms, and — exactly
+          // like real fetch — dies if the caller's signal aborts first.
+          return new Promise((resolvePromise, reject) => {
+            const timer = setTimeout(() => resolvePromise(fakeImageResponse(String(url))), 160);
+            init?.signal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer);
+                reject(new Error("AbortError"));
+              },
+              { once: true },
+            );
+          });
+        }),
+      );
+
+      const start = Date.now();
+      const report = await enrichStaticSiteVisuals(transport as never, {});
+      const elapsed = Date.now() - start;
+      const html = transport.files.get("index.html")!;
+      expect(report.imagesResolved).toBe(2);
+      expect(html).toContain("litt-gallery");
+      expect(html).toContain('src="assets/images/f1.jpg"');
+      expect(html).toContain('src="assets/images/f2.jpg"');
+      expect(elapsed).toBeLessThan(300);
+    } finally {
+      delete process.env.ENRICH_TOTAL_TIMEOUT_MS;
+    }
+  });
+
+  it("never exceeds the shared image budget when a floor batch runs concurrently", async () => {
+    // MAX_IMAGES_PER_RUN is 8. Six slots burn 6 budget entries in
+    // phase 1 — with images too small to count toward the photo floor,
+    // so the floor still owes all 3 photos when it starts, but only 2
+    // budget entries remain. The batch must claim that room
+    // synchronously and launch at most 2 concurrent resolves: without
+    // the claim, all 3 owed resolves would pass the entry check while
+    // the counters still read 6 (they only move as resolves settle) and
+    // the pass would end at 9 entries — over budget.
+    const slots = Array.from({ length: 6 }, (_, i) => `<img data-litt-image="coffee ${i}" alt="s${i}">`).join("");
+    const transport = makeTransport({
+      "index.html": `<html><head><title>Ember Roast</title></head><body><h1>Ember Roast</h1>${slots}</body></html>`,
+    });
+    let inserts = 0;
+    mockInsertAssetFromUrl.mockImplementation(async () => {
+      inserts += 1;
+      return {
+        success: true,
+        path: `assets/images/f${inserts}.jpg`,
+        sitePath: `assets/images/f${inserts}.jpg`,
+        // Slot images are persisted but undersized: real budget spend,
+        // zero floor credit.
+        sizeBytes: inserts <= 6 ? 100 : 120_000,
+      };
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) =>
+      isOpenverse(String(u)) ? openverseEmpty() : fakeImageResponse(String(u))));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    expect(report.imagesResolved + report.imagesFailed).toBeLessThanOrEqual(8);
+    expect(report.imagesResolved).toBe(8);
+    expect(inserts).toBe(8);
+    // The floor landed exactly the 2 photos the remaining budget could
+    // buy — no third batch member was ever launched.
+    expect(html).toContain('src="assets/images/f7.jpg"');
+    expect(html).toContain('src="assets/images/f8.jpg"');
+    expect(html).not.toContain("f9.jpg");
+  });
+
+  it("settles the floor batch when the deadline aborts in-flight resolutions", async () => {
+    // Cancellation: the floor deadline fires while both batch
+    // resolutions are still in flight. The batch must settle — no
+    // dangling promises, no unhandled rejections (vitest fails the run
+    // on those) — and enrichment must return its report having
+    // persisted nothing from the aborted batch.
+    process.env.ENRICH_TOTAL_TIMEOUT_MS = "200";
+    try {
+      const transport = makeTransport({
+        "index.html": `<html><head><title>Ember Roast</title></head><body>
+          <h1>Ember Roast Coffee</h1><img src="assets/images/hero.jpg"></body></html>`,
+        "assets/images/hero.jpg": "binary-stub",
+      });
+      mockInsertAssetFromUrl.mockResolvedValue({
+        success: true,
+        path: "assets/images/never.jpg",
+        sitePath: "assets/images/never.jpg",
+        sizeBytes: 120_000,
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((url: RequestInfo | URL, init?: { signal?: AbortSignal }) => {
+          // Openverse answered empty at once (see the concurrency test
+          // above); the image lanes below are the slow ones.
+          if (isOpenverse(String(url))) return Promise.resolve(openverseEmpty());
+          // Answers only after 500ms — past the 200ms floor deadline —
+          // and, like real fetch, rejects when the signal aborts.
+          return new Promise((resolvePromise, reject) => {
+            const timer = setTimeout(() => resolvePromise(fakeImageResponse(String(url))), 500);
+            init?.signal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer);
+                reject(new Error("AbortError"));
+              },
+              { once: true },
+            );
+          });
+        }),
+      );
+
+      const start = Date.now();
+      const report = await enrichStaticSiteVisuals(transport as never, {});
+      const elapsed = Date.now() - start;
+      // Settled by the deadline (~200ms), not by the 500ms stub.
+      expect(elapsed).toBeLessThan(400);
+      expect(report.imagesResolved).toBe(0);
+      expect(report.imagesFailed).toBe(2);
+      // Only completed inserts may reach filesChanged — the aborted
+      // batch completed none, so nothing was written at all.
+      expect(report.filesChanged).toEqual([]);
+      expect(transport.files.get("index.html")).not.toContain("litt-gallery");
+      expect(mockInsertAssetFromUrl).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.ENRICH_TOTAL_TIMEOUT_MS;
+    }
   });
 });

@@ -203,7 +203,10 @@ export async function enrichStaticSiteVisuals(
       }
       return null;
     };
-    const resolve = async (keywords: string, signal: AbortSignal = overallSignal) => {
+    const resolveImage = async (
+      keywords: string,
+      signal: AbortSignal = overallSignal,
+    ): Promise<{ sitePath: string; url: string } | null> => {
       if (signal.aborted) return null;
       if (report.imagesResolved + report.imagesFailed >= budget) return null;
       // Dedupe: distinct keywords can still resolve to the same photo
@@ -258,8 +261,10 @@ export async function enrichStaticSiteVisuals(
       fileSet.add(sitePath.replace(/^\//, ""));
       if (saved.path) fileSet.add(saved.path.replace(/^\//, ""));
       trackSize(sitePath, saved.path, saved.sizeBytes);
-      return sitePath;
+      return { sitePath, url: resolved.url };
     };
+    const resolve = async (keywords: string, signal: AbortSignal = overallSignal) =>
+      (await resolveImage(keywords, signal))?.sitePath ?? null;
 
     for (const file of htmlFiles) {
       const { content } = await transport.readFile(file);
@@ -412,13 +417,57 @@ export async function enrichStaticSiteVisuals(
         // retries alone can burn ~24s of it) starved the floor before it
         // started — golden run 42726578836 shipped 2/3 photos with the
         // floor inheriting a nearly-dead signal. The floor is the phase
-        // acceptance measures; it is budgeted like it.
+        // acceptance measures; it is budgeted like it. The budget stays
+        // exactly one base timeout: owed photos are bought CONCURRENTLY
+        // under it (below), not sequentially against a multiplied clock.
+        // A deadline scaled by `needed` also multiplies how long a
+        // resumed run can stay in flight — the agent loop's settle guard
+        // (4000ms, tests pin a 3000ms enrich budget) tripped on it three
+        // CI runs in a row on PR #861.
         const floorSignal = AbortSignal.timeout(totalTimeoutMs);
         const title = html.match(/<title[^>]*>([^<]{3,120})<\/title>/i)?.[1] ?? "";
         const h1 = html.match(/<h1[^>]*>([^<]{3,120})<\/h1>/i)?.[1] ?? "";
         const base = `${title} ${h1}`.trim() || topic;
         const vary = ["", " detail", " texture", " interior"];
         const imgs: string[] = [];
+        const galleryImg = (sitePath: string, n: number) => {
+          const alt = `${title || h1 || "Site"} — photo ${n}`.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+          return `<img src="${sitePath}" alt="${alt}" style="width:100%;height:220px;object-fit:cover;border-radius:12px;display:block;" loading="lazy">`;
+        };
+
+        // Workspace top-up first. Images already persisted in the
+        // workspace satisfy the floor at zero network cost and zero
+        // clock: the generate path's auto-insert saves every generated
+        // image under assets/images whether or not the model ever
+        // references it, and countPhotos counts HTML refs only — so
+        // those files are invisible to the floor until it references
+        // them (run 42744941482: the floor owed 2 network photos while
+        // on-topic generated assets sat unreferenced on disk). Disk
+        // picks are not network resolves: they do not increment
+        // imagesResolved and do not debit the shared image budget,
+        // which meters network work (resolve/download calls).
+        const referenced = new Set<string>();
+        for (const r of extractImageRefs(html)) {
+          const src = r.src?.trim() ?? "";
+          if (!src || /^(https?:|data:|blob:)/i.test(src)) continue;
+          const rel = src.replace(/^\.\//, "").replace(/^\//, "").split(/[?#]/)[0];
+          if (rel) referenced.add(rel);
+        }
+        const spareAssets = await transport.listFiles("assets/images").catch(() => null);
+        const spareNames = (spareAssets?.entries ?? [])
+          .filter((e) => e.type === "file")
+          .map((e) => e.name)
+          .sort();
+        for (const name of spareNames) {
+          if (imgs.length >= needed) break;
+          const sitePath = `assets/images/${name}`;
+          if (sitePath === PLACEHOLDER_SVG_PATH || /\.svg$/i.test(name)) continue;
+          if (referenced.has(sitePath) || smallImages.has(sitePath)) continue;
+          const { size } = await transport.readFile(sitePath).catch(() => ({ size: 0 }));
+          if (size <= MIN_REAL_PHOTO_BYTES) continue;
+          imgs.push(galleryImg(sitePath, imgs.length + 1));
+        }
+
         // A single failed resolve must not starve the floor: providers are
         // free-tier and flake, so keep trying with rotated keywords — the
         // shared image budget still bounds total work, and a null resolve
@@ -427,16 +476,61 @@ export async function enrichStaticSiteVisuals(
         // evidence of a flaky free provider, not a content decision, and
         // the * 2 cap turned 3 flaky misses into a shipped shortfall in
         // run 42726578836. The floor's own deadline above still bounds
-        // the wall-clock cost.
+        // the wall-clock cost. Only the remainder still owed after the
+        // workspace top-up goes to the network.
+        //
+        // Owed photos are bought in CONCURRENT batches, not one at a
+        // time: one worst-case resolution (the slow lane's probe
+        // gauntlet, then a full download) can consume most of the floor's
+        // single base budget by itself, so sequential buying starved the
+        // second owed photo in run 42744941482 even with a fresh clock.
+        // A batch launches up to `owed` resolves at once — each keyed by
+        // the global attempt counter, exactly as the sequential loop
+        // derived its rotated keywords, and each resolve downloads +
+        // persists its own image — all sharing floorSignal.
+        //
+        // The concurrency is explicitly BOUNDED three ways:
+        //   - Batch width never exceeds the photos still owed, and owed
+        //     never exceeds MIN_REAL_PHOTOS (3): at most 3 resolves are
+        //     ever in flight from this phase.
+        //   - The shared image budget is claimed synchronously for the
+        //     whole batch before launching: batchSize is capped by the
+        //     budget room left (counters settle between batches, and no
+        //     other resolve can interleave during the synchronous launch
+        //     loop), so total resolve entries across the whole pass can
+        //     never exceed the budget. resolveImage's own entry check
+        //     remains as a backstop.
+        //   - No duplicates: attempt indices within a batch are
+        //     distinct, so the vary keywords — and therefore every
+        //     provider URL built from them — are distinct across the
+        //     batch; and the writtenPaths guard below drops any result
+        //     whose URL an earlier (lower-attempt-index) result in this
+        //     phase already produced, so the same image is never
+        //     inserted into the gallery twice. (URL dedupe via
+        //     usedImageUrls inside the resolve path and content-hash
+        //     dedupe inside resolveImage remain the other layers, as
+        //     before.)
         let floorAttempts = 0;
         const maxFloorAttempts = needed * 4;
-        for (let i = 0; i < needed && floorAttempts < maxFloorAttempts && !floorSignal.aborted; ) {
-          floorAttempts += 1;
-          const sitePath = await resolve(`${base}${vary[i % vary.length]}`.trim(), floorSignal);
-          if (!sitePath) continue;
-          const alt = `${title || h1 || "Site"} — photo ${i + 1}`.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-          imgs.push(`<img src="${sitePath}" alt="${alt}" style="width:100%;height:220px;object-fit:cover;border-radius:12px;display:block;" loading="lazy">`);
-          i += 1;
+        const writtenPaths = new Set<string>();
+        while (imgs.length < needed && floorAttempts < maxFloorAttempts && !floorSignal.aborted) {
+          const owed = needed - imgs.length;
+          const budgetRoom = budget - (report.imagesResolved + report.imagesFailed);
+          const batchSize = Math.min(owed, maxFloorAttempts - floorAttempts, budgetRoom);
+          if (batchSize <= 0) break;
+          const batchBase = floorAttempts;
+          const batch: Array<Promise<{ sitePath: string; url: string } | null>> = [];
+          for (let k = 0; k < batchSize; k++) {
+            floorAttempts += 1;
+            const attemptIndex = batchBase + k;
+            batch.push(resolveImage(`${base}${vary[attemptIndex % vary.length]}`.trim(), floorSignal));
+          }
+          const results = await Promise.all(batch);
+          for (const result of results) {
+            if (!result || writtenPaths.has(result.url)) continue;
+            writtenPaths.add(result.url);
+            imgs.push(galleryImg(result.sitePath, imgs.length + 1));
+          }
         }
         if (imgs.length > 0) {
           const section =
