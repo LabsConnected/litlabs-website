@@ -274,8 +274,8 @@ export default function StudioDock({
       data-open={open ? "true" : "false"}
       className="flex shrink-0 flex-col rounded-none border-t"
       style={{
-        backgroundColor: "rgba(16,12,26,0.92)",
-        borderColor: "rgba(255,255,255,0.07)",
+        backgroundColor: "var(--studio-surface)",
+        borderColor: "var(--studio-border)",
         height: effectiveHeight,
         transition: view === "collapsed" ? "height 0.15s ease" : undefined,
       }}
@@ -288,7 +288,7 @@ export default function StudioDock({
       {view !== "collapsed" && (
         <div
           data-resize-grip="true"
-          className="group flex shrink-0 cursor-row-resize items-center justify-center py-0.5 transition hover:bg-white/5"
+          className="group flex shrink-0 cursor-row-resize items-center justify-center py-0.5 transition hover:bg-black/5"
           style={{ touchAction: "none" }}
           role="separator"
           aria-orientation="horizontal"
@@ -307,7 +307,7 @@ export default function StudioDock({
         >
           <div
             data-resize-grip="true"
-            className="h-0.5 w-8 rounded-full bg-white/15 transition group-hover:bg-white/30"
+            className="h-0.5 w-8 rounded-full bg-black/15 transition group-hover:bg-black/30"
           />
         </div>
       )}
@@ -316,13 +316,13 @@ export default function StudioDock({
           contextual tabs appear only after the developer drawer opens. */}
       <div
         className="flex shrink-0 items-center justify-between"
-        style={{ height: COLLAPSED_HEIGHT, backgroundColor: "#0d0916" }}
+        style={{ height: COLLAPSED_HEIGHT, backgroundColor: "var(--studio-surface)" }}
       >
         {view === "collapsed" ? (
           <button
             type="button"
             onClick={() => { setView("normal"); onToggle(); }}
-            className="flex h-full items-center gap-2 px-3 text-[11px] font-bold transition hover:bg-white/5"
+            className="flex h-full items-center gap-2 px-3 text-[11px] font-bold transition hover:bg-black/5"
             style={{ color: "var(--text-muted)" }}
             aria-label="Open developer tools"
             data-testid="dock-collapsed-toggle"
@@ -368,7 +368,7 @@ export default function StudioDock({
             <button
               type="button"
               onClick={handleMaximize}
-              className="grid h-7 w-7 place-items-center rounded-none transition hover:bg-white/8"
+              className="grid h-7 w-7 place-items-center rounded-lg transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label={view === "maximized" ? "Restore" : "Maximize"}
               title={view === "maximized" ? "Restore (Esc)" : "Maximize"}
@@ -382,7 +382,7 @@ export default function StudioDock({
             <button
               type="button"
               onClick={handleClose}
-              className="grid h-7 w-7 place-items-center rounded-none transition hover:bg-white/8"
+              className="grid h-7 w-7 place-items-center rounded-lg transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Close dock"
               title="Close"

@@ -365,9 +365,9 @@ export default function CommandComposer({
       data-testid="studio-command-composer"
       className={`glass-shell relative flex w-full min-w-0 shrink-0 flex-col gap-1.5 border-t px-2.5 ${compact ? "py-1.5" : "py-2"} pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2`}
       style={{
-        backgroundColor: "rgba(13,9,22,0.88)",
-        borderColor: "rgba(155,77,255,0.12)",
-        boxShadow: "0 -8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(155,77,255,0.06)",
+        backgroundColor: "var(--studio-elevated)",
+        borderColor: "var(--studio-border)",
+        boxShadow: "0 -8px 32px rgba(14,60,26,0.10)",
       }}
     >
       {/* Context line: workspace · repository · branch.
@@ -435,7 +435,7 @@ export default function CommandComposer({
                 <button
                   type="button"
                   onClick={() => clearSelectionChip(index, sel)}
-                  className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md transition hover:bg-white/10"
+                  className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md transition hover:bg-black/5"
                   style={{ color: "var(--text-muted)" }}
                   aria-label={`Clear selection: ${sel.label}`}
                   title="Clear selection"
@@ -451,18 +451,18 @@ export default function CommandComposer({
         contextLine?.selectedElement && (
           <div
             className="flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[10px]"
-            style={{ borderColor: "rgba(155,77,255,0.24)", backgroundColor: "rgba(155,77,255,0.07)" }}
+            style={{ borderColor: "rgba(23,122,54,0.3)", backgroundColor: "rgba(23,122,54,0.08)" }}
             data-testid="selected-preview-context"
           >
-            <MousePointer2 size={11} className="shrink-0" style={{ color: "#c4b5fd" }} aria-hidden="true" />
+            <MousePointer2 size={11} className="shrink-0" style={{ color: "#0c5a26" }} aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-secondary)" }}>
-              Editing <strong style={{ color: "#c4b5fd" }}>{contextLine.selectedElement}</strong>
+              Editing <strong style={{ color: "#0c5a26" }}>{contextLine.selectedElement}</strong>
             </span>
             {onClearSelectedElement && (
               <button
                 type="button"
                 onClick={onClearSelectedElement}
-                className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-white/8"
+                className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-black/5"
                 aria-label="Clear selected preview element"
                 title="Clear selection"
               >
@@ -518,12 +518,12 @@ export default function CommandComposer({
       <div
         className={`glass-panel relative flex flex-wrap items-end gap-1.5 px-2 py-2 transition-all ${dragOver ? "glass-active" : ""}`}
         style={{
-          borderColor: dragOver ? "rgba(168,85,247,0.5)" : "rgba(155,77,255,0.15)",
-          backgroundColor: dragOver ? "rgba(168,85,247,0.08)" : "rgba(20,15,31,0.72)",
+          borderColor: dragOver ? "rgba(23,122,54,0.55)" : "var(--studio-border)",
+          backgroundColor: dragOver ? "rgba(23,122,54,0.08)" : "var(--bg-main)",
           maxWidth: "var(--studio-composer-max-w)",
           width: "100%",
           margin: "0 auto",
-          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px rgba(0,0,0,0.3)",
+          boxShadow: "0 8px 24px rgba(14,60,26,0.08)",
         }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -531,8 +531,8 @@ export default function CommandComposer({
       >
         {/* Drag overlay */}
         {dragOver && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl" style={{ backgroundColor: "rgba(168,85,247,0.08)" }}>
-            <span className="text-[11px] font-bold" style={{ color: "#c084fc" }}>
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl" style={{ backgroundColor: "rgba(23,122,54,0.08)" }}>
+            <span className="text-[11px] font-bold" style={{ color: "#0c5a26" }}>
               Drop files to attach
             </span>
           </div>
@@ -548,9 +548,9 @@ export default function CommandComposer({
           }}
           className="relative grid h-11 w-11 shrink-0 place-items-center rounded-xl border transition"
           style={{
-            color: showAttach ? "#c084fc" : "var(--text-muted)",
+            color: showAttach ? "#177a36" : "var(--text-muted)",
             borderColor: showAttach ? "var(--studio-border-strong)" : "transparent",
-            backgroundColor: showAttach ? "rgba(168,85,247,0.08)" : "transparent",
+            backgroundColor: showAttach ? "rgba(23,122,54,0.08)" : "transparent",
           }}
           aria-label="Attach files, media, or links"
           title="Attach"
@@ -563,7 +563,7 @@ export default function CommandComposer({
           {attachments.length > 0 && (
             <span
               className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[8px] font-black"
-              style={{ backgroundColor: "#a855f7", color: "#fff" }}
+              style={{ backgroundColor: "#177a36", color: "#fff" }}
             >
               {attachments.length}
             </span>
@@ -608,7 +608,7 @@ export default function CommandComposer({
           ref={unifiedTriggerRef}
           type="button"
           onClick={() => setUnifiedOpen((v) => !v)}
-          className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border px-2 sm:px-2.5 transition hover:bg-white/5"
+          className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border px-2 sm:px-2.5 transition hover:bg-black/5"
           style={{
             borderColor: "var(--studio-border-strong)",
             color: agentAccent,
@@ -703,7 +703,7 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={() => setTtsPopoverOpen((v) => !v)}
-          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-black/5"
           style={{
             color: ttsEnabled ? "#65f4ff" : "var(--text-muted)",
             boxShadow: voiceOutputState === "speaking" ? "0 0 0 2px rgba(101,244,255,0.3)" : undefined,
@@ -733,7 +733,7 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={() => setCameraPreviewOpen((v) => !v)}
-          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-black/5"
           style={{
             color: cameraPreviewOpen ? "var(--color-accent)" : "var(--text-muted)",
             boxShadow: cameraPreviewOpen ? "0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent)" : undefined,
@@ -748,10 +748,10 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={() => setShareMenuOpen((v) => !v)}
-          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-black/5"
           style={{
-            color: shareMenuOpen || liveActive ? "#a855f7" : "var(--text-muted)",
-            boxShadow: shareMenuOpen ? "0 0 0 2px rgba(168,85,247,0.3)" : undefined,
+            color: shareMenuOpen || liveActive ? "#177a36" : "var(--text-muted)",
+            boxShadow: shareMenuOpen ? "0 0 0 2px rgba(23,122,54,0.35)" : undefined,
           }}
           aria-label={shareMenuOpen ? "Close share menu" : "Open share menu"}
           title="Share — screen, window, tab, or Live Voice"
@@ -776,7 +776,7 @@ export default function CommandComposer({
           onClick={micState.onClick}
           disabled={micState.disabled}
           className={`pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all ${
-            !micState.disabled && "hover:bg-white/10"
+            !micState.disabled && "hover:bg-black/5"
           } ${micState.disabled && "cursor-not-allowed"}`}
           style={{
             color: micState.color,
@@ -903,7 +903,7 @@ export default function CommandComposer({
             <button
               type="button"
               onClick={cancelRecording}
-              className="ml-auto rounded px-2 py-0.5 text-[10px] font-bold hover:bg-white/10"
+              className="ml-auto rounded px-2 py-0.5 text-[10px] font-bold hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Cancel recording"
             >
@@ -1020,7 +1020,7 @@ function TtsPopover({
         <button
           type="button"
           onClick={toggleTts}
-          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
+          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-black/5"
           style={{ color: "var(--text-primary)" }}
         >
           <span>Read replies aloud</span>
@@ -1035,7 +1035,7 @@ function TtsPopover({
           <button
             type="button"
             onClick={stopSpeaking}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-black/5"
             style={{ color: "#e3b341" }}
           >
             <Square size={12} className="pointer-events-none" />
@@ -1049,7 +1049,7 @@ function TtsPopover({
         <button
           type="button"
           onClick={toggleAutoSend}
-          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
+          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-black/5"
           style={{ color: "var(--text-primary)" }}
         >
           <span>Auto-send voice</span>
@@ -1189,8 +1189,18 @@ function UnifiedSelectorPopover({
       style={{
         left,
         top,
-        backgroundColor: "var(--studio-elevated)",
-        borderColor: "var(--studio-border-strong)",
+        // Portaled to <body> — outside .studio-shell, so the light
+        // palette is carried explicitly (surface + text tokens).
+        backgroundColor: "#ffffff",
+        borderColor: "#a9c48f",
+        color: "#0e1510",
+        ["--text-primary" as string]: "#0e1510",
+        ["--text-secondary" as string]: "#47614a",
+        ["--text-muted" as string]: "#63745f",
+        ["--studio-elevated" as string]: "#ffffff",
+        ["--studio-border" as string]: "#cfdec4",
+        ["--studio-border-strong" as string]: "#a9c48f",
+        ["--color-accent" as string]: "#177a36",
       }}
     >
       {/* ── MODE section ────────────────────────────────────────── */}
@@ -1218,7 +1228,7 @@ function UnifiedSelectorPopover({
               type="button"
               disabled={!unlocked}
               onClick={() => unlocked && onAgentSelect(item.id)}
-              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-60"
               style={{ backgroundColor: isActive ? `${accent}10` : "transparent" }}
             >
               <span
@@ -1268,7 +1278,7 @@ function UnifiedSelectorPopover({
         <button
           type="button"
           onClick={() => onModelSelect(littAutoModel)}
-          className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
+          className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-black/5"
           style={{ backgroundColor: isLittAutoSelected ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
         >
           <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-accent/15 text-sm">
@@ -1307,7 +1317,7 @@ function UnifiedSelectorPopover({
             key={m.id}
             type="button"
             onClick={() => onModelSelect(m)}
-            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
+            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-black/5"
             style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
           >
             <span className="text-base shrink-0">{m.icon}</span>
@@ -1346,7 +1356,7 @@ function UnifiedSelectorPopover({
                 type="button"
                 onClick={() => onModelSelect(m)}
                 title={m.description}
-                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
+                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-black/5"
                 style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
               >
                 <span className="text-base shrink-0">{m.icon}</span>
@@ -1376,7 +1386,7 @@ function UnifiedSelectorPopover({
       <button
         type="button"
         onClick={() => setShowAdvanced((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-white/5"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-black/5"
         style={{ color: "var(--text-muted)" }}
       >
         <ChevronDown
@@ -1397,7 +1407,7 @@ function UnifiedSelectorPopover({
                 key={m.id}
                 type="button"
                 onClick={() => onModelSelect(m)}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-black/5"
                 style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
               >
                 <span className="text-sm shrink-0">{m.icon}</span>
@@ -1422,7 +1432,7 @@ function UnifiedSelectorPopover({
                 key={m.id}
                 type="button"
                 onClick={() => onModelSelect(m)}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-black/5"
                 style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
               >
                 <span className="text-sm shrink-0">{m.icon}</span>
