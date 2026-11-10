@@ -2988,6 +2988,74 @@ main {
   --glow-strength: 1;
 }
 
+/* ============================================================
+   STUDIO TLC SCOPE — approved design language (Larry, 2026-11-10)
+   ------------------------------------------------------------
+   Re-scopes the Studio's EXISTING token system (--studio-*,
+   --text-*, --bg-*, glass + shadow tokens) to the approved
+   homepage design language for everything inside the Studio
+   shell: true-white surfaces worked into green, deep-green
+   accent, lime kept as highlight only, one soft green shadow,
+   light-locked presentation (the Studio frame no longer flips
+   dark with the OS or the visual pack — same lesson as the
+   homepage mockup's removed dark palette).
+
+   This is a token re-scope, NOT a new theme or visual pack:
+   registration stays with the ThemeContext / visual-pack
+   system. When the theme lane lands a first-class light pack,
+   it should carry these same values so this scope can retire.
+   Layout variants ([data-layout=...] below) still layer their
+   own !important surface treatments on top, as before.
+   ============================================================ */
+.studio-shell {
+  /* Surfaces — white worked into green */
+  --studio-bg: #edf3e4;
+  --studio-surface: #ffffff;
+  --studio-elevated: #ffffff;
+  --studio-card: #ffffff;
+  --studio-border: #cfdec4;
+  --studio-border-strong: #a9c48f;
+  --bg-main: #edf3e4;
+  --bg-elevated: #ffffff;
+  --bg-solid: rgba(255, 255, 255, 0.96);
+  --bg-card: rgba(255, 255, 255, 0.92);
+  --glass-1: rgba(255, 255, 255, 0.85);
+  --glass-2: rgba(255, 255, 255, 0.9);
+  --glass-3: rgba(244, 249, 238, 0.95);
+  --glass-border: #cfdec4;
+  --glass-border-highlight: #a9c48f;
+  --border-soft: rgba(14, 60, 26, 0.12);
+  --border-strong: rgba(14, 60, 26, 0.22);
+  --grid-line: rgba(23, 122, 54, 0.07);
+
+  /* Text — ink on white */
+  --text-main: #0e1510;
+  --text-primary: #0e1510;
+  --text-secondary: #47614a;
+  --text-muted: #63745f;
+
+  /* Accent — deep green primary; lime survives as highlight
+     (--mark / chartreuse usages outside these tokens unchanged).
+     Scoped override only: the canonical @theme accent tokens
+     and litt-tokens.ts are untouched. */
+  --color-accent: #177a36;
+  --color-accent-strong: #0c5a26;
+  --color-accent-deep: #0c5a26;
+  --color-on-accent: #ffffff;
+  --litt-primary: #177a36;
+  --litt-primary-strong: #0c5a26;
+  --shadow-accent-glow: 0 0 24px rgba(23, 122, 54, 0.28);
+  --shadow-accent-glow-strong: 0 0 40px rgba(23, 122, 54, 0.4);
+
+  /* Depth — one soft green shadow family, no black/purple glow */
+  --shadow-card: 0 20px 54px rgba(14, 60, 26, 0.14);
+  --shadow-glow: 0 0 40px rgba(23, 122, 54, 0.1);
+  --studio-glow-green: 0 0 8px rgba(23, 122, 54, 0.35);
+  --studio-glow-green-soft: 0 0 12px rgba(23, 122, 54, 0.18);
+  --studio-glow-purple: 0 0 16px rgba(23, 122, 54, 0.16);
+  --studio-glow-purple-soft: 0 0 20px rgba(23, 122, 54, 0.1);
+}
+
 /* Map visual pack font variables to theme tokens */
 @theme inline {
   --font-sans: var(--font-ui), "Inter", "Segoe UI", system-ui, sans-serif;

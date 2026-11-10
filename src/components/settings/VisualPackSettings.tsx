@@ -7,6 +7,7 @@ import { Check } from "lucide-react";
 import { useState, useCallback } from "react";
 
 const PACK_PREVIEWS: Record<string, string> = {
+  "litt-signature": "radial-gradient(ellipse at 82% 12%, rgba(143,209,79,0.35) 0%, transparent 55%), radial-gradient(ellipse at 12% 88%, rgba(23,122,54,0.18) 0%, transparent 50%), linear-gradient(180deg, #FFFFFF 0%, #EDF3E4 100%)",
   "honeycomb-core": "radial-gradient(ellipse at 50% 50%, #fbbf2415 0%, transparent 60%), radial-gradient(ellipse at 20% 80%, #f59e0b12 0%, transparent 50%), radial-gradient(ellipse at 80% 20%, #d9770612 0%, transparent 50%), linear-gradient(180deg, #0d0a05 0%, #1a1510 100%)",
   "littree-forest": "radial-gradient(ellipse at 80% 80%, #22c55e20 0%, transparent 50%), radial-gradient(ellipse at 20% 20%, #16a34a20 0%, transparent 50%), linear-gradient(180deg, #0a1f0a 0%, #1a2f1a 50%, #0d1a0d 100%)",
   "cyber-lab": "repeating-linear-gradient(0deg, transparent, transparent 60px, #ff00ff08 60px, #ff00ff08 61px), repeating-linear-gradient(90deg, transparent, transparent 60px, #00ffff08 60px, #00ffff08 61px), linear-gradient(180deg, #1a0a1a 0%, #0d1a2e 50%, #0a0f1a 100%)",

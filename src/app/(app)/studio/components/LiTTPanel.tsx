@@ -113,17 +113,17 @@ export default function LiTTPanel({
               right: 12,
               bottom: 104,
               width: `min(${expandedWidth}px, calc(100vw - 24px))`,
-              backgroundColor: "#0d0916",
-              border: "1px solid rgba(255,255,255,0.1)",
+              backgroundColor: "var(--studio-elevated)",
+              border: "1px solid var(--studio-border-strong)",
               boxShadow:
-                "0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(168,255,47,0.08), 0 8px 32px rgba(0,0,0,0.5)",
+                "0 24px 80px rgba(14,60,26,0.18), 0 0 0 1px rgba(23,122,54,0.12), 0 8px 32px rgba(14,60,26,0.12)",
             }
           : {
               width: collapsed ? 64 : `clamp(300px, ${expandedWidth}px, ${expandedMaxWidth ?? "min(640px, 26vw)"})`,
               minWidth: collapsed ? 64 : 280,
               maxWidth: collapsed ? 64 : "36vw",
-              backgroundColor: "#0d0916",
-              borderRight: "1px solid rgba(255,255,255,0.07)",
+              backgroundColor: "var(--studio-surface)",
+              borderRight: "1px solid var(--studio-border)",
               backdropFilter: "blur(12px)",
             }
       }
@@ -152,8 +152,8 @@ export default function LiTTPanel({
         <div
           className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5"
           style={{
-            borderColor: "rgba(255,255,255,0.07)",
-            backgroundColor: "rgba(24,18,38,0.96)",
+            borderColor: "var(--studio-border)",
+            backgroundColor: "var(--studio-surface)",
           }}
         >
           {/* LiTT identity mark — canonical brand logo (F1 brand consolidation).
@@ -197,7 +197,7 @@ export default function LiTTPanel({
             <button
               type="button"
               onClick={onCollapse}
-              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
+              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Close LiTT panel"
               data-testid="litt-panel-close"
@@ -209,7 +209,7 @@ export default function LiTTPanel({
             <button
               type="button"
               onClick={onCollapse}
-              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
+              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Collapse LiTT panel"
               data-testid="litt-panel-collapse"

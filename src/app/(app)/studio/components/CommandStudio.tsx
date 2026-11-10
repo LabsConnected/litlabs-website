@@ -2599,7 +2599,7 @@ function CommandStudioContent() {
           <button
             type="button"
             onClick={() => { conversation.clearSendError(); setProjectCreateError(null); }}
-            className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
+            className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-black/5"
             aria-label="Dismiss error"
           >
             ✕
@@ -3021,7 +3021,7 @@ function CommandStudioContent() {
         style={{
           backgroundColor: "var(--bg-main)",
           color: "var(--text-main)",
-          backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139,92,246,0.06), transparent)",
+          backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(23,122,54,0.05), transparent)",
         }}
       >
         {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
@@ -3068,9 +3068,9 @@ function CommandStudioContent() {
             data-testid="export-project-toast"
             className="fixed bottom-4 right-4 z-[250] flex max-w-sm items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-[12px] font-bold shadow-2xl"
             style={{
-              borderColor: exportJob.status === "error" ? "rgba(239,68,68,0.4)" : "rgba(114,242,56,0.3)",
-              backgroundColor: "rgba(24,18,38,0.97)",
-              color: exportJob.status === "error" ? "#fca5a5" : "var(--text-primary)",
+              borderColor: exportJob.status === "error" ? "rgba(239,68,68,0.4)" : "rgba(23,122,54,0.35)",
+              backgroundColor: "var(--studio-elevated)",
+              color: exportJob.status === "error" ? "#b91c1c" : "var(--text-primary)",
             }}
           >
             <span className="min-w-0 flex-1">
@@ -3080,7 +3080,7 @@ function CommandStudioContent() {
               <button
                 type="button"
                 onClick={() => setExportJob({ status: "idle" })}
-                className="shrink-0 rounded px-1.5 py-0.5 text-[10px] hover:bg-white/10"
+                className="shrink-0 rounded px-1.5 py-0.5 text-[10px] hover:bg-black/5"
                 style={{ color: "var(--text-muted)" }}
                 aria-label="Dismiss export result"
               >
@@ -3360,8 +3360,8 @@ function CommandStudioContent() {
               className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
               style={{
                 height: 36,
-                backgroundColor: "rgba(13,9,22,0.85)",
-                borderColor: "rgba(155,77,255,0.1)",
+                backgroundColor: "var(--studio-surface)",
+                borderColor: "var(--studio-border)",
               }}
             >
               {workspaceTabs.map((t) => {
@@ -3381,7 +3381,7 @@ function CommandStudioContent() {
                     className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
                     style={{
                       color: isActive ? "var(--text-main)" : "var(--text-dim)",
-                      backgroundColor: isActive ? "var(--purple-soft)" : "transparent",
+                      backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
                     }}
                     aria-label={t.label}
                     data-testid={`workspace-tab-${t.id}`}
@@ -3391,8 +3391,8 @@ function CommandStudioContent() {
                       <span
                         className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
                         style={{
-                          background: "var(--purple)",
-                          boxShadow: "0 0 6px rgba(139,92,246,0.5)",
+                          background: "var(--color-accent)",
+                          boxShadow: "0 0 6px rgba(23,122,54,0.4)",
                         }}
                         aria-hidden
                       />
@@ -3758,7 +3758,7 @@ function CommandStudioContent() {
             <span
               className="flex h-6 w-6 items-center justify-center rounded-md text-[11px] font-black"
               style={{
-                background: "linear-gradient(135deg, rgba(139,92,246,0.3), rgba(99,102,241,0.15))",
+                background: "linear-gradient(135deg, rgba(23,122,54,0.22), rgba(23,122,54,0.08))",
               }}
               aria-hidden
             >
@@ -3865,11 +3865,11 @@ function CommandStudioContent() {
         <aside
           className="fixed z-[10009] flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-[calc(var(--studio-header-h)+4px)] md:w-full md:max-w-[520px] md:border-l bottom-[calc(var(--studio-mobile-bottom-h)+env(safe-area-inset-bottom))] left-0 right-0 top-auto h-[55dvh] rounded-t-2xl border-t"
           style={{
-            backgroundColor: "rgba(8,9,13,0.97)",
+            backgroundColor: "var(--studio-elevated)",
             borderColor: "var(--studio-border-strong)",
           }}
         >
-          <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/20 md:hidden" />
+          <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-black/20 md:hidden" />
           <div
             className="flex h-9 shrink-0 items-center justify-between px-3 border-b"
             style={{ borderColor: "var(--studio-border)" }}
@@ -3879,7 +3879,7 @@ function CommandStudioContent() {
             </span>
             <button
               onClick={() => setCanvasOpen(false)}
-              className="grid h-7 w-7 place-items-center rounded-lg hover:bg-white/8"
+              className="grid h-7 w-7 place-items-center rounded-lg hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Close Canvas panel"
             >
@@ -4017,8 +4017,8 @@ function MediaWorkspacePanel({
           <div
             className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl"
             style={{
-              background: "linear-gradient(135deg, rgba(139,92,246,0.1), rgba(99,102,241,0.05))",
-              border: "1px solid rgba(139,92,246,0.15)",
+              background: "linear-gradient(135deg, rgba(23,122,54,0.10), rgba(23,122,54,0.04))",
+              border: "1px solid rgba(23,122,54,0.2)",
             }}
           >
             <ImageIcon size={20} style={{ color: "var(--litt-primary)" }} />
@@ -4095,7 +4095,7 @@ function StudioWorkSurface({
     <div
       className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       style={{
-        background: "linear-gradient(180deg, var(--studio-surface) 0%, rgba(13,9,22,0.96) 100%)",
+        background: "linear-gradient(180deg, var(--studio-surface) 0%, var(--bg-main) 100%)",
       }}
       data-studio-surface
     >
@@ -4218,8 +4218,8 @@ function DockFrame({
       <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5" style={{ borderColor: "var(--studio-border)" }}>
         <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" aria-hidden />
         <span className="flex-1 text-[9px] font-black uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>{label}</span>
-        <button type="button" onClick={onMove} className="grid h-6 w-6 place-items-center rounded hover:bg-white/10" style={{ color: "var(--text-muted)" }} aria-label="Move dock">⇮</button>
-        <button type="button" onClick={onClose} className="grid h-6 w-6 place-items-center rounded hover:bg-white/10" style={{ color: "var(--text-muted)" }} aria-label="Close dock">✕</button>
+        <button type="button" onClick={onMove} className="grid h-6 w-6 place-items-center rounded hover:bg-black/5" style={{ color: "var(--text-muted)" }} aria-label="Move dock">⇮</button>
+        <button type="button" onClick={onClose} className="grid h-6 w-6 place-items-center rounded hover:bg-black/5" style={{ color: "var(--text-muted)" }} aria-label="Close dock">✕</button>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
     </div>
