@@ -43,6 +43,8 @@ import { WallpaperSection } from "@/components/settings/WallpaperSection";
 import { LivePreviewPanel } from "@/components/settings/LivePreviewPanel";
 import { IntegrationCard, IntegrationSummaryBar } from "@/components/settings/IntegrationCard";
 import { MicMixerPanel } from "@/features/voice/components/MicMixerPanel";
+import { VoicePreferencesCard } from "./VoicePreferencesCard";
+import { DEVICE_ID_STORAGE_KEY } from "@/features/voice/lib/mixer-settings";
 import { useIntegrationStatus } from "@/hooks/useIntegrationStatus";
 import type { LayoutStyle } from "@/context/ThemeContext";
 import { useStudioModelStore, MODELS as STUDIO_MODELS } from "@/app/(app)/studio/stores/useStudioModelStore";
@@ -1316,7 +1318,7 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
           </div>
         )}
         <div className="mt-2 text-[10px] text-white/40">
-          Voice transcription: <span className="text-white/60">Groq Whisper</span>
+          Media transcription: <span className="text-white/60">Gemini · gemini-3.5-flash</span>
         </div>
       </SettingsCard>
 
@@ -1383,16 +1385,20 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
 function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const [micStatus, setMicStatus] = useState<"unknown" | "available" | "denied" | "error">("unknown");
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedMic, setSelectedMic] = useState<string>("default");
-  const [cameraStatus, setCameraStatus] = useState<"unknown" | "available" | "denied" | "error" | "unsupported">("unknown");
-  const [voiceSettings, setVoiceSettings] = useState({
-    autoSend: false,
-    silenceTimeout: 2000,
-    bargeIn: true,
-    playbackSpeed: "normal",
-    spokenLength: "medium",
+  // The selected input device persists under the same localStorage key
+  // VoiceSessionContext and the mic mixer read (litt:voice:deviceId), so
+  // the device picked here is the device the Studio session captures.
+  const [selectedMic, setSelectedMic] = useState<string>(() => {
+    if (typeof window === "undefined") return "default";
+    try {
+      return localStorage.getItem(DEVICE_ID_STORAGE_KEY) ?? "default";
+    } catch {
+      return "default";
+    }
   });
+  const [cameraStatus, setCameraStatus] = useState<"unknown" | "available" | "denied" | "error" | "unsupported">("unknown");
   const [voicePreviewing, setVoicePreviewing] = useState<string | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [inworldStatus, setInworldStatus] = useState<{
     configured: boolean;
     apiKey: boolean;
@@ -1494,12 +1500,40 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
 
   const previewVoice = useCallback(async (agentId: "litt") => {
     setVoicePreviewing(agentId);
-    try {
-      const sampleText = "Connection established. I'm scanning the project now.";
+    const sampleText = "Connection established. I'm scanning the project now.";
+    const done = () => setVoicePreviewing(null);
 
-      // Use browser speechSynthesis for preview — the real voice is Inworld's
-      // live realtime API, which can't be previewed with a simple TTS call.
-      // This browser preview gives a rough idea of pacing/tone.
+    // Preview through the REAL speech path: POST /api/voice/tts is the
+    // server-side TTS the Studio speak chain itself uses (OpenAI tts-1).
+    // Only when that endpoint fails do we fall back to the browser's
+    // speechSynthesis — the same last resort as the Studio chain, never
+    // the first choice, so the preview is not silently the wrong voice.
+    try {
+      const res = await fetch("/api/voice/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: sampleText, voice: "onyx" }),
+      });
+      if (res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { audioUrl?: unknown };
+        if (typeof data?.audioUrl === "string" && data.audioUrl) {
+          if (previewAudioRef.current) {
+            previewAudioRef.current.pause();
+            previewAudioRef.current = null;
+          }
+          const audio = new Audio(data.audioUrl);
+          previewAudioRef.current = audio;
+          audio.onended = () => { previewAudioRef.current = null; done(); };
+          audio.onerror = () => { previewAudioRef.current = null; done(); };
+          await audio.play();
+          return;
+        }
+      }
+    } catch {
+      // Endpoint unreachable — fall through to the last-resort browser voice.
+    }
+
+    try {
       if (typeof window !== "undefined" && window.speechSynthesis) {
         const { pickBrowserVoice, getBrowserVoiceConfig } = await import("@/features/voice/lib/voiceConfig");
         const synth = window.speechSynthesis;
@@ -1511,21 +1545,21 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
           utt.pitch = config.pitch;
           utt.volume = config.volume;
           if (voice) { utt.voice = voice; utt.lang = voice.lang; }
-          utt.onend = () => setVoicePreviewing(null);
-          utt.onerror = () => setVoicePreviewing(null);
+          utt.onend = done;
+          utt.onerror = done;
           synth.cancel();
           synth.speak(utt);
         };
         if (synth.getVoices().length > 0) speak();
         else {
           synth.onvoiceschanged = () => { synth.onvoiceschanged = null; speak(); };
-          setTimeout(() => { if (synth.getVoices().length > 0) speak(); else setVoicePreviewing(null); }, 1000);
+          setTimeout(() => { if (synth.getVoices().length > 0) speak(); else done(); }, 1000);
         }
       } else {
-        setVoicePreviewing(null);
+        done();
       }
     } catch {
-      setVoicePreviewing(null);
+      done();
     }
   }, []);
 
@@ -1662,7 +1696,16 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
               <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Selected device</span>
               <select
                 value={selectedMic}
-                onChange={(e) => setSelectedMic(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setSelectedMic(next);
+                  try {
+                    // "default" means "let the OS decide" — the capture
+                    // constraints treat a missing key exactly that way.
+                    if (next === "default") localStorage.removeItem(DEVICE_ID_STORAGE_KEY);
+                    else localStorage.setItem(DEVICE_ID_STORAGE_KEY, next);
+                  } catch { /* non-fatal — selection still applies to this view */ }
+                }}
                 className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none"
               >
                 {micDevices.map((d) => (
@@ -1706,7 +1749,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
       <SettingsCard title="Agent voice" description="LiTT voice identity" icon={<Volume2 size={16} />}>
         <div className="space-y-3">
           <p className="text-[10px] text-white/40">
-            Voice is powered by Inworld realtime API. Preview uses your browser&apos;s built-in speech synthesis for a rough demo — the actual voice in the Studio is Inworld&apos;s neural voice.
+            Live Studio voice sessions are powered by Inworld&apos;s realtime API. Preview plays through the same server speech service the Studio speak chain uses — your browser&apos;s built-in voice only steps in as a last resort if that service is unreachable.
           </p>
           {[
             { id: "litt" as const, name: "LiTT", style: "Deep · Calm · Precise", color: brand.primary.DEFAULT, sample: "Connection established. I'm scanning the project now." },
@@ -1740,24 +1783,26 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
                   <div className="mt-1.5 text-emerald-400">Inworld realtime voice is configured and ready.</div>
                 ) : (
                   <div className="mt-1.5 text-amber-400">
-                    Inworld is not configured. Set INWORLD_API_KEY and INWORLD_LITT_VOICE in Vercel env.
+                    Inworld is not configured. Set INWORLD_API_KEY and INWORLD_LITT_VOICE in the web service&apos;s Railway variables.
                   </div>
                 )}
               </div>
 
-              {/* LiveKit status — the newer preferred realtime transport */}
+              {/* LiveKit status — a separate transport for non-Studio features.
+                  Studio voice sessions run on the Inworld transport above and
+                  never use LiveKit; this block must not claim otherwise. */}
               {livekitStatus && (
                 <div className="mt-3 border-t border-white/5 pt-2.5">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Realtime transport (LiveKit)</div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">LiveKit (separate features — not the Studio voice transport)</div>
                   <div className="mt-1.5 space-y-1 text-[10px] text-white/60">
                     <div>LIVEKIT_URL: <span className={livekitStatus.url ? "text-emerald-400" : "text-red-400"}>{livekitStatus.url ? "Set" : "Missing"}</span></div>
                     <div>LIVEKIT_API_KEY: <span className={livekitStatus.apiKey ? "text-emerald-400" : "text-red-400"}>{livekitStatus.apiKey ? "Set" : "Missing"}</span></div>
                     <div>LIVEKIT_API_SECRET: <span className={livekitStatus.apiSecret ? "text-emerald-400" : "text-red-400"}>{livekitStatus.apiSecret ? "Set" : "Missing"}</span></div>
                     {livekitStatus.configured ? (
-                      <div className="mt-1.5 text-emerald-400">LiveKit realtime voice is configured and ready. This is the preferred transport for Studio voice sessions.</div>
+                      <div className="mt-1.5 text-emerald-400">LiveKit is configured and ready for the features that use it. Studio voice sessions run on the Inworld transport above, not LiveKit.</div>
                     ) : (
                       <div className="mt-1.5 text-amber-400">
-                        LiveKit is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET in Vercel env to enable realtime voice in the Studio.
+                        LiveKit is not configured. Studio voice does not need it — it uses Inworld above. Set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET in the web service&apos;s Railway variables to enable the LiveKit-based features.
                       </div>
                     )}
                   </div>
@@ -1813,44 +1858,12 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
         </div>
       </SettingsCard>
 
-      {/* Voice settings */}
-      <SettingsCard title="Voice" description="Speech and playback" icon={<Volume2 size={16} />}>
-        <div className="space-y-3">
-          <ToggleRow title="Auto-send" description="Send message when you stop speaking" checked={voiceSettings.autoSend} onChange={(v) => setVoiceSettings({ ...voiceSettings, autoSend: v })} />
-          <ToggleRow title="Barge-in" description="Speak to interrupt AI response" checked={voiceSettings.bargeIn} onChange={(v) => setVoiceSettings({ ...voiceSettings, bargeIn: v })} />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Silence timeout (ms)</span>
-              <input type="number" value={voiceSettings.silenceTimeout} onChange={(e) => setVoiceSettings({ ...voiceSettings, silenceTimeout: +e.target.value })}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none" />
-            </div>
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Playback speed</span>
-              <div className="mt-1 flex gap-2">
-                {["slow", "normal", "fast"].map((v) => (
-                  <button key={v} type="button" onClick={() => setVoiceSettings({ ...voiceSettings, playbackSpeed: v })}
-                    className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize"
-                    style={{ borderColor: voiceSettings.playbackSpeed === v ? T.accentColor : "rgba(255,255,255,0.08)", color: voiceSettings.playbackSpeed === v ? T.accentColor : "rgba(255,255,255,0.5)" }}>
-                    {v}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Spoken response length</span>
-            <div className="mt-1 flex gap-2">
-              {["short", "medium", "long"].map((v) => (
-                <button key={v} type="button" onClick={() => setVoiceSettings({ ...voiceSettings, spokenLength: v })}
-                  className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize"
-                  style={{ borderColor: voiceSettings.spokenLength === v ? T.accentColor : "rgba(255,255,255,0.08)", color: voiceSettings.spokenLength === v ? T.accentColor : "rgba(255,255,255,0.5)" }}>
-                  {v}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </SettingsCard>
+      {/* Voice settings — wired to the real preference store the Studio
+          voice session reads (see VoicePreferencesCard). The controls
+          that used to live here with no consumer anywhere (barge-in,
+          silence timeout, playback speed, spoken length) were removed
+          instead of being left as decoration. */}
+      <VoicePreferencesCard />
     </div>
   );
 }
