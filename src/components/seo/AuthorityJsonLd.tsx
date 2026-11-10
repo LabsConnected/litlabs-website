@@ -14,7 +14,7 @@ export function AuthorityJsonLd() {
         "https://x.com/LabsConnected",
         "https://github.com/LabsConnected"
       ],
-      "description": "LiTTree LabStudios is an AI creative platform for building apps, creating media, and preserving project context."
+      "description": "LiTTree LabStudios builds LiTT, the AI Project Operator — an AI software-building workspace for turning ideas into real, ownable projects."
     },
     {
       "@context": "https://schema.org",
@@ -39,7 +39,7 @@ export function AuthorityJsonLd() {
       "applicationCategory": "DeveloperApplication, MultimediaApplication",
       "operatingSystem": "Web",
       "url": absoluteUrl("/studio"),
-      "description": "An AI-powered creative operating system for building apps and creating media.",
+      "description": "LiTT is the AI Project Operator by LiTTree LabStudios — an AI software-building workspace: describe, generate, preview, edit, verify, and publish real projects.",
       "creator": {
         "@type": "Organization",
         "name": SITE_NAME

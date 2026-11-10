@@ -7,7 +7,7 @@ This document provides a comprehensive machine-readable guide to LiTTree LabStud
 **Company Name:** LiTTree LabStudios
 **Product Name:** LiTTree / LitLabs
 **Primary Domain:** [https://www.litlabs.net](https://www.litlabs.net)
-**Mission:** To build an AI-powered creative operating system where humans and AI collaborate to build working products and media with total context and control.
+**Mission:** To build the AI Project Operator — an AI software-building workspace where humans and AI collaborate to build working products with total context and control.
 
 ## 2. Core AI Agents
 

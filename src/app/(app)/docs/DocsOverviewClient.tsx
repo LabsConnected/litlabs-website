@@ -250,9 +250,10 @@ export default function DocsOverviewClient() {
         >
           Marketplace
         </Link>{" "}
-        offers specialist agents you can install into your workspace — for
-        code review, content, support, analytics, and more. Installing
-        requires an account. Details in{" "}
+        is the public beta roadmap of capabilities being built into LiTT —
+        specialist tools, workflows, integrations, and agents. Every listing
+        is currently labeled Coming Soon: nothing is installable yet, and the
+        Marketplace never pretends otherwise. Details in{" "}
         <Link
           href="/docs/marketplace"
           className="font-bold underline decoration-dotted underline-offset-4"
