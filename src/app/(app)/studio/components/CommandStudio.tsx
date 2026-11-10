@@ -18,7 +18,7 @@ import { resolveSelectedModelHealth } from "../lib/model-health";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
 import { downloadProjectExport } from "../lib/export-project";
 import { isOptimisticConversationId } from "../lib/optimistic-conversation";
-import { latestRunOutcome, latestRunActivity } from "../lib/last-run-outcome";
+import { latestRunOutcome, latestRunActivity, projectLastRun } from "../lib/last-run-outcome";
 import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
@@ -2658,8 +2658,82 @@ function CommandStudioContent() {
   // the last run failed — so the header pill, operator bar, and Activity
   // tab all derive the settled outcome from the messages instead, and
   // can never disagree with the transcript.
-  const lastRunFailed = latestRunOutcome(conversation.messages) === "failed";
+  const selectedRunOutcome = latestRunOutcome(conversation.messages);
   const lastRunActivity = latestRunActivity(conversation.messages);
+
+  // Project-level fallback (wave-3 Finding 3): when the OPEN conversation
+  // has no settled run of its own — a fresh conversation in a project
+  // whose only build failed — the header must still reflect the PROJECT's
+  // last run, not a bare green "Ready". The store selectors scan the
+  // project's conversations in recency order (open conversation first)
+  // through the same projectLastRun derivation; they return primitives,
+  // so this component re-renders only when the truth actually changes.
+  const projectRunOutcome = useConversationStore((s) => {
+    const selectedId = s.selectedConversationId;
+    const byId = s.messagesByConversationId ?? {};
+    const ordered: (readonly { role: string; status?: string | null; content?: string | null }[] | undefined)[] = [];
+    if (selectedId) ordered.push(byId[selectedId]);
+    for (const c of s.conversations) {
+      if (c.id !== selectedId) ordered.push(byId[c.id]);
+    }
+    return projectLastRun(ordered)?.outcome ?? null;
+  });
+  const projectRunFailureNote = useConversationStore((s) => {
+    const selectedId = s.selectedConversationId;
+    const byId = s.messagesByConversationId ?? {};
+    const ordered: (readonly { role: string; status?: string | null; content?: string | null }[] | undefined)[] = [];
+    if (selectedId) ordered.push(byId[selectedId]);
+    for (const c of s.conversations) {
+      if (c.id !== selectedId) ordered.push(byId[c.id]);
+    }
+    const truth = projectLastRun(ordered);
+    return truth?.outcome === "failed" ? truth.failureNote : null;
+  });
+  // Which conversations already have messages in the store — a joined
+  // primitive, so the fallback loader below re-runs only when the set of
+  // loaded conversations actually changes.
+  const loadedConversationIds = useConversationStore((s) =>
+    Object.keys(s.messagesByConversationId ?? {}).join(""),
+  );
+  const lastRunFailed = (selectedRunOutcome ?? projectRunOutcome) === "failed";
+  const lastRunFailureNote = projectRunFailureNote;
+
+  // Load the project's other conversations (most recent first, bounded)
+  // until a settled run surfaces for the fallback above. Without this,
+  // a reload straight into a fresh conversation would never see the
+  // failed run that lives in the previous conversation's messages.
+  const fallbackLoadsRef = useRef<{ projectKey: string; attempted: Set<string> }>({
+    projectKey: "",
+    attempted: new Set<string>(),
+  });
+  useEffect(() => {
+    if (selectedRunOutcome !== null || projectRunOutcome !== null) return;
+    const projectKey = activeProjectId ?? capabilities.projectId ?? "";
+    if (fallbackLoadsRef.current.projectKey !== projectKey) {
+      fallbackLoadsRef.current = { projectKey, attempted: new Set<string>() };
+    }
+    const attempted = fallbackLoadsRef.current.attempted;
+    if (attempted.size >= 5) return;
+    const loadedIds = new Set(loadedConversationIds ? loadedConversationIds.split(" ") : []);
+    const next = conversation.conversations.find(
+      (c) =>
+        c.id !== conversation.selectedConversationId &&
+        !attempted.has(c.id) &&
+        !loadedIds.has(c.id),
+    );
+    if (!next) return;
+    attempted.add(next.id);
+    void conversation.loadMessages(next.id);
+  }, [
+    selectedRunOutcome,
+    projectRunOutcome,
+    loadedConversationIds,
+    conversation.conversations,
+    conversation.selectedConversationId,
+    conversation.loadMessages,
+    activeProjectId,
+    capabilities.projectId,
+  ]);
 
   // The LiTT command layer: transcript region (expanded) + composer bar
   // (always visible). Shared with the mobile sheet / classic panel paths
@@ -2861,6 +2935,7 @@ function CommandStudioContent() {
             sourceStatus={capabilities.sourceStatus}
             versionControl={capabilities.versionControl}
             workspaceStatus={capabilities.workspaceStatus ?? null}
+            lastRunFailureNote={lastRunFailureNote}
             onSelectionChange={setPreviewSelection}
           />
         );
@@ -3467,6 +3542,7 @@ function CommandStudioContent() {
                       sourceStatus={capabilities.sourceStatus}
                       versionControl={capabilities.versionControl}
                       workspaceStatus={capabilities.workspaceStatus ?? null}
+                      lastRunFailureNote={lastRunFailureNote}
                       onSelectionChange={setPreviewSelection}
                     />
                   </div>

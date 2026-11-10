@@ -32,10 +32,27 @@ export interface TerminalHealthInput {
   error?: string | null;
 }
 
+/**
+ * States that mean an actual terminal operation was attempted and failed
+ * (socket/session errors during an attach). Only these may wear the red
+ * "Terminal error" label.
+ */
 const ERROR_STATES: ReadonlySet<TerminalStatus> = new Set([
   "error",
   "auth_failed",
   "pty_failed",
+]);
+
+/**
+ * States that mean the terminal is simply not available — NOT a failure:
+ * "unavailable" is set for the TERMINAL_DISABLED deploy-time policy
+ * verdict (TerminalPanel documents it as "a policy state, not a socket
+ * failure") and for project-isolation verdicts; "project_context_missing"
+ * means no project workspace resolved for the attach. An idle Studio
+ * must read these calmly (wave-3, Larry's screenshot 2026-11-10: the
+ * operator bar branded an untouched Studio "Terminal error").
+ */
+const UNAVAILABLE_STATES: ReadonlySet<TerminalStatus> = new Set([
   "unavailable",
   "project_context_missing",
 ]);
@@ -62,7 +79,21 @@ export function deriveTerminalHealth(input: TerminalHealthInput): TerminalHealth
       detail: error || "The terminal session failed. It retries automatically.",
     };
   }
-  // disconnected: the PTY is not attached — the server decides idle vs down.
+  if (UNAVAILABLE_STATES.has(storeStatus)) {
+    return {
+      state: "idle",
+      level: "yellow",
+      label: "Terminal unavailable",
+      detail: error || (storeStatus === "project_context_missing"
+        ? "The terminal needs a project workspace before it can connect."
+        : "The terminal is not available in this environment."),
+    };
+  }
+  // disconnected: the PTY is not attached — calm in both server cases.
+  // serverReachable starts false until the first successful probe
+  // (useConnectionSummary), so red/down here painted a false alarm on
+  // every fresh load. Whether the server can execute is the runtime
+  // phase's truth (terminal_unreachable), not this label's.
   if (serverReachable === true) {
     return {
       state: "idle",
@@ -73,10 +104,10 @@ export function deriveTerminalHealth(input: TerminalHealthInput): TerminalHealth
   }
   if (serverReachable === false) {
     return {
-      state: "down",
-      level: "red",
+      state: "idle",
+      level: "yellow",
       label: "Terminal unavailable",
-      detail: error || "Terminal server is unreachable.",
+      detail: error || "No shell is attached and the terminal server has not answered. It connects when a session starts.",
     };
   }
   return {

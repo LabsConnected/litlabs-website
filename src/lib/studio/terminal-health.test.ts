@@ -16,9 +16,32 @@ describe("deriveTerminalHealth — one canonical terminal state", () => {
       .toMatchObject({ state: "idle", label: "Terminal idle" });
   });
 
-  it("an unreachable server is down/red", () => {
+  it("a disconnected PTY with an unconfirmed server is calm, not red", () => {
+    // Wave-3 (Larry's screenshot, 2026-11-10): a fresh, idle Studio painted
+    // red terminal states before anything had failed. serverReachable is
+    // false until the first successful probe (useConnectionSummary), so
+    // red/down here fired by default on every load. The PTY simply is not
+    // attached — server-down truth for execution lives in the runtime
+    // phase, not in this label. Label stays honest, level/state calm.
     expect(deriveTerminalHealth({ storeStatus: "disconnected", cwd: null, serverReachable: false }))
-      .toMatchObject({ state: "down", level: "red", label: "Terminal unavailable" });
+      .toMatchObject({ state: "idle", level: "yellow", label: "Terminal unavailable" });
+  });
+
+  it("policy/context states are unavailable, never 'Terminal error'", () => {
+    // "unavailable" is set for the TERMINAL_DISABLED deploy-time verdict
+    // (TerminalPanel: "a policy state, not a socket failure") and for
+    // isolation verdicts; "project_context_missing" means no project
+    // workspace resolved. Neither is a failed terminal operation, so
+    // neither may wear the red error label in an idle Studio.
+    expect(deriveTerminalHealth({ storeStatus: "unavailable", cwd: null, serverReachable: true, error: "Terminal is disabled" }))
+      .toMatchObject({ state: "idle", level: "yellow", label: "Terminal unavailable", detail: "Terminal is disabled" });
+    expect(deriveTerminalHealth({ storeStatus: "project_context_missing", cwd: null, serverReachable: true }))
+      .toMatchObject({ state: "idle", level: "yellow", label: "Terminal unavailable" });
+  });
+
+  it("pty_failed is a real failed operation and stays red", () => {
+    expect(deriveTerminalHealth({ storeStatus: "pty_failed", cwd: null, serverReachable: true, error: "spawn failed" }))
+      .toMatchObject({ state: "down", level: "red", label: "Terminal error", detail: "spawn failed" });
   });
 
   it("error states are red and carry the real error", () => {
