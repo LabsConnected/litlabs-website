@@ -245,6 +245,22 @@ export function mapProgressEventToActionEvent(
           label: `Run cancelled: ${event.reason}`,
         },
       };
+    case "route_plan": {
+      const planned = event.routes.map((r) => r.provider).join(", ");
+      const skipped = event.excluded.map((e) => e.provider).join(", ");
+      return {
+        type: "agent.status",
+        payload: {
+          ...basePayload(event),
+          kind: "route_plan",
+          routes: event.routes,
+          excluded: event.excluded,
+          label:
+            `Route plan: ${planned || "none"}` +
+            (event.excluded.length > 0 ? ` — excluded: ${skipped}` : ""),
+        },
+      };
+    }
     case "model_failed":
       return {
         type: "agent.status",

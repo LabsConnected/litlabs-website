@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { createConversation, listConversations } from "@/lib/studio/conversation-service";
+import { createConversation, findReusableEmptyConversation, listConversations } from "@/lib/studio/conversation-service";
 import { isValidAgentSlug } from "@/lib/studio/agent-registry";
 import { studioLog } from "@/lib/studio/logger";
 import type { AgentSlug } from "@/lib/studio/types";
@@ -59,6 +59,22 @@ async function postHandler(req: NextRequest) {
   const title = typeof body.title === "string" ? body.title.trim().slice(0, 120) || null : null;
   const rawAgentSlug = body.activeAgentSlug;
   const activeAgentSlug: AgentSlug = isValidAgentSlug(rawAgentSlug as string) ? rawAgentSlug as AgentSlug : "litt";
+
+  // Empty-conversation hygiene: a bare "New Chat" (no explicit title)
+  // focuses an existing empty, untitled conversation in this project
+  // instead of minting another record. Explicitly titled creations
+  // always create.
+  if (title === null) {
+    const reusable = await findReusableEmptyConversation(userId, projectId, { activeAgentSlug });
+    if (reusable) {
+      studioLog("conversation:reused", {
+        conversationId: reusable.id,
+        projectId,
+        userId,
+      });
+      return NextResponse.json({ conversation: reusable, projectId, reused: true }, { status: 200 });
+    }
+  }
 
   // Server generates ID, sets owner, sets revision to 1
   // Caller-provided id, ownerId, revision are ignored

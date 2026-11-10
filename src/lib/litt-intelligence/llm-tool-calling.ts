@@ -1873,6 +1873,24 @@ export class AllRoutesFailedError extends Error {
   }
 }
 
+/**
+ * Route-plan summary reported via `onRoutePlan` — the honest plan record
+ * for one call: the ordered routes the planner produced (with candidate
+ * models) plus every exclusion with its reason, including per-model
+ * deterministic exclusions the attempt loop would otherwise only log
+ * (token-ceiling / context-window / cooldown skips). Provider/model
+ * names and reason codes only — never secrets.
+ */
+export interface RoutePlanSummary {
+  routes: Array<{
+    provider: string;
+    models: string[];
+    costClass: PlannedProvider["costClass"];
+  }>;
+  excluded: Array<{ provider: string; reason: string }>;
+  estimatedRequestTokens: number;
+}
+
 function buildAllFailedMessage(
   failures: RouteAttemptFailure[],
   excluded: Array<{ provider: string; reason: string }>,
@@ -1978,6 +1996,13 @@ export async function callLLMWithTools(
      * single-pass cost semantics; the agent loop opts in.
      */
     allowTransientPlanRetry?: boolean;
+    /**
+     * Route-plan observer: invoked once per call with the final computed
+     * plan (after any zero-route cooldown replan), before attempts begin
+     * — including when the plan is empty and the call is about to throw.
+     * Observer errors are swallowed: reporting must never break the call.
+     */
+    onRoutePlan?: (summary: RoutePlanSummary) => void;
   },
 ): Promise<LLMToolCallResponse> {
   const requirements: RouteRequirements = {
@@ -2080,19 +2105,57 @@ export async function callLLMWithTools(
     }
   }
 
+  // Honest plan record (route honesty): plan-level exclusions from the
+  // registry plus the per-model deterministic exclusions this call will
+  // apply (token ceiling / context window / model cooldown). Those
+  // models will never be attempted for this request — they belong in
+  // the record as EXCLUDED with a reason, not as attempt failures.
+  const planModelExclusions: Array<{ provider: string; reason: string }> = [];
+  for (const route of plan.providers) {
+    for (const model of route.models) {
+      const reason = routeModelSkipReason(
+        route,
+        model,
+        estimatedRequestTokens,
+        contextAdjustedRequestTokens,
+      );
+      if (reason !== null) {
+        planModelExclusions.push({ provider: route.provider, reason: `${reason}:${model}` });
+      }
+    }
+  }
+  const callExcluded: Array<{ provider: string; reason: string }> = [...plan.excluded];
+  if (options?.onRoutePlan) {
+    try {
+      options.onRoutePlan({
+        routes: plan.providers.map((route) => ({
+          provider: route.provider,
+          models: [...route.models],
+          costClass: route.costClass,
+        })),
+        excluded: [...plan.excluded, ...planModelExclusions],
+        estimatedRequestTokens,
+      });
+    } catch {
+      // A broken observer must never break the call.
+    }
+  }
+
   if (plan.providers.length === 0) {
     logRoute("no_eligible_routes", {
       excluded: plan.excluded.map((e) => `${e.provider}:${e.reason}`).join(","),
       remainingBudgetMs: options?.deadlineMs ? Math.max(0, options.deadlineMs - Date.now()) : undefined,
     });
-    throw new AllRoutesFailedError(failures, plan.excluded);
+    throw new AllRoutesFailedError(failures, callExcluded);
   }
   if (attemptableModels === 0) {
     // Providers exist but every model is cooling or cannot fit this
     // request — surface it in diagnostics instead of silently skipping.
     logRoute("no_attemptable_routes", {
       providers: plan.providers.map((p) => p.provider).join(","),
-      excluded: plan.excluded.map((e) => `${e.provider}:${e.reason}`).join(","),
+      excluded: [...plan.excluded, ...planModelExclusions]
+        .map((e) => `${e.provider}:${e.reason}`)
+        .join(","),
       estimatedRequestTokens,
       remainingBudgetMs: options?.deadlineMs ? Math.max(0, options.deadlineMs - Date.now()) : undefined,
     });
@@ -2113,6 +2176,7 @@ export async function callLLMWithTools(
         contextAdjustedRequestTokens,
       );
       if (skipReason === "model_cooldown") {
+        callExcluded.push({ provider: route.provider, reason: `model_cooldown:${model}` });
         logRoute("model_skipped", { provider: route.provider, model, reason: "model_cooldown" });
         continue;
       }
@@ -2124,10 +2188,12 @@ export async function callLLMWithTools(
       //   - context window (Cloudflare llama-3.3 is 24K TOTAL incl.
       //     output — a borderline estimate became a guaranteed 400 at
       //     24,001 actual tokens, staging iter-3)
-      // Both push a model_unavailable failure for diagnostics but, like
-      // model cooldowns, record NO model failure — a request-shape
-      // rejection says nothing about the model's health for smaller
-      // requests, so it must not burn the 10-minute model cooldown.
+      // Both are recorded as EXCLUSIONS with their reason (route
+      // honesty) — never as attempt failures: the model was not tried
+      // and did not refuse. Like model cooldowns they record NO model
+      // failure — a request-shape rejection says nothing about the
+      // model's health for smaller requests, so it must not burn the
+      // 10-minute model cooldown.
       if (
         skipReason === "request_exceeds_route_token_ceiling" ||
         skipReason === "request_exceeds_model_context_window"
@@ -2136,16 +2202,7 @@ export async function callLLMWithTools(
           skipReason === "request_exceeds_route_token_ceiling"
             ? route.requestTokenCeiling
             : route.contextWindows?.[model];
-        failures.push({
-          provider: route.provider,
-          model,
-          class: "model_unavailable",
-          latencyMs: 0,
-          message:
-            skipReason === "request_exceeds_route_token_ceiling"
-              ? `request ~${estimatedRequestTokens} tokens exceeds ${route.provider} per-request ceiling ${limit}`
-              : `request ~${contextAdjustedRequestTokens} adjusted tokens exceeds ${model} context window ${limit}`,
-        });
+        callExcluded.push({ provider: route.provider, reason: `${skipReason}:${model}` });
         logRoute("attempt_skipped", {
           provider: route.provider,
           model,
@@ -2435,10 +2492,12 @@ export async function callLLMWithTools(
   //     network / server_error / rate_limited) — a storm of only
   //     deterministic rejections has nothing to recover from.
   //   - model_unavailable is retry-NEUTRAL, not blocking: it covers
-  //     deterministic request/route rejections (token ceilings, context
-  //     windows, provider 400/404s) that recur identically but say
-  //     nothing about transient-lane health. In iter-3 the retry was
-  //     vetoed by exactly this mix (gemini 503 + ceiling/context 400s).
+  //     deterministic route rejections from real attempts (provider
+  //     400/404s) that recur identically but say nothing about
+  //     transient-lane health. (Token-ceiling / context-window skips
+  //     are recorded as exclusions, not failures, and never enter this
+  //     computation.) In iter-3 the retry was vetoed by exactly this
+  //     mix (gemini 503 + ceiling/context 400s).
   //   - permanent failures (auth_invalid / billing / forbidden) and
   //     bad_response still veto — a dead credential or malformed-output
   //     pattern does not heal in 2 seconds.
@@ -2469,7 +2528,7 @@ export async function callLLMWithTools(
     });
   }
 
-  throw new AllRoutesFailedError(failures, plan.excluded);
+  throw new AllRoutesFailedError(failures, callExcluded);
 }
 
 // ─── Format tool results for LLM ──────────────────────────────────

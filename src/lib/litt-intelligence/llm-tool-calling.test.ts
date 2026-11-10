@@ -2155,3 +2155,92 @@ describe("callLLMWithTools — bounded whole-plan transient retry", () => {
     expect(callsTo("generativelanguage")).toHaveLength(1);
   });
 });
+
+describe("callLLMWithTools — route honesty (exclusions + plan reporting)", () => {
+  it("records a Groq ceiling skip as an exclusion, not an attempt failure", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+
+    const err = await callLLMWithTools(
+      // ~20k chars ≈ 5k tokens + 4k declared max_tokens = 9k > 8k ceiling.
+      "x".repeat(20_000),
+      [{ role: "user", content: "hi" }],
+      [],
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(AllRoutesFailedError);
+    const failed = err as AllRoutesFailedError;
+    // Groq was never attempted — the record must say EXCLUDED with the
+    // ceiling reason, not list it as a failed attempt.
+    expect(failed.failures.some((f) => f.provider === "groq")).toBe(false);
+    expect(
+      failed.excluded.some(
+        (e) =>
+          e.provider === "groq" &&
+          e.reason.includes("request_exceeds_route_token_ceiling"),
+      ),
+    ).toBe(true);
+    expect(callsTo("api.groq.com")).toHaveLength(0);
+  });
+
+  it("reports the computed route plan via onRoutePlan, exclusions included", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValue(makeGeminiSuccessResponse("ok"));
+    const onRoutePlan = vi.fn();
+
+    const result = await callLLMWithTools(
+      "x".repeat(20_000),
+      [{ role: "user", content: "hi" }],
+      [],
+      { onRoutePlan },
+    );
+
+    expect(result.provider).toBe("gemini");
+    expect(onRoutePlan).toHaveBeenCalledTimes(1);
+    const summary = onRoutePlan.mock.calls[0][0] as {
+      routes: Array<{ provider: string; models: string[] }>;
+      excluded: Array<{ provider: string; reason: string }>;
+      estimatedRequestTokens: number;
+    };
+    expect(summary.routes.map((r) => r.provider)).toContain("gemini");
+    expect(summary.routes.map((r) => r.provider)).toContain("groq");
+    expect(
+      summary.excluded.some(
+        (e) =>
+          e.provider === "groq" &&
+          e.reason.includes("request_exceeds_route_token_ceiling"),
+      ),
+    ).toBe(true);
+    expect(summary.estimatedRequestTokens).toBeGreaterThan(8_000);
+  });
+
+  it("still reports the plan when zero routes are eligible", async () => {
+    const onRoutePlan = vi.fn();
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "hi" }], [], { onRoutePlan }),
+    ).rejects.toThrow(AllRoutesFailedError);
+    expect(onRoutePlan).toHaveBeenCalledTimes(1);
+    const summary = onRoutePlan.mock.calls[0][0] as {
+      routes: unknown[];
+      excluded: Array<{ provider: string; reason: string }>;
+    };
+    expect(summary.routes).toHaveLength(0);
+    expect(summary.excluded.length).toBeGreaterThan(0);
+  });
+
+  it("a throwing onRoutePlan observer never breaks the call", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch.mockResolvedValue(makeGeminiSuccessResponse("ok"));
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [],
+      {
+        onRoutePlan: () => {
+          throw new Error("observer boom");
+        },
+      },
+    );
+    expect(result.text).toBe("ok");
+  });
+});
