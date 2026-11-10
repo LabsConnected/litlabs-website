@@ -28,7 +28,8 @@ export type SkinPreset =
   | "blood"
   | "cosmic"
   | "miami"
-  | "honeycomb";
+  | "honeycomb"
+  | "signature";
 
 // Layout style — controls visual structure, not just color
 export type LayoutStyle =
@@ -52,7 +53,8 @@ export type AccentColor =
   | "matrix-green"
   | "sunset-orange"
   | "ocean-blue"
-  | "purple-haze";
+  | "purple-haze"
+  | "signature-green";
 
 // Theme structure
 export interface Theme {
@@ -238,6 +240,19 @@ const darkSkins: Record<
     accentColor: "#f59e0b",
     boxBg: "#1a1510",
   },
+  // LiTT Signature is LIGHT-LOCKED by design: the approved homepage design
+  // is a true-white / deep-green light theme, so the "dark" entry carries
+  // the same light tokens as lightSkins.signature. A device or mode flip
+  // must never repaint it black/green (Larry's phone dark-mode incident).
+  signature: {
+    bgColor: "#FFFFFF",
+    textColor: "#0E1510",
+    linkColor: "#177A36",
+    headerColor: "#0C5A26",
+    borderColor: "#CFDEC4",
+    accentColor: "#177A36",
+    boxBg: "#FFFFFF",
+  },
 };
 
 // Light mode variants — deep navy text for crisp daytime contrast
@@ -406,6 +421,18 @@ const lightSkins: Record<
     accentColor: "#f59e0b",
     boxBg: "#ffffff",
   },
+  // LiTT Signature — tokens lifted from the approved homepage mockup
+  // (--bg #FFFFFF, --ink #0E1510, --accent #177A36, --accent-deep #0C5A26,
+  // --line #CFDEC4). Identical to darkSkins.signature on purpose (light-lock).
+  signature: {
+    bgColor: "#FFFFFF",
+    textColor: "#0E1510",
+    linkColor: "#177A36",
+    headerColor: "#0C5A26",
+    borderColor: "#CFDEC4",
+    accentColor: "#177A36",
+    boxBg: "#FFFFFF",
+  },
 };
 
 // Accent color overrides
@@ -460,6 +487,14 @@ const accentOverrides: Record<
     headerColor: "#d9f99d",
     accentColor: "#a8ff2f",
   },
+  // LiTT Signature: deep green family from the approved homepage mockup —
+  // links sit on true white, so they use the readable mockup accent green
+  // (#177A36) rather than the pale lime tints used on dark skins.
+  "signature-green": {
+    linkColor: "#177A36",
+    headerColor: "#0C5A26",
+    accentColor: "#177A36",
+  },
 };
 
 // Visual pack — a complete preset that applies multiple theme settings at once
@@ -482,6 +517,23 @@ export interface VisualPack {
 }
 
 export const VISUAL_PACKS: VisualPack[] = [
+  {
+    // PROVISIONAL NAME — "LiTT Signature" is a working name (Larry can
+    // rename in this one entry). The approved homepage design as a theme:
+    // true-white surfaces worked into deep green, lime accents, soft glow.
+    // themeMode "light" + light-locked "signature" skin tokens present the
+    // design as designed on every device.
+    id: "litt-signature",
+    name: "LiTT Signature",
+    description:
+      "True-white surfaces worked into deep green with lime accents and a soft glow — the approved homepage design",
+    themeMode: "light",
+    skin: "signature",
+    accent: "signature-green",
+    backgroundMode: "minimal",
+    layoutStyle: "classic",
+    effects: { glow: true, particles: false, motion: true },
+  },
   {
     id: "honeycomb-core",
     name: "Honeycomb Core",
@@ -873,6 +925,7 @@ export const ACCENT_MAP: Record<AccentColor, { hex: string }> = {
   "sunset-orange": { hex: "#f97316" },
   "ocean-blue": { hex: "#0ea5e9" },
   "purple-haze": { hex: "#a855f7" },
+  "signature-green": { hex: "#177A36" },
 };
 
 export { darkSkins, lightSkins, accentOverrides, defaultTheme };
