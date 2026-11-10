@@ -48,9 +48,9 @@ const MORE_MODES: { id: MoreMode; label: string; icon: typeof Puzzle; group: str
 /**
  * CommandStudioNav — premium icon rail (56px wide).
  *
- * Compact vertical icon rail with LiTT green active indicator, purple hover
- * glow, and a plan/usage footer pill. The "More" destination opens a drawer
- * of secondary tools.
+ * Compact vertical icon rail with LiTT green active indicator, soft green
+ * hover treatment, and a plan/usage footer pill. The "More" destination
+ * opens a drawer of secondary tools.
  */
 export default function CommandStudioNav({
   active,
@@ -101,7 +101,7 @@ export default function CommandStudioNav({
                 }
                 onSelect(item.id);
               }}
-              className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-white/8"
+              className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-black/5"
               style={{
                 color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
                 backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -146,7 +146,7 @@ export default function CommandStudioNav({
         {/* LiTTBits balance footer — shows AI credits count */}
         <Link
           href="/wallet"
-          className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-white/8"
+          className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-black/5"
           style={{ color: "var(--text-muted)" }}
           title={`LiTTBits: ${balance.toLocaleString()}`}
           aria-label="View wallet"
@@ -188,7 +188,7 @@ export default function CommandStudioNav({
             height: "calc(100dvh - var(--studio-header-h))",
             backgroundColor: "var(--studio-elevated)",
             borderRight: "1px solid var(--studio-border-strong)",
-            boxShadow: "8px 0 32px rgba(0,0,0,0.5)",
+            boxShadow: "8px 0 32px rgba(14,60,26,0.18)",
             backdropFilter: "blur(12px)",
           }}
         >
@@ -202,7 +202,7 @@ export default function CommandStudioNav({
             <button
               type="button"
               onClick={() => setMoreOpen(false)}
-              className="grid h-7 w-7 place-items-center rounded-lg transition hover:bg-white/10"
+              className="grid h-7 w-7 place-items-center rounded-lg transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Close more tools"
             >
@@ -220,7 +220,7 @@ export default function CommandStudioNav({
                     onSelectMoreMode?.(m.id);
                     setMoreOpen(false);
                   }}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-black/5"
                   style={{ color: "var(--text-secondary)" }}
                 >
                   <Icon size={16} strokeWidth={1.7} className="pointer-events-none shrink-0" />
@@ -231,11 +231,11 @@ export default function CommandStudioNav({
 
             {/* System links */}
             <div className="my-1 h-px" style={{ backgroundColor: "var(--studio-border)" }} />
-            <a href="/settings" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5" style={{ color: "var(--text-secondary)" }}>
+            <a href="/settings" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-black/5" style={{ color: "var(--text-secondary)" }}>
               <SettingsIcon size={16} strokeWidth={1.7} className="pointer-events-none shrink-0" />
               <span className="text-xs font-bold">Settings</span>
             </a>
-            <a href="/settings/connections" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5" style={{ color: "var(--text-secondary)" }}>
+            <a href="/settings/connections" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-black/5" style={{ color: "var(--text-secondary)" }}>
               <Plug size={16} strokeWidth={1.7} className="pointer-events-none shrink-0" />
               <span className="text-xs font-bold">Connections</span>
             </a>
@@ -276,8 +276,8 @@ export function MobileCommandNav({
       style={{
         height: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom))",
         paddingBottom: "env(safe-area-inset-bottom)",
-        backgroundColor: "rgba(7,5,13,0.85)",
-        borderTop: "1px solid rgba(255,255,255,0.07)",
+        backgroundColor: "rgba(255,255,255,0.88)",
+        borderTop: "1px solid var(--studio-border)",
         backdropFilter: "blur(20px)",
         WebkitBackdropFilter: "blur(20px)",
       }}
