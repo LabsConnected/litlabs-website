@@ -22,8 +22,10 @@
  * - Transcript validation gate rejects filler/noise/empty/duplicate transcripts
  *   (see transcript-validation.ts)
  * - Echo isolation: mic is PAUSED during TTS playback and resumed after cooldown
- * - Default UX: stop recording → transcript appears as editable draft → user presses Send.
- *   Auto-send is an opt-in toggle (autoSendEnabled, default false).
+ * - Default UX: stop recording → finalized transcript auto-sends (autoSendEnabled,
+ *   default true per VOICE_GATE_CONFIG.ptt.autoSendDefault). Users who turn
+ *   auto-send off get the editable-draft flow: transcript appears as a draft
+ *   → user presses Send. A stored preference always beats the default.
  * - State machine: idle → requesting_permission → connecting → listening →
  *   processing → transcript_ready → sending → assistant_speaking → idle
  * - Only explicit "End Voice" / unmount / fatal error destroys the session
@@ -251,7 +253,7 @@ const defaultCtx: VoiceSessionCtx = {
   latencies: computeLatencies(createInitialTimingMetrics()),
   ttsEnabled: true,
   voiceAvailable: true,
-  autoSendEnabled: false,
+  autoSendEnabled: VOICE_GATE_CONFIG.ptt.autoSendDefault,
   diagnostics: defaultDiagnostics,
   startVoice: noop,
   stopVoice: noop,
@@ -310,7 +312,8 @@ export function VoiceSessionProvider({
   });
   const [autoSendEnabled, setAutoSendEnabled] = useState<boolean>(() => {
     if (typeof window === "undefined") return VOICE_GATE_CONFIG.ptt.autoSendDefault;
-    return localStorage.getItem(AUTO_SEND_PREF_KEY) === "1";
+    const stored = localStorage.getItem(AUTO_SEND_PREF_KEY);
+    return stored === null ? VOICE_GATE_CONFIG.ptt.autoSendDefault : stored === "1";
   });
   const [voiceAvailable, setVoiceAvailable] = useState<boolean>(true);
   const [diagnostics, setDiagnostics] = useState<VoiceDiagnostics>(defaultDiagnostics);
