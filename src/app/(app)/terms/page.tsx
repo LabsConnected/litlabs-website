@@ -11,7 +11,7 @@ export const metadata: Metadata = buildMetadata({
   index: true,
 });
 
-const UPDATED = "November 7, 2026";
+const UPDATED = "November 10, 2026";
 
 const sections = [
   {
