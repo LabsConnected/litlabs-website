@@ -1,0 +1,62 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Public-pages TLC — the approved homepage design language (homepage-tlc.css,
+   Larry's mockup rounds 1–5, 2026-11-10) extended to the remaining public
+   pages: white worked into green, lime accents, glow/depth, LIGHT-LOCKED
+   (color-scheme: light — these pages never flip dark from a visitor's OS
+   setting, same technique as the homepage).
+
+   Two scopes:
+   - `.litt-public-light` — color-scheme lock for the Tailwind-chromed pages
+     (terms, about, agents, cli). Their colors are set in classNames using
+     the same palette values as homepage-tlc.css.
+   - `.litt-legal` — the var-driven legal pages (privacy, cookies). Those
+     pages paint themselves from the legacy --bg-color / --text-color /
+     --header-color / --link-color / --border-color / --bg-card vars, so
+     re-pointing the vars under this scope re-dresses them without touching
+     a single word of legal text.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.litt-public-light {
+  color-scheme: light;
+}
+
+/* Eyebrow chips on public pages get the homepage's light treatment
+   (same values as `.litt-home .litt-eyebrow` in homepage-tlc.css). */
+.litt-public-light .litt-eyebrow {
+  border-color: color-mix(in srgb, #177a36 30%, transparent);
+  background: #e4f2d6;
+  color: #0c5a26;
+  box-shadow: none;
+}
+
+.litt-legal {
+  color-scheme: light;
+  --bg-color: #ffffff;
+  --bg-card: #ffffff;
+  --text-color: #0e1510;
+  --text-muted: #63745f;
+  --border-color: #cfdec4;
+  --header-color: #0c5a26;
+  --link-color: #177a36;
+  --accent-color: #177a36;
+  --shadow-card: 0 20px 54px rgba(14, 60, 26, 0.14);
+  background:
+    radial-gradient(circle at 85% 4%, rgba(143, 209, 79, 0.1), transparent 26rem),
+    radial-gradient(circle at 10% 30%, rgba(23, 122, 54, 0.05), transparent 24rem),
+    #ffffff;
+}
+
+/* The legal pages' header box: soft green-tinted depth on white, and the
+   shared .lit-box hover border re-pointed from zinc to the brand line. */
+.litt-legal .lit-box {
+  box-shadow: 0 20px 54px rgba(14, 60, 26, 0.1);
+}
+
+.litt-legal .lit-box:hover {
+  border-color: #177a36;
+}
+
+/* .lit-header paints a gradient from --link-color to --header-color; under
+   .litt-legal those are the brand greens, so the band is green-on-green —
+   keep its label readable with the deep-green end darkened via the vars
+   above and full-strength white text (pages already set color: white). */
