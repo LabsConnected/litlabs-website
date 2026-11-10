@@ -169,9 +169,6 @@ export async function enrichStaticSiteVisuals(
         hashedExisting += 1;
       }
     }
-    // Source URLs already resolved this run — providers skip them so two
-    // slots never embed the same photo.
-    const usedImageUrls = new Set<string>();
     const providerAttempts: ProviderAttempt[] = [];
     // One resolve = one persisted image. A provider can pass the URL probe
     // and still fail the download (HTTP 5xx, non-image payload, oversize),

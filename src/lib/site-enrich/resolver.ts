@@ -124,7 +124,6 @@ async function probe(url: string, overall?: AbortSignal): Promise<boolean> {
 
 async function tryPexels(
   keywords: string,
-  seed: number,
   overall?: AbortSignal,
   attempts?: ProviderAttempt[],
   avoidUrls?: ReadonlySet<string>,
