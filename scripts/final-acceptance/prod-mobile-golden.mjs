@@ -731,7 +731,7 @@ async function main() {
           const summary = String(deployCall.summary ?? "");
           productionUrl = productionUrl
             ?? summary.match(/"publicUrl":"(https?:\/\/[^"]+)"/)?.[1]
-            ?? (() => { const id = summary.match(/"deploymentId":"([^"]+)"/)?.[1]; return id ? `${BASE}/sites/${id}` : null; })()
+            ?? (() => { const id = summary.match(/"deploymentId":"([^"]+)"/)?.[1]; return id ? `${BASE}/sites/${id}/` : null; })()
             ?? summary.match(/https?:\/\/[^\s"'\\]+\/sites\/[^\s"'\\]+/)?.[0]
             ?? null;
           deployResult = deployResult ?? {
@@ -781,6 +781,13 @@ async function main() {
         verdict.notes.push("Deploy requested but produced no deploy_result event and no resumable project.deploy pause.");
         step("deploy_result", false, "no deploy evidence");
       }
+
+      // Deployment URLs are directory URLs: relative asset refs in the
+      // served HTML (assets/images/x) only resolve under the deployment
+      // when the base ends in "/". A slash-less base resolves them to
+      // /sites/assets/... — outside the deployment — which is what
+      // produced the image-audit 503s on staging run 42693622298.
+      if (productionUrl && /\/sites\/[^/?#]+$/.test(productionUrl)) productionUrl += "/";
 
       if (productionUrl) {
         // A fresh deployment can take a moment to propagate — retry briefly

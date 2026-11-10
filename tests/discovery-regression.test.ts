@@ -509,21 +509,21 @@ describe("Discovery regression — Round 2 QA fixes", () => {
   });
 });
 
-// ── Trailer playback robustness ──────────────────────────
-// The trailer now lives inside the StudioTour component (final tour step);
-// the source assertions follow it there.
+// ── Trailer removal (Larry's order, 2026-11-10) ──────────
+// The portrait StudioTour trailer (the one with the phone scene) is OFF the
+// homepage for good: the StudioTour section was replaced by the interactive
+// HowItsMade stepper. The assets stay in public/demos; only the page embed
+// was removed. The landscape walkthrough film is the homepage's only video.
 describe("Discovery regression — trailer sources", () => {
-  const tourSrc = readFileSync(
-    path.resolve(__dirname, "../src/components/landing/StudioTour.tsx"),
+  const homeSrc = readFileSync(
+    path.resolve(__dirname, "../src/app/HomePageClient.tsx"),
     "utf-8"
   );
 
-  it("serves a WebM source ahead of the MP4 fallback", () => {
-    expect(tourSrc).toContain('"/demos/litt-trailer.webm"');
-    expect(tourSrc).toContain('"/demos/litt-trailer.mp4"');
-    expect(tourSrc.indexOf("litt-trailer.webm")).toBeLessThan(
-      tourSrc.indexOf("litt-trailer.mp4")
-    );
+  it("keeps the trailer and the old tour off the homepage", () => {
+    expect(homeSrc).not.toContain("litt-trailer");
+    expect(homeSrc).not.toContain("StudioTour");
+    expect(homeSrc).toContain("HowItsMade");
   });
 
   it("ships both trailer assets in public/demos", () => {

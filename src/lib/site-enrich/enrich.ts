@@ -21,9 +21,9 @@ import "server-only";
  */
 
 import { createHash } from "crypto";
-import { insertAssetFromUrl } from "@/lib/litt-intelligence/tool-handlers-v2";
+import { insertAssetFromUrl, type InsertAssetResult } from "@/lib/litt-intelligence/tool-handlers-v2";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
-import { resolveSlotImage, type ProviderAttempt } from "./resolver";
+import { resolveSlotImage, type ProviderAttempt, type ResolvedImage } from "./resolver";
 import { auditStaticSiteHtml, extractImageRefs, type VisualAudit } from "./audit";
 
 export interface EnrichReport {
@@ -149,39 +149,108 @@ export async function enrichStaticSiteVisuals(
         return null;
       }
     };
+    // Seed dedupe with images already in the workspace (e.g. materialized
+    // by image.stock earlier in the same run): a slot/gallery resolve that
+    // lands on identical bytes must retry for a different photo instead of
+    // shipping a second copy. Bounded — at most 60 image files hashed.
+    const IMAGE_EXT = /\.(png|jpe?g|webp|gif|avif)$/i;
+    let hashedExisting = 0;
+    for (const p of fileSet) {
+      if (hashedExisting >= 60) break;
+      if (!IMAGE_EXT.test(p)) continue;
+      const h = await contentHash(p);
+      if (h) {
+        usedHashes.add(h);
+        hashedExisting += 1;
+      }
+    }
+    // Source URLs already resolved this run — providers skip them so two
+    // slots never embed the same photo.
+    const usedImageUrls = new Set<string>();
     const providerAttempts: ProviderAttempt[] = [];
-    const resolve = async (keywords: string) => {
-      if (overallSignal.aborted) return null;
+    // One resolve = one persisted image. A provider can pass the URL probe
+    // and still fail the download (HTTP 5xx, non-image payload, oversize),
+    // and insertAssetFromUrl can throw on network errors — neither may
+    // dead-end the slot or abort the whole pass: exclude that provider and
+    // try the next, bounded by the provider count. (2026-11-09 staging:
+    // picsum probes passed but downloads failed after the probe, the
+    // remaining providers were never tried, and runs shipped 2/3 photos.)
+    const downloadViaProviders = async (
+      kw: string,
+      nameHint: string,
+      signal: AbortSignal = overallSignal,
+    ): Promise<{ resolved: ResolvedImage; saved: InsertAssetResult; sitePath: string; hash: string | null } | null> => {
+      const excluded = new Set<string>();
+      for (let round = 0; round < 4 && !signal.aborted; round++) {
+        const resolved = await resolveSlotImage(kw, seed + round, signal, providerAttempts, excluded, usedImageUrls);
+        if (!resolved) return null;
+        if (usedImageUrls.has(resolved.url)) {
+          seed += 1;
+          continue;
+        }
+        let saved: InsertAssetResult | null = null;
+        try {
+          saved = await insertAssetFromUrl(resolved.url, { nameHint, signal }, transport);
+        } catch {
+          saved = null;
+        }
+        if (saved?.success && saved.sitePath) {
+          usedImageUrls.add(resolved.url);
+          return { resolved, saved, sitePath: saved.sitePath, hash: await contentHash(saved.sitePath) };
+        }
+        excluded.add(resolved.provider);
+        seed += 1;
+      }
+      return null;
+    };
+    const resolveImage = async (
+      keywords: string,
+      signal: AbortSignal = overallSignal,
+    ): Promise<{ sitePath: string; url: string } | null> => {
+      if (signal.aborted) return null;
       if (report.imagesResolved + report.imagesFailed >= budget) return null;
       // Dedupe: distinct keywords can still resolve to the same photo
       // (provider seed collisions shipped visibly duplicated gallery
       // images) — hash the saved bytes and retry once with a bumped seed
       // and varied keywords; a still-identical image counts as a failure
       // so the slot falls back to the honest placeholder.
-      let resolved = await resolveSlotImage(keywords, seed, overallSignal, providerAttempts);
-      let saved = resolved
-        ? await insertAssetFromUrl(resolved.url, { nameHint: keywords.slice(0, 30), signal: overallSignal }, transport)
-        : null;
-      let hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
+      let attempt = await downloadViaProviders(keywords, keywords.slice(0, 30), signal);
+      let hash = attempt?.hash ?? null;
       if (hash && usedHashes.has(hash)) {
+        // Duplicate bytes — remove the just-written copy so the workspace
+        // never carries two identical images, then retry for a different
+        // photo with a bumped seed and varied keywords.
+        if (attempt?.saved.path) {
+          try {
+            await transport.deleteFile(attempt.saved.path);
+          } catch {
+            // Transport without deleteFile or a delete failure — the
+            // duplicate stays unreferenced; dedupe still held.
+          }
+        }
         seed += 1000;
         const varied = `${keywords} scene`;
-        resolved = await resolveSlotImage(varied, seed, overallSignal, providerAttempts);
-        saved = resolved
-          ? await insertAssetFromUrl(resolved.url, { nameHint: varied.slice(0, 30), signal: overallSignal }, transport)
-          : null;
-        hash = saved?.success && saved.sitePath ? await contentHash(saved.sitePath) : null;
+        attempt = await downloadViaProviders(varied, varied.slice(0, 30), signal);
+        hash = attempt?.hash ?? null;
         if (hash && usedHashes.has(hash)) {
           seed += 1;
           report.imagesFailed += 1;
+          if (attempt?.saved.path) {
+            try {
+              await transport.deleteFile(attempt.saved.path);
+            } catch {
+              // See above — unreferenced duplicate is acceptable.
+            }
+          }
           return null;
         }
       }
       seed += 1;
-      if (!resolved || !saved?.success || !saved.sitePath) {
+      if (!attempt) {
         report.imagesFailed += 1;
         return null;
       }
+      const { resolved, saved, sitePath } = attempt;
       if (hash) usedHashes.add(hash);
       report.imagesResolved += 1;
       if (!report.providersUsed.includes(resolved.provider)) {
@@ -189,11 +258,13 @@ export async function enrichStaticSiteVisuals(
       }
       // Treat the just-materialized file as on-disk so the repair pass
       // below does not "fix" it as a missing relative ref.
-      fileSet.add(saved.sitePath.replace(/^\//, ""));
+      fileSet.add(sitePath.replace(/^\//, ""));
       if (saved.path) fileSet.add(saved.path.replace(/^\//, ""));
-      trackSize(saved.sitePath, saved.path, saved.sizeBytes);
-      return saved.sitePath;
+      trackSize(sitePath, saved.path, saved.sizeBytes);
+      return { sitePath, url: resolved.url };
     };
+    const resolve = async (keywords: string, signal: AbortSignal = overallSignal) =>
+      (await resolveImage(keywords, signal))?.sitePath ?? null;
 
     for (const file of htmlFiles) {
       const { content } = await transport.readFile(file);
@@ -340,24 +411,126 @@ export async function enrichStaticSiteVisuals(
       let html = entryHtml;
       const needed = MIN_REAL_PHOTOS - countPhotos(html);
       if (needed > 0) {
+        // The floor runs under its OWN fresh deadline, not whatever is
+        // left of overallSignal: phases 1–3 share that clock, and on
+        // staging a slow-failing provider lane (LoremFlickr's probe
+        // retries alone can burn ~24s of it) starved the floor before it
+        // started — golden run 42726578836 shipped 2/3 photos with the
+        // floor inheriting a nearly-dead signal. The floor is the phase
+        // acceptance measures; it is budgeted like it. The budget stays
+        // exactly one base timeout: owed photos are bought CONCURRENTLY
+        // under it (below), not sequentially against a multiplied clock.
+        // A deadline scaled by `needed` also multiplies how long a
+        // resumed run can stay in flight — the agent loop's settle guard
+        // (4000ms, tests pin a 3000ms enrich budget) tripped on it three
+        // CI runs in a row on PR #861.
+        const floorSignal = AbortSignal.timeout(totalTimeoutMs);
         const title = html.match(/<title[^>]*>([^<]{3,120})<\/title>/i)?.[1] ?? "";
         const h1 = html.match(/<h1[^>]*>([^<]{3,120})<\/h1>/i)?.[1] ?? "";
         const base = `${title} ${h1}`.trim() || topic;
         const vary = ["", " detail", " texture", " interior"];
         const imgs: string[] = [];
+        const galleryImg = (sitePath: string, n: number) => {
+          const alt = `${title || h1 || "Site"} — photo ${n}`.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+          return `<img src="${sitePath}" alt="${alt}" style="width:100%;height:220px;object-fit:cover;border-radius:12px;display:block;" loading="lazy">`;
+        };
+
+        // Workspace top-up first. Images already persisted in the
+        // workspace satisfy the floor at zero network cost and zero
+        // clock: the generate path's auto-insert saves every generated
+        // image under assets/images whether or not the model ever
+        // references it, and countPhotos counts HTML refs only — so
+        // those files are invisible to the floor until it references
+        // them (run 42744941482: the floor owed 2 network photos while
+        // on-topic generated assets sat unreferenced on disk). Disk
+        // picks are not network resolves: they do not increment
+        // imagesResolved and do not debit the shared image budget,
+        // which meters network work (resolve/download calls).
+        const referenced = new Set<string>();
+        for (const r of extractImageRefs(html)) {
+          const src = r.src?.trim() ?? "";
+          if (!src || /^(https?:|data:|blob:)/i.test(src)) continue;
+          const rel = src.replace(/^\.\//, "").replace(/^\//, "").split(/[?#]/)[0];
+          if (rel) referenced.add(rel);
+        }
+        const spareAssets = await transport.listFiles("assets/images").catch(() => null);
+        const spareNames = (spareAssets?.entries ?? [])
+          .filter((e) => e.type === "file")
+          .map((e) => e.name)
+          .sort();
+        for (const name of spareNames) {
+          if (imgs.length >= needed) break;
+          const sitePath = `assets/images/${name}`;
+          if (sitePath === PLACEHOLDER_SVG_PATH || /\.svg$/i.test(name)) continue;
+          if (referenced.has(sitePath) || smallImages.has(sitePath)) continue;
+          const { size } = await transport.readFile(sitePath).catch(() => ({ size: 0 }));
+          if (size <= MIN_REAL_PHOTO_BYTES) continue;
+          imgs.push(galleryImg(sitePath, imgs.length + 1));
+        }
+
         // A single failed resolve must not starve the floor: providers are
         // free-tier and flake, so keep trying with rotated keywords — the
         // shared image budget still bounds total work, and a null resolve
-        // already counted itself against it.
+        // already counted itself against it. The attempt allowance is
+        // generous (needed * 4, not * 2): a failed attempt is cheap
+        // evidence of a flaky free provider, not a content decision, and
+        // the * 2 cap turned 3 flaky misses into a shipped shortfall in
+        // run 42726578836. The floor's own deadline above still bounds
+        // the wall-clock cost. Only the remainder still owed after the
+        // workspace top-up goes to the network.
+        //
+        // Owed photos are bought in CONCURRENT batches, not one at a
+        // time: one worst-case resolution (the slow lane's probe
+        // gauntlet, then a full download) can consume most of the floor's
+        // single base budget by itself, so sequential buying starved the
+        // second owed photo in run 42744941482 even with a fresh clock.
+        // A batch launches up to `owed` resolves at once — each keyed by
+        // the global attempt counter, exactly as the sequential loop
+        // derived its rotated keywords, and each resolve downloads +
+        // persists its own image — all sharing floorSignal.
+        //
+        // The concurrency is explicitly BOUNDED three ways:
+        //   - Batch width never exceeds the photos still owed, and owed
+        //     never exceeds MIN_REAL_PHOTOS (3): at most 3 resolves are
+        //     ever in flight from this phase.
+        //   - The shared image budget is claimed synchronously for the
+        //     whole batch before launching: batchSize is capped by the
+        //     budget room left (counters settle between batches, and no
+        //     other resolve can interleave during the synchronous launch
+        //     loop), so total resolve entries across the whole pass can
+        //     never exceed the budget. resolveImage's own entry check
+        //     remains as a backstop.
+        //   - No duplicates: attempt indices within a batch are
+        //     distinct, so the vary keywords — and therefore every
+        //     provider URL built from them — are distinct across the
+        //     batch; and the writtenPaths guard below drops any result
+        //     whose URL an earlier (lower-attempt-index) result in this
+        //     phase already produced, so the same image is never
+        //     inserted into the gallery twice. (URL dedupe via
+        //     usedImageUrls inside the resolve path and content-hash
+        //     dedupe inside resolveImage remain the other layers, as
+        //     before.)
         let floorAttempts = 0;
-        const maxFloorAttempts = needed * 2;
-        for (let i = 0; i < needed && floorAttempts < maxFloorAttempts && !overallSignal.aborted; ) {
-          floorAttempts += 1;
-          const sitePath = await resolve(`${base}${vary[i % vary.length]}`.trim());
-          if (!sitePath) continue;
-          const alt = `${title || h1 || "Site"} — photo ${i + 1}`.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-          imgs.push(`<img src="${sitePath}" alt="${alt}" style="width:100%;height:220px;object-fit:cover;border-radius:12px;display:block;" loading="lazy">`);
-          i += 1;
+        const maxFloorAttempts = needed * 4;
+        const writtenPaths = new Set<string>();
+        while (imgs.length < needed && floorAttempts < maxFloorAttempts && !floorSignal.aborted) {
+          const owed = needed - imgs.length;
+          const budgetRoom = budget - (report.imagesResolved + report.imagesFailed);
+          const batchSize = Math.min(owed, maxFloorAttempts - floorAttempts, budgetRoom);
+          if (batchSize <= 0) break;
+          const batchBase = floorAttempts;
+          const batch: Array<Promise<{ sitePath: string; url: string } | null>> = [];
+          for (let k = 0; k < batchSize; k++) {
+            floorAttempts += 1;
+            const attemptIndex = batchBase + k;
+            batch.push(resolveImage(`${base}${vary[attemptIndex % vary.length]}`.trim(), floorSignal));
+          }
+          const results = await Promise.all(batch);
+          for (const result of results) {
+            if (!result || writtenPaths.has(result.url)) continue;
+            writtenPaths.add(result.url);
+            imgs.push(galleryImg(result.sitePath, imgs.length + 1));
+          }
         }
         if (imgs.length > 0) {
           const section =

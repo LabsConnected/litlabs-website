@@ -13,13 +13,13 @@ const STEPS = [
     icon: GitBranch,
     title: "Start a project or connect GitHub",
     copy: "Use an existing repository or start fresh from a blank workspace.",
-    accent: "#65f4ff",
+    accent: "#177A36",
   },
   {
     icon: Sparkles,
     title: "Give LiTT a mission",
     copy: "Explain what you want in normal language. LiTT understands the request.",
-    accent: "#b58cff",
+    accent: "#E8A317",
   },
   {
     icon: Rocket,
@@ -31,7 +31,7 @@ const STEPS = [
     icon: ArrowRight,
     title: "Review and ship",
     copy: "Inspect changes, approve sensitive actions, export, or deploy when ready.",
-    accent: "#65f4ff",
+    accent: "#177A36",
   },
 ];
 
@@ -44,10 +44,10 @@ export function OnboardingSteps() {
           <div className="litt-eyebrow">
             <Rocket size={13} /> Start building in minutes
           </div>
-          <h2 className="mt-5 text-[clamp(2.25rem,5vw,4.75rem)] font-black leading-[0.98] tracking-[-0.055em] text-white">
+          <h2 className="mt-5 text-[clamp(2.25rem,5vw,4.75rem)] font-black leading-[0.98] tracking-[-0.055em] text-[#0E1510]">
             From signup to first <span className="litt-gradient-text">mission in minutes.</span>
           </h2>
-          <p className="mt-5 text-base leading-7 text-white/52 sm:text-lg sm:leading-8">
+          <p className="mt-5 text-base leading-7 text-[#63745F] sm:text-lg sm:leading-8">
             No setup maze. No configuration wall. Create an account, give LiTT a mission, and watch the work happen.
           </p>
         </div>
@@ -65,12 +65,12 @@ export function OnboardingSteps() {
                   <span className="litt-onboarding-icon">
                     <Icon size={18} />
                   </span>
-                  <span className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-white/25">
+                  <span className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[#63745F]/80">
                     0{index + 1}
                   </span>
                 </div>
-                <h3 className="mt-6 text-lg font-black tracking-[-0.025em] text-white">{step.title}</h3>
-                <p className="mt-2.5 text-sm leading-6 text-white/50">{step.copy}</p>
+                <h3 className="mt-6 text-lg font-black tracking-[-0.025em] text-[#0E1510]">{step.title}</h3>
+                <p className="mt-2.5 text-sm leading-6 text-[#63745F]">{step.copy}</p>
               </article>
             );
           })}

@@ -2110,3 +2110,48 @@ describe("callLLMWithTools — per-request token ceiling", () => {
     expect(callsTo("api.groq.com")).toHaveLength(1);
   });
 });
+
+describe("callLLMWithTools — bounded whole-plan transient retry", () => {
+  it("re-runs the plan once when every attempt fails transiently and the caller opted in", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    // Pass 1: provider-scope 500. Pass 2 (after the 2s pause): Gemini
+    // recovered — degraded providers stay eligible, just ranked lower.
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(500, "upstream boom"))
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("recovered after retry"));
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [],
+      { allowTransientPlanRetry: true },
+    );
+
+    expect(result.text).toBe("recovered after retry");
+    expect(callsTo("generativelanguage")).toHaveLength(2);
+  });
+
+  it("does not retry without the opt-in flag (strict single-pass callers)", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch.mockResolvedValue(makeErrorResponse(500, "upstream boom"));
+
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "hi" }], []),
+    ).rejects.toThrow(AllRoutesFailedError);
+    expect(callsTo("generativelanguage")).toHaveLength(1);
+  });
+
+  it("never retries permanent failures even when opted in", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    // 401 auth_invalid disables the provider — a credential problem is
+    // not a transient storm and must not burn a second pass.
+    mockFetch.mockResolvedValue(makeErrorResponse(401, "Invalid API key"));
+
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "hi" }], [], {
+        allowTransientPlanRetry: true,
+      }),
+    ).rejects.toThrow(AllRoutesFailedError);
+    expect(callsTo("generativelanguage")).toHaveLength(1);
+  });
+});
