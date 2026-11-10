@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Check, Copy, ExternalLink, Globe, Loader2, RotateCcw, Trash2, X } from "lucide-react";
+import { syncCanvasSiteFromFile } from "./canvas/builder/canvas-site-export";
 
 /**
  * Publish controls for static projects — Publish / Republish / Unpublish.
@@ -86,6 +87,25 @@ export default function StudioPublishControls({
     setState("publishing");
     setError(null);
     try {
+      // P0-1: compile the canvas into index.html BEFORE the deploy
+      // pipeline snapshots the workspace — otherwise Publish ships
+      // whatever file was there before the canvas work (the starter).
+      // A user-authored index.html is never overwritten: on conflict
+      // the publish stops with an honest explanation instead of
+      // silently shipping the wrong site.
+      const sync = await syncCanvasSiteFromFile(projectId);
+      if (sync.status === "conflict") {
+        setError(
+          "Your canvas hasn't been applied: index.html was written outside the canvas (or edited since the last export). Review it in Files, or export the canvas over it, then publish again.",
+        );
+        setState("error");
+        return;
+      }
+      if (sync.status === "error") {
+        setError(`Canvas export failed before publish: ${sync.reason}`);
+        setState("error");
+        return;
+      }
       const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/publish`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
