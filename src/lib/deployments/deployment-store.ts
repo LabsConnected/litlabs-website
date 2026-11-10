@@ -196,17 +196,35 @@ export interface PublishedFile {
 // Bounded retries on transient store errors — a PostgREST blip seconds
 // after deploy must not surface as a public 503/404 for an asset that
 // exists (observed live: deployed image refs 503'd seconds after deploy,
-// then served 200). Three attempts with a growing gap cover a ~1s blip
+// then served 200). Retries with a growing gap cover a multi-second blip
 // window; a persistent outage still surfaces as an error (route → 503),
 // never a false "not found". Null results are never retried — a real
 // 404 stays honest and fast.
-const READ_RETRY_DELAYS_MS = [250, 750] as const;
+// Backoff for published-file reads. The public /sites route serves binary
+// assets stored as base64 text rows — the largest rows in the table. The
+// 2026-11-09 staging golden proved the [250, 750] budget too short:
+// PostgREST errors on the two biggest asset rows (~330KB base64) persisted
+// through all server retries AND the client's own 3×3s retry window,
+// surfacing as public 503s on healthy rows. ~6s of internal coverage lets
+// a single request ride out a post-deploy saturation blip; a blip longer
+// than that still surfaces as 503 (truthful) rather than a false 404.
+const READ_RETRY_DELAYS_MS = [250, 750, 1500, 3000] as const;
+
+// LITT_PUBLISHED_READ_RETRY_MS (comma-separated ms) substitutes the ladder —
+// for tests that must exercise the full retry path without sleeping for
+// real seconds. Production uses the tuned backoff above.
+function readRetryDelays(): readonly number[] {
+  const raw = process.env.LITT_PUBLISHED_READ_RETRY_MS;
+  if (!raw) return READ_RETRY_DELAYS_MS;
+  const parsed = raw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n >= 0);
+  return parsed.length > 0 ? parsed : READ_RETRY_DELAYS_MS;
+}
 
 async function readWithRetries<R extends { error: unknown }>(
   read: () => PromiseLike<R>,
 ): Promise<R> {
   let result = await read();
-  for (const delay of READ_RETRY_DELAYS_MS) {
+  for (const delay of readRetryDelays()) {
     if (!result.error) break;
     await new Promise((resolve) => setTimeout(resolve, delay));
     result = await read();
