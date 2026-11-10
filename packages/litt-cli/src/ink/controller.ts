@@ -2485,6 +2485,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // build, deploy) are completely untouched. Deliberately placed
     // BEFORE @mention context resolution so a hit skips that work too.
     // See lib/utility-lane.ts for why this exists and how it's scoped.
+    let utilityDeclineContext: string | null = null;
     if (intent === "chat" && !isMission) {
       const utilityMatch = classifyUtilityIntent(input);
       if (utilityMatch) {
@@ -2520,9 +2521,21 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         }
         // Direct path could not satisfy the request (e.g. empty search,
         // unparseable expression) — nothing was rendered; fall through
-        // to the normal chat path below exactly as if no utility match
-        // existed. The wasted lookup attempt is a cheap DuckDuckGo/NWS
-        // call, never an LLM round trip.
+        // to the normal chat path below. When a real tool already ran,
+        // tell the model WHAT was attempted and how it ended — otherwise
+        // the chat model starts context-free, cannot see that a search
+        // already happened, and may repeat the identical dead end (or
+        // claim it never searched). The note is runtime truth, not a
+        // fabricated result.
+        if (lookup.toolsUsed.length > 0) {
+          utilityDeclineContext =
+            `[Runtime note: a direct ${utilityMatch.kind} lookup already ran ` +
+            `${lookup.toolsUsed.join(", ")} for this request and returned: ` +
+            `${lookup.reason ?? "no usable result"}. You may retry web.search with a ` +
+            `different query, use web.fetch on a specific URL, or answer honestly ` +
+            `that the information could not be found — do not claim a lookup ` +
+            `succeeded when it did not.]`;
+        }
       }
     }
 
@@ -2534,7 +2547,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       terminalLog: terminalLog.current,
       errorLog: errorLog.current,
     });
-    const modelInput = opts?.promptOverride ?? contextResult.prompt;
+    const baseModelInput = opts?.promptOverride ?? contextResult.prompt;
+    const modelInput = utilityDeclineContext
+      ? `${baseModelInput}\n\n${utilityDeclineContext}`
+      : baseModelInput;
     // Context (@mentions, terminal/error log) resolved into the model
     // prompt. Shared by CHAT and MISSION — emitted before the path split
     // so neither path's `intent_classified → route` span silently bundles
@@ -2945,15 +2961,16 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             });
           }
           const seconds = (result.durationMs / 1000).toFixed(1);
-          // Single concise DONE event — not raw response body. Tagged
-          // DONE (not CHAT) so the live feed keeps the completion marker
-          // while the user-prompt echo stays filtered out.
+          const chatCompleted = result.termination === "complete";
+          // Single concise terminal event — not raw response body. DONE is
+          // claimed ONLY when the loop actually completed; every other
+          // termination reports its real outcome (never DONE-on-failure).
           store.actions.addActivity({
             id: `act_${Date.now()}_done`,
             ts: Date.now(),
-            type: result.termination === "complete" ? "agent.complete" : "agent.stopped",
-            tag: result.termination === "complete" ? "DONE" : "FAIL",
-            text: `LiTT responded · ${seconds}s${chatToolCallCount > 0 ? ` · ${chatToolCallCount} tools` : ""}`,
+            type: chatCompleted ? "agent.complete" : "agent.stopped",
+            tag: chatCompleted ? "DONE" : "FAIL",
+            text: `${chatCompleted ? "LiTT responded" : `LiTT ${result.termination === "cancelled" ? "cancelled" : "did not complete"}`} · ${seconds}s${chatToolCallCount > 0 ? ` · ${chatToolCallCount} tools` : ""}`,
           });
           // CHAT terminal truth: a non-complete termination is a real
           // failure/cancellation, never IDLE-over-a-stale-mission. The
@@ -2966,6 +2983,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               result.termination === "cancelled" ? "CANCELLED" : "FAILED",
             );
           }
+          // Workstream terminal truth: chat turns emit no run.completed
+          // or mission.* lifecycle events, so without this the dock's
+          // overallStatus stays "running" forever after the turn ends.
+          store.actions.workstreamPush((ws) => {
+            if (result.termination === "complete") ws.setComplete();
+            else ws.setFailed();
+          });
         } catch (err) {
           const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
           store.actions.addActivity({
@@ -2985,6 +3009,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           }
           store.actions.setHoloState("FAILED");
           store.actions.scheduleIdle(2000);
+          // An exception mid-turn is a failed workstream, not a
+          // perpetually "running" one.
+          store.actions.workstreamPush((ws) => ws.setFailed());
         } finally {
           currentRemoteModelRef.current = null;
           // ONE canonical transition out of a run: every terminal
