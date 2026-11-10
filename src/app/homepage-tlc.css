@@ -1,0 +1,726 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Homepage TLC — the approved mockup design language applied to the real
+   homepage (Larry's rounds 1–5 verdicts, 2026-11-10).
+
+   Everything is scoped under `.litt-home` (the class HomePageClient puts on
+   its <main>) so the shared marketing chrome and other marketing pages keep
+   their current look. Palette lifted 1:1 from the approved mockup:
+   white worked into green, lime accents, glow/depth, true-white background,
+   one spacing rhythm, LIGHT-LOCKED (color-scheme: light — the page never
+   flips dark from a visitor's OS setting; the dark pieces below are the
+   intentional feature panels: Studio deck, stepper art, closing panel).
+   ───────────────────────────────────────────────────────────────────────── */
+
+.litt-landing.litt-home {
+  --hm-bg: #ffffff;
+  --hm-bg2: #f2f7ea;
+  --hm-surface: #ffffff;
+  --hm-surface2: #edf3e4;
+  --hm-ink: #0e1510;
+  --hm-ink2: #37463a;
+  --hm-muted: #63745f;
+  --hm-line: #cfdec4;
+  --hm-accent: #177a36;
+  --hm-accent-deep: #0c5a26;
+  --hm-lime: #8fd14f;
+  --hm-accent-soft: #e4f2d6;
+  --hm-gold: #e8a317;
+  --hm-dark: #0b120d;
+  --hm-dark2: #131c14;
+  --hm-on-dark: #eaf3e8;
+  --hm-shadow: 0 20px 54px rgba(14, 60, 26, 0.14);
+
+  color-scheme: light;
+  background:
+    radial-gradient(circle at 85% 4%, rgba(143, 209, 79, 0.1), transparent 26rem),
+    radial-gradient(circle at 10% 30%, rgba(23, 122, 54, 0.05), transparent 24rem),
+    var(--hm-bg);
+  color: var(--hm-ink);
+}
+
+/* One spacing rhythm for every homepage section. */
+.litt-home .litt-section {
+  padding-block: clamp(4rem, 9vw, 5.5rem);
+}
+
+/* ── Type helpers ─────────────────────────────────────────────────────── */
+
+.litt-home .litt-eyebrow {
+  border-color: color-mix(in srgb, var(--hm-accent) 30%, transparent);
+  background: var(--hm-accent-soft);
+  color: var(--hm-accent-deep);
+  box-shadow: none;
+}
+
+.litt-home .litt-hero-title-gradient,
+.litt-home .litt-gradient-text {
+  background: linear-gradient(105deg, var(--hm-accent-deep) 5%, var(--hm-accent) 48%, var(--hm-lime) 98%);
+  background-size: 180% 180%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+/* Lime marker highlight, like the mockup's headline underline. */
+.litt-home .litt-mark {
+  background-image: linear-gradient(transparent 62%, rgba(143, 209, 79, 0.55) 62%, rgba(143, 209, 79, 0.55) 94%, transparent 94%);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+
+.litt-home .litt-primary-button {
+  border: 1px solid var(--hm-accent-deep);
+  background: linear-gradient(135deg, #2f9e4f 0%, var(--hm-accent) 52%, var(--hm-accent-deep) 115%);
+  color: #ffffff;
+  box-shadow:
+    0 14px 32px rgba(23, 122, 54, 0.28),
+    0 0 26px rgba(143, 209, 79, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.litt-home .litt-primary-button:hover {
+  box-shadow:
+    0 18px 42px rgba(23, 122, 54, 0.34),
+    0 0 38px rgba(143, 209, 79, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.litt-home .litt-secondary-button {
+  border: 1px solid var(--hm-line);
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  box-shadow: 0 8px 22px rgba(14, 60, 26, 0.07);
+  backdrop-filter: none;
+}
+
+.litt-home .litt-secondary-button:hover {
+  border-color: var(--hm-accent);
+  background: var(--hm-accent-soft);
+  color: var(--hm-accent-deep);
+}
+
+/* Buttons that sit on the intentional dark panels keep the dark treatment. */
+.litt-home .litt-on-dark .litt-secondary-button {
+  border-color: rgba(234, 243, 232, 0.25);
+  background: rgba(234, 243, 232, 0.06);
+  color: var(--hm-on-dark);
+  box-shadow: none;
+}
+
+.litt-home .litt-on-dark .litt-secondary-button:hover {
+  border-color: var(--hm-lime);
+  background: rgba(143, 209, 79, 0.12);
+  color: #ffffff;
+}
+
+/* ── Hero ─────────────────────────────────────────────────────────────── */
+
+.litt-home .litt-hero {
+  background:
+    radial-gradient(circle at 78% 18%, rgba(143, 209, 79, 0.16), transparent 30%),
+    radial-gradient(circle at 12% 8%, rgba(23, 122, 54, 0.07), transparent 34%),
+    linear-gradient(180deg, #ffffff, var(--hm-bg2) 130%);
+}
+
+.litt-home .litt-hero-aurora {
+  background:
+    radial-gradient(circle at 77% 28%, rgba(143, 209, 79, 0.14), transparent 26%),
+    radial-gradient(circle at 60% 55%, rgba(23, 122, 54, 0.08), transparent 30%),
+    radial-gradient(circle at 15% 20%, rgba(232, 163, 23, 0.05), transparent 24%);
+}
+
+.litt-home .litt-hero-grid,
+.litt-home .litt-grid-fade {
+  background-image:
+    linear-gradient(rgba(23, 122, 54, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 122, 54, 0.06) 1px, transparent 1px);
+}
+
+.litt-home .litt-hero-orb-one {
+  border-color: rgba(23, 122, 54, 0.14);
+  box-shadow:
+    inset 0 0 80px rgba(143, 209, 79, 0.08),
+    0 0 100px rgba(143, 209, 79, 0.07);
+}
+
+.litt-home .litt-hero-orb-two {
+  border-color: rgba(23, 122, 54, 0.16);
+}
+
+.litt-home .litt-live-pill {
+  border-color: var(--hm-line);
+  background: var(--hm-surface);
+  color: var(--hm-ink2);
+  box-shadow: 0 8px 22px rgba(14, 60, 26, 0.08);
+}
+
+/* ── Studio command deck — intentional dark feature panel ─────────────── */
+
+.litt-home .litt-command-glow {
+  background:
+    radial-gradient(circle at 55% 15%, rgba(143, 209, 79, 0.22), transparent 46%),
+    radial-gradient(circle at 72% 76%, rgba(23, 122, 54, 0.2), transparent 44%);
+}
+
+.litt-home .litt-command-deck {
+  border-color: rgba(143, 209, 79, 0.28);
+  background: rgba(11, 18, 13, 0.97);
+  box-shadow:
+    0 38px 90px rgba(11, 40, 20, 0.35),
+    0 0 44px rgba(143, 209, 79, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.litt-home .litt-command-deck::before {
+  background: linear-gradient(90deg, transparent, var(--hm-lime), transparent);
+  filter: drop-shadow(0 0 6px rgba(143, 209, 79, 0.8));
+}
+
+.litt-home .litt-command-deck:hover {
+  border-color: rgba(143, 209, 79, 0.45);
+}
+
+.litt-home .litt-scanline {
+  background: linear-gradient(to bottom, transparent, rgba(143, 209, 79, 0.18), transparent);
+}
+
+.litt-home .litt-floating-badge {
+  border-color: var(--hm-line);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--hm-ink2);
+  box-shadow: 0 16px 38px rgba(14, 60, 26, 0.16);
+}
+
+/* ── Pipeline (hero) — also Easter egg 2 ──────────────────────────────── */
+
+.litt-home .litt-pipe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.litt-home .litt-pipe-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--hm-line);
+  border-radius: 999px;
+  background: var(--hm-surface);
+  padding: 0.55rem 0.85rem;
+  color: var(--hm-ink2);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: border-color 200ms ease, background 200ms ease, color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+}
+
+.litt-home .litt-pipe-node:hover {
+  border-color: var(--hm-accent);
+  color: var(--hm-accent-deep);
+  transform: translateY(-1px);
+}
+
+.litt-home .litt-pipe-node.is-lit {
+  border-color: var(--hm-accent);
+  background: var(--hm-accent-soft);
+  color: var(--hm-accent-deep);
+  box-shadow: 0 0 18px rgba(143, 209, 79, 0.35);
+}
+
+.litt-home .litt-pipe-node.is-auto {
+  border-color: color-mix(in srgb, var(--hm-lime) 65%, transparent);
+  box-shadow: 0 0 14px rgba(143, 209, 79, 0.3);
+}
+
+.litt-home .litt-pipe-arrow {
+  color: var(--hm-accent);
+  font-weight: 900;
+  user-select: none;
+}
+
+/* ── Proof ribbon ─────────────────────────────────────────────────────── */
+
+.litt-home .litt-ribbon {
+  display: flex;
+  flex-wrap: wrap;
+  overflow: hidden;
+  border: 1px solid var(--hm-line);
+  border-radius: 14px;
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow);
+}
+
+.litt-home .litt-ribbon > div {
+  display: flex;
+  flex: 1 1 11rem;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  color: var(--hm-ink2);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.litt-home .litt-ribbon > div + div {
+  border-left: 1px solid var(--hm-line);
+}
+
+.litt-home .litt-ribbon strong {
+  color: var(--hm-accent-deep);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.litt-home .litt-ribbon svg {
+  flex-shrink: 0;
+  color: var(--hm-accent);
+}
+
+/* ── Cards: capabilities / trust / onboarding / FAQ ───────────────────── */
+
+.litt-home .litt-bento-card {
+  border-color: var(--hm-line);
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--card-accent) 7%, transparent), transparent 42%),
+    var(--hm-surface);
+  box-shadow: var(--hm-shadow);
+}
+
+.litt-home .litt-bento-card:hover {
+  border-color: color-mix(in srgb, var(--card-accent) 45%, transparent);
+  box-shadow:
+    0 28px 60px rgba(14, 60, 26, 0.16),
+    0 0 36px color-mix(in srgb, var(--card-accent) 10%, transparent);
+}
+
+.litt-home .litt-accent-gold { --card-accent: var(--hm-gold); }
+.litt-home .litt-accent-deep { --card-accent: var(--hm-accent-deep); }
+.litt-home .litt-accent-violet { --card-accent: var(--hm-accent-deep); }
+.litt-home .litt-accent-cyan { --card-accent: var(--hm-accent); }
+
+.litt-home .litt-capability-icon {
+  box-shadow: none;
+}
+
+.litt-home .litt-bento-card:hover .litt-capability-tag:hover {
+  color: var(--hm-accent-deep);
+}
+
+.litt-home .litt-trust-card,
+.litt-home .litt-onboarding-card {
+  border-color: var(--hm-line);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--hm-accent) 4%, transparent), transparent 45%),
+    var(--hm-surface);
+  box-shadow: var(--hm-shadow);
+}
+
+.litt-home .litt-onboarding-card {
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--step-accent) 6%, transparent), transparent 45%),
+    var(--hm-surface);
+}
+
+.litt-home .litt-trust-card:hover,
+.litt-home .litt-onboarding-card:hover {
+  border-color: color-mix(in srgb, var(--hm-accent) 35%, transparent);
+  box-shadow: 0 25px 55px rgba(14, 60, 26, 0.15), 0 0 34px rgba(143, 209, 79, 0.1);
+}
+
+.litt-home .litt-trust-icon {
+  color: var(--hm-accent);
+}
+
+.litt-home .litt-faq-item {
+  border-color: var(--hm-line);
+  background: var(--hm-surface);
+  box-shadow: 0 10px 26px rgba(14, 60, 26, 0.06);
+}
+
+.litt-home .litt-faq-item.is-open {
+  border-color: color-mix(in srgb, var(--hm-accent) 40%, transparent);
+  background: var(--hm-accent-soft);
+}
+
+/* ── Demo shell + stage tabs (panel itself stays dark Studio chrome) ─── */
+
+.litt-home .litt-demo-shell {
+  border-color: var(--hm-line);
+  background: var(--hm-surface2);
+  box-shadow: var(--hm-shadow);
+}
+
+.litt-home .litt-demo-shell::before {
+  background: linear-gradient(90deg, transparent, var(--hm-accent), var(--hm-lime), transparent);
+  filter: drop-shadow(0 0 7px rgba(143, 209, 79, 0.55));
+}
+
+.litt-home .litt-stage-track {
+  background: var(--hm-line);
+}
+
+.litt-home .litt-stage-track > span {
+  background: linear-gradient(90deg, var(--hm-accent), var(--hm-lime));
+  box-shadow: 0 0 10px rgba(143, 209, 79, 0.5);
+}
+
+.litt-home .litt-stage-tab {
+  border-color: var(--hm-line);
+  background: var(--hm-surface);
+  color: var(--hm-muted);
+}
+
+.litt-home .litt-stage-tab:hover {
+  border-color: var(--hm-accent);
+  color: var(--hm-accent-deep);
+}
+
+.litt-home .litt-stage-tab.is-complete {
+  color: var(--hm-accent);
+}
+
+.litt-home .litt-stage-tab.is-active {
+  border-color: color-mix(in srgb, var(--stage-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--stage-accent) 10%, #ffffff);
+  color: var(--hm-accent-deep);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--stage-accent) 14%, transparent);
+}
+
+.litt-home .litt-stage-node {
+  border-color: var(--hm-line);
+  background: var(--hm-accent-soft);
+}
+
+.litt-home .litt-demo-approve:hover {
+  background: #b7e787;
+  box-shadow: 0 12px 28px rgba(143, 209, 79, 0.25);
+}
+
+/* ── Agent card + project cards ───────────────────────────────────────── */
+
+.litt-home .litt-agent-card {
+  border-color: var(--hm-line);
+  box-shadow: var(--hm-shadow);
+}
+
+.litt-home .litt-project-card {
+  border-color: var(--hm-line);
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow);
+}
+
+.litt-home .litt-project-card:hover {
+  border-color: color-mix(in srgb, var(--hm-accent) 40%, transparent);
+  box-shadow: 0 32px 64px rgba(14, 60, 26, 0.18), 0 0 34px rgba(143, 209, 79, 0.12);
+}
+
+/* One image treatment for every outcome card: same crop + green wash. */
+.litt-home .litt-project-image {
+  filter: saturate(0.92) contrast(1.02);
+}
+
+.litt-home .litt-project-card:hover .litt-project-image {
+  filter: saturate(1.05) contrast(1.03) drop-shadow(0 0 12px rgba(143, 209, 79, 0.25));
+}
+
+/* ── One-system panel (Build → Refine → Ship) ─────────────────────────── */
+
+.litt-home .litt-system-panel {
+  border: 1px solid var(--hm-line);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(143, 209, 79, 0.14), transparent 40%),
+    linear-gradient(165deg, #ffffff, var(--hm-surface2));
+  box-shadow: var(--hm-shadow);
+}
+
+.litt-home .litt-system-step {
+  border: 1px solid var(--hm-line);
+  border-radius: 18px;
+  background: var(--hm-surface);
+  padding: 1.4rem;
+  box-shadow: 0 12px 30px rgba(14, 60, 26, 0.07);
+}
+
+.litt-home .litt-system-arrow {
+  display: grid;
+  place-items: center;
+  color: var(--hm-accent);
+}
+
+/* ── How-it's-made stepper ────────────────────────────────────────────── */
+
+.litt-home .litt-stepper {
+  display: grid;
+  gap: 1.4rem;
+}
+
+@media (min-width: 1024px) {
+  .litt-home .litt-stepper {
+    grid-template-columns: 300px 1fr;
+    gap: 1.6rem;
+  }
+}
+
+.litt-home .litt-step-btn {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.8rem;
+  border: 1px solid var(--hm-line);
+  border-radius: 14px;
+  background: var(--hm-surface);
+  padding: 0.8rem 0.9rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 200ms ease, background 200ms ease, transform 200ms ease;
+}
+
+.litt-home .litt-step-btn:hover {
+  border-color: var(--hm-accent);
+  transform: translateY(-1px);
+}
+
+.litt-home .litt-step-btn[aria-selected="true"] {
+  border-color: var(--hm-accent);
+  background: var(--hm-accent-soft);
+  box-shadow: 0 0 18px rgba(143, 209, 79, 0.22);
+}
+
+.litt-home .litt-step-btn .num {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 0.6rem;
+  background: var(--hm-accent-soft);
+  color: var(--hm-accent-deep);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.litt-home .litt-step-btn[aria-selected="true"] .num {
+  background: var(--hm-accent);
+  color: #ffffff;
+}
+
+.litt-home .litt-step-pane {
+  border: 1px solid var(--hm-line);
+  border-radius: 18px;
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow);
+  padding: clamp(1.4rem, 3vw, 2.2rem);
+}
+
+/* Stepper art — intentional dark panel, mono proof text. */
+.litt-home .litt-step-art {
+  border-radius: 14px;
+  background: linear-gradient(160deg, var(--hm-dark2), var(--hm-dark));
+  color: var(--hm-lime);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  padding: 1.1rem 1.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.litt-home .litt-step-nav button {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--hm-line);
+  border-radius: 999px;
+  background: var(--hm-surface);
+  padding: 0.55rem 1.05rem;
+  color: var(--hm-ink2);
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color 200ms ease, background 200ms ease, color 200ms ease;
+}
+
+.litt-home .litt-step-nav button:hover:not(:disabled) {
+  border-color: var(--hm-accent);
+  background: var(--hm-accent-soft);
+  color: var(--hm-accent-deep);
+}
+
+.litt-home .litt-step-nav button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ── Closing panel — intentional dark, deep green (mockup .final) ─────── */
+
+.litt-home .litt-final-cta {
+  border-color: rgba(143, 209, 79, 0.3);
+  background:
+    radial-gradient(700px 300px at 15% 0%, rgba(143, 209, 79, 0.3), transparent 55%),
+    radial-gradient(600px 300px at 90% 100%, rgba(27, 122, 61, 0.5), transparent 55%),
+    linear-gradient(160deg, #10281a, var(--hm-dark) 60%);
+  box-shadow: 0 26px 60px rgba(11, 40, 20, 0.35);
+}
+
+.litt-home .litt-final-cta::before {
+  background: linear-gradient(90deg, transparent, var(--hm-lime), var(--hm-accent), transparent);
+  filter: drop-shadow(0 0 8px rgba(143, 209, 79, 0.6));
+}
+
+/* Clean wordmark set in type — no logo image (Larry's call, 2026-11-10). */
+.litt-home .litt-wordmark {
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+/* The gem — Easter egg 1 (tap ×5). A rotated square that loves attention. */
+.litt-home .litt-gem {
+  display: inline-grid;
+  width: 1.05rem;
+  height: 1.05rem;
+  place-items: center;
+  border: none;
+  border-radius: 0.28rem;
+  background: linear-gradient(135deg, var(--hm-lime), var(--hm-accent));
+  box-shadow: 0 0 16px rgba(143, 209, 79, 0.65);
+  cursor: pointer;
+  transform: rotate(45deg);
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  vertical-align: baseline;
+}
+
+/* ── Garden — Easter egg 4, at the foot of the homepage ───────────────── */
+
+.litt-home .litt-garden {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.9rem 1.25rem;
+  border: 1.5px dashed var(--hm-accent);
+  border-radius: 16px;
+  background: var(--hm-accent-soft);
+  padding: 1.1rem 1.25rem;
+}
+
+.litt-home .litt-garden-tree {
+  font-size: 2rem;
+  line-height: 1;
+  transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.litt-home .litt-water-btn {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--hm-accent);
+  border-radius: 999px;
+  background: var(--hm-surface);
+  padding: 0.55rem 1.1rem;
+  color: var(--hm-accent-deep);
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 200ms ease, transform 200ms ease;
+}
+
+.litt-home .litt-water-btn:hover {
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+/* ── Firefly — Easter egg 5, drifting in the closing panel ────────────── */
+
+.litt-home .litt-firefly {
+  position: absolute;
+  z-index: 30;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transition: left 140ms linear, top 140ms linear;
+}
+
+.litt-home .litt-firefly::after {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fdffce 0%, var(--hm-lime) 55%, transparent 75%);
+  box-shadow: 0 0 18px 6px rgba(143, 209, 79, 0.55);
+  content: "";
+  animation: litt-firefly-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes litt-firefly-pulse {
+  0%, 100% { opacity: 0.65; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+/* ── Egg toast + leaf burst ───────────────────────────────────────────── */
+
+.litt-home .litt-egg-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  z-index: 90;
+  width: min(480px, calc(100vw - 32px));
+  transform: translate(-50%, 18px);
+  border: 1.5px solid var(--hm-lime);
+  border-radius: 16px;
+  background: var(--hm-dark);
+  color: var(--hm-on-dark);
+  box-shadow: 0 22px 48px rgba(6, 30, 14, 0.4);
+  padding: 14px 18px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 350ms ease, transform 350ms ease;
+}
+
+.litt-home .litt-egg-toast.show {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
+
+.litt-home .litt-leaf {
+  position: fixed;
+  top: -24px;
+  z-index: 95;
+  font-size: 19px;
+  pointer-events: none;
+  animation: litt-leaf-fall linear forwards;
+}
+
+@keyframes litt-leaf-fall {
+  to { transform: translateY(108vh) rotate(560deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .litt-home .litt-pipe-node,
+  .litt-home .litt-step-btn,
+  .litt-home .litt-step-nav button,
+  .litt-home .litt-garden-tree,
+  .litt-home .litt-gem,
+  .litt-home .litt-water-btn {
+    transition-duration: 0.01ms !important;
+  }
+
+  .litt-home .litt-firefly {
+    transition: none;
+  }
+
+  .litt-home .litt-firefly::after {
+    animation: none;
+  }
+}

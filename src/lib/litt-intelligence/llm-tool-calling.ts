@@ -162,7 +162,10 @@ interface OpenRouterMessage {
   tool_call_id?: string;
 }
 
-function toOpenRouterMessage(m: LLMMessage): OpenRouterMessage {
+function toOpenRouterMessage(
+  m: LLMMessage,
+  strictToolCallIds?: Map<string, string>,
+): OpenRouterMessage {
   const om: OpenRouterMessage = { role: m.role, content: m.content };
   if (m.images && m.images.length > 0) {
     const parts: OpenRouterContentPart[] = [{ type: "text", text: m.content }];
@@ -171,9 +174,72 @@ function toOpenRouterMessage(m: LLMMessage): OpenRouterMessage {
     }
     om.content = parts;
   }
-  if (m.tool_calls) om.tool_calls = m.tool_calls;
-  if (m.tool_call_id) om.tool_call_id = m.tool_call_id;
+  if (m.tool_calls) {
+    om.tool_calls = m.tool_calls.map((tc) => ({
+      ...tc,
+      id: strictToolCallIds?.get(tc.id) ?? tc.id,
+    }));
+  }
+  if (m.tool_call_id) {
+    om.tool_call_id = strictToolCallIds?.get(m.tool_call_id) ?? m.tool_call_id;
+  }
   return om;
+}
+
+/**
+ * Cloudflare Workers AI rejects tool_call ids outside [A-Za-z0-9] and
+ * expects length 9 (prod-verified 400 on staging iter-3, run 42751987160:
+ * "Tool call id was 44-mcs4r1 but must be a-z, A-Z, 0-9, with a length
+ * of 9"). LiTT transcript ids come from provider responses and synthetic
+ * fallbacks ("gemini-…-…", "call_…", "44-mcs4r1") and routinely contain
+ * hyphens/underscores/over-length runs. When a route declares
+ * strictToolCallIds, ids are normalized per request to a deterministic
+ * 9-char [a-z0-9] value so the assistant tool_calls and tool
+ * tool_call_id sides of the transcript stay correlated.
+ */
+const PROVIDER_TOOL_CALL_ID_STRICT = /^[A-Za-z0-9]{9}$/;
+
+function fnv1a36(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/** Map every tool-call id in the transcript to a wire-safe id for
+ *  strict-id providers. Ids already matching the constraint pass through
+ *  verbatim (keeps cross-provider history stable); collisions between a
+ *  compliant literal and a generated id are resolved by re-hashing. */
+function buildStrictToolCallIdMap(messages: LLMMessage[]): Map<string, string> {
+  const map = new Map<string, string>();
+  const used = new Set<string>();
+  const raws: string[] = [];
+  for (const m of messages) {
+    for (const tc of m.tool_calls ?? []) {
+      if (typeof tc.id === "string" && tc.id) raws.push(tc.id);
+    }
+    if (typeof m.tool_call_id === "string" && m.tool_call_id) raws.push(m.tool_call_id);
+  }
+  for (const raw of raws) {
+    if (map.has(raw)) continue;
+    if (PROVIDER_TOOL_CALL_ID_STRICT.test(raw) && !used.has(raw)) {
+      map.set(raw, raw);
+      used.add(raw);
+      continue;
+    }
+    let sanitized = "";
+    for (let salt = 0; ; salt++) {
+      sanitized = fnv1a36(salt === 0 ? raw : `${raw}#${salt}`)
+        .padStart(9, "0")
+        .slice(-9);
+      if (!used.has(sanitized)) break;
+    }
+    used.add(sanitized);
+    map.set(raw, sanitized);
+  }
+  return map;
 }
 
 export function toOpenRouterTools(tools: ToolDefinition[]): OpenRouterTool[] {
@@ -387,6 +453,15 @@ const MAX_IN_PLACE_429_WAIT_MS = 15_000;
  * checks all re-run unchanged in the re-plan.
  */
 const MAX_ZERO_ROUTE_COOLDOWN_WAIT_MS = 60_000;
+/**
+ * Headroom applied to the chars/4 input estimate before comparing it to a
+ * model's context window. The estimate undercounts code/JSON-heavy
+ * transcripts by ~14% (prod-verified: a request estimated at ~21.5K tokens
+ * was rejected by Cloudflare at 24,001 actual — over by ONE token). 20%
+ * keeps borderline requests off guaranteed-400 routes without materially
+ * shrinking usable capacity.
+ */
+const CONTEXT_ESTIMATE_SAFETY_FACTOR = 1.2;
 
 /**
  * Shortest positive remaining wait among providers excluded purely for a
@@ -660,6 +735,35 @@ interface AttemptContext {
   /** Agent absolute deadline — local providers (Ollama) use it to bound
    *  cold-start model loads separately from the inference attempt. */
   deadlineMs?: number;
+}
+
+/** Why a (provider, model) pair cannot take this request, or null when it
+ *  can. Shared by the attempt loop and the zero-attemptable-route check so
+ *  both agree on exactly which routes are usable. */
+type RouteModelSkipReason =
+  | "model_cooldown"
+  | "request_exceeds_route_token_ceiling"
+  | "request_exceeds_model_context_window"
+  | null;
+
+function routeModelSkipReason(
+  route: PlannedProvider,
+  model: string,
+  estimatedRequestTokens: number,
+  contextAdjustedRequestTokens: number,
+): RouteModelSkipReason {
+  if (isModelCoolingDown(route.provider, model)) return "model_cooldown";
+  if (
+    route.requestTokenCeiling !== undefined &&
+    estimatedRequestTokens > route.requestTokenCeiling
+  ) {
+    return "request_exceeds_route_token_ceiling";
+  }
+  const contextWindow = route.contextWindows?.[model];
+  if (contextWindow !== undefined && contextAdjustedRequestTokens > contextWindow) {
+    return "request_exceeds_model_context_window";
+  }
+  return null;
 }
 
 function toGeminiResponse(
@@ -1280,12 +1384,18 @@ async function attemptOpenAiCompatible(
   endpoint: { baseUrl: string; headers: Record<string, string>; extraBody?: Record<string, unknown>; dispatcher?: Dispatcher },
 ): Promise<LLMToolCallResponse> {
   const openAiTools = toOpenRouterTools(req.tools);
+  // Strict-id providers (Cloudflare Workers AI) get per-request normalized
+  // tool_call ids — see buildStrictToolCallIdMap. Other routes serialize
+  // transcript ids verbatim.
+  const strictIds = route.strictToolCallIds === true
+    ? buildStrictToolCallIdMap(req.messages)
+    : undefined;
   const body: Record<string, unknown> = {
     model,
     stream: false,
     messages: [
       { role: "system", content: req.systemPrompt } as OpenRouterMessage,
-      ...req.messages.map(toOpenRouterMessage),
+      ...req.messages.map((m) => toOpenRouterMessage(m, strictIds)),
     ],
     temperature: req.temperature ?? 0.15,
     ...endpoint.extraBody,
@@ -1855,6 +1965,19 @@ export async function callLLMWithTools(
      * OpenAI) are eligible as last-resort fallback.
      */
     allowLittPaidProviders?: boolean;
+    /**
+     * INTERNAL: set by the bounded whole-plan retry below — never pass
+     * from callers. Caps transient-storm retries at exactly one.
+     */
+    _wholePlanRetried?: boolean;
+    /**
+     * Opt-in: when EVERY route attempt fails with a transient class
+     * (timeout/network/5xx/429), wait briefly and re-run the whole plan
+     * once — free-tier providers fail in correlated windows. Off by
+     * default so auxiliary callers (visual judge, voice) keep strict
+     * single-pass cost semantics; the agent loop opts in.
+     */
+    allowTransientPlanRetry?: boolean;
   },
 ): Promise<LLMToolCallResponse> {
   const requirements: RouteRequirements = {
@@ -1908,24 +2031,52 @@ export async function callLLMWithTools(
   // check is a guardrail, not a meter, so exactness is unnecessary.
   // Computed once — messages grow across steps but this entry point sees
   // the per-call snapshot.
+  const declaredMaxTokens = options?.maxTokens ?? 4_096;
   const estimatedRequestTokens =
     Math.ceil(
       (systemPrompt.length +
         messages.reduce((n, m) => n + (m.content?.length ?? 0), 0) +
         JSON.stringify(toOpenRouterTools(tools)).length) /
         4,
-    ) + (options?.maxTokens ?? 4096);
+    ) + declaredMaxTokens;
+  // Context-window guard estimate: chars/4 undercounts the input side on
+  // code/JSON-heavy transcripts, so the input portion gets headroom before
+  // it is compared against a model's total window (input + output).
+  const estimatedInputTokens = Math.max(0, estimatedRequestTokens - declaredMaxTokens);
+  const contextAdjustedRequestTokens =
+    Math.ceil(estimatedInputTokens * CONTEXT_ESTIMATE_SAFETY_FACTOR) + declaredMaxTokens;
 
-  if (plan.providers.length === 0) {
+  const countAttemptableModels = (p: typeof plan): number =>
+    p.providers.reduce(
+      (n, route) =>
+        n +
+        route.models.filter(
+          (m) =>
+            routeModelSkipReason(
+              route,
+              m,
+              estimatedRequestTokens,
+              contextAdjustedRequestTokens,
+            ) === null,
+        ).length,
+      0,
+    );
+
+  let attemptableModels = countAttemptableModels(plan);
+  if (plan.providers.length === 0 || attemptableModels === 0) {
     const cooldownWaitMs = shortestHealthCooldownWaitMs(plan.excluded);
     if (
       cooldownWaitMs !== null &&
       cooldownWaitMs <= MAX_ZERO_ROUTE_COOLDOWN_WAIT_MS &&
       (!options?.deadlineMs || Date.now() + cooldownWaitMs < options.deadlineMs - 5_000)
     ) {
-      logRoute("zero_route_cooldown_wait", { waitMs: cooldownWaitMs });
+      logRoute("zero_route_cooldown_wait", {
+        waitMs: cooldownWaitMs,
+        attemptableModels,
+      });
       await new Promise((resolve) => setTimeout(resolve, cooldownWaitMs + 250));
       plan = planBasicRoutes(requirements, planOpts);
+      attemptableModels = countAttemptableModels(plan);
     }
   }
 
@@ -1936,6 +2087,16 @@ export async function callLLMWithTools(
     });
     throw new AllRoutesFailedError(failures, plan.excluded);
   }
+  if (attemptableModels === 0) {
+    // Providers exist but every model is cooling or cannot fit this
+    // request — surface it in diagnostics instead of silently skipping.
+    logRoute("no_attemptable_routes", {
+      providers: plan.providers.map((p) => p.provider).join(","),
+      excluded: plan.excluded.map((e) => `${e.provider}:${e.reason}`).join(","),
+      estimatedRequestTokens,
+      remainingBudgetMs: options?.deadlineMs ? Math.max(0, options.deadlineMs - Date.now()) : undefined,
+    });
+  }
 
   const promptLog = messages.map((m) => `${m.role}: ${m.content}`).join("\n");
 
@@ -1945,30 +2106,53 @@ export async function callLLMWithTools(
 
     for (let mi = 0; mi < route.models.length; mi++) {
       const model = route.models[mi];
-      if (isModelCoolingDown(route.provider, model)) {
+      const skipReason = routeModelSkipReason(
+        route,
+        model,
+        estimatedRequestTokens,
+        contextAdjustedRequestTokens,
+      );
+      if (skipReason === "model_cooldown") {
         logRoute("model_skipped", { provider: route.provider, model, reason: "model_cooldown" });
         continue;
       }
 
-      // Per-request token ceiling: when the route's tier cannot physically
-      // accept a request this size, every candidate model behind the same
-      // ceiling 413s (prod-verified on Groq free tier 2026-11-05). Skip
-      // without a fetch — the attempt is a guaranteed rejection and its
-      // model-scope cooldown would only add noise.
-      if (route.requestTokenCeiling !== undefined && estimatedRequestTokens > route.requestTokenCeiling) {
+      // Deterministic capacity skips — evaluated without a fetch:
+      //   - per-request token ceiling (Groq free tier bills prompt +
+      //     declared max_tokens against an 8k TPM cap — exceeding it is a
+      //     guaranteed 413, never worth an attempt)
+      //   - context window (Cloudflare llama-3.3 is 24K TOTAL incl.
+      //     output — a borderline estimate became a guaranteed 400 at
+      //     24,001 actual tokens, staging iter-3)
+      // Both push a model_unavailable failure for diagnostics but, like
+      // model cooldowns, record NO model failure — a request-shape
+      // rejection says nothing about the model's health for smaller
+      // requests, so it must not burn the 10-minute model cooldown.
+      if (
+        skipReason === "request_exceeds_route_token_ceiling" ||
+        skipReason === "request_exceeds_model_context_window"
+      ) {
+        const limit =
+          skipReason === "request_exceeds_route_token_ceiling"
+            ? route.requestTokenCeiling
+            : route.contextWindows?.[model];
         failures.push({
           provider: route.provider,
           model,
           class: "model_unavailable",
           latencyMs: 0,
-          message: `request ~${estimatedRequestTokens} tokens exceeds ${route.provider} per-request ceiling ${route.requestTokenCeiling}`,
+          message:
+            skipReason === "request_exceeds_route_token_ceiling"
+              ? `request ~${estimatedRequestTokens} tokens exceeds ${route.provider} per-request ceiling ${limit}`
+              : `request ~${contextAdjustedRequestTokens} adjusted tokens exceeds ${model} context window ${limit}`,
         });
         logRoute("attempt_skipped", {
           provider: route.provider,
           model,
-          reason: "request_exceeds_route_token_ceiling",
+          reason: skipReason,
           estimatedRequestTokens,
-          ceiling: route.requestTokenCeiling,
+          contextAdjustedRequestTokens,
+          limit,
         });
         continue;
       }
@@ -2238,6 +2422,51 @@ export async function callLLMWithTools(
         recordModelAttemptOutcome(route.provider, model, false, failure.class);
       }
     }
+  }
+
+  // Bounded whole-plan retry for transient provider storms. Free-tier
+  // lanes time out in correlated windows (2026-11-10 staging golden:
+  // gemini-flash-latest AND cloudflare llama both timed out for ~2min,
+  // then recovered) — one fresh pass after a short pause converts that
+  // window into a success instead of failing a user-visible call.
+  //
+  // Retry eligibility (staging iter-3, run 42751987160):
+  //   - at least one GENUINE transient failure is required (timeout /
+  //     network / server_error / rate_limited) — a storm of only
+  //     deterministic rejections has nothing to recover from.
+  //   - model_unavailable is retry-NEUTRAL, not blocking: it covers
+  //     deterministic request/route rejections (token ceilings, context
+  //     windows, provider 400/404s) that recur identically but say
+  //     nothing about transient-lane health. In iter-3 the retry was
+  //     vetoed by exactly this mix (gemini 503 + ceiling/context 400s).
+  //   - permanent failures (auth_invalid / billing / forbidden) and
+  //     bad_response still veto — a dead credential or malformed-output
+  //     pattern does not heal in 2 seconds.
+  // The internal flag caps this at exactly one retry per call.
+  const TRANSIENT_WHOLE_PLAN = new Set(["timeout", "network", "server_error", "rate_limited"]);
+  const NEUTRAL_WHOLE_PLAN = new Set<FailureClass>(["model_unavailable"]);
+  const retryableStorm =
+    failures.some((f) => TRANSIENT_WHOLE_PLAN.has(f.class)) &&
+    failures.every(
+      (f) => TRANSIENT_WHOLE_PLAN.has(f.class) || NEUTRAL_WHOLE_PLAN.has(f.class),
+    );
+  const remainingForRetry = options?.deadlineMs ? options.deadlineMs - Date.now() : Number.POSITIVE_INFINITY;
+  if (
+    retryableStorm &&
+    options?.allowTransientPlanRetry === true &&
+    options?._wholePlanRetried !== true &&
+    remainingForRetry > 20_000
+  ) {
+    logRoute("whole_plan_retry", {
+      attempts: failures.length,
+      classes: [...new Set(failures.map((f) => f.class))].join(","),
+      remainingBudgetMs: Math.max(0, remainingForRetry),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    return callLLMWithTools(systemPrompt, messages, tools, {
+      ...options,
+      _wholePlanRetried: true,
+    });
   }
 
   throw new AllRoutesFailedError(failures, plan.excluded);

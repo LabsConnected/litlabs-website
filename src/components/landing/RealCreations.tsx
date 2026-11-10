@@ -11,7 +11,7 @@ const PROJECTS = [
     outcome: "Responsive launch site + organized project files",
     tools: ["Web", "Image", "Audio", "Copy"],
     icon: Music2,
-    accent: "#b58cff",
+    accent: "#E8A317",
     image: "/gallery/museum/neon-cyber-city.png",
     imageAlt: "Neon city artwork representing an independent artist launch experience",
   },
@@ -22,7 +22,7 @@ const PROJECTS = [
     outcome: "Interactive dashboard + reusable data views",
     tools: ["React", "Charts", "Data", "Export"],
     icon: BarChart3,
-    accent: "#65f4ff",
+    accent: "#8FD14F",
     image: "/showcase/control-center.png",
     imageAlt: "Futuristic business dashboard with operational metrics and agent status",
   },
@@ -67,15 +67,15 @@ export function RealCreations() {
             </div>
 
             <div className="flex flex-1 flex-col p-5 sm:p-6">
-              <p className="text-sm leading-6 text-white/52">“{project.prompt}”</p>
+              <p className="text-sm leading-6 text-[#37463A]">“{project.prompt}”</p>
               <div className="mt-5 flex flex-wrap gap-2">
-                {project.tools.map((tool) => <span key={tool} className="rounded-full border border-white/8 bg-white/3 px-2.5 py-1 text-[10px] font-bold text-white/46">{tool}</span>)}
+                {project.tools.map((tool) => <span key={tool} className="rounded-full border border-[#CFDEC4] bg-[#EDF3E4] px-2.5 py-1 text-[10px] font-bold text-[#37463A]">{tool}</span>)}
               </div>
-              <div className="mt-6 border-t border-white/8 pt-4">
-                <div className="text-[9px] font-black uppercase tracking-[0.16em] text-white/28">Outcome</div>
-                <p className="mt-1.5 text-xs font-bold text-white/64">{project.outcome}</p>
+              <div className="mt-6 border-t border-[#EDF3E4] pt-4">
+                <div className="text-[9px] font-black uppercase tracking-[0.16em] text-[#63745F]">Outcome</div>
+                <p className="mt-1.5 text-xs font-bold text-[#0E1510]">{project.outcome}</p>
               </div>
-              <Link href={`/showcase/${project.slug}`} className="mt-6 inline-flex items-center justify-between rounded-xl border border-white/10 bg-white/4 px-4 py-3 text-xs font-black text-white/72 transition hover:border-white/20 hover:bg-white/7 hover:text-white">
+              <Link href={`/showcase/${project.slug}`} className="mt-6 inline-flex items-center justify-between rounded-xl border border-[#CFDEC4] bg-white px-4 py-3 text-xs font-black text-[#0E1510] transition hover:border-[#177A36] hover:bg-[#E4F2D6]">
                 View the workflow <ArrowRight size={14} style={{ color: project.accent }} />
               </Link>
             </div>

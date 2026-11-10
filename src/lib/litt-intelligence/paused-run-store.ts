@@ -84,9 +84,18 @@ export const RUN_HEARTBEAT_MS = 30_000;
  * last_progress_at on every heartbeat; if it stops advancing for this long
  * while the lease is fresh, the run is stalled, not working.
  *
- * Sized ABOVE DEFAULT_LOOP_CONFIG.maxRuntimeMs (10 min): the loop's own
- * graceful runtime budget must always win over the stall detector, so this
- * only fires when something escaped the budget entirely.
+ * Enforcement is layered. The approvals route's heartbeat watchdog acts on
+ * this bound in-process (settling the run EXECUTION_STALLED) — that is the
+ * primary path, because it needs no reader. The read-path recovery below
+ * (recoverStaleRun) is the backstop for executors whose process died
+ * before their watchdog could fire.
+ *
+ * History: this was originally sized ABOVE the loop's maxRuntimeMs
+ * (10 min) so the graceful runtime budget always won. PR #455 raised
+ * maxRuntimeMs to 30 min for long builds; a run that is MAKING progress
+ * is never condemned by this bound at any size, so the stall bound now
+ * intentionally fires first for a run that produces nothing — no-progress
+ * is the defect this detector exists for, not elapsed time.
  */
 export const RUN_STALL_MS = 12 * 60 * 1000;
 
