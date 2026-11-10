@@ -87,6 +87,7 @@ export default function CommandStudioHeader({
   capabilities,
   busy = false,
   approvalPending = false,
+  lastRunFailed = false,
   executionMode = "auto",
   onExecutionModeChange,
 }: {
@@ -124,6 +125,12 @@ export default function CommandStudioHeader({
   busy?: boolean;
   /** True while an approval gate is waiting on the user. */
   approvalPending?: boolean;
+  /**
+   * True when the conversation's most recent settled run failed. The
+   * ambient runtime label stays available in the status popover, but the
+   * pill must not read green "Ready" over a failed run.
+   */
+  lastRunFailed?: boolean;
   /** Execution mode — shown as a segmented PLAN/ACT/AUTO control. */
   executionMode?: StudioTopBarMode;
   onExecutionModeChange?: (mode: StudioTopBarMode) => void;
@@ -217,11 +224,16 @@ export default function CommandStudioHeader({
 
   // Status pill: approval gates and agent work take precedence over the
   // ambient runtime label — both are truthful, derived from live state.
+  // A settled failed run outranks the ambient label too: "Runtime
+  // verified / Ready" describes the runtime, not the last run, and
+  // showing it green over a failed run reads as a contradiction.
   const pill = approvalPending
     ? { label: "Approval needed", short: "Approval", color: "#e3b341", pulse: true }
     : busy
       ? { label: "Agent working", short: "Working", color: "var(--color-accent)", pulse: true }
-      : {
+      : lastRunFailed
+        ? { label: "Last run failed", short: "Failed", color: "#ef4444", pulse: false }
+        : {
           label: statusLabel,
           short: statusLabel === "Runtime verified" ? "Ready"
             : statusLabel === "Runtime verified · provider degraded" ? "Degraded"

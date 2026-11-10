@@ -11,7 +11,15 @@ import type { MediaItem, MediaProviderId } from "@/components/media/media-types"
 
 // ── Project ───────────────────────────────────────────────────────
 
-export type ProjectStatus = "live" | "building" | "failed" | "draft" | "unknown";
+export type ProjectStatus =
+  | "live"
+  | "preview"
+  | "ready"
+  | "building"
+  | "stalled"
+  | "failed"
+  | "draft"
+  | "unknown";
 
 export interface DashboardProject {
   id: string;

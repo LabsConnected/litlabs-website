@@ -326,3 +326,51 @@ describe("CommandStudioHeader — mobile scroll affordance (Phase 1 #1)", () => 
     expect(screen.getByLabelText("More actions")).toBeTruthy();
   });
 });
+
+describe("CommandStudioHeader — failed run must not sit under a green Ready pill", () => {
+  beforeEach(() => {
+    mockProviderHealth = { auto: "available" };
+  });
+
+  it("shows the Ready pill when the runtime is verified and no run failed", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    expect(screen.getByLabelText("Runtime verified")).toBeTruthy();
+    expect(screen.getByTestId("agent-status-pill").textContent).toContain("Ready");
+  });
+
+  it("replaces the Ready pill with Last run failed after a failed run", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+        lastRunFailed={true}
+      />,
+    );
+    expect(screen.getByLabelText("Last run failed")).toBeTruthy();
+    expect(screen.getByTestId("agent-status-pill").textContent).toContain("Failed");
+    expect(screen.queryByLabelText("Runtime verified")).toBeNull();
+  });
+
+  it("approval and busy still outrank the failed-run pill", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+        lastRunFailed={true}
+        busy={true}
+      />,
+    );
+    expect(screen.getByTestId("agent-status-pill").textContent).toContain("Working");
+  });
+});

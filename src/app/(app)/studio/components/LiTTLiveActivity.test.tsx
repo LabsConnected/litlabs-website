@@ -240,4 +240,44 @@ describe("LiTTLiveActivity", () => {
     render(<LiTTLiveActivity />);
     expect(screen.getByText(/Using google\/gemini-2.5-flash/)).toBeTruthy();
   });
+
+  it("shows the last run's recorded activity instead of 'No activity yet' after a reload", () => {
+    render(
+      <LiTTLiveActivity
+        lastRun={{
+          outcome: "failed",
+          records: [
+            { toolId: "read_file", success: true, summary: "Exploring the project structure" },
+            { toolId: "run_build", success: false, summary: "All AI routes unavailable" },
+          ],
+        }}
+      />,
+    );
+    expect(screen.queryByText("No activity yet")).toBeNull();
+    expect(screen.getByTestId("litt-last-run")).toBeTruthy();
+    expect(screen.getByText(/Last run · Failed/)).toBeTruthy();
+    expect(screen.getByText("Exploring the project structure")).toBeTruthy();
+    expect(screen.getByText("All AI routes unavailable")).toBeTruthy();
+  });
+
+  it("live events take precedence over the last-run fallback", () => {
+    act(() => {
+      useExecutionStore.getState().startRun();
+      useExecutionStore.getState().addEvent({
+        type: "tool_start",
+        summary: "Live step happening now",
+        toolId: "read_file",
+      });
+    });
+    render(
+      <LiTTLiveActivity
+        lastRun={{
+          outcome: "failed",
+          records: [{ toolId: "run_build", success: false, summary: "Old failure" }],
+        }}
+      />,
+    );
+    expect(screen.getByText("Live step happening now")).toBeTruthy();
+    expect(screen.queryByTestId("litt-last-run")).toBeNull();
+  });
 });

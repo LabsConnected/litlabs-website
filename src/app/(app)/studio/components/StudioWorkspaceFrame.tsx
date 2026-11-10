@@ -25,6 +25,7 @@ import StudioPreviewPanel from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
 import StudioBrowserJobsPanel from "./StudioBrowserJobsPanel";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { describeProjectState } from "@/lib/projects/project-state";
 
 interface DeploymentSummary {
   id: string;
@@ -38,6 +39,16 @@ interface HostingSummary {
   name: string;
   configured: boolean;
   reason?: string | null;
+}
+
+/** Canonical project state as carried by the deployments response. */
+interface ProjectStateSummary {
+  workspaceStatus: string;
+  runtimeStatus: string;
+  workspaceError: string | null;
+  runtimeError: string | null;
+  previewUrl: string | null;
+  updatedAt: string;
 }
 
 /**
@@ -132,12 +143,14 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
   const { getToken } = useClerkAuth();
   const [deployment, setDeployment] = useState<DeploymentSummary | null>(null);
   const [hosting, setHosting] = useState<HostingSummary | null>(null);
+  const [projectState, setProjectState] = useState<ProjectStateSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!projectId) {
       setDeployment(null);
       setHosting(null);
+      setProjectState(null);
       return;
     }
     let cancelled = false;
@@ -152,10 +165,11 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
           signal: AbortSignal.timeout(15000),
         });
         if (!res.ok) return;
-        const data = await res.json().catch(() => null) as { deployment?: DeploymentSummary | null; hosting?: HostingSummary | null } | null;
+        const data = await res.json().catch(() => null) as { deployment?: DeploymentSummary | null; hosting?: HostingSummary | null; project?: ProjectStateSummary | null } | null;
         if (!cancelled) {
           setDeployment(data?.deployment ?? null);
           setHosting(data?.hosting ?? null);
+          setProjectState(data?.project ?? null);
         }
       } catch {
         // Non-fatal — the section simply shows the last known state.
@@ -187,9 +201,50 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
   const tone = deployment?.status === "ready" && deployment.urlVerified ? "ok"
     : deployment?.status === "failed" ? "warn" : "muted";
 
+  // Preview truth from the canonical project state — the SAME derivation
+  // /projects renders (describeProjectState). Deployment (the record
+  // above) and preview (the workspace runtime) are different facts: a
+  // project can be preview-ready and never deployed, and this section
+  // must say both instead of collapsing them into "Not deployed yet /
+  // No preview yet".
+  const preview = projectState
+    ? describeProjectState({
+        workspaceStatus: projectState.workspaceStatus,
+        runtimeStatus: projectState.runtimeStatus,
+        updatedAt: projectState.updatedAt,
+        workspaceError: projectState.workspaceError,
+        runtimeError: projectState.runtimeError,
+      })
+    : null;
+  const previewTone = !preview
+    ? "muted"
+    : preview.label === "Preview ready" || preview.label === "Ready"
+      ? "ok"
+      : preview.label === "Setup failed" || preview.label === "Preview failed"
+        ? "warn"
+        : "muted";
+
   return (
     <InspectorSection title="Deployment">
       <InspectorRow label="Status" value={statusLabel} tone={tone} />
+      {preview ? (
+        <InspectorRow label="Preview" value={preview.label} tone={previewTone} />
+      ) : null}
+      {projectState?.previewUrl && projectState.runtimeStatus === "ready" ? (
+        <div className="flex items-start justify-between gap-3 border-b py-2 last:border-0" style={{ borderColor: "var(--studio-border)" }}>
+          <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>Preview URL</span>
+          <a
+            href={projectState.previewUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="max-w-[62%] truncate text-right text-[10px] font-bold underline"
+            style={{ color: "var(--litt-primary)" }}
+            title={projectState.previewUrl}
+          >
+            {projectState.previewUrl.replace(/^https?:\/\//, "")}
+          </a>
+        </div>
+      ) : null}
       {hosting ? (
         <InspectorRow
           label="Hosting"
