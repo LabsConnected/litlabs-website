@@ -2,9 +2,12 @@
  * AppShell navigation regression tests.
  *
  * Verifies the ONE canonical authenticated global nav:
- *   Main: Home · Studio · Assets · Agents · Missions · More
+ *   Main: Studio · Assets · Agents · Missions · More
  *   More: Projects · Discover · Marketplace · Showcase · Games · CLI ·
  *         Deployments · Docs
+ *
+ * Studio is the prime signed-in surface — there is no Home item and no
+ * /dashboard destination (the route only redirects into Studio).
  *
  * Assets/Agents/Missions are Studio destinations (?tool=…) and must light
  * up independently of the bare-Studio pill (isAppNavActive).
@@ -24,7 +27,6 @@ describe("AppShell Navigation", () => {
     it("has exactly the canonical destinations in order", () => {
       const labels = APP_NAV_MAIN.map((i) => i.label);
       expect(labels).toEqual([
-        "Home",
         "Studio",
         "Assets",
         "Agents",
@@ -35,12 +37,21 @@ describe("AppShell Navigation", () => {
     it("every main item resolves to a real route", () => {
       const hrefs = APP_NAV_MAIN.map((i) => i.href);
       expect(hrefs).toEqual([
-        "/dashboard",
         "/studio",
         "/studio?tool=assets",
         "/studio?tool=agents",
         "/studio?tool=workflows",
       ]);
+    });
+
+    it("has no Home item and no /dashboard destination (Studio is prime)", () => {
+      expect(APP_NAV_MAIN.some((i) => i.label === "Home")).toBe(false);
+      const allHrefs = [
+        ...APP_NAV_MAIN.map((i) => i.href),
+        ...APP_NAV_MORE.map((i) => i.href),
+        ...APP_NAV_SECONDARY.flatMap((s) => s.items.map((i) => i.href)),
+      ];
+      expect(allHrefs).not.toContain("/dashboard");
     });
 
     it("does not link to the dead short aliases (issue #602)", () => {
@@ -56,7 +67,7 @@ describe("AppShell Navigation", () => {
 
     it("no competing legacy nav bars remain (single flat main list)", () => {
       // One source of truth — no sectioned groups duplicating the bar.
-      expect(APP_NAV_MAIN.length).toBe(5);
+      expect(APP_NAV_MAIN.length).toBe(4);
       expect(getVisibleMainNav()).toEqual(APP_NAV_MAIN);
     });
   });
@@ -119,15 +130,6 @@ describe("AppShell Navigation", () => {
   describe("Active route detection (isAppNavActive)", () => {
     const search = new URLSearchParams();
 
-    it("Home is active on /dashboard", () => {
-      expect(isAppNavActive("/dashboard", search, "/dashboard")).toBe(true);
-    });
-
-    it("Home is NOT active when ?app= is present", () => {
-      const s = new URLSearchParams("app=music");
-      expect(isAppNavActive("/dashboard", s, "/dashboard")).toBe(false);
-    });
-
     it("Studio is active on /studio and default surfaces", () => {
       expect(isAppNavActive("/studio", search, "/studio")).toBe(true);
       expect(isAppNavActive("/studio/image", search, "/studio")).toBe(true);
@@ -166,14 +168,14 @@ describe("AppShell Navigation", () => {
       ).toBe(false);
       // Not on /studio at all → not active
       expect(
-        isAppNavActive("/dashboard", new URLSearchParams("tool=assets"), "/studio?tool=assets"),
+        isAppNavActive("/projects", new URLSearchParams("tool=assets"), "/studio?tool=assets"),
       ).toBe(false);
     });
 
-    it("Dashboard owns creation and /create is no longer a nav destination", () => {
+    it("Studio owns creation and /create is no longer a nav destination", () => {
       expect(APP_NAV_MAIN.some((item) => item.label === "Create")).toBe(false);
-      expect(isAppNavActive("/dashboard", search, "/dashboard")).toBe(true);
-      expect(isAppNavActive("/create", search, "/dashboard")).toBe(false);
+      expect(isAppNavActive("/studio", search, "/studio")).toBe(true);
+      expect(isAppNavActive("/create", search, "/studio")).toBe(false);
     });
 
     it("Settings is active on /settings and /settings/*", () => {
@@ -182,7 +184,7 @@ describe("AppShell Navigation", () => {
     });
 
     it("null pathname returns false", () => {
-      expect(isAppNavActive(null, search, "/dashboard")).toBe(false);
+      expect(isAppNavActive(null, search, "/studio")).toBe(false);
     });
   });
 

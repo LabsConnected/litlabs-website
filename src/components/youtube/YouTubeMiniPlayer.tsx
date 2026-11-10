@@ -69,10 +69,10 @@ export function YouTubeMiniPlayer() {
         </div>
         <div className="flex items-center gap-0.5">
           <Link
-            href="/dashboard"
+            href="/studio"
             className="grid h-6 w-6 place-items-center rounded-lg text-white/50 transition hover:bg-white/10 hover:text-white"
-            aria-label="Expand on Dashboard"
-            title="Open on Dashboard"
+            aria-label="Expand in Studio"
+            title="Open in Studio"
           >
             <Maximize2 size={12} />
           </Link>

@@ -277,7 +277,7 @@ function AuthInner({ linkColor }: NavAuthProps) {
           </div>
 
           <DropdownItem href="/profile" icon={<User size={14} />} label="Account" />
-          <DropdownItem href="/dashboard" icon={<LayoutGrid size={14} />} label="Workspace" />
+          <DropdownItem href="/studio" icon={<LayoutGrid size={14} />} label="Workspace" />
           <DropdownItem href="/pricing" icon={<CreditCard size={14} />} label="Plan and billing" />
           <DropdownItem href="/wallet" icon={<BarChart3 size={14} />} label="Usage" />
           <DropdownItem href="/settings" icon={<Settings size={14} />} label="Settings" />

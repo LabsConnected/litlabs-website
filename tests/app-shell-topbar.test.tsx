@@ -18,7 +18,7 @@ import { render, within, cleanup } from "@testing-library/react";
 import * as React from "react";
 import { AppShell } from "@/components/AppShell";
 
-let mockPathname = "/dashboard";
+let mockPathname = "/projects";
 let mockAuthLoaded = true;
 vi.mock("next/navigation", () => ({
   usePathname: () => mockPathname,
@@ -85,7 +85,7 @@ describe("AppShell top bar", () => {
   beforeEach(() => {
     cleanup();
     localStorage.clear();
-    mockPathname = "/dashboard";
+    mockPathname = "/projects";
     mockAuthLoaded = true;
   });
 
@@ -113,8 +113,9 @@ describe("AppShell top bar", () => {
     const header = getHeader();
     const scope = within(header);
     // Canonical main pills + the More overflow button.
-    // Create moved into the dashboard composer — it no longer lives in the AppShell nav.
-    for (const label of ["Home", "Studio", "Assets", "Agents", "Missions"]) {
+    // Create lives in the Studio prime landing composer — it no longer lives in the AppShell nav.
+    // There is no Home pill: Studio is the prime landing surface.
+    for (const label of ["Studio", "Assets", "Agents", "Missions"]) {
       expect(scope.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
     expect(scope.getAllByTestId("nav-more").length).toBeGreaterThanOrEqual(1);

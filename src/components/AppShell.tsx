@@ -42,41 +42,6 @@ import {
 import { BrandLogo } from "@/components/branding/BrandLogo";
 import GlobalLittEntry from "@/components/litt/GlobalLittEntry";
 
-type ResolvedColors = ReturnType<typeof useTheme>["resolvedColors"];
-
-/**
- * Studio design palette for the top bar — the `.studio-shell` token
- * values from globals.css, carried explicitly.
- *
- * The Studio page is light-locked BY DESIGN (globals.css `.studio-shell`
- * scope: "the Studio frame no longer flips dark with the OS or the
- * visual pack"). This bar renders OUTSIDE that scope, so under a dark
- * account theme it painted black over the light Studio (wave-3 Finding
- * 1, Larry's screenshot 2026-11-10). Portaled Studio menus solve the
- * identical problem the identical way — the light palette is carried
- * explicitly (surface + text tokens). Only Studio routes take this
- * palette; every other route keeps following the active theme, and the
- * values are pinned to the CSS tokens by AppShell.topbar.test.ts so
- * the two can never drift apart silently.
- */
-export const STUDIO_TOP_BAR_COLORS: Partial<ResolvedColors> = {
-  bgColor: "#ffffff", // --studio-surface
-  boxBg: "#ffffff", // --studio-elevated
-  borderColor: "#cfdec4", // --studio-border
-  textColor: "#0e1510", // --text-primary
-  textMuted: "#63745f", // --text-muted
-  linkColor: "#177a36", // --color-accent
-  headerColor: "#0e1510",
-  accentColor: "#177a36", // --color-accent
-};
-
-export function topBarColorsFor(
-  resolvedColors: ResolvedColors,
-  isStudio: boolean,
-): ResolvedColors {
-  return isStudio ? { ...resolvedColors, ...STUDIO_TOP_BAR_COLORS } : resolvedColors;
-}
-
 /* ─── Identity Dock ────────────────────────────────────────────────── */
 
 /**
@@ -86,11 +51,8 @@ export function topBarColorsFor(
  * (below the bar, right-aligned) with Profile / Wallet / Settings /
  * Account / Sign out. Signed-out state shows a Sign in button.
  */
-function IdentityDock({ T: TProp }: { T?: ResolvedColors }) {
-  const themeColors = useTheme().resolvedColors;
-  // TopBar passes the route-effective colors (Studio palette on Studio
-  // routes) so the account menu matches the bar it drops from.
-  const T = TProp ?? themeColors;
+function IdentityDock() {
+  const T = useTheme().resolvedColors;
   const { isSignedIn, isLoaded, signOut } = useClerkAuth();
   const { user } = useAppUser();
   const [plan, setPlan] = useState("Free");
@@ -445,7 +407,7 @@ function MoreNavMenu({
 function TopBar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { resolvedColors } = useTheme();
+  const { resolvedColors: T } = useTheme();
   const { isSignedIn } = useClerkAuth();
   const { balance, displayBalance, isLoading: walletLoading, isError: walletError } = useWallet();
   const littHealth = useLittHealth();
@@ -454,9 +416,6 @@ function TopBar() {
   // so the scrollable nav strip is skipped there — the single-row bar
   // (logo + status + account) still renders.
   const isStudio = pathname?.startsWith("/studio") ?? false;
-  // On Studio routes the bar wears the Studio design (see
-  // STUDIO_TOP_BAR_COLORS); everywhere else it follows the active theme.
-  const T = topBarColorsFor(resolvedColors, isStudio);
 
   const checkActive = (href?: string) => isAppNavActive(pathname, searchParams, href);
   const mainItems = getVisibleMainNav();
@@ -474,14 +433,12 @@ function TopBar() {
         background: `${T.bgColor}e6`,
         backdropFilter: "blur(14px)",
         borderBottom: `1px solid ${T.borderColor}20`,
-        // The Studio header's own soft green shadow on Studio routes;
-        // the deep neutral shadow belongs to the dark themes.
-        boxShadow: isStudio ? "0 4px 20px rgba(14,60,26,0.08)" : "0 8px 32px rgba(0,0,0,0.25)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
       }}
     >
       {/* Main bar row */}
       <div className="flex h-14 items-center gap-2 px-3 md:gap-3 md:px-4">
-        <BrandLogo href="/dashboard" size={30} showText={false} variant="full" />
+        <BrandLogo href="/studio" size={30} showText={false} variant="full" />
 
         {/* Desktop nav — canonical main items + More overflow */}
         <nav className="ml-2 hidden items-center gap-0.5 md:flex" aria-label="Primary">
@@ -534,7 +491,7 @@ function TopBar() {
             {walletLoading ? (
               <span
                 className="inline-block h-3 w-14 animate-pulse rounded align-middle"
-                style={{ background: isStudio ? "rgba(14,60,26,0.08)" : "rgba(255,255,255,0.08)" }}
+                style={{ background: "rgba(255,255,255,0.08)" }}
                 aria-label="Loading balance"
               />
             ) : walletError ? (
@@ -546,7 +503,7 @@ function TopBar() {
         )}
 
         {/* Identity dock — avatar + account menu */}
-        <IdentityDock T={T} />
+        <IdentityDock />
       </div>
 
       {/* Mobile nav strip — horizontally scrollable, skipped on Studio */}

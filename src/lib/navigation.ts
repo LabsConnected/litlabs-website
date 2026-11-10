@@ -1,7 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { isFeatureEnabled } from "@/config/feature-flags";
 import {
-  LayoutDashboard,
   Sparkles,
   ShoppingBag,
   BarChart3,
@@ -38,19 +37,21 @@ export type NavSection = {
 
 /* ─── Canonical App Shell navigation ───────────────────────────────────
  * ONE canonical authenticated global nav:
- *   Main: Home · Studio · Assets · Agents · Missions · More
+ *   Main: Studio · Assets · Agents · Missions · More
  *   More: Projects · Discover · Marketplace · Showcase · Games · CLI ·
  *         Deployments · Docs
  *
- * Assets/Agents/Missions resolve to their real Studio destinations
- * (?tool=assets|agents|workflows — the same canonical URLs the Studio
- * router writes back via destinationToLegacyTool). Legacy creation
- * routes (/builder, /ai-builder, /chat, /generate, …) all redirect into
- * Studio, so they are not separate destinations.
+ * Studio is the prime signed-in surface and the post-sign-in landing —
+ * there is no separate Home/dashboard page (the /dashboard route only
+ * redirects into Studio). Assets/Agents/Missions resolve to their real
+ * Studio destinations (?tool=assets|agents|workflows — the same
+ * canonical URLs the Studio router writes back via
+ * destinationToLegacyTool). Legacy creation routes (/builder,
+ * /ai-builder, /chat, /generate, …) all redirect into Studio, so they
+ * are not separate destinations.
  */
 
 export const APP_NAV_MAIN: NavItem[] = [
-  { label: "Home", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
   { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
   { label: "Assets", href: "/studio?tool=assets", icon: FolderOpen },
   { label: "Agents", href: "/studio?tool=agents", icon: Bot },
@@ -143,8 +144,7 @@ const STUDIO_DESTINATION_TOOLS = new Set([
 
 /**
  * Active-route check for the new AppShell navigation.
- * Matches by path prefix, with special handling for /dashboard (exact match
- * unless ?app= is present).
+ * Matches by path prefix, with special handling for /studio destinations.
  */
 export function isAppNavActive(
   pathname: string | null,
@@ -153,15 +153,6 @@ export function isAppNavActive(
 ): boolean {
   if (!pathname || !href) return false;
   const [path, query] = href.split("?");
-  // /dashboard is active only when there's no ?app= param (unless the href has one)
-  if (path === "/dashboard" && !query) {
-    return pathname === "/dashboard" && !searchParams.get("app");
-  }
-  if (path === "/dashboard" && query) {
-    const hrefParams = new URLSearchParams(query);
-    return pathname === "/dashboard" &&
-      Array.from(hrefParams.entries()).every(([k, v]) => searchParams.get(k) === v);
-  }
   // /studio: a bare "/studio" href is the DEFAULT Studio surface — it must
   // not light up while a sibling destination owns the URL (?tool=assets,
   // agents, workflows, plugins, clibridge get their own nav items). An

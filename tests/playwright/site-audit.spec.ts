@@ -40,7 +40,7 @@ const PUBLIC_ROUTES = [
 ];
 
 const PROTECTED_ROUTES = [
-  { path: "/dashboard", name: "Dashboard" },
+  { path: "/dashboard", name: "Dashboard (redirects to Studio)" },
   { path: "/settings", name: "Settings" },
   { path: "/profile", name: "Profile" },
   { path: "/wallet", name: "Wallet" },

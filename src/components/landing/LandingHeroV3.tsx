@@ -125,8 +125,8 @@ export function LandingHeroV3() {
     }
   };
 
-  const primaryHref = mounted && isSignedIn ? "/dashboard" : "/sign-up";
-  const primaryLabel = mounted && isSignedIn ? "Open dashboard" : "Start building free";
+  const primaryHref = mounted && isSignedIn ? "/studio" : "/sign-up";
+  const primaryLabel = mounted && isSignedIn ? "Open Studio" : "Start building free";
 
   return (
     <section className={`litt-hero relative overflow-hidden pt-[68px] ${mounted ? "litt-hero-ready" : ""}`}>

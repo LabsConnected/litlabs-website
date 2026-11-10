@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
       ...makeState("idle", {
         code: "NO_PROJECT",
         message: "No project selected. Create or select a project to begin.",
-        recoveryHref: "/dashboard",
+        recoveryHref: "/studio",
       }),
       lastCheckedAt: new Date().toISOString(),
     } satisfies ProjectRuntimeState);
@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
       ...makeState("error", {
         code: "PROJECT_NOT_FOUND",
         message: "Project could not be resolved. It may have been deleted.",
-        recoveryHref: "/dashboard",
+        recoveryHref: "/studio",
       }),
       projectId: current.projectId,
       projectName: current.projectName,
