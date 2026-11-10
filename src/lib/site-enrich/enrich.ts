@@ -178,10 +178,11 @@ export async function enrichStaticSiteVisuals(
     const downloadViaProviders = async (
       kw: string,
       nameHint: string,
+      signal: AbortSignal = overallSignal,
     ): Promise<{ resolved: ResolvedImage; saved: InsertAssetResult; sitePath: string; hash: string | null } | null> => {
       const excluded = new Set<string>();
-      for (let round = 0; round < 4 && !overallSignal.aborted; round++) {
-        const resolved = await resolveSlotImage(kw, seed + round, overallSignal, providerAttempts, excluded, usedImageUrls);
+      for (let round = 0; round < 4 && !signal.aborted; round++) {
+        const resolved = await resolveSlotImage(kw, seed + round, signal, providerAttempts, excluded, usedImageUrls);
         if (!resolved) return null;
         if (usedImageUrls.has(resolved.url)) {
           seed += 1;
@@ -189,7 +190,7 @@ export async function enrichStaticSiteVisuals(
         }
         let saved: InsertAssetResult | null = null;
         try {
-          saved = await insertAssetFromUrl(resolved.url, { nameHint, signal: overallSignal }, transport);
+          saved = await insertAssetFromUrl(resolved.url, { nameHint, signal }, transport);
         } catch {
           saved = null;
         }
@@ -202,15 +203,15 @@ export async function enrichStaticSiteVisuals(
       }
       return null;
     };
-    const resolve = async (keywords: string) => {
-      if (overallSignal.aborted) return null;
+    const resolve = async (keywords: string, signal: AbortSignal = overallSignal) => {
+      if (signal.aborted) return null;
       if (report.imagesResolved + report.imagesFailed >= budget) return null;
       // Dedupe: distinct keywords can still resolve to the same photo
       // (provider seed collisions shipped visibly duplicated gallery
       // images) — hash the saved bytes and retry once with a bumped seed
       // and varied keywords; a still-identical image counts as a failure
       // so the slot falls back to the honest placeholder.
-      let attempt = await downloadViaProviders(keywords, keywords.slice(0, 30));
+      let attempt = await downloadViaProviders(keywords, keywords.slice(0, 30), signal);
       let hash = attempt?.hash ?? null;
       if (hash && usedHashes.has(hash)) {
         // Duplicate bytes — remove the just-written copy so the workspace
@@ -226,7 +227,7 @@ export async function enrichStaticSiteVisuals(
         }
         seed += 1000;
         const varied = `${keywords} scene`;
-        attempt = await downloadViaProviders(varied, varied.slice(0, 30));
+        attempt = await downloadViaProviders(varied, varied.slice(0, 30), signal);
         hash = attempt?.hash ?? null;
         if (hash && usedHashes.has(hash)) {
           seed += 1;
@@ -405,6 +406,14 @@ export async function enrichStaticSiteVisuals(
       let html = entryHtml;
       const needed = MIN_REAL_PHOTOS - countPhotos(html);
       if (needed > 0) {
+        // The floor runs under its OWN fresh deadline, not whatever is
+        // left of overallSignal: phases 1–3 share that clock, and on
+        // staging a slow-failing provider lane (LoremFlickr's probe
+        // retries alone can burn ~24s of it) starved the floor before it
+        // started — golden run 42726578836 shipped 2/3 photos with the
+        // floor inheriting a nearly-dead signal. The floor is the phase
+        // acceptance measures; it is budgeted like it.
+        const floorSignal = AbortSignal.timeout(totalTimeoutMs);
         const title = html.match(/<title[^>]*>([^<]{3,120})<\/title>/i)?.[1] ?? "";
         const h1 = html.match(/<h1[^>]*>([^<]{3,120})<\/h1>/i)?.[1] ?? "";
         const base = `${title} ${h1}`.trim() || topic;
@@ -413,12 +422,17 @@ export async function enrichStaticSiteVisuals(
         // A single failed resolve must not starve the floor: providers are
         // free-tier and flake, so keep trying with rotated keywords — the
         // shared image budget still bounds total work, and a null resolve
-        // already counted itself against it.
+        // already counted itself against it. The attempt allowance is
+        // generous (needed * 4, not * 2): a failed attempt is cheap
+        // evidence of a flaky free provider, not a content decision, and
+        // the * 2 cap turned 3 flaky misses into a shipped shortfall in
+        // run 42726578836. The floor's own deadline above still bounds
+        // the wall-clock cost.
         let floorAttempts = 0;
-        const maxFloorAttempts = needed * 2;
-        for (let i = 0; i < needed && floorAttempts < maxFloorAttempts && !overallSignal.aborted; ) {
+        const maxFloorAttempts = needed * 4;
+        for (let i = 0; i < needed && floorAttempts < maxFloorAttempts && !floorSignal.aborted; ) {
           floorAttempts += 1;
-          const sitePath = await resolve(`${base}${vary[i % vary.length]}`.trim());
+          const sitePath = await resolve(`${base}${vary[i % vary.length]}`.trim(), floorSignal);
           if (!sitePath) continue;
           const alt = `${title || h1 || "Site"} — photo ${i + 1}`.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
           imgs.push(`<img src="${sitePath}" alt="${alt}" style="width:100%;height:220px;object-fit:cover;border-radius:12px;display:block;" loading="lazy">`);
