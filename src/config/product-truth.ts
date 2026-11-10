@@ -23,7 +23,7 @@ export const PRODUCT_IDENTITY = {
   brand: "LiTTree LabStudios",
   domain: "litlabs.net",
   definition:
-    "LiTTree LabStudios is an AI creative operating system and social creator platform where LiTT helps people build apps, create media, preserve project context, collaborate and ship real work from Studio.",
+    "LiTTree LabStudios is the home of LiTT, the AI Project Operator — an AI software-building workspace where you describe what you want and LiTT helps you generate, preview, edit, verify, and publish it as a real, ownable project from Studio.",
   corePromise: "Bring the idea. LiTT helps you build the rest.",
   primaryWorkspace: "Studio",
 } as const;

@@ -26,9 +26,11 @@ describe("Product-truth consistency", () => {
       expect(PRODUCT_IDENTITY.domain).toBe("litlabs.net");
     });
 
-    it("definition includes 'creative operating system' and 'social creator platform'", () => {
-      expect(PRODUCT_IDENTITY.definition).toContain("creative operating system");
-      expect(PRODUCT_IDENTITY.definition).toContain("social creator platform");
+    it("definition uses the canonical 'AI Project Operator' positioning", () => {
+      expect(PRODUCT_IDENTITY.definition).toContain("AI Project Operator");
+      expect(PRODUCT_IDENTITY.definition).toContain("AI software-building workspace");
+      expect(PRODUCT_IDENTITY.definition).not.toContain("creative operating system");
+      expect(PRODUCT_IDENTITY.definition).not.toContain("social creator platform");
     });
 
     it("core promise is 'Bring the idea. LiTT helps you build the rest.'", () => {

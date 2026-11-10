@@ -10,22 +10,22 @@ export const metadata = buildMetadata({
 
 export default function AboutPage() {
   return (
-    <main className="min-h-screen bg-[#03050a] text-white selection:bg-[#a970ff]">
+    <main className="min-h-screen bg-[#03050a] text-white selection:bg-[#8fd14f]">
       {/* ── Hero Section ── */}
       <section className="relative pt-16 pb-20 border-b border-white/8">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(168,112,255,0.08),transparent_50%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(23,122,54,0.12),transparent_50%)]" />
         <div className="relative mx-auto max-w-screen-xl px-5 lg:px-10">
           <div className="max-w-3xl">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/5 px-4 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-accent">
               <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-              The Authority on AI Creation
+              About LiTTree LabStudios
             </div>
             <h1 className="text-5xl font-black leading-[1.1] tracking-tight sm:text-6xl lg:text-7xl">
-              Building the future of <span className="text-transparent bg-clip-text bg-linear-to-r from-accent to-[#65f4ff]">collaborative building.</span>
+              Building the future of <span className="text-transparent bg-clip-text bg-linear-to-r from-accent to-[#8fd14f]">collaborative building.</span>
             </h1>
             <p className="mt-8 text-xl leading-relaxed text-white/60">
-              LiTTree LabStudios is the home of <strong>LiTTree</strong> (also known as <strong>LitLabs</strong>), 
-              an AI creative platform designed to turn ideas into working products and creative media.
+              LiTTree LabStudios is the home of <strong>LiTT</strong>, the AI Project Operator —
+              an AI software-building workspace designed to turn ideas into real, ownable projects.
             </p>
           </div>
         </div>
@@ -37,10 +37,10 @@ export default function AboutPage() {
           <div className="grid gap-16 lg:grid-cols-2">
             <div className="space-y-8">
               <div>
-                <h2 className="text-3xl font-black tracking-tight mb-4">What is LiTTree?</h2>
+                <h2 className="text-3xl font-black tracking-tight mb-4">What is LiTTree LabStudios?</h2>
                 <p className="text-white/60 leading-relaxed">
-                  LiTTree is an AI-powered creative operating system. Unlike simple chat interfaces that forget context or provide generic answers, 
-                  LiTTree is built for <strong>work</strong>. It preserves project memory, understands architectural constraints, 
+                  LiTTree LabStudios builds LiTT, the AI Project Operator. Unlike simple chat interfaces that forget context or provide generic answers, 
+                  LiTT is built for <strong>work</strong>. It preserves project memory, understands architectural constraints, 
                   and operates inside a real development environment.
                 </p>
               </div>
@@ -48,7 +48,7 @@ export default function AboutPage() {
               <div>
                 <h2 className="text-3xl font-black tracking-tight mb-4">Who is LiTT?</h2>
                 <p className="text-white/60 leading-relaxed">
-                  <strong>LiTT</strong> is the core AI engineering and execution brain of the platform. LiTT handles the heavy lifting: 
+                  <strong>LiTT</strong> is the AI Project Operator at the center of the platform. LiTT handles the heavy lifting: 
                   writing code, managing project files, running terminal commands, and planning complex missions.
                 </p>
               </div>
@@ -64,7 +64,7 @@ export default function AboutPage() {
             <div className="space-y-12">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur-sm">
                 <h3 className="text-xl font-bold flex items-center gap-3 mb-4">
-                  <Shield className="text-[#65f4ff]" size={24} />
+                  <Shield className="text-[#8fd14f]" size={24} />
                   Trust & Governance
                 </h3>
                 <p className="text-white/60 text-sm leading-relaxed mb-6">
@@ -95,7 +95,7 @@ export default function AboutPage() {
                   <div className="text-[10px] text-white/40">The primary build environment for real products.</div>
                 </div>
                 <div className="rounded-xl border border-white/8 bg-black/40 p-5">
-                  <Zap className="text-[#b58cff] mb-3" size={20} />
+                  <Zap className="text-[#8fd14f] mb-3" size={20} />
                   <div className="text-xs font-black uppercase tracking-wider mb-1">Missions</div>
                   <div className="text-[10px] text-white/40">Structured execution plans with clear outcomes.</div>
                 </div>
@@ -111,12 +111,24 @@ export default function AboutPage() {
           <h2 className="text-3xl font-black mb-6">Current Beta Status</h2>
           <p className="max-w-2xl mx-auto text-white/50 mb-12">
             LiTTree is evolving rapidly. While core building and media tools are ready for use, 
-            features like file checkpoints and one-click global deployment are currently in beta.
+            features like file checkpoints and publishing are currently in beta. Publishing puts your 
+            project live at its own LiTTLabs-managed URL when you approve it — nothing ships without you saying so.
           </p>
           <div className="inline-flex flex-wrap justify-center gap-3">
-            {["Core Chat", "Project Memory", "Terminal Access", "Visual Canvas", "Image Forge", "Audio & Music"].map(feature => (
-              <span key={feature} className="px-4 py-2 rounded-full border border-white/10 bg-white/5 text-xs font-bold text-white/70">
-                {feature}
+            {[
+              { label: "Core Chat", status: "Live" },
+              { label: "Project Memory", status: "Live" },
+              { label: "Terminal Access", status: "Live" },
+              { label: "Visual Canvas", status: "Live" },
+              { label: "Image Forge", status: "Live" },
+              { label: "Audio & Music", status: "Live" },
+              { label: "File Checkpoints", status: "Beta" },
+              { label: "Publishing", status: "Beta" },
+            ].map(feature => (
+              <span key={feature.label} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-xs font-bold text-white/70">
+                <span className={`h-1.5 w-1.5 rounded-full ${feature.status === "Live" ? "bg-[#8fd14f]" : "bg-[#e8a317]"}`} />
+                {feature.label}
+                <span className="text-[10px] font-black uppercase tracking-wider text-white/40">{feature.status}</span>
               </span>
             ))}
           </div>

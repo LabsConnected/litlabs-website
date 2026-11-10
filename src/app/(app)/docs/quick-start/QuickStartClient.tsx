@@ -76,8 +76,9 @@ export default function QuickStartClient() {
             title: "Create or select a project",
             body: (
               <>
-                Start a new project from a template (a website template is the
-                fastest way to see results) or start blank. Your project gets
+                Now that you&apos;re signed in, start a new project: pick a
+                template (a website template is the fastest way to see
+                results) or start blank. Your project gets
                 its own workspace — files, a preview runtime, and a terminal
                 session. The active project is the one everything in Studio
                 follows.
