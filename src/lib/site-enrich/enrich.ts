@@ -149,6 +149,24 @@ export async function enrichStaticSiteVisuals(
         return null;
       }
     };
+    // Seed dedupe with images already in the workspace (e.g. materialized
+    // by image.stock earlier in the same run): a slot/gallery resolve that
+    // lands on identical bytes must retry for a different photo instead of
+    // shipping a second copy. Bounded — at most 60 image files hashed.
+    const IMAGE_EXT = /\.(png|jpe?g|webp|gif|avif)$/i;
+    let hashedExisting = 0;
+    for (const p of fileSet) {
+      if (hashedExisting >= 60) break;
+      if (!IMAGE_EXT.test(p)) continue;
+      const h = await contentHash(p);
+      if (h) {
+        usedHashes.add(h);
+        hashedExisting += 1;
+      }
+    }
+    // Source URLs already resolved this run — providers skip them so two
+    // slots never embed the same photo.
+    const usedImageUrls = new Set<string>();
     const providerAttempts: ProviderAttempt[] = [];
     // One resolve = one persisted image. A provider can pass the URL probe
     // and still fail the download (HTTP 5xx, non-image payload, oversize),
@@ -164,8 +182,12 @@ export async function enrichStaticSiteVisuals(
     ): Promise<{ resolved: ResolvedImage; saved: InsertAssetResult; sitePath: string; hash: string | null } | null> => {
       const excluded = new Set<string>();
       for (let round = 0; round < 4 && !signal.aborted; round++) {
-        const resolved = await resolveSlotImage(kw, seed + round, signal, providerAttempts, excluded);
+        const resolved = await resolveSlotImage(kw, seed + round, signal, providerAttempts, excluded, usedImageUrls);
         if (!resolved) return null;
+        if (usedImageUrls.has(resolved.url)) {
+          seed += 1;
+          continue;
+        }
         let saved: InsertAssetResult | null = null;
         try {
           saved = await insertAssetFromUrl(resolved.url, { nameHint, signal }, transport);
@@ -173,6 +195,7 @@ export async function enrichStaticSiteVisuals(
           saved = null;
         }
         if (saved?.success && saved.sitePath) {
+          usedImageUrls.add(resolved.url);
           return { resolved, saved, sitePath: saved.sitePath, hash: await contentHash(saved.sitePath) };
         }
         excluded.add(resolved.provider);
@@ -191,6 +214,17 @@ export async function enrichStaticSiteVisuals(
       let attempt = await downloadViaProviders(keywords, keywords.slice(0, 30), signal);
       let hash = attempt?.hash ?? null;
       if (hash && usedHashes.has(hash)) {
+        // Duplicate bytes — remove the just-written copy so the workspace
+        // never carries two identical images, then retry for a different
+        // photo with a bumped seed and varied keywords.
+        if (attempt?.saved.path) {
+          try {
+            await transport.deleteFile(attempt.saved.path);
+          } catch {
+            // Transport without deleteFile or a delete failure — the
+            // duplicate stays unreferenced; dedupe still held.
+          }
+        }
         seed += 1000;
         const varied = `${keywords} scene`;
         attempt = await downloadViaProviders(varied, varied.slice(0, 30), signal);
@@ -198,6 +232,13 @@ export async function enrichStaticSiteVisuals(
         if (hash && usedHashes.has(hash)) {
           seed += 1;
           report.imagesFailed += 1;
+          if (attempt?.saved.path) {
+            try {
+              await transport.deleteFile(attempt.saved.path);
+            } catch {
+              // See above — unreferenced duplicate is acceptable.
+            }
+          }
           return null;
         }
       }
