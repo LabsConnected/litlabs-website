@@ -13,6 +13,7 @@ import {
   createPausedRun,
   renewRunLease,
   RUN_HEARTBEAT_MS,
+  RUN_STALL_MS,
   type PausedRunRecord,
   type RunResult,
 } from "@/lib/litt-intelligence/paused-run-store";
@@ -578,12 +579,65 @@ export async function POST(
   const abortController = new AbortController();
   let fenced = false;
   let lastProgressAt = new Date().toISOString();
+  let lastProgressAtMs = Date.now();
+  // Executor-side stall watchdog (2026-11-10): the read-path recovery in
+  // paused-run-store only marks a no-progress run failed when someone
+  // happens to READ the gate past RUN_STALL_MS — staging acceptance run
+  // 42761179141 iteration 3 sat "processing" with zero progress events
+  // for its whole observation window because nothing in the process ever
+  // acted on the stall. The heartbeat is already running in-process, so
+  // it enforces the same bound actively: on a stall trip this executor
+  // fences itself, aborts the loop, and settles the run FAILED with the
+  // reaper's own vocabulary (EXECUTION_STALLED / "Execution stalled (no
+  // progress)"). The settle is claim-verified, and `fenced` makes the
+  // loop's own .then/.catch write nothing if it ever returns.
+  const STALL_MESSAGE = "Execution stalled (no progress)";
+  let stallWatchdogFired = false;
+  const settleStalledRun = async () => {
+    studioLog("approval:resume_stall_watchdog_fired", {
+      conversationId,
+      userId,
+      pausedRunId,
+      actionRunId: resolved.actionRunId ?? undefined,
+    });
+    await writeResumedResultToTranscript({
+      conversationId,
+      userId,
+      projectId: resolved.projectId,
+      pausedRunId,
+      status: "failed",
+      content: STALL_MESSAGE,
+    });
+    try {
+      await settleResumedRunOutcome({
+        record: resolved,
+        userId,
+        status: "failed",
+        eventType: "run.failed",
+        patch: { currentActivity: STALL_MESSAGE, failureCode: "EXECUTION_STALLED", failureMessage: STALL_MESSAGE },
+        executionToken,
+        logEvent: "approval:action_run_stall_settle_failed",
+      });
+    } catch {
+      await releaseRunClaim(pausedRunId, userId, executionToken, "failed").catch(
+        () => undefined,
+      );
+    }
+  };
   const heartbeat = setInterval(() => {
     void renewRunLease(pausedRunId, userId, executionToken, lastProgressAt)
       .then((alive) => {
         if (!alive) {
           fenced = true;
           abortController.abort();
+          return;
+        }
+        if (!stallWatchdogFired && Date.now() - lastProgressAtMs > RUN_STALL_MS) {
+          stallWatchdogFired = true;
+          fenced = true;
+          abortController.abort();
+          clearInterval(heartbeat);
+          void settleStalledRun();
         }
       })
       .catch(() => undefined);
@@ -594,6 +648,7 @@ export async function POST(
   // that is what separates "slow but working" from "alive but stalled".
   const runProgress = new ProgressEmitter(() => {
     lastProgressAt = new Date().toISOString();
+    lastProgressAtMs = Date.now();
   });
 
   const actionContext = resolved.actionRunId
@@ -693,9 +748,18 @@ export async function POST(
     // a BUILD run. Resume with the guard enabled so a model that stops
     // writing files gets ruled out within 3 steps instead of burning the
     // run budget — the same protection the main loop gets via launch-flow.
-    buildCapabilityGuard: isFileWritingTool(resolved.toolId)
-      ? { maxStepsWithoutFileWrite: 3 }
-      : undefined,
+    // A build run's first gate is routinely a NON-writing tool, though —
+    // the golden journey pauses on image.stock before any file exists —
+    // so tool type alone misses exactly those builds. Use the route's
+    // existing build-intent test (the same one that enables the quality
+    // loop below: act/auto mode with a project) as the second arming
+    // condition, so an image-first build keeps its zero-write protection
+    // across the resume.
+    buildCapabilityGuard:
+      isFileWritingTool(resolved.toolId) ||
+      shouldEnableQualityLoop(resolved.executionMode, resolved.projectId)
+        ? { maxStepsWithoutFileWrite: 3 }
+        : undefined,
     // Quality loop: resume with a fresh evidence session so the resumed
     // run is gated the same way (agent markers re-harvest from history).
     // AUTO resumes opt in too — an AUTO run pauses for deploy approval,
@@ -777,6 +841,7 @@ export async function POST(
       // window for the settlement tail (preview verify, transcript write,
       // nested-gate persist); the heartbeat keeps the lease alive through it.
       lastProgressAt = new Date().toISOString();
+      lastProgressAtMs = Date.now();
       // Approval resume is a separate execution path from the initial
       // launch. Prove that an approved mutation really landed in the bound
       // workspace and restart/verify preview before marking the resumed run

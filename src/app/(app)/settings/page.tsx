@@ -961,7 +961,7 @@ function AppearanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColo
   const skinOptions = [
     "cyberpunk", "retro", "ocean", "sunset", "matrix", "pink",
     "synthwave", "volcanic", "gold", "arctic", "emerald", "midnight",
-    "neon", "blood", "cosmic", "miami", "honeycomb",
+    "neon", "blood", "cosmic", "miami", "honeycomb", "signature",
   ];
 
   const bgOptions: { id: string; label: string }[] = [

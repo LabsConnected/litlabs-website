@@ -7,7 +7,7 @@ export default function MarketingFooter() {
       <div className="mx-auto grid max-w-[1500px] gap-8 md:grid-cols-[1.2fr_2fr] md:items-end">
         <div>
           <BrandLogo href="/" size={42} showText={false} variant="full" className="max-w-[190px]" />
-          <p className="mt-4 max-w-sm text-sm leading-6 text-white/38">An AI creative operating system for turning ideas into real, ownable work.</p>
+          <p className="mt-4 max-w-sm text-sm leading-6 text-white/38">The AI Project Operator for turning ideas into real, ownable work.</p>
         </div>
         <div className="flex flex-wrap gap-x-6 gap-y-3 text-xs font-bold text-white/42 md:justify-end">
           <Link href="/studio" className="litt-footer-link">Studio</Link>

@@ -24,18 +24,41 @@ function AuthGateFallback({
 }) {
   const { tokens } = useTheme();
   if (!timedOut) {
+    // This fallback is also the server-rendered first paint, so it carries
+    // the sign-in invitation itself: a logged-out visitor following a
+    // /discover link should see an invitation, not a bare spinner.
     return (
       <div
         className="flex min-h-screen items-center justify-center p-6"
         style={{ backgroundColor: tokens.background, color: tokens.textMuted }}
       >
-        <div className="flex flex-col items-center gap-3">
-          <Loader2
-            size={24}
-            className="animate-spin"
-            style={{ color: tokens.primary }}
-          />
-          <span className="text-xs font-bold uppercase tracking-wider">
+        <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+          <h1
+            className="text-xl font-bold tracking-tight"
+            style={{ color: tokens.text }}
+          >
+            Discover
+          </h1>
+          <p className="text-sm leading-relaxed">
+            The Discover feed is for signed-in members. Sign in to see what
+            the community is building — and share your own work.
+          </p>
+          <Link
+            href="/sign-in?redirect_url=/discover"
+            className="inline-flex min-h-[44px] items-center justify-center rounded-lg px-5 text-sm font-bold"
+            style={{
+              backgroundColor: tokens.primary,
+              color: tokens.textInverse,
+            }}
+          >
+            Sign in to see the Discover feed
+          </Link>
+          <span className="mt-2 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider">
+            <Loader2
+              size={14}
+              className="animate-spin"
+              style={{ color: tokens.primary }}
+            />
             Loading discover feed
           </span>
         </div>
@@ -62,6 +85,16 @@ function AuthGateFallback({
         >
           Retry
         </button>
+        <p className="text-xs">
+          Not signed in yet?{" "}
+          <Link
+            href="/sign-in?redirect_url=/discover"
+            className="font-bold underline"
+            style={{ color: tokens.primary }}
+          >
+            Sign in to see the Discover feed
+          </Link>
+        </p>
       </div>
     </div>
   );

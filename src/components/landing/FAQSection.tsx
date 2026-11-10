@@ -61,7 +61,7 @@ export function FAQSection() {
           <div className="litt-eyebrow">
             <ChevronDown size={13} /> Common questions
           </div>
-          <h2 className="mt-5 text-[clamp(2.25rem,5vw,4.75rem)] font-black leading-[0.98] tracking-[-0.055em] text-white">
+          <h2 className="mt-5 text-[clamp(2.25rem,5vw,4.75rem)] font-black leading-[0.98] tracking-[-0.055em] text-[#0E1510]">
             Answers before <span className="litt-gradient-text">you have to ask.</span>
           </h2>
         </div>
@@ -82,10 +82,10 @@ export function FAQSection() {
                   onClick={() => setOpenIndex(isOpen ? null : index)}
                   className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left sm:px-6"
                 >
-                  <span className="text-sm font-black text-white sm:text-base">{faq.question}</span>
+                  <span className="text-sm font-black text-[#0E1510] sm:text-base">{faq.question}</span>
                   <ChevronDown
                     size={18}
-                    className={`shrink-0 text-white/40 transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`}
+                    className={`shrink-0 text-[#63745F] transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`}
                   />
                 </button>
                 {isOpen && (
@@ -95,7 +95,7 @@ export function FAQSection() {
                     aria-labelledby={`faq-trigger-${index}`}
                     className="px-5 pb-5 sm:px-6"
                   >
-                    <p className="text-sm leading-7 text-white/52">{faq.answer}</p>
+                    <p className="text-sm leading-7 text-[#37463A]">{faq.answer}</p>
                   </div>
                 )}
               </div>
