@@ -3151,6 +3151,7 @@ function CommandStudioContent() {
       >
         {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
         <CommandStudioHeader
+          viewedProjectId={activeProjectId ?? capabilities.projectId}
           onPreviewAction={handlePreview}
           onToggleDockAction={handleToggleDock}
           onOpenDockTabAction={handleOpenDockTab}
