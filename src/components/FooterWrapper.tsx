@@ -7,7 +7,6 @@ import Footer from "@/components/Footer";
 // marketing footer beneath them both steals vertical space and creates a large
 // unrelated panel when an internal tool uses a fixed-height canvas.
 const HIDE_PATHS = [
-  "/dashboard",
   "/studio",
   "/projects",
   "/agents",

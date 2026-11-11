@@ -255,7 +255,7 @@ export default function ProjectsPageClient() {
                   <GitPullRequest size={14} /> Connect GitHub
                 </Link>
                 <Link
-                  href="/dashboard#dashboard-guided-start"
+                  href="/studio#dashboard-guided-start"
                   className="mt-2 inline-flex items-center gap-2 text-xs font-bold"
                   style={{ color: tokens.primary }}
                 >

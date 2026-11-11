@@ -4,10 +4,9 @@
  * YouTubePlayerShell — renders the appropriate YouTube player UI
  * based on the current route and dock mode.
  *
- * - On /dashboard: renders YouTubeDock (full card)
- * - On other authenticated pages: renders YouTubeMiniPlayer
- *   when dockMode is "mini" or "docked" (docked means the user
- *   was on dashboard and navigated away — show mini)
+ * - On authenticated pages: renders YouTubeMiniPlayer
+ *   when dockMode is "mini" or "docked" (docked is the mode the
+ *   retired dashboard set — the mini player carries it elsewhere)
  * - On public pages: renders nothing
  * - When dockMode is "hidden": renders nothing
  *
@@ -50,12 +49,8 @@ export function YouTubePlayerShell() {
   // Never show if hidden
   if (dockMode === "hidden") return null;
 
-  // Dashboard renders its own dock directly — shell shows nothing there
-  if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) {
-    return null;
-  }
-
-  // Other authenticated pages get the mini player
-  // (docked mode means user was on dashboard — show mini elsewhere)
+  // Authenticated pages get the mini player (Studio carries the full
+  // media dock itself; the retired dashboard was the shell's only
+  // suppression case and it no longer exists as a page).
   return <YouTubeMiniPlayer />;
 }

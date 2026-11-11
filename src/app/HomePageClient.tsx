@@ -399,7 +399,7 @@ export default function HomePageClient() {
     if (!clerkLoaded) return;
     if (clerkSignedIn) {
       track("returning_user");
-      router.replace("/dashboard");
+      router.replace("/studio");
     }
   }, [clerkSignedIn, clerkLoaded, router]);
 

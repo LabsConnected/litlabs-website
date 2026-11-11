@@ -75,8 +75,6 @@ function derivePageContext(pathname: string, authenticated: boolean): CompanionC
     pageTitle = "Pricing";
   } else if (route.startsWith("/agents")) {
     pageTitle = "Agents";
-  } else if (route.startsWith("/dashboard")) {
-    pageTitle = "Dashboard";
   } else if (route.startsWith("/docs")) {
     pageTitle = "Documentation";
   } else if (route === "/") {

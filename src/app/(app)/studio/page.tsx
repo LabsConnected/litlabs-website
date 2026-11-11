@@ -1,11 +1,12 @@
 "use client";
 
 import { Suspense, useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
 import { track } from "@/lib/analytics";
 import CommandStudio from "./components/CommandStudio";
+import StudioPrimeLanding from "./components/StudioPrimeLanding";
 import FirstRunWelcome from "./components/FirstRunWelcome";
 import {
   peekFirstRunProjectId,
@@ -129,6 +130,7 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
 function StudioHub() {
   const { isLoaded, isSignedIn, userId, getToken } = useClerkAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [retryKey, setRetryKey] = useState(0);
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   // Clerk's injected session state can make isLoaded resolve true before
@@ -283,6 +285,16 @@ function StudioHub() {
         initialIdea={handoffPrompt}
       />
     );
+  }
+
+  // Studio prime (ART-20261110-029): a bare /studio visit lands on the
+  // prime landing — the universal create launcher + recent projects
+  // folded in from the retired dashboard, so Studio is the one
+  // signed-in home. Any deep link (?project=, ?tool=, ?creator=,
+  // ?prompt=…) opens the CommandStudio workspace directly, exactly as
+  // before; a pending first-run handoff does the same.
+  if (searchParams.toString() === "" && !peekFirstRunProjectId()) {
+    return <StudioPrimeLanding />;
   }
 
   return <CommandStudio />;

@@ -75,7 +75,7 @@ export default function SettingsPage() {
   const returnTo = searchParams.get("returnTo") || "/studio";
 
   // Read ?section= from the URL on mount so deep links like
-  // /settings?section=connections&returnTo=/dashboard land on the right tab.
+  // /settings?section=connections&returnTo=/studio land on the right tab.
   useEffect(() => {
     const section = searchParams.get("section");
     if (section && SETTINGS_SECTIONS.some((s) => s.id === section)) {

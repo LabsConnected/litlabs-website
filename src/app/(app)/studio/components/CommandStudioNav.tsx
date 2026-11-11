@@ -15,7 +15,6 @@ import {
   Network,
   Terminal,
   X,
-  Home,
   Settings as SettingsIcon,
   Plug,
 } from "lucide-react";
@@ -302,10 +301,6 @@ export function MobileCommandNav({
         );
       }) : (
         <>
-          <Link href="/dashboard" className="flex flex-1 flex-col items-center justify-center gap-1 transition-colors" style={{ color: "var(--text-muted)" }} aria-label="Go to dashboard">
-            <Home size={20} strokeWidth={1.8} className="pointer-events-none" />
-            <span className="text-[10px] font-bold">Home</span>
-          </Link>
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.id;
