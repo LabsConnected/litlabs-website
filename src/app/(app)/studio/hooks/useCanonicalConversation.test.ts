@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { shouldDeferConversationUrlSync, useConversationStore, type ChatMessage } from "../stores/useConversationStore";
+import { shouldDeferConversationUrlSync, useConversationStore, type ChatMessage, type ChatMessage as StoreChatMessage } from "../stores/useConversationStore";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import type { Conversation, ConversationMessage } from "@/lib/studio/types";
 import type { SendResult } from "./useCanonicalConversation";
@@ -624,6 +624,195 @@ describe("send() selection context — StudioSelectionPayload", () => {
     expect(sendResult?.accepted).toBe(true);
     expect(capturedBody.message).toBe("make it bigger");
     expect(capturedBody.previewSelection).toBeUndefined();
+  });
+});
+
+// ── Retry honesty — real hook render ────────────────────────────────
+// Regression (production run aa70559b, diagnosis ART-20261111-070 §4):
+// pressing Retry on a failed agent turn silently fell back to the
+// chat-only /regenerate endpoint whenever the client store's copy of the
+// turn failed findRetryResendText's strict preconditions (e.g. a locally
+// constructed shape with parentMessageId: null). The user got a plain
+// chat reply ("Could you share the link…?") and the task never re-ran.
+// Retry must resolve the turn from canonical messages, re-send through
+// the agent pipeline when the server has the linkage, and otherwise say
+// honestly that it couldn't re-run — never downgrade silently.
+describe("regenerate() Retry honesty", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const makeMsg = (overrides: Partial<ConversationMessage>): ConversationMessage => ({
+    id: "msg-x",
+    conversationId: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    role: "assistant",
+    agentSlug: "litt",
+    agentMode: "standard",
+    agentInstanceId: null,
+    content: "",
+    status: "completed",
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    clientRequestId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  const makeChatMsg = (overrides: Partial<StoreChatMessage>): StoreChatMessage => ({
+    id: "cm-x",
+    role: "assistant",
+    content: "",
+    agentSlug: "litt",
+    agentMode: "standard",
+    status: "completed",
+    createdAt: new Date().toISOString(),
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    ...overrides,
+  });
+
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const PROMPT = "Use the live browser to inspect this project's preview page";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let postMessageBodies: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let regenerateBodies: any[];
+  let canonicalMessages: ConversationMessage[];
+
+  beforeEach(() => {
+    postMessageBodies = [];
+    regenerateBodies = [];
+    canonicalMessages = [];
+    useConversationStore.getState().resetForProject();
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (method === "GET" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return jsonResponse({ messages: canonicalMessages, revision: 2 });
+      }
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        const body = JSON.parse(String(init?.body));
+        postMessageBodies.push(body);
+        return jsonResponse({
+          userMessage: makeMsg({ id: "u-new", role: "user", content: body.message }),
+          assistantMessage: makeMsg({ id: "a-new", content: "Re-running the task." }),
+          revision: 3,
+        });
+      }
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/regenerate$/.test(url)) {
+        regenerateBodies.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          assistantMessage: makeMsg({ id: "a-regen", content: "Fresh chat answer." }),
+          revision: 3,
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useConversationStore.getState().resetForProject();
+  });
+
+  async function renderAndSeed(storeMessages: StoreChatMessage[]) {
+    const { result } = renderHook(() => useCanonicalConversation({ serverProjectId: "proj-1" }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+      st.setMessages("conv-1", storeMessages);
+    });
+    return result;
+  }
+
+  it("re-sends through the agent pipeline when the store lost the parent linkage but the server kept it", async () => {
+    canonicalMessages = [
+      makeMsg({ id: "u1", role: "user", content: PROMPT, clientRequestId: "req-1" }),
+      makeMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: "u1", clientRequestId: "req-1" }),
+    ];
+    // Hazard shape: the store's copy of the failed turn has no parent and
+    // the parent user message is not in the store's list at all.
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: null }),
+    ]);
+
+    await act(async () => { await result.current.regenerate("asst-1"); });
+
+    expect(postMessageBodies).toHaveLength(1);
+    expect(postMessageBodies[0].message).toBe(PROMPT);
+    expect(regenerateBodies).toHaveLength(0);
+  });
+
+  it("says honestly that it couldn't re-run when the linkage exists nowhere, and never calls the chat-only regenerate", async () => {
+    canonicalMessages = [
+      makeMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: null }),
+    ];
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: null }),
+    ]);
+
+    await act(async () => { await result.current.regenerate("asst-1"); });
+
+    expect(regenerateBodies).toHaveLength(0);
+    expect(postMessageBodies).toHaveLength(0);
+    expect(result.current.sendError).toContain("Couldn't re-run that turn");
+  });
+
+  it("re-sends directly when the store already resolves the parent (no downgrade, no regenerate call)", async () => {
+    canonicalMessages = [
+      makeMsg({ id: "u1", role: "user", content: PROMPT }),
+      makeMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: "u1" }),
+    ];
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "u1", role: "user", content: PROMPT, status: "completed" }),
+      makeChatMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: "u1" }),
+    ]);
+
+    await act(async () => { await result.current.regenerate("asst-1"); });
+
+    expect(postMessageBodies).toHaveLength(1);
+    expect(postMessageBodies[0].message).toBe(PROMPT);
+    expect(regenerateBodies).toHaveLength(0);
+  });
+
+  it("keeps plain Regenerate (no id, completed turn) on the chat-only endpoint", async () => {
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "u1", role: "user", content: "Say hi", status: "completed" }),
+      makeChatMsg({ id: "a9", content: "Hi.", status: "completed", parentMessageId: "u1" }),
+    ]);
+
+    await act(async () => { await result.current.regenerate(); });
+
+    expect(regenerateBodies).toHaveLength(1);
+    expect(regenerateBodies[0].assistantMessageId).toBe("a9");
+    expect(postMessageBodies).toHaveLength(0);
+    expect(result.current.sendError).toBeNull();
   });
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { findRetryResendText } from "@/lib/studio/retry-strategy";
+import { findRetryResendText, resolveCanonicalRetryTarget } from "@/lib/studio/retry-strategy";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
@@ -1859,12 +1859,53 @@ export function useCanonicalConversation({
 
     // A failed turn means the work never completed — re-send the parent user
     // message through the normal send pipeline so the turn is genuinely
-    // re-run (see findRetryResendText). Falls back to the regenerate API
-    // when there is no parent message to re-send.
+    // re-run (see findRetryResendText).
     const resendText = findRetryResendText(target, allMessages);
     if (resendText) {
       await send(resendText);
       return;
+    }
+
+    // Retry pressed on a specific turn (an id was passed): falling through
+    // to the chat-only regenerate API below would silently downgrade the
+    // retry — that endpoint cannot re-run workspace operations, so the
+    // failed turn would stay failed while a fresh chat reply pretends
+    // otherwise. The store's copy of the turn can diverge from the
+    // persisted row (locally constructed shapes carry parentMessageId:
+    // null; optimistic/canonical identity mixing can strand the parent
+    // outside the store's list), while the server persists the real
+    // linkage — resolve the turn from canonical messages before deciding.
+    let regenerateTargetId = target.id;
+    if (assistantMessageId) {
+      await loadMessages(conversationId);
+      const freshMessages = getStore().getMessages();
+      const canonicalTarget = resolveCanonicalRetryTarget(target, freshMessages);
+      if (canonicalTarget?.status === "failed") {
+        const canonicalResendText = findRetryResendText(canonicalTarget, freshMessages);
+        if (canonicalResendText) {
+          await send(canonicalResendText);
+          return;
+        }
+        // Canonically failed and no parent exists anywhere to re-send:
+        // say so honestly instead of fabricating a chat reply. The user
+        // can send the request again as a new turn to retry the task.
+        setSendError(
+          "Couldn't re-run that turn — its original message couldn't be found in this conversation. Send the request again as a new message to retry the task.",
+        );
+        return;
+      }
+      if (!canonicalTarget && target.status === "failed") {
+        setSendError(
+          "Couldn't re-run that turn — it couldn't be found in this conversation. Send the request again as a new message to retry the task.",
+        );
+        return;
+      }
+      if (canonicalTarget) {
+        // Canonical state disagrees with the store's stale copy (e.g. the
+        // turn actually completed) — regenerate the canonical message
+        // through the normal path below.
+        regenerateTargetId = canonicalTarget.id;
+      }
     }
 
     setBusy(true);
@@ -1880,7 +1921,7 @@ export function useCanonicalConversation({
         credentials: "include",
         headers: await authHeaders(true),
         body: JSON.stringify({
-          assistantMessageId: target.id,
+          assistantMessageId: regenerateTargetId,
           clientRequestId: generateClientRequestId(),
           expectedRevision: s.revision,
           runtimeContext,
