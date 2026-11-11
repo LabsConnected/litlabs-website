@@ -428,3 +428,108 @@ describe("P1-1: generate flow (idempotency, no double-submit, honest errors)", (
     });
   });
 });
+
+describe("fallthrough gaps: default selection + serving-provider identity (battery 2026-11-11)", () => {
+  const apiFetchMock = vi.mocked(apiFetch);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    studioCtx.projectId = PROJECT_ID;
+    localStorage.clear();
+    // Provider status: Gemini is configured, so its pin is selectable.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).includes("/api/media/providers/status")) {
+        return new Response(
+          JSON.stringify({ providers: [{ id: "gemini", configured: true }] }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+    apiFetchMock.mockImplementation((async (input: string | URL) => {
+      if (String(input).includes("/api/media/generate")) {
+        return {
+          downloadUrl: "https://cdn.example.com/gen.png",
+          providerId: "cloudflare",
+          free: true,
+          cost: 0,
+        };
+      }
+      return {};
+    }) as typeof apiFetch);
+  });
+
+  function generateCalls() {
+    return apiFetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("/api/media/generate"),
+    );
+  }
+
+  function startGenerate(promptText = "a small coffee shop logo") {
+    render(<ImageTool />);
+    const input = screen.getAllByTestId("image-prompt-input")[0];
+    fireEvent.change(input, { target: { value: promptText } });
+    fireEvent.click(screen.getAllByTestId("generate-image-button")[0]);
+  }
+
+  it("with NO explicit provider choice, generate starts from Auto — no OpenAI pin", async () => {
+    startGenerate();
+    await waitFor(() => {
+      expect(generateCalls().length).toBe(1);
+    });
+    const [, options] = generateCalls()[0];
+    const body = JSON.parse((options as RequestInit).body as string);
+    // The battery failure: a fresh/chat-routed pane pinned
+    // providerId=openai and died on its dead key. With no user choice
+    // the request must enter the configured-provider chain instead.
+    expect(body.providerId).toBeUndefined();
+    expect(body.generationMode).toBe("auto-free");
+  });
+
+  it("an explicit provider pin IS respected — sent as providerId, not a mode", async () => {
+    render(<ImageTool />);
+    // The provider list lives in the left panel's Settings tab.
+    const settingsTabs = screen.getAllByRole("button", { name: "Settings" });
+    fireEvent.click(settingsTabs[0]);
+    // Wait for the provider-status fetch to mark Gemini selectable,
+    // then pin it explicitly.
+    const geminiPills = await screen.findAllByRole("button", { name: /Gemini/ });
+    const enabled = geminiPills.filter((b) => !(b as HTMLButtonElement).disabled);
+    expect(enabled.length).toBeGreaterThan(0);
+    fireEvent.click(enabled[0]);
+
+    const input = screen.getAllByTestId("image-prompt-input")[0];
+    fireEvent.change(input, { target: { value: "a small coffee shop logo" } });
+    fireEvent.click(screen.getAllByTestId("generate-image-button")[0]);
+
+    await waitFor(() => {
+      expect(generateCalls().length).toBe(1);
+    });
+    const [, options] = generateCalls()[0];
+    const body = JSON.parse((options as RequestInit).body as string);
+    expect(body.providerId).toBe("gemini");
+    expect(body.generationMode).toBeUndefined();
+  });
+
+  it("the result names the provider that ACTUALLY served — in the log and the stored history", async () => {
+    startGenerate();
+    await waitFor(() => {
+      expect(generateCalls().length).toBe(1);
+    });
+    // Reveal the generation log: the Done line must name the serving
+    // provider (the response said cloudflare), not just the mode label.
+    fireEvent.click(screen.getByTitle("Toggle generation log"));
+    await waitFor(() => {
+      expect(screen.getByText(/✓ Done · FREE · Cloudflare/)).toBeInTheDocument();
+    });
+    // The persisted history entry carries the serving provider too —
+    // the canvas caption and vault read from it, so "Auto Best (Free)"
+    // can never again be the only identity a result has.
+    await waitFor(() => {
+      const raw = localStorage.getItem(`litlabs-generate-history:${PROJECT_ID}`);
+      expect(raw).toBeTruthy();
+      const entries = JSON.parse(raw!) as Array<{ provider: string }>;
+      expect(entries[0].provider).toBe("cloudflare");
+    });
+  });
+});

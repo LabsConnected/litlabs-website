@@ -460,7 +460,13 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
   }, [prompt]);
 
   /* ── Provider / format state ── */
-  const [providerId, setProviderId] = useState<ProviderSelection>("openai");
+  // Default is Auto, NOT a pinned provider: with no explicit user
+  // choice the request must enter the configured-provider chain
+  // (generationMode) instead of pinning one provider whose key/quota
+  // can be dead (production battery 2026-11-11: a fresh/chat-routed
+  // pane pinned OpenAI and died on its exhausted quota). An explicit
+  // pin picked in the UI is still respected as-is.
+  const [providerId, setProviderId] = useState<ProviderSelection>("auto-free");
   const [aspectRatio, setAspectRatio] = useState<
     "1:1" | "4:5" | "3:2" | "16:9" | "9:16"
   >("1:1");
@@ -671,7 +677,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
       name: "Default",
       prompt: "",
       negativePrompt: "",
-      providerId: "openai",
+      providerId: "auto-free",
       aspectRatio: "1:1",
       imageSize: "1K",
       seed: 0,
@@ -1108,6 +1114,18 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
         const dataCost = typeof data.cost === "number" ? data.cost : 0;
         const assetId = data.assetId as string | null | undefined;
         const assetPersistenceFailed = data.assetPersistenceFailed === true;
+        // Truthful provider identification: the response names the
+        // provider that ACTUALLY served (after any fallthrough) —
+        // record and display THAT, never just the requested mode's
+        // label ("Auto Best (Free)" told the user nothing).
+        const servedProviderId =
+          typeof data.providerId === "string" && data.providerId
+            ? (data.providerId as ProviderSelection)
+            : null;
+        const servedProviderLabel = servedProviderId
+          ? (PROVIDER_OPTIONS.find((p) => p.id === servedProviderId)?.label ??
+            servedProviderId)
+          : null;
 
         setHistory((prev) =>
           prev.map((g) =>
@@ -1117,6 +1135,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                   status: "succeeded",
                   fileUrl: downloadUrl,
                   thumbUrl,
+                  ...(servedProviderId ? { provider: servedProviderId } : {}),
                 }
               : g,
           ),
@@ -1129,13 +1148,14 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                   status: "succeeded",
                   fileUrl: downloadUrl,
                   thumbUrl,
+                  ...(servedProviderId ? { provider: servedProviderId } : {}),
                 }
               : prev,
           );
 
         addLog(
           "success",
-          `[${i + 1}/${batchSize}] ✓ Done · ${isFree ? "FREE" : dataCost + " 🪙"}`,
+          `[${i + 1}/${batchSize}] ✓ Done · ${isFree ? "FREE" : dataCost + " 🪙"}${servedProviderLabel ? ` · ${servedProviderLabel}` : ""}`,
         );
         refreshWallet().catch(() => {});
 

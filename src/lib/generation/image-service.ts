@@ -898,6 +898,28 @@ function isProviderConfigError(err: Error): boolean {
   );
 }
 
+/**
+ * True when a provider failure is a quota / rate-limit condition:
+ * the provider is configured and reachable, but it will not serve
+ * this request right now (HTTP 429, quota exhausted, rate limit).
+ * Handlers surface these as message text ("OpenAI error: {..."
+ * code":"insufficient_quota"...}", "Gemini quota exceeded:
+ * RESOURCE_EXHAUSTED (429)", "Pollinations upstream rate limit
+ * (429)"), so the classification matches their stable phrasings.
+ * Quota failures are fallthrough-eligible exactly like config
+ * failures: this provider cannot serve, but the chain may.
+ */
+function isProviderQuotaError(err: Error): boolean {
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes("quota") ||
+    msg.includes("rate limit") ||
+    msg.includes("rate_limit") ||
+    msg.includes("too many requests") ||
+    /\b429\b/.test(msg)
+  );
+}
+
 function isVectorRequest(prompt: string): boolean {
   const lower = prompt.toLowerCase();
   return (
@@ -1406,6 +1428,14 @@ export async function generateImage(
   let result: MediaResult | null = null;
   let usedProviderId: MediaProviderId = providerId;
   let lastError: Error | null = null;
+  // Every failed dispatch, in order — used to build a truthful
+  // all-providers-failed error that names what was actually tried.
+  const attempts: Array<{ providerId: MediaProviderId; error: Error }> = [];
+  const recordFailure = (candidateId: MediaProviderId, err: unknown): Error => {
+    const error = err instanceof Error ? err : new Error("Provider error");
+    attempts.push({ providerId: candidateId, error });
+    return error;
+  };
 
   if (generationMode === "auto-free" || generationMode === "auto-quality") {
     const order = getAutoOrder(generationMode, prompt);
@@ -1416,23 +1446,27 @@ export async function generateImage(
         usedProviderId = candidateId;
         break;
       } catch (err) {
-        lastError = err instanceof Error ? err : new Error("Provider error");
+        lastError = recordFailure(candidateId, err);
       }
     }
   } else {
     try {
       result = await deps.dispatch(providerId, input, prompt);
     } catch (err) {
-      lastError = err instanceof Error ? err : new Error("Provider error");
+      lastError = recordFailure(providerId, err);
       // A pinned provider whose credential is absent or REJECTED (dead
       // key) is not actually configured — the pin cannot be served by
       // it at all. Fall through the configured auto-quality chain so a
       // dead key never becomes the terminal answer while a genuinely
       // configured provider exists (production 2026-11-11: the pane's
       // default pin is OpenAI, whose key was dead, while Gemini was
-      // healthy). Non-config failures keep the pin's semantics: they
-      // are the pinned provider's real answer and stay terminal.
-      if (isProviderConfigError(lastError)) {
+      // healthy). A pinned provider that is OUT OF QUOTA (429) gets
+      // the same treatment (production battery 2026-11-11: OpenAI
+      // quota-exceeded was terminal even though the chain was
+      // healthy) — it cannot serve this request, but the chain may.
+      // Other failures keep the pin's semantics: they are the pinned
+      // provider's real answer and stay terminal.
+      if (isProviderConfigError(lastError) || isProviderQuotaError(lastError)) {
         const fallthrough = getAutoOrder("auto-quality", prompt).filter(
           (candidateId) => candidateId !== providerId,
         );
@@ -1443,8 +1477,7 @@ export async function generateImage(
             usedProviderId = candidateId;
             break;
           } catch (fallbackErr) {
-            lastError =
-              fallbackErr instanceof Error ? fallbackErr : new Error("Provider error");
+            lastError = recordFailure(candidateId, fallbackErr);
           }
         }
       }
@@ -1453,15 +1486,39 @@ export async function generateImage(
 
   if (!result) {
     const rawMsg = lastError?.message || "Generation failed";
+    const duration = Date.now() - startTime;
+    console.info(
+      `[image-service] FAIL provider=${usedProviderId} requestId=${requestId} duration=${duration}ms error=${rawMsg.replace(/\s+/g, " ").slice(0, 200)}`,
+    );
+    if (attempts.length > 1) {
+      // The chain was walked and every provider failed. The error
+      // must be truthful about that: name each provider tried and
+      // its failure, instead of blaming only the last one (the
+      // pre-fix behavior synthesized "<first provider> quota
+      // exceeded" even after fallthrough attempts). The code is
+      // QUOTA_EXCEEDED only when quota is the whole story.
+      const allQuota = attempts.every((a) => isProviderQuotaError(a.error));
+      const triedList = attempts.map((a) => a.providerId).join(", ");
+      const detail = attempts
+        .map(
+          (a) =>
+            `${a.providerId}: ${a.error.message.replace(/\s+/g, " ").slice(0, 160)}`,
+        )
+        .join("; ");
+      const errorMsg = `All configured image providers failed. Tried: ${triedList}. ${detail}`;
+      await failJob(errorMsg);
+      return fail(
+        allQuota ? "QUOTA_EXCEEDED" : "PROVIDER_ERROR",
+        errorMsg,
+        !allQuota,
+        usedProviderId,
+      );
+    }
     const isQuota = rawMsg.includes("429") || rawMsg.toLowerCase().includes("quota");
     const errorMsg = isQuota
       ? `${usedProviderId} quota exceeded. Try again later or choose another configured provider.`
       : rawMsg;
     await failJob(errorMsg);
-    const duration = Date.now() - startTime;
-    console.info(
-      `[image-service] FAIL provider=${usedProviderId} requestId=${requestId} duration=${duration}ms error=${rawMsg.replace(/\s+/g, " ").slice(0, 200)}`,
-    );
     return fail(
       isQuota ? "QUOTA_EXCEEDED" : "PROVIDER_ERROR",
       errorMsg,
