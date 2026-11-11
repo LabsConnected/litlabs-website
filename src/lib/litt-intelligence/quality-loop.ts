@@ -280,6 +280,16 @@ export interface QualityLoopState {
    * Narrows required stages via {@link requiredStagesFor}.
    */
   isStaticWorkspace?: boolean;
+  /**
+   * Latest static-lane visual audit outcome, recorded by
+   * noteStaticVisualAudit (quality-loop-flow.ts) from the enrichment
+   * pass's post-build audit: the placeholder image references still
+   * present in the built page. While placeholderRefs is non-empty the
+   * TEST stage cannot pass — a build that ships placeholder imagery is
+   * not visually complete, no matter what other evidence exists
+   * (production defect 2026-11-11). Absent until the first audit.
+   */
+  visualAudit?: { placeholderRefs: string[] };
   startedAt: string;
   updatedAt: string;
 }
