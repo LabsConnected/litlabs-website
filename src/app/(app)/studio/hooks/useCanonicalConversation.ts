@@ -339,6 +339,42 @@ export function useCanonicalConversation({
     [canonicalMessages],
   );
 
+  // ── Approval-gate derivation (approve-in-chat, 2026-11-11) ─────────
+  // The chat ApprovalCard is fed by the execution store's pendingApproval
+  // — session-local state. The send flow arms it for THIS client's runs
+  // and loadMessages rehydrates it at load time, but only when no run is
+  // active locally. A session that opens a conversation whose run paused
+  // in ANOTHER session (or that tracks that run as running) therefore
+  // saw the chat announce the gate with no actionable card anywhere —
+  // the desktop half of Larry's approve-in-chat report. The canonical
+  // messages are the server-persisted truth every session loads, so arm
+  // the gate from them whenever they change: latest assistant message
+  // carries a paused run, the store has no gate mounted, no decision is
+  // in flight (approvalPhase idle), and the gate was not already decided
+  // in this session (resolvedPausedRunIds — the store's own
+  // anti-resurrection record). Same gate shape as loadMessages
+  // rehydration; no gating semantics change.
+  useEffect(() => {
+    const conversationId = selectedConversationId;
+    if (!conversationId || conversationId.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)) return;
+    const lastAssistant = [...canonicalMessages].reverse().find((m) => m.role === "assistant");
+    if (!lastAssistant) return;
+    const gate = lastAssistant.pendingApproval;
+    if (!gate?.pausedRunId) return;
+    if (lastAssistant.status !== "awaiting_approval" && lastAssistant.status !== "streaming") return;
+    const exec = useExecutionStore.getState();
+    if (exec.pendingApproval) return;
+    if (exec.approvalPhase !== "idle") return;
+    if (exec.resolvedPausedRunIds.includes(gate.pausedRunId)) return;
+    exec.setPendingApproval({
+      toolId: gate.toolId,
+      reason: gate.reason,
+      pausedRunId: gate.pausedRunId,
+      conversationId,
+      inputs: gate.inputs,
+    });
+  }, [canonicalMessages, selectedConversationId]);
+
   // Load messages for a conversation
   const loadMessages = useCallback(async (conversationId: string) => {
     try {
