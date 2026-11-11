@@ -69,7 +69,7 @@ export default function GameCloudHome() {
   }, []);
 
   return (
-    <main className="min-h-dvh bg-[#070812] text-white pb-[calc(112px+env(safe-area-inset-bottom))]">
+    <main className="min-h-dvh bg-[#edf3e4] text-white pb-[calc(112px+env(safe-area-inset-bottom))]">
       <section className="px-4 pt-5 space-y-5 max-w-7xl mx-auto">
         <div>
           <p className="text-sm text-orange-400 font-bold">
@@ -86,7 +86,7 @@ export default function GameCloudHome() {
           placeholder="Search games..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm outline-none focus:border-orange-500/50 transition-colors text-white placeholder:text-slate-500"
+          className="w-full rounded-2xl bg-[#0e1510]/5 border border-[#0e1510]/10 px-4 py-3 text-sm outline-none focus:border-orange-500/50 transition-colors text-white placeholder:text-slate-500"
         />
 
         <GameHero />
@@ -96,7 +96,7 @@ export default function GameCloudHome() {
             <button
               key={item}
               aria-label={`Filter by ${item}`}
-              className="rounded-2xl bg-white/5 border border-white/10 px-3 py-4 text-sm font-bold text-white hover:bg-white/10 hover:border-orange-500/50 transition-all"
+              className="rounded-2xl bg-[#0e1510]/5 border border-[#0e1510]/10 px-3 py-4 text-sm font-bold text-white hover:bg-[#0e1510]/10 hover:border-orange-500/50 transition-all"
             >
               {item}
             </button>

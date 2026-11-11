@@ -37,7 +37,7 @@ export function CustomConsentForm() {
     <form
       method="POST"
       action={actionUrl}
-      className="w-full max-w-lg rounded-xl border border-[#29345e] bg-[#090d1b] p-6 text-[#eef4ff]"
+      className="w-full max-w-lg rounded-xl border border-[#29345e] bg-[#f6f9f1] p-6 text-[#eef4ff]"
     >
       <h1 className="mb-2 text-2xl font-semibold">
         {data.oauthApplicationName} wants access
@@ -112,7 +112,7 @@ export function CustomConsentForm() {
           type="submit"
           name="consented"
           value="false"
-          className="flex-1 rounded-lg border border-white/20 px-4 py-3"
+          className="flex-1 rounded-lg border border-[#0e1510]/20 px-4 py-3"
         >
           Deny
         </button>

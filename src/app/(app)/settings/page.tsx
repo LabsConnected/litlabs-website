@@ -151,7 +151,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => { handleMobileBack(); setMobileSettingsOpen(true); }}
-              className="mb-3 inline-flex min-h-9 items-center gap-2 rounded-lg px-1 text-xs font-bold text-white/65 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+              className="mb-3 inline-flex min-h-9 items-center gap-2 rounded-lg px-1 text-xs font-bold text-[#0e1510]/65 transition-colors hover:text-[#0e1510] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
               aria-label="Back to all settings"
             >
               <ArrowLeft size={14} className="pointer-events-none" />
@@ -249,7 +249,7 @@ function SettingsTabStrip({
       <div className="flex items-center gap-2 px-3 py-2.5 md:gap-3 md:px-4">
         <Link
           href={returnTo}
-          className="grid h-[40px] w-[40px] shrink-0 place-items-center rounded-lg border transition-colors hover:bg-white/5"
+          className="grid h-[40px] w-[40px] shrink-0 place-items-center rounded-lg border transition-colors hover:bg-[#0e1510]/5"
           style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)" }}
           aria-label="Back to Studio"
         >
@@ -259,7 +259,7 @@ function SettingsTabStrip({
           Settings
         </span>
         <div className="relative hidden min-w-0 flex-1 md:block md:max-w-64">
-          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#0e1510]/30" />
           <input
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
@@ -277,7 +277,7 @@ function SettingsTabStrip({
         <button
           type="button"
           onClick={onToggleMobileSearch}
-          className="grid h-[40px] w-[40px] shrink-0 place-items-center rounded-lg border border-white/10 text-white/70 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 md:hidden"
+          className="grid h-[40px] w-[40px] shrink-0 place-items-center rounded-lg border border-[#0e1510]/10 text-[#0e1510]/70 transition hover:bg-[#0e1510]/5 hover:text-[#0e1510] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 md:hidden"
           aria-label={mobileSearchOpen ? "Close settings search" : "Search settings"}
           aria-expanded={mobileSearchOpen}
         >
@@ -299,7 +299,7 @@ function SettingsTabStrip({
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-accent/75">All settings</span>
-            <span className="block truncate text-sm font-bold text-white">{SETTINGS_SECTIONS.find((s) => s.id === activeSection)?.label ?? "Overview"}</span>
+            <span className="block truncate text-sm font-bold text-[#0e1510]">{SETTINGS_SECTIONS.find((s) => s.id === activeSection)?.label ?? "Overview"}</span>
           </span>
           <ChevronRight size={16} className="shrink-0 text-accent/80" />
         </button>
@@ -308,12 +308,12 @@ function SettingsTabStrip({
       {mobileSearchOpen && (
         <div className="px-3 pb-2.5 md:hidden">
           <div className="relative">
-            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/55" />
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#0e1510]/55" />
             <input
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Search settings…"
-              className="min-h-10 w-full rounded-xl border border-white/12 bg-black/40 py-2 pl-9 pr-3 text-sm text-white outline-none transition focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
+              className="min-h-10 w-full rounded-xl border border-[#0e1510]/12 bg-white py-2 pl-9 pr-3 text-sm text-[#0e1510] outline-none transition focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
               aria-label="Search settings"
               data-testid="mobile-settings-search"
               autoFocus
@@ -360,7 +360,7 @@ function SettingsTabStrip({
             if (groupSections.length === 0) return null;
             return (
               <div key={group.id} className="flex items-center gap-1" data-testid={`desktop-settings-group-${group.id}`}>
-                <span className="shrink-0 px-2 text-[10px] font-black uppercase tracking-[0.14em] text-white/35">
+                <span className="shrink-0 px-2 text-[10px] font-black uppercase tracking-[0.14em] text-[#0e1510]/35">
                   {group.label}
                 </span>
                 {groupSections.map((section) => {
@@ -423,19 +423,19 @@ function MobileSettingsSheet({
   return (
     <div className="fixed inset-0 z-[100] lg:hidden" role="dialog" aria-modal="true" aria-label="All settings">
       <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} aria-label="Close all settings" />
-      <section className="absolute inset-0 flex flex-col overflow-hidden border border-white/10 bg-[#090b12] pb-[env(safe-area-inset-bottom)] shadow-2xl">
-        <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+      <section className="absolute inset-0 flex flex-col overflow-hidden border border-[#0e1510]/10 bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl">
+        <header className="flex items-center gap-3 border-b border-[#0e1510]/10 px-4 py-3">
           <button
             type="button"
             onClick={onClose}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 text-white/75 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#0e1510]/10 text-[#0e1510]/75 transition hover:bg-[#0e1510]/5 hover:text-[#0e1510] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
             aria-label="Close all settings"
           >
             <X size={17} className="pointer-events-none" />
           </button>
           <div className="min-w-0 flex-1">
-            <h2 className="text-base font-black text-white">All settings</h2>
-            <p className="text-xs text-white/60">Choose a category</p>
+            <h2 className="text-base font-black text-[#0e1510]">All settings</h2>
+            <p className="text-xs text-[#0e1510]/60">Choose a category</p>
           </div>
         </header>
         <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 py-4" aria-label="Settings sections" data-testid="mobile-settings-sections">
@@ -458,14 +458,14 @@ function MobileSettingsSheet({
                   aria-current={isActive ? "page" : undefined}
                   aria-label={section.label}
                 >
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-accent/90">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#0e1510]/[0.06] text-accent/90">
                     <Icon size={16} className="pointer-events-none" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-white/90"}`}>{section.label}</span>
-                    <span className="block truncate text-xs text-white/60">{section.description}</span>
+                    <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-[#0e1510]/90"}`}>{section.label}</span>
+                    <span className="block truncate text-xs text-[#0e1510]/60">{section.description}</span>
                   </span>
-                  {isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
+                  {isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-[#0e1510]/45" />}
                 </button>
               );
             })
@@ -475,7 +475,7 @@ function MobileSettingsSheet({
               if (groupSections.length === 0) return null;
               return (
                 <div key={group.id} data-testid={`mobile-settings-group-${group.id}`}>
-                  <h3 className="px-1 pb-1 pt-3 text-[10px] font-black uppercase tracking-[0.16em] text-white/40">
+                  <h3 className="px-1 pb-1 pt-3 text-[10px] font-black uppercase tracking-[0.16em] text-[#0e1510]/40">
                     {group.label}
                   </h3>
                   <div className="space-y-2">
@@ -497,14 +497,14 @@ function MobileSettingsSheet({
                           aria-current={isActive ? "page" : undefined}
                           aria-label={section.label}
                         >
-                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-accent/90">
+                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#0e1510]/[0.06] text-accent/90">
                             <Icon size={16} className="pointer-events-none" />
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-white/90"}`}>{section.label}</span>
-                            <span className="block truncate text-xs text-white/60">{section.description}</span>
+                            <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-[#0e1510]/90"}`}>{section.label}</span>
+                            <span className="block truncate text-xs text-[#0e1510]/60">{section.description}</span>
                           </span>
-                          {isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
+                          {isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-[#0e1510]/45" />}
                         </button>
                       );
                     })}
@@ -678,7 +678,7 @@ function OverviewSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
               key={card.label}
               type="button"
               onClick={() => goToSection(card.section)}
-              className="flex min-h-23 items-center justify-between rounded-2xl border px-5 py-4 text-left transition-all hover:bg-white/5"
+              className="flex min-h-23 items-center justify-between rounded-2xl border px-5 py-4 text-left transition-all hover:bg-[#0e1510]/5"
               style={{ borderColor: "rgba(255,255,255,0.06)", backgroundColor: "rgba(255,255,255,0.02)" }}
               aria-label={`${card.label}: ${card.value}. ${card.action}.`}
             >
@@ -687,8 +687,8 @@ function OverviewSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
                   {card.icon}
                 </span>
                 <div className="min-w-0">
-                  <div className="text-sm font-bold text-white/80">{card.label}</div>
-                  <div className="mt-1 truncate text-xs leading-5 text-white/40">{card.value}</div>
+                  <div className="text-sm font-bold text-[#0e1510]/80">{card.label}</div>
+                  <div className="mt-1 truncate text-xs leading-5 text-[#0e1510]/40">{card.value}</div>
                 </div>
               </div>
               <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold" style={{ color: T.accentColor }}>
@@ -708,11 +708,11 @@ function OverviewSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
                 key={i}
                 type="button"
                 onClick={action.onClick}
-                className="flex items-center justify-between rounded-xl border px-4 py-3 text-xs font-bold transition-all hover:bg-white/5"
+                className="flex items-center justify-between rounded-xl border px-4 py-3 text-xs font-bold transition-all hover:bg-[#0e1510]/5"
                 style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)" }}
               >
                 {action.label}
-                <ChevronRight size={14} className="pointer-events-none text-white/30" />
+                <ChevronRight size={14} className="pointer-events-none text-[#0e1510]/30" />
               </button>
             ))}
           </div>
@@ -768,7 +768,7 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
   }, [user]);
 
   if (!isLoaded) {
-    return <div className="flex items-center gap-2 text-xs text-white/40"><Loader2 size={14} className="animate-spin" /> Loading account…</div>;
+    return <div className="flex items-center gap-2 text-xs text-[#0e1510]/40"><Loader2 size={14} className="animate-spin" /> Loading account…</div>;
   }
 
   if (!user) {
@@ -796,7 +796,7 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
               alt={name}
               width={64}
               height={64}
-              className="h-16 w-16 rounded-full border border-white/10 object-cover"
+              className="h-16 w-16 rounded-full border border-[#0e1510]/10 object-cover"
             />
             <button
               type="button"
@@ -807,9 +807,9 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
               title="Upload profile picture"
             >
               {uploadingPic ? (
-                <Loader2 size={18} className="animate-spin text-white" />
+                <Loader2 size={18} className="animate-spin text-[#0e1510]" />
               ) : (
-                <Camera size={18} className="text-white" />
+                <Camera size={18} className="text-[#0e1510]" />
               )}
             </button>
             <input
@@ -827,13 +827,13 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
             />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-bold text-white">{name}</div>
-            <div className="text-xs text-white/40">{email}</div>
+            <div className="text-sm font-bold text-[#0e1510]">{name}</div>
+            <div className="text-xs text-[#0e1510]/40">{email}</div>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploadingPic}
-              className="mt-1.5 text-[10px] font-bold text-white/50 hover:text-white/80 disabled:opacity-50"
+              className="mt-1.5 text-[10px] font-bold text-[#0e1510]/50 hover:text-[#0e1510]/80 disabled:opacity-50"
             >
               {uploadingPic ? "Uploading…" : "Change photo"}
             </button>
@@ -845,13 +845,13 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
           </div>
         )}
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-white/8 bg-white/2.5 px-3 py-2.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Display name</div>
-            <div className="mt-1 text-xs font-semibold text-white/85">{name}</div>
+          <div className="rounded-xl border border-[#0e1510]/8 bg-[#0e1510]/2.5 px-3 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">Display name</div>
+            <div className="mt-1 text-xs font-semibold text-[#0e1510]/85">{name}</div>
           </div>
-          <div className="rounded-xl border border-white/8 bg-white/2.5 px-3 py-2.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Primary email</div>
-            <div className="mt-1 truncate text-xs font-semibold text-white/85">{email}</div>
+          <div className="rounded-xl border border-[#0e1510]/8 bg-[#0e1510]/2.5 px-3 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">Primary email</div>
+            <div className="mt-1 truncate text-xs font-semibold text-[#0e1510]/85">{email}</div>
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
@@ -866,7 +866,7 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
           <button
             type="button"
             onClick={() => void signOut({ redirectUrl: "/" })}
-            className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-white/60 hover:bg-white/5"
+            className="rounded-lg border border-[#0e1510]/10 px-3 py-1.5 text-xs font-bold text-[#0e1510]/60 hover:bg-[#0e1510]/5"
           >
             Sign out
           </button>
@@ -878,16 +878,16 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
         {identities.length > 0 ? (
           <div className="space-y-2">
             {identities.map((id) => (
-              <div key={id.id} className="flex items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
+              <div key={id.id} className="flex items-center justify-between rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-white">{id.provider}</span>
+                  <span className="text-xs font-bold text-[#0e1510]">{id.provider}</span>
                 </div>
                 <StatusBadge label="Connected" color="#22c55e" />
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-xs text-white/40">No external identities linked.</p>
+          <p className="text-xs text-[#0e1510]/40">No external identities linked.</p>
         )}
       </SettingsCard>
 
@@ -900,7 +900,7 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
             <div className="text-sm font-black" style={{ color: T.accentColor }}>
               {billingLoading ? "Loading…" : (billing?.plan?.name ?? "Starter")}
             </div>
-            <div className="text-[10px] text-white/40">
+            <div className="text-[10px] text-[#0e1510]/40">
               {billing?.plan && billing.plan.monthlyPriceCents ? `$${(billing.plan.monthlyPriceCents / 100).toFixed(0)}/month` : "Free"}
               {billing?.plan?.beta && " · Beta"}
             </div>
@@ -921,16 +921,16 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
         <button
           type="button"
           onClick={() => openUserProfile()}
-          className="flex min-h-12 w-full items-center justify-between rounded-xl border border-white/8 bg-white/2.5 px-3 text-left transition hover:border-white/15 hover:bg-white/5"
+          className="flex min-h-12 w-full items-center justify-between rounded-xl border border-[#0e1510]/8 bg-[#0e1510]/2.5 px-3 text-left transition hover:border-[#0e1510]/15 hover:bg-[#0e1510]/5"
         >
           <span className="flex items-center gap-3">
             <Shield size={15} className="text-violet-300" />
             <span>
-              <span className="block text-xs font-bold text-white">Password, passkeys & 2FA</span>
-              <span className="block text-[10px] text-white/45">Managed securely by Clerk</span>
+              <span className="block text-xs font-bold text-[#0e1510]">Password, passkeys & 2FA</span>
+              <span className="block text-[10px] text-[#0e1510]/45">Managed securely by Clerk</span>
             </span>
           </span>
-          <ChevronRight size={15} className="text-white/35" />
+          <ChevronRight size={15} className="text-[#0e1510]/35" />
         </button>
       </SettingsCard>
     </div>
@@ -1037,7 +1037,7 @@ function AppearanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColo
                 <div className="text-xs font-bold" style={{ color: theme.layoutStyle === opt.id ? T.accentColor : "rgba(255,255,255,0.7)" }}>
                   {opt.label}
                 </div>
-                <p className="mt-0.5 text-[10px] leading-4 text-white/40">{opt.desc}</p>
+                <p className="mt-0.5 text-[10px] leading-4 text-[#0e1510]/40">{opt.desc}</p>
               </button>
             ))}
           </div>
@@ -1198,14 +1198,14 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
               role="radio"
               aria-checked={selectedProfile === profile.name}
               aria-label={`${profile.name} workspace profile`}
-              className="relative rounded-xl border p-3 pr-10 text-left transition hover:border-accent/45 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+              className="relative rounded-xl border p-3 pr-10 text-left transition hover:border-accent/45 hover:bg-[#0e1510]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
               style={{
                 borderColor: selectedProfile === profile.name ? `${T.accentColor}80` : "rgba(255,255,255,0.1)",
                 backgroundColor: selectedProfile === profile.name ? `${T.accentColor}12` : "rgba(255,255,255,0.02)",
               }}
             >
               <span className="text-xs font-black" style={{ color: selectedProfile === profile.name ? T.accentColor : "rgba(255,255,255,0.9)" }}>{profile.name}</span>
-              <span className="mt-1 block text-[10px] leading-4 text-white/60">{profile.description}</span>
+              <span className="mt-1 block text-[10px] leading-4 text-[#0e1510]/60">{profile.description}</span>
               {selectedProfile === profile.name && (
                 <span className="absolute right-3 top-3 grid h-5 w-5 place-items-center rounded-full bg-accent/15 text-accent" aria-hidden="true">
                   <Check size={12} />
@@ -1220,7 +1220,7 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
         <div className="grid gap-4 sm:grid-cols-2">
           <fieldset className="rounded-xl border border-accent/15 bg-accent/[0.03] p-3">
             <legend className="px-1 text-[10px] font-black uppercase tracking-[0.14em] text-accent/80">Default view</legend>
-            <p className="mt-1 text-[11px] text-white/60">The workspace surface opened first.</p>
+            <p className="mt-1 text-[11px] text-[#0e1510]/60">The workspace surface opened first.</p>
             <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="Default view">
               {["chat", "code", "preview"].map((v) => (
                 <button key={v} type="button" onClick={() => setDefaults((current) => ({ ...current, defaultView: v }))}
@@ -1234,7 +1234,7 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
           </fieldset>
           <fieldset className="rounded-xl border border-accent/15 bg-accent/[0.03] p-3">
             <legend className="px-1 text-[10px] font-black uppercase tracking-[0.14em] text-accent/80">Default tool</legend>
-            <p className="mt-1 text-[11px] text-white/60">The tool selected inside that surface.</p>
+            <p className="mt-1 text-[11px] text-[#0e1510]/60">The tool selected inside that surface.</p>
             <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="Default tool">
               {["chat", "code", "agents"].map((v) => (
                 <button key={v} type="button" onClick={() => setDefaults((current) => ({ ...current, defaultTool: v }))}
@@ -1268,7 +1268,7 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
           <ToggleRow title="Compact density" description="Reduce padding and spacing" checked={defaults.compactDensity} onChange={(v) => setDefaults({ ...defaults, compactDensity: v })} />
           <ToggleRow title="Overlay effects" description="Blur and transparency" checked={defaults.overlayEffects} onChange={(v) => setDefaults({ ...defaults, overlayEffects: v })} />
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Mobile layout</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">Mobile layout</span>
             <div className="mt-1 flex gap-2">
               {["compact", "comfortable"].map((v) => (
                 <button key={v} type="button" onClick={() => setDefaults({ ...defaults, mobileLayout: v })}
@@ -1311,18 +1311,18 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-black" style={{ color: T.accentColor }}>{selectedModel?.name || "Auto Best"}</div>
-              <div className="text-[10px] text-white/40">{categoryLabels[activeCategory] ?? "Auto"} · {selectedModel?.provider || "Auto"}</div>
+              <div className="text-[10px] text-[#0e1510]/40">{categoryLabels[activeCategory] ?? "Auto"} · {selectedModel?.provider || "Auto"}</div>
             </div>
             <StatusBadge label={selectedModel?.cost === "free" ? "Free" : "Paid"} color={selectedModel?.cost === "free" ? "#22c55e" : "#f59e0b"} />
           </div>
         </div>
         {fallbackModel && (
-          <div className="mt-2 text-[10px] text-white/40">
-            Fallback: <span className="text-white/60">{fallbackModel.name}</span>
+          <div className="mt-2 text-[10px] text-[#0e1510]/40">
+            Fallback: <span className="text-[#0e1510]/60">{fallbackModel.name}</span>
           </div>
         )}
-        <div className="mt-2 text-[10px] text-white/40">
-          Media transcription: <span className="text-white/60">Gemini · gemini-3.5-flash</span>
+        <div className="mt-2 text-[10px] text-[#0e1510]/40">
+          Media transcription: <span className="text-[#0e1510]/60">Gemini · gemini-3.5-flash</span>
         </div>
       </SettingsCard>
 
@@ -1348,7 +1348,7 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
                 <span className="text-base">{m.icon}</span>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-bold" style={{ color: isSelected ? T.accentColor : "rgba(255,255,255,0.8)" }}>{m.name}</div>
-                  <div className="text-[9px] text-white/35">{categoryLabels[m.category ?? "auto"]} · {m.provider}</div>
+                  <div className="text-[9px] text-[#0e1510]/35">{categoryLabels[m.category ?? "auto"]} · {m.provider}</div>
                 </div>
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: healthColor }} title={health} />
                 {isSelected && <Check size={12} style={{ color: T.accentColor }} />}
@@ -1369,8 +1369,8 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
             const health = providerHealth[p.key] ?? "available";
             const color = health === "available" ? "#22c55e" : health === "degraded" ? "#f59e0b" : health === "unavailable" ? "#ef4444" : "#6b7280";
             return (
-              <div key={p.key} className="flex items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
-                <span className="text-xs font-bold text-white/80">{p.name}</span>
+              <div key={p.key} className="flex items-center justify-between rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2.5">
+                <span className="text-xs font-bold text-[#0e1510]/80">{p.name}</span>
                 <div className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
                   <span className="text-[10px] font-bold capitalize" style={{ color }}>{health}</span>
@@ -1688,16 +1688,16 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
       {/* Microphone */}
       <SettingsCard title="Microphone" description="Input device and permission" icon={<Mic size={16} />}>
         <div className="space-y-3">
-          <div className="flex items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
+          <div className="flex items-center justify-between rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2.5">
             <div>
-              <div className="text-xs font-bold text-white/80">Status: {micStatusInfo.label}</div>
-              <div className="text-[10px] text-white/40">{micStatusInfo.desc}</div>
+              <div className="text-xs font-bold text-[#0e1510]/80">Status: {micStatusInfo.label}</div>
+              <div className="text-[10px] text-[#0e1510]/40">{micStatusInfo.desc}</div>
             </div>
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: micStatusInfo.color }} />
           </div>
           {micDevices.length > 0 && (
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Selected device</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">Selected device</span>
               <select
                 value={selectedMic}
                 onChange={(e) => {
@@ -1710,7 +1710,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
                     else localStorage.setItem(DEVICE_ID_STORAGE_KEY, next);
                   } catch { /* non-fatal — selection still applies to this view */ }
                 }}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none"
+                className="mt-1 w-full rounded-lg border border-[#0e1510]/10 bg-white px-3 py-2 text-xs text-[#0e1510] outline-none"
               >
                 {micDevices.map((d) => (
                   <option key={d.deviceId} value={d.deviceId}>{d.label || `Device ${d.deviceId.slice(0, 8)}`}</option>
@@ -1734,10 +1734,10 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
       {/* Camera */}
       <SettingsCard title="Camera" description="Camera device and permission" icon={<Camera size={16} />}>
         <div className="space-y-3">
-          <div className="flex items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
+          <div className="flex items-center justify-between rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2.5">
             <div>
-              <div className="text-xs font-bold text-white/80">Status: {camStatusInfo.label}</div>
-              <div className="text-[10px] text-white/40">{camStatusInfo.desc}</div>
+              <div className="text-xs font-bold text-[#0e1510]/80">Status: {camStatusInfo.label}</div>
+              <div className="text-[10px] text-[#0e1510]/40">{camStatusInfo.desc}</div>
             </div>
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: camStatusInfo.color }} />
           </div>
@@ -1752,7 +1752,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
       {/* Agent voice */}
       <SettingsCard title="Agent voice" description="LiTT voice identity" icon={<Volume2 size={16} />}>
         <div className="space-y-3">
-          <p className="text-[10px] text-white/40">
+          <p className="text-[10px] text-[#0e1510]/40">
             Live Studio voice sessions are powered by Inworld&apos;s realtime API. Preview plays through the same server speech service the Studio speak chain uses — your browser&apos;s built-in voice only steps in as a last resort if that service is unreachable.
           </p>
           {[
@@ -1762,7 +1762,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
               style={{ borderColor: `${agent.color}30`, backgroundColor: `${agent.color}08` }}>
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-black" style={{ color: agent.color }}>{agent.name}</div>
-                <div className="text-[10px] text-white/40">{agent.style}</div>
+                <div className="text-[10px] text-[#0e1510]/40">{agent.style}</div>
               </div>
               <button
                 type="button"
@@ -1777,9 +1777,9 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
           ))}
 
           {inworldStatus && (
-            <div className="rounded-lg border border-white/5 bg-black/30 px-3 py-2.5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Voice provider status (Inworld)</div>
-              <div className="mt-1.5 space-y-1 text-[10px] text-white/60">
+            <div className="rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/5 px-3 py-2.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">Voice provider status (Inworld)</div>
+              <div className="mt-1.5 space-y-1 text-[10px] text-[#0e1510]/60">
                 <div>API Key: <span className={inworldStatus.apiKey ? "text-emerald-400" : "text-red-400"}>{inworldStatus.apiKey ? "Set" : "Missing"}</span></div>
                 <div>LiTT Voice: <span className={inworldStatus.littVoice ? "text-emerald-400" : "text-red-400"}>{inworldStatus.littVoice ? "Set" : "Missing"}</span></div>
                 <div>WebSocket URL: <span className={inworldStatus.wsUrl ? "text-emerald-400" : "text-red-400"}>{inworldStatus.wsUrl ? "Set" : "Missing"}</span></div>
@@ -1796,9 +1796,9 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
                   Studio voice sessions run on the Inworld transport above and
                   never use LiveKit; this block must not claim otherwise. */}
               {livekitStatus && (
-                <div className="mt-3 border-t border-white/5 pt-2.5">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">LiveKit (separate features — not the Studio voice transport)</div>
-                  <div className="mt-1.5 space-y-1 text-[10px] text-white/60">
+                <div className="mt-3 border-t border-[#0e1510]/5 pt-2.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">LiveKit (separate features — not the Studio voice transport)</div>
+                  <div className="mt-1.5 space-y-1 text-[10px] text-[#0e1510]/60">
                     <div>LIVEKIT_URL: <span className={livekitStatus.url ? "text-emerald-400" : "text-red-400"}>{livekitStatus.url ? "Set" : "Missing"}</span></div>
                     <div>LIVEKIT_API_KEY: <span className={livekitStatus.apiKey ? "text-emerald-400" : "text-red-400"}>{livekitStatus.apiKey ? "Set" : "Missing"}</span></div>
                     <div>LIVEKIT_API_SECRET: <span className={livekitStatus.apiSecret ? "text-emerald-400" : "text-red-400"}>{livekitStatus.apiSecret ? "Set" : "Missing"}</span></div>
@@ -1845,7 +1845,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
                   </span>
                 )}
                 {connectionTest.state === "testing" && (
-                  <span className="text-[10px] font-medium text-white/50">{connectionTest.message}</span>
+                  <span className="text-[10px] font-medium text-[#0e1510]/50">{connectionTest.message}</span>
                 )}
               </div>
             </div>
@@ -1879,7 +1879,7 @@ function ConnectionsSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolve
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-white/40">
+      <div className="flex items-center gap-2 text-sm text-[#0e1510]/40">
         <Loader2 size={14} className="animate-spin" />
         Checking integration status…
       </div>
@@ -2065,7 +2065,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
       {/* Current Plan */}
       <SettingsCard title="Plan" description="Current subscription" icon={<Coins size={16} />}>
         {loading ? (
-          <div className="flex items-center gap-2 text-xs text-white/40">
+          <div className="flex items-center gap-2 text-xs text-[#0e1510]/40">
             <Loader2 size={12} className="animate-spin" /> Loading…
           </div>
         ) : (
@@ -2074,12 +2074,12 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
               style={{ borderColor: `${T.accentColor}30`, backgroundColor: `${T.accentColor}08` }}>
               <div>
                 <div className="text-sm font-black" style={{ color: T.accentColor }}>{planName}</div>
-                <div className="text-[10px] text-white/40">
+                <div className="text-[10px] text-[#0e1510]/40">
                   {isPaid ? `$${(planPrice / 100).toFixed(0)}/month` : "Free"}
                   {data?.plan?.beta && " · Beta"}
                 </div>
                 {subStatus === "active" && periodEnd && (
-                  <div className="mt-1 text-[10px] text-white/30">
+                  <div className="mt-1 text-[10px] text-[#0e1510]/30">
                     Renews {new Date(periodEnd).toLocaleDateString()}
                   </div>
                 )}
@@ -2091,14 +2091,14 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
                 )}
               </div>
               <div className="flex flex-col gap-1.5">
-                <Link href="/pricing" className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-bold text-white/70 transition hover:bg-white/5">
+                <Link href="/pricing" className="rounded-lg border border-[#0e1510]/10 px-3 py-1.5 text-[10px] font-bold text-[#0e1510]/70 transition hover:bg-[#0e1510]/5">
                   {isPaid ? "Change plan" : "Upgrade"}
                 </Link>
                 {isPaid && (
                   <button
                     onClick={handlePortal}
                     disabled={portalLoading}
-                    className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-bold text-white/70 transition hover:bg-white/5 disabled:opacity-50"
+                    className="rounded-lg border border-[#0e1510]/10 px-3 py-1.5 text-[10px] font-bold text-[#0e1510]/70 transition hover:bg-[#0e1510]/5 disabled:opacity-50"
                   >
                     {portalLoading ? "Loading…" : "Manage billing"}
                   </button>
@@ -2106,7 +2106,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
               </div>
             </div>
             {subStatus === "canceled" && (
-              <p className="mt-2 text-[10px] text-white/40">
+              <p className="mt-2 text-[10px] text-[#0e1510]/40">
                 Your projects and data are preserved. You can resubscribe anytime.
               </p>
             )}
@@ -2117,34 +2117,34 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
       {/* AI Credits Balance */}
       <SettingsCard title="AI Credits" description="Platform credits for AI actions">
         {loading ? (
-          <div className="flex items-center gap-2 text-xs text-white/40">
+          <div className="flex items-center gap-2 text-xs text-[#0e1510]/40">
             <Loader2 size={12} className="animate-spin" /> Loading…
           </div>
         ) : (
           <>
             <div className="rounded-xl border p-4" style={{ borderColor: `${T.accentColor}30`, backgroundColor: `${T.accentColor}08` }}>
               <div className="text-2xl font-black" style={{ color: T.accentColor }}>{totalBalance.toLocaleString()} credits</div>
-              <p className="mt-1 text-xs text-white/40">
+              <p className="mt-1 text-xs text-[#0e1510]/40">
                 {betaBalance > 0 && `Includes ${betaBalance.toLocaleString()} Beta credits (no cash value)`}
                 {betaBalance === 0 && "Available balance"}
               </p>
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2">
-              <div className="rounded-lg border border-white/5 bg-white/2 px-3 py-2 text-center">
-                <div className="text-sm font-bold text-white/80">{monthlyBalance.toLocaleString()}</div>
-                <div className="text-[9px] uppercase tracking-wider text-white/40">Monthly</div>
+              <div className="rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2 text-center">
+                <div className="text-sm font-bold text-[#0e1510]/80">{monthlyBalance.toLocaleString()}</div>
+                <div className="text-[9px] uppercase tracking-wider text-[#0e1510]/40">Monthly</div>
               </div>
-              <div className="rounded-lg border border-white/5 bg-white/2 px-3 py-2 text-center">
-                <div className="text-sm font-bold text-white/80">{purchasedBalance.toLocaleString()}</div>
-                <div className="text-[9px] uppercase tracking-wider text-white/40">Purchased</div>
+              <div className="rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2 text-center">
+                <div className="text-sm font-bold text-[#0e1510]/80">{purchasedBalance.toLocaleString()}</div>
+                <div className="text-[9px] uppercase tracking-wider text-[#0e1510]/40">Purchased</div>
               </div>
-              <div className="rounded-lg border border-white/5 bg-white/2 px-3 py-2 text-center">
-                <div className="text-sm font-bold text-white/80">{betaBalance.toLocaleString()}</div>
-                <div className="text-[9px] uppercase tracking-wider text-white/40">Beta</div>
+              <div className="rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2 text-center">
+                <div className="text-sm font-bold text-[#0e1510]/80">{betaBalance.toLocaleString()}</div>
+                <div className="text-[9px] uppercase tracking-wider text-[#0e1510]/40">Beta</div>
               </div>
             </div>
             {betaBalance > 0 && (
-              <p className="mt-2 text-[10px] text-white/30">
+              <p className="mt-2 text-[10px] text-[#0e1510]/30">
                 Beta credits are consumed after paid credits. Expiration is defined per grant.
               </p>
             )}
@@ -2166,9 +2166,9 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
               rows.push({ label: "Refunded", value: `${usage.summary.totalCreditsRefunded.toLocaleString()} LiTTBits` });
             }
             return rows.map((u) => (
-              <div key={u.label} className="flex items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
-                <span className="text-xs font-bold text-white/80">{u.label}</span>
-                <span className="text-[10px] text-white/40">{u.value}</span>
+              <div key={u.label} className="flex items-center justify-between rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2.5">
+                <span className="text-xs font-bold text-[#0e1510]/80">{u.label}</span>
+                <span className="text-[10px] text-[#0e1510]/40">{u.value}</span>
               </div>
             ));
           })()}
@@ -2266,7 +2266,7 @@ function PrivacySection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCol
   return (
     <div className="space-y-4">
       <SettingsCard title="Active sessions" description="Devices logged into your account">
-        <p className="text-xs text-white/40">Session management is coming soon — for now, sign out directly on each device.</p>
+        <p className="text-xs text-[#0e1510]/40">Session management is coming soon — for now, sign out directly on each device.</p>
       </SettingsCard>
 
       <SettingsCard title="Data management" description="Export or delete your data (GDPR)">
@@ -2285,7 +2285,7 @@ function PrivacySection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCol
             type="button"
             onClick={handleExport}
             disabled={exporting || deleting}
-            className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-white/60 hover:bg-white/5 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-[#0e1510]/10 px-3 py-1.5 text-xs font-bold text-[#0e1510]/60 hover:bg-[#0e1510]/5 disabled:opacity-50"
           >
             {exporting && <Loader2 size={12} className="animate-spin" />}
             {exporting ? "Exporting..." : "Export data"}
@@ -2319,7 +2319,7 @@ function PrivacySection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCol
                 type="button"
                 onClick={() => setConfirmDelete(false)}
                 disabled={deleting}
-                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-white/60 disabled:opacity-50"
+                className="rounded-lg border border-[#0e1510]/10 px-3 py-1.5 text-xs font-bold text-[#0e1510]/60 disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -2330,28 +2330,28 @@ function PrivacySection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCol
 
       <SettingsCard title="Audit log" description="Recent account activity">
         {auditEntries === null && !auditFailed && (
-          <p className="text-xs text-white/40">Loading activity…</p>
+          <p className="text-xs text-[#0e1510]/40">Loading activity…</p>
         )}
         {auditFailed && (
-          <p className="text-xs text-white/40">Couldn&apos;t load activity right now.</p>
+          <p className="text-xs text-[#0e1510]/40">Couldn&apos;t load activity right now.</p>
         )}
         {auditEntries !== null && auditEntries.length === 0 && (
-          <p className="text-xs text-white/40">No recent activity.</p>
+          <p className="text-xs text-[#0e1510]/40">No recent activity.</p>
         )}
         {auditEntries !== null && auditEntries.length > 0 && (
           <div className="space-y-2">
             {auditEntries.map((entry) => (
-              <div key={entry.id} className="flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-white/2 px-3 py-2">
+              <div key={entry.id} className="flex items-center justify-between gap-3 rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2">
                 <div className="min-w-0">
-                  <div className="truncate text-xs font-bold text-white/80">{entry.action || "Activity"}</div>
-                  <div className="text-[10px] text-white/40">
+                  <div className="truncate text-xs font-bold text-[#0e1510]/80">{entry.action || "Activity"}</div>
+                  <div className="text-[10px] text-[#0e1510]/40">
                     {[entry.provider, entry.createdAt ? new Date(entry.createdAt).toLocaleDateString() : null]
                       .filter(Boolean)
                       .join(" · ") || "—"}
                   </div>
                 </div>
                 {entry.status && (
-                  <span className="shrink-0 text-[10px] font-bold capitalize text-white/50">{entry.status}</span>
+                  <span className="shrink-0 text-[10px] font-bold capitalize text-[#0e1510]/50">{entry.status}</span>
                 )}
               </div>
             ))}
@@ -2391,15 +2391,15 @@ function PerformanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
               style={{ borderColor: s.perfMode === opt.id ? `${T.accentColor}40` : "rgba(255,255,255,0.06)", backgroundColor: s.perfMode === opt.id ? `${T.accentColor}10` : "transparent" }}>
               <div>
                 <div className="text-xs font-bold" style={{ color: s.perfMode === opt.id ? T.accentColor : "rgba(255,255,255,0.8)" }}>{opt.label}</div>
-                <div className="text-[10px] text-white/40">{opt.desc}</div>
+                <div className="text-[10px] text-[#0e1510]/40">{opt.desc}</div>
               </div>
               {s.perfMode === opt.id && <Check size={14} style={{ color: T.accentColor }} />}
             </button>
           ))}
         </div>
-        <div className="mt-3 rounded-lg border border-white/5 bg-white/2 px-3 py-2">
-          <span className="text-[10px] text-white/40">Recommended: </span>
-          <span className="text-[10px] font-bold text-white/60">Balanced</span>
+        <div className="mt-3 rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2">
+          <span className="text-[10px] text-[#0e1510]/40">Recommended: </span>
+          <span className="text-[10px] font-bold text-[#0e1510]/60">Balanced</span>
         </div>
       </SettingsCard>
 
@@ -2438,9 +2438,9 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
       <SettingsCard title="Provider fallback" description="AI model fallback chain">
         <div className="space-y-2">
           {["Gemini 2.5 Flash", "Groq Llama 70B", "OpenRouter Free"].map((p, i) => (
-            <div key={p} className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
-              <span className="text-[10px] font-bold text-white/30">{i + 1}.</span>
-              <span className="text-xs font-bold text-white/80">{p}</span>
+            <div key={p} className="flex items-center gap-2 rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/2 px-3 py-2.5">
+              <span className="text-[10px] font-bold text-[#0e1510]/30">{i + 1}.</span>
+              <span className="text-xs font-bold text-[#0e1510]/80">{p}</span>
             </div>
           ))}
         </div>
@@ -2450,14 +2450,14 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
         <div className="space-y-2">
           <Link
             href="/settings/connections/diagnostics"
-            className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-white/5"
+            className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-[#0e1510]/5"
             style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)" }}
           >
             <span>
               Connection diagnostics
-              <span className="block text-[10px] font-medium text-white/35">Live integration health checks</span>
+              <span className="block text-[10px] font-medium text-[#0e1510]/35">Live integration health checks</span>
             </span>
-            <ChevronRight size={12} className="pointer-events-none shrink-0 text-white/30" />
+            <ChevronRight size={12} className="pointer-events-none shrink-0 text-[#0e1510]/30" />
           </Link>
           {[
             { label: "Voice connection test", desc: "End-to-end mic → voice pipeline test", section: "voice-camera" },
@@ -2469,18 +2469,18 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
                 key={item.label}
                 type="button"
                 onClick={() => goToSection(item.section)}
-                className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-white/5"
+                className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-[#0e1510]/5"
                 style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)" }}
                 aria-label={item.label}
               >
                 <span className="text-left">
                   {item.label}
-                  <span className="block text-[10px] font-medium text-white/35">
+                  <span className="block text-[10px] font-medium text-[#0e1510]/35">
                     {item.desc}
                   </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-1.5">
-                  <ChevronRight size={12} className="pointer-events-none text-white/30" />
+                  <ChevronRight size={12} className="pointer-events-none text-[#0e1510]/30" />
                 </span>
               </button>
             );
@@ -2502,7 +2502,7 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
               <button
                 type="button"
                 onClick={() => setConfirmResetAll(false)}
-                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-white/60 transition-all hover:bg-white/5"
+                className="rounded-lg border border-[#0e1510]/10 px-3 py-1.5 text-xs font-bold text-[#0e1510]/60 transition-all hover:bg-[#0e1510]/5"
               >
                 Cancel
               </button>
@@ -2518,7 +2518,7 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
             </button>
           )}
         </div>
-        {resetMsg && <p className="mt-2 text-[10px] text-white/40">{resetMsg}</p>}
+        {resetMsg && <p className="mt-2 text-[10px] text-[#0e1510]/40">{resetMsg}</p>}
       </SettingsCard>
     </div>
   );

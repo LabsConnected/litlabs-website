@@ -972,21 +972,21 @@ export default function RetroPlayerPage() {
   // ─── Loading state ─────────────────────────────────────────────
   if (loading)
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#050507] text-white">
+      <div className="flex min-h-screen items-center justify-center bg-[#edf3e4] text-[#0e1510]">
         <div className="text-center">
           <Gamepad2 className="mx-auto animate-pulse text-fuchsia-400" size={40} />
-          <p className="mt-4 text-sm font-bold text-white/50">Loading local cartridge…</p>
+          <p className="mt-4 text-sm font-bold text-[#0e1510]/50">Loading local cartridge…</p>
         </div>
       </div>
     );
 
   if (error || !game || !system)
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#050507] p-6 text-white">
-        <div className="max-w-md rounded-3xl border border-white/10 bg-white/[.035] p-8 text-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#edf3e4] p-6 text-[#0e1510]">
+        <div className="max-w-md rounded-3xl border border-[#0e1510]/10 bg-[#0e1510]/[.035] p-8 text-center">
           <LockKeyhole className="mx-auto text-fuchsia-300" size={36} />
           <h1 className="mt-4 text-2xl font-black">Game not found here</h1>
-          <p className="mt-2 text-sm leading-6 text-white/45">
+          <p className="mt-2 text-sm leading-6 text-[#0e1510]/45">
             {error ?? "This local game is unavailable."} ROMs are device-specific, so add it again from this browser if needed.
           </p>
           <Link
@@ -1000,13 +1000,13 @@ export default function RetroPlayerPage() {
     );
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_50%_-10%,rgba(168,85,247,.18),transparent_30%),#050507] text-white">
-      <header className="border-b border-white/10 bg-black/40 px-4 py-3 backdrop-blur-xl">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_50%_-10%,rgba(23,122,54,.14),transparent_30%),#edf3e4] text-[#0e1510]">
+      <header className="border-b border-[#0e1510]/10 bg-black/40 px-4 py-3 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <Link
               href="/games/retro"
-              className="rounded-xl border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white"
+              className="rounded-xl border border-[#0e1510]/10 p-2 text-[#0e1510]/60 hover:bg-[#0e1510]/10 hover:text-[#0e1510]"
               aria-label="Back to arcade"
             >
               <ArrowLeft size={18} />
@@ -1019,7 +1019,7 @@ export default function RetroPlayerPage() {
             </span>
             <div className="min-w-0">
               <h1 className="truncate text-sm font-black sm:text-base">{game.title}</h1>
-              <p className="truncate text-[11px] text-white/35">
+              <p className="truncate text-[11px] text-[#0e1510]/35">
                 LiTT Retro Arcade · local session{isSatellaview && " · Satellaview / BS-X"}
               </p>
             </div>
@@ -1027,7 +1027,7 @@ export default function RetroPlayerPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowDiagnostic((v) => !v)}
-              className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black hover:bg-white/10"
+              className="flex shrink-0 items-center gap-2 rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/5 px-3 py-2 text-xs font-black hover:bg-[#0e1510]/10"
               aria-label="Toggle diagnostics"
             >
               {showDiagnostic ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
@@ -1035,7 +1035,7 @@ export default function RetroPlayerPage() {
             </button>
             <button
               onClick={enterFullscreen}
-              className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black hover:bg-white/10"
+              className="flex shrink-0 items-center gap-2 rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/5 px-3 py-2 text-xs font-black hover:bg-[#0e1510]/10"
               aria-label="Enter fullscreen"
             >
               <Expand size={15} />
@@ -1052,7 +1052,7 @@ export default function RetroPlayerPage() {
         <section className="min-w-0">
           <div
             ref={stageRef}
-            className="relative aspect-[16/10] min-h-[360px] overflow-hidden rounded-2xl border border-white/10 bg-black shadow-[0_30px_100px_rgba(0,0,0,.55)] sm:min-h-[520px]"
+            className="relative aspect-[16/10] min-h-[360px] overflow-hidden rounded-2xl border border-[#0e1510]/10 bg-black shadow-[0_30px_100px_rgba(0,0,0,.55)] sm:min-h-[520px]"
           >
             {canRenderIframe && runtimeConfig ? (
               <iframe
@@ -1194,8 +1194,8 @@ export default function RetroPlayerPage() {
             )}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[.025] px-4 py-3">
-            <div className="flex flex-wrap gap-4 text-[11px] text-white/40">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/[.025] px-4 py-3">
+            <div className="flex flex-wrap gap-4 text-[11px] text-[#0e1510]/40">
               <span className="flex items-center gap-1.5">
                 <Gamepad2 size={13} /> {system.shortName}
               </span>
@@ -1208,7 +1208,7 @@ export default function RetroPlayerPage() {
             </div>
             <button
               onClick={() => setShowControls(true)}
-              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black hover:bg-white/10"
+              className="flex items-center gap-2 rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/5 px-3 py-2 text-xs font-black hover:bg-[#0e1510]/10"
             >
               <Keyboard size={14} /> Controls
             </button>
@@ -1278,7 +1278,7 @@ export default function RetroPlayerPage() {
                   )}
                   <Link
                     href="/games/retro"
-                    className="rounded-lg border border-white/15 px-3 py-1.5 text-[10px] font-bold text-white/60 hover:bg-white/5"
+                    className="rounded-lg border border-[#0e1510]/15 px-3 py-1.5 text-[10px] font-bold text-[#0e1510]/60 hover:bg-[#0e1510]/5"
                   >
                     Back to Library
                   </Link>
@@ -1291,7 +1291,7 @@ export default function RetroPlayerPage() {
           )}
 
           {showDiagnostic && (
-            <div className="mt-3 rounded-2xl border border-white/10 bg-black/60 p-4 text-[10px] font-mono text-white/70">
+            <div className="mt-3 rounded-2xl border border-white/10 bg-[#0b120d] p-4 text-[10px] font-mono text-white/70">
               <div className="mb-2 font-bold text-white/90">DIAGNOSTICS — {EMULATOR_BUILD_ID}</div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                 <div>EmulatorJS: {EMULATOR_VERSION}</div>
@@ -1361,14 +1361,14 @@ export default function RetroPlayerPage() {
 
         <aside className="space-y-4">
           {isSatellaview && (
-            <section className="rounded-2xl border border-white/10 bg-white/[.02] p-5">
+            <section className="rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/[.02] p-5">
               <div className="flex items-center gap-2">
-                <span className="grid h-5 w-5 place-items-center rounded-full border border-white/20 text-[10px] font-black text-white/50">
+                <span className="grid h-5 w-5 place-items-center rounded-full border border-[#0e1510]/20 text-[10px] font-black text-[#0e1510]/50">
                   BS
                 </span>
-                <h2 className="text-sm font-black text-white/70">BIOS (optional)</h2>
+                <h2 className="text-sm font-black text-[#0e1510]/70">BIOS (optional)</h2>
               </div>
-              <p className="mt-2 text-xs leading-5 text-white/45">
+              <p className="mt-2 text-xs leading-5 text-[#0e1510]/45">
                 Most Satellaview games boot without a BIOS. If yours doesn&apos;t,
                 load a legally obtained BS-X.bin here. The file stays in this
                 browser and is never uploaded.
@@ -1394,7 +1394,7 @@ export default function RetroPlayerPage() {
                   </div>
                   <button
                     onClick={clearBios}
-                    className="rounded p-1 text-white/40 hover:text-white"
+                    className="rounded p-1 text-[#0e1510]/40 hover:text-[#0e1510]"
                     aria-label="Remove BIOS"
                   >
                     <X size={13} />
@@ -1445,11 +1445,11 @@ export default function RetroPlayerPage() {
             </button>
           )}
 
-          <section className="rounded-2xl border border-white/10 bg-white/[.03] p-5">
+          <section className="rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/[.03] p-5">
             <h2 className="text-sm font-black">
               {launchStatusLabel(launchState)}
             </h2>
-            <p className="mt-2 text-sm leading-6 text-white/55">
+            <p className="mt-2 text-sm leading-6 text-[#0e1510]/55">
               {launchState.status === "needs-bios"
                 ? "Load a BS-X BIOS file, or try launching without one. The file stays in this browser."
                 : launchState.status === "ready"
@@ -1472,57 +1472,57 @@ export default function RetroPlayerPage() {
             {(canRenderIframe || launchState.status === "error") && (
               <button
                 onClick={exitGame}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 py-2 text-xs font-black text-white/70 hover:bg-white/10"
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/5 py-2 text-xs font-black text-[#0e1510]/70 hover:bg-[#0e1510]/10"
               >
                 <X size={13} /> Exit Session
               </button>
             )}
           </section>
 
-          <section className="rounded-2xl border border-white/10 bg-white/[.03] p-5">
+          <section className="rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/[.03] p-5">
             <h2 className="text-sm font-black">Session details</h2>
             <dl className="mt-4 space-y-3 text-xs">
               <div className="flex justify-between gap-3">
-                <dt className="text-white/35">System</dt>
+                <dt className="text-[#0e1510]/35">System</dt>
                 <dd className="text-right font-bold">{system.name}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-white/35">Core</dt>
+                <dt className="text-[#0e1510]/35">Core</dt>
                 <dd className="text-right font-bold">{ejsCore}{useLegacy ? " (legacy)" : ""}</dd>
               </div>
               {isSatellaview && (
                 <div className="flex justify-between gap-3">
-                  <dt className="text-white/35">Mode</dt>
+                  <dt className="text-[#0e1510]/35">Mode</dt>
                   <dd className="text-right font-bold text-cyan-200">Satellaview / BS-X</dd>
                 </div>
               )}
               <div className="flex justify-between gap-3">
-                <dt className="text-white/35">Launches</dt>
+                <dt className="text-[#0e1510]/35">Launches</dt>
                 <dd className="font-bold">{game.launches}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-white/35">Storage</dt>
+                <dt className="text-[#0e1510]/35">Storage</dt>
                 <dd className="font-bold text-emerald-300">This browser</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-white/35">Runtime</dt>
+                <dt className="text-[#0e1510]/35">Runtime</dt>
                 <dd className="font-bold">{STATE_LABELS[sessionState]}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-white/35">ROM</dt>
-                <dd className="max-w-[180px] truncate font-mono text-[10px] text-white/50">
+                <dt className="text-[#0e1510]/35">ROM</dt>
+                <dd className="max-w-[180px] truncate font-mono text-[10px] text-[#0e1510]/50">
                   {runtimeConfig?.romUrl ? "blob:local" : romBlob ? "ready" : "—"}
                 </dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-white/35">EmulatorJS</dt>
-                <dd className="font-mono text-[10px] text-white/50">
+                <dt className="text-[#0e1510]/35">EmulatorJS</dt>
+                <dd className="font-mono text-[10px] text-[#0e1510]/50">
                   {runtimeSource === "official-fallback" ? "CDN fallback" : "self-hosted"} {EMULATOR_VERSION}
                 </dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-white/35">Build</dt>
-                <dd className="font-mono text-[10px] text-white/50">{EMULATOR_BUILD_ID}</dd>
+                <dt className="text-[#0e1510]/35">Build</dt>
+                <dd className="font-mono text-[10px] text-[#0e1510]/50">{EMULATOR_BUILD_ID}</dd>
               </div>
             </dl>
           </section>
@@ -1530,7 +1530,7 @@ export default function RetroPlayerPage() {
           <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[.04] p-5">
             <ShieldCheck className="text-emerald-300" size={19} />
             <h2 className="mt-3 text-sm font-black">Private play</h2>
-            <p className="mt-2 text-xs leading-5 text-white/50">
+            <p className="mt-2 text-xs leading-5 text-[#0e1510]/50">
               {canRenderIframe
                 ? "The ROM and BIOS were loaded from this browser only — the data stays in memory as a blob URL inside the emulator iframe. LiTT does not upload the file. The emulator runtime is self-hosted and versioned."
                 : isSatellaview && launchState.status === "needs-bios"

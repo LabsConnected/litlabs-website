@@ -59,7 +59,7 @@ type IconType = ComponentType<{ size?: number; strokeWidth?: number; className?:
 
 /* ── Design tokens (literals) ──────────────────────────────────── */
 
-const CARD_SURFACE = "rgba(16,12,26,0.92)";
+const CARD_SURFACE = "var(--studio-card)";
 const CARD_BORDER = "rgba(255,255,255,0.07)";
 const ACCENT = "var(--color-accent)";
 const AMBER = "#e3b341";

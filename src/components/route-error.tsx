@@ -21,17 +21,17 @@ export function RouteError({
   return (
     <div
       className="flex min-h-[60dvh] items-center justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-16"
-      style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}
+      style={{ backgroundColor: "#f6f9f1", color: "#0e1510" }}
     >
       <div
         className="w-full max-w-md rounded-xl p-8"
-        style={{ border: "1px solid #2a2a3a", backgroundColor: "#1a1a24" }}
+        style={{ border: "1px solid #cfdec4", backgroundColor: "#ffffff" }}
       >
         <div className="mb-6 text-center">
           <div className="mb-2 text-4xl">💥</div>
           <h1
             className="text-lg font-bold tracking-tight"
-            style={{ color: "#e2e8f0" }}
+            style={{ color: "#0e1510" }}
           >
             {label} hit a snag
           </h1>
@@ -42,7 +42,7 @@ export function RouteError({
 
         <div
           className="mb-6 break-all rounded-lg p-3 font-mono text-[10px] opacity-70"
-          style={{ backgroundColor: "#0f0f14", border: "1px solid #2a2a3a" }}
+          style={{ backgroundColor: "#f6f9f1", border: "1px solid #cfdec4" }}
         >
           {error.digest || error.message || "Unknown error"}
         </div>
@@ -51,7 +51,7 @@ export function RouteError({
           <button
             onClick={reset}
             className="cursor-pointer rounded-lg px-4 py-2 text-xs font-bold transition-opacity hover:opacity-90"
-            style={{ backgroundColor: "#6366f1", color: "#fff" }}
+            style={{ backgroundColor: "#177a36", color: "#fff" }}
           >
             Try Again
           </button>
@@ -60,8 +60,8 @@ export function RouteError({
             className="rounded-lg px-4 py-2 text-xs font-bold transition-opacity hover:opacity-90"
             style={{
               backgroundColor: "transparent",
-              color: "#94a3b8",
-              border: "1px solid #2a2a3a",
+              color: "#63745f",
+              border: "1px solid #cfdec4",
               textDecoration: "none",
             }}
           >

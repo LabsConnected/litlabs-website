@@ -27,8 +27,8 @@ export function LivePreviewPanel() {
   const isArcade = theme.layoutStyle === "arcade";
 
   const cardRadius = isHoneycomb ? "rounded-2xl" : isTerminal ? "rounded-md" : "rounded-xl";
-  const cardBorder = isGlass ? "border-white/10 backdrop-blur-sm" : isTerminal ? "border-green-500/20" : "border-white/8";
-  const cardBg = isGlass ? "bg-white/5" : isTerminal ? "bg-black/50" : "bg-white/3";
+  const cardBorder = isGlass ? "border-[#0e1510]/10 backdrop-blur-sm" : isTerminal ? "border-green-500/20" : "border-[#0e1510]/8";
+  const cardBg = isGlass ? "bg-[#0e1510]/5" : isTerminal ? "bg-black/50" : "bg-[#0e1510]/3";
 
   const honeycombBg = isHoneycomb
     ? "repeating-conic-gradient(from 30deg at 50% 50%, rgba(245,158,11,0.04) 0deg 60deg, transparent 60deg 120deg)"
@@ -37,15 +37,15 @@ export function LivePreviewPanel() {
   return (
     <div className="sticky top-8 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-black text-white/90">Live Preview</h3>
-        <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-[10px] font-bold text-white/50">
+        <h3 className="text-sm font-black text-[#0e1510]/90">Live Preview</h3>
+        <span className="rounded-full bg-[#0e1510]/5 px-2.5 py-0.5 text-[10px] font-bold text-[#0e1510]/50">
           {LAYOUT_LABELS[theme.layoutStyle]}
         </span>
       </div>
 
       {/* Preview frame */}
       <div
-        className="relative overflow-hidden rounded-2xl border border-white/8"
+        className="relative overflow-hidden rounded-2xl border border-[#0e1510]/8"
         style={{
           backgroundColor: T.bgColor,
           backgroundImage: isCustom
@@ -155,24 +155,24 @@ export function LivePreviewPanel() {
 
       {/* Current settings summary */}
       <div className="grid grid-cols-2 gap-2 text-[10px]">
-        <div className="rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
-          <span className="text-white/40">Skin</span>
-          <div className="font-bold capitalize text-white/70">{theme.skin}</div>
+        <div className="rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/5 px-2.5 py-2">
+          <span className="text-[#0e1510]/40">Skin</span>
+          <div className="font-bold capitalize text-[#0e1510]/70">{theme.skin}</div>
         </div>
-        <div className="rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
-          <span className="text-white/40">Accent</span>
+        <div className="rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/5 px-2.5 py-2">
+          <span className="text-[#0e1510]/40">Accent</span>
           <div className="flex items-center gap-1.5">
             <div className="h-3 w-3 rounded-full" style={{ backgroundColor: T.accentColor }} />
-            <span className="font-bold text-white/70">{theme.accent.replace(/-/g, " ")}</span>
+            <span className="font-bold text-[#0e1510]/70">{theme.accent.replace(/-/g, " ")}</span>
           </div>
         </div>
-        <div className="rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
-          <span className="text-white/40">Mode</span>
-          <div className="font-bold capitalize text-white/70">{theme.mode}</div>
+        <div className="rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/5 px-2.5 py-2">
+          <span className="text-[#0e1510]/40">Mode</span>
+          <div className="font-bold capitalize text-[#0e1510]/70">{theme.mode}</div>
         </div>
-        <div className="rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
-          <span className="text-white/40">Background</span>
-          <div className="font-bold capitalize text-white/70">{theme.backgroundMode}</div>
+        <div className="rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/5 px-2.5 py-2">
+          <span className="text-[#0e1510]/40">Background</span>
+          <div className="font-bold capitalize text-[#0e1510]/70">{theme.backgroundMode}</div>
         </div>
       </div>
     </div>

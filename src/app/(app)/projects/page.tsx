@@ -296,7 +296,7 @@ export default function ProjectsPage() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search projects..."
-                  className="h-9 w-64 rounded-xl border bg-black/20 pl-9 pr-3 text-xs outline-none focus:border-accent/40"
+                  className="h-9 w-64 rounded-xl border bg-white pl-9 pr-3 text-xs outline-none focus:border-accent/40"
                   style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
                 />
               </div>

@@ -375,7 +375,7 @@ function ConnectionsTab({
                   </button>
                 </>
               ) : (
-                <span className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-bold opacity-40">
+                <span className="flex items-center gap-1.5 rounded-lg border border-[#0e1510]/10 px-2.5 py-1 text-[10px] font-bold opacity-40">
                   <X size={10} /> Not connected
                 </span>
               )}

@@ -198,7 +198,7 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
 
   if (loading && canvases.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-white/40 text-sm">
+      <div className="flex h-full items-center justify-center text-[#0e1510]/40 text-sm">
         Loading canvases...
       </div>
     );
@@ -207,7 +207,7 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
   return (
     <div className="relative flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
+      <div className="flex items-center justify-between border-b border-[#0e1510]/5 px-4 py-2.5">
         <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={() => setShowSwitcher(!showSwitcher)}
@@ -216,7 +216,7 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
             {activeCanvas ? activeCanvas.title : "No canvas selected"}
           </button>
           {activeCanvas && (
-            <span className="text-[10px] text-white/30 shrink-0">v{activeCanvas.version}</span>
+            <span className="text-[10px] text-[#0e1510]/30 shrink-0">v{activeCanvas.version}</span>
           )}
         </div>
         <div className="flex items-center gap-1.5">
@@ -224,14 +224,14 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
             <>
               <button
                 onClick={handleUndo}
-                className="text-xs text-white/40 hover:text-white/80 transition-colors px-2 py-1 rounded hover:bg-white/5"
+                className="text-xs text-[#0e1510]/40 hover:text-[#0e1510]/80 transition-colors px-2 py-1 rounded hover:bg-[#0e1510]/5"
                 title="Undo last change"
               >
                 ↶ Undo
               </button>
               <button
                 onClick={() => setShowHistory(true)}
-                className="text-xs text-white/40 hover:text-white/80 transition-colors px-2 py-1 rounded hover:bg-white/5"
+                className="text-xs text-[#0e1510]/40 hover:text-[#0e1510]/80 transition-colors px-2 py-1 rounded hover:bg-[#0e1510]/5"
                 title="Revision history"
               >
                 History
@@ -249,7 +249,7 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
           )}
           <button
             onClick={() => void loadCanvases()}
-            className="text-xs text-white/40 hover:text-white/80 transition-colors px-2 py-1 rounded hover:bg-white/5"
+            className="text-xs text-[#0e1510]/40 hover:text-[#0e1510]/80 transition-colors px-2 py-1 rounded hover:bg-[#0e1510]/5"
             title="Refresh"
           >
             ↻
@@ -259,9 +259,9 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
 
       {/* Canvas switcher dropdown */}
       {showSwitcher && (
-        <div className="border-b border-white/5 bg-black/40 px-2 py-2 max-h-48 overflow-y-auto">
+        <div className="border-b border-[#0e1510]/5 bg-black/40 px-2 py-2 max-h-48 overflow-y-auto">
           {canvases.length === 0 ? (
-            <div className="text-xs text-white/30 px-2 py-1">No canvases yet</div>
+            <div className="text-xs text-[#0e1510]/30 px-2 py-1">No canvases yet</div>
           ) : (
             canvases.map((c) => (
               <button
@@ -274,11 +274,11 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
                   "flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors",
                   c.id === activeCanvasId
                     ? "bg-accent/10 text-accent"
-                    : "text-white/70 hover:bg-white/5",
+                    : "text-[#0e1510]/70 hover:bg-[#0e1510]/5",
                 )}
               >
                 <span className="truncate">{c.title}</span>
-                <span className="text-[10px] text-white/30 shrink-0 ml-2">{c.type}</span>
+                <span className="text-[10px] text-[#0e1510]/30 shrink-0 ml-2">{c.type}</span>
               </button>
             ))
           )}
@@ -296,11 +296,11 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {activeBlocks.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
-            <div className="text-white/30 text-sm mb-2">
+            <div className="text-[#0e1510]/30 text-sm mb-2">
               {activeCanvas ? "This canvas is empty" : "No canvas selected"}
             </div>
             {activeCanvas && (
-              <div className="text-white/20 text-xs">
+              <div className="text-[#0e1510]/20 text-xs">
                 LiTT will add blocks here as you work together.
                 <br />
                 Try saying &quot;make notes&quot; or &quot;open in canvas&quot; in chat.
@@ -321,7 +321,7 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
 
       {/* Revision history drawer — slides up from bottom */}
       {showHistory && activeCanvasId && (
-        <div className="absolute inset-0 z-10 flex flex-col bg-[#08090d]/98 border-t border-white/10">
+        <div className="absolute inset-0 z-10 flex flex-col bg-[#f2f7ea]/98 border-t border-[#0e1510]/10">
           <RevisionHistory
             canvasId={activeCanvasId}
             onClose={() => setShowHistory(false)}
@@ -336,9 +336,9 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
       {/* Promote to project confirmation */}
       {showPromoteConfirm && activeCanvas && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 p-4">
-          <div className="max-w-sm rounded-xl border border-violet-500/20 bg-[#0a0b12] p-5 shadow-2xl">
+          <div className="max-w-sm rounded-xl border border-violet-500/20 bg-[#f2f7ea] p-5 shadow-2xl">
             <div className="text-sm font-bold text-white mb-2">Promote to Project?</div>
-            <div className="text-xs text-white/60 mb-4">
+            <div className="text-xs text-[#0e1510]/60 mb-4">
               This will create a new blank project named &quot;{activeCanvas.title}&quot; and link
               this canvas to it. You can then run missions, connect GitHub, and deploy from
               the project workspace.
@@ -346,7 +346,7 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowPromoteConfirm(false)}
-                className="text-xs text-white/50 hover:text-white/80 px-3 py-1.5 rounded hover:bg-white/5"
+                className="text-xs text-[#0e1510]/50 hover:text-[#0e1510]/80 px-3 py-1.5 rounded hover:bg-[#0e1510]/5"
               >
                 Cancel
               </button>

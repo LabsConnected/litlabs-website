@@ -16,7 +16,7 @@ export default function GameCard({
   return (
     <article
       onClick={onClick}
-      className={`rounded-2xl overflow-hidden bg-white/5 border border-white/10 hover:border-orange-500/50 transition-all hover:scale-[1.02] group ${onClick ? "cursor-pointer" : ""}`}
+      className={`rounded-2xl overflow-hidden bg-[#0e1510]/5 border border-[#0e1510]/10 hover:border-orange-500/50 transition-all hover:scale-[1.02] group ${onClick ? "cursor-pointer" : ""}`}
     >
       <div className="aspect-video bg-linear-to-br from-purple-900 to-orange-900 relative overflow-hidden">
         <Image
@@ -50,7 +50,7 @@ export default function GameCard({
 
         {showProgress && game.progress !== undefined && (
           <div className="mt-3">
-            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+            <div className="h-1.5 bg-[#0e1510]/10 rounded-full overflow-hidden">
               <div
                 className="h-full bg-orange-500"
                 style={{ width: `${game.progress}%` }}

@@ -6,7 +6,7 @@ export default function MultiplayerRooms() {
   ];
 
   return (
-    <section className="rounded-2xl bg-white/5 border border-white/10 p-4">
+    <section className="rounded-2xl bg-[#0e1510]/5 border border-[#0e1510]/10 p-4">
       <h2 className="font-black mb-4 text-white">Multiplayer</h2>
 
       <div className="space-y-3">

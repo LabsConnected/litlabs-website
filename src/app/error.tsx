@@ -19,16 +19,16 @@ export default function Error({
   return (
     <div
       className="min-h-dvh flex items-center justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-16"
-      style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}
+      style={{ backgroundColor: "#f6f9f1", color: "#0e1510" }}
     >
       <div
         className="max-w-md w-full rounded-xl p-8"
-        style={{ border: "1px solid #2a2a3a", backgroundColor: "#1a1a24" }}
+        style={{ border: "1px solid #cfdec4", backgroundColor: "#ffffff" }}
       >
         <div className="text-center mb-6">
           <h1
             className="text-lg font-bold tracking-tight"
-            style={{ color: "#e2e8f0" }}
+            style={{ color: "#0e1510" }}
           >
             Something went wrong
           </h1>
@@ -39,7 +39,7 @@ export default function Error({
 
         <div
           className="rounded-lg p-3 mb-6 text-[10px] font-mono break-all opacity-70"
-          style={{ backgroundColor: "#0f0f14", border: "1px solid #2a2a3a" }}
+          style={{ backgroundColor: "#f6f9f1", border: "1px solid #cfdec4" }}
         >
           {error.digest || error.message || "Unknown error"}
         </div>
@@ -57,8 +57,8 @@ export default function Error({
             className="px-4 py-2 text-xs font-bold rounded-lg hover:opacity-90 transition-opacity"
             style={{
               backgroundColor: "transparent",
-              color: "#94a3b8",
-              border: "1px solid #2a2a3a",
+              color: "#63745f",
+              border: "1px solid #cfdec4",
               textDecoration: "none",
             }}
           >

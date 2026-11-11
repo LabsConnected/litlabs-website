@@ -276,7 +276,7 @@ export default function LiveVoiceOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-[10020] overflow-hidden bg-[#05050b]"
+      className="fixed inset-0 z-[10020] overflow-hidden bg-[#edf3e4]"
       role="dialog"
       aria-label="LiTT Live Voice"
       data-testid="live-voice-overlay"
@@ -331,7 +331,7 @@ export default function LiveVoiceOverlay({
             <button
               type="button"
               onClick={() => void reconnect()}
-              className="ml-2 rounded bg-white/10 px-2 py-0.5 text-[10px] hover:bg-white/20"
+              className="ml-2 rounded bg-[#0e1510]/10 px-2 py-0.5 text-[10px] hover:bg-[#0e1510]/20"
             >
               Retry
             </button>
@@ -343,10 +343,10 @@ export default function LiveVoiceOverlay({
       <div className="pointer-events-none absolute inset-0 z-10">
         {/* Top-left: LiTT LIVE + connection */}
         <div className="absolute left-5 top-5">
-          <div className="text-xs font-semibold tracking-[0.2em] text-white">
+          <div className="text-xs font-semibold tracking-[0.2em] text-[#0e1510]">
             LiTT LIVE
           </div>
-          <div className="mt-1 flex items-center gap-2 text-[10px] text-white/45">
+          <div className="mt-1 flex items-center gap-2 text-[10px] text-[#0e1510]/45">
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
@@ -359,39 +359,39 @@ export default function LiveVoiceOverlay({
 
         {/* Top-right: MIC / AGENT / VOICE / VISION status — truthful indicators */}
         <div className="absolute right-5 top-5 flex flex-col items-end gap-1.5">
-          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-white/50">
+          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-[#0e1510]/50">
             MIC
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                isMuted ? "bg-red-400" : micActive ? "bg-emerald-400" : "bg-white/20",
+                isMuted ? "bg-red-400" : micActive ? "bg-emerald-400" : "bg-[#0e1510]/20",
               )}
             />
           </div>
-          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-white/50">
+          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-[#0e1510]/50">
             AGENT
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                agentJoined ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-white/20",
+                agentJoined ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-[#0e1510]/20",
               )}
             />
           </div>
-          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-white/50">
+          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-[#0e1510]/50">
             VOICE
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                voiceActive ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-white/20",
+                voiceActive ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-[#0e1510]/20",
               )}
             />
           </div>
-          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-white/50">
+          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-[#0e1510]/50">
             VISION
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                visionActive ? "bg-emerald-400" : "bg-white/20",
+                visionActive ? "bg-emerald-400" : "bg-[#0e1510]/20",
               )}
             />
           </div>
@@ -443,10 +443,10 @@ export default function LiveVoiceOverlay({
 
           {/* State label */}
           <div className="mt-6 text-center">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.45em] text-white/40">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.45em] text-[#0e1510]/40">
               LiTT
             </div>
-            <div className="mt-2 text-xl font-semibold text-white">
+            <div className="mt-2 text-xl font-semibold text-[#0e1510]">
               {STATE_LABELS[littState]}
               {showEllipsis && <span className="litt-ellipsis" />}
             </div>
@@ -456,7 +456,7 @@ export default function LiveVoiceOverlay({
           {(userTranscript || assistantTranscript) && (
             <div className="mt-4 max-w-md space-y-2 text-center">
               {userTranscript && (
-                <p className="text-[13px] font-medium text-white/70">
+                <p className="text-[13px] font-medium text-[#0e1510]/70">
                   <span className="text-[10px] font-bold uppercase opacity-50">You: </span>
                   {userTranscript}
                 </p>
@@ -475,14 +475,14 @@ export default function LiveVoiceOverlay({
       {/* ─── Camera state label (when not active) ───────────── */}
       {!cameraVisible && cameraDisplay !== "active" && (
         <div className="pointer-events-none absolute left-1/2 top-[38%] z-[15] -translate-x-1/2 text-center">
-          <p className="text-[11px] font-medium tracking-wider text-white/30">
+          <p className="text-[11px] font-medium tracking-wider text-[#0e1510]/30">
             {CAMERA_STATE_LABELS[cameraDisplay]}
           </p>
           {cameraDisplay === "failed" && (
             <button
               type="button"
               onClick={handleCameraToggle}
-              className="pointer-events-auto mt-2 rounded-lg border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/60 hover:bg-white/10"
+              className="pointer-events-auto mt-2 rounded-lg border border-[#0e1510]/15 bg-[#0e1510]/5 px-3 py-1 text-[11px] text-[#0e1510]/60 hover:bg-[#0e1510]/10"
             >
               Retry camera
             </button>
@@ -492,13 +492,13 @@ export default function LiveVoiceOverlay({
 
       {/* ─── Layer 30: Bottom controls (glass command dock) ─── */}
       <div className="absolute bottom-6 left-1/2 z-30 -translate-x-1/2">
-        <div className="flex items-center gap-3 rounded-full border border-white/10 bg-black/30 px-3 py-2 shadow-2xl backdrop-blur-xl">
+        <div className="flex items-center gap-3 rounded-full border border-[#0e1510]/10 bg-black/30 px-3 py-2 shadow-2xl backdrop-blur-xl">
           {/* Camera toggle */}
           <button
             type="button"
             onClick={handleCameraToggle}
             disabled={!isLive && cameraDisplay !== "failed"}
-            className="flex h-12 w-12 items-center justify-center rounded-full transition-all hover:bg-white/10 disabled:opacity-40"
+            className="flex h-12 w-12 items-center justify-center rounded-full transition-all hover:bg-[#0e1510]/10 disabled:opacity-40"
             style={{
               color: cameraOn ? "var(--color-accent)" : "rgba(255,255,255,0.4)",
               backgroundColor: cameraOn ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -515,7 +515,7 @@ export default function LiveVoiceOverlay({
             type="button"
             onClick={() => void handleFlip()}
             disabled={!isLive || !cameraOn}
-            className="flex h-12 w-12 items-center justify-center rounded-full text-white/40 transition-all hover:bg-white/10 disabled:opacity-30"
+            className="flex h-12 w-12 items-center justify-center rounded-full text-[#0e1510]/40 transition-all hover:bg-[#0e1510]/10 disabled:opacity-30"
             aria-label="Flip camera"
             title="Flip camera"
           >
@@ -527,7 +527,7 @@ export default function LiveVoiceOverlay({
             type="button"
             onClick={() => (screenOn ? stopScreenShare() : void startScreenShare())}
             disabled={!isLive}
-            className="hidden h-12 w-12 items-center justify-center rounded-full transition-all hover:bg-white/10 disabled:opacity-40 md:flex"
+            className="hidden h-12 w-12 items-center justify-center rounded-full transition-all hover:bg-[#0e1510]/10 disabled:opacity-40 md:flex"
             style={{
               color: screenOn ? "var(--color-accent)" : "rgba(255,255,255,0.4)",
               backgroundColor: screenOn ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -544,7 +544,7 @@ export default function LiveVoiceOverlay({
             onClick={toggleMute}
             disabled={!isLive}
             className={cn(
-              "flex h-12 w-12 items-center justify-center rounded-full transition-all hover:bg-white/10 disabled:opacity-40",
+              "flex h-12 w-12 items-center justify-center rounded-full transition-all hover:bg-[#0e1510]/10 disabled:opacity-40",
             )}
             style={{
               color: isMuted ? "#ef4444" : isLive ? "#22c55e" : "rgba(255,255,255,0.4)",
@@ -562,7 +562,7 @@ export default function LiveVoiceOverlay({
             <button
               type="button"
               onClick={interrupt}
-              className="flex h-12 w-12 items-center justify-center rounded-full text-accent transition-all hover:bg-white/10"
+              className="flex h-12 w-12 items-center justify-center rounded-full text-accent transition-all hover:bg-[#0e1510]/10"
               aria-label="Interrupt LiTT"
               title="Interrupt"
             >
@@ -575,7 +575,7 @@ export default function LiveVoiceOverlay({
             <button
               type="button"
               onClick={() => void reconnect()}
-              className="flex h-12 w-12 items-center justify-center rounded-full text-amber-400 transition-all hover:bg-white/10"
+              className="flex h-12 w-12 items-center justify-center rounded-full text-amber-400 transition-all hover:bg-[#0e1510]/10"
               aria-label="Reconnect"
               title="Reconnect"
             >
@@ -584,7 +584,7 @@ export default function LiveVoiceOverlay({
           )}
 
           {/* Divider */}
-          <div className="h-8 w-px bg-white/10" />
+          <div className="h-8 w-px bg-[#0e1510]/10" />
 
           {/* Hang up */}
           <button

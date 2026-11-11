@@ -67,11 +67,11 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
+      <div className="flex items-center justify-between border-b border-[#0e1510]/5 px-4 py-2.5">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-white">Revision History</span>
           {revisions.length > 0 && (
-            <span className="text-[10px] text-white/30">{revisions.length} versions</span>
+            <span className="text-[10px] text-[#0e1510]/30">{revisions.length} versions</span>
           )}
         </div>
         <div className="flex items-center gap-1.5">
@@ -86,7 +86,7 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
           )}
           <button
             onClick={onClose}
-            className="grid h-7 w-7 place-items-center rounded-lg text-white/45 hover:bg-white/8 hover:text-white"
+            className="grid h-7 w-7 place-items-center rounded-lg text-[#0e1510]/45 hover:bg-[#0e1510]/8 hover:text-white"
             aria-label="Close revision history"
           >
             ✕
@@ -104,11 +104,11 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
       {/* Revision list */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="flex h-full items-center justify-center text-white/40 text-sm">
+          <div className="flex h-full items-center justify-center text-[#0e1510]/40 text-sm">
             Loading revisions...
           </div>
         ) : revisions.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-white/30 text-sm">
+          <div className="flex h-full items-center justify-center text-[#0e1510]/30 text-sm">
             No revisions yet
           </div>
         ) : (
@@ -122,13 +122,13 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
                   onClick={() => setSelectedVersion(isSelected ? null : rev.version)}
                   className={cn(
                     "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors",
-                    isSelected ? "bg-accent/5" : "hover:bg-white/[0.02]",
+                    isSelected ? "bg-accent/5" : "hover:bg-[#0e1510]/[0.02]",
                   )}
                 >
                   {/* Version number */}
                   <div className={cn(
                     "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
-                    isLatest ? "bg-accent/20 text-accent" : "bg-white/5 text-white/40",
+                    isLatest ? "bg-accent/20 text-accent" : "bg-[#0e1510]/5 text-[#0e1510]/40",
                   )}>
                     {rev.version}
                   </div>
@@ -140,7 +140,7 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
                         rev.actor === "user" && "text-accent",
                         rev.actor === "litt" && "text-violet-300",
                         rev.actor === "spark" && "text-pink-300",
-                        rev.actor === "system" && "text-white/40",
+                        rev.actor === "system" && "text-[#0e1510]/40",
                       )}>
                         {rev.actor}
                       </span>
@@ -148,10 +148,10 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
                         <span className="text-[9px] text-accent/60">LATEST</span>
                       )}
                     </div>
-                    <div className="text-sm text-white/80 mt-0.5 truncate">
+                    <div className="text-sm text-[#0e1510]/80 mt-0.5 truncate">
                       {rev.summary || "No description"}
                     </div>
-                    <div className="text-[10px] text-white/30 mt-0.5">
+                    <div className="text-[10px] text-[#0e1510]/30 mt-0.5">
                       {new Date(rev.createdAt).toLocaleString()}
                     </div>
                   </div>
@@ -164,19 +164,19 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
 
       {/* Selected revision details */}
       {selectedRev && (
-        <div className="border-t border-white/5 bg-black/30 px-4 py-3 max-h-48 overflow-y-auto">
-          <div className="text-[10px] font-bold uppercase text-white/40 mb-2">
+        <div className="border-t border-[#0e1510]/5 bg-black/30 px-4 py-3 max-h-48 overflow-y-auto">
+          <div className="text-[10px] font-bold uppercase text-[#0e1510]/40 mb-2">
             Version {selectedRev.version} — Operations
           </div>
           <div className="space-y-1.5">
             {selectedRev.operations.map((op, i) => (
-              <div key={i} className="text-xs text-white/60 font-mono">
+              <div key={i} className="text-xs text-[#0e1510]/60 font-mono">
                 <span className="text-accent">{op.op}</span>
                 {"blockId" in op && (
-                  <span className="text-white/30"> → {op.blockId.slice(0, 8)}...</span>
+                  <span className="text-[#0e1510]/30"> → {op.blockId.slice(0, 8)}...</span>
                 )}
                 {"newTitle" in op && (
-                  <span className="text-white/30"> → &ldquo;{op.newTitle}&rdquo;</span>
+                  <span className="text-[#0e1510]/30"> → &ldquo;{op.newTitle}&rdquo;</span>
                 )}
               </div>
             ))}

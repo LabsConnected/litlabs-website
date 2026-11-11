@@ -14,7 +14,7 @@ export function LoadingBar({ label = "Loading" }: { label?: string }) {
   return (
     <div
       className="min-h-dvh flex items-center justify-center px-5 pb-[calc(2rem+env(safe-area-inset-bottom))]"
-      style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}
+      style={{ backgroundColor: "#f6f9f1", color: "#0e1510" }}
     >
       <div className="text-center">
         <div className="text-3xl mb-4" aria-hidden="true">
@@ -22,13 +22,13 @@ export function LoadingBar({ label = "Loading" }: { label?: string }) {
         </div>
         <div
           className="text-xs font-bold tracking-[0.15em] uppercase"
-          style={{ color: "#94a3b8" }}
+          style={{ color: "#63745f" }}
         >
           {label}...
         </div>
         <div
           className="mt-4 w-48 h-1 mx-auto rounded-full"
-          style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}
+          style={{ backgroundColor: "#ffffff", border: "1px solid #cfdec4" }}
         >
           <div
             className="loading-bar h-full rounded-full bg-accent"

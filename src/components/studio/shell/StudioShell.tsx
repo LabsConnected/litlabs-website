@@ -41,7 +41,7 @@ export function StudioShell() {
 
   if (focusMode) {
     return (
-      <div className="flex h-dvh w-screen flex-col overflow-hidden bg-[#07050a]">
+      <div className="flex h-dvh w-screen flex-col overflow-hidden bg-[#edf3e4]">
         <TopBar />
         <div className="relative flex-1 overflow-hidden">
           <WorkspaceCanvas />
@@ -52,7 +52,7 @@ export function StudioShell() {
   }
 
   return (
-    <div className="flex h-dvh w-screen flex-col overflow-hidden bg-[#07050a]">
+    <div className="flex h-dvh w-screen flex-col overflow-hidden bg-[#edf3e4]">
       <TopBar />
 
       <div className="flex-1 overflow-hidden">
@@ -63,11 +63,11 @@ export function StudioShell() {
                 defaultSize="18"
                 minSize="240"
                 maxSize="30"
-                className="border-r border-white/5"
+                className="border-r border-[#0e1510]/5"
               >
                 <LeftRail />
               </Panel>
-              <Separator className="w-px bg-white/5 hover:bg-[#8b5cf6]/40 transition-colors" />
+              <Separator className="w-px bg-[#0e1510]/5 hover:bg-[#177a36]/40 transition-colors" />
             </>
           )}
 
@@ -79,7 +79,7 @@ export function StudioShell() {
 
               {bottomDockOpen && (
                 <>
-                  <Separator className="h-px bg-white/5 hover:bg-[#8b5cf6]/40 transition-colors" />
+                  <Separator className="h-px bg-[#0e1510]/5 hover:bg-[#177a36]/40 transition-colors" />
                   <Panel
                     defaultSize="25"
                     minSize="200"
@@ -94,12 +94,12 @@ export function StudioShell() {
 
           {rightPanelOpen && (
             <>
-              <Separator className="w-px bg-white/5 hover:bg-[#8b5cf6]/40 transition-colors" />
+              <Separator className="w-px bg-[#0e1510]/5 hover:bg-[#177a36]/40 transition-colors" />
               <Panel
                 defaultSize="22"
                 minSize="320"
                 maxSize="40"
-                className="border-l border-white/5"
+                className="border-l border-[#0e1510]/5"
               >
                 <RightPanel />
               </Panel>

@@ -865,7 +865,7 @@ export default function MissionForge() {
               onClick={() => void runWorkflow()}
               disabled={running || nodes.length < 2}
               className="flex items-center gap-1 text-[9px] px-3 py-1 rounded font-bold transition-all disabled:opacity-40"
-              style={{ backgroundColor: brand.primary.DEFAULT, color: "#03050a" }}
+              style={{ backgroundColor: brand.primary.DEFAULT, color: "#f2f7ea" }}
             >
               {running ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} fill="currentColor" />} Simulate
             </button>
@@ -931,7 +931,7 @@ export default function MissionForge() {
                 }
               : {
                   backgroundImage:
-                    "linear-gradient(105deg,rgba(3,5,11,.96),rgba(3,5,11,.72) 48%,rgba(3,5,11,.88)),url('/wallpapers/litt-afterglow.webp')",
+                    "linear-gradient(105deg,rgba(255,255,255,.97),rgba(255,255,255,.85) 48%,rgba(255,255,255,.92)),url('/wallpapers/litt-afterglow.webp')",
                 }
           }
         >
@@ -1340,7 +1340,7 @@ export default function MissionForge() {
                   type="submit"
                   disabled={copilotLoading || !copilotPrompt.trim()}
                   className="w-full py-2 text-[11px] font-bold rounded-lg disabled:opacity-40 transition-all"
-                  style={{ backgroundColor: brand.primary.DEFAULT, color: "#03050a" }}
+                  style={{ backgroundColor: brand.primary.DEFAULT, color: "#f2f7ea" }}
                 >
                   {copilotLoading ? <Loader2 size={12} className="animate-spin mx-auto" /> : "Generate draft with LiTT"}
                 </button>
@@ -1418,7 +1418,7 @@ export default function MissionForge() {
               {mobileSheet === "copilot" && (
                 <form onSubmit={(e) => { void handleCopilot(e); setMobileSheet(null); }} className="space-y-2">
                   <textarea value={copilotPrompt} onChange={(e) => setCopilotPrompt(e.target.value)} placeholder="Describe a Mission…" rows={3} className="w-full rounded-lg px-3 py-2 text-[11px] outline-none resize-none" style={{ background: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor }} />
-                  <button type="submit" disabled={copilotLoading || !copilotPrompt.trim()} className="w-full py-2 text-[11px] font-bold rounded-lg disabled:opacity-40" style={{ backgroundColor: brand.primary.DEFAULT, color: "#03050a" }}>
+                  <button type="submit" disabled={copilotLoading || !copilotPrompt.trim()} className="w-full py-2 text-[11px] font-bold rounded-lg disabled:opacity-40" style={{ backgroundColor: brand.primary.DEFAULT, color: "#f2f7ea" }}>
                     {copilotLoading ? "Generating..." : "Generate with LiTT"}
                   </button>
                 </form>

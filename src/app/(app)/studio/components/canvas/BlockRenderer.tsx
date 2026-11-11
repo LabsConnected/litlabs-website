@@ -58,14 +58,14 @@ function BlockWrapper({
   return (
     <div
       className={cn(
-        "group relative rounded-lg border border-white/5 bg-white/[0.02] p-3 transition-colors hover:border-white/10",
+        "group relative rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/[0.02] p-3 transition-colors hover:border-[#0e1510]/10",
         className,
       )}
     >
       {!readOnly && (
         <button
           onClick={onDelete}
-          className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100 text-white/30 hover:text-red-400 text-xs"
+          className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100 text-[#0e1510]/30 hover:text-red-400 text-xs"
           aria-label="Delete block"
         >
           ✕
@@ -129,7 +129,7 @@ function HeadingBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
   };
 
   return (
-    <BlockWrapper block={block} onDelete={() => {}} readOnly={readOnly} className="bg-transparent border-0 p-0 hover:bg-white/[0.02]">
+    <BlockWrapper block={block} onDelete={() => {}} readOnly={readOnly} className="bg-transparent border-0 p-0 hover:bg-[#0e1510]/[0.02]">
       {renderHeading()}
     </BlockWrapper>
   );
@@ -156,16 +156,16 @@ function ParagraphBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
           onChange={(e) => setText(e.target.value)}
           onBlur={handleSave}
           rows={3}
-          className="w-full bg-transparent text-sm text-white/90 outline-none resize-y"
+          className="w-full bg-transparent text-sm text-[#0e1510]/90 outline-none resize-y"
         />
       </BlockWrapper>
     );
   }
 
   return (
-    <BlockWrapper block={block} onDelete={() => {}} readOnly={readOnly} className="bg-transparent border-0 p-0 hover:bg-white/[0.02]">
+    <BlockWrapper block={block} onDelete={() => {}} readOnly={readOnly} className="bg-transparent border-0 p-0 hover:bg-[#0e1510]/[0.02]">
       <p
-        className="text-sm text-white/80 whitespace-pre-wrap cursor-text leading-relaxed"
+        className="text-sm text-[#0e1510]/80 whitespace-pre-wrap cursor-text leading-relaxed"
         onClick={() => !readOnly && setEditing(true)}
       >
         {content.text}
@@ -201,7 +201,7 @@ function ChecklistBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
                 "mt-0.5 h-4 w-4 shrink-0 rounded border transition-colors",
                 item.checked
                   ? "border-accent bg-accent/20"
-                  : "border-white/20 hover:border-white/40",
+                  : "border-[#0e1510]/20 hover:border-[#0e1510]/40",
               )}
             >
               {item.checked && <span className="text-accent text-xs">✓</span>}
@@ -209,7 +209,7 @@ function ChecklistBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
             <span
               className={cn(
                 "text-sm",
-                item.checked ? "text-white/40 line-through" : "text-white/80",
+                item.checked ? "text-[#0e1510]/40 line-through" : "text-[#0e1510]/80",
               )}
             >
               {item.text}
@@ -217,7 +217,7 @@ function ChecklistBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
           </li>
         ))}
         {items.length === 0 && (
-          <li className="text-sm text-white/30 italic">No items yet</li>
+          <li className="text-sm text-[#0e1510]/30 italic">No items yet</li>
         )}
       </ul>
     </BlockWrapper>
@@ -235,7 +235,7 @@ function TaskBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
   };
 
   const statusColors: Record<string, string> = {
-    todo: "bg-white/10 text-white/60",
+    todo: "bg-[#0e1510]/10 text-[#0e1510]/60",
     in_progress: "bg-accent/20 text-accent",
     done: "bg-green-500/20 text-green-300",
     blocked: "bg-red-500/20 text-red-300",
@@ -265,10 +265,10 @@ function TaskBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-white">{content.title}</div>
           {content.description && (
-            <div className="text-xs text-white/50 mt-0.5">{content.description}</div>
+            <div className="text-xs text-[#0e1510]/50 mt-0.5">{content.description}</div>
           )}
           {content.assignee && (
-            <div className="text-[10px] text-white/30 mt-1">@{content.assignee}</div>
+            <div className="text-[10px] text-[#0e1510]/30 mt-1">@{content.assignee}</div>
           )}
         </div>
       </div>
@@ -283,13 +283,13 @@ function CodeBlockView({ block, readOnly }: BlockRendererProps) {
 
   return (
     <BlockWrapper block={block} onDelete={() => {}} readOnly={readOnly} className="p-0 overflow-hidden">
-      <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
-        <span className="text-[10px] font-mono text-white/40">
+      <div className="flex items-center justify-between border-b border-[#0e1510]/5 px-3 py-1.5">
+        <span className="text-[10px] font-mono text-[#0e1510]/40">
           {content.filename ?? content.language ?? "code"}
         </span>
-        <span className="text-[10px] font-mono text-white/20">{content.language}</span>
+        <span className="text-[10px] font-mono text-[#0e1510]/20">{content.language}</span>
       </div>
-      <pre className="overflow-x-auto p-3 text-xs font-mono text-white/80 leading-relaxed">
+      <pre className="overflow-x-auto p-3 text-xs font-mono text-[#0e1510]/80 leading-relaxed">
         <code>{content.code}</code>
       </pre>
     </BlockWrapper>
@@ -305,7 +305,7 @@ function NoteBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
     <BlockWrapper block={block} onDelete={() => {}} readOnly={readOnly} className="border-yellow-500/20 bg-yellow-500/[0.03]">
       <div className="flex items-start gap-2">
         {content.pinned && <span className="text-yellow-400 text-xs">📌</span>}
-        <p className="text-sm text-white/80 whitespace-pre-wrap flex-1">{content.text}</p>
+        <p className="text-sm text-[#0e1510]/80 whitespace-pre-wrap flex-1">{content.text}</p>
       </div>
     </BlockWrapper>
   );
@@ -323,10 +323,10 @@ function DecisionBlock({ block, readOnly }: BlockRendererProps) {
       </div>
       <div className="text-sm font-medium text-white">{content.title}</div>
       {content.rationale && (
-        <div className="text-xs text-white/50 mt-1">{content.rationale}</div>
+        <div className="text-xs text-[#0e1510]/50 mt-1">{content.rationale}</div>
       )}
       {content.decidedAt && (
-        <div className="text-[10px] text-white/30 mt-1">{content.decidedAt}</div>
+        <div className="text-[10px] text-[#0e1510]/30 mt-1">{content.decidedAt}</div>
       )}
     </BlockWrapper>
   );
@@ -347,7 +347,7 @@ function ImageBlock({ block, readOnly }: BlockRendererProps) {
         height={content.height}
         className="rounded-md max-w-full h-auto"
       />
-      {content.alt && <div className="text-xs text-white/40 mt-1 px-2 pb-1">{content.alt}</div>}
+      {content.alt && <div className="text-xs text-[#0e1510]/40 mt-1 px-2 pb-1">{content.alt}</div>}
     </BlockWrapper>
   );
 }
@@ -360,9 +360,9 @@ function FileBlock({ block, readOnly }: BlockRendererProps) {
   return (
     <BlockWrapper block={block} onDelete={() => {}} readOnly={readOnly}>
       <div className="flex items-center gap-2">
-        <span className="text-white/40 text-sm">📄</span>
-        <span className="text-sm font-mono text-white/80">{content.path}</span>
-        <span className="text-[10px] text-white/30">{content.language}</span>
+        <span className="text-[#0e1510]/40 text-sm">📄</span>
+        <span className="text-sm font-mono text-[#0e1510]/80">{content.path}</span>
+        <span className="text-[10px] text-[#0e1510]/30">{content.language}</span>
       </div>
     </BlockWrapper>
   );
@@ -375,7 +375,7 @@ function PreviewBlock({ block, readOnly }: BlockRendererProps) {
 
   return (
     <BlockWrapper block={block} onDelete={() => {}} readOnly={readOnly} className="p-0 overflow-hidden">
-      <div className="border-b border-white/5 px-3 py-1.5 text-[10px] text-white/40">{content.label}</div>
+      <div className="border-b border-[#0e1510]/5 px-3 py-1.5 text-[10px] text-[#0e1510]/40">{content.label}</div>
       <iframe
         src={content.url}
         className="w-full h-64 border-0"
@@ -391,10 +391,10 @@ function PreviewBlock({ block, readOnly }: BlockRendererProps) {
 function UnknownBlock({ block, readOnly }: BlockRendererProps) {
   return (
     <BlockWrapper block={block} onDelete={() => {}} readOnly={readOnly}>
-      <div className="text-xs text-white/40">
+      <div className="text-xs text-[#0e1510]/40">
         Unknown block type: {block.type}
       </div>
-      <pre className="text-[10px] text-white/30 mt-1 overflow-x-auto">
+      <pre className="text-[10px] text-[#0e1510]/30 mt-1 overflow-x-auto">
         {JSON.stringify(block.content, null, 2)}
       </pre>
     </BlockWrapper>

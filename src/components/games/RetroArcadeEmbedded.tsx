@@ -129,7 +129,7 @@ export function RetroArcadeEmbedded() {
           <h2 className="mt-1 text-xl font-black sm:text-2xl">
             Your retro collection
           </h2>
-          <p className="mt-1 text-xs text-white/60">
+          <p className="mt-1 text-xs text-[#0e1510]/60">
             {standardGames.length > 0
               ? `${standardGames.length} game${standardGames.length === 1 ? "" : "s"} · Stored locally in this browser`
               : "Import legal ROMs you own — NES, SNES, Game Boy, Genesis, and more"}
@@ -155,7 +155,7 @@ export function RetroArcadeEmbedded() {
           />
           <Link
             href="/games/retro"
-            className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-bold text-white/70 transition hover:bg-white/10 hover:text-white"
+            className="flex items-center gap-1.5 rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/5 px-4 py-2.5 text-sm font-bold text-[#0e1510]/70 transition hover:bg-[#0e1510]/10 hover:text-white"
           >
             Full arcade <ArrowRight size={14} />
           </Link>
@@ -164,7 +164,7 @@ export function RetroArcadeEmbedded() {
 
       {/* Message toast */}
       {message && (
-        <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs text-white/60">
+        <div className="rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/5 px-4 py-2.5 text-xs text-[#0e1510]/60">
           {message}
         </div>
       )}
@@ -173,7 +173,7 @@ export function RetroArcadeEmbedded() {
       {recent && (
         <Link
           href={`/games/retro/play/${recent.id}`}
-          className="group relative flex min-h-28 items-center overflow-hidden rounded-2xl border border-fuchsia-400/20 bg-linear-to-r from-violet-950 via-[#15101e] to-transparent p-4 transition hover:border-fuchsia-400/40"
+          className="group relative flex min-h-28 items-center overflow-hidden rounded-2xl border border-fuchsia-400/20 bg-linear-to-r from-violet-950 via-[#ffffff] to-transparent p-4 transition hover:border-fuchsia-400/40"
         >
           <div className="relative z-10 flex items-center gap-3">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-fuchsia-500/20 text-fuchsia-300">
@@ -184,7 +184,7 @@ export function RetroArcadeEmbedded() {
                 Continue playing
               </p>
               <h3 className="text-base font-black">{recent.title}</h3>
-              <p className="text-[11px] text-white/60">
+              <p className="text-[11px] text-[#0e1510]/60">
                 {getRetroSystem(recent.system).name}
               </p>
             </div>
@@ -203,11 +203,11 @@ export function RetroArcadeEmbedded() {
             className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
               systemFilter === "all"
                 ? "bg-fuchsia-500/20 text-fuchsia-300"
-                : "border border-white/10 text-white/60 hover:bg-white/5 hover:text-white"
+                : "border border-[#0e1510]/10 text-[#0e1510]/60 hover:bg-[#0e1510]/5 hover:text-white"
             }`}
           >
             <Library size={13} /> All
-            <span className="ml-0.5 text-white/55">{standardGames.length}</span>
+            <span className="ml-0.5 text-[#0e1510]/55">{standardGames.length}</span>
           </button>
           {RETRO_SYSTEMS.filter((s) =>
             standardGames.some((g) => g.system === s.id),
@@ -217,8 +217,8 @@ export function RetroArcadeEmbedded() {
               onClick={() => setSystemFilter(system.id)}
               className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
                 systemFilter === system.id
-                  ? "bg-white/15 text-white"
-                  : "border border-white/10 text-white/60 hover:bg-white/5 hover:text-white"
+                  ? "bg-[#0e1510]/15 text-white"
+                  : "border border-[#0e1510]/10 text-[#0e1510]/60 hover:bg-[#0e1510]/5 hover:text-white"
               }`}
             >
               <i
@@ -229,14 +229,14 @@ export function RetroArcadeEmbedded() {
                 }}
               />
               {system.shortName}
-              <span className="ml-0.5 text-white/55">
+              <span className="ml-0.5 text-[#0e1510]/55">
                 {standardGames.filter((g) => g.system === system.id).length}
               </span>
             </button>
           ))}
           <div className="relative ml-auto w-full max-w-40">
             <Search
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/50"
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#0e1510]/50"
               size={13}
             />
             <input
@@ -244,7 +244,7 @@ export function RetroArcadeEmbedded() {
               placeholder="Search…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full rounded-full border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 text-xs text-white outline-none placeholder:text-white/50 focus:border-fuchsia-500/40"
+              className="w-full rounded-full border border-[#0e1510]/10 bg-[#0e1510]/5 py-1.5 pl-8 pr-3 text-xs text-white outline-none placeholder:text-[#0e1510]/50 focus:border-fuchsia-500/40"
             />
           </div>
         </div>
@@ -256,7 +256,7 @@ export function RetroArcadeEmbedded() {
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="aspect-3/4 animate-pulse rounded-xl border border-white/5 bg-white/3"
+              className="aspect-3/4 animate-pulse rounded-xl border border-[#0e1510]/5 bg-[#0e1510]/3"
             />
           ))}
         </div>
@@ -269,7 +269,7 @@ export function RetroArcadeEmbedded() {
               <Link
                 key={game.id}
                 href={`/games/retro/play/${game.id}`}
-                className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/3 transition hover:-translate-y-1 hover:border-fuchsia-400/30"
+                className="group relative overflow-hidden rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/3 transition hover:-translate-y-1 hover:border-fuchsia-400/30"
               >
                 <div className="relative aspect-3/4 overflow-hidden">
                   {coverUrl ? (
@@ -285,7 +285,7 @@ export function RetroArcadeEmbedded() {
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-violet-900/40 to-fuchsia-900/30">
-                      <Gamepad2 size={32} className="text-white/40" />
+                      <Gamepad2 size={32} className="text-[#0e1510]/40" />
                     </div>
                   )}
                   <div className="absolute inset-0 bg-linear-to-t from-black/70 to-transparent opacity-0 transition group-hover:opacity-100" />
@@ -295,7 +295,7 @@ export function RetroArcadeEmbedded() {
                     </span>
                   </div>
                   <span
-                    className="absolute left-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[8px] font-bold uppercase text-white/70 backdrop-blur-sm"
+                    className="absolute left-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[8px] font-bold uppercase text-[#0e1510]/70 backdrop-blur-sm"
                     style={{ color: system.color }}
                   >
                     {system.shortName}
@@ -306,7 +306,7 @@ export function RetroArcadeEmbedded() {
                       e.stopPropagation();
                       void toggleFavorite(game);
                     }}
-                    className="absolute right-1.5 top-1.5 rounded-md bg-black/60 p-1 text-white/50 backdrop-blur-sm transition hover:text-white"
+                    className="absolute right-1.5 top-1.5 rounded-md bg-black/60 p-1 text-[#0e1510]/50 backdrop-blur-sm transition hover:text-white"
                     aria-label={
                       game.favorite
                         ? `Unfavorite ${game.title}`
@@ -324,7 +324,7 @@ export function RetroArcadeEmbedded() {
                 </div>
                 <div className="p-2.5">
                   <h3 className="truncate text-xs font-black">{game.title}</h3>
-                  <p className="mt-0.5 text-[10px] text-white/55">
+                  <p className="mt-0.5 text-[10px] text-[#0e1510]/55">
                     {system.name}
                   </p>
                 </div>
@@ -334,14 +334,14 @@ export function RetroArcadeEmbedded() {
         </div>
       ) : (
         !loading && (
-          <div className="rounded-2xl border border-white/10 bg-white/3 p-8 text-center">
-            <Gamepad2 size={32} className="mx-auto mb-3 text-white/40" />
-            <h3 className="text-sm font-black text-white/70">
+          <div className="rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/3 p-8 text-center">
+            <Gamepad2 size={32} className="mx-auto mb-3 text-[#0e1510]/40" />
+            <h3 className="text-sm font-black text-[#0e1510]/70">
               {standardGames.length === 0
                 ? "No retro games yet"
                 : "No games match your filter"}
             </h3>
-            <p className="mt-1 text-xs text-white/60">
+            <p className="mt-1 text-xs text-[#0e1510]/60">
               {standardGames.length === 0
                 ? "Import legal ROMs you own to start playing in your browser"
                 : "Try a different system or clear your search"}
@@ -359,7 +359,7 @@ export function RetroArcadeEmbedded() {
       )}
 
       {/* Privacy note */}
-      <div className="flex items-center gap-2 text-[10px] text-white/55">
+      <div className="flex items-center gap-2 text-[10px] text-[#0e1510]/55">
         <ShieldCheck size={12} className="shrink-0 text-emerald-400/70" />
         <span>
           ROM files stay in this browser&apos;s IndexedDB. LiTT does not upload

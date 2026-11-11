@@ -31,29 +31,29 @@ export function RightPanel() {
   // No selection → show Project Overview / Memory
   if (!selection) {
     return (
-      <div className="flex h-full flex-col bg-[#0d0a12]">
-        <div className="border-b border-white/5 px-4 py-3">
-          <span className="text-xs font-medium text-white/60">Project Overview</span>
+      <div className="flex h-full flex-col bg-[#f2f7ea]">
+        <div className="border-b border-[#0e1510]/5 px-4 py-3">
+          <span className="text-xs font-medium text-[#0e1510]/60">Project Overview</span>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           <div className="space-y-4">
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-white/30">Project</div>
-              <div className="mt-1 text-sm text-white/70">{projectName ?? "No project selected"}</div>
+              <div className="text-[10px] uppercase tracking-wider text-[#0e1510]/30">Project</div>
+              <div className="mt-1 text-sm text-[#0e1510]/70">{projectName ?? "No project selected"}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-white/30">Memory</div>
-              <div className="mt-1 text-xs text-white/20">
+              <div className="text-[10px] uppercase tracking-wider text-[#0e1510]/30">Memory</div>
+              <div className="mt-1 text-xs text-[#0e1510]/20">
                 Project memories will appear here. Select an object to see its properties.
               </div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-white/30">Ask LiTT</div>
-              <div className="mt-2 rounded-lg border border-white/5 bg-white/[0.02] p-3">
+              <div className="text-[10px] uppercase tracking-wider text-[#0e1510]/30">Ask LiTT</div>
+              <div className="mt-2 rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/[0.02] p-3">
                 <input
                   type="text"
                   placeholder="Ask about this project..."
-                  className="w-full bg-transparent text-xs text-white/60 placeholder:text-white/20 focus:outline-none"
+                  className="w-full bg-transparent text-xs text-[#0e1510]/60 placeholder:text-[#0e1510]/20 focus:outline-none"
                 />
               </div>
             </div>
@@ -67,12 +67,12 @@ export function RightPanel() {
   const Icon = config.icon;
 
   return (
-    <div className="flex h-full flex-col bg-[#0d0a12]">
+    <div className="flex h-full flex-col bg-[#f2f7ea]">
       {/* Header */}
-      <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
+      <div className="flex items-center gap-2 border-b border-[#0e1510]/5 px-4 py-3">
         <Icon size={16} weight="regular" className="text-[#8b5cf6]" />
-        <span className="text-xs font-medium text-white/60">{config.label}</span>
-        <span className="ml-auto text-xs text-white/30">{selection.name}</span>
+        <span className="text-xs font-medium text-[#0e1510]/60">{config.label}</span>
+        <span className="ml-auto text-xs text-[#0e1510]/30">{selection.name}</span>
       </div>
 
       {/* Properties */}
@@ -131,12 +131,12 @@ export function RightPanel() {
       </div>
 
       {/* Ask LiTT footer */}
-      <div className="border-t border-white/5 p-3">
-        <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3">
+      <div className="border-t border-[#0e1510]/5 p-3">
+        <div className="rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/[0.02] p-3">
           <input
             type="text"
             placeholder={`Ask LiTT about this ${config.label.toLowerCase()}...`}
-            className="w-full bg-transparent text-xs text-white/60 placeholder:text-white/20 focus:outline-none"
+            className="w-full bg-transparent text-xs text-[#0e1510]/60 placeholder:text-[#0e1510]/20 focus:outline-none"
           />
         </div>
       </div>
@@ -147,8 +147,8 @@ export function RightPanel() {
 function PropertyRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-xs text-white/40">{label}</span>
-      <span className="text-xs text-white/60">{value}</span>
+      <span className="text-xs text-[#0e1510]/40">{label}</span>
+      <span className="text-xs text-[#0e1510]/60">{value}</span>
     </div>
   );
 }
@@ -159,7 +159,7 @@ function ActionButtons({ actions }: { actions: string[] }) {
       {actions.map((action) => (
         <button
           key={action}
-          className="rounded-lg border border-white/5 bg-white/[0.02] px-3 py-1.5 text-xs text-white/50 transition-colors hover:bg-white/[0.04] hover:text-white/70"
+          className="rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/[0.02] px-3 py-1.5 text-xs text-[#0e1510]/50 transition-colors hover:bg-[#0e1510]/[0.04] hover:text-[#0e1510]/70"
         >
           {action}
         </button>

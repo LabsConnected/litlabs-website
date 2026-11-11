@@ -50,7 +50,7 @@ export function VoicePreferencesCard() {
             writeTtsEnabled(v);
           }}
         />
-        <p className="text-[10px] text-white/40">
+        <p className="text-[10px] text-[#0e1510]/40">
           These preferences are shared with the Studio voice session — changing them here
           changes them there too.
         </p>

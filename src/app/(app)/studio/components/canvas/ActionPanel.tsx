@@ -146,7 +146,7 @@ export function ActionPanel({ open, onClose, projectId, onActionSelect }: Action
         className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
       />
       {/* Sheet */}
-      <div className="relative flex max-h-[62vh] w-full flex-col rounded-t-2xl border-t border-white/10 bg-[#14141a] shadow-2xl">
+      <div className="relative flex max-h-[62vh] w-full flex-col rounded-t-2xl border-t border-[#0e1510]/10 bg-white shadow-2xl">
         {/* Handle + header */}
         <div className="flex items-center justify-between px-4 pb-1 pt-2.5">
           <div className="flex items-center gap-2">
@@ -155,12 +155,12 @@ export function ActionPanel({ open, onClose, projectId, onActionSelect }: Action
           <button
             onClick={onClose}
             aria-label="Close"
-            className="rounded-full p-1.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+            className="rounded-full p-1.5 text-[#0e1510]/50 transition-colors hover:bg-[#0e1510]/10 hover:text-white"
           >
             <X size={16} />
           </button>
         </div>
-        <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-white/15" aria-hidden="true" />
+        <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-[#0e1510]/15" aria-hidden="true" />
 
         {browseDir !== null && projectId ? (
           <FileTreeView
@@ -174,14 +174,14 @@ export function ActionPanel({ open, onClose, projectId, onActionSelect }: Action
           <>
         {/* Search */}
         <div className="px-4 pb-2">
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5">
-            <Search size={14} className="shrink-0 text-white/40" />
+          <div className="flex items-center gap-2 rounded-lg border border-[#0e1510]/10 bg-[#0e1510]/5 px-2.5 py-1.5">
+            <Search size={14} className="shrink-0 text-[#0e1510]/40" />
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search actions…"
               aria-label="Search actions"
-              className="w-full bg-transparent text-sm text-white placeholder:text-white/30 focus:outline-none"
+              className="w-full bg-transparent text-sm text-white placeholder:text-[#0e1510]/30 focus:outline-none"
             />
           </div>
         </div>
@@ -198,7 +198,7 @@ export function ActionPanel({ open, onClose, projectId, onActionSelect }: Action
                 "shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
                 activeCategory === cat.id
                   ? "border-accent/50 bg-accent/15 text-accent"
-                  : "border-white/10 bg-white/5 text-white/55 hover:border-white/20 hover:text-white/80",
+                  : "border-[#0e1510]/10 bg-[#0e1510]/5 text-[#0e1510]/55 hover:border-[#0e1510]/20 hover:text-[#0e1510]/80",
               )}
             >
               {cat.label}
@@ -211,14 +211,14 @@ export function ActionPanel({ open, onClose, projectId, onActionSelect }: Action
           {resolved === null ? (
             <div className="grid grid-cols-2 gap-2" aria-label="Loading actions">
               {[0, 1, 2].map((i) => (
-                <div key={i} className="h-[76px] animate-pulse rounded-xl border border-white/5 bg-white/5" />
+                <div key={i} className="h-[76px] animate-pulse rounded-xl border border-[#0e1510]/5 bg-[#0e1510]/5" />
               ))}
             </div>
           ) : (
             <>
               {recentItems.length > 0 && (
                 <div className="mb-3">
-                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/35">
+                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#0e1510]/35">
                     Recent
                   </div>
                   <div className="grid grid-cols-2 gap-2">
@@ -229,7 +229,7 @@ export function ActionPanel({ open, onClose, projectId, onActionSelect }: Action
                 </div>
               )}
               {visible.length === 0 ? (
-                <div className="py-8 text-center text-sm text-white/35">
+                <div className="py-8 text-center text-sm text-[#0e1510]/35">
                   No actions match{searchQuery ? ` “${searchQuery}”` : ""}.
                 </div>
               ) : (
@@ -268,15 +268,15 @@ function ActionCard({
       className={cn(
         "flex flex-col gap-1 rounded-xl border p-3 text-left transition-all",
         disabled
-          ? "cursor-not-allowed border-white/5 bg-white/[0.02] opacity-55"
-          : "border-white/10 bg-white/5 hover:border-accent/40 hover:bg-accent/10 active:scale-[0.98]",
+          ? "cursor-not-allowed border-[#0e1510]/5 bg-[#0e1510]/[0.02] opacity-55"
+          : "border-[#0e1510]/10 bg-[#0e1510]/5 hover:border-accent/40 hover:bg-accent/10 active:scale-[0.98]",
       )}
     >
-      <span className={cn("flex h-7 w-7 items-center justify-center rounded-lg", disabled ? "bg-white/5 text-white/35" : "bg-accent/15 text-accent")}>
+      <span className={cn("flex h-7 w-7 items-center justify-center rounded-lg", disabled ? "bg-[#0e1510]/5 text-[#0e1510]/35" : "bg-accent/15 text-accent")}>
         <Icon size={15} />
       </span>
       <span className="text-[13px] font-semibold text-white">{def.label}</span>
-      <span className="line-clamp-2 text-[11px] leading-4 text-white/45">
+      <span className="line-clamp-2 text-[11px] leading-4 text-[#0e1510]/45">
         {disabled && availability.reason ? availability.reason : def.description}
       </span>
     </button>
@@ -400,12 +400,12 @@ function FileTreeView({
         <button
           onClick={goBack}
           aria-label={parentDir === null ? "Back to actions" : parentDir === "." ? "Back to project root" : `Back to ${parentDir}`}
-          className="rounded-full p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+          className="rounded-full p-1.5 text-[#0e1510]/60 transition-colors hover:bg-[#0e1510]/10 hover:text-white"
         >
           <ArrowLeft size={16} />
         </button>
         <span className="shrink-0 text-sm font-semibold text-white">Files</span>
-        <span className="min-w-0 flex-1 truncate text-xs text-white/40">
+        <span className="min-w-0 flex-1 truncate text-xs text-[#0e1510]/40">
           {dir === "." ? "project root" : dir}
         </span>
       </div>
@@ -415,7 +415,7 @@ function FileTreeView({
         {entries === null && !error ? (
           <div className="flex flex-col gap-1.5" aria-label="Loading files">
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-10 animate-pulse rounded-lg border border-white/5 bg-white/5" />
+              <div key={i} className="h-10 animate-pulse rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/5" />
             ))}
           </div>
         ) : error ? (
@@ -423,14 +423,14 @@ function FileTreeView({
             <p className="text-[13px] text-red-200/90">{error}</p>
             <button
               onClick={() => setReloadKey((k) => k + 1)}
-              className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:border-accent/40 hover:text-white"
+              className="flex items-center gap-1.5 rounded-full border border-[#0e1510]/10 bg-[#0e1510]/5 px-3 py-1.5 text-xs font-medium text-[#0e1510]/70 transition-colors hover:border-accent/40 hover:text-white"
             >
               <RefreshCw size={12} />
               Retry
             </button>
           </div>
         ) : (entries ?? []).length === 0 ? (
-          <div className="py-8 text-center text-sm text-white/35">No files in this folder.</div>
+          <div className="py-8 text-center text-sm text-[#0e1510]/35">No files in this folder.</div>
         ) : (
           <ul className="flex flex-col gap-1">
             {(entries ?? []).map((entry) => {
@@ -441,17 +441,17 @@ function FileTreeView({
                   <button
                     onClick={() => (isFolder ? onNavigate(path) : onOpenFile(path))}
                     aria-label={isFolder ? `Open folder ${entry.name}` : `Open file ${path}`}
-                    className="flex w-full items-center gap-2.5 rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2.5 text-left transition-colors hover:border-accent/30 hover:bg-accent/10 active:scale-[0.99]"
+                    className="flex w-full items-center gap-2.5 rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/[0.03] px-3 py-2.5 text-left transition-colors hover:border-accent/30 hover:bg-accent/10 active:scale-[0.99]"
                   >
                     {isFolder ? (
                       <Folder size={15} className="shrink-0 text-accent/80" />
                     ) : (
-                      <FileText size={15} className="shrink-0 text-white/45" />
+                      <FileText size={15} className="shrink-0 text-[#0e1510]/45" />
                     )}
                     <span className="min-w-0 flex-1 truncate text-[13px] text-white">
                       {entry.name}
                     </span>
-                    {isFolder && <ChevronRight size={14} className="shrink-0 text-white/30" />}
+                    {isFolder && <ChevronRight size={14} className="shrink-0 text-[#0e1510]/30" />}
                   </button>
                 </li>
               );
