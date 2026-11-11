@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import {
+  errorCarriesHostExecutionDisabled,
+  hostExecutionDisabledResponse,
+} from "@/lib/host-execution-guard";
 
 /**
  * POST /api/studio-projects/[projectId]/workspace/prepare
@@ -32,6 +36,20 @@ export async function POST(
       branch: refreshed?.workspaceBranch ?? null,
     });
   } catch (err) {
+    // The terminal-server's fail-closed refusal carries the
+    // HOST_EXECUTION_DISABLED code all the way up (attached by the
+    // terminal client, preserved by the provisioning service) — this
+    // catch used to drop it and return an unmapped 500 whose body was
+    // the raw message with the JSON code string embedded, which is
+    // what callers then rendered verbatim. Map it to the standard
+    // 503 + coded body (same shape as /api/agents/commits); genuinely
+    // unexpected errors keep the 500.
+    if (errorCarriesHostExecutionDisabled(err)) {
+      return NextResponse.json(
+        hostExecutionDisabledResponse("workspace.prepare"),
+        { status: 503 },
+      );
+    }
     const message = err instanceof Error ? err.message : "Workspace provisioning failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }

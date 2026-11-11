@@ -272,8 +272,16 @@ describe("Dashboard v3 — universal composer", () => {
     expect(src).toContain('id="dashboard-guided-start"');
   });
 
-  it("uses the LIME canonical accent", () => {
-    expect(src).toContain("#a8ff2f");
+  it("consumes the canonical theme accent — no hard-coded accent hex", () => {
+    // Partially superseded by the layout/theme wave (2026-11-10,
+    // ART-20261111-004): BuildConsole used to hard-code the lime
+    // accent (#a8ff2f) in its styles. It now consumes the applied
+    // theme's accentColor token — LiTT Signature green by default,
+    // LiTT Lime when the user picks it — so the pin moved from the
+    // hex literal to the token contract. The never-purple half of
+    // the original assertion is unchanged.
+    expect(src).toContain("resolvedColors.accentColor");
+    expect(src).not.toContain("#a8ff2f");
     expect(src).not.toContain("#a78bfa");
   });
 

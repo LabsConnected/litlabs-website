@@ -14,7 +14,7 @@ import {
 } from "@/lib/terminal-internal-client";
 import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
 import { createPreviewToken } from "@/lib/projects/preview-token";
-import { extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
+import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -289,12 +289,16 @@ export async function POST(
       previewUrl: null,
       runtimeError: message,
     });
+    const runtimeErrorCode = (err as { code?: string }).code ?? extractEmbeddedErrorCode(message);
     return NextResponse.json({
       error: message,
       runtimeStatus: "failed",
       runtimeError: message,
-      runtimeErrorCode: (err as { code?: string }).code ?? extractEmbeddedErrorCode(message),
-    }, { status: 500 });
+      runtimeErrorCode,
+      // A designed host-execution refusal is a 503, not a 500: the
+      // status must match the code the body already carries, or
+      // clients and monitoring read a known refusal as breakage.
+    }, { status: runtimeErrorCode === HOST_EXECUTION_DISABLED_CODE ? 503 : 500 });
   }
 
   await updateProjectRuntime(projectId, userId, {
@@ -344,7 +348,7 @@ export async function POST(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Preview start failed";
-    const errorCode = (err as { code?: string }).code ?? null;
+    const errorCode = (err as { code?: string }).code ?? extractEmbeddedErrorCode(message);
     await updateProjectRuntime(projectId, userId, {
       runtimeStatus: "failed",
       previewUrl: null,
@@ -356,7 +360,9 @@ export async function POST(
       runtimeStatus: "failed",
       runtimeError: message,
       runtimeErrorCode: errorCode,
-    }, { status: 500 });
+      // Same mapping as the provisioning branch above: the designed
+      // host-execution refusal is a 503; other failures stay 500.
+    }, { status: errorCode === HOST_EXECUTION_DISABLED_CODE ? 503 : 500 });
   }
 }
 

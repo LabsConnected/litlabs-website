@@ -694,24 +694,40 @@ function CommandStudioContent() {
   }, [littCollapsed]);
 
   // Chat dock position — "left" (persistent left panel, 360px default) or
-  // "bottom" (today's bottom command layer). Default "left" per the spec;
-  // any stored value other than "bottom" falls back to "left".
+  // "bottom" (the integrated bottom command layer). Larry's ruling
+  // (2026-11-10): chat must open INTEGRATED in the composition — not
+  // stuck to the left and not a detached pop-out — so the default is
+  // now "bottom". An explicit switcher choice still wins, tracked with
+  // an explicit marker: the old code persisted on mount, which wrote
+  // the default "left" into storage on every first run and made a
+  // stored "left" indistinguishable from a real choice. Migration:
+  // a stored "bottom" could only come from the switcher (the old
+  // default never produced it), so it stays honored; a stored "left"
+  // without the explicit marker is treated as unset.
   const CHAT_DOCK_KEY = "littree:studio:chat-dock";
+  const CHAT_DOCK_EXPLICIT_KEY = "littree:studio:chat-dock:explicit";
   const [chatDock, setChatDock] = useState<"left" | "bottom">(() => {
-    if (typeof window === "undefined") return "left";
+    if (typeof window === "undefined") return "bottom";
     try {
-      return localStorage.getItem(CHAT_DOCK_KEY) === "bottom" ? "bottom" : "left";
+      const stored = localStorage.getItem(CHAT_DOCK_KEY);
+      if (stored === "bottom") return "bottom";
+      if (stored === "left" && localStorage.getItem(CHAT_DOCK_EXPLICIT_KEY) === "1") {
+        return "left";
+      }
+      return "bottom";
     } catch {
-      return "left";
+      return "bottom";
     }
   });
-  useEffect(() => {
+  const handleChatDockChange = useCallback((next: "left" | "bottom") => {
+    setChatDock(next);
     try {
-      localStorage.setItem(CHAT_DOCK_KEY, chatDock);
+      localStorage.setItem(CHAT_DOCK_KEY, next);
+      localStorage.setItem(CHAT_DOCK_EXPLICIT_KEY, "1");
     } catch {
-      // ignore
+      // ignore — the in-memory choice still applies for this session
     }
-  }, [chatDock]);
+  }, []);
 
   // Canonical LiTT active tab — single source of truth shared by the
   // desktop rail, the mobile sheet, and header/activity actions.
@@ -778,7 +794,8 @@ function CommandStudioContent() {
   };
 
   // F1 workspace-first: LiTT opens on the 64px rail (no permanent
-  // desktop column). Expanding opens the floating overlay panel (Slice B).
+  // desktop column). Expanding widens the in-flow column (the Slice B
+  // floating overlay was retired 2026-11-10 — no detached pop-outs).
   // A stored explicit preference is never overridden.
   const laptopDefaultAppliedRef = useRef(false);
   useEffect(() => {
@@ -3178,9 +3195,14 @@ function CommandStudioContent() {
         )}
 
         {/* Body: LiTT rail | Workspace — canvas-first 2-zone layout.
+            This comment block describes the NON-shell branch below.
+            The shell branch (StudioShell) composes differently: chat
+            docks left (explicit choice) or as the integrated bottom
+            command layer (the default), with the stage beside/above it.
             - LiTTPanel never reserves a permanent desktop column (F1):
               collapsed it is the 64px ambient HUD rail in flow; expanded
-              it is Slice B's floating overlay panel (fixed, right side).
+              it widens in flow (Slice B's floating overlay panel was
+              retired 2026-11-10 — no detached pop-outs).
             - The workspace <main> is the canvas zone: the WorktabBar sits
               directly above it, then Design / Code / Preview consume ALL
               remaining width. No permanent secondary columns are reserved.
@@ -3357,7 +3379,7 @@ function CommandStudioContent() {
                   expandedWidth={littDockResize.width}
                   expandedMaxWidth="500px"
                   dockPosition="left"
-                  onDockPositionChange={setChatDock}
+                  onDockPositionChange={handleChatDockChange}
                 />
               ) : null
             }
@@ -3384,7 +3406,7 @@ function CommandStudioContent() {
                   composer={littComposer}
                   statusBar={operatorBar}
                   dockPosition="bottom"
-                  onDockPositionChange={setChatDock}
+                  onDockPositionChange={handleChatDockChange}
                 />
               )
             }
@@ -3398,17 +3420,22 @@ function CommandStudioContent() {
 
           {/* F1 workspace-first: LiTT never reserves a permanent desktop
               column. Collapsed → the 64px ambient HUD rail in flow
-              (Slice B column mode). Expanded → Slice B's `overlay` mode:
-              a floating panel (fixed, right side, elevated shadow) that
-              hides with display:none when closed. One LiTTPanel instance
-              at the same tree position, so chat content, SSE streams,
-              scroll position, and composer drafts survive the toggle.
-              Below 1024px, LiTT is NOT rendered here at all — it is
-              accessed via the mobile trigger + overlay sheet below
-              (Phase C2.1). */}
+              (Slice B column mode). Expanded → the same in-flow column,
+              widened — Slice B's floating `overlay` panel was retired
+              by Larry's no-detached-pop-out ruling (2026-11-10). One
+              LiTTPanel instance at the same tree position, so chat
+              content, SSE streams, scroll position, and composer
+              drafts survive the toggle. Below 1024px, LiTT is NOT
+              rendered here at all — it is accessed via the mobile
+              trigger + overlay sheet below (Phase C2.1). */}
           {viewportTier !== null && !isMobileLitt && (
             <LiTTPanel
-              overlay={!littCollapsed}
+              // Integrated, never a detached pop-out (Larry's ruling,
+              // 2026-11-10): the non-shell branch used to expand into
+              // Slice B's floating fixed panel (overlay). It now stays
+              // an in-flow docked column when expanded, like the shell
+              // docks. Mobile keeps its own full-width sheet.
+              overlay={false}
               collapsed={littCollapsed}
               onCollapse={() => setLittCollapsed(true)}
               onExpand={() => setLittCollapsed(false)}

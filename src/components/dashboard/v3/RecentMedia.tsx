@@ -17,6 +17,7 @@ import { Music as MusicIcon, Play, Heart, Download, ListPlus, ExternalLink, Film
 import type { DashboardMediaItem, MediaCategory } from "./types";
 import { toggleFavorite } from "./types";
 import type { MediaDockActions } from "./useMediaDock";
+import { useTheme } from "@/context/ThemeContext";
 
 interface RecentMediaProps {
   items: DashboardMediaItem[];
@@ -39,6 +40,11 @@ const SOURCE_BADGE: Record<DashboardMediaItem["source"], { label: string; color:
 };
 
 export function RecentMedia({ items, loading, error, mediaActions }: RecentMediaProps) {
+  // Theme-token driven chrome (was hard-coded dark glass): follows the
+  // applied theme — light under the default LiTT Signature theme. The
+  // dark scrims overlaid ON media thumbnails stay: they sit on photos,
+  // not on the page surface.
+  const { resolvedColors } = useTheme();
   const [activeTab, setActiveTab] = useState<MediaCategory>("all");
   const [favorites, setFavorites] = useState<Set<string>>(() => {
     return new Set(items.filter((i) => i.favorite).map((i) => i.id));
@@ -81,16 +87,15 @@ export function RecentMedia({ items, loading, error, mediaActions }: RecentMedia
     <section
       className="flex flex-col gap-3 rounded-xl border p-5"
       style={{
-        background: "rgba(18,18,21,0.7)",
-        borderColor: "rgba(255,255,255,0.06)",
-        backdropFilter: "blur(12px)",
+        background: resolvedColors.boxBg,
+        borderColor: resolvedColors.borderColor,
       }}
     >
       <div
         className="flex items-center justify-between border-b pb-3"
-        style={{ borderColor: "rgba(255,255,255,0.06)" }}
+        style={{ borderColor: resolvedColors.borderColor }}
       >
-        <h3 className="text-sm font-bold uppercase tracking-[.18em] text-zinc-300">
+        <h3 className="text-sm font-bold uppercase tracking-[.18em]" style={{ color: resolvedColors.textColor }}>
           Recent Media
         </h3>
         <div className="flex gap-3 text-xs font-medium md:gap-4">
@@ -100,14 +105,14 @@ export function RecentMedia({ items, loading, error, mediaActions }: RecentMedia
               onClick={() => setActiveTab(tab.id)}
               className="px-1 py-2 transition-colors"
               style={{
-                color: activeTab === tab.id ? "#a8ff2f" : "#71717a",
-                borderBottom: activeTab === tab.id ? "1px solid #a8ff2f" : "1px solid transparent",
+                color: activeTab === tab.id ? resolvedColors.accentColor : resolvedColors.textMuted,
+                borderBottom: activeTab === tab.id ? `1px solid ${resolvedColors.accentColor}` : "1px solid transparent",
               }}
               onMouseEnter={(e) => {
-                if (activeTab !== tab.id) e.currentTarget.style.color = "#fafafa";
+                if (activeTab !== tab.id) e.currentTarget.style.color = resolvedColors.textColor;
               }}
               onMouseLeave={(e) => {
-                if (activeTab !== tab.id) e.currentTarget.style.color = "#71717a";
+                if (activeTab !== tab.id) e.currentTarget.style.color = resolvedColors.textMuted;
               }}
             >
               {tab.label}
@@ -122,19 +127,19 @@ export function RecentMedia({ items, loading, error, mediaActions }: RecentMedia
             <div
               key={i}
               className="aspect-square animate-pulse rounded"
-              style={{ background: "rgba(255,255,255,0.04)" }}
+              style={{ background: `${resolvedColors.textColor}0d` }}
             />
           ))}
         </div>
       ) : error ? (
         <div className="py-6 text-center">
-          <p className="text-sm" style={{ color: "#71717a" }}>
+          <p className="text-sm" style={{ color: resolvedColors.textMuted }}>
             Your generated and uploaded media will appear here.
           </p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="py-6 text-center">
-          <p className="text-sm" style={{ color: "#71717a" }}>
+          <p className="text-sm" style={{ color: resolvedColors.textMuted }}>
             {activeTab === "all"
               ? "Your generated and uploaded media will appear here."
               : `No ${activeTab} media yet.`}
@@ -173,11 +178,12 @@ function MediaTile({
 }) {
   const [hover, setHover] = useState(false);
   const source = SOURCE_BADGE[item.source];
+  const { resolvedColors } = useTheme();
 
   return (
     <div
       className="group relative aspect-square cursor-pointer overflow-hidden rounded border"
-      style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(30,30,34,0.6)" }}
+      style={{ borderColor: resolvedColors.borderColor, background: `${resolvedColors.textColor}0d` }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
@@ -194,15 +200,15 @@ function MediaTile({
         <div
           className="flex h-full w-full flex-col items-center justify-center gap-1"
           style={{
-            background: "linear-gradient(to bottom right, rgba(18,18,21,0.8), rgba(10,10,10,0.9))",
+            background: `linear-gradient(to bottom right, ${resolvedColors.boxBg}, ${resolvedColors.bgColor})`,
           }}
         >
           {item.type === "music" ? (
-            <MusicIcon size={24} style={{ color: hover ? "#a8ff2f" : "#71717a" }} />
+            <MusicIcon size={24} style={{ color: hover ? resolvedColors.accentColor : resolvedColors.textMuted }} />
           ) : item.type === "video" ? (
-            <Film size={24} style={{ color: hover ? "#a8ff2f" : "#71717a" }} />
+            <Film size={24} style={{ color: hover ? resolvedColors.accentColor : resolvedColors.textMuted }} />
           ) : (
-            <ImageIcon size={24} style={{ color: hover ? "#a8ff2f" : "#71717a" }} />
+            <ImageIcon size={24} style={{ color: hover ? resolvedColors.accentColor : resolvedColors.textMuted }} />
           )}
         </div>
       )}
