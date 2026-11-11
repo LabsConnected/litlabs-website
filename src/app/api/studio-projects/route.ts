@@ -4,6 +4,7 @@ import { getInstallationOctokit } from "@/lib/github-app";
 import {
   createBlankProject,
   createGithubProject,
+  findReusableEmptyBlankProject,
   listProjects,
   ProjectConflictError,
   PROJECT_TEMPLATES,
@@ -83,6 +84,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Entry flows that always ask for the same default project (the
+  // Studio Website chip's "New Website") opt in to empty-project
+  // reuse: when the user already has a provably untouched blank from
+  // a previous entry, return it instead of minting a duplicate.
+  // Explicit creates never set this flag and always create.
+  const reuseUntouchedBlank = body.reuseUntouchedBlank === true;
+
   try {
     // "managed" is the domain name for LiTT-owned source; the stored
     // source_type remains "blank" — the domain layer unifies them.
@@ -95,17 +103,27 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const project = await createBlankProject({
-        userId,
-        name,
-        templateId,
-        accessMode: body.accessMode === "shared" ? "shared" : "private",
-        // Same-key repeats (retry of this submission — double click,
-        // network retry, sequential concurrent POSTs) return the row
-        // they already made; enforced by a unique index on
-        // (user_id, idempotency_key), never by name or slug.
-        ...(idempotencyKey ? { idempotencyKey } : {}),
-      });
+      // Reuse is checked first, but it can only ever return a
+      // provably untouched blank; a keyed submission whose project
+      // has been touched falls through to createBlankProject, whose
+      // idempotency lookup still returns that submission's own row.
+      const reusable = reuseUntouchedBlank
+        ? await findReusableEmptyBlankProject(userId, { name, templateId })
+        : null;
+
+      const project =
+        reusable ??
+        (await createBlankProject({
+          userId,
+          name,
+          templateId,
+          accessMode: body.accessMode === "shared" ? "shared" : "private",
+          // Same-key repeats (retry of this submission — double click,
+          // network retry, sequential concurrent POSTs) return the row
+          // they already made; enforced by a unique index on
+          // (user_id, idempotency_key), never by name or slug.
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        }));
 
       // Provision durable source at create time — a managed project must
       // not wait for Preview auto-start to get its workspace, Git repo
@@ -131,7 +149,13 @@ export async function POST(request: NextRequest) {
         ),
       );
       const refreshed = await getProject(project.id, userId);
-      return NextResponse.json({ project: refreshed ?? project }, { status: 201 });
+      return NextResponse.json(
+        {
+          project: refreshed ?? project,
+          ...(reusable ? { reused: true } : {}),
+        },
+        { status: reusable ? 200 : 201 },
+      );
     }
 
     if (sourceType === "github") {

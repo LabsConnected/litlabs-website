@@ -23,6 +23,7 @@ vi.mock("@/lib/projects/project-repository", async (importActual) => {
     ...actual,
     createBlankProject: vi.fn(),
     createGithubProject: vi.fn(),
+    findReusableEmptyBlankProject: vi.fn(),
     listProjects: vi.fn(),
     getProject: vi.fn(),
   };
@@ -61,6 +62,7 @@ import { auth } from "@/lib/auth";
 import {
   createBlankProject,
   createGithubProject,
+  findReusableEmptyBlankProject,
   getProject,
   listProjects,
   ProjectConflictError,
@@ -70,6 +72,7 @@ import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 const mockAuth = vi.mocked(auth);
 const mockCreateBlank = vi.mocked(createBlankProject);
 const mockCreateGithub = vi.mocked(createGithubProject);
+const mockFindReusable = vi.mocked(findReusableEmptyBlankProject);
 const mockGetProject = vi.mocked(getProject);
 const mockListProjects = vi.mocked(listProjects);
 const mockProvision = vi.mocked(provisionWorkspaceForProject);
@@ -99,6 +102,7 @@ beforeEach(() => {
   mockAuth.mockResolvedValue({ userId: USER, clerkId: "clerk_1" });
   mockListProjects.mockResolvedValue({ projects: [], legacyOnly: [] });
   mockCreateBlank.mockResolvedValue({ id: "p1", name: "My Site" } as never);
+  mockFindReusable.mockResolvedValue(null);
   mockCreateGithub.mockResolvedValue({ id: "p2", name: "acme/site" } as never);
   mockGetProject.mockResolvedValue({ id: "p1", name: "My Site", workspaceStatus: "ready" } as never);
   mockProvision.mockResolvedValue(undefined as never);
@@ -245,6 +249,48 @@ describe("blank creation", () => {
       }),
     );
     expect(tooLong.status).toBe(400);
+  });
+});
+
+describe("website-entry empty-project reuse", () => {
+  const WEBSITE_BODY = {
+    sourceType: "blank",
+    name: "New Website",
+    templateId: "blank-static",
+    reuseUntouchedBlank: true,
+  };
+
+  it("returns the untouched blank from a previous entry instead of minting another", async () => {
+    mockFindReusable.mockResolvedValue({ id: "p-reused", name: "New Website" } as never);
+    mockGetProject.mockResolvedValue({ id: "p-reused", name: "New Website", workspaceStatus: "ready" } as never);
+    const res = await POST(req("POST", WEBSITE_BODY));
+    expect(res.status).toBe(200);
+    const payload = await res.json();
+    expect(payload.project.id).toBe("p-reused");
+    expect(payload.reused).toBe(true);
+    expect(mockFindReusable).toHaveBeenCalledWith(USER, {
+      name: "New Website",
+      templateId: "blank-static",
+    });
+    expect(mockCreateBlank).not.toHaveBeenCalled();
+  });
+
+  it("creates fresh when no untouched blank exists", async () => {
+    const res = await POST(req("POST", WEBSITE_BODY));
+    expect(res.status).toBe(201);
+    expect(mockFindReusable).toHaveBeenCalled();
+    expect(mockCreateBlank).toHaveBeenCalled();
+    expect((await res.json()).reused).toBeUndefined();
+  });
+
+  it("never consults reuse without the opt-in flag — explicit creates always create", async () => {
+    mockFindReusable.mockResolvedValue({ id: "p-reused", name: "New Website" } as never);
+    const res = await POST(
+      req("POST", { sourceType: "blank", name: "New Website", templateId: "blank-static" }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockFindReusable).not.toHaveBeenCalled();
+    expect(mockCreateBlank).toHaveBeenCalled();
   });
 });
 

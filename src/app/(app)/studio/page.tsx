@@ -252,6 +252,10 @@ function StudioHub() {
   // a website build. So: creator=website with no ?project= creates
   // the blank project up front (the same POST the first-run flow
   // uses) and pins it in the URL. An explicit ?project= always wins.
+  // The POST opts in to empty-project reuse, so a repeat entry pins
+  // the previous entry's still-untouched blank instead of minting
+  // another duplicate (#892 intent preserved: never the selected
+  // repo project, never a project the user has actually worked in).
   const websiteIntent =
     searchParams.get("creator") === "website" && !searchParams.get("project");
   const websiteStartRef = useRef(false);
@@ -275,6 +279,10 @@ function StudioHub() {
           sourceType: "blank",
           name: "New Website",
           templateId: "blank-static",
+          // Repeat entries focus the still-untouched blank from the
+          // last entry instead of piling up identical empty projects;
+          // the server only reuses a provably untouched one.
+          reuseUntouchedBlank: true,
         }),
       });
       if (!res.ok) {
