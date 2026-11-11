@@ -4,9 +4,21 @@ import { NextRequest } from "next/server";
 vi.mock("@/lib/auth", () => ({
   auth: vi.fn(() => Promise.resolve({ userId: "user-123" })),
 }));
-vi.mock("@/lib/projects/project-repository", () => ({
-  verifyProjectWorkspace: vi.fn(() => Promise.resolve({ workspaceId: "ws-123" })),
-}));
+vi.mock("@/lib/projects/project-repository", () => {
+  class ProjectVerificationError extends Error {
+    code: string;
+    constructor(message: string, code: string) {
+      super(message);
+      this.code = code;
+      this.name = "ProjectVerificationError";
+    }
+  }
+  return {
+    verifyProjectWorkspace: vi.fn(() => Promise.resolve({ workspaceId: "ws-123" })),
+    getProject: vi.fn(() => Promise.resolve(null)),
+    ProjectVerificationError,
+  };
+});
 vi.mock("@/lib/terminal-auth", () => ({
   createTerminalToken: vi.fn(() => ({ token: "tok", expiresAt: 9999999999 })),
 }));

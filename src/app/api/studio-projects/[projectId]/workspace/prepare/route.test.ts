@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "@/app/api/studio-projects/[projectId]/workspace/prepare/route";
 
 /**
- * Route honesty (console-errors diagnosis §1.1): the terminal-server's
- * fail-closed HOST_EXECUTION_DISABLED refusal reaches this route with
- * its code attached — the adapter must map it to the standard 503 +
- * coded body instead of an unmapped 500 carrying the raw message
- * (which embeds the JSON code string callers then render verbatim).
+ * Host-exec seam: when workspace provisioning fails because the terminal
+ * server refuses host execution (fail-closed 503 HOST_EXECUTION_DISABLED),
+ * this route must answer with the mapped 503 + code body — not a bare 500
+ * that drops the code and leaves every caller showing raw message text.
+ * Genuinely unexpected errors keep the existing 500 shape.
  */
 
 vi.mock("@/lib/auth", () => ({
@@ -29,8 +29,7 @@ const authMock = vi.mocked(auth);
 const getProjectMock = vi.mocked(getProject);
 const provisionMock = vi.mocked(provisionWorkspaceForProject);
 
-const HOST_EXEC_STORED =
-  'Workspace prepare failed (503): {"error":"Host execution is disabled in production (workspace.prepare(git,install)); a verified sandbox is required","code":"HOST_EXECUTION_DISABLED"}';
+const project = { id: "proj-1", userId: "user-1" };
 
 function postPrepare() {
   return POST(
@@ -39,39 +38,58 @@ function postPrepare() {
   );
 }
 
-describe("POST /workspace/prepare — host-execution mapping", () => {
+describe("POST /api/studio-projects/[projectId]/workspace/prepare — host-exec mapping", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authMock.mockResolvedValue({ userId: "user-1" } as never);
-    getProjectMock.mockResolvedValue({ id: "proj-1", userId: "user-1" } as never);
+    getProjectMock.mockResolvedValue({ ...project } as never);
   });
 
-  it("maps a carried HOST_EXECUTION_DISABLED code to 503 + coded body", async () => {
-    const err = new Error(HOST_EXEC_STORED) as Error & { code?: string };
-    err.code = "HOST_EXECUTION_DISABLED";
-    provisionMock.mockRejectedValue(err);
+  it("maps a host-execution refusal (code attached) to 503 with the code in the body", async () => {
+    const refusal = new Error(
+      'Workspace prepare failed (503): {"error":"Host execution is disabled in production (workspace.prepare(git,install)); a verified sandbox is required","code":"HOST_EXECUTION_DISABLED"}',
+    ) as Error & { code?: string };
+    refusal.code = "HOST_EXECUTION_DISABLED";
+    provisionMock.mockRejectedValue(refusal);
+
     const res = await postPrepare();
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(body.code).toBe("HOST_EXECUTION_DISABLED");
-    // The human sentence, NOT the raw stored message with embedded JSON.
-    expect(body.error).not.toContain("HOST_EXECUTION_DISABLED");
-    expect(body.error).not.toContain("{");
+    // The body carries the guard's human sentence, never the raw throw text.
+    expect(body.error).not.toContain("Workspace prepare failed (503)");
+    expect(body.error).not.toContain('"code"');
   });
 
-  it("maps an embedded-code-only refusal to 503 as well", async () => {
-    provisionMock.mockRejectedValue(new Error(HOST_EXEC_STORED));
+  it("recovers the code from the message text when no .code is attached", async () => {
+    provisionMock.mockRejectedValue(
+      new Error('Workspace prepare failed (503): {"error":"Host execution is disabled in production","code":"HOST_EXECUTION_DISABLED"}'),
+    );
+
     const res = await postPrepare();
     expect(res.status).toBe(503);
     expect((await res.json()).code).toBe("HOST_EXECUTION_DISABLED");
   });
 
-  it("keeps genuinely unexpected failures at 500 with their message", async () => {
-    provisionMock.mockRejectedValue(new Error("terminal down"));
+  it("keeps genuinely unexpected errors at 500 with the existing shape", async () => {
+    provisionMock.mockRejectedValue(new Error("database exploded"));
+
     const res = await postPrepare();
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toBe("terminal down");
-    expect(body.code).toBeUndefined();
+    expect(body).toEqual({ error: "database exploded" });
+  });
+
+  it("returns the provisioned workspace on success", async () => {
+    provisionMock.mockResolvedValue("ws-1");
+    getProjectMock
+      .mockResolvedValueOnce({ ...project } as never)
+      .mockResolvedValueOnce({ ...project, workspaceRoot: "/ws/root", workspaceBranch: "main" } as never);
+
+    const res = await postPrepare();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.workspaceId).toBe("ws-1");
+    expect(body.workspaceStatus).toBe("ready");
   });
 });

@@ -5,18 +5,21 @@ vi.mock("@/lib/auth", () => ({
   auth: vi.fn(() => Promise.resolve({ userId: "user-123" })),
 }));
 
-vi.mock("@/lib/projects/project-repository", () => ({
-  verifyProjectWorkspace: vi.fn(() => Promise.resolve({ workspaceId: "ws-123" })),
-  // Mirrors the real class so the route's instanceof check works.
-  ProjectVerificationError: class ProjectVerificationError extends Error {
+vi.mock("@/lib/projects/project-repository", () => {
+  class ProjectVerificationError extends Error {
     code: string;
     constructor(message: string, code: string) {
       super(message);
       this.code = code;
       this.name = "ProjectVerificationError";
     }
-  },
-}));
+  }
+  return {
+    verifyProjectWorkspace: vi.fn(() => Promise.resolve({ workspaceId: "ws-123" })),
+    getProject: vi.fn(() => Promise.resolve(null)),
+    ProjectVerificationError,
+  };
+});
 
 vi.mock("@/lib/terminal-auth", () => ({
   createTerminalToken: vi.fn(() => ({ token: "tok", expiresAt: 9999999999 })),
@@ -115,50 +118,71 @@ describe("GET /api/studio-projects/[projectId]/workspace-state", () => {
     );
     expect(res.status).toBe(401);
   });
+});
 
-  // Route honesty (console-errors diagnosis): "no workspace yet" is an
-  // expected state, not a server fault — it must not return 500.
-  it("maps WORKSPACE_NOT_PROVISIONED to a coded 200 with the fallback body", async () => {
+describe("GET workspace-state — expected workspace refusals are not 500s (seam close)", () => {
+  const HOST_EXEC_STORED =
+    'Workspace prepare failed (503): {"error":"Host execution is disabled in production (workspace.prepare(git,install)); a verified sandbox is required","code":"HOST_EXECUTION_DISABLED"}';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  async function callRoute() {
+    const { GET } = await import("./route");
+    return GET(
+      new NextRequest("http://localhost:3000/api/studio-projects/p1/workspace-state"),
+      { params: Promise.resolve({ projectId: "p1" }) },
+    );
+  }
+
+  it("returns 200 + fallback + codes when the workspace was never provisioned (host-exec refusal stored)", async () => {
     const repo = await import("@/lib/projects/project-repository");
     vi.mocked(repo.verifyProjectWorkspace).mockRejectedValueOnce(
       new repo.ProjectVerificationError("Workspace not provisioned", "WORKSPACE_NOT_PROVISIONED"),
     );
-    const { GET } = await import("./route");
-    const res = await GET(
-      new NextRequest("http://localhost:3000/api/studio-projects/p1/workspace-state"),
-      { params: Promise.resolve({ projectId: "p1" }) },
-    );
+    vi.mocked(repo.getProject).mockResolvedValueOnce({
+      id: "p1", userId: "user-123", workspaceStatus: "failed", workspaceError: HOST_EXEC_STORED,
+    } as never);
+
+    const res = await callRoute();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      code: "WORKSPACE_NOT_PROVISIONED",
-      scaffolded: false,
-      touched: false,
-      starterContent: false,
-    });
+    const body = await res.json();
+    expect(body.scaffolded).toBe(false);
+    expect(body.touched).toBe(false);
+    expect(body.starterContent).toBe(false);
+    expect(body.code).toBe("WORKSPACE_NOT_PROVISIONED");
+    // The refusal code the preview pane consumes, recovered from the stored
+    // error with the same extraction the project-runtime route uses.
+    expect(body.workspaceErrorCode).toBe("HOST_EXECUTION_DISABLED");
   });
 
-  it("maps WORKSPACE_NOT_READY to a coded 200 with the fallback body", async () => {
+  it("returns 200 + code with a null workspaceErrorCode for a non-host-exec not-ready workspace", async () => {
     const repo = await import("@/lib/projects/project-repository");
     vi.mocked(repo.verifyProjectWorkspace).mockRejectedValueOnce(
-      new repo.ProjectVerificationError("Workspace not ready", "WORKSPACE_NOT_READY"),
+      new repo.ProjectVerificationError("Workspace not ready (current: provisioning)", "WORKSPACE_NOT_READY"),
     );
-    const { GET } = await import("./route");
-    const res = await GET(
-      new NextRequest("http://localhost:3000/api/studio-projects/p1/workspace-state"),
-      { params: Promise.resolve({ projectId: "p1" }) },
-    );
+    vi.mocked(repo.getProject).mockResolvedValueOnce({
+      id: "p1", userId: "user-123", workspaceStatus: "provisioning", workspaceError: null,
+    } as never);
+
+    const res = await callRoute();
     expect(res.status).toBe(200);
-    expect((await res.json()).code).toBe("WORKSPACE_NOT_READY");
+    const body = await res.json();
+    expect(body.code).toBe("WORKSPACE_NOT_READY");
+    expect(body.workspaceErrorCode).toBeNull();
   });
 
-  it("keeps unexpected verification failures at 500", async () => {
+  it("keeps genuinely unexpected verification errors at 500 with the old shape", async () => {
     const repo = await import("@/lib/projects/project-repository");
-    vi.mocked(repo.verifyProjectWorkspace).mockRejectedValueOnce(new Error("db down"));
-    const { GET } = await import("./route");
-    const res = await GET(
-      new NextRequest("http://localhost:3000/api/studio-projects/p1/workspace-state"),
-      { params: Promise.resolve({ projectId: "p1" }) },
-    );
+    vi.mocked(repo.verifyProjectWorkspace).mockRejectedValueOnce(new Error("supabase melted"));
+
+    const res = await callRoute();
     expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("supabase melted");
+    expect(body.code).toBeUndefined();
+    expect(body.scaffolded).toBe(false);
   });
 });
