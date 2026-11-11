@@ -5,6 +5,7 @@ import {
   formatBits,
   getPlanCreditAllowance,
 } from "@/config/plan-entitlements";
+import "@/app/public-pages-tlc.css";
 
 /**
  * PublicShowcaseGallery — the /showcase index for signed-out visitors.
@@ -16,20 +17,21 @@ import {
  */
 export default function PublicShowcaseGallery() {
   return (
+    <div className="litt-public-light bg-white text-[#0e1510] selection:bg-[#8fd14f]/60">
     <div className="mx-auto w-full max-w-5xl px-4 pb-20 pt-10 sm:px-6">
       <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-accent">
         Showcase
       </p>
-      <h1 className="mb-4 text-4xl font-black tracking-tight text-white md:text-6xl">
+      <h1 className="mb-4 text-4xl font-black tracking-tight text-[#0e1510] md:text-6xl">
         See what LiTT can build.
       </h1>
-      <p className="mb-3 max-w-2xl text-base leading-relaxed text-white/55 md:text-lg">
+      <p className="mb-3 max-w-2xl text-base leading-relaxed text-[#0e1510]/60 md:text-lg">
         Walk through full product demonstrations — from the first prompt to
         the finished result. Each demo shows the mission, the plan, and every
         build step along the way.
       </p>
-      <p className="mb-10 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/50">
-        <FlaskConical size={13} className="text-[#65f4ff]" />
+      <p className="mb-10 inline-flex items-center gap-2 rounded-full border border-[#cfdec4] bg-[#f2f7ea] px-3 py-1.5 text-xs font-bold text-[#0e1510]/55">
+        <FlaskConical size={13} className="text-[#0e7490]" />
         Illustrative simulations — not live customer work
       </p>
 
@@ -40,7 +42,7 @@ export default function PublicShowcaseGallery() {
             <Link
               key={project.slug}
               href={`/showcase/${project.slug}`}
-              className="group rounded-2xl border border-white/10 bg-white/[0.03] p-6 transition-all hover:-translate-y-1 hover:border-white/20"
+              className="group rounded-2xl border border-[#cfdec4] bg-white p-6 shadow-[0_20px_54px_rgba(14,60,26,0.08)] transition-all hover:-translate-y-1 hover:border-[#8fd14f]"
             >
               <div
                 className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl"
@@ -48,17 +50,17 @@ export default function PublicShowcaseGallery() {
               >
                 <Icon size={20} />
               </div>
-              <h2 className="mb-2 text-lg font-black text-white">
+              <h2 className="mb-2 text-lg font-black text-[#0e1510]">
                 {project.title}
               </h2>
-              <p className="mb-4 text-sm leading-relaxed text-white/50">
+              <p className="mb-4 text-sm leading-relaxed text-[#0e1510]/55">
                 {project.outcome}
               </p>
               <div className="mb-5 flex flex-wrap gap-1.5">
                 {project.tools.slice(0, 3).map((tool) => (
                   <span
                     key={tool}
-                    className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold text-white/45"
+                    className="rounded-full border border-[#cfdec4] bg-[#f2f7ea] px-2 py-0.5 text-[10px] font-bold text-[#0e1510]/50"
                   >
                     {tool}
                   </span>
@@ -79,11 +81,11 @@ export default function PublicShowcaseGallery() {
         })}
       </div>
 
-      <div className="mt-12 rounded-2xl border border-white/10 bg-gradient-to-br from-accent/10 to-[#65f4ff]/10 p-8 text-center">
-        <h2 className="mb-2 text-2xl font-black text-white">
+      <div className="mt-12 rounded-2xl border border-[#cfdec4] bg-gradient-to-br from-accent/10 to-[#8fd14f]/15 p-8 text-center">
+        <h2 className="mb-2 text-2xl font-black text-[#0e1510]">
           Ready to run your own mission?
         </h2>
-        <p className="mx-auto mb-6 max-w-xl text-sm leading-relaxed text-white/55">
+        <p className="mx-auto mb-6 max-w-xl text-sm leading-relaxed text-[#0e1510]/60">
           Start free with {formatBits(getPlanCreditAllowance("starter"))} AI credits. Give LiTT a brief and watch it plan,
           build, and verify — the same loop you just walked through.
         </p>
@@ -94,6 +96,7 @@ export default function PublicShowcaseGallery() {
           Start building free <ArrowRight size={15} />
         </Link>
       </div>
+    </div>
     </div>
   );
 }

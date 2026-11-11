@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Check, ArrowRight, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { MarketingFrame } from "@/components/ProductPageFrame";
+import "@/app/public-pages-tlc.css";
 
 type OfferData = {
   id: string;
@@ -59,7 +60,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#03050a] text-white">
+    <div className="litt-public-light min-h-screen bg-white text-[#0e1510] selection:bg-[#8fd14f]/60">
       {/* Hero */}
       <section className="relative overflow-hidden px-5 pt-32 pb-16 lg:px-10">
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-accent/5 to-transparent" />
@@ -70,7 +71,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
           <h1 className="text-4xl font-black tracking-tight sm:text-5xl lg:text-6xl">
             Get it <span className="text-accent">done</span> for you
           </h1>
-          <p className="mx-auto mt-5 max-w-2xl text-lg text-white/60">
+          <p className="mx-auto mt-5 max-w-2xl text-lg text-[#0e1510]/65">
             Don&apos;t want to DIY it? We&apos;ll build your site, set up your AI automation,
             or design your brand — then hand you the keys to LiTTree for ongoing work.
           </p>
@@ -78,7 +79,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
             <a href="#offers" className="rounded-xl bg-accent px-6 py-3 text-sm font-black text-on-accent shadow-accent-glow transition hover:scale-[1.02] hover:bg-accent-strong">
               See offers
             </a>
-            <a href="#inquiry" className="rounded-xl border border-white/20 px-6 py-3 text-sm font-bold text-white transition hover:bg-white/5">
+            <a href="#inquiry" className="rounded-xl border border-[#0c5a26]/30 px-6 py-3 text-sm font-bold text-[#0c5a26] transition hover:bg-[#f2f7ea]">
               Talk to us first
             </a>
           </div>
@@ -89,7 +90,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
       <section id="offers" className="px-5 py-16 lg:px-10">
         <MarketingFrame>
           <h2 className="mb-2 text-2xl font-black">Productized services</h2>
-          <p className="mb-10 text-sm text-white/50">
+          <p className="mb-10 text-sm text-[#0e1510]/55">
             Clear scope. Clear price. No surprises. Pick the one that fits.
           </p>
 
@@ -99,8 +100,8 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                 key={offer.id}
                 className="relative flex flex-col rounded-2xl border-2 p-6 transition hover:scale-[1.01]"
                 style={{
-                  borderColor: offer.featured ? offer.accent : "rgba(255,255,255,0.1)",
-                  backgroundColor: offer.featured ? `${offer.accent}08` : "rgba(255,255,255,0.02)",
+                  borderColor: offer.featured ? offer.accent : "#cfdec4",
+                  backgroundColor: offer.featured ? `${offer.accent}08` : "#ffffff",
                 }}
               >
                 {offer.featured && (
@@ -114,18 +115,18 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
 
                 <div className="mb-3 text-3xl">{offer.icon}</div>
                 <h3 className="text-lg font-black">{offer.name}</h3>
-                <p className="mt-1 text-xs text-white/50">{offer.tagline}</p>
+                <p className="mt-1 text-xs text-[#0e1510]/55">{offer.tagline}</p>
 
                 <div className="mt-4 text-3xl font-black" style={{ color: offer.accent }}>
                   {offer.price}
                 </div>
-                <div className="text-[10px] text-white/40">one-time · {offer.turnaround}</div>
+                <div className="text-[10px] text-[#0e1510]/45">one-time · {offer.turnaround}</div>
 
-                <p className="mt-4 text-xs text-white/60">{offer.description}</p>
+                <p className="mt-4 text-xs text-[#0e1510]/65">{offer.description}</p>
 
                 <div className="mt-4 flex-1 space-y-1.5">
                   {offer.deliverables.map((d) => (
-                    <div key={d} className="flex items-start gap-2 text-[11px] text-white/70">
+                    <div key={d} className="flex items-start gap-2 text-[11px] text-[#0e1510]/75">
                       <Check size={12} className="mt-0.5 shrink-0" style={{ color: offer.accent }} />
                       <span>{d}</span>
                     </div>
@@ -133,12 +134,12 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                 </div>
 
                 {offer.exclusions.length > 0 && (
-                  <div className="mt-4 border-t border-white/10 pt-3">
-                    <div className="text-[9px] font-bold uppercase tracking-wider text-white/30">
+                  <div className="mt-4 border-t border-[#cfdec4] pt-3">
+                    <div className="text-[9px] font-bold uppercase tracking-wider text-[#0e1510]/35">
                       Not included
                     </div>
                     {offer.exclusions.map((x) => (
-                      <div key={x} className="mt-1 text-[10px] text-white/40">
+                      <div key={x} className="mt-1 text-[10px] text-[#0e1510]/45">
                         · {x}
                       </div>
                     ))}
@@ -156,7 +157,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                     Get started <ArrowRight size={14} />
                   </a>
                 ) : (
-                  <div className="mt-6 flex items-center justify-center rounded-xl border border-white/10 py-3 text-sm font-bold text-white/40">
+                  <div className="mt-6 flex items-center justify-center rounded-xl border border-[#cfdec4] py-3 text-sm font-bold text-[#0e1510]/45">
                     Coming soon
                   </div>
                 )}
@@ -165,7 +166,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
           </div>
 
           {/* How it works */}
-          <div className="mt-16 rounded-2xl border border-white/10 bg-white/[0.02] p-8">
+          <div className="mt-16 rounded-2xl border border-[#cfdec4] bg-[#f2f7ea] p-8">
             <h3 className="mb-6 text-lg font-black">How it works</h3>
             <div className="grid gap-6 md:grid-cols-4">
               {[
@@ -179,7 +180,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                     {s.step}
                   </div>
                   <div className="text-sm font-bold">{s.title}</div>
-                  <div className="mt-1 text-xs text-white/50">{s.desc}</div>
+                  <div className="mt-1 text-xs text-[#0e1510]/55">{s.desc}</div>
                 </div>
               ))}
             </div>
@@ -190,9 +191,9 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
       {/* Lead Capture / Inquiry Form */}
       <section id="inquiry" className="px-5 py-16 lg:px-10">
         <MarketingFrame>
-          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-8">
+          <div className="rounded-2xl border border-[#cfdec4] bg-[#f2f7ea] p-8">
             <h2 className="text-2xl font-black">Not sure which fits?</h2>
-            <p className="mt-2 text-sm text-white/50">
+            <p className="mt-2 text-sm text-[#0e1510]/55">
               Tell us what you need and we&apos;ll point you to the right service — or build a custom quote.
             </p>
 
@@ -200,7 +201,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
               <div className="mt-6 rounded-xl border border-accent/30 bg-accent/5 p-6 text-center">
                 <div className="text-2xl">✅</div>
                 <div className="mt-2 font-bold text-accent">Thanks — we&apos;ll be in touch within 24 hours.</div>
-                <Link href="/" className="mt-4 inline-block text-xs text-white/50 hover:text-white">
+                <Link href="/" className="mt-4 inline-block text-xs text-[#0e1510]/55 hover:text-[#0c5a26]">
                   Back to home
                 </Link>
               </div>
@@ -213,7 +214,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                     placeholder="Your name"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
+                    className="rounded-xl border border-[#cfdec4] bg-white px-4 py-3 text-sm text-[#0e1510] placeholder:text-[#0e1510]/40 outline-none focus:border-accent/50"
                   />
                   <input
                     type="email"
@@ -221,7 +222,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                     placeholder="Email address"
                     value={form.email}
                     onChange={(e) => setForm({ ...form, email: e.target.value })}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
+                    className="rounded-xl border border-[#cfdec4] bg-white px-4 py-3 text-sm text-[#0e1510] placeholder:text-[#0e1510]/40 outline-none focus:border-accent/50"
                   />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -230,20 +231,20 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                     placeholder="Phone (optional)"
                     value={form.phone}
                     onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
+                    className="rounded-xl border border-[#cfdec4] bg-white px-4 py-3 text-sm text-[#0e1510] placeholder:text-[#0e1510]/40 outline-none focus:border-accent/50"
                   />
                   <input
                     type="text"
                     placeholder="Company (optional)"
                     value={form.company}
                     onChange={(e) => setForm({ ...form, company: e.target.value })}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
+                    className="rounded-xl border border-[#cfdec4] bg-white px-4 py-3 text-sm text-[#0e1510] placeholder:text-[#0e1510]/40 outline-none focus:border-accent/50"
                   />
                 </div>
                 <select
                   value={form.serviceId}
                   onChange={(e) => setForm({ ...form, serviceId: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
+                  className="w-full rounded-xl border border-[#cfdec4] bg-white px-4 py-3 text-sm text-[#0e1510] placeholder:text-[#0e1510]/40 outline-none focus:border-accent/50"
                 >
                   <option value="">Which service interests you? (optional)</option>
                   <option value="launch_sprint">LiTTree Launch Sprint ($449)</option>
@@ -255,7 +256,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                   rows={4}
                   value={form.message}
                   onChange={(e) => setForm({ ...form, message: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
+                  className="w-full rounded-xl border border-[#cfdec4] bg-white px-4 py-3 text-sm text-[#0e1510] placeholder:text-[#0e1510]/40 outline-none focus:border-accent/50"
                 />
                 <button
                   type="submit"
