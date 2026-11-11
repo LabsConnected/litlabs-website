@@ -305,6 +305,34 @@ export function deriveApprovalRequestDetails(
   return details;
 }
 
+/**
+ * Approval details for a specific tool. Wraps the generic derivation
+ * with the one subject the generic pass cannot know: project.deploy's
+ * publish TARGET. A deploy gate must say WHERE the site will be
+ * published before the user approves it (Larry, 2026-11-11: the staging
+ * deploy card showed a bare tool name) — "Netlify" when the frozen
+ * inputs carry target "netlify", "LiTT Hosting" otherwise.
+ *
+ * Touch point for PR #924's structural subjects: when that lands, its
+ * deploy subject should branch on inputs.target exactly as here.
+ */
+export function deriveApprovalDetailsForTool(
+  toolId: string,
+  inputs?: Record<string, unknown>,
+  excludeValues: string[] = [],
+): ApprovalRequestDetails {
+  const details = deriveApprovalRequestDetails(inputs, excludeValues);
+  if (toolId === "project.deploy") {
+    details.subject = {
+      label: "publish to",
+      value: inputs?.target === "netlify" ? "Netlify" : "LiTT Hosting",
+    };
+    // The target is the subject now — don't repeat it as a param chip.
+    details.params = details.params.filter((p) => p.key !== "target");
+  }
+  return details;
+}
+
 /** Short scalar params (size, style, …) to show as chips; prompt handled separately. */
 function imageRequestParams(inputs?: Record<string, unknown>): Array<{ key: string; value: string }> {
   if (!inputs) return [];
@@ -353,7 +381,7 @@ export function ApprovalCard({
   // approval. image.generate keeps its dedicated block above.
   const requestDetails = isImageRequest
     ? null
-    : deriveApprovalRequestDetails(approval.inputs, affectedFiles.map((f) => f.path));
+    : deriveApprovalDetailsForTool(approval.toolId, approval.inputs, affectedFiles.map((f) => f.path));
   const hasRequestDetails = Boolean(
     requestDetails && (requestDetails.subject || requestDetails.destination || requestDetails.params.length > 0),
   );

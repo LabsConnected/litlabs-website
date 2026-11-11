@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
-import { findLatestDeploymentForProject } from "@/lib/deployments/deployment-store";
+import {
+  findLatestDeploymentForProject,
+  findLatestDeploymentForProjectTarget,
+} from "@/lib/deployments/deployment-store";
 import {
   getHostingBackend,
   HOSTING_DISPLAY_NAME,
   HOSTING_TARGET,
 } from "@/lib/deployments/litt-hosting";
+import { NETLIFY_TARGET } from "@/lib/deployments/deploy-targets";
+import { getNetlifyConnection } from "@/lib/netlify-connection";
 
 /**
  * GET /api/studio-projects/[projectId]/deployments
@@ -23,8 +28,10 @@ import {
  * server-side work still completes, clients that need the deployment
  * outcome should read it here rather than trusting only the resume body.
  *
- * Copy rule: the response names "LiTT Hosting" only. Infrastructure
- * provider names never appear here.
+ * Copy rule: the LiTT Hosting fields name "LiTT Hosting" only — its
+ * infrastructure providers never appear. The Netlify fields are the one
+ * deliberate exception: Netlify is a user-selected publish target (the
+ * user's own account), so it is named exactly as the user chose it.
  */
 export async function GET(
   _request: NextRequest,
@@ -43,9 +50,28 @@ export async function GET(
 
   const deployment = await findLatestDeploymentForProject(projectId, userId);
 
+  // Per-target latest records: a project can be live on LiTT Hosting and
+  // on Netlify independently, and the Deploy surface shows each target's
+  // own state. Plus the Netlify connection state (never the token) so the
+  // surface can offer a connect-first state instead of a doomed deploy.
+  const [littDeployment, netlifyDeployment, netlifyConnection] =
+    await Promise.all([
+      findLatestDeploymentForProjectTarget(projectId, userId, HOSTING_TARGET),
+      findLatestDeploymentForProjectTarget(projectId, userId, NETLIFY_TARGET),
+      getNetlifyConnection(userId).catch(() => null),
+    ]);
+
   const hostingCheck = getHostingBackend().isConfigured();
   return NextResponse.json({
     deployment,
+    latestByTarget: {
+      [HOSTING_TARGET]: littDeployment,
+      [NETLIFY_TARGET]: netlifyDeployment,
+    },
+    netlifyConnection: {
+      connected: !!netlifyConnection,
+      accountName: netlifyConnection?.accountName ?? null,
+    },
     // Canonical project state, so the Studio inspector can show preview
     // truth from the SAME derivation /projects uses (describeProjectState)
     // next to the deployment record. Without it the inspector could only

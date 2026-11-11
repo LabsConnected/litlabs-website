@@ -1083,10 +1083,19 @@ function CommandStudioContent() {
         handleOpenDockTab(tab);
       }
     };
-    const requestDeploy = () => {
+    const requestDeploy = (e: Event) => {
+      // The Deploy surface passes the user's chosen target; the prompt
+      // names it so the agent calls project.deploy with that target and
+      // the approval card can name it before anything publishes.
+      const target = (e as CustomEvent).detail?.target as string | undefined;
       window.dispatchEvent(
         new CustomEvent("studio:ask-litt", {
-          detail: { prompt: "Deploy this project to production" },
+          detail: {
+            prompt:
+              target === "netlify"
+                ? "Deploy this project to Netlify"
+                : "Deploy this project to production",
+          },
         }),
       );
     };
@@ -3076,8 +3085,10 @@ function CommandStudioContent() {
         return (
           <StudioDeploySurface
             projectId={projectId}
-            onDeployRequest={() => {
-              window.dispatchEvent(new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY));
+            onDeployRequest={(target) => {
+              window.dispatchEvent(
+                new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY, { detail: { target } }),
+              );
             }}
           />
         );

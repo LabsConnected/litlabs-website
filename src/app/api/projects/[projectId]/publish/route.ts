@@ -55,9 +55,15 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const { listLatestDeploymentsForUser } = await import(
     "@/lib/deployments/deployment-store"
   );
+  const { HOSTING_TARGET } = await import("@/lib/deployments/litt-hosting");
   try {
     const all = await listLatestDeploymentsForUser(owner.userId);
-    const latest = all.find((d) => d.projectId === projectId) ?? null;
+    // This route is the LiTT Hosting publish status — with per-target
+    // latest records, pin the lookup to the LiTT target so a newer
+    // Netlify deployment never masquerades as the LiTT publish state.
+    const latest =
+      all.find((d) => d.projectId === projectId && d.target === HOSTING_TARGET) ??
+      null;
     const deployment = latest
       ? {
           id: latest.id,

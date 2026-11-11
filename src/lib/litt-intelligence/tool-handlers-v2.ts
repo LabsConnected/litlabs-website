@@ -669,7 +669,11 @@ export const handleDeployVerify: ToolHandler = async (inputs) => {
 /**
  * project.deploy — publish the USER'S project to a public URL.
  *
- * Identity is taken from the transport, never from `inputs`. The transport
+ * Identity is taken from the transport, never from `inputs`. The one
+ * input is the publish target the user chose ("litt" default, or
+ * "netlify" for the user's own connected Netlify account) — credentials
+ * for either target are resolved server-side from the transport's owner.
+ * The transport
  * was built by createWorkspaceTransport(projectId, userId), which ran
  * verifyProjectWorkspace() (project exists, owned by this user, workspace
  * ready). So the model cannot name a different tenant, project, workspace,
@@ -680,9 +684,77 @@ export const handleDeployVerify: ToolHandler = async (inputs) => {
  * the verified live URL; on failure it says the deployment failed and never
  * reports a URL.
  */
-export const handleProjectDeploy: ToolHandler = async (_inputs, transport) => {
-  const { deployUserProject } = await import("@/lib/deployments/deploy-service");
+export const handleProjectDeploy: ToolHandler = async (inputs, transport) => {
   const { supabaseDeploymentStore } = await import("@/lib/deployments/deployment-store");
+  const { normalizeDeployTargetInput } = await import(
+    "@/lib/deployments/deploy-targets"
+  );
+
+  // The publish TARGET is the one thing the user chooses (Deploy surface
+  // or their chat request). It is not identity: whichever target runs,
+  // it publishes THIS transport's project with THIS user's own
+  // credential/hosting — the model cannot aim it anywhere else.
+  const targetChoice = normalizeDeployTargetInput(inputs?.target);
+
+  if (targetChoice === "netlify") {
+    const { deployProjectToNetlify } = await import(
+      "@/lib/deployments/netlify-deploy-service"
+    );
+    const { getNetlifyToken } = await import("@/lib/netlify-connection");
+    const { getProject } = await import("@/lib/projects/project-repository");
+
+    let projectName: string | null = null;
+    try {
+      const project = await getProject(transport.projectId, transport.userId);
+      projectName = project?.name ?? null;
+    } catch {
+      // Name is only used for the Netlify site slug — deploy proceeds.
+    }
+
+    const result = await deployProjectToNetlify(
+      {
+        userId: transport.userId,
+        projectId: transport.projectId,
+        transport,
+        projectName,
+      },
+      { store: supabaseDeploymentStore, getToken: getNetlifyToken },
+    );
+
+    if (!result.ok) {
+      return {
+        success: false,
+        deployment: {
+          deploymentId: result.deploymentId,
+          status: result.status,
+          publicUrl: null,
+          target: "netlify",
+        },
+        errorClass: result.errorClass,
+        error: result.message,
+        retryable: result.retryable,
+      };
+    }
+
+    return {
+      success: true,
+      deployment: {
+        deploymentId: result.deploymentId,
+        status: result.status,
+        publicUrl: result.publicUrl,
+        urlVerified: result.urlVerified,
+        target: result.target,
+        projectId: result.projectId,
+        workspaceId: result.workspaceId,
+        fileCount: result.fileCount,
+        totalBytes: result.totalBytes,
+        reused: result.reused,
+      },
+      liveUrl: result.publicUrl,
+    };
+  }
+
+  const { deployUserProject } = await import("@/lib/deployments/deploy-service");
 
   // The live URL is resolved from LiTT Hosting's actual infrastructure
   // inside deployUserProject — never from caller input.

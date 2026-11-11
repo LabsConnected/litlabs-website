@@ -25,7 +25,7 @@ import {
   type ExecutionPhase,
 } from "../stores/useExecutionStore";
 import { toolActivityDotColor } from "./ExecutionBlock";
-import { deriveApprovalRequestDetails } from "./ApprovalCard";
+import { deriveApprovalDetailsForTool } from "./ApprovalCard";
 import type {
   RunOutcome,
   ToolActivityRecord,
@@ -543,7 +543,7 @@ function ApprovalCard({
   phase?: "idle" | "submitting" | "executing" | "failed";
   error?: string | null;
 }) {
-  const details = deriveApprovalRequestDetails(approval.inputs);
+  const details = deriveApprovalDetailsForTool(approval.toolId, approval.inputs);
   const buttonsDisabled = phase === "submitting" || phase === "executing" || phase === "failed";
   return (
     <div
