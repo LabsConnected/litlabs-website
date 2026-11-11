@@ -185,6 +185,53 @@ const MODE_PATTERNS: ModePattern[] = [
     domains: ["engineering"],
   },
 
+  // ─── build (inspection): read-only workspace inspection ──────
+  // A pure listing/read request names no MUTATION verb, so it matched
+  // no build pattern above and fell through to `think` with
+  // requiresExecution:false → the V1 text-only lane, whose model has
+  // no tools attached and honestly declined ("file inspection tools
+  // aren't available in this turn") while the turn created no run
+  // record (2026-11-11 staging acceptance, Gate B project, #902
+  // follow-up). Read-only inspection is still workspace execution: it
+  // must take the V2 structured-tool lane (files.list / files.read)
+  // where a verified workspace exists — and hit the messages route's
+  // coded TOOL_EXECUTION_UNAVAILABLE refusal where it does not —
+  // never a silent tool-less chat turn. Question-forms ABOUT a file
+  // ("what does index.html do?") and how-to questions ("how do I list
+  // files?") carry no inspection directive for THIS workspace and
+  // stay out — the same discriminator discipline as the bare-filename
+  // mutation pattern above.
+  {
+    mode: "build",
+    patterns: [
+      // Listing verbs + workspace nouns: "list the files in the
+      // project", "show me the files", "list files", "show the
+      // folder". How-to openings are teaching questions, not
+      // directives — excluded by the lookahead.
+      /^(?!\s*how\s+(do|can|would|should)\s+(i|you|we)\b)[\s\S]*?\b(list|show|display|enumerate)\b[^.!?]{0,60}\b(files?|file tree|directory|directories|folder|folders|project files|workspace contents)\b/i,
+      // "what files are in this project?", "which files does it have?"
+      /\b(what|which)\s+files?\b/i,
+      // "what's in the src folder?", "what is inside the project?"
+      /\bwhat(?:'s| is| are)\b[^.!?]{0,40}\b(in|inside)\b[^.!?]{0,40}\b(folder|directory|project|workspace|repo|repository|codebase)\b/i,
+      // Structure asks: "show me the project structure", "what's the
+      // directory structure of this project?"
+      /\b(file|directory|folder|project|repo|repository|codebase|workspace)\s+(structure|tree|layout)\b/i,
+      /\bstructure\s+of\b[^.!?]{0,40}\b(project|repo|repository|codebase|workspace)\b/i,
+      // Read a named file: "read index.html", "open src/app/page.tsx",
+      // "read the README.md file". The read verb is the discriminator;
+      // question-form openings are excluded exactly as in the
+      // bare-filename mutation pattern.
+      /^(?!\s*(how|what|why|when|where|which|who|explain|describe|tell\s+me)\b)[\s\S]*?\b(read|open|cat|print|view)\b[\s\S]{0,60}\b[\w./-]*\.(html?|css|scss|sass|less|js|jsx|mjs|cjs|ts|tsx|mts|cts|json|jsonc|md|mdx|txt|xml|svg|yml|yaml|toml|ini|cfg|conf|py|rb|go|rs|java|kt|kts|php|swift|c|h|cpp|hpp|cs|vue|svelte|sql|sh|bash|ps1|csv|tsv)\b/i,
+      // "show me the contents of src/app/page.tsx",
+      // "contents of the config file".
+      /\bcontents?\s+of\b[^.!?]{0,80}\b[\w./-]*\.(html?|css|scss|js|jsx|ts|tsx|json|md|txt|xml|yml|yaml|toml)\b/i,
+      /\bcontents?\s+of\b[^.!?]{0,40}\b(the\s+)?(file|folder|directory)\b/i,
+    ],
+    requiresProject: true,
+    requiresExecution: true,
+    domains: ["engineering"],
+  },
+
   // ─── review: audits, reviews, security ───────────────────────
   {
     mode: "review",
