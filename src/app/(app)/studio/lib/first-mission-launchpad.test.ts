@@ -24,6 +24,59 @@ const project = {
   sourceType: "blank" as const,
 };
 
+describe("unresolved runtime gate — unknown is not disconnected", () => {
+  it("renders the neutral checking state for a never-resolved runtime, even when an error and an unavailable provider ride the inputs", () => {
+    // First-load window: the runtime is still the INITIAL placeholder
+    // (epoch lastCheckedAt — no resolve has ever completed), but a caller
+    // can already supply runtimeLoading=false, a stale error, and a
+    // provider verdict. None of that is settled truth about THIS project:
+    // no failure or connection claim may render from it.
+    const result = deriveFirstMissionLaunchpadState({
+      runtime: { ...INITIAL_RUNTIME_STATE },
+      runtimeLoading: false,
+      runtimeError: "Runtime resolve failed (500)",
+      providerHealth: "unavailable",
+    });
+    expect(result.key).toBe("checking");
+    expect(result.title).not.toMatch(/attention|connect/i);
+    expect(result.description).not.toMatch(/fail|connection|attention/i);
+    expect(result.primaryAction).toBeNull();
+  });
+
+  it("never reaches the terminal_unreachable claim from a never-resolved runtime", () => {
+    const result = deriveFirstMissionLaunchpadState({
+      runtime: runtime({
+        ...project,
+        phase: "terminal_unreachable",
+        workspaceId: "workspace-1",
+        workspaceStatus: "provisioning",
+        workspaceProvisioned: false,
+        executionAvailable: false,
+        lastCheckedAt: new Date(0).toISOString(),
+      }),
+      runtimeLoading: false,
+      providerHealth: "available",
+    });
+    expect(result.key).toBe("checking");
+  });
+
+  it("still renders the settled blocked state once a failed resolve has actually completed", () => {
+    // A completed-but-failed resolve is stamped (real lastCheckedAt) —
+    // the gate must not swallow genuine settled failures.
+    const result = deriveFirstMissionLaunchpadState({
+      runtime: {
+        ...INITIAL_RUNTIME_STATE,
+        lastCheckedAt: "2026-08-31T00:00:00.000Z",
+      },
+      runtimeLoading: false,
+      runtimeError: "Runtime resolve failed (500)",
+      providerHealth: "available",
+    });
+    expect(result.key).toBe("blocked");
+    expect(result.description).toBe("Runtime resolve failed (500)");
+  });
+});
+
 const cases: Array<{
   name: string;
   input: FirstMissionLaunchpadInput;

@@ -166,12 +166,34 @@ function isWorkspaceFailure(runtime: ProjectRuntimeState): boolean {
 
 type LaunchpadStateWithoutProject = Omit<FirstMissionLaunchpadState, "projectId">;
 
+/**
+ * A runtime state counts as RESOLVED only once a resolve attempt has
+ * completed and stamped it. INITIAL_RUNTIME_STATE carries the epoch
+ * sentinel (lastCheckedAt = 1970-01-01) — it is the never-resolved
+ * placeholder every consumer starts from, and it can flow into this
+ * derivation with settled-looking companions (runtimeLoading already
+ * false, a stale error, a provider verdict recorded by an earlier
+ * surface) because the hooks' loading flags are one-shot: they do not
+ * re-arm when a new project resolve begins. Unknown ≠ disconnected:
+ * a never-resolved runtime renders the neutral checking state, never
+ * a failure or connection claim about a project nobody has checked.
+ */
+function runtimeResolved(runtime: ProjectRuntimeState): boolean {
+  const stamped = Date.parse(runtime.lastCheckedAt);
+  return Number.isFinite(stamped) && stamped > 0;
+}
+
 function deriveLaunchpad(input: FirstMissionLaunchpadInput): LaunchpadStateWithoutProject {
   const { runtime, runtimeLoading, runtimeError, providerHealth } = input;
   const facts = factsFor(runtime, providerHealth);
   const blocked = { mutationActionsAllowed: false, inspectionEvidence: [] };
 
-  if (runtimeLoading || runtime.phase === "resolving" || providerHealth === undefined) {
+  if (
+    runtimeLoading ||
+    runtime.phase === "resolving" ||
+    providerHealth === undefined ||
+    !runtimeResolved(runtime)
+  ) {
     return {
       key: "checking",
       eyebrow: "Getting things ready",

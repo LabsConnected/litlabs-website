@@ -239,10 +239,32 @@ export function useProjectRuntime(options?: { disabled?: boolean }): UseProjectR
     } catch (err) {
       if (!mountedRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to resolve runtime");
+      // Stamp the preserved state: a resolve was attempted and failed,
+      // which is settled truth (consumers may render the honest error).
+      // Without the stamp the state keeps the epoch sentinel of
+      // INITIAL_RUNTIME_STATE and reads as "never checked" forever —
+      // indistinguishable from a resolve that is still in flight.
+      setState((prev) => ({ ...prev, lastCheckedAt: new Date().toISOString() }));
     } finally {
       if (mountedRef.current) setLoading(false);
     }
   }, [authLoaded, isSignedIn, getToken, explicitProjectId, terminalStatus, terminalSessionId, terminalCwd]);
+
+  // Project identity change: the previous project's settled state must
+  // never be presented as the new project's truth while its first
+  // resolve is in flight. Reset to the unresolved placeholder (epoch
+  // stamp → downstream surfaces render their neutral loading state)
+  // and re-arm loading; the poll effect below starts the new resolve
+  // on the same commit. Declared first so the reset lands before that
+  // resolve begins. Same-identity polls never touch this effect.
+  const resolvedProjectIdRef = useRef(explicitProjectId);
+  useEffect(() => {
+    if (resolvedProjectIdRef.current === explicitProjectId) return;
+    resolvedProjectIdRef.current = explicitProjectId;
+    setState(INITIAL_RUNTIME_STATE);
+    setLoading(true);
+    setError(null);
+  }, [explicitProjectId]);
 
   // Initial resolve + polling — skipped entirely when disabled so a
   // second hook instance can't double the runtime poll stack.
