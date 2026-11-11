@@ -51,7 +51,7 @@ import {
   type WorkspaceDescriptor,
 } from "./workspace/WorkspaceManager";
 import { resolveWorkspacePath as resolveWorkspacePathSecure, validateWritePayload } from "./workspace/WorkspaceSecurity";
-import { deleteResolvedPath } from "./workspace/FileService";
+import { deleteResolvedPath, mkdirResolvedPath } from "./workspace/FileService";
 import { replaceScaffoldingForWrite, SCAFFOLD_DIR_NAME } from "./workspace/scaffold";
 import { checkExpectedSha256 } from "./workspace/cas";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
@@ -1666,8 +1666,7 @@ app.post("/ws-files/mkdir", (req: AuthenticatedRequest, res) => {
   }
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
-    if (existsSync(target)) return res.status(409).json({ error: "Path already exists" });
-    mkdirSync(target, { recursive: false });
+    if (mkdirResolvedPath(target) === "exists") return res.status(409).json({ error: "Path already exists" });
     res.json({ created: true, workspaceId: req.workspaceId });
   } catch (err) {
     const { status, error } = fileErrorResponse(err, "Failed to create folder");
