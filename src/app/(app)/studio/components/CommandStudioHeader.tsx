@@ -11,7 +11,11 @@ import {
   useStudioModelStore,
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
-import { resolveSelectedModelHealth } from "../lib/model-health";
+import {
+  resolveSelectedModelHealth,
+  summarizeProviderHealth,
+  type ProviderHealthSummary,
+} from "../lib/model-health";
 import {
   Eye,
   Rocket,
@@ -192,7 +196,11 @@ export default function CommandStudioHeader({
   const writesAllowed = capabilities.writeAccess;
   const modelHealth = resolveSelectedModelHealth(selectedModel, providerHealth);
   const hasAi = modelHealth === "available" || modelHealth === "degraded";
-  const providerCount = hasAi ? 1 : 0;
+  // The popover's AI Providers row reports the actual per-provider health
+  // map — which providers are usable right now. (hasAi above is a
+  // different, narrower truth: the SELECTED model's route health, used
+  // for the status pill. It must never be dressed up as a provider count.)
+  const providerSummary = summarizeProviderHealth(providerHealth);
 
   // "ready" already implies executionAvailable (workspace mounted AND
   // terminal server reachable) — the canonical hook derives them together,
@@ -311,7 +319,7 @@ export default function CommandStudioHeader({
             rect={statusRect}
             onClose={() => setStatusOpen(false)}
             onOpenTerminalAction={() => onOpenDockTabAction?.("terminal")}
-            providerCount={providerCount}
+            providerSummary={providerSummary}
             repoConnected={capabilities.repository === "connected"}
             repoName={capabilities.repositoryName}
             ptyState={capabilities.terminalStatus}
@@ -321,7 +329,6 @@ export default function CommandStudioHeader({
             modelHealth={modelHealth}
             fallbackNotice={fallbackNotice}
             walletBalance={walletLoading ? null : balance}
-            connectionSummary={capabilities.connectionSummary}
           />,
           document.body,
         )}
@@ -479,7 +486,7 @@ function WorkspaceStatusPopover({
   rect,
   onClose,
   onOpenTerminalAction,
-  providerCount,
+  providerSummary,
   repoConnected,
   repoName,
   ptyState,
@@ -489,12 +496,11 @@ function WorkspaceStatusPopover({
   modelHealth,
   fallbackNotice,
   walletBalance,
-  connectionSummary,
 }: {
   rect: DOMRect;
   onClose: () => void;
   onOpenTerminalAction?: () => void;
-  providerCount: number;
+  providerSummary: ProviderHealthSummary;
   repoConnected: boolean;
   repoName: string | null;
   ptyState: string;
@@ -505,7 +511,6 @@ function WorkspaceStatusPopover({
   modelHealth: ProviderHealth | undefined;
   fallbackNotice: string | null;
   walletBalance: number | null;
-  connectionSummary: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -572,8 +577,8 @@ function WorkspaceStatusPopover({
         <span
           className="h-1.5 w-1.5 rounded-full"
           style={{
-            backgroundColor: providerCount ? "var(--color-accent)" : "var(--text-muted)",
-            boxShadow: providerCount ? "0 0 4px var(--color-accent)" : "none",
+            backgroundColor: providerSummary.availableCount ? "var(--color-accent)" : "var(--text-muted)",
+            boxShadow: providerSummary.availableCount ? "0 0 4px var(--color-accent)" : "none",
           }}
           aria-hidden
         />
@@ -581,10 +586,20 @@ function WorkspaceStatusPopover({
       <div className="max-h-[60dvh] overflow-y-auto divide-y" style={{ borderColor: "#cfdec4" }}>
         <StatusRow
           label="AI Providers"
-          value={providerCount ? `${providerCount} connected` : "None connected"}
-          ok={providerCount > 0}
-          warn={providerCount === 0}
-          detail={connectionSummary}
+          value={
+            !providerSummary.known
+              ? "Checking…"
+              : providerSummary.availableCount > 0
+                ? `${providerSummary.availableCount} of ${providerSummary.totalCount} available`
+                : "None available"
+          }
+          ok={providerSummary.availableCount > 0}
+          warn={providerSummary.known && providerSummary.availableCount === 0}
+          detail={
+            providerSummary.known
+              ? providerSummary.detail
+              : "Provider health has not been verified yet"
+          }
         />
         <StatusRow
           label="Selected Model"

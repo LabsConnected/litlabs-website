@@ -106,7 +106,11 @@ const cases: Array<{
     action: "configure_provider",
   },
   {
-    name: "connects a terminal after provider and workspace verification",
+    // A ready workspace + available provider is a working state: terminal
+    // command execution being unavailable (on the hosted service it is
+    // disabled by design) must NOT gate the first mission behind a
+    // "connect" step. The Terminal fact reports it; the launchpad proceeds.
+    name: "does not gate a ready workspace on terminal execution",
     input: {
       runtime: runtime({
         ...project,
@@ -115,6 +119,23 @@ const cases: Array<{
         workspaceStatus: "ready",
         workspaceProvisioned: true,
         readAccess: true,
+      }),
+      runtimeLoading: false,
+      providerHealth: "available",
+    },
+    key: "verified",
+    action: "prepare_inspection",
+  },
+  {
+    name: "keeps the terminal state when the workspace itself is not ready",
+    input: {
+      runtime: runtime({
+        ...project,
+        phase: "terminal_unreachable",
+        workspaceId: "workspace-1",
+        workspaceStatus: "provisioning",
+        workspaceProvisioned: false,
+        readAccess: false,
       }),
       runtimeLoading: false,
       providerHealth: "available",
@@ -238,6 +259,49 @@ describe("deriveFirstMissionLaunchpadState", () => {
 
     expect(result.key).toBe("checking");
     expect(result.primaryAction).toBeNull();
+  });
+
+  it("never claims a ready workspace needs a 'live connection' when only terminal execution is unavailable", () => {
+    const result = deriveFirstMissionLaunchpadState({
+      runtime: runtime({
+        ...project,
+        phase: "terminal_unreachable",
+        workspaceId: "workspace-1",
+        workspaceStatus: "ready",
+        workspaceProvisioned: true,
+        readAccess: true,
+        executionAvailable: false,
+      }),
+      runtimeLoading: false,
+      providerHealth: "available",
+    });
+
+    expect(result.key).toBe("verified");
+    expect(result.description).not.toMatch(/live connection/i);
+    // The unavailability is still reported — as the Terminal fact, which is
+    // the state it actually describes.
+    const terminalFact = result.facts.find((fact) => fact.label === "Terminal");
+    expect(terminalFact?.status).toBe("unavailable");
+  });
+
+  it("scopes the residual terminal state to command execution, not a general 'live connection'", () => {
+    const result = deriveFirstMissionLaunchpadState({
+      runtime: runtime({
+        ...project,
+        phase: "terminal_unreachable",
+        workspaceId: "workspace-1",
+        workspaceStatus: "provisioning",
+        workspaceProvisioned: false,
+        readAccess: false,
+        executionAvailable: false,
+      }),
+      runtimeLoading: false,
+      providerHealth: "available",
+    });
+
+    expect(result.key).toBe("terminal_unreachable");
+    expect(result.description).not.toMatch(/needs a live connection/i);
+    expect(result.description.toLowerCase()).toContain("command");
   });
 
   it("does not derive readiness from project existence", () => {

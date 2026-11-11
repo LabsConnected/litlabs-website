@@ -146,8 +146,8 @@ function factsFor(runtime: ProjectRuntimeState, providerHealth?: ProviderHealth)
       // from workspace + terminal-server reachability, NOT PTY attachment.
       runtime.executionAvailable ? "verified" : "unavailable",
       runtime.executionAvailable
-        ? "Verified connection"
-        : "No verified execution session",
+        ? "Terminal server reachable — commands can run"
+        : "Command execution unavailable",
     ),
     fact("Deployment", "not_started", "Not checked by the first mission"),
   ];
@@ -267,19 +267,31 @@ function deriveLaunchpad(input: FirstMissionLaunchpadInput): LaunchpadStateWitho
     };
   }
 
-  // Gate on executionAvailable alone — the canonical runtime truth. Server-side
-  // execution (transport.exec → terminal-server HTTP) never waits on an
-  // interactive PTY, so PTY attachment state is not a launch blocker.
+  // Terminal/command execution is a separate capability, not the gate for
+  // the first mission. executionAvailable = workspace ready AND terminal
+  // server reachable (transport.exec → terminal-server HTTP); on the
+  // hosted service that execution path is unavailable by design, while
+  // chat, generation, and file work run without it. When the workspace IS
+  // ready, fall through to the verified flow — the Terminal fact already
+  // reports execution as unavailable, which is the whole truth, stated
+  // where it belongs. The blocking state remains only for the residue
+  // where the workspace itself is not ready either, and its copy names
+  // the actual gap: command execution, not a general "live connection".
   if (!runtime.executionAvailable) {
-    return {
-      key: "terminal_unreachable",
-      eyebrow: "One more step",
-      title: "Almost there",
-      description: "LiTT needs a live connection to run things. One tap to connect.",
-      facts,
-      primaryAction: action("connect_terminal", "Connect"),
-      ...blocked,
-    };
+    const workspaceReady =
+      runtime.workspaceProvisioned && runtime.workspaceStatus === "ready";
+    if (!workspaceReady) {
+      return {
+        key: "terminal_unreachable",
+        eyebrow: "One more step",
+        title: "Almost there",
+        description:
+          "LiTT can't run commands yet — the terminal execution connection isn't reachable, and your workspace isn't fully ready. You can still chat with LiTT in the meantime.",
+        facts,
+        primaryAction: action("connect_terminal", "Connect"),
+        ...blocked,
+      };
+    }
   }
 
   if (input.inspection) {
