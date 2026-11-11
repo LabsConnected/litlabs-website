@@ -131,6 +131,21 @@ export function deleteResolvedPath(target: string): void {
   rmSync(target, { recursive: true });
 }
 
+/**
+ * Create a directory at an already-resolved workspace path. The caller
+ * resolves the workspace-relative path through WorkspaceSecurity first —
+ * this is the execution step only.
+ *
+ * Returns "exists" when anything is already at the target so the
+ * /ws-files/mkdir route can answer its 409 — the pre-check lives here,
+ * next to the create, so the two cannot drift apart.
+ */
+export function mkdirResolvedPath(target: string): "created" | "exists" {
+  if (existsSync(target)) return "exists";
+  mkdirSync(target, { recursive: true });
+  return "created";
+}
+
 export interface SearchResult {
   path: string;
   line: number;
