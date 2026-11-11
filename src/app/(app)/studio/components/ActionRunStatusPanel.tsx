@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExecutionDetailsExpander, type ExecutionDetailRecord } from "./ExecutionBlock";
 import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 
@@ -93,6 +93,9 @@ function stateColor(state: ActionRunProjectionResponse["displayState"]): string 
   return "var(--litt-primary)";
 }
 
+const POLL_INTERVAL_MS = 2000;
+const MAX_POLL_DELAY_MS = 30_000;
+
 export function ActionRunStatusPanel({
   conversationId,
   busy,
@@ -102,6 +105,11 @@ export function ActionRunStatusPanel({
 }) {
   const [projection, setProjection] = useState<ActionRunProjectionResponse | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  // Delay before the next poll. A 429 stretches it (Retry-After when the
+  // server sends one, bounded exponential backoff otherwise); a success
+  // restores the normal cadence. A ref, not state: changing the delay
+  // must not re-render or reset the poll loop by itself.
+  const pollDelayRef = useRef(POLL_INTERVAL_MS);
 
   const load = useCallback(async () => {
     // Optimistic send placeholders ("pending_<req>") have no server row —
@@ -117,6 +125,19 @@ export function ActionRunStatusPanel({
         `/api/studio/conversations/${encodeURIComponent(conversationId)}/action-run`,
         { cache: "no-store", credentials: "include" },
       );
+      if (response.status === 429) {
+        // Rate-limited: this is backpressure, not unavailability. Keep
+        // the last good projection on screen and slow the poll down —
+        // honoring Retry-After when present, else doubling the current
+        // delay up to a cap. The old behavior flagged "unavailable" and
+        // kept firing every 2s, deepening the limit it had just hit.
+        const retryAfterSeconds = Number(response.headers.get("Retry-After"));
+        pollDelayRef.current =
+          Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? Math.min(retryAfterSeconds * 1000, MAX_POLL_DELAY_MS)
+            : Math.min(pollDelayRef.current * 2, MAX_POLL_DELAY_MS);
+        return;
+      }
       if (!response.ok) {
         setUnavailable(response.status !== 404);
         return;
@@ -124,6 +145,7 @@ export function ActionRunStatusPanel({
       const body = await response.json() as { projection?: ActionRunProjectionResponse | null };
       setProjection(body.projection ?? null);
       setUnavailable(false);
+      pollDelayRef.current = POLL_INTERVAL_MS;
     } catch {
       setUnavailable(true);
     }
@@ -132,6 +154,7 @@ export function ActionRunStatusPanel({
   useEffect(() => {
     setProjection(null);
     setUnavailable(false);
+    pollDelayRef.current = POLL_INTERVAL_MS;
     void load();
   }, [load]);
 
@@ -142,8 +165,21 @@ export function ActionRunStatusPanel({
   const active = projection ? ACTIVE_STATES.has(projection.displayState) : false;
   useEffect(() => {
     if (!active) return;
-    const timer = window.setInterval(() => void load(), 2000);
-    return () => window.clearInterval(timer);
+    // Self-scheduling poll: each tick waits pollDelayRef's CURRENT value,
+    // so a 429 stretches the following gap and a success restores 2s.
+    let cancelled = false;
+    let timer: number | undefined;
+    const tick = async () => {
+      await load();
+      if (!cancelled) {
+        timer = window.setTimeout(() => void tick(), pollDelayRef.current);
+      }
+    };
+    timer = window.setTimeout(() => void tick(), pollDelayRef.current);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [active, load]);
 
   const details = useMemo<ExecutionDetailRecord[]>(() => {
