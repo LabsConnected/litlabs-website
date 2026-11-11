@@ -53,6 +53,14 @@ export interface ApprovalCardProps {
    * not a server-attested lane.
    */
   mode?: "plan" | "act" | "auto";
+  /**
+   * The name of the project this gate belongs to, when the rendering
+   * surface knows it. Used only to name the target of zero-arg tools
+   * (project.deploy above all: its inputs are empty by schema, so the
+   * project name is the subject). Optional: when absent, the deploy
+   * subject falls back to "this project" — the card never invents a name.
+   */
+  projectName?: string;
 }
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
@@ -237,8 +245,11 @@ function findAttachedImageUrl(inputs?: Record<string, unknown>): string | null {
  *  will act on (image.stock's `query`, a search's `query`, …). */
 const SUBJECT_KEYS = ["query", "subject", "prompt", "description", "searchQuery", "search", "title", "text"];
 
-/** Keys whose string value says WHERE the result lands. */
-const DESTINATION_KEYS = ["sitePath", "destinationPath", "destination", "outputPath", "targetPath", "savePath", "saveAs", "path", "filePath", "url"];
+/** Keys whose string value says WHERE the result lands. `newPath`
+ *  (files.rename) outranks `path` — the source is already listed as an
+ *  affected file; the destination is the rename target. `to`
+ *  (files.move) is that tool's target path. */
+const DESTINATION_KEYS = ["sitePath", "destinationPath", "destination", "outputPath", "targetPath", "savePath", "saveAs", "newPath", "path", "filePath", "to", "url"];
 
 /** Keys that must never be rendered from inputs: internal ids and
  *  credential-shaped values. The card shows WHAT is being approved, never
@@ -247,6 +258,79 @@ const HIDDEN_PARAM_KEY = /id$|key|token|secret|password|auth|credential/i;
 
 /** Keys whose values are payload bodies, not parameters. */
 const BODY_PARAM_KEY = /^(content|body|html|code|css|script)$/i;
+
+/** Per-tool subject keys: where the subject lives for tools the generic
+ *  SUBJECT_KEYS don't cover (registry-wide audit, ART-20261111-080 —
+ *  terminal.execute's `command` IS the thing being approved, git.commit's
+ *  `message`, memory.store's `content`, …). */
+const TOOL_SUBJECT_KEYS: Record<string, string[]> = {
+  "terminal.execute": ["command"],
+  "git.commit": ["message"],
+  "memory.store": ["content"],
+  "site.patch": ["heading", "section"],
+  "project.insert_asset": ["name"],
+  "assets.save": ["name"],
+  "image.saveAsset": ["name"],
+  "checkpoint.create": ["label"],
+};
+
+/** Tools whose only identifying argument is an internal id. The card
+ *  shows it truncated — the same treatment the paused-run id already
+ *  gets on this card — and never in full. */
+const TOOL_ID_SUBJECTS: Record<string, { key: string; label: string }> = {
+  "checkpoint.restore": { key: "checkpointId", label: "checkpoint" },
+  "canvas.removeNode": { key: "nodeId", label: "node" },
+  "canvas.editNode": { key: "nodeId", label: "node" },
+  "canvas.moveNode": { key: "nodeId", label: "node" },
+  "image.attachReference": { key: "assetId", label: "asset" },
+  "image.selectResult": { key: "resultId", label: "result" },
+  "image.sendToCanvas": { key: "resultId", label: "result" },
+  "assets.useInProject": { key: "assetId", label: "asset" },
+};
+
+/**
+ * Structural subjects for tools whose input schema is EMPTY (project.deploy
+ * takes no arguments at all) or whose subject is staged outside the args
+ * (creator-state generators: music/video/station image): the frozen inputs
+ * carry nothing, so the subject states exactly what approving DOES. No
+ * fields are invented — the project name, when present, is the run's own
+ * project supplied verbatim by the rendering surface.
+ */
+export function structuralSubjectFor(
+  toolId: string,
+  projectName?: string,
+): { label: string; value: string } | null {
+  switch (toolId) {
+    case "project.deploy":
+    case "deploy.execute":
+    case "deploy.preview":
+      return {
+        label: "target",
+        value: projectName
+          ? `Publish “${projectName}” to its public site URL`
+          : "Publish this project to its public site URL",
+      };
+    case "preview.open":
+      return { label: "target", value: "Open this project's live preview" };
+    case "preview.stop":
+      return { label: "target", value: "Stop this project's running preview" };
+    case "preview.start":
+    case "preview.launch":
+      return { label: "target", value: "Start this project's preview server" };
+    case "preview.reload":
+      return { label: "target", value: "Restart this project's preview server" };
+    case "music.generate":
+      return { label: "target", value: "Generate a track from the Music settings staged in this session" };
+    case "video.generate":
+      return { label: "target", value: "Generate a video from the Video settings staged in this session" };
+    case "video.imageToVideo":
+      return { label: "target", value: "Animate the selected image asset into a video" };
+    case "image.generate":
+      return { label: "target", value: "Generate an image from the prompt staged in this session" };
+    default:
+      return null;
+  }
+}
 
 export interface ApprovalRequestDetails {
   subject?: { label: string; value: string };
@@ -261,14 +345,27 @@ export interface ApprovalRequestDetails {
  * because the card showed only the tool name; the subject sat in
  * inputs.query the whole time.) Values already shown elsewhere on the
  * card (affected file paths) are passed as `excludeValues` so nothing
- * renders twice.
+ * renders twice. `opts.toolId` enables the per-tool subject resolution
+ * (TOOL_SUBJECT_KEYS / TOOL_ID_SUBJECTS / structural subjects) for the
+ * tools the generic keys miss — project.deploy above all, whose input
+ * schema is empty and whose launch-flow pause synthesizes inputs:{},
+ * so its card rendered the tool name alone (staging, 2026-11-11).
  */
 export function deriveApprovalRequestDetails(
   inputs?: Record<string, unknown>,
   excludeValues: string[] = [],
+  opts: { toolId?: string; projectName?: string } = {},
 ): ApprovalRequestDetails {
   const details: ApprovalRequestDetails = { params: [] };
-  if (!inputs) return details;
+  if (!inputs) {
+    // Zero-arg gates may carry no inputs object at all — the structural
+    // subject is the only truthful "what" there is for them.
+    if (opts.toolId) {
+      const structural = structuralSubjectFor(opts.toolId, opts.projectName);
+      if (structural) details.subject = structural;
+    }
+    return details;
+  }
   const excluded = new Set(excludeValues);
   const used = new Set<string>();
   const asTrimmedString = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -291,6 +388,37 @@ export function deriveApprovalRequestDetails(
       used.add(key);
       break;
     }
+  }
+  // Per-tool subject sources, then id subjects, then structural subjects
+  // for zero-arg tools — each step only fires when the generic pass found
+  // no subject, and every value still comes from the frozen inputs (or,
+  // for the structural step, from the tool's own semantics alone).
+  if (!details.subject && opts.toolId) {
+    for (const key of TOOL_SUBJECT_KEYS[opts.toolId] ?? []) {
+      const value = asTrimmedString(inputs[key]);
+      if (value) {
+        details.subject = {
+          label: key,
+          value: value.length > 180 ? `${value.slice(0, 180)}…` : value,
+        };
+        used.add(key);
+        break;
+      }
+    }
+  }
+  if (!details.subject && opts.toolId) {
+    const idSpec = TOOL_ID_SUBJECTS[opts.toolId];
+    if (idSpec) {
+      const value = asTrimmedString(inputs[idSpec.key]);
+      if (value) {
+        details.subject = { label: idSpec.label, value: `${value.slice(0, 8)}…` };
+        used.add(idSpec.key);
+      }
+    }
+  }
+  if (!details.subject && opts.toolId) {
+    const structural = structuralSubjectFor(opts.toolId, opts.projectName);
+    if (structural) details.subject = structural;
   }
   for (const [key, value] of Object.entries(inputs)) {
     if (details.params.length >= 6) break;
@@ -335,6 +463,7 @@ export function ApprovalCard({
   expired = false,
   onRetry,
   mode,
+  projectName,
 }: ApprovalCardProps) {
   const toolLabel = approval.toolId.replace(/_/g, " ");
   const affectedCount = countAffectedFiles(approval.inputs);
@@ -353,7 +482,10 @@ export function ApprovalCard({
   // approval. image.generate keeps its dedicated block above.
   const requestDetails = isImageRequest
     ? null
-    : deriveApprovalRequestDetails(approval.inputs, affectedFiles.map((f) => f.path));
+    : deriveApprovalRequestDetails(approval.inputs, affectedFiles.map((f) => f.path), {
+        toolId: approval.toolId,
+        projectName,
+      });
   const hasRequestDetails = Boolean(
     requestDetails && (requestDetails.subject || requestDetails.destination || requestDetails.params.length > 0),
   );
@@ -571,6 +703,18 @@ export function ApprovalCard({
                 Attached image — came with the request, not generated.
               </div>
             </>
+          )}
+          {!attachedImageUrl && !imagePrompt && imageParams.length === 0 && (
+            // Station image.generate carries no args — its prompt is staged
+            // in creator state, not in the frozen inputs. Say what will be
+            // generated instead of rendering an empty "Image request" box.
+            <div
+              data-testid="approval-image-structural"
+              className="pt-1 text-[11px] leading-snug"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {structuralSubjectFor("image.generate")?.value}
+            </div>
           )}
           {imagePrompt && (
             <div

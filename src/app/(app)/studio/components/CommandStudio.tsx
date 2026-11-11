@@ -2748,6 +2748,9 @@ function CommandStudioContent() {
         // the dead pausedRunId would 409. Other failures retry the
         // approval POST as before.
         onRetry={approvalExpired ? handleReRequestApproval : () => handleResolveApproval("approved")}
+        // Names the target of zero-arg gates (project.deploy): the card's
+        // structural subject uses the run's own project name verbatim.
+        projectName={capabilities.projectName || undefined}
       />
     </div>
   ) : null;
