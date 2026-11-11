@@ -81,11 +81,42 @@ function resolveClientIp(request: NextRequest): string {
   return request.headers.get("x-real-ip")?.trim() || "unknown";
 }
 
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NUMERIC_SEGMENT = /^\d+$/;
+
+/**
+ * Route pattern for the bucket key: the request pathname with dynamic
+ * segments (UUIDs, numeric ids) normalized to ":id", so
+ * /api/studio/conversations/<uuid>/action-run is ONE bucket per user —
+ * not one bucket per conversation, and never a bucket shared with
+ * unrelated routes.
+ */
+function resolveRoutePattern(request: NextRequest): string {
+  let pathname = "/";
+  try {
+    pathname = request.nextUrl?.pathname || new URL(request.url).pathname;
+  } catch {
+    pathname = "/";
+  }
+  const pattern = pathname
+    .split("/")
+    .map((segment) =>
+      UUID_SEGMENT.test(segment) || NUMERIC_SEGMENT.test(segment) ? ":id" : segment,
+    )
+    .join("/");
+  return pattern || "/";
+}
+
 /**
  * Rate limit a request using a Supabase-backed counter.
  *
  * Uses the verified authenticated user ID when available, falling
  * back to the edge-derived client IP for unauthenticated requests.
+ *
+ * The bucket is scoped per route pattern (see resolveRoutePattern):
+ * each route's declared limit is that route's own budget. Before this
+ * scoping, every rate-limited route incremented ONE shared per-user
+ * counter, so chatty pollers on one route could 429 unrelated routes.
  *
  * Falls back to an in-process sliding window if Supabase is unreachable
  * or the table is missing, so a rate-limit outage no longer means
@@ -96,9 +127,13 @@ export async function rateLimit(
   limit: number = 100,
   window: number = 60,
 ): Promise<RateLimitResult> {
-  // Build the rate-limit key — prefer verified user ID, fall back to IP
+  // Build the rate-limit key — prefer verified user ID, fall back to IP;
+  // either way the bucket is scoped to this route's pattern.
   const userId = await resolveVerifiedUserId();
-  const key = userId ? `rl_user_${userId}` : `rl_${resolveClientIp(request)}`;
+  const routePattern = resolveRoutePattern(request);
+  const key = userId
+    ? `rl_user_${userId}:${routePattern}`
+    : `rl_${resolveClientIp(request)}:${routePattern}`;
   const now = Math.floor(Date.now() / 1000);
   const windowStart = now - window;
 
