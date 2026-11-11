@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, Download, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
-import { HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
+import { HOST_EXECUTION_DISABLED_CODE, extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
 import {
   HOST_EXECUTION_UNAVAILABLE_LABEL,
   HOST_EXECUTION_UNAVAILABLE_MESSAGE,
@@ -211,7 +211,12 @@ function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | nu
   const runtimeStatus = typeof payload.runtimeStatus === "string" ? payload.runtimeStatus : "stopped";
   const url = typeof payload.previewUrl === "string" && payload.previewUrl ? payload.previewUrl : null;
   const error = typeof payload.runtimeError === "string" && payload.runtimeError ? payload.runtimeError : null;
-  const errorCode = typeof payload.runtimeErrorCode === "string" && payload.runtimeErrorCode ? payload.runtimeErrorCode : null;
+  // The structured field wins; when a server path omits it, recover the
+  // code embedded in the message text itself (the terminal-server's 503
+  // body survives storage only as serialized text — see
+  // extractEmbeddedErrorCode). Without this, a HOST_EXECUTION_DISABLED
+  // failure arriving on a code-less payload poses as a generic crash.
+  const errorCode = typeof payload.runtimeErrorCode === "string" && payload.runtimeErrorCode ? payload.runtimeErrorCode : extractEmbeddedErrorCode(error);
   if (runtimeStatus === "ready" && url) return { state: "ready", url, error: null, errorCode: null };
   if (runtimeStatus === "starting") return { state: "starting", url, error, errorCode };
   if (runtimeStatus === "restarting") return { state: "restarting", url, error, errorCode };
@@ -227,6 +232,26 @@ function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | nu
   }
   if (workspaceStatus !== "ready") return { state: "not_started", url, error, errorCode };
   return { state: "unreachable", url, error, errorCode };
+}
+
+/**
+ * Server error text is log material, not UI copy: some failure paths
+ * persist the terminal-server's raw response body inside the message
+ * (e.g. `Workspace prepare failed (503): {"error":"…","code":"…"}`), and
+ * rendering that verbatim dumps machine JSON on the user (Larry's
+ * production screenshot, 2026-11-10). Serialized payloads map to null so
+ * each state's existing human fallback sentence takes over; plain
+ * human-readable messages pass through untouched. The raw text remains
+ * available server-side (the project's stored runtime/workspace error
+ * and the terminal-server logs) — it just never renders in this pane.
+ */
+function humanizePreviewError(error: string | null): string | null {
+  if (!error) return null;
+  const trimmed = error.trim();
+  const looksSerialized =
+    /\{\s*"(error|code)"\s*:/.test(trimmed) ||
+    (trimmed.startsWith("{") && trimmed.endsWith("}"));
+  return looksSerialized ? null : error;
 }
 
 export default function StudioPreviewPanel({
@@ -974,7 +999,27 @@ export default function StudioPreviewPanel({
       });
       const payload = await response.json().catch(() => null) as PreviewPayload | null;
       if (!isCurrent()) return;
-      if (!response.ok || !payload) throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview preparation failed (${response.status})`);
+      if (!response.ok) {
+        // A failed start still returns a shaped payload (runtimeStatus /
+        // runtimeError / runtimeErrorCode) — run it through
+        // statusFromPayload so the machine code survives (wave-4
+        // threading). This branch used to throw payload.runtimeError into
+        // the catch below, which hard-nulled errorCode and rendered the
+        // serialized server text verbatim: a HOST_EXECUTION_DISABLED
+        // refusal arriving via auto-start/Restart (the production path)
+        // then posed as a generic "Preview failed to start" with the raw
+        // JSON as its detail and a Restart that can never succeed. Only
+        // an unshaped body (no runtime fields at all) keeps the old throw.
+        const shaped = payload !== null && (typeof payload.runtimeStatus === "string" || typeof payload.runtimeError === "string" || typeof payload.runtimeErrorCode === "string");
+        if (!shaped) throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview preparation failed (${response.status})`);
+        const failedNext = statusFromPayload(payload, workspaceStatus);
+        setState("failed");
+        setPreviewUrl(null);
+        setError(failedNext.error ?? "The preview did not start. Retry, or check that the project has an index.html.");
+        setErrorCode(failedNext.errorCode);
+        return;
+      }
+      if (!payload) throw new Error(`Preview preparation failed (${response.status})`);
       const next = statusFromPayload(payload, workspaceStatus);
       if (next.state === "not_started") {
         // A start that answers "not started" has not started. Say so with a
@@ -1130,8 +1175,10 @@ export default function StudioPreviewPanel({
   // of an indefinite "Preparing your preview automatically…".
   const awaitingFirstContent = state === "not_started" && workspaceTruth === "no_content";
   const frameFailed = iframeFailed || frameCheck === "failed";
+  // Raw serialized server payloads never render — see humanizePreviewError.
+  const humanError = humanizePreviewError(error);
   const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : frameCheck === "ok" ? "Preview ready" : "Loading preview…") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (humanError ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (humanError ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : humanError ?? "The dev server failed to start. Try restarting it.") : humanError ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
 
@@ -1537,30 +1584,62 @@ export default function StudioPreviewPanel({
           </div>
         ) : (
           <div
-            className="flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
+            className={hostExecBlocked
+              ? "flex min-h-[280px] flex-1 flex-col px-5 py-5"
+              : "flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 px-6 text-center"}
             style={{
               backgroundImage: "radial-gradient(ellipse 60% 50% at 50% 40%, rgba(168,255,47,0.04), transparent)",
             }}
           >
-            <div
-              className="grid h-12 w-12 place-items-center rounded-2xl"
-              style={{
-                backgroundColor: state === "failed" ? "rgba(239,68,68,0.1)" : "color-mix(in srgb, var(--color-accent) 10%, transparent)",
-                color: state === "failed" ? "#EF4444" : "var(--litt-primary)",
-                border: `1px solid ${state === "failed" ? "rgba(239,68,68,0.2)" : "color-mix(in srgb, var(--color-accent) 20%, transparent)"}`,
-                boxShadow: state === "failed" ? "0 0 24px rgba(239,68,68,0.1)" : "0 0 24px rgba(168,255,47,0.08)",
-              }}
-            >
-              {state === "loading" || state === "starting" || state === "restarting" ? (
-                <Loader2 size={20} className="animate-spin" />
-              ) : (
-                <Eye size={20} />
-              )}
-            </div>
-            <div {...(hostExecBlocked ? { "data-testid": "preview-host-exec-notice" } : {})}>
-              <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{displayLabel}</div>
-              <div className="mx-auto mt-1.5 max-w-[280px] text-xs leading-5" style={{ color: "var(--text-muted)" }}>{displayDetail}</div>
-            </div>
+            {hostExecBlocked ? (
+              // Host-exec refusal: a compact notice card inside the pane's
+              // normal chrome — never a full-pane empty void with the
+              // message stranded in the middle (Larry's screenshot rule:
+              // unavailable states render as compact notices, not dead
+              // panes). Same label/detail copy as the wave-4 notice.
+              <div
+                data-testid="preview-host-exec-notice"
+                className="flex w-full max-w-[560px] items-start gap-3 self-start rounded-xl border p-4 text-left"
+                style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}
+              >
+                <div
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                  style={{
+                    backgroundColor: "rgba(239,68,68,0.1)",
+                    color: "#EF4444",
+                    border: "1px solid rgba(239,68,68,0.2)",
+                  }}
+                >
+                  <Eye size={16} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{displayLabel}</div>
+                  <div className="mt-1 text-xs leading-5" style={{ color: "var(--text-muted)" }}>{displayDetail}</div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div
+                  className="grid h-12 w-12 place-items-center rounded-2xl"
+                  style={{
+                    backgroundColor: state === "failed" ? "rgba(239,68,68,0.1)" : "color-mix(in srgb, var(--color-accent) 10%, transparent)",
+                    color: state === "failed" ? "#EF4444" : "var(--litt-primary)",
+                    border: `1px solid ${state === "failed" ? "rgba(239,68,68,0.2)" : "color-mix(in srgb, var(--color-accent) 20%, transparent)"}`,
+                    boxShadow: state === "failed" ? "0 0 24px rgba(239,68,68,0.1)" : "0 0 24px rgba(168,255,47,0.08)",
+                  }}
+                >
+                  {state === "loading" || state === "starting" || state === "restarting" ? (
+                    <Loader2 size={20} className="animate-spin" />
+                  ) : (
+                    <Eye size={20} />
+                  )}
+                </div>
+                <div>
+                  <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{displayLabel}</div>
+                  <div className="mx-auto mt-1.5 max-w-[280px] text-xs leading-5" style={{ color: "var(--text-muted)" }}>{displayDetail}</div>
+                </div>
+              </>
+            )}
             {/* Staged loading — show honest progress while the preview starts. */}
             {(state === "starting" || state === "restarting") && startPhase && (
               <div className="flex items-center gap-2" data-testid="preview-start-stages" aria-label="Preview startup progress">

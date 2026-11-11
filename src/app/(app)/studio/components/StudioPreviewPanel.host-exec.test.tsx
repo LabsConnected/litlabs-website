@@ -103,3 +103,140 @@ describe("StudioPreviewPanel — host-execution truth (wave-4)", () => {
     expect(screen.getByTestId("preview-source-summary")).toHaveTextContent("Source error");
   });
 });
+
+// Prepare-path regression (Larry's production screenshot, 2026-11-10 ~21:31
+// EST, production on f228f11a): the wave-4 tests above mock the prepare POST
+// as HTTP 200 with the same payload as the GET. Production's POST answers
+// 500 — and on that path the panel threw payload.runtimeError into its catch
+// block, which set errorCode to null unconditionally. The code the server
+// DID send in the 500 body was destroyed, so the pane rendered the raw
+// serialized error under "Preview failed to start" and re-offered the
+// futile "Restart preview". These tests drive the real shapes: GET reports
+// not_started (auto-start fires), POST answers 500.
+const RAW_HOST_EXEC_ERROR =
+  'Workspace prepare failed (503): {"error":"Host execution is disabled in production (workspace.prepare(git,install)); a verified sandbox is required","code":"HOST_EXECUTION_DISABLED"}';
+
+function mockFetchByMethod(
+  getPayload: Record<string, unknown>,
+  postPayload: Record<string, unknown>,
+  postStatus = 200,
+) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.includes("/workspace-state")) return jsonResponse(HAS_CONTENT);
+    if (url.includes("/preview")) {
+      const method = (init as RequestInit | undefined)?.method ?? "GET";
+      if (method === "POST") return jsonResponse(postPayload, postStatus);
+      return jsonResponse(getPayload);
+    }
+    return new Response("not found", { status: 404 });
+  });
+}
+
+const NOT_STARTED_NO_CODE = {
+  runtimeStatus: "not_started",
+  previewUrl: null,
+  runtimeError: null,
+  runtimeErrorCode: null,
+};
+
+describe("StudioPreviewPanel — host-execution truth on the prepare path (POST 500)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    act(() => useExecutionStore.getState().reset());
+  });
+
+  it("survives the auto-start POST 500: honest copy, no raw JSON, no Restart", async () => {
+    mockFetchByMethod(
+      NOT_STARTED_NO_CODE,
+      {
+        error: RAW_HOST_EXEC_ERROR,
+        runtimeStatus: "failed",
+        runtimeError: RAW_HOST_EXEC_ERROR,
+        runtimeErrorCode: "HOST_EXECUTION_DISABLED",
+      },
+      500,
+    );
+    renderPanel();
+
+    const notice = await screen.findByTestId("preview-host-exec-notice");
+    expect(notice).toHaveTextContent(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+    expect(screen.getByText(HOST_EXECUTION_UNAVAILABLE_LABEL)).toBeInTheDocument();
+    expect(screen.queryByText("Preview failed to start")).toBeNull();
+    // The raw serialized server error must never render verbatim.
+    expect(document.body.textContent).not.toContain("Workspace prepare failed (503)");
+    expect(document.body.textContent).not.toContain('"code"');
+    // No futile affordances on either surface.
+    expect(screen.queryByTestId("preview-prepare")).toBeNull();
+    expect(screen.queryByTestId("preview-restart")).toBeNull();
+    expect(screen.queryByRole("button", { name: /restart preview/i })).toBeNull();
+  });
+
+  it("recovers the code from the message when the 500 body omits runtimeErrorCode", async () => {
+    mockFetchByMethod(
+      NOT_STARTED_NO_CODE,
+      {
+        error: RAW_HOST_EXEC_ERROR,
+        runtimeStatus: "failed",
+        runtimeError: RAW_HOST_EXEC_ERROR,
+      },
+      500,
+    );
+    renderPanel();
+
+    const notice = await screen.findByTestId("preview-host-exec-notice");
+    expect(notice).toHaveTextContent(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+    expect(screen.queryByText("Preview failed to start")).toBeNull();
+    expect(document.body.textContent).not.toContain("Workspace prepare failed (503)");
+    expect(screen.queryByTestId("preview-prepare")).toBeNull();
+    expect(screen.queryByTestId("preview-restart")).toBeNull();
+  });
+
+  it("keeps the generic POST-500 failure byte-for-byte, Restart included", async () => {
+    mockFetchByMethod(
+      NOT_STARTED_NO_CODE,
+      {
+        error: "Workspace preparation failed",
+        runtimeStatus: "failed",
+        runtimeError: "Workspace preparation failed",
+        runtimeErrorCode: null,
+      },
+      500,
+    );
+    renderPanel();
+
+    await waitFor(() => {
+      expect(screen.getByText("Preview failed to start")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Workspace preparation failed")).toBeInTheDocument();
+    expect(screen.queryByTestId("preview-host-exec-notice")).toBeNull();
+    const action = screen.getByTestId("preview-prepare");
+    expect(action).toHaveTextContent("Restart preview");
+    expect(screen.getByTestId("preview-restart")).toBeInTheDocument();
+  });
+
+  it("never renders a serialized server error verbatim for non-host-exec failures either", async () => {
+    const rawOther =
+      'Workspace prepare failed (503): {"error":"Kaboom inside the sandbox","code":"SANDBOX_KABOOM"}';
+    mockFetch({
+      runtimeStatus: "failed",
+      previewUrl: null,
+      runtimeError: rawOther,
+      runtimeErrorCode: "SANDBOX_KABOOM",
+    });
+    renderPanel();
+
+    await waitFor(() => {
+      expect(screen.getByText("Preview failed to start")).toBeInTheDocument();
+    });
+    // Raw machine payload is mapped to the human fallback sentence…
+    expect(screen.getByText("The dev server failed to start. Try restarting it.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("Kaboom inside the sandbox");
+    expect(document.body.textContent).not.toContain("Workspace prepare failed (503)");
+    expect(document.body.textContent).not.toContain('"code"');
+    // …and the failure stays a generic one: Restart remains available.
+    expect(screen.queryByTestId("preview-host-exec-notice")).toBeNull();
+    expect(screen.getByTestId("preview-prepare")).toHaveTextContent("Restart preview");
+    expect(screen.getByTestId("preview-restart")).toBeInTheDocument();
+  });
+});
