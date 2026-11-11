@@ -4,10 +4,12 @@ import {
   mapMediaIntentToDestination,
   destinationToLegacyTool,
   resolveCreatorDestination,
+  resolveEntryCreateType,
   DESTINATION_LABELS,
   type StudioDestination,
   type WorkspaceStage,
   type CreatorKind,
+  type StudioEntryCreateType,
   workspaceStageToMode,
   modeToWorkspaceStage,
   CREATOR_KIND_LABELS,
@@ -317,6 +319,57 @@ describe("studio-destinations", () => {
       expect(resolveCreatorDestination("chat")).toBeNull();
       expect(resolveCreatorDestination("design")).toBeNull();
       expect(resolveCreatorDestination("../../../etc")).toBeNull();
+    });
+  });
+
+  describe("resolveEntryCreateType (one-chat entry chips)", () => {
+    // One-chat entry (Larry's directive, 2026-11-11; ART-20261111-031):
+    // the creation-type chips live INSIDE the one chat as entry hints.
+    // Each chip's plan must land exactly where the retired hub's chip
+    // landed — the hub's hrefs were /studio?creator=website (page-level
+    // website start), ?creator=image|video|music|game (Create
+    // destination), ?tool=code and ?tool=design (Studio stages) — but
+    // executed in place, never as a trip through a separate hub page.
+    const kinds: StudioEntryCreateType[] = [
+      "website",
+      "image",
+      "video",
+      "music",
+      "code",
+      "design",
+      "game",
+    ];
+
+    it("routes Website to the page-level website start, not a creator/tool", () => {
+      expect(resolveEntryCreateType("website")).toEqual({ kind: "website-start" });
+    });
+
+    it("routes Image/Video/Music/Game to the Create destination in that mode", () => {
+      for (const mode of ["image", "video", "music", "game"] as const) {
+        expect(resolveEntryCreateType(mode)).toEqual({ kind: "creator", mode });
+        // Parity with the hub's ?creator= deep link: the same state the
+        // deep link resolves to on load.
+        expect(resolveCreatorDestination(mode)).toEqual({
+          destination: "create",
+          mode,
+        });
+      }
+    });
+
+    it("routes Code/Design to the Studio destination's matching stage tool", () => {
+      for (const tool of ["code", "design"] as const) {
+        expect(resolveEntryCreateType(tool)).toEqual({ kind: "tool", tool });
+        // Parity with the hub's ?tool= deep link.
+        const dest = mapLegacyToolToDestination(tool);
+        expect(dest.destination).toBe("studio");
+        expect(dest.mode).toBe(tool);
+      }
+    });
+
+    it("covers exactly the seven creation types", () => {
+      for (const kind of kinds) {
+        expect(resolveEntryCreateType(kind)).toBeTruthy();
+      }
     });
   });
 });

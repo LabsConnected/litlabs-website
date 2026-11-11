@@ -5,41 +5,46 @@ import path from "node:path";
 const root = path.resolve(__dirname, "..");
 const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
 
-describe("Studio prime landing owns the canonical create experience", () => {
-  const landing = read("src/app/(app)/studio/components/StudioPrimeLanding.tsx");
-  const composer = read("src/components/dashboard/v3/BuildConsole.tsx");
+describe("Studio one-chat entry owns the canonical create experience", () => {
+  // One-chat entry (Larry's directive, 2026-11-11; ART-20261111-031)
+  // supersedes the prime-landing premise of the original gate: the
+  // "What do you want to make?" hub page is retired and /studio opens
+  // straight into the main chat. The create experience — describe
+  // once, creation-type entry hints — lives inside that one chat.
+  const page = read("src/app/(app)/studio/page.tsx");
+  const commandStudio = read("src/app/(app)/studio/components/CommandStudio.tsx");
+  const emptyState = read("src/app/(app)/studio/components/LiTEmptyState.tsx");
+  const destinations = read("src/app/(app)/studio/lib/studio-destinations.ts");
   const legacyCreate = read("src/app/(app)/create/page.tsx");
   const dashboardRoute = read("src/app/(app)/dashboard/page.tsx");
   const navigation = read("src/lib/navigation.ts");
 
-  it("uses one universal composer on the Studio prime landing", () => {
-    // The launcher was ported, not rebuilt: the landing mounts the same
-    // BuildConsole component the retired dashboard carried, next to the
-    // same RecentWork recent-projects list.
-    expect(landing).toContain("BuildConsole");
-    expect(landing).toContain("RecentWork");
-    expect(landing).not.toContain("QuickStart");
-    expect(composer).toContain("What do you want to make?");
-    expect(composer).toContain('fetch("/api/litt/intent"');
-    expect(composer).toContain('params.set("intent"');
-    expect(composer.match(/onSubmit=\{submit\}/g)).toHaveLength(1);
+  it("renders the one chat at the /studio entry — the hub landing is retired", () => {
+    expect(page).not.toContain("StudioPrimeLanding");
+    expect(
+      fs.existsSync(
+        path.join(root, "src/app/(app)/studio/components/StudioPrimeLanding.tsx"),
+      ),
+    ).toBe(false);
+    expect(page).toContain("CommandStudio");
   });
 
-  it("honors deep-link prompts from the legacy /create redirect", () => {
-    expect(landing).toContain('initialPrompt={searchParams.get("prompt")');
-    expect(composer).toContain("initialPrompt");
+  it("carries a describe deep link into the one chat's composer", () => {
+    // ?prompt= is consumed by CommandStudio itself (the first-run
+    // handoff channel): the text lands in the chat's own composer —
+    // typed once at entry, never re-asked, never a second prompt.
+    expect(commandStudio).toContain('takeFirstRunPrompt(searchParams.get("prompt"))');
   });
 
-  it("exposes creation-type shortcuts without bypassing the router", () => {
+  it("exposes the seven creation types as entry hints inside the one chat", () => {
     for (const label of ["Website", "Image", "Video", "Music", "Code", "Design", "Game"]) {
-      expect(composer).toContain(`label: "${label}"`);
+      expect(emptyState).toContain(`label: "${label}"`);
     }
-    // Media/game chips deep-link into Studio's authoritative creator
-    // surfaces; the typed prompt always goes through the intent router.
-    for (const creator of ["image", "video", "music", "game"]) {
-      expect(composer).toContain(`href: "/studio?creator=${creator}"`);
-    }
-    expect(composer).toContain('fetch("/api/litt/intent"');
+    expect(emptyState).toContain("entry-create-type-chips");
+    expect(emptyState).toContain("onCreateType");
+    // The in-place routing for those hints is resolved by the pure
+    // destinations mapping (hub-href parity, executed in place).
+    expect(destinations).toContain("resolveEntryCreateType");
   });
 
   it("redirects legacy /create links to Studio and preserves query params", () => {

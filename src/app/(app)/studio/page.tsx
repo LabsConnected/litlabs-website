@@ -6,7 +6,6 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
 import { track } from "@/lib/analytics";
 import CommandStudio from "./components/CommandStudio";
-import StudioPrimeLanding from "./components/StudioPrimeLanding";
 import FirstRunWelcome from "./components/FirstRunWelcome";
 import {
   peekFirstRunProjectId,
@@ -398,16 +397,16 @@ function StudioHub() {
     );
   }
 
-  // Studio prime (ART-20261110-029): a bare /studio visit lands on the
-  // prime landing — the universal create launcher + recent projects
-  // folded in from the retired dashboard, so Studio is the one
-  // signed-in home. Any deep link (?project=, ?tool=, ?creator=,
-  // ?prompt=…) opens the CommandStudio workspace directly, exactly as
-  // before; a pending first-run handoff does the same.
-  if (searchParams.toString() === "" && !peekFirstRunProjectId()) {
-    return <StudioPrimeLanding />;
-  }
-
+  // One-chat entry (Larry's directive, 2026-11-11; ART-20261111-031),
+  // superseding the Studio prime landing (ART-20261110-029): the
+  // "What do you want to make?" hub page is RETIRED. A bare /studio
+  // visit falls through to the CommandStudio workspace below — the
+  // one chat — exactly like every deep link (?project=, ?tool=,
+  // ?creator=, ?prompt=…) and like a pending first-run handoff. The
+  // creation-type chips survive only as entry hints inside that chat
+  // (LiTEmptyState, resolved by resolveEntryCreateType), and a
+  // describe typed at entry lands in the chat's own composer via
+  // ?prompt= (takeFirstRunPrompt) — typed once, never re-asked.
   return <CommandStudio />;
 }
 
