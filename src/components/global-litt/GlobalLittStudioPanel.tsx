@@ -52,7 +52,18 @@ function toPanelMessages(rows: CanonicalMessageRow[]): Message[] {
   for (const row of rows) {
     if (row.role !== "user" && row.role !== "assistant") continue;
     if (typeof row.content !== "string") continue;
-    if (row.status !== "completed" && row.status !== "awaiting_approval") continue;
+    // "failed" assistant rows are kept: their content is the run's
+    // truthful failure report (e.g. a quality-gate verdict), and the
+    // docked transcript renders them. Filtering them out here made a
+    // failed run look like silence — the user saw their message and
+    // then nothing at all.
+    if (
+      row.status !== "completed" &&
+      row.status !== "awaiting_approval" &&
+      !(row.role === "assistant" && row.status === "failed")
+    ) {
+      continue;
+    }
     out.push({
       role: row.role,
       content:

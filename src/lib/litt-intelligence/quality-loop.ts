@@ -133,7 +133,21 @@ export const STAGE_REQUIREMENTS: Record<QualityStage, StageRequirement> = {
  * Scope can narrow which stages apply; it can never fabricate evidence
  * for the stages that remain, and it never excuses a failed stage.
  */
-export type QualityTaskScope = "trivial" | "standard" | "full";
+/**
+ * Task scopes the quality gate can run under.
+ * - "full" / "standard" / "trivial": work that CHANGES the project —
+ *   derived from the request text by classifyTaskScope below.
+ * - "inspection": a read-only workspace-inspection turn. This scope is
+ *   NEVER derived from prose here; it is assigned only from the
+ *   kernel's classification signal (kernel taskKind "inspection",
+ *   threaded route → agent loop → session creation). A read produces
+ *   no build/test evidence BY NATURE — gating it on those stages
+ *   failed every correct listing run (live defect, ART-20261111-041).
+ *   Its required stages are exactly the cognitive stages the loop
+ *   files from the request itself; the read's tool output is judged
+ *   as the run's evidence by the completion path, not by this gate.
+ */
+export type QualityTaskScope = "trivial" | "standard" | "full" | "inspection";
 
 /**
  * Stages that must pass with recorded evidence for each task scope.
@@ -152,6 +166,12 @@ export const REQUIRED_STAGES_BY_SCOPE: Record<QualityTaskScope, readonly Quality
   standard: ["understand", "plan", "build", "test"],
   // A new product surface. The complete pipeline, as originally designed.
   full: ["understand", "plan", "design", "build", "run", "inspect", "critique", "test"],
+  // Read-only workspace inspection (kernel-classified): the run must
+  // not mutate, so build/test evidence can never exist. The gate
+  // requires exactly the cognitive stages the loop files from the
+  // request itself; whether the read actually answered is judged from
+  // the tool results by the completion path.
+  inspection: ["understand", "plan"],
 };
 
 /**

@@ -682,6 +682,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     && canonicalCtx.executionMode === "auto";
   const executionRequired =
     !!built.kernelResult.decision.routing.requiresExecution || detcodegenPinned;
+  // Read-only workspace inspection, per the kernel's classification
+  // (#905 pattern group, recorded as routing.taskKind). Such a turn
+  // executes through the tool lane but must never be completed like a
+  // build: the quality session scopes to the stages a read can
+  // evidence, the launch flow returns the read's answer instead of
+  // demanding a mutation, and the completion check below does not
+  // require mutation evidence. The deterministic-codegen pin is an
+  // explicit "answer by generating files" act, so it is never
+  // inspection even if the prose matched the read patterns.
+  const inspectionTurn =
+    built.kernelResult.decision.routing.taskKind === "inspection" && !detcodegenPinned;
 
   const useV2 = canonicalCtx.workspaceExecutionAvailable
     && !!runProjectId
@@ -773,6 +784,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           projectId: runProjectId,
           userId,
           userRequest: resolvedMessage.slice(0, 2000),
+          // Kernel-classified read-only turn: scope the gate to the
+          // evidence a read produces (see quality-loop "inspection").
+          taskScope: inspectionTurn ? ("inspection" as const) : undefined,
         }
       : undefined,
     evalMetadata: {
@@ -1267,6 +1281,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           qualityLoop: cfg.qualityLoop,
           enableDeploy: built.kernelResult.decision.routing.mode === "ship",
           requiresExecution: effectiveRequiresExecution,
+          // Kernel-classified read-only turn: completion is the read's
+          // answer, not a mutation/artifact/preview (launch-flow).
+          // Never true on the V1→V2 reroute — a rerouted turn was
+          // classified non-execution, so it cannot be inspection.
+          readOnly: inspectionTurn,
           // A production execution request is not complete until the
           // agent-created website entry file is physically present in the
           // verified workspace. This is enforced again after approval
@@ -1414,7 +1433,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         // exit-0 command whose output never reached disk), and that
         // alone must not establish completion. See
         // completion-evidence.ts for exactly what counts as proof.
-        const mutationRequired = effectiveRequiresExecution === true;
+        // A read-only inspection turn requires no mutation evidence —
+        // demanding it would mark every correct read "not verified"
+        // and replace its answer with a failure notice. Its completion
+        // evidence is the launch flow's read result (successful tool
+        // calls + quality verdict), already reflected in
+        // launchFlowResult.success below.
+        const mutationRequired = effectiveRequiresExecution === true && !inspectionTurn;
         const v2ToolCalls = v2Result?.toolCalls ?? [];
         const completionRequirement = {
           mutation: mutationRequired,

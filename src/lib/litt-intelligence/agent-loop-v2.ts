@@ -68,6 +68,7 @@ import {
   type QualityLoopSnapshot,
   formatQualityVerdictBlock,
 } from "./quality-loop-flow";
+import type { QualityTaskScope } from "./quality-loop";
 // LiTT Tool Orchestrator (fix/litt-tool-orchestrator): goal → capability
 // planning, tool health, reference-match workflow, run observability.
 import { planCapabilities, buildCapabilityPlanPrompt } from "./capability-planner";
@@ -233,6 +234,14 @@ export interface AgentLoopConfig {
     userId: string;
     /** The user's original request (judge context). Falls back to the first user message. */
     userRequest?: string;
+    /**
+     * System-determined task scope from the kernel's classification
+     * (taskKind "inspection" → "inspection"). Forwarded to the quality
+     * session at creation; a resume ignores it (the snapshot's scope
+     * governs). Unset = the session derives scope from the request
+     * text, exactly as before.
+     */
+    taskScope?: QualityTaskScope;
     /** Server-persisted evidence restored after an approval pause. */
     state?: QualityLoopSnapshot;
   };
@@ -1837,6 +1846,7 @@ async function runAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? userMessage,
       snapshot: cfg.qualityLoop.state,
       isStaticWorkspace: cfg.isStaticWorkspace,
+      taskScope: cfg.qualityLoop.taskScope,
     });
     cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
@@ -3558,6 +3568,7 @@ async function resumeAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? "",
       snapshot: cfg.qualityLoop.state,
       isStaticWorkspace: cfg.isStaticWorkspace,
+      taskScope: cfg.qualityLoop.taskScope,
     });
     cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }

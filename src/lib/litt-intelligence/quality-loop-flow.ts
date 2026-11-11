@@ -136,6 +136,16 @@ export function startQualityLoopSession(opts: {
   snapshot?: QualityLoopSnapshot;
   /** Static (gitless) workspace — narrows the required stage set. */
   isStaticWorkspace?: boolean;
+  /**
+   * System-determined scope override from the kernel's classification
+   * (taskKind "inspection" → "inspection"). When set it replaces the
+   * prose-derived classifyTaskScope result — the kernel already
+   * classified the turn, and re-deriving a scope from the same text is
+   * what gated read-only runs on build/test evidence. Only the kernel
+   * signal may set this; the agent never can. A resume ignores it: the
+   * snapshot carries the scope the run started with.
+   */
+  taskScope?: QualityTaskScope;
 }): QualityLoopSession {
   if (
     opts.snapshot &&
@@ -165,8 +175,10 @@ export function startQualityLoopSession(opts: {
       userId: opts.userId,
     }),
     userRequest: opts.userRequest,
-    // System-determined from the request — never agent-declared.
-    taskScope: classifyTaskScope(opts.userRequest),
+    // System-determined — never agent-declared. The kernel's task-kind
+    // signal wins when present; otherwise the scope is derived from
+    // the request text, exactly as before.
+    taskScope: opts.taskScope ?? classifyTaskScope(opts.userRequest),
     inspectionRan: false,
     critiqueFailed: false,
     observations: [],
@@ -1258,6 +1270,14 @@ const TASK_SCOPE_PROMPT: Record<QualityTaskScope, string[]> = {
     "This is a product build: work every stage in order and declare each one. The visual",
     "judge will score your preview; a below-threshold score means another design pass.",
     "Deploy only if the user asked to ship.",
+  ],
+  inspection: [
+    "",
+    "Task scope for this run: INSPECTION (determined by the system from the request).",
+    "This is a read-only inspection: answer the user's question from the workspace read",
+    "tools (files.list / files.read / search). Do NOT write, modify, or delete any file,",
+    "and do not start previews or run checks. Only the understand and plan stages apply;",
+    "the read results are the evidence for your answer.",
   ],
 };
 
