@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useState, useEffect, useMemo } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { useStudioContextOptional } from "../context/StudioContext";
 import {
   LayoutGrid,
   Search,
@@ -33,7 +34,7 @@ function getYouTubeThumbnail(url: string): string | undefined {
 }
 
 
-type GalleryItem = {
+export type GalleryItem = {
   id: string;
   title: string;
   artist: string;
@@ -45,6 +46,8 @@ type GalleryItem = {
   prompt?: string;
   likes: number;
   createdAt: string;
+  /** Set for items listed from the active project's workspace (agent-generated media). */
+  workspacePath?: string;
 };
 
 type Tab = "all" | "generations" | "discover" | "videos";
@@ -134,12 +137,136 @@ function loadGenerations(): GalleryItem[] {
   );
 }
 
+// ─── Workspace assets ────────────────────────────────────────────────
+// Agent media tools (image.generate / image.stock / video / audio) save
+// into the active project's workspace — they never write the localStorage
+// history keys above, so a bucket fed by localStorage alone shows agent
+// work as "0 items" forever. The bucket therefore also lists the
+// project's asset folders through the project-files API (read-only) and
+// merges them with the history entries.
+
+const WORKSPACE_ASSET_DIRS = [
+  { dir: "assets/images", kind: "image" },
+  { dir: "assets/video", kind: "video" },
+  { dir: "assets/audio", kind: "audio" },
+] as const;
+
+type WorkspaceAssetKind = (typeof WORKSPACE_ASSET_DIRS)[number]["kind"];
+
+const MEDIA_EXTENSIONS: Record<WorkspaceAssetKind, ReadonlySet<string>> = {
+  image: new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "svg", "bmp", "ico"]),
+  video: new Set(["mp4", "webm", "mov"]),
+  audio: new Set(["mp3", "wav", "ogg", "m4a"]),
+};
+
+export function workspaceFileUrl(projectId: string, path: string): string {
+  return `/api/studio-projects/${encodeURIComponent(projectId)}/files/raw?path=${encodeURIComponent(path)}`;
+}
+
+/**
+ * Identity used for dedupe. A media URL that points into a project
+ * workspace — the files/raw endpoint (its `path` param) or any URL whose
+ * path ends with the workspace-relative asset path — identifies as that
+ * workspace path; anything else identifies as the URL itself.
+ */
+export function mediaIdentity(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url, "http://localhost");
+    const rawPath = parsed.searchParams.get("path");
+    if (rawPath && parsed.pathname.includes("/files/raw")) {
+      return `ws:${rawPath.replace(/\\/g, "/")}`;
+    }
+    const suffix = parsed.pathname.match(
+      /(?:^|\/)(assets\/(?:images|video|audio)\/[^/]+)$/,
+    );
+    if (suffix) return `ws:${decodeURIComponent(suffix[1])}`;
+  } catch {
+    /* fall through to URL identity */
+  }
+  return `url:${url}`;
+}
+
+/**
+ * Merge workspace asset items into the bucket: localStorage entries are
+ * kept as-is (their prompt/metadata wins), and a workspace file is added
+ * only when no history entry already references it.
+ */
+export function mergeBucketItems(
+  localItems: GalleryItem[],
+  workspaceItems: GalleryItem[],
+): GalleryItem[] {
+  const seen = new Set<string>();
+  for (const item of localItems) {
+    const identity = mediaIdentity(item.imageUrl ?? item.videoUrl ?? item.audioUrl);
+    if (identity) seen.add(identity);
+  }
+  return [
+    ...localItems,
+    ...workspaceItems.filter((item) => {
+      if (!item.workspacePath) return true;
+      return !seen.has(`ws:${item.workspacePath}`);
+    }),
+  ];
+}
+
+async function loadWorkspaceAssets(projectId: string): Promise<GalleryItem[]> {
+  const items: GalleryItem[] = [];
+  await Promise.all(
+    WORKSPACE_ASSET_DIRS.map(async ({ dir, kind }) => {
+      try {
+        const res = await fetch(
+          `/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(dir)}`,
+          { credentials: "include" },
+        );
+        if (!res.ok) return; // folder doesn't exist in this project — fine
+        const payload = (await res.json().catch(() => null)) as {
+          entries?: unknown;
+        } | null;
+        if (!payload || !Array.isArray(payload.entries)) return;
+        for (const entry of payload.entries) {
+          if (!entry || typeof entry !== "object") continue;
+          const raw = entry as { name?: unknown; type?: unknown };
+          if (raw.type !== "file" || typeof raw.name !== "string") continue;
+          const ext = raw.name.split(".").pop()?.toLowerCase() ?? "";
+          if (!MEDIA_EXTENSIONS[kind].has(ext)) continue;
+          const path = `${dir}/${raw.name}`;
+          const url = workspaceFileUrl(projectId, path);
+          items.push({
+            id: `ws:${path}`,
+            title: raw.name,
+            artist: "Project",
+            category: kind,
+            source: kind,
+            imageUrl: kind === "image" ? url : undefined,
+            videoUrl: kind === "video" ? url : undefined,
+            audioUrl: kind === "audio" ? url : undefined,
+            workspacePath: path,
+            likes: 0,
+            // The listing carries no timestamp; empty means "unknown" and
+            // renders without a date rather than a fabricated one.
+            createdAt: "",
+          });
+        }
+      } catch {
+        /* one folder failing must never break the bucket */
+      }
+    }),
+  );
+  return items.sort((a, b) =>
+    (a.workspacePath ?? "").localeCompare(b.workspacePath ?? ""),
+  );
+}
+
 export default function GalleryTool() {
   const { resolvedColors: T } = useTheme();
+  const studioContext = useStudioContextOptional();
+  const projectId = studioContext?.projectId ?? null;
   const [activeTab, setActiveTab] = useState<Tab>("all");
   const [myItems, setMyItems] = useState<GalleryItem[]>(() =>
     loadGenerations(),
   );
+  const [workspaceItems, setWorkspaceItems] = useState<GalleryItem[]>([]);
   const [apiItems, setApiItems] = useState<GalleryItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
@@ -161,6 +288,23 @@ export default function GalleryTool() {
     const id = requestAnimationFrame(() => setMyItems(loadGenerations()));
     return () => cancelAnimationFrame(id);
   }, [activeTab]);
+
+  // Agent-generated media lives in the project workspace, not in
+  // localStorage — list it so the bucket can show it. Refreshed when the
+  // active project changes and when the user comes back to this tab.
+  useEffect(() => {
+    if (!projectId) {
+      setWorkspaceItems([]);
+      return;
+    }
+    let cancelled = false;
+    loadWorkspaceAssets(projectId).then((items) => {
+      if (!cancelled) setWorkspaceItems(items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, activeTab]);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -234,9 +378,14 @@ export default function GalleryTool() {
     setIsSharing(false);
   };
 
+  const bucketItems = useMemo(
+    () => mergeBucketItems(myItems, workspaceItems),
+    [myItems, workspaceItems],
+  );
+
   const allItems = useMemo(
-    () => [...myItems, ...apiItems],
-    [myItems, apiItems],
+    () => [...bucketItems, ...apiItems],
+    [bucketItems, apiItems],
   );
 
   const videoItems = useMemo(
@@ -268,7 +417,8 @@ export default function GalleryTool() {
       )
       .sort(
         (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          (new Date(b.createdAt).getTime() || 0) -
+          (new Date(a.createdAt).getTime() || 0),
       );
   }, [allItems, activeTab, searchQuery, videoItems]);
 
@@ -315,7 +465,7 @@ export default function GalleryTool() {
 
   const tabs = [
     { id: "all" as Tab, label: `All (${allItems.length})` },
-    { id: "generations" as Tab, label: `My Bucket (${myItems.length})` },
+    { id: "generations" as Tab, label: `My Bucket (${bucketItems.length})` },
     { id: "videos" as Tab, label: `Videos (${videoItems.length})` },
     { id: "discover" as Tab, label: "Discover" },
   ];
@@ -551,9 +701,10 @@ export default function GalleryTool() {
                   {sourceIcon(item.source)}{" "}
                   {item.videoUrl ? "video" : item.source}
                 </div>
-                {(item.source === "image" ||
-                  item.source === "video" ||
-                  item.source === "audio") && (
+                {!item.workspacePath &&
+                  (item.source === "image" ||
+                    item.source === "video" ||
+                    item.source === "audio") && (
                   <button
                     onClick={(e) => handleDelete(item.id, e)}
                     className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
@@ -578,7 +729,8 @@ export default function GalleryTool() {
                     className="text-[9px] opacity-50"
                     style={{ color: T.textMuted }}
                   >
-                    {item.artist} · {item.createdAt}
+                    {item.artist}
+                    {item.createdAt ? ` · ${item.createdAt}` : ""}
                   </span>
                 </div>
               </div>
@@ -698,7 +850,9 @@ export default function GalleryTool() {
                   <span style={{ color: sourceColor(selectedItem.source) }}>
                     {selectedItem.source.toUpperCase()}
                   </span>
-                  <span>{selectedItem.createdAt}</span>
+                  {selectedItem.createdAt && (
+                    <span>{selectedItem.createdAt}</span>
+                  )}
                 </div>
               </div>
               {(selectedItem.imageUrl ||
