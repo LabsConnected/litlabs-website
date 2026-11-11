@@ -264,6 +264,14 @@ export function useInworldSession(
   const sessionGenerationRef = useRef(0);
   /** Whether audio should be sent to Inworld (gated by VAD). */
   const shouldSendAudioRef = useRef(false);
+  /** Whether any audio frames were appended to the current Inworld buffer
+   * since it was last cleared/committed. Guards the push-to-talk Stop path:
+   * committing an empty buffer only draws a server error event. */
+  const bufferHasAudioRef = useRef(false);
+  /** Whether the current buffer was already committed (by the VAD
+   * end-of-speech endpoint). Prevents stopListening() from stacking a
+   * second commit on top of the endpoint's commit. */
+  const bufferCommittedRef = useRef(false);
   /** Unsubscribes the mixer-store listener attached during mic capture. */
   const mixerUnsubRef = useRef<(() => void) | null>(null);
   /** Master output gain node for TTS playback (created lazily per context). */
@@ -495,6 +503,8 @@ export function useInworldSession(
       // Only send audio to Inworld when real speech is detected.
       // This prevents background noise from being transcribed.
       shouldSendAudioRef.current = false;
+      bufferHasAudioRef.current = false;
+      bufferCommittedRef.current = false;
       vadSpeechDurationRef.current = 0;
       vadStateRef.current = "idle";
       const vad = new VoiceActivityDetector(analyser, {
@@ -505,6 +515,9 @@ export function useInworldSession(
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
           }
+          // The buffer was just cleared — nothing captured or committed yet.
+          bufferHasAudioRef.current = false;
+          bufferCommittedRef.current = false;
         },
         onSpeechEnd: (durationMs) => {
           if (process.env.NODE_ENV !== "production") console.debug("[Voice VAD] speech ended", { durationMs });
@@ -513,6 +526,7 @@ export function useInworldSession(
           // Commit the audio buffer so Inworld transcribes it
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+            bufferCommittedRef.current = true;
           }
         },
         onStateChange: (state) => {
@@ -554,6 +568,7 @@ export function useInworldSession(
             audio: base64,
           }),
         );
+        bufferHasAudioRef.current = true;
       };
 
       inputGainNode.connect(processor);
@@ -1121,8 +1136,22 @@ export function useInworldSession(
 
   const stopListening = useCallback(() => {
     stopMicCapture();
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    // Commit ONLY audio that was actually captured and not already
+    // committed by the VAD endpoint. stopMicCapture's VAD teardown fires
+    // onSpeechEnd for in-progress speech, which commits — an unconditional
+    // commit here would stack a second commit on the now-empty buffer and
+    // draw a server error event while the real transcript is still in
+    // flight. And when no speech was ever captured (VAD gate never opened:
+    // silent/wrong device, muted mixer), there is nothing to commit —
+    // sending one produced exactly the "hit Stop, nothing happens (but an
+    // error)" dead end reported from production.
+    if (
+      bufferHasAudioRef.current &&
+      !bufferCommittedRef.current &&
+      wsRef.current?.readyState === WebSocket.OPEN
+    ) {
       wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+      bufferCommittedRef.current = true;
     }
     setState("thinking");
   }, [setState, stopMicCapture]);
@@ -1319,6 +1348,8 @@ export function useInworldSession(
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
     }
+    bufferHasAudioRef.current = false;
+    bufferCommittedRef.current = false;
     if (process.env.NODE_ENV !== "production") console.debug("[Voice] mic paused (TTS echo isolation)");
   }, []);
 

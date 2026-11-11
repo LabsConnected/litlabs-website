@@ -22,10 +22,8 @@
  * - Transcript validation gate rejects filler/noise/empty/duplicate transcripts
  *   (see transcript-validation.ts)
  * - Echo isolation: mic is PAUSED during TTS playback and resumed after cooldown
- * - Default UX: stop recording → finalized transcript auto-sends (autoSendEnabled,
- *   default true per VOICE_GATE_CONFIG.ptt.autoSendDefault). Users who turn
- *   auto-send off get the editable-draft flow: transcript appears as a draft
- *   → user presses Send. A stored preference always beats the default.
+ * - Default UX: stop recording → transcript appears as editable draft → user presses Send.
+ *   Auto-send is an opt-in toggle (autoSendEnabled, default false).
  * - State machine: idle → requesting_permission → connecting → listening →
  *   processing → transcript_ready → sending → assistant_speaking → idle
  * - Only explicit "End Voice" / unmount / fatal error destroys the session
@@ -253,7 +251,7 @@ const defaultCtx: VoiceSessionCtx = {
   latencies: computeLatencies(createInitialTimingMetrics()),
   ttsEnabled: true,
   voiceAvailable: true,
-  autoSendEnabled: VOICE_GATE_CONFIG.ptt.autoSendDefault,
+  autoSendEnabled: false,
   diagnostics: defaultDiagnostics,
   startVoice: noop,
   stopVoice: noop,
@@ -312,8 +310,7 @@ export function VoiceSessionProvider({
   });
   const [autoSendEnabled, setAutoSendEnabled] = useState<boolean>(() => {
     if (typeof window === "undefined") return VOICE_GATE_CONFIG.ptt.autoSendDefault;
-    const stored = localStorage.getItem(AUTO_SEND_PREF_KEY);
-    return stored === null ? VOICE_GATE_CONFIG.ptt.autoSendDefault : stored === "1";
+    return localStorage.getItem(AUTO_SEND_PREF_KEY) === "1";
   });
   const [voiceAvailable, setVoiceAvailable] = useState<boolean>(true);
   const [diagnostics, setDiagnostics] = useState<VoiceDiagnostics>(defaultDiagnostics);
@@ -413,8 +410,18 @@ export function VoiceSessionProvider({
 
         if (!validation.accepted) {
           console.debug("[Voice Pipeline] transcript rejected", validation);
-          // Don't send — write into composer if it's not empty/filler
-          if (validation.reason !== "empty" && validation.reason !== "filler_only" && validation.reason !== "no_speech_detected") {
+          // Don't auto-send — write into the composer as an editable draft
+          // instead. Only content-free rejections (empty / filler-only) are
+          // dropped outright. A "no_speech_detected" rejection is NOT
+          // dropped: the STT engine produced a real, non-filler transcript,
+          // and only the client-side VAD duration metadata failed the gate.
+          // That metadata is unreliable on the push-to-talk Stop path (it
+          // is written solely by VAD speech-end callbacks), so discarding
+          // the user's actual words here made real speech vanish with no
+          // trace — the production "I hit Stop and nothing happens" bug.
+          // The draft fallback keeps the anti-ghost property (nothing is
+          // auto-sent) without silently destroying real transcripts.
+          if (validation.reason !== "empty" && validation.reason !== "filler_only") {
             if (onTranscriptCompleteRef.current) {
               onTranscriptCompleteRef.current(trimmed);
               setVoiceState("idle");
@@ -733,6 +740,17 @@ export function VoiceSessionProvider({
   const stopVoice = useCallback(() => {
     console.debug("[Voice] stopVoice");
     const wasSpeaking = voiceOutputStateRef.current === "speaking";
+    // Capture whether the VAD heard any speech during this hold BEFORE
+    // stopListening() tears the VAD down. Two signals: a measured speech
+    // duration from an endpointed utterance, or the VAD currently sitting
+    // in speech_detected (user stopped mid-utterance). Read defensively —
+    // older test doubles may not implement getLastSpeechDurationMs.
+    const lastSpeechMs =
+      typeof inworldSession.getLastSpeechDurationMs === "function"
+        ? inworldSession.getLastSpeechDurationMs()
+        : 0;
+    const heardSpeech =
+      lastSpeechMs > 0 || inworldSession.getVadState() === "speech_detected";
     if (inworldConnectedRef.current) {
       // Stop the mic and commit the audio buffer so Inworld can finish STT.
       // Do NOT disconnect the WebSocket — the STT response
@@ -761,6 +779,10 @@ export function VoiceSessionProvider({
 
     // Safety timeout: if STT doesn't produce a transcript within 8s,
     // transition back to idle so the user isn't stuck in "processing".
+    // If the VAD never heard speech during the hold, say so — a silent
+    // return to idle left users with "I talked, hit Stop, nothing
+    // happened" and no hint that the microphone captured silence (wrong
+    // or dead input device, muted mixer, level under the VAD threshold).
     const gen = sessionGenerationRef.current;
     window.setTimeout(() => {
       if (
@@ -768,6 +790,11 @@ export function VoiceSessionProvider({
         voiceStateRef.current === "processing"
       ) {
         console.debug("[Voice] STT timeout — returning to idle");
+        if (!heardSpeech) {
+          setErrorMessage(
+            "I didn't hear anything — check that the right microphone is selected and not muted, then tap the mic and try again.",
+          );
+        }
         setVoiceState("idle");
         voiceStateRef.current = "idle";
       }
