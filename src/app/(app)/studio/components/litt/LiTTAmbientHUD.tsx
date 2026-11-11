@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import type { ComponentType, CSSProperties } from "react";
 import { useExecutionStore, type ExecutionPhase } from "../../stores/useExecutionStore";
+import { approvalAwaitingDecision } from "../../lib/approval-awaiting";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 import type { DeviceStatus } from "@/lib/litt/live/types";
 
@@ -129,6 +130,10 @@ export default function LiTTAmbientHUD({
   const execPhase = useExecutionStore((s) => s.phase);
   const execRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
+  // The indicator means "waiting on your decision" — a gate already
+  // decided (submitting/executing) must not keep showing it.
+  const approvalWaiting = approvalAwaitingDecision(pendingApproval, approvalPhase);
 
   // Canonical RuntimeStore from terminal-server (Socket.IO)
   // Takes priority when a deterministic command is running.
@@ -208,7 +213,7 @@ export default function LiTTAmbientHUD({
       )}
 
       {/* Approval indicator */}
-      {pendingApproval && (
+      {approvalWaiting && (
         <div
           className="flex h-6 w-6 items-center justify-center rounded-md"
           style={{

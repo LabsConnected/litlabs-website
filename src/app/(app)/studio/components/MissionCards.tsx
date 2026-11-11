@@ -34,6 +34,7 @@ import {
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
 import { describeSourceRows } from "../lib/source-rows";
 import { useExecutionStore, type ExecutionPhase } from "../stores/useExecutionStore";
+import { approvalAwaitingDecision } from "../lib/approval-awaiting";
 import { useStudioAgentStore, AGENT_META } from "../stores/useStudioAgentStore";
 
 export interface MissionCardsProps {
@@ -242,6 +243,12 @@ export default function MissionCards({
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
+  // A gate whose decision already landed (submitting/executing) is not
+  // "waiting" — pendingApproval stays mounted through the resume by
+  // design, and reading its presence alone contradicted the chat card's
+  // "Approved — running..." on the same screen (2026-11-11).
+  const approvalWaiting = approvalAwaitingDecision(pendingApproval, approvalPhase);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
   const afterCheckpoint = useExecutionStore((s) => s.afterCheckpoint);
   // Persisted run checkpoints survive a refresh: hydrate the store from
@@ -280,7 +287,8 @@ export default function MissionCards({
 
   /* ── Contextual hints derived from real store state ───────────── */
   const hints: string[] = [];
-  if (pendingApproval) hints.push("Approval waiting — review the request before work continues.");
+  if (approvalWaiting) hints.push("Approval waiting — review the request before work continues.");
+  if (pendingApproval && !approvalWaiting) hints.push("Approval granted — the run is continuing.");
   if (isRunning) hints.push(`Run in progress — step ${toolCalls.length + 1}.`);
   if (hasCheckpoint && hasChanges && !isRunning) hints.push("Checkpoint recorded — restore if you need to undo changes.");
   const terminalHealth = terminalHealthOf(capabilities);
@@ -344,7 +352,7 @@ export default function MissionCards({
             </span>
           }
         />
-        {pendingApproval && (
+        {approvalWaiting && (
           <div
             style={{
               display: "inline-flex",

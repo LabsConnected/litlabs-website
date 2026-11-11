@@ -272,3 +272,102 @@ describe("ApprovalCard — image request preview", () => {
     expect(screen.getByText(/No image generated yet/)).toBeTruthy();
   });
 });
+
+describe("ApprovalCard — request details: WHAT is being approved (approve-in-chat)", () => {
+  // Larry, 2026-11-11: four image.stock gates in one run were
+  // indistinguishable because the card showed only the tool name. The
+  // paused-run inputs carry the subject (image.stock: { projectId, query })
+  // — the card must render it for every tool, not just image.generate.
+  it("shows the image.stock subject (query) from the paused-run inputs", () => {
+    render(
+      <ApprovalCard
+        approval={{
+          toolId: "image.stock",
+          reason: "Mutation requires approval in ACT mode",
+          pausedRunId: "eedea9cb-0000-4000-8000-000000000001",
+          inputs: { projectId: "proj-1", query: "people enjoying food in a food court" },
+        }}
+        onResolve={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("approval-request-details")).toBeTruthy();
+    expect(screen.getByText(/people enjoying food in a food court/)).toBeTruthy();
+  });
+
+  it("two image.stock gates with different queries are distinguishable", () => {
+    const { unmount } = render(
+      <ApprovalCard
+        approval={{
+          toolId: "image.stock",
+          reason: "Mutation requires approval in ACT mode",
+          inputs: { projectId: "proj-1", query: "chef grilling burgers closeup" },
+        }}
+        onResolve={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/chef grilling burgers closeup/)).toBeTruthy();
+    expect(screen.queryByText(/families at picnic tables/)).toBeNull();
+    unmount();
+    render(
+      <ApprovalCard
+        approval={{
+          toolId: "image.stock",
+          reason: "Mutation requires approval in ACT mode",
+          inputs: { projectId: "proj-1", query: "families at picnic tables" },
+        }}
+        onResolve={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/families at picnic tables/)).toBeTruthy();
+  });
+
+  it("never renders internal ids or credential-shaped values from inputs", () => {
+    render(
+      <ApprovalCard
+        approval={{
+          toolId: "image.stock",
+          reason: "Mutation requires approval in ACT mode",
+          inputs: {
+            projectId: "proj-secret-id",
+            conversationId: "conv-secret-id",
+            apiKey: "sk-should-not-render",
+            query: "cats on a porch",
+          },
+        }}
+        onResolve={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/cats on a porch/)).toBeTruthy();
+    expect(screen.queryByText(/proj-secret-id/)).toBeNull();
+    expect(screen.queryByText(/conv-secret-id/)).toBeNull();
+    expect(screen.queryByText(/sk-should-not-render/)).toBeNull();
+  });
+
+  it("shows short scalar params as chips for non-image tools", () => {
+    render(
+      <ApprovalCard
+        approval={{
+          toolId: "image.stock",
+          reason: "Mutation requires approval in ACT mode",
+          inputs: { projectId: "proj-1", query: "coffee beans roast", provider: "pollinations" },
+        }}
+        onResolve={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/provider: pollinations/)).toBeTruthy();
+  });
+
+  it("does not duplicate a file path already listed as an affected file", () => {
+    render(
+      <ApprovalCard
+        approval={{
+          toolId: "files.write",
+          reason: "Mutation requires approval in ACT mode",
+          inputs: { path: "src/index.html", content: "<html>hello</html>" },
+        }}
+        onResolve={vi.fn()}
+      />
+    );
+    expect(screen.getAllByText(/src\/index\.html/).length).toBe(1);
+  });
+});
