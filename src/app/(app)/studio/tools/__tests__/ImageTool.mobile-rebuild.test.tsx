@@ -148,8 +148,9 @@ describe("ImageTool mobile rebuild", () => {
     const src = fs.readFileSync(IMAGE_TOOL_PATH, "utf8");
     const desktopStart = src.indexOf("LEFT PANEL: Controls (desktop only)");
     const desktop = src.slice(desktopStart);
-    // Desktop keeps its own advanced inline panel and hover actions
+    // Desktop keeps its own advanced inline panel and hover actions.
+    // (Theme pass: the panel surface is token-driven now, not glass-panel.)
     expect(desktop).toContain("hidden md:flex");
-    expect(desktop).toContain("glass-panel");
+    expect(desktop).toContain("tokens.surface");
   });
 });

@@ -22,7 +22,10 @@ const studioCtx = vi.hoisted(() => ({
 const notifyAssetsChanged = vi.hoisted(() => vi.fn());
 
 vi.mock("@/context/ThemeContext", () => ({
-  useTheme: () => ({ resolvedColors: new Proxy({}, { get: () => "#111111" }) }),
+  useTheme: () => ({
+    resolvedColors: new Proxy({}, { get: () => "#111111" }),
+    tokens: new Proxy({}, { get: () => "#111111" }),
+  }),
 }));
 vi.mock("@/context/WalletContext", () => ({
   useWallet: () => ({ balance: 100, refresh: () => Promise.resolve() }),
