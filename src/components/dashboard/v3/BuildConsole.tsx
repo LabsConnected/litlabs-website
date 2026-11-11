@@ -33,11 +33,16 @@ import { resolveBuildRoute } from "./build-routing";
  */
 
 const SUGGESTIONS = [
-  { label: "Website", href: "/studio?tool=chat", icon: Layout },
+  // Website has a dedicated start path (studio/page.tsx): it creates
+  // a fresh blank project and pins it — it must NOT resolve into the
+  // currently selected project the way ?tool=chat did (audit A1-2:
+  // Website and Code were byte-identical generic doors; Code now
+  // opens the real code surface via the existing ?tool=code mapping).
+  { label: "Website", href: "/studio?creator=website", icon: Layout },
   { label: "Image", href: "/studio?creator=image", icon: ImageIcon },
   { label: "Video", href: "/studio?creator=video", icon: Play },
   { label: "Music", href: "/studio?creator=music", icon: Music },
-  { label: "Code", href: "/studio?tool=chat", icon: Code2 },
+  { label: "Code", href: "/studio?tool=code", icon: Code2 },
   { label: "Design", href: "/studio?tool=design", icon: Palette },
   { label: "Game", href: "/studio?creator=game", icon: Gamepad2 },
 ];

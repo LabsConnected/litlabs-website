@@ -1,5 +1,27 @@
 "use client";
 
+/**
+ * LiTEmptyState — the empty-conversation surface.
+ *
+ * Larry's directive (2026-11-10): the chat must open straight into
+ * the conversation — no welcome interstitial. This surface used to
+ * be a full-screen "first mission launchpad" (hero presence,
+ * greeting headline, describe-your-business funnel, setup-check
+ * theater). That welcome screen is gone. What remains is only what
+ * is functional:
+ *
+ *  - A compact state notice when the launchpad is NOT ready
+ *    (blocked / preparing / provider or terminal trouble): the
+ *    honest title + description, the real primary action when one
+ *    exists (prepare/retry workspace, configure provider, connect
+ *    terminal…), and the expandable setup facts behind the status
+ *    line. Ready states render NO notice — silence means ready.
+ *  - The starter chips (hidden while blocked): entry hints that
+ *    prime the composer via `studio:ask-litt`; nothing runs until
+ *    the user sends.
+ *  - Recent conversations, when a selector was provided.
+ */
+
 import { useState } from "react";
 import {
   AlertCircle,
@@ -14,10 +36,7 @@ import {
   Wand2,
   Wrench,
 } from "lucide-react";
-import LiTTPresence from "./LiTTPresence";
 import RecentConversations from "./RecentConversations";
-import { DescribeBusinessBox } from "@/components/studio/DescribeBusinessBox";
-import type { BusinessProfile } from "@/lib/business-profile";
 import type {
   FirstMissionActionId,
   FirstMissionFact,
@@ -35,10 +54,10 @@ const FACT_META: Record<
 };
 
 /**
- * Starter intents for the first screen. Tapping one primes the composer via
- * the canonical `studio:ask-litt` event (the same pattern StudioPreviewPanel
- * and the canvas toolbar use): the prompt lands in the chat box and nothing
- * runs until the user sends it.
+ * Starter intents. Tapping one primes the composer via the canonical
+ * `studio:ask-litt` event (the same pattern StudioPreviewPanel and
+ * the canvas toolbar use): the prompt lands in the chat box and
+ * nothing runs until the user sends it.
  */
 const STARTER_CHIPS: { label: string; prompt: string; icon: typeof Globe }[] = [
   { label: "Build my business website", prompt: "Build a website for my business", icon: Globe },
@@ -68,76 +87,181 @@ function statusFor(key: FirstMissionLaunchpadState["key"]): {
 }
 
 export default function LiTEmptyState({
-  displayName,
   launchpadState,
   onPrimaryAction,
   onSelectConversation,
-  hideDescribeBox = false,
 }: {
-  displayName?: string | null;
   launchpadState: FirstMissionLaunchpadState;
   onPrimaryAction: (action: FirstMissionActionId) => void;
   onSelectConversation?: (conversationId: string) => void;
-  hideDescribeBox?: boolean;
 }) {
   const [showChecks, setShowChecks] = useState(false);
-  const greetingName = displayName?.trim();
   const action = launchpadState.primaryAction;
   const isBlocked = launchpadState.key === "blocked";
+  const isReady =
+    launchpadState.key === "verified" || launchpadState.key === "inspection_proven";
   const status = statusFor(launchpadState.key);
-  const headline = isBlocked
-    ? launchpadState.title
-    : greetingName
-      ? `${greetingName}, what do you want LiTT to do?`
-      : "What do you want LiTT to do?";
-
-  const handleBusinessConfirmed = ({ profile }: { profile: BusinessProfile }) => {
-    const desc = profile.description?.trim();
-    primeComposer(desc ? `Build a website for my business: ${desc}` : "Build a website for my business");
-  };
 
   return (
     <div
-      className="relative flex min-h-full flex-col items-center justify-center overflow-hidden px-4 py-5 sm:py-8 animate-fadeInUp"
+      className="relative flex w-full flex-col px-4 py-4"
       style={{ color: "var(--text-primary)" }}
       data-testid="empty-state"
       data-launchpad-state={launchpadState.key}
       aria-live="polite"
-      aria-label="First mission launchpad"
+      aria-label="Conversation start"
     >
-      <div className="relative mx-auto flex w-full max-w-3xl flex-col items-center gap-5">
-        <div className="relative grid min-h-[140px] place-items-center" style={{ overflow: "visible" }}>
-          <LiTTPresence state="idle" variant="empty-state" size="xl" />
-          <span
-            className="glass-status-pill absolute -bottom-2"
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+        {!isReady && (
+          <section
+            className="w-full rounded-xl border px-4 py-3"
             style={{
-              borderColor: "var(--glass-border-green)",
-              color: "var(--glass-green)",
+              borderColor: "var(--studio-border-strong)",
+              backgroundColor: "var(--studio-surface)",
             }}
+            aria-label="Workspace status"
+            data-testid="first-mission-notice"
           >
-            LiTT · Operating
-          </span>
-        </div>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 max-w-xl">
+                <div
+                  className="text-sm font-black tracking-tight"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  {launchpadState.title}
+                </div>
+                <p
+                  className="mt-1 text-[13px] leading-relaxed"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {launchpadState.description}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowChecks((v) => !v)}
+                aria-expanded={showChecks}
+                data-testid="first-mission-status"
+                className="inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] transition hover:opacity-80"
+                style={{
+                  borderColor:
+                    status.tone === "ready"
+                      ? "rgba(114,242,56,0.28)"
+                      : status.tone === "busy"
+                        ? "rgba(227,179,65,0.28)"
+                        : "rgba(252,165,165,0.28)",
+                  backgroundColor:
+                    status.tone === "ready"
+                      ? "rgba(114,242,56,0.06)"
+                      : status.tone === "busy"
+                        ? "rgba(227,179,65,0.06)"
+                        : "rgba(252,165,165,0.06)",
+                  color:
+                    status.tone === "ready"
+                      ? "var(--litt-primary)"
+                      : status.tone === "busy"
+                        ? "#e3b341"
+                        : "#fca5a5",
+                }}
+              >
+                {status.tone === "busy" ? (
+                  <Loader2 size={11} className="animate-spin" aria-hidden />
+                ) : (
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
+                )}
+                {status.text}
+                <ChevronDown
+                  size={11}
+                  aria-hidden
+                  className={`transition-transform ${showChecks ? "rotate-180" : ""}`}
+                />
+              </button>
+            </div>
 
-        <div className="max-w-2xl text-center">
-          <h1
-            className="text-xl font-black tracking-tight sm:text-2xl lg:text-3xl"
-            style={{ color: "var(--text-primary)" }}
-          >
-            {headline}
-          </h1>
-          <p
-            className="mx-auto mt-2 max-w-xl text-[13px] leading-relaxed sm:text-sm"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {launchpadState.description}
-          </p>
-        </div>
+            {showChecks && (
+              <section
+                className="mt-3 w-full"
+                aria-label="Setup checks"
+                data-testid="first-mission-facts"
+              >
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {launchpadState.facts.map((item) => {
+                    const meta = FACT_META[item.status];
+                    const Icon = meta.icon;
+                    return (
+                      <div
+                        key={item.label}
+                        className="flex min-w-0 items-start gap-2.5 rounded-xl border px-3 py-3"
+                        style={{
+                          borderColor: "var(--studio-border-strong)",
+                          backgroundColor: "rgba(255,255,255,0.02)",
+                        }}
+                      >
+                        <Icon size={14} className="mt-0.5 shrink-0" style={{ color: meta.color }} aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>
+                              {item.label}
+                            </span>
+                            <span className="text-[9px] font-black uppercase tracking-[0.12em]" style={{ color: meta.color }}>
+                              {meta.label}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>
+                            {item.detail}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {action ? (
+              <button
+                type="button"
+                onClick={() => onPrimaryAction(action.id)}
+                disabled={action.disabled}
+                aria-describedby={action.disabledReason ? "first-mission-action-reason" : undefined}
+                className="mt-3 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-[12px] font-black transition-all hover:-translate-y-0.5 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+                style={{
+                  borderColor: "rgba(114,242,56,0.38)",
+                  backgroundColor: "rgba(114,242,56,0.10)",
+                  color: "var(--litt-primary)",
+                }}
+                data-testid="first-mission-primary-action"
+              >
+                {action.label}
+                <ArrowRight size={14} aria-hidden />
+              </button>
+            ) : (
+              <div
+                className="mt-3 w-full rounded-xl border px-4 py-3 text-[11px] font-medium"
+                style={{
+                  borderColor: "rgba(227,179,65,0.22)",
+                  backgroundColor: "rgba(227,179,65,0.06)",
+                  color: "#e3b341",
+                }}
+                role="status"
+              >
+                {launchpadState.key === "workspace_preparing"
+                  ? "LiTT is still getting set up — everything unlocks when it's done."
+                  : "Nothing is available until the checks finish."}
+              </div>
+            )}
+            {action?.disabledReason && (
+              <p id="first-mission-action-reason" className="mt-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
+                {action.disabledReason}
+              </p>
+            )}
+          </section>
+        )}
 
         {!isBlocked && (
-          <>
+          <div>
             <div
-              className="flex w-full max-w-xl flex-wrap items-center justify-center gap-2"
+              className="flex w-full flex-wrap items-center gap-2"
               role="group"
               aria-label="Starter ideas"
               data-testid="first-mission-starter-chips"
@@ -162,162 +286,11 @@ export default function LiTEmptyState({
                 );
               })}
             </div>
-
-            {!hideDescribeBox && (
-              <div className="w-full max-w-xl" data-testid="first-mission-describe-box">
-                <DescribeBusinessBox
-                  variant="studio"
-                  projectId={launchpadState.projectId}
-                  onConfirmed={handleBusinessConfirmed}
-                />
-              </div>
-            )}
-          </>
-        )}
-
-        <div className="flex w-full max-w-md flex-col items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowChecks((v) => !v)}
-            aria-expanded={showChecks}
-            data-testid="first-mission-status"
-            className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] transition hover:opacity-80"
-            style={{
-              borderColor:
-                status.tone === "ready"
-                  ? "rgba(114,242,56,0.28)"
-                  : status.tone === "busy"
-                    ? "rgba(227,179,65,0.28)"
-                    : "rgba(252,165,165,0.28)",
-              backgroundColor:
-                status.tone === "ready"
-                  ? "rgba(114,242,56,0.06)"
-                  : status.tone === "busy"
-                    ? "rgba(227,179,65,0.06)"
-                    : "rgba(252,165,165,0.06)",
-              color:
-                status.tone === "ready"
-                  ? "var(--litt-primary)"
-                  : status.tone === "busy"
-                    ? "#e3b341"
-                    : "#fca5a5",
-            }}
-          >
-            {status.tone === "busy" ? (
-              <Loader2 size={11} className="animate-spin" aria-hidden />
-            ) : (
-              <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
-            )}
-            {status.text}
-            <ChevronDown
-              size={11}
-              aria-hidden
-              className={`transition-transform ${showChecks ? "rotate-180" : ""}`}
-            />
-          </button>
-
-          {showChecks && (
-            <section
-              className="glass-panel w-full p-4 sm:p-5"
-              aria-label="Setup checks"
-              data-testid="first-mission-facts"
-            >
-              <div className="glass-section-header">Setup checks</div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {launchpadState.facts.map((item) => {
-                  const meta = FACT_META[item.status];
-                  const Icon = meta.icon;
-                  return (
-                    <div
-                      key={item.label}
-                      className="flex min-w-0 items-start gap-2.5 rounded-xl border px-3 py-3"
-                      style={{
-                        borderColor: "var(--studio-border-strong)",
-                        backgroundColor: "rgba(255,255,255,0.02)",
-                      }}
-                    >
-                      <Icon size={14} className="mt-0.5 shrink-0" style={{ color: meta.color }} aria-hidden />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>
-                            {item.label}
-                          </span>
-                          <span className="text-[9px] font-black uppercase tracking-[0.12em]" style={{ color: meta.color }}>
-                            {meta.label}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>
-                          {item.detail}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
-          {action ? (
-            launchpadState.key === "verified" ? (
-              <button
-                type="button"
-                onClick={() => onPrimaryAction(action.id)}
-                disabled={action.disabled}
-                className="mt-1 inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[11px] font-bold transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
-                style={{
-                  borderColor: "var(--studio-border-strong)",
-                  color: "var(--text-secondary)",
-                }}
-                data-testid="first-mission-primary-action"
-              >
-                {action.label}
-                <ArrowRight size={12} aria-hidden />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => onPrimaryAction(action.id)}
-                disabled={action.disabled}
-                aria-describedby={action.disabledReason ? "first-mission-action-reason" : undefined}
-                className="group flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-[12px] font-black transition-all hover:-translate-y-0.5 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-                style={{
-                  borderColor: "rgba(114,242,56,0.38)",
-                  backgroundColor: "rgba(114,242,56,0.10)",
-                  color: "var(--litt-primary)",
-                  boxShadow: "0 8px 28px rgba(114,242,56,0.08)",
-                }}
-                data-testid="first-mission-primary-action"
-              >
-                {action.label}
-                <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" aria-hidden />
-              </button>
-            )
-          ) : (
-            <div
-              className="w-full rounded-xl border px-4 py-3 text-center text-[11px] font-medium"
-              style={{
-                borderColor: "rgba(227,179,65,0.22)",
-                backgroundColor: "rgba(227,179,65,0.06)",
-                color: "#e3b341",
-              }}
-              role="status"
-            >
-              {launchpadState.key === "workspace_preparing"
-                ? "LiTT is still getting set up — everything unlocks when it's done."
-                : "Nothing is available until the checks finish."}
-            </div>
-          )}
-          {action?.disabledReason && (
-            <p id="first-mission-action-reason" className="text-center text-[10px]" style={{ color: "var(--text-muted)" }}>
-              {action.disabledReason}
-            </p>
-          )}
-          {!isBlocked && (
-            <p className="text-center text-[10px]" style={{ color: "var(--text-muted)" }}>
+            <p className="mt-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
               Choosing one fills in the chat box — nothing runs until you send it.
             </p>
-          )}
-        </div>
+          </div>
+        )}
 
         {onSelectConversation && (
           <section className="glass-panel w-full p-4" aria-label="Recent conversations">
