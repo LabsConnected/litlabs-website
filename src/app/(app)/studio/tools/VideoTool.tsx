@@ -22,6 +22,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { apiFetch, readApiResponse, type ApiJson } from "@/lib/api-response";
+import { useTheme } from "@/context/ThemeContext";
 import { notifyAssetsChanged } from "../hooks/useAssetsRefresh";
 import { useStudioContext } from "../context/StudioContext";
 
@@ -129,9 +130,10 @@ function ChipRow({
   onToggle: (val: string) => void;
   accentColor: string;
 }) {
+  const { tokens } = useTheme();
   return (
     <div>
-      <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">{label}</div>
+      <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>{label}</div>
       <div className="flex flex-wrap gap-1.5">
         {options.map((opt) => {
           const isSelected = selected.includes(opt);
@@ -143,9 +145,9 @@ function ChipRow({
                 isSelected ? "scale-[1.02]" : ""
               }`}
               style={{
-                borderColor: isSelected ? `${accentColor}80` : "rgba(255,255,255,0.08)",
-                background: isSelected ? `${accentColor}18` : "rgba(255,255,255,0.03)",
-                color: isSelected ? accentColor : "rgba(255,255,255,0.55)",
+                borderColor: isSelected ? `${accentColor}80` : tokens.border,
+                background: isSelected ? `${accentColor}18` : tokens.text + "08",
+                color: isSelected ? accentColor : tokens.textMuted,
                 minHeight: 32,
               }}
             >
@@ -161,6 +163,7 @@ function ChipRow({
 /* ─── Main Component ─────────────────────────────────────────────────── */
 
 export default function VideoTool({ initialPrompt }: { initialPrompt?: string | null }) {
+  const { tokens } = useTheme();
   const { setActiveAssetId } = useStudioContext();
   const [mode, setMode] = useState<CreationMode>("quick");
   const [prompt, setPrompt] = useState(initialPrompt ?? "");
@@ -572,25 +575,25 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
   /* ─── Render ──────────────────────────────────────────────────────── */
 
   return (
-    <div className="w-full space-y-4 p-4" style={{ background: "#050508", minHeight: "100%" }}>
+    <div className="w-full space-y-4 p-4" style={{ backgroundColor: tokens.background, color: tokens.text, minHeight: "100%" }}>
       {/* Header */}
       <Entrance delay={0}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.3)" }}>
-              <Film size={18} style={{ color: "#A970FF" }} />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: tokens.primary + "26", border: `1px solid ${tokens.primary}4D` }}>
+              <Film size={18} style={{ color: tokens.primary }} />
             </div>
             <div>
-              <div className="text-sm font-black tracking-tight text-white">LiTT Video Lab</div>
-              <div className="text-[10px] text-white/40">Turn an idea or image into motion</div>
+              <div className="text-sm font-black tracking-tight" style={{ color: tokens.text }}>LiTT Video Lab</div>
+              <div className="text-[10px]" style={{ color: tokens.textMuted }}>Turn an idea or image into motion</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(114,242,56,0.3)", background: "rgba(114,242,56,0.08)", color: "#72F238" }}>
+            <span className="rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: tokens.success + "4D", background: tokens.success + "14", color: tokens.success }}>
               {coinBalance ?? "—"} LiTTBits
             </span>
-            <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(255,255,255,0.08)", color: genStatus === "generating" ? "#F97316" : "#72F238" }}>
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: genStatus === "generating" ? "#F97316" : "#72F238" }} />
+            <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: tokens.border, color: genStatus === "generating" ? tokens.warning : tokens.success }}>
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: genStatus === "generating" ? tokens.warning : tokens.success }} />
               {genStatus === "generating" ? "RENDERING" : genStatus === "complete" ? "READY" : "READY"}
             </span>
           </div>
@@ -610,12 +613,12 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
               onClick={() => setMode(tab.id)}
               className="flex flex-col items-start rounded-xl border px-4 py-2.5 transition-all hover:scale-[1.02] active:scale-95"
               style={{
-                borderColor: mode === tab.id ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)",
-                background: mode === tab.id ? "rgba(139,92,246,0.12)" : "rgba(255,255,255,0.02)",
+                borderColor: mode === tab.id ? tokens.primary + "80" : tokens.border,
+                background: mode === tab.id ? tokens.primary + "1F" : tokens.text + "08",
               }}
             >
-              <span className="text-xs font-black" style={{ color: mode === tab.id ? "#A970FF" : "rgba(255,255,255,0.6)" }}>{tab.label}</span>
-              <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.35)" }}>{tab.desc}</span>
+              <span className="text-xs font-black" style={{ color: mode === tab.id ? tokens.primary : tokens.text }}>{tab.label}</span>
+              <span className="text-[9px]" style={{ color: tokens.textMuted }}>{tab.desc}</span>
             </button>
           ))}
         </div>
@@ -623,9 +626,9 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
 
       {/* Video Stage */}
       <Entrance delay={0.1}>
-        <div className="relative overflow-hidden rounded-2xl border" style={{ borderColor: "rgba(255,255,255,0.08)", background: "#080710" }}>
+        <div className="relative overflow-hidden rounded-2xl border" style={{ borderColor: tokens.border, background: tokens.surface }}>
           {/* Ambient bloom */}
-          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(ellipse at 50% 40%, rgba(139,92,246,0.08) 0%, transparent 70%)" }} />
+          <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(ellipse at 50% 40%, ${tokens.primary}14 0%, transparent 70%)` }} />
           {/* Film grain */}
           <div className="pointer-events-none absolute inset-0 opacity-[0.02] mix-blend-overlay" style={{
             backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
@@ -639,17 +642,17 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
                 {/* Render shimmer */}
                 <motion.div
                   className="h-1 w-48 overflow-hidden rounded-full"
-                  style={{ background: "rgba(255,255,255,0.06)" }}
+                  style={{ background: tokens.text + "0F" }}
                 >
                   <motion.div
                     className="h-full rounded-full"
-                    style={{ background: "linear-gradient(90deg, transparent, rgba(139,92,246,0.8), transparent)" }}
+                    style={{ background: `linear-gradient(90deg, transparent, ${tokens.primary}CC, transparent)` }}
                     animate={{ x: ["-100%", "100%"] }}
                     transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
                   />
                 </motion.div>
-                <div className="text-sm font-black uppercase tracking-[.2em] text-white/60">Generating your shot</div>
-                <div className="text-[10px] text-white/30">{videoModel.label} · {genStatus === "queued" ? "Queued" : genStatus === "finalizing" ? "Finalizing" : "Rendering"}</div>
+                <div className="text-sm font-black uppercase tracking-[.2em]" style={{ color: tokens.text }}>Generating your shot</div>
+                <div className="text-[10px]" style={{ color: tokens.textMuted }}>{videoModel.label} · {genStatus === "queued" ? "Queued" : genStatus === "finalizing" ? "Finalizing" : "Rendering"}</div>
               </div>
             ) : uploadedImagePreview && mode === "animate" ? (
               <div className="relative h-full w-full">
@@ -660,26 +663,26 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
               </div>
             ) : (
               <div className="text-center">
-                <Film size={40} className="mx-auto opacity-20" style={{ color: "#A970FF" }} />
-                <p className="mt-3 text-sm text-white/40">Your video will appear here</p>
-                <p className="mt-1 text-[10px] text-white/20">{videoModel.label} · {aspectRatio} · {resolution}</p>
+                <Film size={40} className="mx-auto opacity-20" style={{ color: tokens.primary }} />
+                <p className="mt-3 text-sm" style={{ color: tokens.textMuted }}>Your video will appear here</p>
+                <p className="mt-1 text-[10px]" style={{ color: tokens.textMuted }}>{videoModel.label} · {aspectRatio} · {resolution}</p>
               </div>
             )}
           </div>
 
           {/* Result actions */}
           {current?.videoUrl && (
-            <div className="flex items-center gap-2 border-t px-4 py-2.5" style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(0,0,0,0.3)" }}>
-              <button onClick={() => { const v = document.querySelector("video"); v?.play(); }} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)" }}>
+            <div className="flex items-center gap-2 border-t px-4 py-2.5" style={{ borderColor: tokens.border, background: tokens.surface }}>
+              <button onClick={() => { const v = document.querySelector("video"); v?.play(); }} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: tokens.border, color: tokens.text }}>
                 <RefreshCw size={11} /> Replay
               </button>
-              <button onClick={() => handleDownload(current.videoUrl!)} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)" }}>
+              <button onClick={() => handleDownload(current.videoUrl!)} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: tokens.border, color: tokens.text }}>
                 <Download size={11} /> Download
               </button>
-              <button onClick={handleRemix} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)" }}>
+              <button onClick={handleRemix} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: tokens.border, color: tokens.text }}>
                 <RotateCcw size={11} /> Remix
               </button>
-              <div className="ml-auto flex items-center gap-3 text-[9px] text-white/30">
+              <div className="ml-auto flex items-center gap-3 text-[9px]" style={{ color: tokens.textMuted }}>
                 <span>{videoModel.label}</span>
                 <span>{aspectRatio}</span>
                 <span>{resolution}</span>
@@ -692,23 +695,23 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
 
       {/* Prompt Composer */}
       <Entrance delay={0.15}>
-        <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.6)", backdropFilter: "blur(12px)" }}>
+        <div className="rounded-2xl border p-4" style={{ borderColor: tokens.border, background: tokens.surface, backdropFilter: "blur(12px)" }}>
           <div className="flex items-center gap-2">
-            <Sparkles size={14} style={{ color: "#A970FF" }} />
-            <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/50">Describe your shot</span>
+            <Sparkles size={14} style={{ color: tokens.primary }} />
+            <span className="text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Describe your shot</span>
           </div>
 
           {showEnhanced && enhancedPrompt ? (
             <div className="mt-3 space-y-2">
               <div className="flex gap-2">
-                <button onClick={() => setShowEnhanced(false)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}>Original</button>
-                <button onClick={() => setShowEnhanced(true)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(139,92,246,0.4)", background: "rgba(139,92,246,0.12)", color: "#A970FF" }}>Enhanced</button>
+                <button onClick={() => setShowEnhanced(false)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: tokens.border, color: tokens.textMuted }}>Original</button>
+                <button onClick={() => setShowEnhanced(true)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: tokens.primary + "66", background: tokens.primary + "1F", color: tokens.primary }}>Enhanced</button>
               </div>
-              <div className="rounded-xl border p-3 text-sm leading-relaxed" style={{ borderColor: "rgba(139,92,246,0.2)", background: "rgba(139,92,246,0.05)", color: "rgba(255,255,255,0.85)" }}>
+              <div className="rounded-xl border p-3 text-sm leading-relaxed" style={{ borderColor: tokens.primary + "33", background: tokens.primary + "0D", color: tokens.text }}>
                 {showEnhanced ? enhancedPrompt : originalPrompt}
               </div>
               {showEnhanced && (
-                <button onClick={() => { setPrompt(enhancedPrompt); setShowEnhanced(false); }} className="text-[10px] font-bold text-white/40 transition hover:text-white/70">
+                <button onClick={() => { setPrompt(enhancedPrompt); setShowEnhanced(false); }} className="text-[10px] font-bold transition" style={{ color: tokens.textMuted }}>
                   Use enhanced prompt →
                 </button>
               )}
@@ -722,7 +725,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
               rows={3}
               disabled={isGenerating}
               className="mt-3 w-full resize-none rounded-xl border bg-transparent px-3 py-2.5 text-sm outline-none disabled:opacity-50"
-              style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.9)", background: "rgba(255,255,255,0.02)" }}
+              style={{ borderColor: tokens.border, color: tokens.text, background: tokens.background }}
             />
           )}
 
@@ -731,7 +734,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
               onClick={handleEnhance}
               disabled={!prompt.trim() || isEnhancing || isGenerating}
               className="flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[11px] font-bold transition hover:scale-[1.02] active:scale-95 disabled:opacity-40"
-              style={{ borderColor: "rgba(139,92,246,0.3)", background: "rgba(139,92,246,0.08)", color: "#A970FF", minHeight: 40 }}
+              style={{ borderColor: tokens.primary + "4D", background: tokens.primary + "14", color: tokens.primary, minHeight: 40 }}
             >
               {isEnhancing ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
               Enhance with LiTT
@@ -740,21 +743,21 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
               onClick={handleGenerate}
               disabled={!prompt.trim() || !canAfford || isGenerating}
               className="ml-auto flex items-center gap-2 rounded-xl px-5 py-2 text-xs font-black transition hover:scale-[1.02] active:scale-95 disabled:opacity-40"
-              style={{ background: "linear-gradient(135deg, #8B5CF6, #A970FF)", color: "#fff", boxShadow: "0 0 24px rgba(139,92,246,0.3)", minHeight: 40 }}
+              style={{ background: tokens.primary, color: tokens.textInverse, boxShadow: `0 0 24px ${tokens.primary}4D`, minHeight: 40 }}
             >
               {isGenerating ? <><Loader2 size={14} className="animate-spin" /> Generating...</> : <><Sparkles size={14} /> Generate · {cost} LiTTBits</>}
             </button>
           </div>
 
           {error && (
-            <div className="mt-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px]" style={{ borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.08)", color: "#ef4444" }}>
+            <div className="mt-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px]" style={{ borderColor: tokens.danger + "4D", background: tokens.danger + "14", color: tokens.danger }}>
               <AlertTriangle size={12} />
               <span>{error}</span>
               {(error.includes("timed out") || error.includes("failed")) && (
-                <button onClick={handleGenerate} className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: "rgba(239,68,68,0.2)" }}>Retry</button>
+                <button onClick={handleGenerate} className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: tokens.danger + "33" }}>Retry</button>
               )}
               {error.startsWith("Need ") && (
-                <a href="/pricing" className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: "rgba(239,68,68,0.2)" }}>Upgrade</a>
+                <a href="/pricing" className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: tokens.danger + "33" }}>Upgrade</a>
               )}
             </div>
           )}
@@ -764,8 +767,8 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
       {/* Shot Controls — Director mode only */}
       {mode === "director" && (
         <Entrance delay={0.2}>
-          <div className="grid gap-4 rounded-2xl border p-4 sm:grid-cols-2" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
-            <ChipRow label="Camera" options={CAMERA_OPTIONS} selected={camera} onToggle={toggleCamera} accentColor="#A970FF" />
+          <div className="grid gap-4 rounded-2xl border p-4 sm:grid-cols-2" style={{ borderColor: tokens.border, background: tokens.surface, backdropFilter: "blur(12px)" }}>
+            <ChipRow label="Camera" options={CAMERA_OPTIONS} selected={camera} onToggle={toggleCamera} accentColor={tokens.primary} />
             <ChipRow label="Motion" options={MOTION_OPTIONS} selected={[motionStyle]} onToggle={(v) => setMotionStyle(v)} accentColor="#22D3EE" />
             <ChipRow label="Look" options={LOOK_OPTIONS} selected={[look]} onToggle={(v) => setLook(v)} accentColor="#72F238" />
             <ChipRow label="Composition" options={COMPOSITION_OPTIONS} selected={composition} onToggle={toggleComposition} accentColor="#F97316" />
@@ -778,10 +781,10 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
         <div className="grid gap-4 lg:grid-cols-2">
           {/* Source / First Frame */}
           {showReferenceImage && (
-            <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
+            <div className="rounded-2xl border p-4" style={{ borderColor: tokens.border, background: tokens.surface, backdropFilter: "blur(12px)" }}>
               <div className="flex items-center gap-2">
                 <Eye size={13} style={{ color: "#22D3EE" }} />
-                <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/50">{referenceLabel}</span>
+                <span className="text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>{referenceLabel}</span>
               </div>
 
               {uploadedImagePreview ? (
@@ -795,16 +798,16 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
                   )}
                   {isAnalyzing && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 backdrop-blur-sm">
-                      <Loader2 size={20} className="animate-spin" style={{ color: "#A970FF" }} />
-                      <span className="text-[10px] font-bold" style={{ color: "#A970FF" }}>LiTT is studying your image...</span>
+                      <Loader2 size={20} className="animate-spin" style={{ color: tokens.primary }} />
+                      <span className="text-[10px] font-bold" style={{ color: tokens.primary }}>LiTT is studying your image...</span>
                     </div>
                   )}
                 </div>
               ) : (
-                <label className="mt-3 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 transition-all hover:scale-[1.01]" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)" }}>
-                  {isUploading ? <Loader2 size={20} className="animate-spin" style={{ color: "#A970FF" }} /> : <ImagePlus size={20} className="text-white/30" />}
-                  <span className="text-[10px] text-white/40">{isUploading ? "Uploading..." : "Drop first frame or click to upload"}</span>
-                  <span className="text-[9px] text-white/20">JPEG, PNG, or WebP</span>
+                <label className="mt-3 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 transition-all hover:scale-[1.01]" style={{ borderColor: tokens.border, background: tokens.text + "08" }}>
+                  {isUploading ? <Loader2 size={20} className="animate-spin" style={{ color: tokens.primary }} /> : <ImagePlus size={20} style={{ color: tokens.textMuted }} />}
+                  <span className="text-[10px]" style={{ color: tokens.textMuted }}>{isUploading ? "Uploading..." : "Drop first frame or click to upload"}</span>
+                  <span className="text-[9px]" style={{ color: tokens.textMuted }}>JPEG, PNG, or WebP</span>
                   <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={isUploading || isGenerating} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); }} />
                 </label>
               )}
@@ -813,45 +816,45 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
               {uploadedImageUrl && ideas.length > 0 && (
                 <div className="mt-3 space-y-1.5">
                   <div className="flex items-center gap-1.5">
-                    <Lightbulb size={11} style={{ color: "#A970FF" }} />
-                    <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: "#A970FF" }}>Suggested Shots</span>
+                    <Lightbulb size={11} style={{ color: tokens.primary }} />
+                    <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: tokens.primary }}>Suggested Shots</span>
                   </div>
                   {ideas.slice(0, 3).map((idea, i) => (
-                    <button key={i} onClick={() => applyIdea(idea)} disabled={isGenerating} className="w-full rounded-lg border p-2.5 text-left transition-all hover:scale-[1.02] disabled:opacity-50" style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}>
+                    <button key={i} onClick={() => applyIdea(idea)} disabled={isGenerating} className="w-full rounded-lg border p-2.5 text-left transition-all hover:scale-[1.02] disabled:opacity-50" style={{ borderColor: tokens.border, background: tokens.text + "08" }}>
                       <div className="flex items-center gap-1.5">
-                        <span className="rounded px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ background: "rgba(139,92,246,0.2)", color: "#A970FF" }}>{idea.vibe}</span>
-                        <span className="text-[9px] text-white/40">{idea.motion}</span>
+                        <span className="rounded px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ background: tokens.primary + "33", color: tokens.primary }}>{idea.vibe}</span>
+                        <span className="text-[9px]" style={{ color: tokens.textMuted }}>{idea.motion}</span>
                       </div>
-                      <div className="mt-1 text-[11px] font-bold text-white/80">{idea.title}</div>
-                      <div className="mt-0.5 line-clamp-2 text-[10px] text-white/40">{idea.prompt}</div>
+                      <div className="mt-1 text-[11px] font-bold" style={{ color: tokens.text }}>{idea.title}</div>
+                      <div className="mt-0.5 line-clamp-2 text-[10px]" style={{ color: tokens.textMuted }}>{idea.prompt}</div>
                     </button>
                   ))}
                 </div>
               )}
               {ideaError && (
-                <div className="mt-2 rounded-lg border px-2 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.3)", color: "#ef4444", background: "rgba(239,68,68,0.05)" }}>{ideaError}</div>
+                <div className="mt-2 rounded-lg border px-2 py-1.5 text-[10px]" style={{ borderColor: tokens.danger + "4D", color: tokens.danger, background: tokens.danger + "0D" }}>{ideaError}</div>
               )}
             </div>
           )}
 
           {/* Advanced */}
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
+          <div className="rounded-2xl border p-4" style={{ borderColor: tokens.border, background: tokens.surface, backdropFilter: "blur(12px)" }}>
             <button onClick={() => setShowAdvanced(!showAdvanced)} className="flex w-full items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/50">Advanced</span>
-              <ChevronDown size={14} className="text-white/40 transition-transform" style={{ transform: showAdvanced ? "rotate(180deg)" : "none" }} />
+              <span className="text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Advanced</span>
+              <ChevronDown size={14} className="transition-transform" style={{ color: tokens.textMuted, transform: showAdvanced ? "rotate(180deg)" : "none" }} />
             </button>
 
             {showAdvanced && (
               <div className="mt-4 space-y-4">
                 {/* Model selection */}
                 <div>
-                  <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">Model</div>
+                  <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Model</div>
                   <div className="space-y-1.5">
                     {AVAILABLE_MODELS.map((m) => (
                       <button key={m.id} onClick={() => setModelId(m.id)} disabled={isGenerating} className="w-full rounded-lg border p-2.5 text-left text-[11px] transition-all hover:scale-[1.01] disabled:opacity-50" style={{
-                        borderColor: modelId === m.id ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.06)",
-                        background: modelId === m.id ? "rgba(139,92,246,0.12)" : "rgba(255,255,255,0.02)",
-                        color: modelId === m.id ? "#A970FF" : "rgba(255,255,255,0.7)",
+                        borderColor: modelId === m.id ? tokens.primary + "80" : tokens.border,
+                        background: modelId === m.id ? tokens.primary + "1F" : tokens.text + "08",
+                        color: modelId === m.id ? tokens.primary : tokens.text,
                       }}>
                         <div className="flex items-center justify-between font-bold">
                           <span>{m.label}</span>
@@ -862,10 +865,10 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
                     ))}
                     {UNAVAILABLE_MODELS.length > 0 && (
                       <div className="pt-2">
-                        <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-white/20">Coming later</div>
+                        <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider" style={{ color: tokens.textMuted }}>Coming later</div>
                         <div className="flex flex-wrap gap-1.5">
                           {UNAVAILABLE_MODELS.map((m) => (
-                            <span key={m.id} className="rounded-full border px-2.5 py-1 text-[9px] font-bold opacity-40" style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.3)" }}>
+                            <span key={m.id} className="rounded-full border px-2.5 py-1 text-[9px] font-bold opacity-40" style={{ borderColor: tokens.border, color: tokens.textMuted }}>
                               {m.label}
                             </span>
                           ))}
@@ -877,13 +880,13 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
 
                 {/* Aspect ratio */}
                 <div>
-                  <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">Aspect Ratio</div>
+                  <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Aspect Ratio</div>
                   <div className="flex gap-1.5">
                     {caps.aspectRatios.map((ar) => (
                       <button key={ar} onClick={() => setAspectRatio(ar)} disabled={isGenerating} className="rounded-lg border px-3 py-1.5 text-[11px] font-bold transition hover:scale-105 disabled:opacity-50" style={{
-                        borderColor: aspectRatio === ar ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)",
-                        background: aspectRatio === ar ? "rgba(139,92,246,0.12)" : "transparent",
-                        color: aspectRatio === ar ? "#A970FF" : "rgba(255,255,255,0.5)",
+                        borderColor: aspectRatio === ar ? tokens.primary + "80" : tokens.border,
+                        background: aspectRatio === ar ? tokens.primary + "1F" : "transparent",
+                        color: aspectRatio === ar ? tokens.primary : tokens.textMuted,
                       }}>{ar}</button>
                     ))}
                   </div>
@@ -891,13 +894,13 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
 
                 {/* Resolution */}
                 <div>
-                  <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">Resolution</div>
+                  <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Resolution</div>
                   <div className="flex gap-1.5">
                     {caps.resolutions.map((res) => (
                       <button key={res} onClick={() => setResolution(res)} disabled={isGenerating} className="rounded-lg border px-3 py-1.5 text-[11px] font-bold transition hover:scale-105 disabled:opacity-50" style={{
-                        borderColor: resolution === res ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)",
-                        background: resolution === res ? "rgba(139,92,246,0.12)" : "transparent",
-                        color: resolution === res ? "#A970FF" : "rgba(255,255,255,0.5)",
+                        borderColor: resolution === res ? tokens.primary + "80" : tokens.border,
+                        background: resolution === res ? tokens.primary + "1F" : "transparent",
+                        color: resolution === res ? tokens.primary : tokens.textMuted,
                       }}>{res}</button>
                     ))}
                   </div>
@@ -906,13 +909,13 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
                 {/* Duration — only when supported */}
                 {showDuration && (
                   <div>
-                    <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">Duration</div>
+                    <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Duration</div>
                     <div className="flex gap-1.5">
                       {caps.durations.map((d) => (
                         <button key={d} onClick={() => setDuration(d)} disabled={isGenerating} className="rounded-lg border px-3 py-1.5 text-[11px] font-bold transition hover:scale-105 disabled:opacity-50" style={{
-                          borderColor: duration === d ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)",
-                          background: duration === d ? "rgba(139,92,246,0.12)" : "transparent",
-                          color: duration === d ? "#A970FF" : "rgba(255,255,255,0.5)",
+                          borderColor: duration === d ? tokens.primary + "80" : tokens.border,
+                          background: duration === d ? tokens.primary + "1F" : "transparent",
+                          color: duration === d ? tokens.primary : tokens.textMuted,
                         }}>{d}s</button>
                       ))}
                     </div>
@@ -920,9 +923,9 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
                 )}
 
                 {/* Estimate */}
-                <div className="flex items-center justify-between rounded-lg border px-3 py-2.5" style={{ borderColor: "rgba(139,92,246,0.2)", background: "rgba(139,92,246,0.05)" }}>
-                  <span className="text-[10px] text-white/50">Estimated cost</span>
-                  <span className="text-sm font-black" style={{ color: "#A970FF" }}>{cost} LiTTBits</span>
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2.5" style={{ borderColor: tokens.primary + "33", background: tokens.primary + "0D" }}>
+                  <span className="text-[10px]" style={{ color: tokens.textMuted }}>Estimated cost</span>
+                  <span className="text-sm font-black" style={{ color: tokens.primary }}>{cost} LiTTBits</span>
                 </div>
               </div>
             )}
@@ -932,28 +935,28 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
 
       {/* History filmstrip */}
       <Entrance delay={0.3}>
-        <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
+        <div className="rounded-2xl border p-4" style={{ borderColor: tokens.border, background: tokens.surface, backdropFilter: "blur(12px)" }}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
-              <History size={11} className="text-white/40" />
-              <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/40">Recent</span>
+              <History size={11} style={{ color: tokens.textMuted }} />
+              <span className="text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Recent</span>
             </div>
             {history.length > 0 && (
-              <button onClick={handleClear} className="text-[9px] text-white/30 transition hover:text-white/60">Clear</button>
+              <button onClick={handleClear} className="text-[9px] transition" style={{ color: tokens.textMuted }}>Clear</button>
             )}
           </div>
           {history.length === 0 ? (
-            <div className="py-6 text-center text-[11px] text-white/25">No videos yet</div>
+            <div className="py-6 text-center text-[11px]" style={{ color: tokens.textMuted }}>No videos yet</div>
           ) : (
             <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
               {history.map((g) => (
-                <button key={g.id} onClick={() => setCurrent(g)} className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-lg border transition-all hover:scale-[1.04]" style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(0,0,0,0.3)" }}>
+                <button key={g.id} onClick={() => setCurrent(g)} className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-lg border transition-all hover:scale-[1.04]" style={{ borderColor: tokens.border, background: tokens.background }}>
                   {g.videoUrl ? (
                     <video src={g.videoUrl} className="h-full w-full object-cover" muted />
                   ) : g.status === "failed" ? (
-                    <div className="flex h-full w-full items-center justify-center"><AlertTriangle size={16} className="text-red-400/60" /></div>
+                    <div className="flex h-full w-full items-center justify-center"><AlertTriangle size={16} style={{ color: tokens.danger }} /></div>
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center"><Loader2 size={14} className="animate-spin text-white/30" /></div>
+                    <div className="flex h-full w-full items-center justify-center"><Loader2 size={14} className="animate-spin" style={{ color: tokens.textMuted }} /></div>
                   )}
                   <div className="absolute inset-x-0 bottom-0 truncate px-1.5 py-0.5 text-[8px] font-bold" style={{ background: "rgba(0,0,0,0.7)", color: "rgba(255,255,255,0.6)" }}>
                     {g.model} · {new Date(g.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}

@@ -532,17 +532,42 @@ function CommandStudioContent() {
   // The query string written by the state→URL effect on its last pass —
   // used by URL→state to recognize (and skip) our own echoes.
   const lastWrittenUrlRef = useRef<string | null>(null);
+  // The query string the URL→state effect below last applied. The
+  // effect also re-runs when studioShellActive flips WITHOUT any URL
+  // change (it is a dep so the station mapping applies when the shell
+  // activates) — re-applying the same, already-applied URL on such a
+  // re-run is never a navigation and must not touch state.
+  const lastAppliedNavKeyRef = useRef<string | null>(null);
 
   // ── URL → State synchronization (browser back/forward) ───────────
   // When the URL changes (back/forward navigation), update React state
   // to match. Only updates when the canonical value actually changed,
   // preventing update loops with the state→URL effect below.
   useEffect(() => {
+    const navKey = searchParams.toString();
+    // Already-applied guard: a re-run with an unchanged URL is not a
+    // navigation. This matters for state-driven destination changes:
+    // the Images station's "Generate image" button sets destination
+    // to "create" directly (no URL write by the click), which flips
+    // studioShellActive off and re-runs this effect while
+    // searchParams still holds the pre-click URL (?tool=images, no
+    // ?creator=). Re-applying that stale URL mapped it back to
+    // destination "studio" and bounced the creator shut — the first
+    // click only landed the state→URL effect's ?creator= write, and
+    // the second click worked because the URL then carried the
+    // creator param this effect treats as authoritative (the
+    // two-click creator defect). The station mapping an unchanged
+    // URL could contribute on shell activation is already covered:
+    // stageSurface initializes from ?tool=, and the task-binding
+    // effect's first sync honors the URL station explicitly.
+    if (navKey === lastAppliedNavKeyRef.current) {
+      return;
+    }
+    lastAppliedNavKeyRef.current = navKey;
     // Echo guard: if this exact URL was written by the state→URL effect
     // below, it reflects state we already have — applying it back would
     // create a one-tick-lagged feedback oscillator (state ↔ URL each
     // correcting the other toward a stale view, forever).
-    const navKey = searchParams.toString();
     if (navKey === lastWrittenUrlRef.current) {
       lastWrittenUrlRef.current = null;
       return;

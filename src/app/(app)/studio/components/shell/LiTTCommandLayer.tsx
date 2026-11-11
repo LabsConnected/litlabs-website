@@ -21,6 +21,7 @@ import {
   type ReactNode,
 } from "react";
 import { ChevronDown, ChevronUp, Sparkles } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext";
 import ChatDockSwitcher, { type ChatDockPosition } from "../ChatDockSwitcher";
 
 const MIN_HEIGHT = 160;
@@ -55,6 +56,7 @@ export default function LiTTCommandLayer({
   dockPosition?: ChatDockPosition;
   onDockPositionChange?: (position: ChatDockPosition) => void;
 }) {
+  const { tokens } = useTheme();
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const dragRef = useRef<{ startY: number; startH: number; pointerId: number } | null>(null);
 
@@ -121,7 +123,7 @@ export default function LiTTCommandLayer({
       aria-label="LiTT command layer"
       data-testid="litt-command-layer"
       className="glass-shell flex w-full shrink-0 flex-col border-t"
-      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.92)" }}
+      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: tokens.surface }}
     >
       {/* Drag edge — always a resize affordance when expanded, an expand
           affordance when collapsed. */}

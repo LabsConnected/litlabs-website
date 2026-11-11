@@ -6,14 +6,16 @@ import { dirname, join } from "node:path";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { useProjectRuntime } from "./useProjectRuntime";
 
+// Mutable search params so a test can simulate a project switch.
+const mockSearchParams = vi.hoisted(() => ({ current: "" }));
+
 // Minimal browser-environment mocks for rendering the real hook.
 vi.mock("next/navigation", () => {
   const router = { replace: () => {}, push: () => {}, refresh: () => {}, prefetch: () => {} };
-  const searchParams = new URLSearchParams();
   return {
     useRouter: () => router,
     usePathname: () => "/studio",
-    useSearchParams: () => searchParams,
+    useSearchParams: () => new URLSearchParams(mockSearchParams.current),
   };
 });
 
@@ -82,6 +84,7 @@ function mockRuntimeFetch(serverReachable: boolean) {
 describe("useProjectRuntime — single terminal/runtime truth", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockSearchParams.current = "";
     useTerminalStore.getState().reset();
   });
 
@@ -157,6 +160,45 @@ describe("useProjectRuntime — single terminal/runtime truth", () => {
     // drawer connecting is a status-feed detail, not an execution blocker.
     expect(result.current.state.executionAvailable).toBe(true);
     expect(result.current.state.phase).toBe("ready");
+  });
+
+  it("stamps lastCheckedAt when a resolve fails, so a settled failure is distinguishable from never-checked", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+
+    const { result } = renderHook(() => useProjectRuntime());
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.loading).toBe(false);
+    // The preserved state must carry the attempt's stamp: consumers gate
+    // "unresolved" on the epoch sentinel, and a completed-but-failed
+    // resolve must not masquerade as never-resolved (or vice versa).
+    expect(Date.parse(result.current.state.lastCheckedAt)).toBeGreaterThan(0);
+  });
+
+  it("re-enters the unresolved state when the project identity changes, until the new resolve lands", async () => {
+    mockSearchParams.current = "project=project-1";
+    mockRuntimeFetch(true);
+
+    const { result, rerender } = renderHook(() => useProjectRuntime());
+    await waitFor(() => expect(result.current.state.projectId).toBe("project-1"));
+    expect(result.current.loading).toBe(false);
+
+    mockSearchParams.current = "project=project-2";
+    rerender();
+
+    // In the window before the new project's resolve settles, the hook
+    // must present the unresolved placeholder again — never the previous
+    // project's settled state (which downstream surfaces would render as
+    // this project's truth).
+    expect(result.current.loading).toBe(true);
+    expect(result.current.state.projectId).toBeNull();
+    expect(Date.parse(result.current.state.lastCheckedAt)).toBe(0);
+    expect(result.current.error).toBeNull();
   });
 
   it("useConnectionSummary never reads the terminal store directly", () => {
