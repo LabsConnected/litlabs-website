@@ -871,6 +871,33 @@ function isProviderConfigured(providerId: MediaProviderId): boolean {
   }
 }
 
+/**
+ * True when a provider failure means the provider is not actually
+ * configured: its key is missing, or the provider rejected the key
+ * (401/403, invalid/incorrect API key). isProviderConfigured() only
+ * proves a key STRING exists — it cannot prove the key is alive.
+ * Provider handlers surface these as message text ("OpenAI error:
+ * {...Incorrect API key provided...}", "Gemini is not configured —
+ * set GEMINI_API_KEY", "FAL.ai key missing — set FAL_KEY"), so the
+ * classification matches their stable phrasings.
+ */
+function isProviderConfigError(err: Error): boolean {
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes("not configured") ||
+    msg.includes("key missing") ||
+    msg.includes("api key is missing") ||
+    msg.includes("invalid api key") ||
+    msg.includes("invalid_api_key") ||
+    msg.includes("incorrect api key") ||
+    msg.includes("api key not valid") ||
+    msg.includes("unauthorized") ||
+    msg.includes("authentication") ||
+    /\b401\b/.test(msg) ||
+    /\b403\b/.test(msg)
+  );
+}
+
 function isVectorRequest(prompt: string): boolean {
   const lower = prompt.toLowerCase();
   return (
@@ -1397,6 +1424,30 @@ export async function generateImage(
       result = await deps.dispatch(providerId, input, prompt);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error("Provider error");
+      // A pinned provider whose credential is absent or REJECTED (dead
+      // key) is not actually configured — the pin cannot be served by
+      // it at all. Fall through the configured auto-quality chain so a
+      // dead key never becomes the terminal answer while a genuinely
+      // configured provider exists (production 2026-11-11: the pane's
+      // default pin is OpenAI, whose key was dead, while Gemini was
+      // healthy). Non-config failures keep the pin's semantics: they
+      // are the pinned provider's real answer and stay terminal.
+      if (isProviderConfigError(lastError)) {
+        const fallthrough = getAutoOrder("auto-quality", prompt).filter(
+          (candidateId) => candidateId !== providerId,
+        );
+        for (const candidateId of fallthrough) {
+          if (!getProvider(candidateId)) continue;
+          try {
+            result = await deps.dispatch(candidateId, input, prompt);
+            usedProviderId = candidateId;
+            break;
+          } catch (fallbackErr) {
+            lastError =
+              fallbackErr instanceof Error ? fallbackErr : new Error("Provider error");
+          }
+        }
+      }
     }
   }
 

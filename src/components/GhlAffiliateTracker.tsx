@@ -125,11 +125,22 @@ export function GhlAffiliateScript() {
 // The server endpoint enforces idempotency — we can safely call it
 // on every sign-in without worrying about duplicate leads.
 
+// Signup lead tracking is DISABLED (2026-11-11): the GHL affiliate
+// endpoint (backend.leadconnectorhq.com/affiliates/track-lead) returns
+// 404 for every submission — the upstream integration is dead — so
+// each sign-in fired a doomed request and logged a "[ghl] Lead
+// tracking failed" console warning, and because the server only marks
+// ghl_lead_tracked on success it retried on every sign-in forever.
+// Re-enable only when the GHL campaign endpoint is restored. The
+// visitor attribution script (Part 1) is unaffected.
+const GHL_SIGNUP_TRACKING_ENABLED = false;
+
 export function GhlAffiliateSignupTracker() {
   const { isLoaded, isSignedIn, user } = useUser();
   const callInFlightRef = useRef(false);
 
   useEffect(() => {
+    if (!GHL_SIGNUP_TRACKING_ENABLED) return;
     if (!isLoaded || !isSignedIn || !user) return;
     if (callInFlightRef.current) return;
 
