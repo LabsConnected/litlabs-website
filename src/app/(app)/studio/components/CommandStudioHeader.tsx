@@ -32,8 +32,11 @@ import {
 import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
 import {
   runtimePhaseLabel,
+  HOST_EXECUTION_UNAVAILABLE_LABEL,
+  HOST_EXECUTION_UNAVAILABLE_SHORT,
   type ProjectRuntimeState,
 } from "@/lib/projects/runtime-state";
+import { HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
   available: { color: "#177a36", label: "Available" },
@@ -203,6 +206,11 @@ export default function CommandStudioHeader({
         // Canonical terminal wording — same label the operator bar and
         // Mission hints render (lib/studio/terminal-health.ts).
         ? terminalHealthOf(capabilities).label
+      : runtime.error?.code === HOST_EXECUTION_DISABLED_CODE
+        // Wave-4 truth: a repo-backed workspace refused by the hosted
+        // service's fail-closed execution policy is not a transient
+        // "not ready" — name the actual state.
+        ? HOST_EXECUTION_UNAVAILABLE_LABEL
       : runtime.phase !== "ready"
         ? runtimePhaseLabel(runtime.phase)
         : modelHealth === undefined
@@ -240,6 +248,7 @@ export default function CommandStudioHeader({
             : statusLabel === "Runtime status checking" ? "Checking"
             : statusLabel === "No project selected" ? "No project"
             : statusLabel === "AI provider unavailable" ? "No AI"
+            : statusLabel === HOST_EXECUTION_UNAVAILABLE_LABEL ? HOST_EXECUTION_UNAVAILABLE_SHORT
             : statusLabel,
           color: statusColor,
           pulse: false,
@@ -362,7 +371,7 @@ export default function CommandStudioHeader({
 
       {/* Notifications — wired to /api/notifications/count */}
       <Link
-        href="/studio"
+        href="/dashboard"
         className="relative hidden min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-all hover:bg-black/5 sm:grid"
         style={{ color: "var(--text-secondary)" }}
         aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}

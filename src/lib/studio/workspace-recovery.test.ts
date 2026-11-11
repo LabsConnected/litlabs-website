@@ -374,6 +374,26 @@ describe("workspace-recovery", () => {
       }));
     });
 
+    it("preserves the HOST_EXECUTION_DISABLED code on the rethrown provisioning error (wave-4)", async () => {
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "blank", workspaceId: null, workspaceStatus: "not_prepared" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      const blocked = new Error(
+        'Workspace prepare failed (503): {"error":"Host execution is disabled in production","code":"HOST_EXECUTION_DISABLED"}',
+      ) as Error & { code?: string };
+      blocked.code = "HOST_EXECUTION_DISABLED";
+      vi.mocked(prepareWorkspaceInternal).mockRejectedValue(blocked);
+
+      const err = await provisionWorkspaceForProject("proj-blocked", "user-1").catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error & { code?: string }).code).toBe("HOST_EXECUTION_DISABLED");
+      expect(updateProjectWorkspace).toHaveBeenCalledWith("proj-blocked", "user-1", expect.objectContaining({
+        workspaceStatus: "failed",
+      }));
+    });
+
     it("releases the lock when file recovery owns provisioning and terminal prepare fails", async () => {
       vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
       vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));

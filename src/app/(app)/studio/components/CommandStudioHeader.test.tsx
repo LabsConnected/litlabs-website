@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { INITIAL_RUNTIME_STATE, type ProjectRuntimeState } from "@/lib/projects/runtime-state";
+import {
+  INITIAL_RUNTIME_STATE,
+  HOST_EXECUTION_UNAVAILABLE_LABEL,
+  HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+  HOST_EXECUTION_UNAVAILABLE_SHORT,
+  type ProjectRuntimeState,
+} from "@/lib/projects/runtime-state";
 
 // Mock wallet
 vi.mock("@/context/WalletContext", () => ({
@@ -263,6 +269,29 @@ describe("CommandStudioHeader — truthful status", () => {
 
     expect(screen.getByLabelText("Workspace not ready")).toBeTruthy();
     expect(screen.queryByLabelText("Runtime verified")).toBeNull();
+  });
+
+  it("names the host-execution blocker instead of a generic not-ready (wave-4)", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={{
+          ...readyRuntime,
+          phase: "workspace_not_ready",
+          executionAvailable: false,
+          terminalConnected: false,
+          workspaceStatus: "failed",
+          error: { code: "HOST_EXECUTION_DISABLED", message: HOST_EXECUTION_UNAVAILABLE_MESSAGE },
+        }}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+
+    const pill = screen.getByLabelText(HOST_EXECUTION_UNAVAILABLE_LABEL);
+    expect(pill).toBeTruthy();
+    expect(pill.textContent).toContain(HOST_EXECUTION_UNAVAILABLE_SHORT);
+    expect(screen.queryByLabelText("Workspace not ready")).toBeNull();
   });
 
   it("uses the strongest status only for canonical ready runtime and verified provider", () => {

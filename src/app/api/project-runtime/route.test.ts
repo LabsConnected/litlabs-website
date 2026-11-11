@@ -19,6 +19,7 @@ vi.mock("next/server", async (importOriginal) => ({
 }));
 
 import { GET } from "./route";
+import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state";
 import { auth } from "@/lib/auth";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getProject } from "@/lib/projects/project-repository";
@@ -72,5 +73,44 @@ describe("project-runtime recovery polling", () => {
     const body = await failed.json();
     expect(body.error.message).toBe("terminal down");
     expect(afterCallbacks).toHaveLength(0);
+  });
+});
+
+describe("project-runtime host-execution truth (wave-4)", () => {
+  // The exact string production stores as workspaceError when a repo-backed
+  // prepare hits the terminal-server's fail-closed 503.
+  const HOST_EXEC_STORED =
+    'Workspace prepare failed (503): {"error":"Host execution is disabled in production (workspace.prepare(git,install)); a verified sandbox is required","code":"HOST_EXECUTION_DISABLED"}';
+
+  const failedProject = (overrides: Record<string, unknown> = {}) => ({
+    id: "p1", userId: "u1", name: "Demo", sourceType: "github", workspaceId: null,
+    workspaceRoot: null, workspaceError: HOST_EXEC_STORED,
+    workspaceStatus: "failed", updatedAt: new Date().toISOString(), previewUrl: null,
+    ...overrides,
+  }) as never;
+
+  it("surfaces HOST_EXECUTION_DISABLED with the honest message and no retry action", async () => {
+    mockGetProject.mockResolvedValue(failedProject());
+    const body = await (await get()).json();
+    expect(body.error.code).toBe("HOST_EXECUTION_DISABLED");
+    expect(body.error.message).toBe(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+    expect(body.error.recoveryAction).toBeUndefined();
+  });
+
+  it("does the same when a stale workspaceId keeps the project in workspace_not_ready", async () => {
+    mockGetProject.mockResolvedValue(failedProject({ workspaceId: "ws-1", workspaceRoot: "/data/ws-1" }));
+    const body = await (await get()).json();
+    expect(body.phase).toBe("workspace_not_ready");
+    expect(body.error.code).toBe("HOST_EXECUTION_DISABLED");
+    expect(body.error.message).toBe(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+    expect(body.error.recoveryAction).toBeUndefined();
+  });
+
+  it("keeps generic provisioning failures exactly as before", async () => {
+    mockGetProject.mockResolvedValue(failedProject({ workspaceError: "terminal down" }));
+    const body = await (await get()).json();
+    expect(body.error.code).toBe("WORKSPACE_PROVISIONING_FAILED");
+    expect(body.error.message).toBe("terminal down");
+    expect(body.error.recoveryAction).toBe("retry_workspace");
   });
 });

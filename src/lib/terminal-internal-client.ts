@@ -129,7 +129,21 @@ export async function prepareWorkspaceInternal(
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "Unknown error");
-    throw new Error(`Workspace prepare failed (${resp.status}): ${text}`);
+    // Thread the terminal-server's machine code (e.g. the fail-closed
+    // 503's HOST_EXECUTION_DISABLED) onto the error, mirroring
+    // startPreviewInternal — callers key truthful UI states off it
+    // instead of parsing it back out of the message text.
+    let errorCode: string | null = null;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.code) errorCode = String(parsed.code);
+      else if (parsed?.errorCode) errorCode = String(parsed.errorCode);
+    } catch {
+      // Not JSON — fall through
+    }
+    const err = new Error(`Workspace prepare failed (${resp.status}): ${text}`);
+    if (errorCode) (err as { code?: string }).code = errorCode;
+    throw err;
   }
 
   return (await resp.json()) as WorkspacePrepareResponse;
@@ -232,11 +246,14 @@ export async function startPreviewInternal(
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "Unknown error");
-    // Try to extract errorCode from the terminal-server's error response
+    // Try to extract the machine code from the terminal-server's error
+    // response — its fail-closed refusals send `code`; other surfaces
+    // have used `errorCode`. Accept either.
     let errorCode: string | null = null;
     try {
       const parsed = JSON.parse(text);
       if (parsed?.errorCode) errorCode = String(parsed.errorCode);
+      else if (parsed?.code) errorCode = String(parsed.code);
     } catch {
       // Not JSON — fall through
     }

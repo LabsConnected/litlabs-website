@@ -3,8 +3,10 @@ import { auth } from "@/lib/auth";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getProject } from "@/lib/projects/project-repository";
 import type { ProjectRuntimeState, RuntimePhase, ProjectRuntimeError } from "@/lib/projects/runtime-state";
+import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state";
 import { describeProjectSource } from "@/lib/projects/project-source";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
 
 const FAILED_RECOVERY_BACKOFF_MS = 30_000;
 const STALE_PROVISIONING_MS = 45_000;
@@ -64,7 +66,7 @@ export async function GET(request: NextRequest) {
       ...makeState("idle", {
         code: "NO_PROJECT",
         message: "No project selected. Create or select a project to begin.",
-        recoveryHref: "/studio",
+        recoveryHref: "/dashboard",
       }),
       lastCheckedAt: new Date().toISOString(),
     } satisfies ProjectRuntimeState);
@@ -77,7 +79,7 @@ export async function GET(request: NextRequest) {
       ...makeState("error", {
         code: "PROJECT_NOT_FOUND",
         message: "Project could not be resolved. It may have been deleted.",
-        recoveryHref: "/studio",
+        recoveryHref: "/dashboard",
       }),
       projectId: current.projectId,
       projectName: current.projectName,
@@ -114,30 +116,48 @@ export async function GET(request: NextRequest) {
   let phase: RuntimePhase;
   let error: ProjectRuntimeError | undefined;
 
+  // Wave-4 truth: a prepare refused with HOST_EXECUTION_DISABLED is not a
+  // transient failure — repo-backed workspaces cannot open on the hosted
+  // service until a verified sandbox exists, and retrying can never
+  // succeed. Name the code, use the honest message, and offer no retry.
+  const hostExecBlocked =
+    (workspaceStatus === "failed" || workspaceStatus === "error") &&
+    extractEmbeddedErrorCode(project.workspaceError) === HOST_EXECUTION_DISABLED_CODE;
+
   if (!workspaceId) {
     phase = "workspace_not_provisioned";
     const isPreparing = workspaceStatus === "provisioning" || workspaceStatus === "preparing";
     const isFailed = workspaceStatus === "failed" || workspaceStatus === "error";
-    error = {
-      code: isFailed ? "WORKSPACE_PROVISIONING_FAILED" : isPreparing ? "WORKSPACE_PROVISIONING" : "WORKSPACE_NOT_PROVISIONED",
-      message: isFailed
-        ? (project.workspaceError ?? "Workspace preparation failed. Retry to try again.")
-        : isPreparing
-          ? "Workspace is preparing. This will update automatically."
-          : `Source for "${project.name}" has not been provisioned yet. LiTT will prepare it — no GitHub repository is required.`,
-      recoveryAction: isFailed ? "retry_workspace" : "provision_workspace",
-      ...(isFailed ? { recoveryHref: "/settings" } : {}),
-    };
+    error = hostExecBlocked
+      ? {
+          code: HOST_EXECUTION_DISABLED_CODE,
+          message: HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+        }
+      : {
+          code: isFailed ? "WORKSPACE_PROVISIONING_FAILED" : isPreparing ? "WORKSPACE_PROVISIONING" : "WORKSPACE_NOT_PROVISIONED",
+          message: isFailed
+            ? (project.workspaceError ?? "Workspace preparation failed. Retry to try again.")
+            : isPreparing
+              ? "Workspace is preparing. This will update automatically."
+              : `Source for "${project.name}" has not been provisioned yet. LiTT will prepare it — no GitHub repository is required.`,
+          recoveryAction: isFailed ? "retry_workspace" : "provision_workspace",
+          ...(isFailed ? { recoveryHref: "/settings" } : {}),
+        };
   } else if (workspaceStatus !== "ready") {
     phase = "workspace_not_ready";
-    error = {
-      code: "WORKSPACE_NOT_READY",
-      message:
-        project.workspaceError ??
-        `Workspace status is "${workspaceStatus ?? "unknown"}". The workspace may still be initializing or may have failed.`,
-      recoveryAction: "retry_workspace",
-      recoveryHref: "/settings",
-    };
+    error = hostExecBlocked
+      ? {
+          code: HOST_EXECUTION_DISABLED_CODE,
+          message: HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+        }
+      : {
+          code: "WORKSPACE_NOT_READY",
+          message:
+            project.workspaceError ??
+            `Workspace status is "${workspaceStatus ?? "unknown"}". The workspace may still be initializing or may have failed.`,
+          recoveryAction: "retry_workspace",
+          recoveryHref: "/settings",
+        };
   } else {
     // Workspace is ready — terminal connection is client-side
     phase = "ready";

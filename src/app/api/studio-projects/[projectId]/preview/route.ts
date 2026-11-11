@@ -14,6 +14,7 @@ import {
 } from "@/lib/terminal-internal-client";
 import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
 import { createPreviewToken } from "@/lib/projects/preview-token";
+import { extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,16 @@ export async function GET(
   const project = await getProject(projectId, userId);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
+  // Wave-4 truth threading: when workspace preparation failed, recover the
+  // machine code embedded in the stored error (e.g. the terminal-server's
+  // fail-closed HOST_EXECUTION_DISABLED) so the preview pane can render
+  // the honest state instead of a generic failure. Null for every other
+  // project state.
+  const workspaceFailureCode =
+    project.workspaceStatus === "failed" || project.workspaceStatus === "error"
+      ? extractEmbeddedErrorCode(project.workspaceError)
+      : null;
+
   if (!project.workspaceId) {
     // No workspace was ever provisioned for this project. This is the
     // "not_started" state — distinct from "stopped" (workspace exists but
@@ -46,6 +57,7 @@ export async function GET(
       runtimeStatus: "not_started",
       previewUrl: null,
       runtimeError: null,
+      runtimeErrorCode: workspaceFailureCode,
       framework: project.framework,
       developmentCommand: project.developmentCommand,
       packageManager: project.packageManager,
@@ -181,6 +193,7 @@ export async function GET(
         runtimeStatus: "stopped",
         previewUrl: null,
         runtimeError: null,
+        runtimeErrorCode: workspaceFailureCode,
         framework: project.framework,
         developmentCommand: project.developmentCommand,
         packageManager: project.packageManager,
@@ -206,7 +219,7 @@ export async function GET(
       runtimeStatus: runtimeStatus.status,
       previewUrl,
       runtimeError: runtimeStatus.error,
-      runtimeErrorCode: runtimeStatus.errorCode,
+      runtimeErrorCode: runtimeStatus.errorCode ?? workspaceFailureCode,
       framework: runtimeStatus.framework ?? project.framework,
       developmentCommand: runtimeStatus.command ?? project.developmentCommand,
       packageManager: project.packageManager,
@@ -220,7 +233,7 @@ export async function GET(
       runtimeStatus: "unreachable",
       previewUrl: null,
       runtimeError: err instanceof Error ? err.message : "Preview runtime unreachable",
-      runtimeErrorCode: null,
+      runtimeErrorCode: workspaceFailureCode,
       framework: project.framework,
       developmentCommand: project.developmentCommand,
       packageManager: project.packageManager,
@@ -280,6 +293,7 @@ export async function POST(
       error: message,
       runtimeStatus: "failed",
       runtimeError: message,
+      runtimeErrorCode: (err as { code?: string }).code ?? extractEmbeddedErrorCode(message),
     }, { status: 500 });
   }
 
