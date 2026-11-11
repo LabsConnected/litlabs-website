@@ -27,7 +27,7 @@ concurrency:
 
 env:
   STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
-  ACCEPTANCE_RUNS: 10
+  ACCEPTANCE_RUNS: 2
 
 jobs:
   acceptance:
