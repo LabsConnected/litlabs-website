@@ -91,6 +91,7 @@ export function routeKernel(request: KernelRequest): KernelResult {
       requiresCurrentInformation: intent.requiresCurrentInformation,
       requiresPrivateData: intent.requiresPrivateData,
       requiresExecution: intent.requiresExecution,
+      taskKind: intent.taskKind,
       anaphoricFollowUp: intent.anaphoricFollowUp,
     },
     epistemics: {

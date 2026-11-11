@@ -23,6 +23,14 @@ interface ModePattern {
   requiresProject?: boolean;
   requiresExecution?: boolean;
   requiresCurrentInformation?: boolean;
+  /**
+   * Set only by the read-only workspace-inspection group below: the
+   * turn requires the execution lane, but its completion is a read
+   * answer, never a mutation. Recorded on the classification so the
+   * quality gate and the launch flow can scope themselves by task
+   * kind instead of re-deriving it from prose.
+   */
+  taskKind?: "inspection";
   domains?: string[];
 }
 
@@ -229,6 +237,7 @@ const MODE_PATTERNS: ModePattern[] = [
     ],
     requiresProject: true,
     requiresExecution: true,
+    taskKind: "inspection",
     domains: ["engineering"],
   },
 
@@ -392,6 +401,7 @@ export function classifyIntent(
   const requiresProject = matchedPattern?.requiresProject ?? false;
   const requiresExecution = matchedPattern?.requiresExecution ?? false;
   const requiresCurrentInformation = matchedPattern?.requiresCurrentInformation ?? false;
+  const taskKind = matchedPattern?.taskKind;
 
   // Confidence: high when a pattern matched explicitly, lower for default
   const confidence = matchedPattern ? 0.85 : 0.5;
@@ -410,6 +420,7 @@ export function classifyIntent(
     requiresCurrentInformation,
     requiresPrivateData,
     requiresExecution,
+    taskKind,
     confidence,
     reasoning: anaphoricFollowUp
       ? `${reasoning} Anaphoric follow-up (no artifact noun)${opts?.hasProject ? " with project context — caller should clarify the target." : "."}`

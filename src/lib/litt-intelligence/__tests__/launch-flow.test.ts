@@ -1380,3 +1380,115 @@ describe("Launch Flow: entitled paid fallback (real runLaunchFlow path)", () => 
     expect(result.error).toBeTruthy();
   });
 });
+
+// ─── Tests: read-only inspection runs (ART-20261111-041) ────────
+//
+// Live defect: a kernel-classified inspection turn ("List the files…")
+// executed correctly in the tool lane, but this flow then treated the
+// absence of file WRITES as a failed build: it re-prompted the model
+// to write files and ended with TOOL_EXECUTION_UNAVAILABLE, discarding
+// the composed answer. A read-only run is complete when the tool lane
+// answers — no reprompt, no artifact/preview phases, and the agent's
+// text is the result. Mutation runs keep every existing guard.
+
+describe("Launch Flow: read-only inspection runs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  const LISTING_TEXT = "The project contains the following files: 1. index.html 2. litt-probe.txt";
+
+  function inspectionAgentResult(overrides: Partial<AgentLoopResult> = {}): AgentLoopResult {
+    return successAgentResult({
+      finalText: LISTING_TEXT,
+      stepsUsed: 2,
+      toolCalls: [{ toolId: "files.list", success: true, summary: "listed 2 files", mutating: false }],
+      buildFixResult: undefined,
+      ...overrides,
+    });
+  }
+
+  it("completes a read-only run in one pass and delivers the agent's answer verbatim", async () => {
+    const transport = createMockTransport();
+    const runAgentLoop = vi.fn().mockResolvedValue(inspectionAgentResult());
+    const options = makeOptions({
+      userMessage: "List the files in the project I'm currently viewing. Just list them, don't change anything.",
+      transport,
+      runAgentLoop,
+      requiresExecution: true,
+      readOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(runAgentLoop.mock.calls[0][2]).toMatchObject({ requireToolCallOnFirstStep: true });
+    expect(runAgentLoop.mock.calls[0][2].buildCapabilityGuard).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe(LISTING_TEXT);
+    // No build machinery: no artifact/preview phase was entered.
+    expect(transport.startPreview).not.toHaveBeenCalled();
+  });
+
+  it("delivers the answer even when the run's quality verdict fails — never the discarded-answer failure text", async () => {
+    const gatedText = `${LISTING_TEXT}\n\nQuality check — cannot declare success (task scope: standard)`;
+    const runAgentLoop = vi.fn().mockResolvedValue(inspectionAgentResult({
+      finalText: gatedText,
+      qualityLoop: {
+        verdict: { ok: false, missing: ["build", "test"], reason: "Cannot declare success (task scope: standard)" },
+        stages: [],
+        designPasses: 0,
+      },
+    }));
+    const options = makeOptions({
+      userMessage: "List the files in the project I'm currently viewing.",
+      runAgentLoop,
+      requiresExecution: true,
+      readOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.finalText).toBe(gatedText);
+    expect(result.finalText).not.toContain("no available model produced a file-writing tool call");
+  });
+
+  it("does not claim success when the read produced no successful tool call", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(inspectionAgentResult({
+      finalText: "I couldn't list the files: the workspace read failed.",
+      toolCalls: [{ toolId: "files.list", success: false, summary: "read failed", mutating: false }],
+    }));
+    const options = makeOptions({
+      userMessage: "List the files in the project I'm currently viewing.",
+      runAgentLoop,
+      requiresExecution: true,
+      readOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.finalText).toContain("couldn't list the files");
+  });
+
+  it("CONTROL: the identical agent result WITHOUT readOnly still hits the zero-mutation reprompt and its failure text", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(inspectionAgentResult());
+    const options = makeOptions({
+      userMessage: "List the files in the project I'm currently viewing.",
+      runAgentLoop,
+      requiresExecution: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(false);
+    expect(result.finalText).toContain("no available model produced a file-writing tool call");
+  });
+});

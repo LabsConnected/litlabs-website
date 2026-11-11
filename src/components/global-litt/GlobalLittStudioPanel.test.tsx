@@ -52,7 +52,7 @@ interface FetchCall {
   body: Record<string, unknown> | null;
 }
 
-function installFetchMock(opts?: { refuseMessagesPost?: boolean }) {
+function installFetchMock(opts?: { refuseMessagesPost?: boolean; failedAssistantReply?: boolean }) {
   const calls: FetchCall[] = [];
   let sent = false;
   const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
@@ -69,6 +69,20 @@ function installFetchMock(opts?: { refuseMessagesPost?: boolean }) {
     }
     if (u === "/api/studio/conversations/conv-1/messages" && method === "GET") {
       if (!sent) return jsonResponse({ messages: [], revision: 1 });
+      if (opts?.failedAssistantReply) {
+        return jsonResponse({
+          messages: [
+            { id: "m1", role: "user", content: "List the files in the project I'm currently viewing.", status: "completed" },
+            {
+              id: "m2",
+              role: "assistant",
+              content: "The run did not complete: the quality gate could not be satisfied for this task.",
+              status: "failed",
+            },
+          ],
+          revision: 2,
+        });
+      }
       return jsonResponse({
         messages: [
           { id: "m1", role: "user", content: "List the files in the project I'm currently viewing.", status: "completed" },
@@ -161,5 +175,53 @@ describe("GlobalLittStudioPanel workspace inheritance", () => {
       expect(screen.getByText(/Project mismatch/)).toBeTruthy();
     });
     expect(calls.some((c) => c.url === "/api/gemini/chat")).toBe(false);
+  });
+});
+
+describe("GlobalLittStudioPanel composer keys + failed-run visibility (ART-20261111-041)", () => {
+  function messagesPosts(calls: FetchCall[]) {
+    return calls.filter(
+      (c) => c.url === "/api/studio/conversations/conv-1/messages" && c.method === "POST",
+    );
+  }
+
+  it("Enter submits through the canonical lane (docked-composer convention)", async () => {
+    const calls = installFetchMock();
+    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+
+    const composer = screen.getByTestId("global-litt-composer");
+    fireEvent.change(composer, { target: { value: "List the files in the project I'm currently viewing." } });
+    fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
+
+    await screen.findByText("Files: index.html, README.md");
+    expect(messagesPosts(calls)).toHaveLength(1);
+    expect(messagesPosts(calls)[0]?.body?.projectId).toBe("proj-viewed");
+  });
+
+  it("Shift+Enter does NOT submit — it is the newline chord", async () => {
+    const calls = installFetchMock();
+    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+
+    const composer = screen.getByTestId("global-litt-composer") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "List the files" } });
+    fireEvent.keyDown(composer, { key: "Enter", shiftKey: true });
+
+    // Let any (incorrect) async send settle, then assert nothing was sent
+    // and the draft is untouched.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(messagesPosts(calls)).toHaveLength(0);
+    expect(composer.value).toBe("List the files");
+  });
+
+  it("a failed run's assistant message is SHOWN in the overlay, never filtered into silence", async () => {
+    installFetchMock({ failedAssistantReply: true });
+    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+
+    await sendMessage("List the files in the project I'm currently viewing.");
+
+    // The persisted failure report is the user's answer for that turn —
+    // the panel must render it (the docked transcript renders failed
+    // messages; the overlay previously dropped every non-completed row).
+    await screen.findByText(/quality gate could not be satisfied/);
   });
 });
