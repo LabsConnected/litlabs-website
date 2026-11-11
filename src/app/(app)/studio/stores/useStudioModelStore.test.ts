@@ -31,7 +31,7 @@ describe("useStudioModelStore", () => {
     const { useStudioModelStore } = await import("./useStudioModelStore");
     const state = useStudioModelStore.getState();
     expect(state.selectedModel.id).toBe("groq-llama-70b");
-    expect(state.selectedModel.label).toBe("Groq Llama 70B");
+    expect(state.selectedModel.label).toBe("GPT-OSS 120B (Groq)");
   });
 
   it("falls back to default when localStorage has invalid model ID", async () => {

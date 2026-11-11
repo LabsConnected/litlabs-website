@@ -28,6 +28,7 @@ const PROVIDER_HEALTH_WORDS: Record<ProviderHealth, string> = {
   degraded: "Degraded",
   unavailable: "Unavailable",
   locked: "Not configured",
+  unknown: "Unknown",
 };
 
 export interface ProviderHealthSummary {
