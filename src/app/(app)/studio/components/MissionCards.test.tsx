@@ -280,4 +280,33 @@ describe("MissionCards", () => {
       expect(screen.getByTestId("mission-card-actions")).toBeInTheDocument();
     });
   });
+
+  // Approve-in-chat (2026-11-11): Larry approved on the chat card — it read
+  // "Approved — running..." while this Mission surface still said "Approval
+  // waiting" on the SAME screen. Once a decision lands (approvalPhase
+  // submitting/executing), pendingApproval stays mounted by design, but no
+  // surface may keep claiming a decision is still waiting.
+  it("stops saying 'Approval waiting' once the decision lands and the run resumes", () => {
+    act(() => {
+      useExecutionStore.getState().startRun();
+      useExecutionStore.getState().setPendingApproval({
+        toolId: "image.stock",
+        reason: "Mutation requires approval in ACT mode",
+        pausedRunId: "paused-1",
+      });
+    });
+
+    render(<MissionCards {...makeProps()} />);
+    expect(screen.getByText("Approval waiting")).toBeInTheDocument();
+
+    act(() => {
+      useExecutionStore.getState().beginApprovalSubmit();
+      useExecutionStore.getState().approvalAccepted();
+    });
+
+    expect(screen.queryByText("Approval waiting")).toBeNull();
+    expect(
+      screen.queryByText("Approval waiting — review the request before work continues.")
+    ).toBeNull();
+  });
 });
