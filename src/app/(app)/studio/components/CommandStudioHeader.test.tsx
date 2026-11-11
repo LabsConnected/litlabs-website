@@ -387,6 +387,36 @@ describe("CommandStudioHeader — mobile scroll affordance (Phase 1 #1)", () => 
     expect(dialog.textContent).not.toContain("AI connected");
   });
 
+  it("workspace status popover carries exactly one availability count, derived from the provider health map", () => {
+    // Invariant (residual pin): the popover must never present two
+    // availability counts with different memberships — e.g. a second
+    // roll-up row ("Engine — Models N of M") next to the AI Providers
+    // row. There is exactly one count, and it is the provider summary.
+    mockProviderHealth = {
+      Auto: "available",
+      gemini: "available",
+      groq: "available",
+      openrouter: "available",
+      ollama: "unavailable",
+    };
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("agent-status-pill"));
+    const dialog = screen.getByRole("dialog", { name: /workspace status/i });
+    const text = dialog.textContent ?? "";
+    expect(text).toContain("3 of 4 available");
+    const counts = text.match(/\d+ of \d+ available/g) ?? [];
+    expect(counts).toEqual(["3 of 4 available"]);
+    expect(text).not.toMatch(/engine/i);
+    expect(text).not.toMatch(/models \d+ of \d+/i);
+  });
+
   it("workspace status popover says providers are still checking until health is verified", () => {
     mockProviderHealth = {};
     render(
