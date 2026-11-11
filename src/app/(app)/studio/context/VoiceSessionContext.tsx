@@ -388,6 +388,12 @@ export function VoiceSessionProvider({
   const inworldOnErrorRef = useRef<(msg: string) => void>(() => {});
   const inworldOnResponseCompleteRef = useRef<() => void>(() => {});
   const inworldOnCloseRef = useRef<(msg: string) => void>(() => {});
+  // Sync Inworld connection state. Declared with the other session
+  // refs (it used to sit below the session hook): the B-04 close
+  // handler registered in the effect above reads/writes it, and the
+  // react-hooks immutability rule rejects writes to a ref first used
+  // in an effect before its declaration point.
+  const inworldConnectedRef = useRef(false);
 
   // ---------------------------------------------------------------------------
   // dispatchTurn — invoke the registered turn handler for a transcript.
@@ -613,9 +619,6 @@ export function VoiceSessionProvider({
   useEffect(() => {
     resumeMicRef.current = inworldSession.resumeMic;
   }, [inworldSession.resumeMic]);
-
-  // Sync Inworld connection state
-  const inworldConnectedRef = useRef(false);
 
   // Sync Inworld mic level to context micLevel for waveform visualization
   const inworldAudioLevel = useVoiceStore((s) => s.audioLevel);
