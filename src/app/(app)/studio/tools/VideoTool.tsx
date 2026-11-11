@@ -30,6 +30,12 @@ import { useStudioContext } from "../context/StudioContext";
 
 type CreationMode = "quick" | "animate" | "director";
 
+const MODE_LABELS: Record<CreationMode, string> = {
+  quick: "Quick Create",
+  animate: "Animate Image",
+  director: "Director",
+};
+
 type GenStatus = "idle" | "uploading" | "analyzing" | "queued" | "generating" | "finalizing" | "complete" | "failed";
 
 interface VideoGen {
@@ -166,7 +172,11 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
   const { tokens } = useTheme();
   const { setActiveAssetId } = useStudioContext();
   const [mode, setMode] = useState<CreationMode>("quick");
-  const [prompt, setPrompt] = useState(initialPrompt ?? "");
+  // The shot prompt is STAGED, never typed in this pane (one-prompt
+  // contract, ART-20261111-035): it arrives from the one chat
+  // (initialPrompt), a session draft, a suggested-shot card, or a remix
+  // — and is displayed read-only. The pane's own textarea is gone.
+  const [stagedPrompt, setStagedPrompt] = useState(initialPrompt ?? "");
   const lastInitialPromptRef = useRef(initialPrompt);
   const [originalPrompt, setOriginalPrompt] = useState("");
   const [enhancedPrompt, setEnhancedPrompt] = useState<string | null>(null);
@@ -221,7 +231,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
   useEffect(() => {
     if (initialPrompt && initialPrompt !== lastInitialPromptRef.current) {
       lastInitialPromptRef.current = initialPrompt;
-      setPrompt(initialPrompt);
+      setStagedPrompt(initialPrompt);
       setError(null);
     }
   }, [initialPrompt]);
@@ -271,7 +281,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
       const raw = sessionStorage.getItem("litlabs:video:draft");
       if (!raw) return;
       const draft = JSON.parse(raw) as { prompt?: string; duration?: number; aspectRatio?: string; resolution?: string };
-      if (draft.prompt) setPrompt(draft.prompt);
+      if (draft.prompt) setStagedPrompt(draft.prompt);
       if (draft.duration) setDuration(draft.duration);
       if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
       if (draft.resolution) setResolution(draft.resolution);
@@ -345,7 +355,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
   };
 
   const applyIdea = (idea: VideoIdea) => {
-    setPrompt(idea.prompt);
+    setStagedPrompt(idea.prompt);
     setOriginalPrompt(idea.prompt);
     setEnhancedPrompt(null);
     setShowEnhanced(false);
@@ -356,13 +366,13 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
   /* ─── Prompt enhancement ──────────────────────────────────────────── */
 
   const handleEnhance = useCallback(async () => {
-    if (!prompt.trim()) return;
+    if (!stagedPrompt.trim()) return;
     setIsEnhancing(true);
-    setOriginalPrompt(prompt.trim());
+    setOriginalPrompt(stagedPrompt.trim());
     try {
       const data = await apiFetch<ApiJson>("/api/media/suggest-video-ideas", {
         method: "POST",
-        body: JSON.stringify({ prompt: prompt.trim(), mode: "enhance" }),
+        body: JSON.stringify({ prompt: stagedPrompt.trim(), mode: "enhance" }),
       });
       const ideas = Array.isArray(data.ideas) ? (data.ideas as VideoIdea[]) : [];
       const enhanced = (data.enhancedPrompt as string) || ideas[0]?.prompt || null;
@@ -372,13 +382,13 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
       }
     } catch {
       // Fallback: compose locally
-      const local = composeEnhancedPrompt(prompt, camera, motionStyle, look, composition);
+      const local = composeEnhancedPrompt(stagedPrompt, camera, motionStyle, look, composition);
       setEnhancedPrompt(local);
       setShowEnhanced(true);
     } finally {
       setIsEnhancing(false);
     }
-  }, [prompt, camera, motionStyle, look, composition]);
+  }, [stagedPrompt, camera, motionStyle, look, composition]);
 
   /* ─── Chip toggles ────────────────────────────────────────────────── */
 
@@ -392,12 +402,12 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
   /* ─── Generate ────────────────────────────────────────────────────── */
 
   const finalPrompt = useMemo(() => {
-    const base = showEnhanced && enhancedPrompt ? enhancedPrompt : prompt.trim();
+    const base = showEnhanced && enhancedPrompt ? enhancedPrompt : stagedPrompt.trim();
     if (mode === "director" || mode === "quick") {
       return `${base}${buildShotSuffix(camera, motionStyle, look, composition)}`;
     }
     return base;
-  }, [prompt, enhancedPrompt, showEnhanced, mode, camera, motionStyle, look, composition]);
+  }, [stagedPrompt, enhancedPrompt, showEnhanced, mode, camera, motionStyle, look, composition]);
 
   const handleGenerate = useCallback(async () => {
     if (videoModel.id === "happyhorse" && !uploadedImageUrl) {
@@ -405,7 +415,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
       return;
     }
     if (!finalPrompt.trim() || finalPrompt.trim().length < 3) {
-      setError("Prompt must be at least 3 characters.");
+      setError("The staged shot is too short — describe the video in the LiTT chat first.");
       return;
     }
     if (!canAfford) {
@@ -552,7 +562,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
 
   const handleRemix = () => {
     if (!current) return;
-    setPrompt(current.prompt);
+    setStagedPrompt(current.prompt);
     setModelId(current.model);
     setDuration(current.duration);
     setAspectRatio(current.aspectRatio);
@@ -611,6 +621,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
             <button
               key={tab.id}
               onClick={() => setMode(tab.id)}
+              aria-pressed={mode === tab.id}
               className="flex flex-col items-start rounded-xl border px-4 py-2.5 transition-all hover:scale-[1.02] active:scale-95"
               style={{
                 borderColor: mode === tab.id ? tokens.primary + "80" : tokens.border,
@@ -665,7 +676,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
               <div className="text-center">
                 <Film size={40} className="mx-auto opacity-20" style={{ color: tokens.primary }} />
                 <p className="mt-3 text-sm" style={{ color: tokens.textMuted }}>Your video will appear here</p>
-                <p className="mt-1 text-[10px]" style={{ color: tokens.textMuted }}>{videoModel.label} · {aspectRatio} · {resolution}</p>
+                <p data-testid="video-stage-meta" className="mt-1 text-[10px]" style={{ color: tokens.textMuted }}>{MODE_LABELS[mode]} · {videoModel.label} · {aspectRatio} · {resolution}</p>
               </div>
             )}
           </div>
@@ -693,12 +704,24 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
         </div>
       </Entrance>
 
-      {/* Prompt Composer */}
+      {/* Staged Shot — READ-ONLY (one-prompt contract). The shot text
+          lives in the one chat; this card shows what is staged and
+          fires generation from controls. No text input exists here. */}
       <Entrance delay={0.15}>
         <div className="rounded-2xl border p-4" style={{ borderColor: tokens.border, background: tokens.surface, backdropFilter: "blur(12px)" }}>
           <div className="flex items-center gap-2">
             <Sparkles size={14} style={{ color: tokens.primary }} />
-            <span className="text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Describe your shot</span>
+            <span className="text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Staged shot</span>
+            {stagedPrompt.trim() && !isGenerating && (
+              <button
+                onClick={() => { setStagedPrompt(""); setEnhancedPrompt(null); setShowEnhanced(false); setError(null); }}
+                className="ml-auto flex items-center gap-1 text-[10px] font-bold transition"
+                style={{ color: tokens.textMuted }}
+                aria-label="Clear staged shot"
+              >
+                <X size={11} /> Clear
+              </button>
+            )}
           </div>
 
           {showEnhanced && enhancedPrompt ? (
@@ -711,28 +734,33 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
                 {showEnhanced ? enhancedPrompt : originalPrompt}
               </div>
               {showEnhanced && (
-                <button onClick={() => { setPrompt(enhancedPrompt); setShowEnhanced(false); }} className="text-[10px] font-bold transition" style={{ color: tokens.textMuted }}>
+                <button onClick={() => { setStagedPrompt(enhancedPrompt); setShowEnhanced(false); }} className="text-[10px] font-bold transition" style={{ color: tokens.textMuted }}>
                   Use enhanced prompt →
                 </button>
               )}
             </div>
           ) : (
-            <textarea
-              data-testid="video-prompt-input"
-              value={prompt}
-              onChange={(e) => { setPrompt(e.target.value); setError(null); }}
-              placeholder="A futuristic LiTT robot walking through a rain-soaked city at night..."
-              rows={3}
-              disabled={isGenerating}
-              className="mt-3 w-full resize-none rounded-xl border bg-transparent px-3 py-2.5 text-sm outline-none disabled:opacity-50"
-              style={{ borderColor: tokens.border, color: tokens.text, background: tokens.background }}
-            />
+            <div
+              data-testid="video-staged-prompt"
+              className="mt-3 w-full rounded-xl border px-3 py-2.5 text-sm leading-relaxed"
+              style={{
+                borderColor: tokens.border,
+                color: stagedPrompt.trim() ? tokens.text : tokens.textMuted,
+                background: tokens.background,
+                minHeight: 68,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {stagedPrompt.trim()
+                ? stagedPrompt
+                : "Nothing staged yet. Describe the video in the LiTT chat — or upload a first frame and pick a suggested shot — and it lands here, ready to generate."}
+            </div>
           )}
 
           <div className="mt-3 flex items-center gap-2">
             <button
               onClick={handleEnhance}
-              disabled={!prompt.trim() || isEnhancing || isGenerating}
+              disabled={!stagedPrompt.trim() || isEnhancing || isGenerating}
               className="flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[11px] font-bold transition hover:scale-[1.02] active:scale-95 disabled:opacity-40"
               style={{ borderColor: tokens.primary + "4D", background: tokens.primary + "14", color: tokens.primary, minHeight: 40 }}
             >
@@ -741,7 +769,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
             </button>
             <button
               onClick={handleGenerate}
-              disabled={!prompt.trim() || !canAfford || isGenerating}
+              disabled={!stagedPrompt.trim() || !canAfford || isGenerating}
               className="ml-auto flex items-center gap-2 rounded-xl px-5 py-2 text-xs font-black transition hover:scale-[1.02] active:scale-95 disabled:opacity-40"
               style={{ background: tokens.primary, color: tokens.textInverse, boxShadow: `0 0 24px ${tokens.primary}4D`, minHeight: 40 }}
             >

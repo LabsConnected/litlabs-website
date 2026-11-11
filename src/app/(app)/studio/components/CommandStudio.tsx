@@ -132,6 +132,7 @@ const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
 const MusicTool = dynamic(() => import("../tools/MusicTool"), { ssr: false });
+const GameCreatorEmptyState = dynamic(() => import("../tools/GameCreatorEmptyState"), { ssr: false });
 const BuilderTool = dynamic(() => import("../tools/BuilderTool"), { ssr: false });
 const StudioPreviewPanel = dynamic(() => import("./StudioPreviewPanel"), { ssr: false });
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
@@ -173,6 +174,9 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<Record<str
   video: VideoTool,
   audio: AudioTool,
   music: MusicTool,
+  // "game" has no creator implementation — it renders the honest empty
+  // state (never another creator) until a real game tool exists.
+  game: GameCreatorEmptyState,
   build: BuilderTool,
   agents: AgentTool,
   assets: GalleryTool,
@@ -362,6 +366,7 @@ function CommandStudioContent() {
    */
   const [imageStudioPrompt, setImageStudioPrompt] = useState<string | null>(null);
   const [videoStudioPrompt, setVideoStudioPrompt] = useState<string | null>(null);
+  const [musicStudioPrompt, setMusicStudioPrompt] = useState<string | null>(null);
   // Canvas-first 2-zone layout: the live preview is the Preview workspace
   // tab's StudioPreviewPanel, consuming the full workspace width. Studio
   // never reserves canvas width for a second preview column.
@@ -1274,12 +1279,22 @@ function CommandStudioContent() {
     setDestination("create");
   }, []);
 
+  // One-chat music flow (ART-20261111-035): the chat music intent opens
+  // the real Music Studio with the request staged — the pane itself
+  // carries no prompt box, so the staged draft is how requests arrive.
+  const handleOpenMusicStudio = useCallback((prompt: string) => {
+    setMusicStudioPrompt(prompt || null);
+    setCreateMode("music");
+    setDestination("create");
+  }, []);
+
   // A prefilled image prompt only lives while the create destination is
   // active — leaving clears it so a later Image Studio visit starts clean.
   useEffect(() => {
     if (destination !== "create") {
       setImageStudioPrompt(null);
       setVideoStudioPrompt(null);
+      setMusicStudioPrompt(null);
     }
   }, [destination]);
 
@@ -1299,6 +1314,7 @@ function CommandStudioContent() {
     onOpenProjectNameDialog: openProjectNameDialog,
     onOpenImageStudio: handleOpenImageStudio,
     onOpenVideoStudio: handleOpenVideoStudio,
+    onOpenMusicStudio: handleOpenMusicStudio,
     // The URL's explicit ?project= is authoritative the instant it's present —
     // capabilities.projectId is resolved by an async fetch that can still be
     // in flight (or, if it started before the URL param was readable, can
@@ -2588,6 +2604,9 @@ function CommandStudioContent() {
       if (createMode === "audio") return "audio";
       if (createMode === "music") return "music";
       if (createMode === "environment") return "space";
+      // Game must NOT fall through to the Image studio (the silent swap
+      // ART-20261111-035 removes): it resolves to its own honest surface.
+      if (createMode === "game") return "game";
       return "image";
     }
     if (destination === "assets") return "assets";
@@ -3642,14 +3661,14 @@ function CommandStudioContent() {
                         <WorkspaceComponent
                           key={creatorDraftEpoch}
                           projectId={capabilities.projectId}
-                          initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : imageStudioPrompt}
+                          initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : activeLegacyTool === "music" ? musicStudioPrompt : imageStudioPrompt}
                         />
                       </StudioCreatorHost>
                     ) : (
                       <WorkspaceComponent
                         key={creatorDraftEpoch}
                         projectId={capabilities.projectId}
-                        initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : imageStudioPrompt}
+                        initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : activeLegacyTool === "music" ? musicStudioPrompt : imageStudioPrompt}
                       />
                     )}
                   </div>

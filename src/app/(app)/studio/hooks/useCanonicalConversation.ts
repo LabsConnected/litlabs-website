@@ -172,6 +172,7 @@ export function useCanonicalConversation({
   onOpenProjectNameDialog,
   onOpenImageStudio,
   onOpenVideoStudio,
+  onOpenMusicStudio,
   serverProjectId,
   cameraState,
   previewSelection,
@@ -187,6 +188,8 @@ export function useCanonicalConversation({
   onOpenImageStudio?: (prompt: string) => void;
   /** Open the real Video Studio surface with the prompt prefilled. */
   onOpenVideoStudio?: (prompt: string) => void;
+  /** Open the real Music Studio surface with the request staged. */
+  onOpenMusicStudio?: (prompt: string) => void;
   serverProjectId?: string | null;
   /** Camera dock state — passed to the LLM so it knows camera is available */
   cameraState?: { active: boolean; status: string };
@@ -1073,6 +1076,7 @@ export function useCanonicalConversation({
           onOpenProjectNameDialog,
           onOpenImageStudio,
           onOpenVideoStudio,
+          onOpenMusicStudio,
           onNavigate: (url) => {
             if (typeof window !== "undefined") window.location.href = url;
           },
@@ -1084,7 +1088,10 @@ export function useCanonicalConversation({
           // P1-1: the image intent opens the Image Studio surface — it is
           // not an agent run, so the "Done · No files changed" completion
           // card must not render (it would fake a generation success).
-          suppressCompletion: intent.intent === "generate_image",
+          // generate_music opens the Music Studio the same way, so it
+          // suppresses for the same reason (ART-20261111-035).
+          suppressCompletion:
+            intent.intent === "generate_image" || intent.intent === "generate_music",
         };
       }
 
@@ -1794,7 +1801,7 @@ export function useCanonicalConversation({
         // keeps offering Stop and the UI keeps claiming "working".
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, onOpenVideoStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply, serverProjectId, userId],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, onOpenVideoStudio, onOpenMusicStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply, serverProjectId, userId],
   );
 
   // Regenerate — calls canonical regenerate API
