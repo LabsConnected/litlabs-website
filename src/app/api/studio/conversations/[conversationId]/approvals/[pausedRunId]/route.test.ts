@@ -81,6 +81,7 @@ vi.mock("@/lib/studio/task-service", () => ({
 
 vi.mock("@/lib/action-runtime", () => ({
   getActionRun: vi.fn(),
+  appendActionEvent: vi.fn(() => Promise.resolve({})),
   recordActionEventActivity: vi.fn(() => Promise.resolve({})),
   transitionActionRun: vi.fn(() => Promise.resolve({})),
   transitionActionRunEventActivity: vi.fn(() => Promise.resolve({})),
@@ -104,8 +105,14 @@ import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getCheckpoint } from "@/lib/missions/mission-repository";
 import {
   getActionRun,
+  appendActionEvent,
   transitionActionRunEventActivity,
 } from "@/lib/action-runtime";
+import {
+  startQualityLoopSession,
+  snapshotQualityLoopSession,
+} from "@/lib/litt-intelligence/quality-loop-flow";
+import { getProject } from "@/lib/projects/project-repository";
 import {
   getAwaitingApprovalAssistantMessage,
   insertMessage,
@@ -537,6 +544,57 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
         status: "completed",
         clientRequestId: `resume:${PAUSED_ID}`,
       }),
+    );
+  });
+
+  it("persists a preview.ready event when a static resume's artifact check passes", async () => {
+    // Diagnosis ART-20261111-061 §1: the static branch of
+    // ensureProjectPreviewReady records NO action event, so on a resumed
+    // static run nothing ever overwrites an earlier preview.failed in the
+    // projection's latest-event-wins Preview facet. The route files the
+    // preview evidence into the quality session — it must also persist
+    // the ready fact into the action-event log it already owns.
+    vi.mocked(getProject).mockResolvedValue({ framework: "static" } as any);
+    const transport = await createWorkspaceTransport("ws-123", "user_123");
+    Object.assign(transport, {
+      readFile: vi.fn(async () => ({ content: "<html><body>Built site</body></html>" })),
+    });
+    vi.mocked(createWorkspaceTransport).mockResolvedValueOnce(transport);
+    const qualityLoopState = snapshotQualityLoopSession(
+      startQualityLoopSession({
+        runId: "run-parent-1",
+        projectId: "proj-123",
+        userId: "user_123",
+        userRequest: "Build a roofing site",
+        isStaticWorkspace: true,
+      }),
+    );
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "Built the site.",
+      stepsUsed: 2,
+      cancelled: false,
+      toolCalls: [
+        { toolId: "files.write", success: true, summary: "saved", mutating: true, paths: ["index.html"] },
+      ],
+      workspaceChange: { status: "changed", changedPaths: ["index.html"] },
+      qualityLoopState,
+    } as any);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    await vi.waitFor(() =>
+      expect(appendActionEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runId: "run-parent-1",
+          userId: "user_123",
+          type: "preview.ready",
+          payload: expect.objectContaining({
+            success: true,
+            previewUrl: "/api/preview/proj-123/",
+          }),
+        }),
+      ),
     );
   });
 });
