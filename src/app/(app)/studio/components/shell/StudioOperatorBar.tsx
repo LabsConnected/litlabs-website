@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import type { ComponentType, CSSProperties } from "react";
+import { useTheme } from "@/context/ThemeContext";
 import { useExecutionStore, type ExecutionPhase } from "../../stores/useExecutionStore";
 
 const PHASE_META: Record<ExecutionPhase, { label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: CSSProperties }>; color: string }> = {
@@ -72,6 +73,7 @@ export default function StudioOperatorBar({
   modelLabel,
   lastRunFailed = false,
 }: StudioOperatorBarProps) {
+  const { tokens } = useTheme();
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
@@ -123,8 +125,8 @@ export default function StudioOperatorBar({
     <div
       className="flex h-8 shrink-0 items-center gap-2 border-t px-3 text-[11px] overflow-x-auto"
       style={{
-        backgroundColor: "rgba(16,12,26,0.92)",
-        borderColor: "rgba(255,255,255,0.07)",
+        backgroundColor: tokens.surface,
+        borderColor: tokens.border,
         color: "var(--text-muted)",
         backdropFilter: "blur(8px)",
       }}

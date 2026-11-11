@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTheme } from "@/context/ThemeContext";
 import type { WorktabBadge } from "../stores/useExecutionStore";
 import type { Worktab } from "../hooks/useServerWorktabs";
 
@@ -81,6 +82,7 @@ export default function WorktabBar({
   closedTabs,
   onReopen,
 }: WorktabBarProps) {
+  const { tokens } = useTheme();
   const [reopenOpen, setReopenOpen] = useState(false);
   const reopenRef = useRef<HTMLDivElement | null>(null);
 
@@ -107,7 +109,7 @@ export default function WorktabBar({
     <div
       className="glass-shell flex h-9 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b px-2"
       style={{
-        backgroundColor: "rgba(13,9,22,0.85)",
+        backgroundColor: tokens.surface,
         borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)",
         scrollbarWidth: "thin",
       }}
@@ -158,7 +160,7 @@ export default function WorktabBar({
       <button
         type="button"
         onClick={onNew}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[15px] font-bold transition-colors hover:bg-white/5"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[15px] font-bold transition-colors hover:bg-[rgba(127,127,127,0.12)]"
         style={{ color: "var(--text-dim)" }}
         aria-label="New worktab"
         title="New worktab"
@@ -171,7 +173,7 @@ export default function WorktabBar({
           <button
             type="button"
             onClick={() => setReopenOpen((v) => !v)}
-            className="grid h-7 w-7 place-items-center rounded-md text-[13px] transition-colors hover:bg-white/5"
+            className="grid h-7 w-7 place-items-center rounded-md text-[13px] transition-colors hover:bg-[rgba(127,127,127,0.12)]"
             style={{ color: "var(--text-dim)" }}
             aria-label={`Reopen closed worktab (${closedTabs.length} available)`}
             aria-expanded={reopenOpen}
@@ -184,8 +186,8 @@ export default function WorktabBar({
             <div
               className="absolute right-0 top-8 z-50 max-h-56 w-52 overflow-y-auto rounded-lg border p-1 shadow-xl"
               style={{
-                backgroundColor: "rgba(13,9,22,0.98)",
-                borderColor: "rgba(155,77,255,0.2)",
+                backgroundColor: tokens.surface,
+                borderColor: tokens.border,
               }}
               role="menu"
               aria-label="Recently closed worktabs"
@@ -200,7 +202,7 @@ export default function WorktabBar({
                     setReopenOpen(false);
                     onReopen(tab.id);
                   }}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] font-semibold transition-colors hover:bg-white/5"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] font-semibold transition-colors hover:bg-[rgba(127,127,127,0.12)]"
                   style={{ color: "var(--text-main)" }}
                   title={tab.title}
                   data-testid={`worktab-reopen-${tab.id}`}

@@ -6,6 +6,7 @@
  * Compact icon rail that switches the central Stage surface. Pure view —
  * the caller owns the active surface and persistence.
  */
+import { useTheme } from "@/context/ThemeContext";
 import {
   PRIMARY_SURFACES,
   STAGE_SURFACE_META,
@@ -20,6 +21,7 @@ export default function WorkspaceRail({
   active: StudioStageSurface;
   onSelect: (surface: StudioStageSurface) => void;
 }) {
+  const { tokens } = useTheme();
   const item = (id: StudioStageSurface) => {
     const meta = STAGE_SURFACE_META[id];
     const Icon = meta.icon;
@@ -34,7 +36,7 @@ export default function WorkspaceRail({
         title={meta.hint}
         data-testid={`workspace-rail-${id}`}
         className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] ${
-          isActive ? "" : "hover:bg-white/5"
+          isActive ? "" : "hover:bg-[rgba(127,127,127,0.12)]"
         }`}
         style={{
           color: isActive ? "var(--text-main)" : "var(--text-muted)",
@@ -59,7 +61,7 @@ export default function WorkspaceRail({
     <nav
       aria-label="Workspace surfaces"
       className="glass-shell flex w-12 shrink-0 flex-col items-center gap-1 border-r px-1 py-2"
-      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.85)" }}
+      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: tokens.surface }}
       data-testid="studio-workspace-rail"
     >
       {PRIMARY_SURFACES.map(item)}
