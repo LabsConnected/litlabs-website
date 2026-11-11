@@ -19,6 +19,8 @@ import {
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useStudioContext } from "../context/StudioContext";
 import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
+import { attemptWorkspacePrepare, isHostExecSettled } from "@/lib/studio/host-exec-session";
+import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state";
 
 interface FileEntry {
   name: string;
@@ -178,6 +180,10 @@ export default function StudioProjectFiles({
   const [fileLoading, setFileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [preparing, setPreparing] = useState(false);
+  // True once this project returned the HOST_EXECUTION_DISABLED prepare
+  // verdict (this session): the panel settles into the honest unavailable
+  // explanation and never auto-retries or offers Prepare again.
+  const [hostExecUnavailable, setHostExecUnavailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unsupportedPath, setUnsupportedPath] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -215,6 +221,20 @@ export default function StudioProjectFiles({
     }
     return payload;
   }, [authHeaders]);
+
+  // Prepare through the session guard: after a HOST_EXECUTION_DISABLED
+  // verdict this resolves "unavailable" without any request, so the
+  // files-recovery path below can never spin into a prepare loop.
+  const runPrepare = useCallback(() => {
+    if (!projectId) return Promise.resolve({ kind: "failed", message: "No project selected" } as const);
+    return attemptWorkspacePrepare(projectId, async () =>
+      fetchWithTimeout(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, {
+        method: "POST",
+        credentials: "include",
+        headers: await authHeaders(),
+      }),
+    );
+  }, [authHeaders, projectId]);
 
   const exportZip = useCallback(async () => {
     if (!projectId || exporting) return;
@@ -287,32 +307,49 @@ export default function StudioProjectFiles({
         response?.status === 500 ||
         response?.status === 503;
       if (recoverable && !preparing) {
+        // Settled host-execution verdict: do not attempt prepare at all.
+        // (This branch previously re-POSTed prepare on every load cycle:
+        // `preparing` toggling recreated loadDirectory, which re-fired the
+        // mount effect, which failed files again — an unbounded loop of
+        // 503s for repo-backed projects.)
+        if (isHostExecSettled(projectId)) {
+          setHostExecUnavailable(true);
+          setError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+          return;
+        }
         setPreparing(true);
         try {
-          const prepPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
-          if (prepPayload && prepPayload.workspaceStatus === "ready") {
-            onWorkspacePrepared?.();
-            window.dispatchEvent(new CustomEvent("studio:workspace-recovered", { detail: { projectId, workspaceId: prepPayload.workspaceId } }));
-            await new Promise((resolve) => setTimeout(resolve, 600));
-            const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
-            if (retryPayload && Array.isArray(retryPayload.entries)) {
-              const retryEntries = retryPayload.entries.flatMap((entry) => {
-                if (!entry || typeof entry !== "object") return [];
-                const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
-                if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
-                return [{
-                  name: raw.name,
-                  type: raw.type,
-                  size: typeof raw.size === "number" ? raw.size : undefined,
-                  path: safeDirectory === "." ? raw.name : `${safeDirectory}/${raw.name}`,
-                } satisfies FileEntry];
-              }).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
-              setEntries((current) => ({ ...current, [safeDirectory]: retryEntries }));
-              return;
-            }
+          const outcome = await runPrepare();
+          if (outcome.kind === "unavailable") {
+            setHostExecUnavailable(true);
+            setError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+            return;
           }
-          const prepErr = typeof prepPayload?.error === "string" ? prepPayload.error : "Workspace re-preparation failed. Click Prepare to retry.";
-          setError(prepErr);
+          if (outcome.kind === "failed") {
+            setError(outcome.message);
+            return;
+          }
+          const prepPayload = outcome.payload;
+          onWorkspacePrepared?.();
+          window.dispatchEvent(new CustomEvent("studio:workspace-recovered", { detail: { projectId, workspaceId: prepPayload.workspaceId } }));
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
+          if (retryPayload && Array.isArray(retryPayload.entries)) {
+            const retryEntries = retryPayload.entries.flatMap((entry) => {
+              if (!entry || typeof entry !== "object") return [];
+              const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
+              if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
+              return [{
+                name: raw.name,
+                type: raw.type,
+                size: typeof raw.size === "number" ? raw.size : undefined,
+                path: safeDirectory === "." ? raw.name : `${safeDirectory}/${raw.name}`,
+              } satisfies FileEntry];
+            }).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
+            setEntries((current) => ({ ...current, [safeDirectory]: retryEntries }));
+            return;
+          }
+          setError("Workspace re-preparation did not restore file access. Click Prepare to retry.");
         } catch {
           setError("Workspace was lost and could not be re-prepared automatically. Click Prepare to retry.");
         } finally {
@@ -324,7 +361,7 @@ export default function StudioProjectFiles({
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [projectId, requestJson, preparing, onWorkspacePrepared, authHeaders]);
+  }, [projectId, requestJson, runPrepare, preparing, onWorkspacePrepared, authHeaders]);
 
   useEffect(() => {
     setEntries({});
@@ -336,6 +373,7 @@ export default function StudioProjectFiles({
     setUnsupportedPath(null);
     setConflictNotice(null);
     setError(null);
+    setHostExecUnavailable(projectId ? isHostExecSettled(projectId) : false);
     if (projectId) {
       // Always try to load — the files route will auto-recover if the
       // workspace was lost on the terminal server.
@@ -345,11 +383,22 @@ export default function StudioProjectFiles({
 
   const prepareWorkspace = useCallback(async () => {
     if (!projectId || preparing) return;
+    // Settled verdict: explain, never re-POST.
+    if (isHostExecSettled(projectId)) {
+      setHostExecUnavailable(true);
+      setError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+      return;
+    }
     setPreparing(true);
     setError(null);
     try {
-      const payload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
-      if (!payload || payload.workspaceStatus !== "ready") throw new Error("Workspace preparation did not complete");
+      const outcome = await runPrepare();
+      if (outcome.kind === "unavailable") {
+        setHostExecUnavailable(true);
+        setError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+        return;
+      }
+      if (outcome.kind === "failed") throw new Error(outcome.message);
       onWorkspacePrepared?.();
       await loadDirectory(".");
     } catch (prepareError) {
@@ -357,7 +406,7 @@ export default function StudioProjectFiles({
     } finally {
       setPreparing(false);
     }
-  }, [loadDirectory, onWorkspacePrepared, preparing, projectId, requestJson]);
+  }, [loadDirectory, onWorkspacePrepared, preparing, projectId, runPrepare]);
 
   const refresh = useCallback(async () => {
     setEntries({});
@@ -608,7 +657,7 @@ export default function StudioProjectFiles({
         </button>
       </div>
 
-      {workspaceStatus !== "ready" && <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}><span className="min-w-0 flex-1">Workspace is {workspaceStatus ?? "not prepared"}. Prepare it before browsing project files.</span><button type="button" onClick={() => void prepareWorkspace()} disabled={preparing || workspaceStatus === "provisioning" || workspaceStatus === "preparing"} className="flex min-h-10 shrink-0 items-center gap-1 rounded-md px-2 font-bold disabled:opacity-40" style={{ backgroundColor: "#e3b341", color: "#000" }}>{preparing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Prepare</button></div>}
+      {workspaceStatus !== "ready" && (hostExecUnavailable ? <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}><span className="min-w-0 flex-1">{HOST_EXECUTION_UNAVAILABLE_MESSAGE}</span></div> : <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}><span className="min-w-0 flex-1">Workspace is {workspaceStatus ?? "not prepared"}. Prepare it before browsing project files.</span><button type="button" onClick={() => void prepareWorkspace()} disabled={preparing || workspaceStatus === "provisioning" || workspaceStatus === "preparing"} className="flex min-h-10 shrink-0 items-center gap-1 rounded-md px-2 font-bold disabled:opacity-40" style={{ backgroundColor: "#e3b341", color: "#000" }}>{preparing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Prepare</button></div>)}
       {workspaceStatus === "ready" && !writeAccess && <div className="rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}>Editing is unavailable because this workspace is read-only. The server will continue to enforce project ownership and mutation permissions.</div>}
       {error && <div className="flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.06)", color: "#fca5a5" }}><span className="min-w-0 flex-1">{error}</span><button type="button" onClick={() => setError(null)} aria-label="Dismiss file error"><X size={12} /></button></div>}
 

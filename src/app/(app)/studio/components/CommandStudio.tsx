@@ -34,7 +34,8 @@ import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
 import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
 import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_OPEN_FILE, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
-import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
+import { INITIAL_RUNTIME_STATE, deriveExecutionHint, HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state";
+import { isHostExecDisabledResponse, isHostExecSettled, markHostExecSettled } from "@/lib/studio/host-exec-session";
 import { createManagedStudioProject, takeSubmissionKey, type CreateSubmission } from "@/lib/projects/create-project-request";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 import {
@@ -2014,6 +2015,11 @@ function CommandStudioContent() {
 
   const handlePrepareWorkspace = useCallback(async () => {
     if (!runtimeState.projectId) return;
+    // Already settled this session: explain, never re-POST.
+    if (isHostExecSettled(runtimeState.projectId)) {
+      setProjectCreateError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+      return;
+    }
     setCreatingProject(true);
     setProjectCreateError(null);
     try {
@@ -2028,9 +2034,19 @@ function CommandStudioContent() {
       );
       const payload = await response.json().catch(() => ({})) as {
         error?: string;
+        code?: string;
         workspaceStatus?: string;
       };
       if (!response.ok) {
+        // The coded host-execution refusal is a policy verdict, not a
+        // failed attempt: record it in the session guard (so the files
+        // panel / terminal drawer settle without re-attempting) and show
+        // the honest explanation instead of the raw server text.
+        if (isHostExecDisabledResponse(response.status, payload)) {
+          markHostExecSettled(runtimeState.projectId);
+          setProjectCreateError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+          return;
+        }
         throw new Error(payload.error ?? `Workspace preparation failed (${response.status})`);
       }
       await Promise.all([refreshCapabilities(), runtime?.refresh() ?? Promise.resolve()]);

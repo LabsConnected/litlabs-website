@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { AlertCircle, RotateCcw, Play } from "lucide-react";
+import { attemptWorkspacePrepare } from "@/lib/studio/host-exec-session";
+import {
+  HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+  HOST_EXECUTION_UNAVAILABLE_SHORT,
+} from "@/lib/projects/runtime-state";
 
 const TerminalPanel = dynamic(
   () => import("@/components/litt-terminal/TerminalPanel").then((m) => m.TerminalPanel),
@@ -16,7 +21,7 @@ interface StudioTerminalDrawerProps {
   visible?: boolean;
 }
 
-type WorkspaceState = "idle" | "preparing" | "ready" | "error";
+type WorkspaceState = "idle" | "preparing" | "ready" | "error" | "unavailable";
 type TerminalSessionState = "not_started" | "connecting" | "connected" | "disconnected" | "error";
 
 export default function StudioTerminalDrawer({ projectId, repositoryName, branch, visible }: StudioTerminalDrawerProps) {
@@ -39,29 +44,30 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
 
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch(`/api/studio-projects/${projectId}/workspace/prepare`, {
+      // attemptWorkspacePrepare resolves WITHOUT a request when this
+      // project already returned the HOST_EXECUTION_DISABLED verdict this
+      // session — remounts settle into the unavailable state instead of
+      // re-POSTing prepare (and re-logging a 503) on every drawer open.
+      const outcome = await attemptWorkspacePrepare(projectId, () =>
+        fetch(`/api/studio-projects/${projectId}/workspace/prepare`, {
           method: "POST",
           // Provisioning can take a while, but it must still terminate.
           signal: AbortSignal.timeout(120000),
-        });
-        if (cancelled) return;
-        if (res.ok) {
-          setWorkspaceStatus("ready");
-          // Auto-start terminal unless the user explicitly opted out.
-          if (typeof window !== "undefined" && localStorage.getItem("litt:terminalAutoStart") !== "0") {
-            setTerminalSession("connecting");
-          }
-        } else {
-          const data = await res.json().catch(() => ({}));
-          setWorkspaceStatus("error");
-          setWorkspaceError(data.error ?? "Workspace preparation failed");
+        }),
+      );
+      if (cancelled) return;
+      if (outcome.kind === "ready") {
+        setWorkspaceStatus("ready");
+        // Auto-start terminal unless the user explicitly opted out.
+        if (typeof window !== "undefined" && localStorage.getItem("litt:terminalAutoStart") !== "0") {
+          setTerminalSession("connecting");
         }
-      } catch {
-        if (!cancelled) {
-          setWorkspaceStatus("error");
-          setWorkspaceError("Network error during workspace preparation");
-        }
+      } else if (outcome.kind === "unavailable") {
+        setWorkspaceStatus("unavailable");
+        setWorkspaceError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+      } else {
+        setWorkspaceStatus("error");
+        setWorkspaceError(outcome.message);
       }
     })();
 
@@ -70,30 +76,28 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
 
   const handleRetry = () => {
     if (!projectId) return;
+    // A settled HOST_EXECUTION_DISABLED verdict has no retry: the guard
+    // resolves "unavailable" without a request, so this stays a no-op
+    // state-wise instead of re-POSTing a preparation that cannot succeed.
+    if (workspaceStatus === "unavailable") return;
     setWorkspaceStatus("preparing");
     setWorkspaceError(null);
-    void fetch(`/api/studio-projects/${projectId}/workspace/prepare`, {
-      method: "POST",
-      signal: AbortSignal.timeout(120000),
-    })
-      .then(async (res) => {
-        if (res.ok) {
-          const data = await res.json().catch(() => ({}));
-          if (data.workspaceStatus === "ready") {
-            setWorkspaceStatus("ready");
-          } else if (data.workspaceStatus === "provisioning") {
-            setWorkspaceStatus("preparing");
-          } else {
-            setWorkspaceStatus("error");
-            setWorkspaceError(data.error ?? "Workspace preparation failed");
-          }
-        } else {
-          const data = await res.json().catch(() => ({}));
-          setWorkspaceStatus("error");
-          setWorkspaceError(data.error ?? `Preparation failed (${res.status})`);
-        }
-      })
-      .catch(() => { setWorkspaceStatus("error"); setWorkspaceError("Network error during retry"); });
+    void attemptWorkspacePrepare(projectId, () =>
+      fetch(`/api/studio-projects/${projectId}/workspace/prepare`, {
+        method: "POST",
+        signal: AbortSignal.timeout(120000),
+      }),
+    ).then((outcome) => {
+      if (outcome.kind === "ready") {
+        setWorkspaceStatus("ready");
+      } else if (outcome.kind === "unavailable") {
+        setWorkspaceStatus("unavailable");
+        setWorkspaceError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+      } else {
+        setWorkspaceStatus("error");
+        setWorkspaceError(outcome.message);
+      }
+    });
   };
 
   if (!projectId) {
@@ -107,8 +111,8 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
     );
   }
 
-  const wsColor = workspaceStatus === "ready" ? "#72f238" : workspaceStatus === "preparing" ? "#e3b341" : workspaceStatus === "error" ? "#ef4444" : "rgba(255,255,255,0.2)";
-  const wsLabel = workspaceStatus === "preparing" ? "Workspace provisioning…" : workspaceStatus === "ready" ? "Workspace ready" : workspaceStatus === "error" ? "Workspace error" : "Idle";
+  const wsColor = workspaceStatus === "ready" ? "#72f238" : workspaceStatus === "preparing" ? "#e3b341" : workspaceStatus === "error" ? "#ef4444" : workspaceStatus === "unavailable" ? "#e3b341" : "rgba(255,255,255,0.2)";
+  const wsLabel = workspaceStatus === "preparing" ? "Workspace provisioning…" : workspaceStatus === "ready" ? "Workspace ready" : workspaceStatus === "error" ? "Workspace error" : workspaceStatus === "unavailable" ? HOST_EXECUTION_UNAVAILABLE_SHORT : "Idle";
   const termColor = terminalSession === "connected" ? "#72f238" : terminalSession === "connecting" ? "#e3b341" : terminalSession === "error" ? "#ef4444" : "rgba(255,255,255,0.2)";
   const termLabel = terminalSession === "connected" ? "Connected" : terminalSession === "connecting" ? "Connecting…" : terminalSession === "error" ? "Error" : "Not started";
 
@@ -142,33 +146,42 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: termColor }} />
           <span className="truncate">{termLabel}</span>
         </span>
-        <button
-          type="button"
-          onClick={handleRetry}
-          className="grid h-5 w-5 shrink-0 place-items-center rounded transition hover:bg-white/8"
-          style={{ color: "var(--text-muted)" }}
-          aria-label="Restart workspace"
-          title="Restart workspace"
-        >
-          <RotateCcw size={11} />
-        </button>
-      </div>
-
-      {/* Workspace error inline */}
-      {workspaceError && (
-        <div
-          className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-[10px]"
-          style={{ backgroundColor: "rgba(239,68,68,0.08)", color: "#fca5a5" }}
-        >
-          <AlertCircle size={11} className="shrink-0" />
-          <span className="flex-1 truncate">{workspaceError}</span>
+        {workspaceStatus !== "unavailable" && (
           <button
             type="button"
             onClick={handleRetry}
-            className="rounded px-1.5 py-0.5 text-[9px] font-bold hover:bg-red-500/10"
+            className="grid h-5 w-5 shrink-0 place-items-center rounded transition hover:bg-white/8"
+            style={{ color: "var(--text-muted)" }}
+            aria-label="Restart workspace"
+            title="Restart workspace"
           >
-            Retry
+            <RotateCcw size={11} />
           </button>
+        )}
+      </div>
+
+      {/* Workspace error inline — a settled host-execution verdict renders
+          as an amber explanation with NO retry affordance, not a failure. */}
+      {workspaceError && (
+        <div
+          className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-[10px]"
+          style={
+            workspaceStatus === "unavailable"
+              ? { backgroundColor: "rgba(227,179,65,0.08)", color: "#e3b341" }
+              : { backgroundColor: "rgba(239,68,68,0.08)", color: "#fca5a5" }
+          }
+        >
+          <AlertCircle size={11} className="shrink-0" />
+          <span className="flex-1 truncate" title={workspaceError}>{workspaceError}</span>
+          {workspaceStatus !== "unavailable" && (
+            <button
+              type="button"
+              onClick={handleRetry}
+              className="rounded px-1.5 py-0.5 text-[9px] font-bold hover:bg-red-500/10"
+            >
+              Retry
+            </button>
+          )}
         </div>
       )}
 
