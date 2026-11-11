@@ -233,6 +233,78 @@ function findAttachedImageUrl(inputs?: Record<string, unknown>): string | null {
   return null;
 }
 
+/** Keys whose string value is the SUBJECT of the request — what the tool
+ *  will act on (image.stock's `query`, a search's `query`, …). */
+const SUBJECT_KEYS = ["query", "subject", "prompt", "description", "searchQuery", "search", "title", "text"];
+
+/** Keys whose string value says WHERE the result lands. */
+const DESTINATION_KEYS = ["sitePath", "destinationPath", "destination", "outputPath", "targetPath", "savePath", "saveAs", "path", "filePath", "url"];
+
+/** Keys that must never be rendered from inputs: internal ids and
+ *  credential-shaped values. The card shows WHAT is being approved, never
+ *  bookkeeping identifiers or secrets. */
+const HIDDEN_PARAM_KEY = /id$|key|token|secret|password|auth|credential/i;
+
+/** Keys whose values are payload bodies, not parameters. */
+const BODY_PARAM_KEY = /^(content|body|html|code|css|script)$/i;
+
+export interface ApprovalRequestDetails {
+  subject?: { label: string; value: string };
+  destination?: string;
+  params: Array<{ key: string; value: string }>;
+}
+
+/**
+ * Derive the readable "what is being approved" details from a paused
+ * run's frozen inputs — for EVERY tool, not just image.generate.
+ * (Larry, 2026-11-11: four image.stock gates were indistinguishable
+ * because the card showed only the tool name; the subject sat in
+ * inputs.query the whole time.) Values already shown elsewhere on the
+ * card (affected file paths) are passed as `excludeValues` so nothing
+ * renders twice.
+ */
+export function deriveApprovalRequestDetails(
+  inputs?: Record<string, unknown>,
+  excludeValues: string[] = [],
+): ApprovalRequestDetails {
+  const details: ApprovalRequestDetails = { params: [] };
+  if (!inputs) return details;
+  const excluded = new Set(excludeValues);
+  const used = new Set<string>();
+  const asTrimmedString = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+  for (const key of SUBJECT_KEYS) {
+    const value = asTrimmedString(inputs[key]);
+    if (value) {
+      details.subject = {
+        label: key,
+        value: value.length > 180 ? `${value.slice(0, 180)}…` : value,
+      };
+      used.add(key);
+      break;
+    }
+  }
+  for (const key of DESTINATION_KEYS) {
+    const value = asTrimmedString(inputs[key]);
+    if (value && !excluded.has(value)) {
+      details.destination = value;
+      used.add(key);
+      break;
+    }
+  }
+  for (const [key, value] of Object.entries(inputs)) {
+    if (details.params.length >= 6) break;
+    if (used.has(key) || FILE_LIKE_KEY.test(key) || BODY_PARAM_KEY.test(key)) continue;
+    if (HIDDEN_PARAM_KEY.test(key)) continue;
+    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") continue;
+    const s = String(value).trim();
+    if (s.length === 0 || s.length > 48 || /^https?:\/\//i.test(s)) continue;
+    if (excluded.has(s)) continue;
+    details.params.push({ key, value: s });
+  }
+  return details;
+}
+
 /** Short scalar params (size, style, …) to show as chips; prompt handled separately. */
 function imageRequestParams(inputs?: Record<string, unknown>): Array<{ key: string; value: string }> {
   if (!inputs) return [];
@@ -275,6 +347,16 @@ export function ApprovalCard({
       : null;
   const imageParams = isImageRequest ? imageRequestParams(approval.inputs) : [];
   const attachedImageUrl = isImageRequest ? findAttachedImageUrl(approval.inputs) : null;
+  // Generic request details for every non-image tool: subject +
+  // destination + short params from the frozen inputs, so gates of the
+  // same tool (e.g. four image.stock calls) are distinguishable BEFORE
+  // approval. image.generate keeps its dedicated block above.
+  const requestDetails = isImageRequest
+    ? null
+    : deriveApprovalRequestDetails(approval.inputs, affectedFiles.map((f) => f.path));
+  const hasRequestDetails = Boolean(
+    requestDetails && (requestDetails.subject || requestDetails.destination || requestDetails.params.length > 0),
+  );
   // Once a decision is submitted the gate is consumed server-side — the
   // buttons must not be clickable again while submitting/executing, and a
   // failed gate offers Retry (same paused run) instead of a second decision.
@@ -390,6 +472,64 @@ export function ApprovalCard({
           {affectedFiles.length > 12 && (
             <div className="pt-0.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
               +{affectedFiles.length - 12} more
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Request details — WHAT is being approved, for every tool. The
+          subject is the frozen input the run will act on (image.stock:
+          the photo query), never a paraphrase. */}
+      {hasRequestDetails && requestDetails && (
+        <div
+          data-testid="approval-request-details"
+          className="mb-2 rounded-lg border px-2 py-1.5"
+          style={{
+            borderColor: "rgba(255,255,255,0.08)",
+            backgroundColor: "rgba(255,255,255,0.03)",
+          }}
+        >
+          <div
+            className="pb-1 text-[9px] font-black uppercase tracking-wider"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Request details
+          </div>
+          {requestDetails.subject && (
+            <div
+              data-testid="approval-request-subject"
+              className="text-[11px] leading-snug"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              <span style={{ color: "var(--text-muted)" }}>{requestDetails.subject.label}: </span>
+              {requestDetails.subject.value}
+            </div>
+          )}
+          {requestDetails.destination && (
+            <div
+              data-testid="approval-request-destination"
+              className="truncate pt-0.5 font-mono text-[10px]"
+              style={{ color: "var(--text-secondary)" }}
+              title={requestDetails.destination}
+            >
+              → {requestDetails.destination}
+            </div>
+          )}
+          {requestDetails.params.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-1">
+              {requestDetails.params.map(({ key, value }) => (
+                <span
+                  key={key}
+                  className="rounded-full border px-1.5 py-0.5 text-[9px] font-bold"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.1)",
+                    backgroundColor: "rgba(255,255,255,0.04)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {key}: {value}
+                </span>
+              ))}
             </div>
           )}
         </div>

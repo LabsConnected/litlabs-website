@@ -32,20 +32,49 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { X, Send, Loader2 } from "lucide-react";
 import { useGlobalLitt } from "@/components/global-litt/GlobalLittProvider";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { ApprovalCard } from "@/app/(app)/studio/components/ApprovalCard";
+import { submitApprovalAndPoll } from "@/app/(app)/studio/lib/approval-polling";
+
+/** A paused run attached to a canonical message row — the same payload
+ *  the docked chat's rehydration consumes (tool, reason, frozen inputs). */
+interface PanelPendingApproval {
+  toolId: string;
+  reason: string;
+  pausedRunId: string;
+  inputs?: Record<string, unknown>;
+}
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  pendingApproval?: PanelPendingApproval;
 }
 
 interface CanonicalMessageRow {
   role?: unknown;
   content?: unknown;
   status?: unknown;
+  pendingApproval?: unknown;
 }
 
 const APPROVAL_NOTE =
   "\n\n(Waiting for approval — open this project's chat to approve or reject.)";
+
+function parsePendingApproval(raw: unknown): PanelPendingApproval | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const gate = raw as Record<string, unknown>;
+  if (typeof gate.pausedRunId !== "string" || !gate.pausedRunId) return null;
+  if (typeof gate.toolId !== "string" || !gate.toolId) return null;
+  return {
+    toolId: gate.toolId,
+    reason: typeof gate.reason === "string" ? gate.reason : "Approval required",
+    pausedRunId: gate.pausedRunId,
+    inputs:
+      typeof gate.inputs === "object" && gate.inputs !== null && !Array.isArray(gate.inputs)
+        ? (gate.inputs as Record<string, unknown>)
+        : undefined,
+  };
+}
 
 function toPanelMessages(rows: CanonicalMessageRow[]): Message[] {
   const out: Message[] = [];
@@ -64,12 +93,18 @@ function toPanelMessages(rows: CanonicalMessageRow[]): Message[] {
     ) {
       continue;
     }
+    // Approve-in-chat (2026-11-11): when the row carries the paused run,
+    // the panel renders the canonical ApprovalCard inline — actionable
+    // HERE, in this chat. The go-elsewhere note remains only as the
+    // fallback for a gate whose paused-run identity did not survive.
+    const gate = row.status === "awaiting_approval" ? parsePendingApproval(row.pendingApproval) : null;
     out.push({
       role: row.role,
       content:
-        row.status === "awaiting_approval"
+        row.status === "awaiting_approval" && !gate
           ? row.content + APPROVAL_NOTE
           : row.content,
+      ...(gate ? { pendingApproval: gate } : {}),
     });
   }
   return out;
@@ -450,12 +485,118 @@ export default function GlobalLittStudioPanel({
     }
   }, [input, busy, projectId, canonicalProjectId, messages, sendCanonical]);
 
+  // ── Approve in chat (2026-11-11 directive) ─────────────────────────
+  // A paused run in the viewed conversation is decided HERE, in the
+  // overlay, through the same approvals endpoint + polling contract the
+  // docked chat uses (submitApprovalAndPoll) — same gates, same
+  // decisions, no second mechanism. Local state only mirrors the card
+  // lifecycle phases the canonical ApprovalCard renders.
+  const [gateState, setGateState] = useState<{
+    pausedRunId: string;
+    phase: "idle" | "submitting" | "executing" | "failed";
+    error: string | null;
+    retryable: boolean;
+    expired: boolean;
+  } | null>(null);
+  const gateCancelRef = useRef<(() => void) | null>(null);
+  const gateDecisionRef = useRef<"approved" | "rejected">("approved");
+  useEffect(() => () => {
+    gateCancelRef.current?.();
+  }, []);
+
+  const resolveGate = useCallback(
+    (gate: PanelPendingApproval, decision: "approved" | "rejected") => {
+      const conversationId = convRef.current?.conversationId;
+      if (!conversationId) return;
+      gateDecisionRef.current = decision;
+      gateCancelRef.current?.();
+      setGateState({ pausedRunId: gate.pausedRunId, phase: "submitting", error: null, retryable: true, expired: false });
+      gateCancelRef.current = submitApprovalAndPoll({
+        conversationId,
+        pausedRunId: gate.pausedRunId,
+        decision,
+        onAccepted: () => {
+          if (decision === "rejected") {
+            // Nothing runs server-side after a rejection — the thread
+            // reload shows the settled transcript and the card unmounts.
+            setGateState(null);
+            void loadCanonicalMessages(conversationId);
+          } else {
+            setGateState((s) => (s?.pausedRunId === gate.pausedRunId ? { ...s, phase: "executing" } : s));
+          }
+        },
+        onCompleted: () => {
+          setGateState(null);
+          void loadCanonicalMessages(conversationId);
+        },
+        onFailed: (error, info) => {
+          if (info?.decisionRecorded) {
+            // The decision landed and the run settled — the transcript
+            // is the truth now; reload it and drop the dead card.
+            setGateState(null);
+            void loadCanonicalMessages(conversationId);
+            return;
+          }
+          setGateState({
+            pausedRunId: gate.pausedRunId,
+            phase: "failed",
+            error,
+            retryable: info?.retryable ?? true,
+            expired: info?.expired ?? false,
+          });
+        },
+      });
+    },
+    [loadCanonicalMessages],
+  );
+
+  const retryGate = useCallback(
+    async (gate: PanelPendingApproval) => {
+      const conversationId = convRef.current?.conversationId;
+      if (!conversationId) return;
+      if (!gateState?.expired) {
+        resolveGate(gate, "approved");
+        return;
+      }
+      // Expired gate: re-request a fresh one through the same endpoint
+      // the docked chat uses, then reload — the rows carry the new gate.
+      try {
+        const res = await fetch(`/api/studio/conversations/${conversationId}/approvals/re-request`, {
+          method: "POST",
+          credentials: "include",
+          headers: await authHeaders(true),
+          body: JSON.stringify({ pausedRunId: gate.pausedRunId }),
+        });
+        if (!res.ok) throw new Error(`Re-request failed (${res.status})`);
+        setGateState(null);
+        await loadCanonicalMessages(conversationId);
+      } catch (err) {
+        setGateState({
+          pausedRunId: gate.pausedRunId,
+          phase: "failed",
+          error: err instanceof Error ? err.message : "Could not re-request the approval.",
+          retryable: true,
+          expired: true,
+        });
+      }
+    },
+    [gateState?.expired, resolveGate, authHeaders, loadCanonicalMessages],
+  );
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void sendMessage();
     }
   };
+
+  // Only the LATEST gated message gets the actionable card — a decided
+  // run's row can briefly coexist with a newer gate after a reload, and
+  // exactly one live decision surface may exist per conversation.
+  const lastGateIndex = messages.reduce(
+    (acc, m, i) => (m.pendingApproval ? i : acc),
+    -1,
+  );
 
   return (
     <div
@@ -524,24 +665,60 @@ export default function GlobalLittStudioPanel({
             </div>
           )}
           {messages.map((m, i) => (
-            <div
-              key={i}
-              className={`mb-3 flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-            >
+            <div key={i}>
               <div
-                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                  m.role === "user"
-                    ? "text-black"
-                    : "border border-white/10 bg-white/5 text-white"
-                }`}
-                style={
-                  m.role === "user"
-                    ? { backgroundColor: "var(--color-accent)" }
-                    : undefined
-                }
+                className={`mb-3 flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
-                {m.content}
+                <div
+                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                    m.role === "user"
+                      ? "text-black"
+                      : "border border-white/10 bg-white/5 text-white"
+                  }`}
+                  style={
+                    m.role === "user"
+                      ? { backgroundColor: "var(--color-accent)" }
+                      : undefined
+                  }
+                >
+                  {m.content}
+                </div>
               </div>
+              {m.pendingApproval && i === lastGateIndex && (
+                <div className="mb-3 flex justify-start">
+                  <div className="w-[85%]">
+                    <ApprovalCard
+                      approval={m.pendingApproval}
+                      phase={
+                        gateState?.pausedRunId === m.pendingApproval.pausedRunId
+                          ? gateState.phase
+                          : "idle"
+                      }
+                      error={
+                        gateState?.pausedRunId === m.pendingApproval.pausedRunId
+                          ? gateState.error
+                          : null
+                      }
+                      retryable={
+                        gateState?.pausedRunId === m.pendingApproval.pausedRunId
+                          ? gateState.retryable
+                          : true
+                      }
+                      expired={
+                        gateState?.pausedRunId === m.pendingApproval.pausedRunId
+                          ? gateState.expired
+                          : false
+                      }
+                      onResolve={(decision) => {
+                        if (m.pendingApproval) resolveGate(m.pendingApproval, decision);
+                      }}
+                      onRetry={() => {
+                        if (m.pendingApproval) void retryGate(m.pendingApproval);
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           ))}
           {busy && (
