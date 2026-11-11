@@ -299,6 +299,34 @@ describe("studio-projects preview route — workspace failure code threading (wa
     expect(body.runtimeErrorCode).toBeNull();
   });
 
+  // Deterministic derivation (follow-up to #901): a settled failure whose
+  // stored error carries no embedded code — e.g. "Provisioning timed out"
+  // from the stale-provisioning settle — still names the refusal when the
+  // project is repo-backed and this deployment cannot execute host work.
+  // Parsing the code back out of free text was the only channel #901 had,
+  // and production's stored text defeated it.
+  it("derives HOST_EXECUTION_DISABLED for a repo-backed failed workspace with a code-less stored error", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "Provisioning timed out", framework: "nextjs",
+      sourceType: "github",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBe("HOST_EXECUTION_DISABLED");
+  });
+
+  it("does not derive the refusal for a managed project with a code-less stored error", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "Provisioning timed out", framework: "nextjs",
+      sourceType: "blank",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBeNull();
+  });
+
   // Route honesty (console-errors diagnosis): when the POST provisioning
   // branch fails with the host-execution refusal, the status must match
   // the code the body carries — 503, not an unmapped 500.

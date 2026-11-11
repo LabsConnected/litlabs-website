@@ -318,6 +318,10 @@ export default function StudioPreviewPanel({
   // The workspace-state lookup runs on every mount and names the
   // refusal directly; hostExecBlocked below consumes both channels.
   const [workspaceRefusalCode, setWorkspaceRefusalCode] = useState<string | null>(null);
+  // Render-time mirror of hostExecKnown (derived below) for the async
+  // prepare path: preparePreview is defined before the derivation, so
+  // it reads this ref to refuse a prepare that can never succeed.
+  const hostExecKnownRef = useRef(false);
   const [frameKey, setFrameKey] = useState(0);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [maximized, setMaximized] = useState(false);
@@ -944,6 +948,10 @@ export default function StudioPreviewPanel({
     // Single-flight guard: only one preview start in flight at a time.
     // Mobile rerenders and rapid prop changes cannot launch duplicate runtimes.
     if (startInFlightRef.current) return;
+    // A known host-execution refusal means prepare can never succeed on
+    // this deployment — no mount or handler (toolbar Restart, pane CTA,
+    // auto-start, retry) may fire the doomed POST.
+    if (hostExecKnownRef.current) return;
     startInFlightRef.current = true;
     // Per-call token: a start launched for a previous project must never
     // clear the in-flight flag or write state for the project now on screen.
@@ -1126,15 +1134,19 @@ export default function StudioPreviewPanel({
     if (state !== "not_started") return;
     if (!projectId) return;
     if (workspaceTruth !== "has_content") return;
-    // A workspace-state refusal already told us prepare can never
-    // succeed on this deployment — do not fire the doomed POST just to
-    // learn it again; the refusal renders as the honest notice instead.
-    if (workspaceRefusalCode === HOST_EXECUTION_DISABLED_CODE) return;
+    // A refusal already told us prepare can never succeed on this
+    // deployment — do not fire the doomed POST just to learn it again;
+    // the refusal renders as the honest notice instead. The code can
+    // arrive on EITHER channel: the workspace-state lookup
+    // (workspaceRefusalCode) or the preview payload itself (errorCode).
+    // #901's guard read only the first; a payload-only refusal still
+    // auto-started into the wall.
+    if (workspaceRefusalCode === HOST_EXECUTION_DISABLED_CODE || errorCode === HOST_EXECUTION_DISABLED_CODE) return;
     if (autoStartedForRef.current === projectId) return;
     if (startInFlightRef.current) return;
     autoStartedForRef.current = projectId;
     void preparePreview();
-  }, [state, projectId, preparePreview, workspaceTruth, workspaceRefusalCode]);
+  }, [state, projectId, preparePreview, workspaceTruth, workspaceRefusalCode, errorCode]);
 
   const handleCopyUrl = useCallback(async () => {
     if (!previewUrl) return;
@@ -1199,7 +1211,21 @@ export default function StudioPreviewPanel({
   // where the refusal is already known before any start is attempted).
   // Both feed this one derivation; there is no second detection path.
   const hostExecKnown = errorCode === HOST_EXECUTION_DISABLED_CODE || workspaceRefusalCode === HOST_EXECUTION_DISABLED_CODE;
+  // hostExecBlocked is the state-scoped presentation derivation (label,
+  // detail, notice card, source line): the honest notice replaces the
+  // generic failure copy only in the settled states #901 covered.
   const hostExecBlocked = hostExecKnown && (state === "failed" || state === "not_started");
+  // The RESTART GATES, however, key on hostExecKnown in ANY state
+  // (follow-up to #901, production f9ad12cd): the refusal can be known
+  // while the panel sits in "unreachable" — a state hostExecBlocked
+  // excludes — where the pane CTA (handleRetry → preparePreview) still
+  // offered a prepare that can never succeed and the toolbar/pane
+  // rendered "Restart preview" over the honest notice. Once the refusal
+  // is known, no restart affordance renders and no prepare fires; the
+  // toolbar Refresh (a status re-check, not a prepare) stays available.
+  useEffect(() => {
+    hostExecKnownRef.current = hostExecKnown;
+  }, [hostExecKnown]);
   // The v4 @import trap: a Tailwind-intended preview that renders unstyled
   // must surface honestly — never a green "Preview ready" over dead CSS.
   const stylingFailed = state === "ready" && styleProbe?.tailwindDetected === true && styleProbe.styled === false;
@@ -1423,9 +1449,11 @@ export default function StudioPreviewPanel({
           <RefreshCw size={12} className={`pointer-events-none ${state === "stale" ? "animate-spin" : ""}`} />
         </button>
         {/* Restart dev server — hidden for static projects (no dev server)
-            and for host-execution refusals, where a restart can never
-            succeed on the hosted service (wave-4). */}
-        {(isLive || state === "failed") && !isStaticProject && !hostExecBlocked && (
+            and whenever a host-execution refusal is KNOWN, in any state:
+            a restart can never succeed on the hosted service (wave-4;
+            gating widened from hostExecBlocked to hostExecKnown after
+            production f9ad12cd still rendered this button). */}
+        {(isLive || state === "failed") && !isStaticProject && !hostExecKnown && (
           <button
             type="button"
             onClick={() => void preparePreview()}
@@ -1705,10 +1733,11 @@ export default function StudioPreviewPanel({
               </div>
             )}
             {/* Retry button for unreachable/failed states. not_started is
-                handled by auto-start — no manual button needed. Host-exec
-                refusals get NO button: retrying can never succeed on the
-                hosted service, so the honest notice above stands alone. */}
-            {(["unreachable", "failed", "not_started"].includes(state) || (isLive && frameFailed)) && projectId && !hostExecBlocked && (
+                handled by auto-start — no manual button needed. A KNOWN
+                host-exec refusal gets NO button in any state (this CTA's
+                handler fires a prepare POST): retrying can never succeed
+                on the hosted service, so the honest notice stands alone. */}
+            {(["unreachable", "failed", "not_started"].includes(state) || (isLive && frameFailed)) && projectId && !hostExecKnown && (
               <>
                 <button
                   type="button"

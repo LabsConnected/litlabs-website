@@ -14,7 +14,7 @@ import {
 } from "@/lib/terminal-internal-client";
 import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
 import { createPreviewToken } from "@/lib/projects/preview-token";
-import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
+import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE, isHostExecutionPermitted } from "@/lib/host-execution-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,9 +44,22 @@ export async function GET(
   // fail-closed HOST_EXECUTION_DISABLED) so the preview pane can render
   // the honest state instead of a generic failure. Null for every other
   // project state.
+  //
+  // Deterministic fallback (follow-up to #901): settled failure messages
+  // can carry no embedded code at all ("Provisioning timed out" from the
+  // stale-provisioning settle) — yet a repo-backed project whose prepare
+  // settled failed on a deployment where host execution is not permitted
+  // can never be prepared there, so the refusal is derivable from the
+  // source kind + settled status + the deployment's own execution
+  // policy, without parsing free text. Managed projects are excluded: a
+  // restart can genuinely succeed for them. (Same derivation the
+  // workspace-state route performs for its channel.)
   const workspaceFailureCode =
     project.workspaceStatus === "failed" || project.workspaceStatus === "error"
-      ? extractEmbeddedErrorCode(project.workspaceError)
+      ? extractEmbeddedErrorCode(project.workspaceError) ??
+        (project.sourceType === "github" && !isHostExecutionPermitted()
+          ? HOST_EXECUTION_DISABLED_CODE
+          : null)
       : null;
 
   if (!project.workspaceId) {
