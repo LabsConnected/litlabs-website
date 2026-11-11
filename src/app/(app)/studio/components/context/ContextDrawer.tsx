@@ -28,6 +28,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Folder, ClipboardList, PanelRightClose, PanelLeftClose, ImageIcon, Activity } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 
 export type ContextDrawerTab = "work" | "files" | "assets" | "inspector";
@@ -83,6 +84,7 @@ export default function ContextDrawer({
   width = 320,
   position = "right",
 }: ContextDrawerProps) {
+  const { tokens } = useTheme();
   const pxWidth = `${width}px`;
   const isLeft = position === "left";
   const CloseIcon = isLeft ? PanelLeftClose : PanelRightClose;
@@ -145,7 +147,7 @@ export default function ContextDrawer({
             className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5"
             style={{
               borderColor: "var(--studio-border)",
-              backgroundColor: "rgba(13,9,22,0.6)",
+              backgroundColor: tokens.surface,
             }}
           >
             {PRIMARY_TABS.map((t) => {
