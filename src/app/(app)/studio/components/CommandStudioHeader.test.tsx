@@ -356,6 +356,53 @@ describe("CommandStudioHeader — mobile scroll affordance (Phase 1 #1)", () => 
     expect(screen.getByTestId("studio-dock-toggle")).toBeTruthy();
     expect(screen.getByLabelText("More actions")).toBeTruthy();
   });
+
+  it("workspace status popover reports real per-provider health, not subsystem capabilities", () => {
+    mockProviderHealth = {
+      Auto: "available",
+      gemini: "available",
+      groq: "unavailable",
+      openrouter: "unavailable",
+      ollama: "unavailable",
+    };
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("agent-status-pill"));
+    const dialog = screen.getByRole("dialog", { name: /workspace status/i });
+    // One of the four health-checked providers is usable — a real count
+    // from the provider health map, not the selected-model boolean.
+    expect(dialog.textContent).toContain("1 of 4 available");
+    expect(dialog.textContent).toContain("Gemini");
+    expect(dialog.textContent).toContain("OpenRouter");
+    // The old row dressed a boolean as a count ("1 connected") and listed
+    // workspace subsystem capabilities (the fixture's connectionSummary)
+    // as if they were AI providers. Neither may appear.
+    expect(dialog.textContent).not.toContain("1 connected");
+    expect(dialog.textContent).not.toContain("AI connected");
+  });
+
+  it("workspace status popover says providers are still checking until health is verified", () => {
+    mockProviderHealth = {};
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("agent-status-pill"));
+    const dialog = screen.getByRole("dialog", { name: /workspace status/i });
+    expect(dialog.textContent).toContain("AI Providers");
+    expect(dialog.textContent).not.toContain("None connected");
+    expect(dialog.textContent).not.toContain("AI connected");
+  });
 });
 
 describe("CommandStudioHeader — failed run must not sit under a green Ready pill", () => {

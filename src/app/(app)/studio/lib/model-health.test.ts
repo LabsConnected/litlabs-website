@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { resolveSelectedModelHealth } from "./model-health";
+import { resolveSelectedModelHealth, summarizeProviderHealth } from "./model-health";
 import type { ProviderHealth, SelectedModel } from "../stores/useStudioModelStore";
 
 const health = (entries: Record<string, ProviderHealth>) => entries;
@@ -81,5 +81,49 @@ describe("resolveSelectedModelHealth", () => {
         health({}),
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("summarizeProviderHealth", () => {
+  it("reports unverified while no provider health has been recorded", () => {
+    const summary = summarizeProviderHealth(health({}));
+    expect(summary.known).toBe(false);
+    expect(summary.availableCount).toBe(0);
+    expect(summary.totalCount).toBe(0);
+  });
+
+  it("counts real providers only — the Auto roll-up is a routing alias, not a provider", () => {
+    const summary = summarizeProviderHealth(
+      health({
+        Auto: "available",
+        gemini: "available",
+        groq: "unavailable",
+        openrouter: "unavailable",
+        ollama: "unavailable",
+      }),
+    );
+    expect(summary.known).toBe(true);
+    expect(summary.totalCount).toBe(4);
+    expect(summary.availableCount).toBe(1);
+  });
+
+  it("counts degraded as usable and names each provider with its state in the detail", () => {
+    const summary = summarizeProviderHealth(
+      health({
+        gemini: "degraded",
+        groq: "available",
+        openrouter: "unavailable",
+        ollama: "locked",
+      }),
+    );
+    expect(summary.availableCount).toBe(2);
+    expect(summary.detail).toContain("Gemini");
+    expect(summary.detail).toContain("Groq");
+    expect(summary.detail).toContain("OpenRouter");
+    expect(summary.detail).toContain("Ollama");
+    // Workspace subsystem capability ids are not AI providers and must
+    // never be presented as the provider detail.
+    expect(summary.detail).not.toContain("runtime.sandbox");
+    expect(summary.detail).not.toContain("Connected:");
   });
 });

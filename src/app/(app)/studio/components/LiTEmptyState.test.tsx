@@ -96,8 +96,13 @@ const renderCases = [
     },
   },
   {
-    name: "terminal unreachable",
-    expected: "Connect",
+    // Workspace ready + provider available: terminal execution being
+    // unavailable must not replace the ready surface with a "Connect" gate.
+    // It renders exactly like the fully ready case — silent, straight
+    // into chat (the #892 empty-state contract).
+    name: "terminal unreachable but workspace ready",
+    expected: null,
+    ready: true,
     input: {
       runtime: runtime({
         ...project,
