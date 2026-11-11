@@ -285,6 +285,15 @@ function stagePassable(
 ): boolean {
   const s = state.stages[stage];
   if (s.evidence.length === 0) return false;
+  // Placeholder gate: while the latest static visual audit still names
+  // unresolved placeholder image references, TEST cannot pass — no
+  // matter what other evidence exists or in what order it was filed.
+  // The block lives on the loop state (not on any single evidence
+  // record) precisely so a passing read-back filed before OR after the
+  // audit can never mask it; a later clean audit clears it.
+  if (stage === "test" && (state.visualAudit?.placeholderRefs.length ?? 0) > 0) {
+    return false;
+  }
   if (blockedReason(state, stage)) return false;
   if (taskScope === "trivial" && stage === "build") {
     return s.evidence.some((e) => e.by !== "agent");
@@ -787,6 +796,73 @@ export function noteStaticArtifactCheck(
   }
 }
 
+/**
+ * Record the static-lane visual audit as TEST evidence and as the
+ * loop's placeholder gate state.
+ *
+ * The enrichment pass audits the built page after every mutation; this
+ * is the only caller. While the audit names surviving placeholder image
+ * references (slots that fell back to the local SVG, model-authored
+ * placeholder refs that could not be repaired), the run must not earn a
+ * clean quality pass: the refs are recorded on the loop state (where
+ * stagePassable consults them order-independently) AND as failing TEST
+ * evidence naming them, so the verdict says exactly what is incomplete.
+ * A later audit with no placeholders clears the block and files the
+ * clearing record, so a fix-then-pass flow recovers.
+ *
+ * Scope: mutating static BUILD runs only. Non-static sessions have no
+ * enrichment pass; inspection-scope sessions are read-only and stay
+ * light (PR #907 taskKind scoping) — both are untouched.
+ */
+export function noteStaticVisualAudit(
+  session: QualityLoopSession,
+  placeholderRefs: string[],
+): void {
+  try {
+    if (session.state.isStaticWorkspace !== true) return;
+    if (session.taskScope === "inspection") return;
+    const refs = [
+      ...new Set(
+        (placeholderRefs ?? []).filter(
+          (r): r is string => typeof r === "string" && r.length > 0,
+        ),
+      ),
+    ];
+    session.state.visualAudit = { placeholderRefs: refs };
+    if (refs.length > 0) {
+      fileObservation(session, "test", {
+        summary:
+          `Static visual audit: ${refs.length} unresolved placeholder image ` +
+          `reference(s) survive in the built page: ${refs.join(", ")}.`,
+        artifacts: refs.slice(0, 20),
+        by: "system",
+        detail: {
+          via: "static-visual-audit",
+          passed: false,
+          executedChecks: true,
+          reason:
+            `Unresolved placeholder image reference(s) in the built page: ` +
+            `${refs.join(", ")} — the page ships placeholder imagery instead of real photos.`,
+        },
+      });
+    } else {
+      fileObservation(session, "test", {
+        summary:
+          "Static visual audit: no placeholder image references remain in the built page.",
+        by: "system",
+        // The clearing record supersedes any earlier failing audit
+        // record as the stage's latest evidence. It deliberately does
+        // NOT carry executedChecks: TEST's machine-evidence bar stays
+        // the read-back / executed checks — the audit clears its own
+        // block, it does not substitute for them.
+        detail: { via: "static-visual-audit", passed: true },
+      });
+    }
+  } catch {
+    // Evidence recording must never break the run.
+  }
+}
+
 /** Record build-fix (typecheck/lint/test) results as TEST evidence. */
 export function noteBuildFix(
   session: QualityLoopSession,
@@ -1153,10 +1229,30 @@ export function finalizeQualityLoop(
     const reason = blockedReason(state, stage);
     return reason ? [`${stage}: ${reason}`] : [];
   });
-  const verdict: SuccessVerdict =
+  const blockedVerdict: SuccessVerdict =
     blocked.length > 0 && !rawVerdict.ok
       ? { ...rawVerdict, reason: `${rawVerdict.reason} Blocked: ${blocked.join("; ")}` }
       : rawVerdict;
+  // Placeholder gate, enforced at the verdict itself: while the latest
+  // static visual audit names unresolved placeholder references, success
+  // may not be declared and TEST is named as the lacking stage — even
+  // if every stage was swept to passed before the audit landed. The
+  // verdict reason names the surviving refs.
+  const unresolvedPlaceholders = state.visualAudit?.placeholderRefs ?? [];
+  const verdict: SuccessVerdict =
+    unresolvedPlaceholders.length > 0
+      ? {
+          ok: false,
+          missing: blockedVerdict.missing.includes("test")
+            ? blockedVerdict.missing
+            : [...blockedVerdict.missing, "test"],
+          reason: blockedVerdict.reason.includes(unresolvedPlaceholders[0])
+            ? blockedVerdict.reason
+            : `${blockedVerdict.reason} Unresolved placeholder image reference(s) ` +
+              `survive in the built page: ${unresolvedPlaceholders.join(", ")} — ` +
+              `the build is not visually complete.`,
+        }
+      : blockedVerdict;
   return {
     verdict,
     stages: summarizeLoop(state),
