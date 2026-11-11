@@ -6,6 +6,8 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useProjectRuntime } from "../hooks/useProjectRuntime";
 import { runtimePhaseLabel, runtimeRecoveryActions } from "@/lib/projects/runtime-state";
 import { formatSourceSummary } from "@/lib/projects/project-source";
+import { isOptimisticConversationId } from "../lib/optimistic-conversation";
+import type { ActionRunDisplayState } from "./ActionRunStatusPanel";
 
 type CheckId = "build" | "typecheck" | "lint" | "test" | "security" | "accessibility" | "performance";
 type CheckStatus = "not_run" | "running" | "passed" | "failed" | "unavailable" | "not_configured";
@@ -32,6 +34,38 @@ interface PendingApproval {
   createdAt?: string;
   expiresAt?: string | null;
 }
+
+/**
+ * A V2 agent-loop approval gate, read from the action-run projection's
+ * pendingApprovals (the paused-run store). The checks payload's
+ * PendingApproval above is the LEGACY mission_approvals queue — a
+ * different store that V2 gates never write to.
+ */
+interface RunPendingApproval {
+  id: string;
+  toolId: string;
+  reason: string;
+}
+
+interface RunProjectionResponse {
+  projection?: {
+    displayState?: ActionRunDisplayState;
+    pendingApprovals?: Array<{ id?: unknown; toolId?: unknown; reason?: unknown }>;
+  } | null;
+}
+
+// Mirrors ACTIVE_STATES in ActionRunStatusPanel: display states in which
+// the run is still live, so its pending gates can appear or resolve
+// underneath the panel.
+const RUN_ACTIVE_DISPLAY_STATES: ReadonlySet<ActionRunDisplayState> = new Set([
+  "queued",
+  "starting",
+  "running",
+  "waiting_for_user",
+  "awaiting_approval",
+  "paused",
+  "stopping",
+]);
 
 interface HealthPayload {
   checks: HealthCheck[];
@@ -75,11 +109,16 @@ function statusLabel(status: CheckStatus): string {
 export default function StudioHealthPanel({
   mode,
   projectId,
+  conversationId = null,
   refreshKey = 0,
   runTrigger = 0,
 }: {
   mode: "checks" | "approvals";
   projectId: string | null;
+  /** Conversation whose action-run projection carries the V2 approval
+      gates (approvals mode). Null when no conversation is in scope — the
+      panel then shows only the legacy mission approvals queue. */
+  conversationId?: string | null;
   refreshKey?: number;
   /** Incremented externally to trigger run-all checks */
   runTrigger?: number;
@@ -92,6 +131,13 @@ export default function StudioHealthPanel({
   const [running, setRunning] = useState<CheckId | null>(null);
   const [runningAll, setRunningAll] = useState(false);
   const [resolving, setResolving] = useState<string | null>(null);
+  // V2 run gates from the action-run projection. `runApprovalsKnown`
+  // stays false until the projection has actually been read (or there is
+  // no conversation to read one from), so the panel never claims "No
+  // pending approvals" on the strength of the legacy store alone.
+  const [runApprovals, setRunApprovals] = useState<RunPendingApproval[]>([]);
+  const [runApprovalsKnown, setRunApprovalsKnown] = useState(false);
+  const [runActive, setRunActive] = useState(false);
 
   const authHeaders = useCallback(async (json = false): Promise<HeadersInit> => {
     const token = await getToken?.();
@@ -129,6 +175,58 @@ export default function StudioHealthPanel({
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (refreshKey > 0) void load(); }, [load, refreshKey]);
+
+  /**
+   * Read the conversation's action-run projection — the store V2
+   * agent-loop gates actually live in (paused runs). Read-only: decisions
+   * stay in the chat's approval flow; this section only reports them.
+   */
+  const loadRunApprovals = useCallback(async () => {
+    if (!conversationId || isOptimisticConversationId(conversationId)) return;
+    try {
+      const response = await fetch(`/api/studio/conversations/${encodeURIComponent(conversationId)}/action-run`, { cache: "no-store", credentials: "include", headers: await authHeaders() });
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => null)) as RunProjectionResponse | null;
+      const projection = data?.projection ?? null;
+      const pending = Array.isArray(projection?.pendingApprovals) ? projection.pendingApprovals : [];
+      setRunApprovals(
+        pending
+          .filter((approval): approval is { id: string; toolId?: unknown; reason?: unknown } => Boolean(approval && typeof approval.id === "string"))
+          .map((approval) => ({
+            id: approval.id,
+            toolId: typeof approval.toolId === "string" && approval.toolId ? approval.toolId : "Action",
+            reason: typeof approval.reason === "string" ? approval.reason : "",
+          })),
+      );
+      setRunActive(Boolean(projection?.displayState && RUN_ACTIVE_DISPLAY_STATES.has(projection.displayState)));
+      setRunApprovalsKnown(true);
+    } catch {
+      // Keep the last known gates — a failed refresh must not blank the
+      // section back into a false "No pending approvals."
+    }
+  }, [authHeaders, conversationId]);
+
+  // Approvals mode: load the run gates with the panel, and keep polling
+  // them while the run is live (the status panel's cadence) — previously
+  // this section fetched the legacy store once on mount and never again,
+  // so it was stale by construction during a live run.
+  useEffect(() => {
+    if (mode !== "approvals") return;
+    if (!conversationId || isOptimisticConversationId(conversationId)) {
+      setRunApprovals([]);
+      setRunActive(false);
+      setRunApprovalsKnown(true);
+      return;
+    }
+    setRunApprovalsKnown(false);
+    void loadRunApprovals();
+  }, [mode, conversationId, loadRunApprovals, refreshKey]);
+
+  useEffect(() => {
+    if (mode !== "approvals" || !runActive) return;
+    const timer = setInterval(() => { void loadRunApprovals(); }, 2000);
+    return () => clearInterval(timer);
+  }, [mode, runActive, loadRunApprovals]);
 
   const runAllChecks = useCallback(async () => {
     if (!projectId) return;
@@ -219,11 +317,13 @@ export default function StudioHealthPanel({
   if (!projectId) return <div className="flex h-full min-h-40 items-center justify-center px-4 text-center text-[10px]" style={{ color: "var(--text-muted)" }}>{mode === "checks" ? "Select a project to run checks." : "Select a project to view approvals."}</div>;
 
   if (mode === "approvals") {
+    const legacyApprovals = payload.pendingApprovals;
+    const approvalsEmpty = legacyApprovals.length === 0 && runApprovals.length === 0;
     return (
       <div className="space-y-3" data-testid="studio-approvals-panel">
-        <div className="flex items-center justify-between"><div><div className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: "var(--text-secondary)" }}>Pending approvals</div><div className="mt-1 text-[9px]" style={{ color: "var(--text-muted)" }}>Server-enforced actions for this project.</div></div><button type="button" onClick={() => void load()} disabled={loading} className="grid h-10 w-10 place-items-center rounded-lg hover:bg-white/8 disabled:opacity-40" aria-label="Refresh approvals"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button></div>
+        <div className="flex items-center justify-between"><div><div className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: "var(--text-secondary)" }}>Pending approvals</div><div className="mt-1 text-[9px]" style={{ color: "var(--text-muted)" }}>Server-enforced actions for this project.</div></div><button type="button" onClick={() => { void load(); void loadRunApprovals(); }} disabled={loading} className="grid h-10 w-10 place-items-center rounded-lg hover:bg-white/8 disabled:opacity-40" aria-label="Refresh approvals"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button></div>
         {error && <div className="rounded-lg border px-2.5 py-2 text-[9px]" style={{ borderColor: "rgba(239,68,68,0.3)", color: "#fca5a5" }}>{error}</div>}
-        {loading ? <div className="flex items-center justify-center gap-2 py-8 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={13} className="animate-spin" /> Loading approvals…</div> : payload.pendingApprovals.length === 0 ? <div className="flex flex-col items-center gap-2 py-8 text-[10px]" style={{ color: "var(--text-muted)" }}><ShieldCheck size={20} style={{ color: "var(--litt-primary)" }} /> No pending approvals.</div> : <div className="space-y-2">{payload.pendingApprovals.map((approval) => <div key={approval.id} className="rounded-xl border p-2.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}><div className="flex items-center justify-between"><span className="text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{approval.actionType ?? "Action"}</span>{approval.riskLevel && <span className="rounded px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ backgroundColor: approval.riskLevel === "high" ? "rgba(239,68,68,0.15)" : "rgba(227,179,65,0.15)", color: approval.riskLevel === "high" ? "#fca5a5" : "#e3b341" }}>{approval.riskLevel}</span>}</div>{approval.affectedFiles && approval.affectedFiles.length > 0 && <div className="mt-1.5 space-y-0.5">{approval.affectedFiles.slice(0, 5).map((file) => <div key={file} className="truncate font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>{file}</div>)}</div>}{approval.diff && <details className="mt-1.5"><summary className="cursor-pointer text-[8px] font-bold" style={{ color: "var(--text-secondary)" }}>View diff</summary><pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg border p-2 text-[7px] leading-3" style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)" }}>{approval.diff}</pre></details>}<div className="mt-2 flex gap-2"><button type="button" onClick={() => void resolveApproval(approval.id, "approved")} disabled={resolving !== null} className="flex-1 rounded-lg px-2 py-1.5 text-[9px] font-bold transition-colors hover:opacity-80 disabled:opacity-40" style={{ backgroundColor: "rgba(182,255,74,0.1)", color: "var(--litt-primary)" }}>Approve</button><button type="button" onClick={() => void resolveApproval(approval.id, "denied")} disabled={resolving !== null} className="flex-1 rounded-lg px-2 py-1.5 text-[9px] font-bold transition-colors hover:opacity-80 disabled:opacity-40" style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "#fca5a5" }}>Deny</button></div></div>)}</div>}
+        {loading && approvalsEmpty ? <div className="flex items-center justify-center gap-2 py-8 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={13} className="animate-spin" /> Loading approvals…</div> : approvalsEmpty ? (runApprovalsKnown ? <div className="flex flex-col items-center gap-2 py-8 text-[10px]" style={{ color: "var(--text-muted)" }}><ShieldCheck size={20} style={{ color: "var(--litt-primary)" }} /> No pending approvals.</div> : <div className="flex items-center justify-center gap-2 py-8 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={13} className="animate-spin" /> Checking the current run…</div>) : <div className="space-y-3">{runApprovals.length > 0 && <div className="space-y-2">{runApprovals.map((approval) => <div key={approval.id} className="rounded-xl border p-2.5" style={{ borderColor: "rgba(227,179,65,0.35)", backgroundColor: "var(--studio-card)" }}><div className="flex items-center justify-between gap-2"><span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{approval.toolId}</span><span className="shrink-0 rounded px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ backgroundColor: "rgba(227,179,65,0.15)", color: "#e3b341" }}>Waiting in chat</span></div>{approval.reason && <div className="mt-1.5 text-[9px] leading-4" style={{ color: "var(--text-secondary)" }}>{approval.reason}</div>}<div className="mt-1.5 text-[8px] leading-3" style={{ color: "var(--text-muted)" }}>LiTT is paused on this step — approve or deny it in the chat to continue the run.</div></div>)}</div>}{legacyApprovals.length > 0 && <div className="space-y-2">{legacyApprovals.map((approval) => <div key={approval.id} className="rounded-xl border p-2.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}><div className="flex items-center justify-between"><span className="text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{approval.actionType ?? "Action"}</span>{approval.riskLevel && <span className="rounded px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ backgroundColor: approval.riskLevel === "high" ? "rgba(239,68,68,0.15)" : "rgba(227,179,65,0.15)", color: approval.riskLevel === "high" ? "#fca5a5" : "#e3b341" }}>{approval.riskLevel}</span>}</div>{approval.affectedFiles && approval.affectedFiles.length > 0 && <div className="mt-1.5 space-y-0.5">{approval.affectedFiles.slice(0, 5).map((file) => <div key={file} className="truncate font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>{file}</div>)}</div>}{approval.diff && <details className="mt-1.5"><summary className="cursor-pointer text-[8px] font-bold" style={{ color: "var(--text-secondary)" }}>View diff</summary><pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg border p-2 text-[7px] leading-3" style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)" }}>{approval.diff}</pre></details>}<div className="mt-2 flex gap-2"><button type="button" onClick={() => void resolveApproval(approval.id, "approved")} disabled={resolving !== null} className="flex-1 rounded-lg px-2 py-1.5 text-[9px] font-bold transition-colors hover:opacity-80 disabled:opacity-40" style={{ backgroundColor: "rgba(182,255,74,0.1)", color: "var(--litt-primary)" }}>Approve</button><button type="button" onClick={() => void resolveApproval(approval.id, "denied")} disabled={resolving !== null} className="flex-1 rounded-lg px-2 py-1.5 text-[9px] font-bold transition-colors hover:opacity-80 disabled:opacity-40" style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "#fca5a5" }}>Deny</button></div></div>)}</div>}</div>}
       </div>
     );
   }

@@ -111,6 +111,34 @@ describe("StudioActivityPanel — persisted run events as the Activity truth", (
   });
 });
 
+describe("StudioActivityPanel — render window covers the fetched events", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders a long run in full instead of truncating at 60 events", async () => {
+    const events = Array.from({ length: 80 }, (_, i) =>
+      actionEvent({
+        id: `e${i + 1}`,
+        sequence: String(i + 1),
+        type: "tool.completed",
+        payload: { toolId: "files.write", label: `Event ${i + 1}` },
+      }),
+    );
+    mockFetchFor(events);
+
+    render(<StudioActivityPanel runId="run-1" {...baseProps} />);
+
+    expect(await screen.findByText("Event 80")).toBeInTheDocument();
+    // The oldest events survive too — the render window covers the whole
+    // fetched list (the events route returns up to 200), so a fresh fetch
+    // shows a long run in full instead of silently dropping its head.
+    expect(screen.getByText("Event 1")).toBeInTheDocument();
+    expect(screen.getByText("80 run events")).toBeInTheDocument();
+    expect(screen.queryByText(/Showing latest 60 of 80/)).not.toBeInTheDocument();
+  });
+});
+
 describe("useRunActivity — fetch stability", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
