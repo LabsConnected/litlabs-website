@@ -283,6 +283,14 @@ function ProjectPickerMenu({
   onCreateProject?: () => void;
   onRequestRename: (project: ProjectOption) => void;
 }) {
+  // Search filter (audit ART-20261111-082: with many projects and
+  // truncated names, finding one was scroll-and-squint). Local to the
+  // menu — the menu unmounts on close, so the query resets naturally.
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleProjects = normalizedQuery
+    ? projects.filter((p) => p.name.toLowerCase().includes(normalizedQuery))
+    : projects;
   const menuWidth = 256;
   const left = rect
     ? Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 8))
@@ -313,14 +321,29 @@ function ProjectPickerMenu({
       aria-label="Projects"
       data-testid="project-picker-menu"
     >
+      <div className="px-1 pb-1.5 pt-0.5">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search projects…"
+          aria-label="Search projects"
+          className="h-8 w-full rounded-md border px-2 text-[12px] outline-none"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "#ffffff", color: "var(--text-primary)" }}
+        />
+      </div>
       {loading ? (
         <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>Loading projects…</div>
       ) : error ? (
         <div className="px-2.5 py-3 text-[12px]" style={{ color: "#b91c1c" }}>{error}</div>
       ) : projects.length === 0 ? (
         <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>No projects available.</div>
+      ) : visibleProjects.length === 0 ? (
+        <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>
+          {`No projects match "${query.trim()}".`}
+        </div>
       ) : (
-        projects.map((project) => (
+        visibleProjects.map((project) => (
           confirmDeleteId === project.id ? (
             <div
               key={project.id}

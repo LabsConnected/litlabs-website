@@ -40,6 +40,7 @@ import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 import {
   isOnboardingComplete,
   markFirstRunPromptConsumed,
+  resolveActiveProjectIdForUrl,
   resolveStudioProjectId,
   takeFirstRunPrompt,
 } from "../lib/first-run-handoff";
@@ -180,7 +181,11 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<Record<str
   game: GameCreatorEmptyState,
   build: BuilderTool,
   agents: AgentTool,
-  assets: GalleryTool,
+  // GalleryTool declares its real (all-optional) props — the project
+  // context seam — which are not assignable to this map's loose
+  // Record<string, unknown> component type under strictFunctionTypes;
+  // the map only ever passes it the documented props.
+  assets: GalleryTool as React.ComponentType<Record<string, unknown>>,
   plugins: PluginsTool,
   camera: CameraTool,
   screen: ScreenTool,
@@ -1458,7 +1463,15 @@ function CommandStudioContent() {
     }
     // Build the target URL with ?tool=
     const params = new URLSearchParams(searchParams.toString());
-    const projectId = resolveStudioProjectId(searchParams.get("project"));
+    // Pin the active project into the URL: explicit ?project= (or the
+    // first-run handoff) wins; otherwise the server-resolved project
+    // (capabilities) is written back so context is durable across
+    // refresh and surface navigation instead of silently re-resolving
+    // to a different project (audit ART-20261111-082).
+    const projectId = resolveActiveProjectIdForUrl(
+      searchParams.get("project"),
+      capabilities.projectId,
+    );
     if (projectId) params.set("project", projectId);
     params.delete("prompt");
 
@@ -1493,8 +1506,11 @@ function CommandStudioContent() {
       lastWrittenUrlRef.current = params.toString();
       router.replace(target, { scroll: false });
     }
+    // capabilities.projectId is a dep so the resolved project is pinned
+    // into the URL as soon as resolution completes, not only on the next
+    // destination change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router, studioShellActive, stageSurface]);
+  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router, studioShellActive, stageSurface, capabilities.projectId]);
 
   // Handle legacy "studio:switch-tool" events emitted from inside tools.
   useEffect(() => {
@@ -2626,6 +2642,23 @@ function CommandStudioContent() {
   }, [destination, studioMode, createMode, moreMode, workSurface]);
 
   const WorkspaceComponent = activeLegacyTool ? TOOL_COMPONENTS[activeLegacyTool] : null;
+  // Assets is a project surface (audit ART-20261111-082): it receives
+  // the active project's name and the SAME picker callbacks as the
+  // header, so its shared StudioProjectPicker shows — and can change —
+  // the project the user is in. Other tools get no extra props.
+  const assetsProjectProps = activeLegacyTool === "assets"
+    ? {
+        projectName: capabilities.projectName,
+        onProjectSelectAction: handleSelectProject,
+        onCreateProjectAction: openProjectNameDialog,
+        onDeleteProjectAction: handleDeleteProject,
+        onProjectRenamedAction: (renamedId: string, name: string) => {
+          if (capabilities.projectId !== renamedId) return;
+          refreshCapabilities();
+          window.dispatchEvent(new CustomEvent("studio:project-renamed", { detail: { projectId: renamedId, name } }));
+        },
+      }
+    : {};
   const isPlan = destination === "studio" && studioMode === "work" && workSurface !== "builder";
   const isCanvas = destination === "studio" && studioMode === "files";
   const isCode = destination === "studio" && studioMode === "code";
@@ -3675,6 +3708,7 @@ function CommandStudioContent() {
                           key={creatorDraftEpoch}
                           projectId={capabilities.projectId}
                           initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : activeLegacyTool === "music" ? musicStudioPrompt : imageStudioPrompt}
+                          {...assetsProjectProps}
                         />
                       </StudioCreatorHost>
                     ) : (
@@ -3682,6 +3716,7 @@ function CommandStudioContent() {
                         key={creatorDraftEpoch}
                         projectId={capabilities.projectId}
                         initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : activeLegacyTool === "music" ? musicStudioPrompt : imageStudioPrompt}
+                        {...assetsProjectProps}
                       />
                     )}
                   </div>

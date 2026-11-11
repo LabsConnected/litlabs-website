@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useState, useEffect, useMemo } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import StudioProjectPicker from "../components/StudioProjectPicker";
 import {
   LayoutGrid,
   Search,
@@ -134,7 +135,32 @@ function loadGenerations(): GalleryItem[] {
   );
 }
 
-export default function GalleryTool() {
+export default function GalleryTool({
+  projectId,
+  projectName,
+  onProjectSelectAction,
+  onCreateProjectAction,
+  onProjectRenamedAction,
+  onDeleteProjectAction,
+}: {
+  /**
+   * The active Studio project this Assets surface belongs to.
+   * CommandStudio passes projectId to every workspace component; the
+   * Assets destination additionally receives the project name and the
+   * SAME picker callbacks as the Studio header, so the surface renders
+   * the shared StudioProjectPicker — the user lands on the project they
+   * were in and can change it deliberately here (audit
+   * ART-20261111-082: Assets showed "No project" with no selector).
+   * Project-media listing itself is a separate lane; this is the
+   * context seam it builds on.
+   */
+  projectId?: string | null;
+  projectName?: string | null;
+  onProjectSelectAction?: (projectId: string) => void;
+  onCreateProjectAction?: () => void;
+  onProjectRenamedAction?: (projectId: string, name: string) => void;
+  onDeleteProjectAction?: (projectId: string) => void;
+} = {}) {
   const { resolvedColors: T } = useTheme();
   const [activeTab, setActiveTab] = useState<Tab>("all");
   const [myItems, setMyItems] = useState<GalleryItem[]>(() =>
@@ -322,6 +348,24 @@ export default function GalleryTool() {
 
   return (
     <div className="p-4 h-full overflow-y-auto studio-scroll">
+      {onProjectSelectAction && (
+        <div data-testid="assets-project-bar" className="mb-3 flex items-center gap-2">
+          <span
+            className="text-[10px] font-bold uppercase tracking-widest"
+            style={{ color: T.textMuted }}
+          >
+            Project
+          </span>
+          <StudioProjectPicker
+            projectId={projectId ?? null}
+            projectName={projectName ?? null}
+            onSelect={onProjectSelectAction}
+            onCreateProject={onCreateProjectAction}
+            onDeleteProject={onDeleteProjectAction}
+            onProjectRenamed={onProjectRenamedAction}
+          />
+        </div>
+      )}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <LayoutGrid size={14} style={{ color: T.accentColor }} />

@@ -34,6 +34,7 @@ import { planDisplayLabel } from "@/lib/plan-label";
 import {
   getVisibleMainNav,
   getVisibleMoreNavSections,
+  withActiveProjectContext,
   APP_NAV_SECONDARY,
   isAppNavActive,
   type NavItem,
@@ -459,7 +460,14 @@ function TopBar() {
   const T = topBarColorsFor(resolvedColors, isStudio);
 
   const checkActive = (href?: string) => isAppNavActive(pathname, searchParams, href);
-  const mainItems = getVisibleMainNav();
+  // Studio destinations in the top bar carry the active project
+  // (?project=) from the current URL — without this, navigating to
+  // Assets/Agents/Missions from inside a project dropped the param and
+  // Studio re-resolved to a different project (audit ART-20261111-082).
+  const mainItems = withActiveProjectContext(
+    getVisibleMainNav(),
+    searchParams?.get("project"),
+  );
   const moreSections = getVisibleMoreNavSections();
   const moreActive = moreSections.some((section) => section.items.some((i) => i.href && checkActive(i.href)));
 
