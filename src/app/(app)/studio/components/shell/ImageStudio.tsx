@@ -20,6 +20,7 @@ import {
   Loader2, Lock, RotateCcw, RotateCw, Sparkles, Unlock, Upload,
 } from "lucide-react";
 import type { StudioAsset } from "@/lib/assets/types";
+import { useTheme } from "@/context/ThemeContext";
 import { notifyAssetsChanged, useAssetsRefreshTrigger } from "../../hooks/useAssetsRefresh";
 import { useStudioContext } from "../../context/StudioContext";
 import {
@@ -29,8 +30,6 @@ import {
   type CropRect, type ImageOps, type OpHistory,
 } from "../../lib/image-ops";
 
-const MUTED = "var(--text-muted)";
-const BORDER = "rgba(255,255,255,0.08)";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type SaveKind = "project" | "asset" | null;
@@ -40,6 +39,7 @@ function slugify(name: string): string {
 }
 
 export default function ImageStudio({ projectId, onOpenCreate }: { projectId: string | null; onOpenCreate?: () => void }) {
+  const { tokens } = useTheme();
   const { setActiveAssetId } = useStudioContext();
   const refreshTrigger = useAssetsRefreshTrigger();
 
@@ -271,15 +271,15 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" data-testid="image-studio">
       {/* asset rail */}
-      <div className="flex w-44 shrink-0 flex-col border-r" style={{ borderColor: BORDER }}>
-        <div className="flex items-center justify-between border-b px-2.5 py-2" style={{ borderColor: BORDER }}>
-          <span className="text-[10px] font-extrabold uppercase tracking-[0.12em]" style={{ color: "var(--text-secondary)" }}>Images</span>
+      <div className="flex w-44 shrink-0 flex-col border-r" style={{ borderColor: tokens.border }}>
+        <div className="flex items-center justify-between border-b px-2.5 py-2" style={{ borderColor: tokens.border }}>
+          <span className="text-[10px] font-extrabold uppercase tracking-[0.12em]" style={{ color: tokens.textMuted }}>Images</span>
           <div className="flex items-center gap-1">
-            <button type="button" title="Upload image" aria-label="Upload image" data-testid="image-studio-upload" className="grid h-6 w-6 place-items-center rounded-md hover:bg-white/5" style={{ color: MUTED }} onClick={() => uploadFileRef.current?.click()}>
+            <button type="button" title="Upload image" aria-label="Upload image" data-testid="image-studio-upload" className="grid h-6 w-6 place-items-center rounded-md hover:bg-[rgba(127,127,127,0.14)]" style={{ color: tokens.textMuted }} onClick={() => uploadFileRef.current?.click()}>
               <Upload size={12} />
             </button>
             {onOpenCreate && (
-              <button type="button" title="Generate with LiTT" aria-label="Generate image" className="grid h-6 w-6 place-items-center rounded-md hover:bg-white/5" style={{ color: "var(--litt-primary)" }} onClick={onOpenCreate}>
+              <button type="button" title="Generate with LiTT" aria-label="Generate image" className="grid h-6 w-6 place-items-center rounded-md hover:bg-[rgba(127,127,127,0.14)]" style={{ color: tokens.primary }} onClick={onOpenCreate}>
                 <Sparkles size={12} />
               </button>
             )}
@@ -287,10 +287,10 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
         </div>
         <input ref={uploadFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadFile(f); e.target.value = ""; }} />
         <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-          {assetsError && <div className="p-2 text-[10px]" style={{ color: "#fca5a5" }}>{assetsError}</div>}
-          {!projectId && <div className="p-2 text-[10px]" style={{ color: MUTED }}>Open a project to browse its images.</div>}
+          {assetsError && <div className="p-2 text-[10px]" style={{ color: tokens.danger }}>{assetsError}</div>}
+          {!projectId && <div className="p-2 text-[10px]" style={{ color: tokens.textMuted }}>Open a project to browse its images.</div>}
           {projectId && assets.length === 0 && !assetsError && (
-            <div className="p-2 text-[10px]" style={{ color: MUTED }}>No images yet — generate one with LiTT or upload.</div>
+            <div className="p-2 text-[10px]" style={{ color: tokens.textMuted }}>No images yet — generate one with LiTT or upload.</div>
           )}
           <div className="grid grid-cols-2 gap-1.5">
             {assets.map((a) => (
@@ -299,13 +299,13 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
                 type="button"
                 onClick={() => loadAsset(a)}
                 className="group relative aspect-square overflow-hidden rounded-md border text-left"
-                style={{ borderColor: selected?.id === a.id ? "var(--litt-primary)" : BORDER }}
+                style={{ borderColor: selected?.id === a.id ? tokens.primary : tokens.border }}
                 data-testid={`image-asset-${a.id}`}
                 title={a.name}
               >
                 {failedThumbnailIds.has(a.id) ? (
                   <span className="grid h-full w-full place-items-center" aria-label="Image unavailable">
-                    <ImageIcon size={18} style={{ color: MUTED }} aria-hidden />
+                    <ImageIcon size={18} style={{ color: tokens.textMuted }} aria-hidden />
                   </span>
                 ) : (
                   /* eslint-disable-next-line @next/next/no-img-element */
@@ -326,13 +326,13 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
       {/* stage */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* toolbar */}
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-2.5 py-1.5" style={{ borderColor: BORDER }}>
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-2.5 py-1.5" style={{ borderColor: tokens.border }}>
           <ToolBtn label="Crop" testId="image-op-crop" active={cropMode} disabled={!image} onClick={() => { setCropMode((v) => !v); setCropDraft(null); }} icon={<Crop size={12} />} />
           <ToolBtn label="Rotate left" testId="image-op-rotate-left" disabled={!image} onClick={() => apply({ ...ops, rotate: ((ops.rotate + 270) % 360) as ImageOps["rotate"] })} icon={<RotateCcw size={12} />} />
           <ToolBtn label="Rotate right" testId="image-op-rotate-right" disabled={!image} onClick={() => apply({ ...ops, rotate: ((ops.rotate + 90) % 360) as ImageOps["rotate"] })} icon={<RotateCw size={12} />} />
           <ToolBtn label="Flip horizontal" testId="image-op-flip-h" active={ops.flipH} disabled={!image} onClick={() => apply({ ...ops, flipH: !ops.flipH })} icon={<FlipHorizontal2 size={12} />} />
           <ToolBtn label="Flip vertical" testId="image-op-flip-v" active={ops.flipV} disabled={!image} onClick={() => apply({ ...ops, flipV: !ops.flipV })} icon={<FlipVertical2 size={12} />} />
-          <span className="mx-1 h-4 w-px" style={{ backgroundColor: BORDER }} />
+          <span className="mx-1 h-4 w-px" style={{ backgroundColor: tokens.border }} />
           <ToolBtn label="Undo" testId="image-op-undo" disabled={!canUndo(history)} onClick={() => setHistory(undoOp)} icon={<RotateCcw size={12} />} />
           <ToolBtn label="Redo" testId="image-op-redo" disabled={!canRedo(history)} onClick={() => setHistory(redoOp)} icon={<RotateCw size={12} />} />
           <button
@@ -340,13 +340,13 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
             disabled={!dirty}
             onClick={() => setHistory({ stack: [defaultOps()], index: 0 })}
             className="rounded-md border px-2 py-1 text-[10px] font-bold disabled:opacity-40"
-            style={{ borderColor: BORDER, color: MUTED }}
+            style={{ borderColor: tokens.border, color: tokens.textMuted }}
           >
             Reset
           </button>
           <span className="flex-1" />
           {image && (
-            <span className="font-mono text-[10px]" style={{ color: MUTED }} data-testid="image-studio-size">
+            <span className="font-mono text-[10px]" style={{ color: tokens.textMuted }} data-testid="image-studio-size">
               {out.w}×{out.h}
             </span>
           )}
@@ -355,7 +355,7 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
             disabled={!image || !projectId || !!saveBusy}
             onClick={() => { void saveToProject(); }}
             className="rounded-md border px-2.5 py-1 text-[10px] font-bold disabled:opacity-40"
-            style={{ borderColor: "rgba(72,238,56,0.35)", color: "#48EE38" }}
+            style={{ borderColor: tokens.success + "59", color: tokens.success }}
             data-testid="image-studio-save-project"
           >
             {saveBusy === "project" ? <Loader2 size={10} className="inline animate-spin" /> : <Check size={10} className="inline" />} Save to project
@@ -365,7 +365,7 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
             disabled={!image || !!saveBusy}
             onClick={() => { void saveAsAsset(); }}
             className="rounded-md border px-2.5 py-1 text-[10px] font-bold disabled:opacity-40"
-            style={{ borderColor: "rgba(155,77,255,0.35)", color: "var(--litt-primary)" }}
+            style={{ borderColor: tokens.primary + "59", color: tokens.primary }}
             data-testid="image-studio-save-asset"
           >
             {saveBusy === "asset" ? <Loader2 size={10} className="inline animate-spin" /> : null} Save as asset
@@ -373,24 +373,24 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
         </div>
 
         {/* canvas area */}
-        <div ref={stageRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4" style={{ background: "radial-gradient(circle at 50% 40%, rgba(139,92,246,0.05), transparent 50%)" }}>
+        <div ref={stageRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4" style={{ background: `radial-gradient(circle at 50% 40%, ${tokens.primary}0D, transparent 50%)` }}>
           {loadState === "idle" && (
-            <div className="text-center" style={{ color: MUTED }}>
+            <div className="text-center" style={{ color: tokens.textMuted }}>
               <ImageIcon size={22} className="mx-auto mb-2 opacity-60" />
-              <p className="text-[12px] font-bold" style={{ color: "var(--text-secondary)" }}>Select an image to edit</p>
+              <p className="text-[12px] font-bold" style={{ color: tokens.textMuted }}>Select an image to edit</p>
               <p className="mt-1 text-[10px]">Pick from the list, upload one, or generate with LiTT.</p>
             </div>
           )}
-          {loadState === "loading" && <Loader2 size={18} className="animate-spin" style={{ color: MUTED }} />}
+          {loadState === "loading" && <Loader2 size={18} className="animate-spin" style={{ color: tokens.textMuted }} />}
           {loadState === "error" && (
-            <div className="max-w-xs text-center text-[11px]" style={{ color: "#fca5a5" }}>{loadError}</div>
+            <div className="max-w-xs text-center text-[11px]" style={{ color: tokens.danger }}>{loadError}</div>
           )}
           {loadState === "ready" && image && (
             <div className="relative" style={{ maxWidth: "100%", maxHeight: "100%" }}>
               <canvas
                 ref={canvasRef}
                 className="block max-h-full max-w-full rounded-md border"
-                style={{ borderColor: BORDER, cursor: cropMode ? "crosshair" : "default", maxWidth: "min(100%, 720px)", maxHeight: "100%" }}
+                style={{ borderColor: tokens.border, cursor: cropMode ? "crosshair" : "default", maxWidth: "min(100%, 720px)", maxHeight: "100%" }}
                 data-testid="image-studio-canvas"
                 onPointerDown={onCropDown}
                 onPointerMove={onCropMove}
@@ -400,7 +400,7 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
                 <div
                   className="pointer-events-none absolute border-2 border-dashed"
                   style={{
-                    borderColor: "var(--litt-primary)",
+                    borderColor: tokens.primary,
                     left: `${(cropDraft.x / out.w) * 100}%`,
                     top: `${(cropDraft.y / out.h) * 100}%`,
                     width: `${(cropDraft.w / out.w) * 100}%`,
@@ -415,28 +415,28 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
 
         {/* crop confirm + resize + filters strip */}
         {loadState === "ready" && image && (
-          <div className="shrink-0 border-t px-3 py-2" style={{ borderColor: BORDER }}>
+          <div className="shrink-0 border-t px-3 py-2" style={{ borderColor: tokens.border }}>
             {cropMode && (
-              <div className="mb-2 flex items-center gap-2 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+              <div className="mb-2 flex items-center gap-2 text-[10px]" style={{ color: tokens.textMuted }}>
                 <span>Drag on the image to pick the crop area.</span>
-                <button type="button" className="rounded-md border px-2 py-0.5 font-bold disabled:opacity-40" style={{ borderColor: "rgba(72,238,56,0.4)", color: "#48EE38" }} disabled={!cropDraft || cropDraft.w < 2} onClick={commitCrop} data-testid="image-crop-apply">Apply crop</button>
-                <button type="button" className="rounded-md border px-2 py-0.5 font-bold" style={{ borderColor: BORDER, color: MUTED }} onClick={() => { setCropMode(false); setCropDraft(null); }}>Cancel</button>
+                <button type="button" className="rounded-md border px-2 py-0.5 font-bold disabled:opacity-40" style={{ borderColor: tokens.success + "66", color: tokens.success }} disabled={!cropDraft || cropDraft.w < 2} onClick={commitCrop} data-testid="image-crop-apply">Apply crop</button>
+                <button type="button" className="rounded-md border px-2 py-0.5 font-bold" style={{ borderColor: tokens.border, color: tokens.textMuted }} onClick={() => { setCropMode(false); setCropDraft(null); }}>Cancel</button>
               </div>
             )}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               {/* resize */}
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] font-bold uppercase" style={{ color: MUTED }}>Size</span>
-                <input type="number" className="w-16 rounded-md border bg-black/20 px-1.5 py-0.5 text-[11px]" style={{ borderColor: BORDER, color: "var(--text-main)" }} value={ops.resize?.w ?? out.w} data-testid="image-resize-w" onChange={(e) => {
+                <span className="text-[9px] font-bold uppercase" style={{ color: tokens.textMuted }}>Size</span>
+                <input type="number" className="w-16 rounded-md border px-1.5 py-0.5 text-[11px]" style={{ borderColor: tokens.border, color: tokens.text, backgroundColor: tokens.background }} value={ops.resize?.w ?? out.w} data-testid="image-resize-w" onChange={(e) => {
                   const v = parseInt(e.target.value, 10);
                   if (!v) return;
                   const base = { w: out.w, h: out.h };
                   apply({ ...ops, resize: aspectLocked ? resizeKeepingAspect(base, "w", v) : { w: v, h: ops.resize?.h ?? out.h } });
                 }} />
-                <button type="button" className="grid h-6 w-6 place-items-center rounded-md" style={{ color: MUTED }} aria-label={aspectLocked ? "Unlock aspect" : "Lock aspect"} data-testid="image-aspect-lock" onClick={() => setAspectLocked((v) => !v)}>
+                <button type="button" className="grid h-6 w-6 place-items-center rounded-md" style={{ color: tokens.textMuted }} aria-label={aspectLocked ? "Unlock aspect" : "Lock aspect"} data-testid="image-aspect-lock" onClick={() => setAspectLocked((v) => !v)}>
                   {aspectLocked ? <Lock size={10} /> : <Unlock size={10} />}
                 </button>
-                <input type="number" className="w-16 rounded-md border bg-black/20 px-1.5 py-0.5 text-[11px]" style={{ borderColor: BORDER, color: "var(--text-main)" }} value={ops.resize?.h ?? out.h} data-testid="image-resize-h" onChange={(e) => {
+                <input type="number" className="w-16 rounded-md border px-1.5 py-0.5 text-[11px]" style={{ borderColor: tokens.border, color: tokens.text, backgroundColor: tokens.background }} value={ops.resize?.h ?? out.h} data-testid="image-resize-h" onChange={(e) => {
                   const v = parseInt(e.target.value, 10);
                   if (!v) return;
                   const base = { w: out.w, h: out.h };
@@ -450,7 +450,7 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
                 ["sepia", "Sepia", 100], ["blur", "Blur", 20],
               ] as const).map(([key, label, max]) => (
                 <label key={key} className="flex items-center gap-1.5">
-                  <span className="w-16 text-right text-[9px] font-bold uppercase" style={{ color: MUTED }}>{label}</span>
+                  <span className="w-16 text-right text-[9px] font-bold uppercase" style={{ color: tokens.textMuted }}>{label}</span>
                   <input
                     type="range" min={0} max={max} step={1}
                     value={ops.filters[key]}
@@ -458,12 +458,12 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
                     onChange={(e) => apply({ ...ops, filters: { ...ops.filters, [key]: parseInt(e.target.value, 10) } })}
                     className="w-20"
                   />
-                  <span className="w-7 font-mono text-[9px]" style={{ color: MUTED }}>{ops.filters[key]}</span>
+                  <span className="w-7 font-mono text-[9px]" style={{ color: tokens.textMuted }}>{ops.filters[key]}</span>
                 </label>
               ))}
             </div>
             {(savedNote || saveError) && (
-              <div className="mt-2 text-[10px]" style={{ color: savedNote ? "#48EE38" : "#fca5a5" }} data-testid="image-studio-save-status">
+              <div className="mt-2 text-[10px]" style={{ color: savedNote ? tokens.success : tokens.danger }} data-testid="image-studio-save-status">
                 {savedNote ?? saveError}
               </div>
             )}
@@ -478,6 +478,7 @@ function ToolBtn({ label, testId, active, disabled, onClick, icon }: {
   label: string; testId?: string; active?: boolean; disabled?: boolean;
   onClick: () => void; icon: React.ReactNode;
 }) {
+  const { tokens } = useTheme();
   return (
     <button
       type="button"
@@ -488,9 +489,9 @@ function ToolBtn({ label, testId, active, disabled, onClick, icon }: {
       onClick={onClick}
       className="grid h-7 w-7 place-items-center rounded-md border transition disabled:opacity-40"
       style={{
-        borderColor: active ? "var(--litt-primary)" : BORDER,
-        color: active ? "var(--litt-primary)" : MUTED,
-        backgroundColor: active ? "rgba(155,77,255,0.12)" : "transparent",
+        borderColor: active ? tokens.primary : tokens.border,
+        color: active ? tokens.primary : tokens.textMuted,
+        backgroundColor: active ? tokens.primary + "1F" : "transparent",
       }}
     >
       {icon}
