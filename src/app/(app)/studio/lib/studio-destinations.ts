@@ -191,6 +191,57 @@ export function resolveCreatorDestination(creator: string | null): DestinationSt
 }
 
 /**
+ * The seven creation types offered as entry hints inside the one
+ * chat (one-chat entry, Larry's directive 2026-11-11;
+ * ART-20261111-031). These are the same types the retired
+ * "What do you want to make?" hub page offered — but the chips now
+ * live in the chat's own entry surface and act in place: selecting
+ * one sets the chat's creation context / opens the matching pane in
+ * the same screen. Never a separate destination page, never a
+ * second prompt.
+ */
+export type StudioEntryCreateType =
+  | "website"
+  | "image"
+  | "video"
+  | "music"
+  | "code"
+  | "design"
+  | "game";
+
+/**
+ * How an entry chip executes, resolved purely so the routing parity
+ * is unit-testable:
+ *  - "website-start": the page-level website start owns blank-project
+ *    creation (mint/reuse + pin) — the chip routes through the same
+ *    ?creator=website URL the hub's Website chip used. There is no
+ *    in-chat substitute for that create path.
+ *  - "creator": activate the Create destination in this mode — the
+ *    exact state the hub's ?creator=<mode> deep link resolves to.
+ *  - "tool": route the legacy tool in place — the exact mapping the
+ *    hub's ?tool=code / ?tool=design deep links resolve through.
+ */
+export type EntryCreateTypePlan =
+  | { kind: "website-start" }
+  | { kind: "creator"; mode: CreateMode }
+  | { kind: "tool"; tool: "code" | "design" };
+
+export function resolveEntryCreateType(type: StudioEntryCreateType): EntryCreateTypePlan {
+  switch (type) {
+    case "website":
+      return { kind: "website-start" };
+    case "image":
+    case "video":
+    case "music":
+    case "game":
+      return { kind: "creator", mode: type };
+    case "code":
+    case "design":
+      return { kind: "tool", tool: type };
+  }
+}
+
+/**
  * Map a legacy `?tool=` query value (or any StudioTool) to a Command
  * Studio destination. ALL old tool URLs now canonicalize to the LiTT
  * chat surface. The user never leaves the conversation.

@@ -354,3 +354,77 @@ describe("LiTEmptyState direct conversation open (no welcome screen)", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("LiTEmptyState creation-type entry chips (one-chat entry)", () => {
+  // One-chat entry (Larry's directive, 2026-11-11; ART-20261111-031):
+  // the seven creation types are entry hints INSIDE the one chat —
+  // the same types the retired hub page offered, but selecting one
+  // sets the chat's creation context / opens the matching pane in
+  // place. It never navigates to a separate hub or destination page
+  // and never opens a second prompt.
+  const readyInput = {
+    runtime: readyRuntime,
+    runtimeLoading: false,
+    providerHealth: "available" as const,
+  };
+
+  it("renders all seven creation-type chips when a handler is provided", () => {
+    render(
+      <LiTEmptyState
+        launchpadState={state(readyInput)}
+        onPrimaryAction={vi.fn()}
+        onCreateType={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("entry-create-type-chips")).toBeInTheDocument();
+    for (const label of ["Website", "Image", "Video", "Music", "Code", "Design", "Game"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("reports the chosen type to the handler — in place, no navigation", () => {
+    const onCreateType = vi.fn();
+    render(
+      <LiTEmptyState
+        launchpadState={state(readyInput)}
+        onPrimaryAction={vi.fn()}
+        onCreateType={onCreateType}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Image" }));
+    expect(onCreateType).toHaveBeenCalledWith("image");
+    fireEvent.click(screen.getByRole("button", { name: "Website" }));
+    expect(onCreateType).toHaveBeenCalledWith("website");
+    fireEvent.click(screen.getByRole("button", { name: "Game" }));
+    expect(onCreateType).toHaveBeenCalledWith("game");
+    fireEvent.click(screen.getByRole("button", { name: "Code" }));
+    expect(onCreateType).toHaveBeenCalledWith("code");
+    expect(onCreateType).toHaveBeenCalledTimes(4);
+  });
+
+  it("renders no creation-type chips without a handler (other surfaces unaffected)", () => {
+    render(
+      <LiTEmptyState
+        launchpadState={state(readyInput)}
+        onPrimaryAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("entry-create-type-chips")).not.toBeInTheDocument();
+  });
+
+  it("hides the creation-type chips while the launchpad is blocked (starter-chip parity)", () => {
+    render(
+      <LiTEmptyState
+        launchpadState={state({
+          runtime: runtime({ phase: "idle" }),
+          runtimeLoading: false,
+          runtimeError: "boom",
+          providerHealth: "available",
+        })}
+        onPrimaryAction={vi.fn()}
+        onCreateType={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("entry-create-type-chips")).not.toBeInTheDocument();
+  });
+});

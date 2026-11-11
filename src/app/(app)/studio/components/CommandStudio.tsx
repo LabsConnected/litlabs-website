@@ -101,10 +101,12 @@ import {
   mapMediaIntentToDestination,
   destinationToLegacyTool,
   resolveCreatorDestination,
+  resolveEntryCreateType,
   workspaceStageToMode,
   type StudioDestination,
   type StudioMode,
   type CreateMode,
+  type StudioEntryCreateType,
   type MoreMode,
   type MissionMode,
   type InspectorTab,
@@ -1225,6 +1227,35 @@ function CommandStudioContent() {
     }
     setPendingCommand(command);
   }, [capabilities.terminalStatus, handleOpenContextInspector, handleOpenDockTab, studioShellActive, openStageSurface]);
+
+  // One-chat entry chips (Larry's directive, 2026-11-11;
+  // ART-20261111-031): the creation-type hints in the chat's empty
+  // state execute their plan IN PLACE — the user never leaves the
+  // one chat, and no second prompt ever opens. Creator plans land in
+  // the exact state the retired hub's ?creator= deep links resolved
+  // to; tool plans route through handleRouteTool like every other
+  // in-Studio route. Website is the one exception: blank-project
+  // creation (mint/reuse + pin) is owned by the page-level website
+  // start, so the chip routes through the same ?creator=website URL
+  // the hub's Website chip used — StudioHub above us performs the
+  // create and pins the project, and this surface remounts bound to
+  // it, exactly as a deep link does.
+  const handleEntryCreateType = useCallback(
+    (type: StudioEntryCreateType) => {
+      const plan = resolveEntryCreateType(type);
+      if (plan.kind === "website-start") {
+        router.replace("/studio?creator=website");
+        return;
+      }
+      if (plan.kind === "creator") {
+        setCreateMode(plan.mode);
+        setDestination("create");
+        return;
+      }
+      handleRouteTool(plan.tool);
+    },
+    [router, handleRouteTool],
+  );
 
   // P1-1: the chat image intent ("generate an image of X") opens the REAL
   // Image Studio — the create destination's ImageTool — with the user's
@@ -2803,6 +2834,7 @@ function CommandStudioContent() {
         onSelectConversation={handleSelectConversation}
         launchpadState={launchpadState}
         onFirstMissionAction={handleFirstMissionAction}
+        onCreateTypeAction={handleEntryCreateType}
         completion={completion}
         onDismissCompletion={() => setCompletion(null)}
         onUndoCompletion={handleUndoCompletion}
@@ -4198,6 +4230,7 @@ function StudioWorkSurface({
   onSelectConversation,
   launchpadState,
   onFirstMissionAction,
+  onCreateTypeAction,
   completion,
   onDismissCompletion,
   onUndoCompletion,
@@ -4217,6 +4250,8 @@ function StudioWorkSurface({
   onSelectConversation?: (conversationId: string) => void;
   launchpadState: FirstMissionLaunchpadState;
   onFirstMissionAction: (action: FirstMissionActionId) => void;
+  /** One-chat entry chips: creation-type hints act in place. */
+  onCreateTypeAction?: (type: StudioEntryCreateType) => void;
   completion?: { changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null;
   onDismissCompletion?: () => void;
   onUndoCompletion?: () => void;
@@ -4256,6 +4291,7 @@ function StudioWorkSurface({
             launchpadState={launchpadState}
             onPrimaryAction={onFirstMissionAction}
             onSelectConversation={onSelectConversation}
+            onCreateType={onCreateTypeAction}
           />
         </div>
       ) : loading && messages.length === 0 ? (

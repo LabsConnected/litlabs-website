@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 /**
- * Studio prime gate (ART-20261110-029).
+ * Studio one-chat entry gate (ART-20261111-031).
  *
- * Studio is the one signed-in landing surface:
+ * Supersedes the Studio prime gate (ART-20261110-029) under Larry's
+ * one-chat directive (2026-11-11): the "What do you want to make?"
+ * hub page must go — Studio opens straight into the main chat.
  *  - Bare /studio (no params) for a user WITH projects renders the
- *    prime landing: the universal create launcher (BuildConsole —
- *    the same component the retired dashboard used) + recent projects.
+ *    CommandStudio workspace (the one chat) directly. The prime
+ *    landing (hub) is never rendered.
  *  - Any deep link (?project=, ?tool=, ?prompt=…) renders the
  *    CommandStudio workspace exactly as before.
  *  - Users with NO projects keep the first-run welcome.
@@ -64,7 +66,7 @@ vi.mock("@/app/(app)/studio/components/FirstRunWelcome", () => ({
     React.createElement("div", { "data-testid": "first-run-welcome" }, "Welcome"),
 }));
 
-describe("Studio prime gate", () => {
+describe("Studio one-chat entry gate", () => {
   beforeEach(() => {
     nav.searchParams = new URLSearchParams();
     mockClerkAuth.mockReturnValue({
@@ -82,16 +84,28 @@ describe("Studio prime gate", () => {
     vi.clearAllMocks();
   });
 
-  it("bare /studio renders the prime landing with the create launcher", async () => {
+  it("bare /studio renders the one-chat workspace — the hub landing is gone", async () => {
     const mod = await import("@/app/(app)/studio/page");
     await act(async () => {
       render(React.createElement(mod.default));
     });
-    expect(screen.getByTestId("studio-prime-landing")).toBeTruthy();
-    // The universal composer itself — launcher parity with the retired
-    // dashboard (same BuildConsole component, same testid).
-    expect(screen.getByTestId("dashboard-composer")).toBeTruthy();
-    expect(screen.queryByTestId("command-studio-mounted")).toBeNull();
+    // Straight into the main chat surface (mocked CommandStudio).
+    expect(screen.getByTestId("command-studio-mounted")).toBeTruthy();
+    // The hub composition never renders: no prime landing, no
+    // "What do you want to make?" create box, no hub composer.
+    expect(screen.queryByTestId("studio-prime-landing")).toBeNull();
+    expect(screen.queryByTestId("dashboard-composer")).toBeNull();
+    expect(screen.queryByText("What do you want to make?")).toBeNull();
+  });
+
+  it("a describe deep link (?prompt=) renders the workspace, not the landing", async () => {
+    nav.searchParams = new URLSearchParams("tool=chat&prompt=A%20website%20for%20my%20bakery");
+    const mod = await import("@/app/(app)/studio/page");
+    await act(async () => {
+      render(React.createElement(mod.default));
+    });
+    expect(screen.getByTestId("command-studio-mounted")).toBeTruthy();
+    expect(screen.queryByTestId("studio-prime-landing")).toBeNull();
   });
 
   it("a project deep link renders the workspace, not the landing", async () => {
