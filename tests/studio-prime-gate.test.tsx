@@ -34,6 +34,18 @@ vi.mock("@/context/ThemeContext", () => ({
       surface: "#111111",
       border: "#222222",
     },
+    // The landing components consume the full hook shape since the
+    // layout/theme wave (ART-20261111-004): theme.mode +
+    // resolvedColors. Values are inert — this gate tests routing.
+    theme: { mode: "light" },
+    resolvedColors: {
+      accentColor: "#177A36",
+      boxBg: "#ffffff",
+      bgColor: "#ffffff",
+      borderColor: "#CFDEC4",
+      textColor: "#0E1510",
+      textMuted: "#5c6b5e",
+    },
   }),
 }));
 vi.mock("next/navigation", () => ({
