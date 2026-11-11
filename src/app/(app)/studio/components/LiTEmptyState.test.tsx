@@ -11,18 +11,6 @@ import {
   type ProjectRuntimeState,
 } from "@/lib/projects/runtime-state";
 
-vi.mock("./LiTTPresence", () => ({
-  default: ({ state, variant, size }: { state: string; variant: string; size: string }) => (
-    <div
-      data-testid="litt-presence"
-      aria-label="LiTT Studio operator presence"
-      data-state={state}
-      data-variant={variant}
-      data-size={size}
-    />
-  ),
-}));
-
 vi.mock("./RecentConversations", () => ({
   default: () => <div data-testid="recent-conversations" />,
 }));
@@ -124,8 +112,13 @@ const renderCases = [
     },
   },
   {
+    // Larry's no-welcome directive (2026-11-10): a ready launchpad
+    // renders NO notice and NO primary action — the conversation
+    // simply opens (chips + composer). The old design's subtle
+    // "Look over my project first" action is superseded.
     name: "fully ready",
-    expected: "Look over my project first",
+    expected: null,
+    ready: true,
     input: {
       runtime: readyRuntime,
       runtimeLoading: false,
@@ -148,6 +141,10 @@ describe("LiTEmptyState truthful launchpad", () => {
       expect(primaryActions).toHaveLength(testCase.expected ? 1 : 0);
       if (testCase.expected) {
         expect(primaryActions[0]).toHaveTextContent(testCase.expected);
+      } else if ("ready" in testCase && testCase.ready) {
+        // Ready = silent: no notice, no action, straight into chat.
+        expect(screen.queryByTestId("first-mission-notice")).not.toBeInTheDocument();
+        expect(screen.getByTestId("first-mission-starter-chips")).toBeInTheDocument();
       } else {
         expect(screen.getAllByText(/still getting set up/i).length).toBeGreaterThan(0);
       }
@@ -173,7 +170,13 @@ describe("LiTEmptyState truthful launchpad", () => {
   it("dispatches the derived action without submitting a mission", () => {
     const onPrimaryAction = vi.fn();
     const launchpadState = state({
-      runtime: readyRuntime,
+      runtime: runtime({
+        ...project,
+        phase: "workspace_not_ready",
+        workspaceId: "workspace-1",
+        workspaceStatus: "failed",
+        error: { code: "WORKSPACE_NOT_READY", message: "Clone failed" },
+      }),
       runtimeLoading: false,
       providerHealth: "available",
     });
@@ -184,13 +187,15 @@ describe("LiTEmptyState truthful launchpad", () => {
         onPrimaryAction={onPrimaryAction}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Look over my project first" }));
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
 
     expect(onPrimaryAction).toHaveBeenCalledOnce();
-    expect(onPrimaryAction).toHaveBeenCalledWith("prepare_inspection");
+    expect(onPrimaryAction).toHaveBeenCalledWith("retry_workspace");
   });
 
-  it("preserves LiTT operator presence", () => {
+  it("renders no welcome hero — the welcome screen is removed", () => {
+    // Superseded by Larry's directive (2026-11-10): the hero
+    // presence + greeting headline WERE the welcome screen.
     render(
       <LiTEmptyState
         launchpadState={state({
@@ -202,11 +207,12 @@ describe("LiTEmptyState truthful launchpad", () => {
       />,
     );
 
-    expect(screen.getByTestId("litt-presence")).toHaveAttribute("data-variant", "empty-state");
+    expect(screen.queryByTestId("litt-presence")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
   });
 });
 
-describe("LiTEmptyState first-run first screen", () => {
+describe("LiTEmptyState direct conversation open (no welcome screen)", () => {
   function renderReady() {
     return render(
       <LiTEmptyState
@@ -220,11 +226,12 @@ describe("LiTEmptyState first-run first screen", () => {
     );
   }
 
-  it("leads with the vision headline, not infrastructure", () => {
+  it("opens direct when ready: no headline, no notice — chips and composer only", () => {
     renderReady();
-    expect(
-      screen.getByRole("heading", { name: /what do you want LiTT to do\?/i }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("first-mission-notice")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("first-mission-status")).not.toBeInTheDocument();
+    expect(screen.getByTestId("first-mission-starter-chips")).toBeInTheDocument();
   });
 
   it("renders all five starter chips", () => {
@@ -242,9 +249,18 @@ describe("LiTEmptyState first-run first screen", () => {
     }
   });
 
-  it("keeps the setup checks collapsed behind the status line by default", () => {
-    renderReady();
-    expect(screen.getByTestId("first-mission-status")).toHaveTextContent(/you're all set/i);
+  it("keeps the setup checks collapsed behind the status line while not ready", () => {
+    render(
+      <LiTEmptyState
+        launchpadState={state({
+          runtime: runtime({ phase: "resolving" }),
+          runtimeLoading: false,
+          providerHealth: undefined,
+        })}
+        onPrimaryAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("first-mission-status")).toHaveTextContent(/getting things ready/i);
     expect(screen.queryByTestId("first-mission-facts")).not.toBeInTheDocument();
     expect(screen.queryByText("AI provider")).not.toBeInTheDocument();
 
@@ -291,10 +307,12 @@ describe("LiTEmptyState first-run first screen", () => {
     dispatchSpy.mockRestore();
   });
 
-  it("transplants the describe-once box onto the first screen", () => {
+  it("does not gate the chat behind the describe-your-business funnel", () => {
+    // The describe-once box was part of the removed welcome screen;
+    // describing happens in the composer itself now.
     renderReady();
-    expect(screen.getByTestId("first-mission-describe-box")).toBeInTheDocument();
-    expect(screen.getByLabelText("Describe your business")).toBeInTheDocument();
+    expect(screen.queryByTestId("first-mission-describe-box")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Describe your business")).not.toBeInTheDocument();
   });
 
   it("keeps infrastructure nouns out of the default first screen", () => {
@@ -320,9 +338,8 @@ describe("LiTEmptyState first-run first screen", () => {
     );
     expect(screen.queryByTestId("first-mission-starter-chips")).not.toBeInTheDocument();
     expect(screen.queryByTestId("first-mission-describe-box")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Something needs attention" }),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("first-mission-notice")).toBeInTheDocument();
+    expect(screen.getByText("Something needs attention")).toBeInTheDocument();
   });
 
   it("tells the truth that choosing only fills the chat box", () => {

@@ -128,7 +128,9 @@ describe("CommandStudioHeader — truthful status", () => {
     expect(segmented.textContent).toContain("AUTO");
     // The permanent mode-description strip is gone (chrome-stacking fix)
     expect(screen.queryByTestId("execution-mode-guide")).toBeNull();
-    expect(screen.getByTestId("studio-brand")).toBeTruthy();
+    // No brand block in the project header (Larry's directive,
+    // 2026-11-10): projects, Global LiTT, repo workspace status only.
+    expect(screen.queryByTestId("studio-brand")).toBeNull();
     fireEvent.click(screen.getByTestId("studio-dock-toggle"));
     expect(onToggleDock).toHaveBeenCalledTimes(1);
   });

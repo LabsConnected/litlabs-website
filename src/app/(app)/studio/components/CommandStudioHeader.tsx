@@ -265,23 +265,10 @@ export default function CommandStudioHeader({
       data-testid="studio-header"
     >
       {/* Brand */}
-      <div className="flex shrink-0 items-center gap-2 pr-1" data-testid="studio-brand">
-        <div
-          className="grid h-7 w-7 place-items-center rounded-lg"
-          style={{
-            background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 25%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
-            border: "1px solid color-mix(in srgb, var(--color-accent) 35%, transparent)",
-            boxShadow: "0 0 12px color-mix(in srgb, var(--color-accent) 25%, transparent)",
-          }}
-          aria-hidden="true"
-        >
-          <span className="text-[11px] font-black text-accent">L</span>
-        </div>
-        <span className="hidden text-[13px] font-bold tracking-tight md:inline" style={{ color: "var(--text-primary)" }}>
-          LiTT <span className="text-accent">Studio</span>
-        </span>
-      </div>
-
+      {/* No brand block in the project header (Larry's directive,
+          2026-11-10): the bar is his projects, Global LiTT, and the
+          repo workspace status — the app-level top bar above carries
+          the brand. */}
       <StudioProjectPicker
         projectId={capabilities.projectId}
         projectName={capabilities.projectName}

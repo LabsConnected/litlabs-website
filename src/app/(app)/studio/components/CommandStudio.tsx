@@ -219,8 +219,6 @@ function CommandStudioContent() {
   const { userId, getToken } = useClerkAuth();
   const { user: appUser } = useAppUser();
   const { profile } = useProfile();
-  const userDisplayName = appUser?.firstName ?? appUser?.fullName ?? null;
-  const profileDisplayName = profile?.displayName ?? userDisplayName;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -2779,7 +2777,6 @@ function CommandStudioContent() {
         onRegenerateAction={conversation.regenerate}
         onSelectConversation={handleSelectConversation}
         launchpadState={launchpadState}
-        displayName={profileDisplayName}
         onFirstMissionAction={handleFirstMissionAction}
         completion={completion}
         onDismissCompletion={() => setCompletion(null)}
@@ -4174,7 +4171,6 @@ function StudioWorkSurface({
   onRegenerateAction,
   onSelectConversation,
   launchpadState,
-  displayName,
   onFirstMissionAction,
   completion,
   onDismissCompletion,
@@ -4194,7 +4190,6 @@ function StudioWorkSurface({
   onRegenerateAction: (assistantMessageId?: string) => void;
   onSelectConversation?: (conversationId: string) => void;
   launchpadState: FirstMissionLaunchpadState;
-  displayName?: string | null;
   onFirstMissionAction: (action: FirstMissionActionId) => void;
   completion?: { changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null;
   onDismissCompletion?: () => void;
@@ -4233,7 +4228,6 @@ function StudioWorkSurface({
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState
             launchpadState={launchpadState}
-            displayName={displayName}
             onPrimaryAction={onFirstMissionAction}
             onSelectConversation={onSelectConversation}
           />
