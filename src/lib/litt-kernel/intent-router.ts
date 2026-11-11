@@ -53,6 +53,52 @@ const MODE_PATTERNS: ModePattern[] = [
     domains: ["platform"],
   },
 
+  // ─── build (inspection): live-browser / preview inspection ───
+  // A request to LOOK at this project's own rendered page — "use the
+  // live browser to inspect this project's preview page", "look at
+  // the site in the browser", "check that every image renders",
+  // "screenshot the preview", "open the preview and tell me what you
+  // see" — names no file and no mutation, so the #905 inspection
+  // group below (file/folder/filename vocabulary only) never matched
+  // it, and the build-mutation placement pattern ("use … page/hero")
+  // or the browser-session group claimed the turn instead. taskKind
+  // was never set, so the quality session fell back to prose scope
+  // "standard" and demanded build/test evidence a read can never
+  // produce — production run aa70559b (2026-11-11) failed the gate
+  // with '"build" (pending), "test" (pending)' for a pure inspection
+  // (ART-20261111-070 §2).
+  //
+  // ONE discriminating pattern, with the inspection group's exact
+  // semantics (mode build, project + execution, taskKind inspection).
+  // It must precede BOTH thief groups — first-match wins — so it sits
+  // here, ahead of browser-session control and build-mutation. Three
+  // guards keep that precedence safe:
+  //  1. Whole-message MUTATION exclusion: any mutation verb anywhere
+  //     ("inspect the preview and fix the hero", "check the page then
+  //     update the headline", "build a page and show me in the
+  //     browser") disqualifies the pattern, so hybrids keep their
+  //     existing routing and full build gating.
+  //  2. A page-ish object must be named (preview/site/page/hero/
+  //     image/…): bare browser control ("use the browser to check
+  //     the dashboard", "go to X in the browser") names none and
+  //     stays in the browser-session lane below.
+  //  3. The verb must be an inspection verb tied to a browser/preview
+  //     target (either order), an open/show-me of the preview, or a
+  //     check + renders pairing.
+  // classifyTaskScope and the required stage sets are untouched: the
+  // kernel signal remains the only source of the inspection scope.
+  // Corpus: intent-router.browser-inspection.test.ts.
+  {
+    mode: "build",
+    patterns: [
+      /^(?![\s\S]*?\b(fix|edit|change|add|remove|update|delete|create|build|make|deploy|publish|redesign|restyle|revamp|overhaul|repair|modify|replace|rename|insert|generate|write|improve)\b)(?=[\s\S]*?\b(preview|website|web\s?page|homepage|site|page|hero|images?)\b)[\s\S]*?(?:\b(?:inspect|check|look\s+at|view|screenshot|verify)\b[^.!?]{0,60}\b(?:live\s+browser|browser|preview|website|web\s?page|homepage|site|page)\b|\b(?:live\s+browser|preview)\b[^.!?]{0,40}\b(?:inspect|check|look|view|screenshot)\b|\bopen\b[^.!?]{0,40}\bpreview\b|\bshow\s+me\b[^.!?]{0,40}\bpreview\b|\b(?:check|inspect|verify)\b[^.!?]{0,60}\brenders?\b)/i,
+    ],
+    requiresProject: true,
+    requiresExecution: true,
+    taskKind: "inspection",
+    domains: ["engineering"],
+  },
+
   // ─── browser: live browser session control ───────────────────
   // Browser-control intent is execution, not chat: without this lane,
   // "open a live browser session" fell through to think mode →
