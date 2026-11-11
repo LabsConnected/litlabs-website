@@ -4,6 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, Download, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
+import { HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
+import {
+  HOST_EXECUTION_UNAVAILABLE_LABEL,
+  HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+} from "@/lib/projects/runtime-state";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
 import StudioPublishControls from "./StudioPublishControls";
@@ -1113,6 +1118,11 @@ export default function StudioPreviewPanel({
   const effectivePreviewUrl = isStaticProject ? staticPreviewUrl : previewUrl;
   const displayUrl = effectivePreviewUrl ? `${effectivePreviewUrl}${effectivePreviewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
   const isAuthConfigError = errorCode === "preview_clerk_config_error" || errorCode === "preview_auth_config_error";
+  // Wave-4 truth: a HOST_EXECUTION_DISABLED failure is the hosted service's
+  // fail-closed execution policy, not a transient crash — repo-backed
+  // workspaces cannot open there until a verified sandbox exists, so the
+  // pane names that state and offers no restart that can never succeed.
+  const hostExecBlocked = state === "failed" && errorCode === HOST_EXECUTION_DISABLED_CODE;
   // The v4 @import trap: a Tailwind-intended preview that renders unstyled
   // must surface honestly — never a green "Preview ready" over dead CSS.
   const stylingFailed = state === "ready" && styleProbe?.tailwindDetected === true && styleProbe.styled === false;
@@ -1120,8 +1130,8 @@ export default function StudioPreviewPanel({
   // of an indefinite "Preparing your preview automatically…".
   const awaitingFirstContent = state === "not_started" && workspaceTruth === "no_content";
   const frameFailed = iframeFailed || frameCheck === "failed";
-  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : frameCheck === "ok" ? "Preview ready" : "Loading preview…") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
+  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : frameCheck === "ok" ? "Preview ready" : "Loading preview…") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : "Preview failed to start") : "Preview runtime unreachable";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
 
@@ -1219,13 +1229,15 @@ export default function StudioPreviewPanel({
       setExportNotice({ kind: "err", text: result.error });
     }
   }, [projectId, exporting, getToken]);
-  const sourceSummary = formatSourceSummary({
-    kind: sourceKind,
-    status: sourceStatus,
-    versionControl,
-    branch,
-    githubRepository: repositoryName,
-  });
+  const sourceSummary = hostExecBlocked
+    ? "Repo workspace unavailable on the hosted service"
+    : formatSourceSummary({
+        kind: sourceKind,
+        status: sourceStatus,
+        versionControl,
+        branch,
+        githubRepository: repositoryName,
+      });
 
   return (
     <div className={`flex h-full min-h-0 flex-col ${maximized ? "fixed inset-0 z-[300] p-3" : ""}`} data-testid="studio-preview-panel" data-project-id={projectId ?? ""}>
@@ -1331,8 +1343,10 @@ export default function StudioPreviewPanel({
         >
           <RefreshCw size={12} className={`pointer-events-none ${state === "stale" ? "animate-spin" : ""}`} />
         </button>
-        {/* Restart dev server — hidden for static projects (no dev server) */}
-        {(isLive || state === "failed") && !isStaticProject && (
+        {/* Restart dev server — hidden for static projects (no dev server)
+            and for host-execution refusals, where a restart can never
+            succeed on the hosted service (wave-4). */}
+        {(isLive || state === "failed") && !isStaticProject && !hostExecBlocked && (
           <button
             type="button"
             onClick={() => void preparePreview()}
@@ -1543,7 +1557,7 @@ export default function StudioPreviewPanel({
                 <Eye size={20} />
               )}
             </div>
-            <div>
+            <div {...(hostExecBlocked ? { "data-testid": "preview-host-exec-notice" } : {})}>
               <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{displayLabel}</div>
               <div className="mx-auto mt-1.5 max-w-[280px] text-xs leading-5" style={{ color: "var(--text-muted)" }}>{displayDetail}</div>
             </div>
@@ -1580,8 +1594,10 @@ export default function StudioPreviewPanel({
               </div>
             )}
             {/* Retry button for unreachable/failed states. not_started is
-                handled by auto-start — no manual button needed. */}
-            {(["unreachable", "failed", "not_started"].includes(state) || (isLive && frameFailed)) && projectId && (
+                handled by auto-start — no manual button needed. Host-exec
+                refusals get NO button: retrying can never succeed on the
+                hosted service, so the honest notice above stands alone. */}
+            {(["unreachable", "failed", "not_started"].includes(state) || (isLive && frameFailed)) && projectId && !hostExecBlocked && (
               <>
                 <button
                   type="button"

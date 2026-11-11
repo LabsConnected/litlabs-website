@@ -184,6 +184,24 @@ export function runtimePhaseLabel(
 }
 
 /**
+ * Honest copy for the HOST_EXECUTION_DISABLED workspace failure (wave-4).
+ *
+ * Repo-backed workspace preparation is fail-closed on the hosted service:
+ * opening the repo as a live workspace runs host git + install, which stays
+ * disabled until a verified sandbox exists (terminal-server isolation
+ * policy — deliberately no override). The generic "Workspace not ready /
+ * preparation failed" states lied about that: they implied a transient
+ * failure and offered retries that can never succeed. When the failure
+ * carries this code, every surface uses this copy instead, and no retry /
+ * restart affordance is offered.
+ */
+export const HOST_EXECUTION_UNAVAILABLE_LABEL =
+  "Repo-backed workspaces aren't available on the hosted service yet";
+export const HOST_EXECUTION_UNAVAILABLE_SHORT = "Repo workspace unavailable";
+export const HOST_EXECUTION_UNAVAILABLE_MESSAGE =
+  "Opening a GitHub repo as a live workspace needs a secure sandbox, which the hosted service doesn't have yet. Your project's files and builds aren't affected — only the live workspace and preview are paused.";
+
+/**
  * Human-readable label for the socket's heartbeat freshness.
  * The socket is a STATUS FEED, not the execution pipe — tool execution runs
  * server-side over HTTP, so a stale/down feed never blocks chat or builds.

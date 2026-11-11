@@ -255,3 +255,47 @@ describe("studio-projects preview route — static guards", () => {
     expect(createPreviewTokenMock).not.toHaveBeenCalled();
   });
 });
+
+describe("studio-projects preview route — workspace failure code threading (wave-4)", () => {
+  // The exact string production stores as workspaceError when a repo-backed
+  // prepare hits the terminal-server's fail-closed 503.
+  const HOST_EXEC_STORED =
+    'Workspace prepare failed (503): {"error":"Host execution is disabled in production (workspace.prepare(git,install)); a verified sandbox is required","code":"HOST_EXECUTION_DISABLED"}';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user-1" } as never);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function getPreview() {
+    return GET(
+      new Request("https://x.test/api/studio-projects/proj-1/preview") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+  }
+
+  it("threads HOST_EXECUTION_DISABLED into runtimeErrorCode for a failed repo workspace", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: HOST_EXEC_STORED, framework: "nextjs",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBe("HOST_EXECUTION_DISABLED");
+  });
+
+  it("leaves generic workspace failures codeless", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "terminal down", framework: "nextjs",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBeNull();
+  });
+});

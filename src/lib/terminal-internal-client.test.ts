@@ -229,3 +229,79 @@ describe("terminal client functions wire timeouts", () => {
     expect(url).not.toContain("terminal.public.test");
   });
 });
+
+describe("error-code threading (wave-4 truth-in-UI)", () => {
+  let origEnv: NodeJS.ProcessEnv;
+  const origFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    origEnv = { ...process.env };
+    process.env.TERMINAL_INTERNAL_SERVICE_KEY = SERVICE_KEY;
+    process.env.TERMINAL_SERVER_URL = "https://terminal.test";
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    process.env = origEnv;
+    globalThis.fetch = origFetch;
+    vi.restoreAllMocks();
+  });
+
+  function errorResponse(body: string, status: number): Promise<Response> {
+    return Promise.resolve(new Response(body, { status, headers: { "Content-Type": "application/json" } }));
+  }
+
+  it("prepareWorkspaceInternal attaches the terminal-server's 503 code to the thrown error", async () => {
+    vi.mocked(fetch).mockImplementation(() =>
+      errorResponse(
+        JSON.stringify({
+          error: "Host execution is disabled in production (workspace.prepare(git,install)); a verified sandbox is required",
+          code: "HOST_EXECUTION_DISABLED",
+        }),
+        503,
+      ),
+    );
+
+    const err = await prepareWorkspaceInternal({
+      sourceType: "github",
+      userId: "u",
+      projectId: "p",
+      installationId: 1,
+      owner: "o",
+      repo: "r",
+      branch: "main",
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("Workspace prepare failed (503)");
+    expect((err as Error & { code?: string }).code).toBe("HOST_EXECUTION_DISABLED");
+  });
+
+  it("prepareWorkspaceInternal leaves generic failures codeless", async () => {
+    vi.mocked(fetch).mockImplementation(() => errorResponse("boom", 500));
+
+    const err = await prepareWorkspaceInternal({
+      sourceType: "managed",
+      userId: "u",
+      projectId: "p",
+      templateId: "blank-static",
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error & { code?: string }).code).toBeUndefined();
+  });
+
+  it("startPreviewInternal reads the code field the terminal-server actually sends", async () => {
+    vi.mocked(fetch).mockImplementation(() =>
+      errorResponse(
+        JSON.stringify({ error: "Host execution is disabled", code: "HOST_EXECUTION_DISABLED" }),
+        503,
+      ),
+    );
+
+    const err = await startPreviewInternal("ws1", "u").catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error & { code?: string }).code).toBe("HOST_EXECUTION_DISABLED");
+  });
+});

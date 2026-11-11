@@ -12,6 +12,7 @@ import {
   prepareWorkspaceInternal,
 } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
+import { extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
 import { isManagedSourceType, isStaticTemplateId } from "@/lib/projects/project-source";
 import type { CanonicalProject } from "@/lib/projects/types";
 
@@ -68,8 +69,21 @@ function startProvisioningHeartbeat(projectId: string, userId: string, provision
   return () => clearInterval(timer);
 }
 
+/**
+ * Attach the machine error code (when one is recoverable) to an Error so
+ * downstream routes can key truthful states off it — e.g. the
+ * terminal-server's fail-closed HOST_EXECUTION_DISABLED, which the stored
+ * workspaceError carries only as embedded JSON text.
+ */
+function withProvisioningCode(error: Error, source?: unknown): Error {
+  const rawCode = (source as { code?: unknown } | null | undefined)?.code;
+  const code = typeof rawCode === "string" ? rawCode : extractEmbeddedErrorCode(error.message);
+  if (code) (error as { code?: string }).code = code;
+  return error;
+}
+
 function workspaceProvisioningError(project: CanonicalProject): Error {
-  return new Error(project.workspaceError || "Workspace provisioning failed");
+  return withProvisioningCode(new Error(project.workspaceError || "Workspace provisioning failed"));
 }
 
 function sanitizeProvisioningError(error: unknown): string {
@@ -417,7 +431,7 @@ export async function provisionWorkspaceForProject(
       // The write failure is already logged inside updateProjectWorkspace —
       // don't let it mask the provisioning error being rethrown below.
     }
-    throw new Error(message);
+    throw withProvisioningCode(new Error(message), err);
   } finally {
     stopHeartbeat();
   }

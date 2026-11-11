@@ -122,6 +122,45 @@ export function isUntrustedLocalRequest(headers: { get(name: string): string | n
 export const HOST_EXECUTION_DISABLED_CODE = "HOST_EXECUTION_DISABLED" as const;
 
 /**
+ * Extract a machine error code embedded in a stored error string.
+ *
+ * Workspace provisioning failures are persisted as a single sanitized
+ * message (project.workspaceError). When the terminal-server refuses a
+ * prepare with 503, the web client embeds the raw JSON body in the Error
+ * message — `Workspace prepare failed (503): {"error":"…","code":"…"}` —
+ * so the code survives storage only as text. This recovers it
+ * deterministically: a `"code": "…"` JSON fragment wins; a bare
+ * HOST_EXECUTION_DISABLED token is the fallback. Returns null when the
+ * text carries no recognizable code.
+ */
+export function extractEmbeddedErrorCode(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const jsonCode = /"code"\s*:\s*"([A-Z][A-Z0-9_]*)"/.exec(text);
+  if (jsonCode) return jsonCode[1];
+  if (text.includes(HOST_EXECUTION_DISABLED_CODE)) return HOST_EXECUTION_DISABLED_CODE;
+  return null;
+}
+
+/**
+ * True when an unknown thrown/carried value represents the fail-closed
+ * host-execution refusal: the guard error itself, any error with `.code`
+ * attached (the terminal-internal client's threading), a bare code
+ * string, or a message embedding the code.
+ */
+export function errorCarriesHostExecutionDisabled(err: unknown): boolean {
+  if (!err) return false;
+  if (err instanceof HostExecutionDisabledError) return true;
+  if (typeof err === "string") return extractEmbeddedErrorCode(err) === HOST_EXECUTION_DISABLED_CODE;
+  if (typeof err === "object") {
+    const code = (err as { code?: unknown }).code;
+    if (code === HOST_EXECUTION_DISABLED_CODE) return true;
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === "string") return extractEmbeddedErrorCode(message) === HOST_EXECUTION_DISABLED_CODE;
+  }
+  return false;
+}
+
+/**
  * Thrown by library-level execution boundaries (docker provider, git clone).
  * Request handlers map it to 503 HOST_EXECUTION_DISABLED.
  */
