@@ -5,7 +5,9 @@
  *
  * This is NOT another assistant implementation. It reuses:
  * - useGlobalLitt() from Phase 1 (loads the existing owner system row, never duplicates)
- * - The existing /api/gemini/chat endpoint with globalLittProjectId
+ * - The panel's send lanes: the canonical Studio messages route when a
+ *   project is being viewed (workspace-capable), else /api/gemini/chat
+ *   with globalLittProjectId for plain chat
  *
  * The button appears in the Studio header, separate from the ordinary
  * project picker. Global LiTT never appears in ordinary project lists.
@@ -22,7 +24,17 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useGlobalLitt } from "@/components/global-litt/GlobalLittProvider";
 import GlobalLittStudioPanel from "./GlobalLittStudioPanel";
 
-export default function GlobalLittStudioEntry() {
+export default function GlobalLittStudioEntry({
+  viewedProjectId,
+}: {
+  /** The project currently open/viewed in Studio, when the entry is
+   *  rendered inside it. The panel uses it to run through the canonical
+   *  Studio messages route so the run inherits that project's workspace
+   *  (capabilities, tools, approval gates, Activity records). Absent on
+   *  non-project surfaces (e.g. first-run welcome) — the panel then keeps
+   *  its plain-chat lane, which honestly has no workspace. */
+  viewedProjectId?: string | null;
+} = {}) {
   const { projectId, loading, error, refresh } = useGlobalLitt();
   const { isSignedIn } = useClerkAuth();
   const [open, setOpen] = useState(false);
@@ -77,7 +89,12 @@ export default function GlobalLittStudioEntry() {
           {ensuring ? "Starting…" : "Global LiTT"}
         </span>
       </button>
-      {open && <GlobalLittStudioPanel onClose={() => setOpen(false)} />}
+      {open && (
+        <GlobalLittStudioPanel
+          onClose={() => setOpen(false)}
+          viewedProjectId={viewedProjectId ?? null}
+        />
+      )}
     </>
   );
 }
