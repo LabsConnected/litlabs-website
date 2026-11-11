@@ -36,6 +36,14 @@ interface UseInworldSessionOptions {
   onError?: (message: string) => void;
   /** Fired when the agent's TTS response finishes (response.done). */
   onResponseComplete?: () => void;
+  /**
+   * Fired when an established (session-ready) WebSocket closes for any
+   * reason OTHER than an intentional client disconnect() — e.g. a network
+   * drop or a server restart mid-recording (B-04). The store alone was
+   * not enough: consumers keyed to their own state machine never learned
+   * the transport died and sat on "Listening" over a dead mic.
+   */
+  onClose?: (message: string) => void;
 }
 
 /** Metadata passed with transcript callbacks for validation. */
@@ -221,7 +229,7 @@ interface UseInworldSessionReturn {
 export function useInworldSession(
   options: UseInworldSessionOptions = {},
 ): UseInworldSessionReturn {
-  const { onTranscript, onAgentText: _onAgentText, onError, onResponseComplete } = options;
+  const { onTranscript, onAgentText: _onAgentText, onError, onResponseComplete, onClose } = options;
 
   const setState = useVoiceStore((store) => store.setState);
   const setError = useVoiceStore((store) => store.setError);
@@ -232,6 +240,10 @@ export function useInworldSession(
   // the value at session-creation time, not on every change).
 
   const wsRef = useRef<WebSocket | null>(null);
+  /** Set by disconnect() so handleClose can tell an intentional client
+   *  close apart from a dropped transport (B-04: only the latter is
+   *  surfaced via onClose). Reset at the start of every connect attempt. */
+  const intentionalCloseRef = useRef(false);
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -702,6 +714,7 @@ export function useInworldSession(
         // Append the auth token as a query param so the proxy can validate it
         const urlWithToken = wsUrl + (wsUrl.includes("?") ? "&" : "?") + `token=${encodeURIComponent(conn.token)}`;
 
+        intentionalCloseRef.current = false;
         const ws = new WebSocket(urlWithToken);
         wsRef.current = ws;
 
@@ -906,6 +919,19 @@ export function useInworldSession(
           } else if (event.code === 4002) {
             setErrorState("Voice service is not configured.");
           }
+          // B-04: an established session that closes underneath the user
+          // (network drop, proxy restart) must reach the session context —
+          // writing only the store left the UI on "Listening" with a dead
+          // mic and a running timer. Intentional disconnects stay silent.
+          if (!intentionalCloseRef.current) {
+            onClose?.(
+              event.code === 4001
+                ? "Authentication failed. Please sign in again."
+                : event.code === 4002
+                  ? "Voice service is not configured."
+                  : "Voice connection closed. Tap the mic to try again.",
+            );
+          }
         };
 
         const handleError = () => {
@@ -1006,7 +1032,7 @@ export function useInworldSession(
         throw err;
       }
     },
-    [onError, onTranscript, onResponseComplete, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback, decodePcm16ToAudioBuffer, schedulePendingChunks],
+    [onError, onTranscript, onResponseComplete, onClose, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback, decodePcm16ToAudioBuffer, schedulePendingChunks],
   );
 
   // connect() is the public entry point: it resolves conn.endpoint via
@@ -1084,6 +1110,9 @@ export function useInworldSession(
     stopMicCapture();
     stopPlayback();
     if (wsRef.current) {
+      // Mark BEFORE close(): the browser fires the close event async and
+      // handleClose must not surface an intentional disconnect as a drop.
+      intentionalCloseRef.current = true;
       wsRef.current.close(1000, "Client disconnect");
       wsRef.current = null;
     }

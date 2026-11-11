@@ -115,4 +115,18 @@ describe("CommandComposer — voice failure surfaces on the mic button", () => {
     expect(mic.getAttribute("title") ?? "").not.toMatch(/unavailable/i);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  it("B-11: idle with a did-not-hear notice still renders the message", () => {
+    // #882 sets errorMessage ("I didn't hear anything…") at the moment the
+    // state returns to idle; rendering it only in error states made the
+    // fix invisible. The notice must show while idle (it clears on the
+    // next mic start).
+    voice.voiceState = "idle";
+    voice.errorMessage =
+      "I didn't hear anything — check that the right microphone is selected and not muted, then tap the mic and try again.";
+    renderComposer();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/didn't hear anything/i);
+    expect(screen.getByRole("button", { name: "Start voice" })).toBeInTheDocument();
+  });
 });
