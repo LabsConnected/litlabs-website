@@ -66,6 +66,18 @@ const CATEGORY_COLORS: Record<string, string> = {
   integration: "#22d3ee",
 };
 
+/** Light-legible variants of CATEGORY_COLORS for TEXT on light surfaces.
+ *  The fills above stay as solid strip/button backgrounds, where black
+ *  bold text carries the contrast; as text on white they fall to
+ *  1.5-3:1. Same treatment as the showcase accent darkening
+ *  (ART-20261111-046). */
+const CATEGORY_TEXT_COLORS: Record<string, string> = {
+  development: "#4f46e5",
+  creative: "#db2777",
+  automation: "#b45309",
+  integration: "#0e7490",
+};
+
 const TYPE_LABELS: Record<MarketplaceItemType, string> = {
   skill: "Skill",
   tool: "Tool",
@@ -263,7 +275,7 @@ export default function Marketplace({ initialItems, initialError = false, header
   }, [router]);
 
   return (
-    <div className="min-h-screen bg-[#070812] text-white" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
+    <div className="min-h-screen bg-white text-[#0e1510]" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
       {/* Toast */}
       {toast && (
         <div
@@ -282,7 +294,7 @@ export default function Marketplace({ initialItems, initialError = false, header
       {/* When the server already rendered the H1/intro (SSR), the client only
           renders the interactive search + filters below. */}
       {!headerRendered ? (
-      <div className="border-b border-white/10 bg-gradient-to-b from-white/[.03] to-transparent px-4 py-8 sm:px-6 sm:py-10">
+      <div className="border-b border-[#cfdec4] bg-gradient-to-b from-[#f2f7ea] to-transparent px-4 py-8 sm:px-6 sm:py-10">
         <ProductFrame>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-black tracking-tight sm:text-3xl" style={{ color: T.headerColor }}>
@@ -296,7 +308,7 @@ export default function Marketplace({ initialItems, initialError = false, header
               Beta
             </span>
           </div>
-          <p className="mt-2 max-w-xl text-sm text-white/55">
+          <p className="mt-2 max-w-xl text-sm text-[#63745f]">
             Browse verified capabilities for LiTT. {hasInstallableItems
               ? "Installable items show a clear action; everything else is labeled Coming Soon."
               : "Available items will show a clear Install or Use action when their executor is ready."}
@@ -304,14 +316,14 @@ export default function Marketplace({ initialItems, initialError = false, header
 
           {/* Search */}
           <div className="relative mt-6 max-w-md">
-            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#0e1510]/35" />
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search capabilities…"
               aria-label="Search capabilities"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:border-white/25 focus:outline-none"
+              className="w-full rounded-xl border border-[#cfdec4] bg-white py-2.5 pl-10 pr-4 text-sm text-[#0e1510] placeholder:text-[#0e1510]/40 focus:border-[#177a36] focus:outline-none"
             />
           </div>
 
@@ -326,14 +338,14 @@ export default function Marketplace({ initialItems, initialError = false, header
                 style={
                   category === c
                     ? { backgroundColor: T.accentColor, color: "#000" }
-                    : { backgroundColor: "rgba(255,255,255,0.05)", color: T.textMuted }
+                    : { backgroundColor: "rgba(14,21,16,0.05)", color: T.textMuted }
                 }
               >
                 {c === "all" ? "All" : c.replace(/_/g, " ")}
               </button>
             ))}
-            <span className="mx-1 hidden h-5 w-px bg-white/10 sm:block" aria-hidden="true" />
-            <div className="flex overflow-hidden rounded-full border border-white/10" role="group" aria-label="Capability view">
+            <span className="mx-1 hidden h-5 w-px bg-[#cfdec4] sm:block" aria-hidden="true" />
+            <div className="flex overflow-hidden rounded-full border border-[#cfdec4]" role="group" aria-label="Capability view">
               {(["all", "installed"] as const).map((v) => (
                 <button
                   key={v}
@@ -342,7 +354,7 @@ export default function Marketplace({ initialItems, initialError = false, header
                   className="px-3.5 py-1.5 text-xs font-bold capitalize transition"
                   style={
                     view === v
-                      ? { backgroundColor: "rgba(255,255,255,0.12)", color: T.headerColor }
+                      ? { backgroundColor: "rgba(14,21,16,0.08)", color: T.headerColor }
                       : { color: T.textMuted }
                   }
                 >
@@ -355,17 +367,17 @@ export default function Marketplace({ initialItems, initialError = false, header
       </div>
       ) : (
       /* Server rendered the H1/intro — client only needs the interactive controls. */
-      <div className="border-b border-white/10 px-4 py-6 sm:px-6">
+      <div className="border-b border-[#cfdec4] px-4 py-6 sm:px-6">
         <ProductFrame>
           <div className="relative max-w-md">
-            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#0e1510]/35" />
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search capabilities…"
               aria-label="Search capabilities"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:border-white/25 focus:outline-none"
+              className="w-full rounded-xl border border-[#cfdec4] bg-white py-2.5 pl-10 pr-4 text-sm text-[#0e1510] placeholder:text-[#0e1510]/40 focus:border-[#177a36] focus:outline-none"
             />
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -378,14 +390,14 @@ export default function Marketplace({ initialItems, initialError = false, header
                 style={
                   category === c
                     ? { backgroundColor: T.accentColor, color: "#000" }
-                    : { backgroundColor: "rgba(255,255,255,0.05)", color: T.textMuted }
+                    : { backgroundColor: "rgba(14,21,16,0.05)", color: T.textMuted }
                 }
               >
                 {c === "all" ? "All" : c.replace(/_/g, " ")}
               </button>
             ))}
-            <span className="mx-1 hidden h-5 w-px bg-white/10 sm:block" aria-hidden="true" />
-            <div className="flex overflow-hidden rounded-full border border-white/10" role="group" aria-label="Capability view">
+            <span className="mx-1 hidden h-5 w-px bg-[#cfdec4] sm:block" aria-hidden="true" />
+            <div className="flex overflow-hidden rounded-full border border-[#cfdec4]" role="group" aria-label="Capability view">
               {(["all", "installed"] as const).map((v) => (
                 <button
                   key={v}
@@ -394,7 +406,7 @@ export default function Marketplace({ initialItems, initialError = false, header
                   className="px-3.5 py-1.5 text-xs font-bold capitalize transition"
                   style={
                     view === v
-                      ? { backgroundColor: "rgba(255,255,255,0.12)", color: T.headerColor }
+                      ? { backgroundColor: "rgba(14,21,16,0.08)", color: T.headerColor }
                       : { color: T.textMuted }
                   }
                 >
@@ -411,29 +423,29 @@ export default function Marketplace({ initialItems, initialError = false, header
       <ProductFrame className="py-6">
         {loadError ? (
           <div className="py-12 text-center">
-            <p className="text-white/40">Marketplace couldn&rsquo;t load.</p>
+            <p className="text-[#0e1510]/45">Marketplace couldn&rsquo;t load.</p>
             <button
               onClick={() => loadItems()}
-              className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5"
+              className="mt-3 rounded-lg border border-[#cfdec4] px-4 py-2 text-sm text-[#0e1510]/65 hover:bg-[#0e1510]/[0.04]"
             >
               Retry
             </button>
           </div>
         ) : loading ? (
           <div className="py-12 text-center">
-            <p className="text-white/40">Loading capabilities...</p>
+            <p className="text-[#0e1510]/45">Loading capabilities...</p>
           </div>
         ) : items.length === 0 ? (
           <div className="py-12 text-center">
-            <p className="text-white/40">No capabilities listed yet. Check back soon.</p>
+            <p className="text-[#0e1510]/45">No capabilities listed yet. Check back soon.</p>
           </div>
         ) : view === "installed" && !isSignedIn ? (
           <div className="py-12 text-center">
-            <p className="text-white/40">Sign in to see the capabilities you&rsquo;ve installed.</p>
+            <p className="text-[#0e1510]/45">Sign in to see the capabilities you&rsquo;ve installed.</p>
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center">
-            <p className="text-white/40">
+            <p className="text-[#0e1510]/45">
               {view === "installed"
                 ? "You haven't installed any capabilities yet."
                 : "Nothing matches your search."}
@@ -443,7 +455,7 @@ export default function Marketplace({ initialItems, initialError = false, header
           <>
             {featured.length > 0 && (
               <section aria-label="Featured capabilities" className="mb-8">
-                <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-white/40">
+                <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-[#0e1510]/45">
                   Featured
                 </h2>
                 <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
@@ -463,7 +475,7 @@ export default function Marketplace({ initialItems, initialError = false, header
             )}
 
             <section aria-label="Explore capabilities">
-              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-white/40">
+              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-[#0e1510]/45">
                 Explore
               </h2>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -508,6 +520,7 @@ const FeaturedCard = memo(function FeaturedCard({
   borderColor: string;
 }) {
   const categoryColor = CATEGORY_COLORS[item.category] || "#fbbf24";
+  const categoryTextColor = CATEGORY_TEXT_COLORS[item.category] || "#b45309";
   const TypeIcon = TYPE_ICONS[item.item_type] || Code2;
   return (
     <button
@@ -520,11 +533,11 @@ const FeaturedCard = memo(function FeaturedCard({
         className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xl"
         style={{ background: categoryColor + "15", border: `1px solid ${categoryColor}30` }}
       >
-        {item.icon || <TypeIcon size={20} style={{ color: categoryColor }} />}
+        {item.icon || <TypeIcon size={20} style={{ color: categoryTextColor }} />}
       </div>
       <div className="min-w-0 flex-1">
         <div className="line-clamp-2 min-h-10 text-sm font-black" style={{ color: headerColor }}>{item.name}</div>
-        <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: categoryColor }}>
+        <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: categoryTextColor }}>
           {TYPE_LABELS[item.item_type]}
         </div>
       </div>
@@ -560,6 +573,7 @@ const CapabilityCard = memo(function CapabilityCard({
   headerColor: string;
 }) {
   const categoryColor = CATEGORY_COLORS[item.category] || "#fbbf24";
+  const categoryTextColor = CATEGORY_TEXT_COLORS[item.category] || "#b45309";
   const TypeIcon = TYPE_ICONS[item.item_type] || Code2;
   const cta = ctaStateFor(item, installed);
   const requires = requiresLabel(item.required_connections);
@@ -595,7 +609,7 @@ const CapabilityCard = memo(function CapabilityCard({
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xl"
           style={{ background: categoryColor + "15", border: `1px solid ${categoryColor}30` }}
         >
-          {item.icon || <TypeIcon size={20} style={{ color: categoryColor }} />}
+          {item.icon || <TypeIcon size={20} style={{ color: categoryTextColor }} />}
         </div>
         <h3 className="min-w-0 flex-1 truncate text-[15px] font-black" style={{ color: headerColor }}>
           {item.name}
@@ -603,7 +617,7 @@ const CapabilityCard = memo(function CapabilityCard({
       </div>
 
       {/* 2. capability type */}
-      <div className="mt-2.5 text-[10px] font-black uppercase tracking-widest" style={{ color: categoryColor }}>
+      <div className="mt-2.5 text-[10px] font-black uppercase tracking-widest" style={{ color: categoryTextColor }}>
         {TYPE_LABELS[item.item_type]}
       </div>
 
@@ -640,7 +654,7 @@ const CapabilityCard = memo(function CapabilityCard({
         {cta === "installed" && (
           <button
             onClick={handleCta}
-            className="flex w-full items-center justify-center gap-1.5 rounded-xl border py-2.5 text-[13px] font-black transition hover:bg-white/5"
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl border py-2.5 text-[13px] font-black transition hover:bg-[#0e1510]/[0.04]"
             style={{ borderColor: accentColor + "50", color: accentColor }}
             aria-label={`${item.name} installed — manage`}
           >
@@ -650,7 +664,7 @@ const CapabilityCard = memo(function CapabilityCard({
         {cta === "coming_soon" && (
           <button
             disabled
-            className="w-full cursor-not-allowed rounded-xl bg-white/[0.04] py-2.5 text-[13px] font-black text-white/30"
+            className="w-full cursor-not-allowed rounded-xl bg-[#0e1510]/[0.04] py-2.5 text-[13px] font-black text-[#0e1510]/40"
             aria-label={`${item.name} coming soon`}
           >
             Coming Soon

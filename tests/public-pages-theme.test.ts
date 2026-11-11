@@ -48,3 +48,90 @@ describe("public pages wear the light-locked design", () => {
     }
   });
 });
+
+/**
+ * Marketplace family theme guard (ART-20261111-046 follow-up lane).
+ *
+ * The /marketplace surfaces follow the theme tokens at the root, but their
+ * inner utilities hard-assumed a dark backdrop, so under the default light
+ * LiTT Signature theme secondary text rendered white-on-white. These
+ * assertions keep the family on the #875 light palette: no white-on-light
+ * utilities, no pastel *-300 badge text, and the light-legible accent
+ * variants must stay wired in.
+ */
+describe("marketplace family wears the light-locked design", () => {
+  const files = [
+    "src/app/(app)/marketplace/page.tsx",
+    "src/app/(app)/marketplace/loading.tsx",
+    "src/app/(app)/marketplace/MarketplaceClient.tsx",
+    "src/app/(app)/marketplace/[slug]/CapabilityDetailClient.tsx",
+    "src/app/(app)/marketplace/_components/AgentCard.tsx",
+    "src/app/(app)/marketplace/agents/[slug]/page.tsx",
+    "src/app/(app)/marketplace/agents/[slug]/AgentDetailClient.tsx",
+  ];
+
+  const darkAssuming = [
+    "text-white",
+    "border-white",
+    "bg-white/",
+    "bg-white[",
+    "from-white",
+    "placeholder-white",
+    "rgba(255,255,255",
+    "text-lime-300",
+    "bg-lime-400",
+    "rose-300",
+    "rose-400",
+    "emerald-300",
+    "amber-300",
+    "blue-300",
+  ];
+
+  it("no marketplace file carries dark-assuming utilities", () => {
+    for (const file of files) {
+      const src = read(file);
+      for (const stale of darkAssuming) {
+        expect(src, `${file} must not contain ${stale}`).not.toContain(stale);
+      }
+    }
+  });
+
+  it("marketplace home no longer paints the old near-black root", () => {
+    const src = read("src/app/(app)/marketplace/MarketplaceClient.tsx");
+    expect(src).not.toContain("#070812");
+    expect(src).toContain("text-[#0e1510]");
+  });
+
+  it("SSR header and loading state use the brand green, not lime-300", () => {
+    for (const file of [
+      "src/app/(app)/marketplace/page.tsx",
+      "src/app/(app)/marketplace/loading.tsx",
+    ]) {
+      const src = read(file);
+      expect(src).toContain("#177a36");
+      expect(src).toContain("border-[#cfdec4]");
+    }
+  });
+
+  it("category labels use the light-legible text variants", () => {
+    for (const file of [
+      "src/app/(app)/marketplace/MarketplaceClient.tsx",
+      "src/app/(app)/marketplace/[slug]/CapabilityDetailClient.tsx",
+      "src/app/(app)/marketplace/_components/AgentCard.tsx",
+    ]) {
+      expect(read(file)).toContain("CATEGORY_TEXT_COLORS");
+    }
+  });
+
+  it("agent detail surfaces derive a light-legible accent for text", () => {
+    for (const file of [
+      "src/app/(app)/marketplace/agents/[slug]/page.tsx",
+      "src/app/(app)/marketplace/agents/[slug]/AgentDetailClient.tsx",
+    ]) {
+      expect(read(file)).toContain("legibleOnLight");
+    }
+    const page = read("src/app/(app)/marketplace/agents/[slug]/page.tsx");
+    expect(page).toContain("litt-public-light");
+    expect(page).toContain("public-pages-tlc.css");
+  });
+});

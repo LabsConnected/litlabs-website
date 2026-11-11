@@ -54,6 +54,15 @@ const CATEGORY_COLORS: Record<string, string> = {
   integration: "#22d3ee",
 };
 
+/** Light-legible variants of CATEGORY_COLORS for TEXT on light surfaces
+ *  (fills stay as tint/button backgrounds). See MarketplaceClient. */
+const CATEGORY_TEXT_COLORS: Record<string, string> = {
+  development: "#4f46e5",
+  creative: "#db2777",
+  automation: "#b45309",
+  integration: "#0e7490",
+};
+
 const TYPE_LABELS: Record<MarketplaceItemType, string> = {
   skill: "Skill",
   tool: "Tool",
@@ -203,7 +212,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-white/40">
+      <div className="flex min-h-screen items-center justify-center text-[#0e1510]/45">
         <p className="text-sm">Loading capability...</p>
       </div>
     );
@@ -213,7 +222,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
-          <p className="text-white/40">This capability doesn&rsquo;t exist.</p>
+          <p className="text-[#0e1510]/45">This capability doesn&rsquo;t exist.</p>
           <Link href="/marketplace" className="mt-3 inline-block text-sm font-bold" style={{ color: T.accentColor }}>
             Back to Marketplace
           </Link>
@@ -223,6 +232,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
   }
 
   const categoryColor = CATEGORY_COLORS[item.category] || "#fbbf24";
+  const categoryTextColor = CATEGORY_TEXT_COLORS[item.category] || "#b45309";
   const TypeIcon = TYPE_ICONS[item.item_type] || Code2;
   const installed = !!installation;
   const canInstall = item.installable && item.status !== "coming_soon" && !installed;
@@ -242,7 +252,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
       <ProductFrame className="py-8">
         <Link
           href="/marketplace"
-          className="inline-flex items-center gap-1.5 text-xs font-bold text-white/40 transition hover:text-white/70"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0e1510]/50 transition hover:text-[#0e1510]/80"
         >
           <ArrowLeft size={14} /> Back to Marketplace
         </Link>
@@ -253,7 +263,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
             className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl text-3xl"
             style={{ background: categoryColor + "15", border: `1px solid ${categoryColor}30` }}
           >
-            {item.icon || <TypeIcon size={28} style={{ color: categoryColor }} />}
+            {item.icon || <TypeIcon size={28} style={{ color: categoryTextColor }} />}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -267,7 +277,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
                 Beta
               </span>
             </div>
-            <div className="mt-1 text-[11px] font-black uppercase tracking-widest" style={{ color: categoryColor }}>
+            <div className="mt-1 text-[11px] font-black uppercase tracking-widest" style={{ color: categoryTextColor }}>
               {TYPE_LABELS[item.item_type]}
             </div>
           </div>
@@ -281,20 +291,20 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
           {/* Details */}
           <div className="space-y-6">
             <section>
-              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-white/40">Details</h2>
-              <dl className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-[#0e1510]/45">Details</h2>
+              <dl className="space-y-3 rounded-2xl border border-[#cfdec4] bg-[#f2f7ea] p-5">
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-white/40">Version</dt>
+                  <dt className="text-[#0e1510]/50">Version</dt>
                   <dd className="font-bold" style={{ color: T.headerColor }}>v{item.version}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-white/40">Works with</dt>
+                  <dt className="text-[#0e1510]/50">Works with</dt>
                   <dd className="font-bold" style={{ color: T.headerColor }}>
                     {assistants.length > 0 ? assistants.join(" · ") : "—"}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-white/40">Requirements</dt>
+                  <dt className="text-[#0e1510]/50">Requirements</dt>
                   <dd className="text-right font-bold" style={{ color: T.headerColor }}>
                     {item.required_connections.length > 0
                       ? item.required_connections.map((c) => CONNECTION_LABELS[c] || c).join(" · ")
@@ -302,7 +312,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-white/40">Provider</dt>
+                  <dt className="text-[#0e1510]/50">Provider</dt>
                   <dd className="font-bold" style={{ color: T.headerColor }}>
                     {item.author_name || "LiTTree Labs"}
                     {item.is_official && (
@@ -313,16 +323,16 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-white/40">Price</dt>
+                  <dt className="text-[#0e1510]/50">Price</dt>
                   <dd className="font-bold" style={{ color: T.headerColor }}>{formatPrice(item.price_cents)}</dd>
                 </div>
               </dl>
             </section>
 
             <section>
-              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-white/40">Changelog</h2>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-                <p className="text-sm text-white/40">No changelog published yet.</p>
+              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-[#0e1510]/45">Changelog</h2>
+              <div className="rounded-2xl border border-[#cfdec4] bg-[#f2f7ea] p-5">
+                <p className="text-sm text-[#0e1510]/50">No changelog published yet.</p>
               </div>
             </section>
           </div>
@@ -351,7 +361,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
                     <button
                       onClick={handleUninstall}
                       disabled={busy}
-                      className="w-full rounded-xl border border-rose-400/20 py-2.5 text-xs font-bold text-rose-300/70 transition hover:bg-rose-400/10 disabled:opacity-50"
+                      className="w-full rounded-xl border border-rose-600/25 py-2.5 text-xs font-bold text-rose-700/80 transition hover:bg-rose-600/10 disabled:opacity-50"
                     >
                       {busy ? "Working…" : "Remove"}
                     </button>
@@ -366,14 +376,14 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
                     {busy ? "Installing…" : `Install ${item.name}`}
                   </button>
                 ) : (
-                  <div className="w-full rounded-xl bg-white/[0.04] py-3 text-center text-sm font-black text-white/30">
+                  <div className="w-full rounded-xl bg-[#0e1510]/[0.04] py-3 text-center text-sm font-black text-[#0e1510]/40">
                     Coming Soon
                   </div>
                 )}
               </div>
 
               {item.required_connections.length > 0 && (
-                <div className="mt-4 flex items-start gap-1.5 border-t border-white/5 pt-4 text-[11px] font-bold" style={{ color: T.textMuted }}>
+                <div className="mt-4 flex items-start gap-1.5 border-t border-[#cfdec4]/70 pt-4 text-[11px] font-bold" style={{ color: T.textMuted }}>
                   <Plug size={12} className="mt-0.5 shrink-0" />
                   Requires {item.required_connections.map((c) => CONNECTION_LABELS[c] || c).join(" · ")}
                 </div>

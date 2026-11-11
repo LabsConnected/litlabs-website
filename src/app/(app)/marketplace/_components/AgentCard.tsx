@@ -57,6 +57,22 @@ const CATEGORY_COLORS: Record<string, string> = {
   general: "#fbbf24",
 };
 
+/** Light-legible variants of CATEGORY_COLORS for TEXT on light surfaces
+ *  (fills stay as solid strip/button backgrounds, where black bold text
+ *  carries the contrast). See MarketplaceClient. */
+const CATEGORY_TEXT_COLORS: Record<string, string> = {
+  development: "#4f46e5",
+  creative: "#db2777",
+  automation: "#b45309",
+  integration: "#0e7490",
+  growth: "#047857",
+  social: "#db2777",
+  code: "#4f46e5",
+  media: "#7c3aed",
+  data: "#1d4ed8",
+  general: "#b45309",
+};
+
 function AgentCardInner({
   item,
   accentColor,
@@ -74,6 +90,7 @@ function AgentCardInner({
   const authedFetch = useAuthedFetch();
 
   const categoryColor = CATEGORY_COLORS[item.category] || "#fbbf24";
+  const categoryTextColor = CATEGORY_TEXT_COLORS[item.category] || "#b45309";
   const agentId = item.agent_id ?? null;
 
   const loadState = useCallback(async () => {
@@ -165,12 +182,12 @@ function AgentCardInner({
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xl"
             style={{ background: categoryColor + "15", border: `1px solid ${categoryColor}30` }}
           >
-            {item.icon || <Sparkles size={20} style={{ color: categoryColor }} />}
+            {item.icon || <Sparkles size={20} style={{ color: categoryTextColor }} />}
           </div>
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-sm font-black" style={{ color: headerColor }}>{item.name}</h3>
             <div className="mt-0.5 flex items-center gap-2 text-[10px] uppercase tracking-wide" style={{ color: textMuted }}>
-              <span style={{ color: categoryColor }}>Agent</span>
+              <span style={{ color: categoryTextColor }}>Agent</span>
               <span>·</span>
               <span className="capitalize">{item.category}</span>
               {item.is_official && (<><span>·</span><span style={{ color: accentColor }}>Official</span></>)}
@@ -200,7 +217,7 @@ function AgentCardInner({
             className="ml-auto rounded-md px-2 py-0.5 font-bold"
             style={{
               backgroundColor: item.price_cents === 0 ? "#10b98115" : `${categoryColor}15`,
-              color: item.price_cents === 0 ? "#34d399" : categoryColor,
+              color: item.price_cents === 0 ? "#047857" : categoryTextColor,
             }}
           >
             {item.price_cents === 0 ? "Free" : `$${(item.price_cents / 100).toFixed(2)}`}
@@ -209,7 +226,7 @@ function AgentCardInner({
 
         <div className="mt-4 border-t pt-3" style={{ borderColor: borderColor + "20" }}>
           <ActionButton
-            state={state} busy={busy} categoryColor={categoryColor}
+            state={state} busy={busy} categoryColor={categoryColor} categoryTextColor={categoryTextColor}
             borderColor={borderColor} textMuted={textMuted} itemSlug={item.slug}
             instanceId={instanceId}
             onBuy={handleBuy} onInstall={handleInstall}
@@ -223,22 +240,22 @@ function AgentCardInner({
 
 function StateBadge({ state }: { state: AgentState }) {
   switch (state) {
-    case "open": return <span className="flex items-center gap-1 rounded-md bg-emerald-400/10 px-2 py-0.5 font-bold text-emerald-300"><Check size={10} /> Installed</span>;
-    case "disabled": return <span className="flex items-center gap-1 rounded-md bg-amber-400/10 px-2 py-0.5 font-bold text-amber-300">Disabled</span>;
-    case "processing": return <span className="flex items-center gap-1 rounded-md bg-blue-400/10 px-2 py-0.5 font-bold text-blue-300"><Clock size={10} /> Processing</span>;
-    case "revoked": return <span className="flex items-center gap-1 rounded-md bg-rose-400/10 px-2 py-0.5 font-bold text-rose-300"><Ban size={10} /> Revoked</span>;
-    case "unavailable": return <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold text-white/40">Unavailable</span>;
+    case "open": return <span className="flex items-center gap-1 rounded-md bg-emerald-600/10 px-2 py-0.5 font-bold text-emerald-700"><Check size={10} /> Installed</span>;
+    case "disabled": return <span className="flex items-center gap-1 rounded-md bg-amber-600/10 px-2 py-0.5 font-bold text-amber-700">Disabled</span>;
+    case "processing": return <span className="flex items-center gap-1 rounded-md bg-blue-600/10 px-2 py-0.5 font-bold text-blue-700"><Clock size={10} /> Processing</span>;
+    case "revoked": return <span className="flex items-center gap-1 rounded-md bg-rose-600/10 px-2 py-0.5 font-bold text-rose-700"><Ban size={10} /> Revoked</span>;
+    case "unavailable": return <span className="rounded-md bg-[#0e1510]/[0.05] px-2 py-0.5 font-bold text-[#0e1510]/50">Unavailable</span>;
     case "install": return <span className="rounded-md bg-accent/10 px-2 py-0.5 font-bold text-accent">Owned</span>;
-    case "buy": return <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold text-white/60">Available</span>;
-    default: return <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold text-white/40">...</span>;
+    case "buy": return <span className="rounded-md bg-[#0e1510]/[0.05] px-2 py-0.5 font-bold text-[#0e1510]/65">Available</span>;
+    default: return <span className="rounded-md bg-[#0e1510]/[0.05] px-2 py-0.5 font-bold text-[#0e1510]/50">...</span>;
   }
 }
 
 function ActionButton({
-  state, busy, categoryColor, borderColor, textMuted, itemSlug, instanceId,
+  state, busy, categoryColor, categoryTextColor, borderColor, textMuted, itemSlug, instanceId,
   onBuy, onInstall, onUninstall, onToggle,
 }: {
-  state: AgentState; busy: boolean; categoryColor: string; borderColor: string;
+  state: AgentState; busy: boolean; categoryColor: string; categoryTextColor: string; borderColor: string;
   textMuted: string; itemSlug: string; instanceId: string | null;
   onBuy: () => void; onInstall: () => void; onUninstall: () => void; onToggle: () => void;
 }) {
@@ -256,20 +273,20 @@ function ActionButton({
     case "install": return <button onClick={onInstall} className="w-full rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]" style={{ background: categoryColor }}>Add</button>;
     case "open": return (
       <div className="flex gap-2">
-        <Link href={instanceId ? `/studio?tool=chat&agentInstance=${instanceId}` : `/studio?tool=chat&agent=${itemSlug}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]" style={{ background: categoryColor + "20", color: categoryColor }}>
+        <Link href={instanceId ? `/studio?tool=chat&agentInstance=${instanceId}` : `/studio?tool=chat&agent=${itemSlug}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]" style={{ background: categoryColor + "20", color: categoryTextColor }}>
           <ArrowRight size={12} /> Open in Studio
         </Link>
-        <button onClick={onToggle} className="rounded-xl border px-3 py-2.5 text-xs font-bold transition hover:bg-white/5" style={{ borderColor: borderColor + "30", color: textMuted }}>Disable</button>
-        <button onClick={onUninstall} className="rounded-xl border border-rose-400/30 px-3 py-2.5 text-xs font-bold text-rose-300 transition hover:bg-rose-400/10">Remove</button>
+        <button onClick={onToggle} className="rounded-xl border px-3 py-2.5 text-xs font-bold transition hover:bg-[#0e1510]/[0.04]" style={{ borderColor: borderColor + "30", color: textMuted }}>Disable</button>
+        <button onClick={onUninstall} className="rounded-xl border border-rose-600/30 px-3 py-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-600/10">Remove</button>
       </div>
     );
     case "disabled": return (
       <div className="flex gap-2">
-        <button onClick={onToggle} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold" style={{ background: categoryColor + "20", color: categoryColor }}>Enable</button>
-        <button onClick={onUninstall} className="rounded-xl border border-rose-400/30 px-3 py-2.5 text-xs font-bold text-rose-300 transition hover:bg-rose-400/10">Remove</button>
+        <button onClick={onToggle} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold" style={{ background: categoryColor + "20", color: categoryTextColor }}>Enable</button>
+        <button onClick={onUninstall} className="rounded-xl border border-rose-600/30 px-3 py-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-600/10">Remove</button>
       </div>
     );
-    case "revoked": return <div className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold" style={{ background: "#ff444415", color: "#ff4444" }}><Ban size={12} /> Access revoked</div>;
+    case "revoked": return <div className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold" style={{ background: "#dc262612", color: "#dc2626" }}><Ban size={12} /> Access revoked</div>;
     case "unavailable": return <div className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold" style={{ background: borderColor + "10", color: textMuted }}>Unavailable</div>;
     default: return <div className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold" style={{ background: borderColor + "10", color: textMuted }}><Loader2 size={12} className="animate-spin" /> Loading...</div>;
   }
