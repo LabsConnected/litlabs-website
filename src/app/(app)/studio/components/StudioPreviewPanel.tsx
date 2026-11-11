@@ -308,6 +308,12 @@ export default function StudioPreviewPanel({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
+  // Refusal code reported by the workspace-state lookup (its
+  // workspaceErrorCode field). The preview payload does not reliably carry
+  // the code on every path — on the workspace-state/prepare-driven path it
+  // can arrive code-less — while workspace-state runs on every mount and
+  // now names the refusal directly. Consumed by hostExecBlocked below.
+  const [workspaceRefusalCode, setWorkspaceRefusalCode] = useState<string | null>(null);
   const [frameKey, setFrameKey] = useState(0);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [maximized, setMaximized] = useState(false);
@@ -670,6 +676,7 @@ export default function StudioPreviewPanel({
     if (!projectId) {
       setWorkspaceTruth("no_content");
       setWorkspaceContent(null);
+      setWorkspaceRefusalCode(null);
       return;
     }
     let cancelled = false;
@@ -686,13 +693,16 @@ export default function StudioPreviewPanel({
         if (cancelled) return;
         if (!res.ok) {
           setWorkspaceTruth("no_content");
+          setWorkspaceRefusalCode(null);
           return;
         }
-        const payload = await res.json().catch(() => null) as { scaffolded?: unknown; touched?: unknown; starterContent?: unknown } | null;
+        const payload = await res.json().catch(() => null) as { scaffolded?: unknown; touched?: unknown; starterContent?: unknown; workspaceErrorCode?: unknown } | null;
         if (cancelled || !payload) {
           setWorkspaceTruth("no_content");
+          setWorkspaceRefusalCode(null);
           return;
         }
+        setWorkspaceRefusalCode(typeof payload.workspaceErrorCode === "string" && payload.workspaceErrorCode ? payload.workspaceErrorCode : null);
         // Same signal CommandStudio uses: a second git commit or a consumed
         // scaffold manifest both mean real content exists.
         const hasContent = payload.touched === true || payload.scaffolded === false;
@@ -702,7 +712,10 @@ export default function StudioPreviewPanel({
           starterContent: payload.starterContent === true,
         });
       } catch {
-        if (!cancelled) setWorkspaceTruth("no_content");
+        if (!cancelled) {
+          setWorkspaceTruth("no_content");
+          setWorkspaceRefusalCode(null);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -1058,6 +1071,7 @@ export default function StudioPreviewPanel({
     setPreviewUrl(null);
     setError(null);
     setErrorCode(null);
+    setWorkspaceRefusalCode(null);
     setFramework(null);
     setDevCommand(null);
     setLogs([]);
@@ -1105,11 +1119,15 @@ export default function StudioPreviewPanel({
     if (state !== "not_started") return;
     if (!projectId) return;
     if (workspaceTruth !== "has_content") return;
+    // A workspace-state refusal already told us prepare can never succeed
+    // on this deployment — do not fire the doomed POST just to learn it
+    // again (the refusal renders as the honest notice instead).
+    if (workspaceRefusalCode === HOST_EXECUTION_DISABLED_CODE) return;
     if (autoStartedForRef.current === projectId) return;
     if (startInFlightRef.current) return;
     autoStartedForRef.current = projectId;
     void preparePreview();
-  }, [state, projectId, preparePreview, workspaceTruth]);
+  }, [state, projectId, preparePreview, workspaceTruth, workspaceRefusalCode]);
 
   const handleCopyUrl = useCallback(async () => {
     if (!previewUrl) return;
@@ -1167,7 +1185,14 @@ export default function StudioPreviewPanel({
   // fail-closed execution policy, not a transient crash — repo-backed
   // workspaces cannot open there until a verified sandbox exists, so the
   // pane names that state and offers no restart that can never succeed.
-  const hostExecBlocked = state === "failed" && errorCode === HOST_EXECUTION_DISABLED_CODE;
+  // The code can arrive on either of two channels: the preview payload
+  // (errorCode, wave-4/#887 threading) or the workspace-state lookup
+  // (workspaceRefusalCode) — the latter is the only reliable carrier on
+  // the workspace-state/prepare-driven path, where the preview payload
+  // can settle code-less in not_started. Both feed the one derivation;
+  // there is no second detection mechanism.
+  const hostExecKnown = errorCode === HOST_EXECUTION_DISABLED_CODE || workspaceRefusalCode === HOST_EXECUTION_DISABLED_CODE;
+  const hostExecBlocked = hostExecKnown && (state === "failed" || state === "not_started");
   // The v4 @import trap: a Tailwind-intended preview that renders unstyled
   // must surface honestly — never a green "Preview ready" over dead CSS.
   const stylingFailed = state === "ready" && styleProbe?.tailwindDetected === true && styleProbe.styled === false;
@@ -1177,8 +1202,8 @@ export default function StudioPreviewPanel({
   const frameFailed = iframeFailed || frameCheck === "failed";
   // Raw serialized server payloads never render — see humanizePreviewError.
   const humanError = humanizePreviewError(error);
-  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : frameCheck === "ok" ? "Preview ready" : "Loading preview…") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (humanError ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (humanError ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : humanError ?? "The dev server failed to start. Try restarting it.") : humanError ?? "The preview surface reports only real project runtime state.";
+  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : frameCheck === "ok" ? "Preview ready" : "Loading preview…") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : "Preview failed to start") : "Preview runtime unreachable";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (humanError ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (humanError ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : humanError ?? "The dev server failed to start. Try restarting it.") : humanError ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
 

@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { verifyProjectWorkspace, ProjectVerificationError } from "@/lib/projects/project-repository";
+import {
+  getProject,
+  ProjectVerificationError,
+  verifyProjectWorkspace,
+} from "@/lib/projects/project-repository";
+import { extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
 
@@ -174,19 +179,27 @@ export async function GET(
     return NextResponse.json({ scaffolded, touched, starterContent });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to get workspace state";
-    // "No workspace yet" is an EXPECTED state for a project whose
-    // prepare never succeeded — not a server fault. It used to return
-    // 500 by design (code discarded), logging as a console error on
-    // every Studio mount. Return the same fail-soft fallback body
-    // with a 200 and the code attached; only unexpected throws 500.
+    // A workspace that was never provisioned (or is not ready yet) is a
+    // known, expected state — not a server fault. Answer 200 with the
+    // fail-soft fallback body PLUS the machine codes, so the response stops
+    // logging as a console 500 on every Studio mount and the preview pane
+    // can consume the underlying refusal: `code` names the verification
+    // outcome, and `workspaceErrorCode` recovers the refusal recorded in
+    // the project's stored workspaceError (same extractEmbeddedErrorCode
+    // recovery the project-runtime route uses for its header pill).
     if (
       err instanceof ProjectVerificationError &&
       (err.code === "WORKSPACE_NOT_PROVISIONED" || err.code === "WORKSPACE_NOT_READY")
     ) {
-      return NextResponse.json(
-        { code: err.code, scaffolded: false, touched: false, starterContent: false },
-        { status: 200 },
-      );
+      const project = await getProject(projectId, userId).catch(() => null);
+      return NextResponse.json({
+        error: msg,
+        code: err.code,
+        workspaceErrorCode: extractEmbeddedErrorCode(project?.workspaceError),
+        scaffolded: false,
+        touched: false,
+        starterContent: false,
+      });
     }
     // Fail-soft: the caller treats an error as "unknown" and keeps the
     // default center surface. Never block Studio loading on this check.
