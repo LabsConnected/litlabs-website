@@ -359,6 +359,40 @@ export function harvestStageMarkers(
   return recorded;
 }
 
+/**
+ * Remove harvested QUALITY stage-declaration lines from the text the
+ * USER sees. The markers are a machine-readable evidence convention —
+ * {@link harvestStageMarkers} files them into the quality ledger from
+ * the raw model text — but the same raw text used to flow straight into
+ * the persisted assistant message, so docked chat and the Global overlay
+ * rendered "QUALITY: understand — … / QUALITY: plan — …" as the visible
+ * reply prefix (production battery, 2026-11-11).
+ *
+ * This runs at the agent loop's final-text composition, AFTER the final
+ * harvest — never as a chat-render filter — so the ledger keeps its
+ * evidence and only the user-visible copy loses the declarations. Only
+ * lines the harvester itself would file are removed (valid stage,
+ * non-empty summary, whole line): a marker mentioned in prose, or an
+ * unknown stage, is ordinary text and is preserved verbatim.
+ */
+const QUALITY_MARKER_LINE_RE =
+  /^\s*QUALITY\s*:\s*([a-z_]+)\s*[—–\-:]\s*(.+?)\s*$/i;
+
+export function stripQualityStageMarkers(text: string): string {
+  if (!text || !/quality/i.test(text)) return text;
+  const kept: string[] = [];
+  for (const line of text.split("\n")) {
+    const m = QUALITY_MARKER_LINE_RE.exec(line);
+    if (m && isQualityStage(m[1].toLowerCase()) && m[2].trim()) continue;
+    kept.push(line);
+  }
+  return kept
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\n+/, "")
+    .replace(/\n+$/, "");
+}
+
 /** Bounded reprompts spent asking the agent to declare missing stages. */
 export const MAX_MARKER_REPROMPTS = 1;
 

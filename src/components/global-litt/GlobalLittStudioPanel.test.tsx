@@ -2,6 +2,14 @@ import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GlobalLittStudioPanel from "./GlobalLittStudioPanel";
+import { ThemeProvider } from "@/context/ThemeContext";
+
+// The panel consumes the applied theme (useTheme) like every other
+// Studio surface — production always renders it inside the app
+// ThemeProvider, so tests do the same.
+function renderPanel(ui: React.ReactElement) {
+  return render(<ThemeProvider>{ui}</ThemeProvider>);
+}
 
 /**
  * ART-20261111-025 — Global overlay workspace inheritance.
@@ -135,7 +143,7 @@ afterEach(() => {
 describe("GlobalLittStudioPanel workspace inheritance", () => {
   it("viewed project: sends through the canonical messages route carrying the viewed project, never the legacy lane", async () => {
     const calls = installFetchMock();
-    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
 
     await sendMessage("List the files in the project I'm currently viewing.");
 
@@ -154,7 +162,7 @@ describe("GlobalLittStudioPanel workspace inheritance", () => {
 
   it("no viewed project: keeps the plain-chat lane (honest no-workspace surface)", async () => {
     const calls = installFetchMock();
-    render(<GlobalLittStudioPanel onClose={() => {}} />);
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} />);
 
     await sendMessage("Hello there.");
 
@@ -167,7 +175,7 @@ describe("GlobalLittStudioPanel workspace inheritance", () => {
 
   it("canonical coded refusal surfaces honestly — no silent fallback to the tool-less lane", async () => {
     const calls = installFetchMock({ refuseMessagesPost: true });
-    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
 
     await sendMessage("List the files in the project I'm currently viewing.");
 
@@ -187,7 +195,7 @@ describe("GlobalLittStudioPanel composer keys + failed-run visibility (ART-20261
 
   it("Enter submits through the canonical lane (docked-composer convention)", async () => {
     const calls = installFetchMock();
-    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
 
     const composer = screen.getByTestId("global-litt-composer");
     fireEvent.change(composer, { target: { value: "List the files in the project I'm currently viewing." } });
@@ -200,22 +208,25 @@ describe("GlobalLittStudioPanel composer keys + failed-run visibility (ART-20261
 
   it("Shift+Enter does NOT submit — it is the newline chord", async () => {
     const calls = installFetchMock();
-    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
 
     const composer = screen.getByTestId("global-litt-composer") as HTMLTextAreaElement;
     fireEvent.change(composer, { target: { value: "List the files" } });
+    composer.setSelectionRange(composer.value.length, composer.value.length);
     fireEvent.keyDown(composer, { key: "Enter", shiftKey: true });
 
-    // Let any (incorrect) async send settle, then assert nothing was sent
-    // and the draft is untouched.
+    // Let any (incorrect) async send settle, then assert nothing was
+    // sent and the draft gained exactly the newline (chat beauty pass,
+    // 2026-11-11: Shift+Enter visibly inserts at the caret — it used to
+    // be a silent no-op in the one-row composer).
     await new Promise((r) => setTimeout(r, 50));
     expect(messagesPosts(calls)).toHaveLength(0);
-    expect(composer.value).toBe("List the files");
+    expect(composer.value).toBe("List the files\n");
   });
 
   it("a failed run's assistant message is SHOWN in the overlay, never filtered into silence", async () => {
     installFetchMock({ failedAssistantReply: true });
-    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
 
     await sendMessage("List the files in the project I'm currently viewing.");
 
@@ -307,7 +318,7 @@ describe("GlobalLittStudioPanel — approve in chat (2026-11-11 directive)", () 
 
   it("renders an actionable ApprovalCard with tool + subject for a paused run — not a go-elsewhere note", async () => {
     installGateFetchMock();
-    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
 
     const card = await screen.findByTestId("approval-card");
     expect(card).toBeTruthy();
@@ -319,7 +330,7 @@ describe("GlobalLittStudioPanel — approve in chat (2026-11-11 directive)", () 
 
   it("rejecting posts the decision to the same approvals endpoint exactly once and the card settles", async () => {
     const calls = installGateFetchMock();
-    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
 
     const deny = await screen.findByTestId("approval-deny");
     fireEvent.click(deny);
@@ -339,7 +350,7 @@ describe("GlobalLittStudioPanel — approve in chat (2026-11-11 directive)", () 
 
   it("approving posts exactly once and the card enters the running state", async () => {
     const calls = installGateFetchMock();
-    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
 
     const approve = await screen.findByTestId("approval-approve");
     fireEvent.click(approve);
@@ -355,5 +366,77 @@ describe("GlobalLittStudioPanel — approve in chat (2026-11-11 directive)", () 
       expect(screen.getByTestId("approval-status").textContent).toMatch(/Approved — running/);
     });
     expect((screen.getByTestId("approval-approve") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("GlobalLittStudioPanel — chat structure & beauty (2026-11-11)", () => {
+  // Larry's Signature theme, pinned via customColors so the expected
+  // token values are exact (same pattern as shell-chrome-theme.test).
+  const LIGHT_THEME = {
+    mode: "light",
+    skin: "signature",
+    accent: "signature-green",
+    backgroundMode: "minimal",
+    layoutStyle: "classic",
+    customColors: {
+      bgColor: "#ffffff",
+      textColor: "#10240f",
+      boxBg: "#eef5e9",
+      borderColor: "#c9dcbf",
+      accentColor: "#1d7a35",
+      linkColor: "#1d7a35",
+      headerColor: "#10240f",
+    },
+  };
+  const LIGHT_SURFACE = "rgb(238, 245, 233)";
+
+  it("panel wears the applied LIGHT theme — not the old hard-coded black", async () => {
+    localStorage.setItem("litlabs-theme", JSON.stringify(LIGHT_THEME));
+    installFetchMock();
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+
+    const panel = screen.getByTestId("global-litt-panel-surface");
+    // ThemeProvider applies the stored theme after a rAF-gated mount.
+    await waitFor(() => expect(panel.style.backgroundColor).toBe(LIGHT_SURFACE));
+    expect(panel.style.backgroundColor).not.toBe("rgb(10, 10, 15)");
+  });
+
+  it("welcome copy is contained: full-width block, normal wrapping, no narrow clip column", async () => {
+    installFetchMock();
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+
+    const welcome = await screen.findByTestId("global-litt-welcome");
+    expect(welcome.className).toContain("w-full");
+    expect(welcome.className).not.toContain("max-w-xs");
+    const copy = screen.getByText(/or tell me what to build/);
+    expect(copy.className).toContain("whitespace-normal");
+    expect((copy as HTMLElement).style.overflowWrap).toBe("anywhere");
+  });
+
+  it("Shift+Enter inserts a visible newline at the caret instead of a no-op", async () => {
+    const calls = installFetchMock();
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+
+    const composer = screen.getByTestId("global-litt-composer") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "List the files" } });
+    composer.setSelectionRange(composer.value.length, composer.value.length);
+    fireEvent.keyDown(composer, { key: "Enter", shiftKey: true });
+
+    expect(composer.value).toBe("List the files\n");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(
+      calls.filter(
+        (c) => c.url === "/api/studio/conversations/conv-1/messages" && c.method === "POST",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("assistant message content wraps anywhere — long unbroken text cannot overflow the bubble", async () => {
+    installFetchMock();
+    renderPanel(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+    await sendMessage("List the files in the project I'm currently viewing.");
+    const bubble = await screen.findByText("Files: index.html, README.md");
+    expect(bubble.className).toContain("whitespace-pre-wrap");
+    expect((bubble as HTMLElement).style.overflowWrap).toBe("anywhere");
   });
 });

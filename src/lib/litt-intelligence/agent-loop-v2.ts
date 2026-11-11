@@ -67,6 +67,7 @@ import {
   type QualityLoopSession,
   type QualityLoopSnapshot,
   formatQualityVerdictBlock,
+  stripQualityStageMarkers,
 } from "./quality-loop-flow";
 import type { QualityTaskScope } from "./quality-loop";
 // LiTT Tool Orchestrator (fix/litt-tool-orchestrator): goal → capability
@@ -2932,10 +2933,24 @@ async function runAgentLoopV2Inner(
     finalText: effectiveFinalText,
     localProgress,
   });
+  // User-visible copy (chat beauty, 2026-11-11): the finalize above has
+  // already harvested the final text's QUALITY stage declarations into
+  // the ledger — they are evidence, not prose, and must not reach the
+  // persisted message the docked chat and overlay render. A reply that
+  // was ONLY declarations falls back to the factual silent-outcome
+  // description instead of persisting as an empty message.
+  const visibleFinalText = qualitySession
+    ? stripQualityStageMarkers(effectiveFinalText)
+    : effectiveFinalText;
+  const userFinalText =
+    visibleFinalText ||
+    (qualitySession
+      ? describeSilentOutcome(toolCallLog, cancelled, cancelReason)
+      : visibleFinalText);
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
-      : effectiveFinalText;
+      ? `${userFinalText}${formatQualityVerdictBlock(qualityFinale)}`
+      : userFinalText;
 
   // What did this run actually do to the files?
   //
@@ -4534,10 +4549,22 @@ async function resumeAgentLoopV2Inner(
     finalText: effectiveFinalText,
     localProgress,
   });
+  // User-visible copy (chat beauty, 2026-11-11): same contract as the
+  // initial loop — declarations harvested above stay in the ledger,
+  // never in the persisted message; a declarations-only reply falls
+  // back to the factual silent-outcome description.
+  const visibleFinalText = qualitySession
+    ? stripQualityStageMarkers(effectiveFinalText)
+    : effectiveFinalText;
+  const userFinalText =
+    visibleFinalText ||
+    (qualitySession
+      ? describeSilentOutcome(toolCallLog, cancelled, cancelReason)
+      : visibleFinalText);
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
-      : effectiveFinalText;
+      ? `${userFinalText}${formatQualityVerdictBlock(qualityFinale)}`
+      : userFinalText;
 
   // What did this run actually do to the files?
   //

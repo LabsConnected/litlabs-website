@@ -820,3 +820,34 @@ describe("StudioTranscript — chronological rendering", () => {
     expect(rendered[1]).toContain("Second same-time message");
   });
 });
+
+describe("StudioTranscript — Signature chat surfaces (chat beauty, 2026-11-11)", () => {
+  // The docked/mobile transcript is a Studio-shell surface and must wear
+  // the Signature light tokens like the rest of the shell. It used to
+  // paint every bubble with hard-coded dark-purple glass
+  // (rgba(20,15,31,*)) and render markdown with prose-invert (light text
+  // for dark backgrounds) regardless of the applied theme.
+  it("message bubbles use the Signature surface tokens, not dark-purple glass", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Build a landing page", createdAt: Date.now() },
+      { role: "assistant", content: "I'm ready to help.", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+
+    const userBubble = screen.getByText("Build a landing page").closest(".rounded-2xl") as HTMLElement;
+    const assistantBubble = screen.getByText("I'm ready to help.").closest(".rounded-2xl") as HTMLElement;
+    expect(userBubble.style.backgroundColor).not.toContain("20, 15, 31");
+    expect(assistantBubble.style.backgroundColor).not.toContain("20, 15, 31");
+    expect(assistantBubble.style.backgroundColor).toBe("var(--studio-card)");
+
+    const prose = screen.getByText("I'm ready to help.").closest(".prose") as HTMLElement;
+    expect(prose.className).not.toContain("prose-invert");
+  });
+});
