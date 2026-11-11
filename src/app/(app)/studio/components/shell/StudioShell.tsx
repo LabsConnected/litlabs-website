@@ -179,7 +179,7 @@ export default function StudioShell({
           aria-pressed={isFloating}
           aria-label={!inspectorOpen ? "Open inspector" : isFloating ? "Dock inspector" : "Float inspector"}
           title={!inspectorOpen ? "Open inspector" : isFloating ? "Dock inspector" : "Float inspector"}
-          className="min-h-8 rounded-md border border-white/10 px-3 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          className="min-h-8 rounded-md border px-3 text-xs font-medium hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" style={{ borderColor: "var(--studio-border)", color: "var(--text-main)" }}
           data-testid="dock-float-toggle"
         >
           {!inspectorOpen ? "Inspector" : isFloating ? "Dock inspector" : "Float inspector"}
@@ -190,7 +190,7 @@ export default function StudioShell({
           aria-pressed={workspaceExpanded}
           aria-label={workspaceExpanded ? "Exit focus workspace" : "Expand workspace"}
           title={workspaceExpanded ? "Exit focus workspace" : "Expand workspace"}
-          className="min-h-8 rounded-md border border-white/10 px-3 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          className="min-h-8 rounded-md border px-3 text-xs font-medium hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" style={{ borderColor: "var(--studio-border)", color: "var(--text-main)" }}
           data-testid="studio-expand-toggle"
         >
           {workspaceExpanded ? "Exit focus" : "Expand workspace"}
@@ -200,7 +200,7 @@ export default function StudioShell({
           onClick={handleReset}
           aria-label="Reset workspace layout"
           title="Reset workspace layout"
-          className="min-h-8 rounded-md border border-white/10 px-3 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          className="min-h-8 rounded-md border px-3 text-xs font-medium hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" style={{ borderColor: "var(--studio-border)", color: "var(--text-main)" }}
           data-testid="dock-reset"
         >
           Reset layout
@@ -214,7 +214,7 @@ export default function StudioShell({
         </span>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 gap-2 overflow-hidden px-2 pb-2">
         {hasLeft && (
           <div
             data-testid="studio-left-panel"
@@ -240,7 +240,7 @@ export default function StudioShell({
           {rail}
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-testid="studio-stage">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--studio-border)", background: "var(--studio-surface)" }} data-testid="studio-stage">
           {stage}
         </div>
 
@@ -258,9 +258,9 @@ export default function StudioShell({
                 onKeyDown={onInspectorHandleKeyDown}
                 onMouseDown={onInspectorMouseDown}
                 data-testid="dock-resize-inspector"
-                className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center bg-transparent hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center bg-transparent hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
               >
-                <span className="h-8 w-0.5 rounded-full bg-white/15 group-hover:bg-white/25" aria-hidden="true" />
+                <span className="h-8 w-0.5 rounded-full bg-[var(--studio-border-strong)]" aria-hidden="true" />
               </div>
             )}
             <div
@@ -287,21 +287,23 @@ export default function StudioShell({
           aria-modal="false"
           aria-label="Floating inspector"
           data-testid="floating-inspector"
-          className="absolute right-3 top-16 z-50 flex max-h-[calc(100vh-96px)] w-[min(360px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border bg-[#0a0a0b] shadow-xl"
+          className="absolute right-3 top-16 z-50 flex max-h-[calc(100vh-96px)] w-[min(360px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border shadow-xl"
           style={{
             width: `min(${inspectorWidth}px, calc(100vw - 24px))`,
             maxWidth: "calc(100vw - 24px)",
             maxHeight: "calc(100vh - 96px)",
-            borderColor: "rgba(255,255,255,0.12)",
+            borderColor: "var(--studio-border)",
+            background: "var(--studio-surface)",
+            color: "var(--text-main)",
           }}
         >
-          <div className="flex min-h-10 shrink-0 items-center justify-between border-b px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+          <div className="flex min-h-10 shrink-0 items-center justify-between border-b px-3 py-2" style={{ borderColor: "var(--studio-border)" }}>
             <span className="text-xs font-semibold">Inspector · floating</span>
             <button
               type="button"
               onClick={() => setFloating(null)}
               aria-label="Dock floating inspector"
-              className="min-h-8 rounded-md px-3 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+              className="min-h-8 rounded-md px-3 text-xs hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
             >
               Dock inspector
             </button>

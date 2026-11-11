@@ -12,6 +12,7 @@ import {
   deriveProject,
   derivePulseItems,
 } from "@/components/dashboard/v3/useDashboardData";
+import { useTheme } from "@/context/ThemeContext";
 
 /**
  * /studio/mission-control — the runtime telemetry home.
@@ -25,28 +26,31 @@ export default function MissionControlPage() {
   const missionControl = useMissionControl();
   const dashboardMedia = useDashboardMedia();
   const { actions: mediaActions } = useMediaDock();
+  // Theme-token driven (was a hard-coded near-black page): follows
+  // the applied theme — light under the default LiTT Signature theme.
+  const { tokens } = useTheme();
 
   const currentProject = deriveProject(missionControl.data?.project ?? null);
   const pulseItems = derivePulseItems(missionControl.data ?? null);
 
   return (
-    <div className="min-h-dvh" style={{ background: "#0a0a0a" }}>
+    <div className="min-h-dvh" style={{ background: tokens.background }}>
       <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 md:px-6">
         <div>
           <Link
             href="/studio"
-            className="inline-flex items-center gap-1.5 text-[13px] font-medium transition hover:text-white"
-            style={{ color: "#a1a1aa" }}
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium transition"
+            style={{ color: tokens.textMuted }}
           >
             <ArrowLeft size={14} aria-hidden /> Back to Studio
           </Link>
           <h1
-            className="mt-4 text-3xl font-bold tracking-tight text-white"
-            style={{ letterSpacing: "-0.02em" }}
+            className="mt-4 text-3xl font-bold tracking-tight"
+            style={{ letterSpacing: "-0.02em", color: tokens.text }}
           >
             Mission control
           </h1>
-          <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-zinc-400">
+          <p className="mt-2 max-w-2xl text-[15px] leading-relaxed" style={{ color: tokens.textMuted }}>
             Live status for your work — builds, agents, and media. Everything
             here is reported from the real runtime; nothing is faked.
           </p>

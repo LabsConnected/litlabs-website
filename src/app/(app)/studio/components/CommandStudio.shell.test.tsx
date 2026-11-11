@@ -427,8 +427,10 @@ describe("StudioShell — desktop operating shell", () => {
     capState.projectId = "project-1";
     capState.projectName = "Test Project";
     // Reset the chat-dock preference so every test starts from the
-    // default left dock unless it explicitly opts into bottom mode.
+    // default (integrated bottom layer) unless it explicitly opts into
+    // a dock mode.
     window.localStorage.removeItem("littree:studio:chat-dock");
+    window.localStorage.removeItem("littree:studio:chat-dock:explicit");
     window.localStorage.removeItem("litt-studio-layout");
     window.localStorage.removeItem("littree:studio:litt-dock-width");
     window.localStorage.removeItem("littree:studio:litt-collapsed");
@@ -451,7 +453,7 @@ describe("StudioShell — desktop operating shell", () => {
     });
   });
 
-  it("mounts rail + stage + collapsed inspector + left-docked LiTT panel by default", async () => {
+  it("mounts rail + stage + collapsed inspector + integrated bottom LiTT layer by default", async () => {
     await renderStudioShell();
     expect(screen.getByTestId("studio-shell")).toBeTruthy();
     expect(screen.getByTestId("studio-workspace-rail")).toBeTruthy();
@@ -460,13 +462,27 @@ describe("StudioShell — desktop operating shell", () => {
     expect(screen.getByTestId("studio-inspector-open")).toBeTruthy();
     expect(screen.getByTestId("dock-inspector-panel").style.width).toBe("20px");
     expect(screen.queryByTestId("dock-resize-inspector")).toBeNull();
-    // Default chatDock is "left": the chat lives in the left panel and the
-    // bottom command layer is not mounted.
-    expect(screen.getByTestId("litt-panel")).toBeTruthy();
-    expect(screen.queryByTestId("litt-command-layer")).toBeNull();
+    // Default chatDock is "bottom" (Larry's integrated-composition
+    // ruling, 2026-11-10): the chat lives in the bottom command layer
+    // and the left panel is not mounted.
+    expect(screen.getByTestId("litt-command-layer")).toBeTruthy();
+    expect(screen.queryByTestId("litt-panel")).toBeNull();
+  });
+
+  it("treats a legacy stored 'left' without the explicit marker as unset", async () => {
+    // The pre-fix code persisted the old default on mount, so a stored
+    // "left" alone is not evidence of a choice — the integrated bottom
+    // layer wins until the user actually picks Left in the switcher.
+    window.localStorage.setItem("littree:studio:chat-dock", "left");
+    await renderStudioShell();
+    expect(screen.getByTestId("litt-command-layer")).toBeTruthy();
+    expect(screen.queryByTestId("litt-panel")).toBeNull();
   });
 
   it("opens and floats the inspector without hiding the docked chat", async () => {
+    // Explicit left dock (this test pins chat visibility in left mode).
+    window.localStorage.setItem("littree:studio:chat-dock", "left");
+    window.localStorage.setItem("littree:studio:chat-dock:explicit", "1");
     const { user } = await renderStudioShell();
     await user.click(screen.getByTestId("dock-float-toggle"));
     await waitFor(() => expect(screen.getByTestId("studio-context-inspector")).toBeTruthy());
@@ -483,6 +499,9 @@ describe("StudioShell — desktop operating shell", () => {
   });
 
   it("expands the stage while keeping side-panel contents mounted, then restores them", async () => {
+    // Explicit left dock (the side panel under test is the left dock).
+    window.localStorage.setItem("littree:studio:chat-dock", "left");
+    window.localStorage.setItem("littree:studio:chat-dock:explicit", "1");
     const { user } = await renderStudioShell();
     const shell = screen.getByTestId("studio-shell");
     const leftPanel = screen.getByTestId("studio-left-panel");
@@ -529,6 +548,9 @@ describe("StudioShell — desktop operating shell", () => {
   });
 
   it("rail switches the stage surface and keeps visited surfaces mounted", async () => {
+    // Explicit left dock (asserts the panel's collapse-on-switch).
+    window.localStorage.setItem("littree:studio:chat-dock", "left");
+    window.localStorage.setItem("littree:studio:chat-dock:explicit", "1");
     const { user } = await renderStudioShell();
     await waitFor(() => screen.getByTestId("studio-preview-panel"));
     await user.click(screen.getByTestId("workspace-rail-design"));
@@ -608,7 +630,11 @@ describe("StudioShell — left chat dock", () => {
     sendMock.mockResolvedValue({ accepted: true });
     capState.projectId = "project-1";
     capState.projectName = "Test Project";
-    window.localStorage.removeItem("littree:studio:chat-dock");
+    // The left dock is an EXPLICIT choice now (bottom is the default):
+    // this describe exercises the left dock as a user who picked it, so
+    // seed the stored value plus the explicit-choice marker.
+    window.localStorage.setItem("littree:studio:chat-dock", "left");
+    window.localStorage.setItem("littree:studio:chat-dock:explicit", "1");
     window.localStorage.removeItem("litt-studio-layout");
     window.localStorage.removeItem("littree:studio:litt-dock-width");
     window.localStorage.removeItem("littree:studio:litt-collapsed");
@@ -702,14 +728,17 @@ describe("StudioShell — left chat dock", () => {
     });
     expect(screen.queryByTestId("litt-command-layer")).toBeNull();
     expect(window.localStorage.getItem("littree:studio:chat-dock")).toBe("left");
+    // Switcher choices are recorded as EXPLICIT (the marker is what
+    // distinguishes a chosen "left" from the old default-written one).
+    expect(window.localStorage.getItem("littree:studio:chat-dock:explicit")).toBe("1");
     expect(screen.getAllByTestId("studio-command-composer")).toHaveLength(1);
   });
 
-  it("an invalid stored dock value falls back to left", async () => {
+  it("an invalid stored dock value falls back to the integrated bottom layer", async () => {
     window.localStorage.setItem("littree:studio:chat-dock", "sideways");
     await renderStudioShell();
-    expect(screen.getByTestId("litt-panel")).toBeTruthy();
-    expect(screen.queryByTestId("litt-command-layer")).toBeNull();
+    expect(screen.getByTestId("litt-command-layer")).toBeTruthy();
+    expect(screen.queryByTestId("litt-panel")).toBeNull();
   });
 
   it("a stored collapsed preference wins over the first-run expanded default", async () => {

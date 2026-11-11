@@ -7,6 +7,15 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/projects/project-repository", () => ({
   verifyProjectWorkspace: vi.fn(() => Promise.resolve({ workspaceId: "ws-123" })),
+  // Mirrors the real class so the route's instanceof check works.
+  ProjectVerificationError: class ProjectVerificationError extends Error {
+    code: string;
+    constructor(message: string, code: string) {
+      super(message);
+      this.code = code;
+      this.name = "ProjectVerificationError";
+    }
+  },
 }));
 
 vi.mock("@/lib/terminal-auth", () => ({
@@ -105,5 +114,51 @@ describe("GET /api/studio-projects/[projectId]/workspace-state", () => {
       { params: Promise.resolve({ projectId: "p1" }) },
     );
     expect(res.status).toBe(401);
+  });
+
+  // Route honesty (console-errors diagnosis): "no workspace yet" is an
+  // expected state, not a server fault — it must not return 500.
+  it("maps WORKSPACE_NOT_PROVISIONED to a coded 200 with the fallback body", async () => {
+    const repo = await import("@/lib/projects/project-repository");
+    vi.mocked(repo.verifyProjectWorkspace).mockRejectedValueOnce(
+      new repo.ProjectVerificationError("Workspace not provisioned", "WORKSPACE_NOT_PROVISIONED"),
+    );
+    const { GET } = await import("./route");
+    const res = await GET(
+      new NextRequest("http://localhost:3000/api/studio-projects/p1/workspace-state"),
+      { params: Promise.resolve({ projectId: "p1" }) },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      code: "WORKSPACE_NOT_PROVISIONED",
+      scaffolded: false,
+      touched: false,
+      starterContent: false,
+    });
+  });
+
+  it("maps WORKSPACE_NOT_READY to a coded 200 with the fallback body", async () => {
+    const repo = await import("@/lib/projects/project-repository");
+    vi.mocked(repo.verifyProjectWorkspace).mockRejectedValueOnce(
+      new repo.ProjectVerificationError("Workspace not ready", "WORKSPACE_NOT_READY"),
+    );
+    const { GET } = await import("./route");
+    const res = await GET(
+      new NextRequest("http://localhost:3000/api/studio-projects/p1/workspace-state"),
+      { params: Promise.resolve({ projectId: "p1" }) },
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).code).toBe("WORKSPACE_NOT_READY");
+  });
+
+  it("keeps unexpected verification failures at 500", async () => {
+    const repo = await import("@/lib/projects/project-repository");
+    vi.mocked(repo.verifyProjectWorkspace).mockRejectedValueOnce(new Error("db down"));
+    const { GET } = await import("./route");
+    const res = await GET(
+      new NextRequest("http://localhost:3000/api/studio-projects/p1/workspace-state"),
+      { params: Promise.resolve({ projectId: "p1" }) },
+    );
+    expect(res.status).toBe(500);
   });
 });

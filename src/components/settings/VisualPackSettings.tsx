@@ -2,7 +2,7 @@
 
 import { useTheme, VISUAL_PACKS, type VisualPack } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
-import type { WallpaperId } from "@/lib/wallpapers";
+import type { WallpaperId, WallpaperEffect } from "@/lib/wallpapers";
 import { Check } from "lucide-react";
 import { useState, useCallback } from "react";
 
@@ -38,11 +38,24 @@ export function VisualPackSettings() {
   const handleApply = useCallback((pack: VisualPack) => {
     applyVisualPack(pack.id);
     if (pack.wallpaperId) {
+      // A pack is one look: align the profile-side wallpaper effect
+      // with the pack's background effect where the two concepts map
+      // 1:1, so a leftover effect from a previous look (e.g.
+      // constellation dots over the light Signature theme) cannot
+      // survive the apply. Unmapped modes leave the effect untouched.
+      const effectForMode: Partial<Record<string, WallpaperEffect>> = {
+        minimal: "none",
+        constellation: "constellation",
+        nebula: "nebula",
+        waves: "waves",
+      };
+      const alignedEffect = effectForMode[pack.backgroundMode];
       updateProfile({
         wallpaper: pack.wallpaperId as WallpaperId,
         wallpaperOverlay: pack.overlayOpacity ?? 0.46,
         wallpaperBlur: pack.layoutStyle === "glass" ? 2 : 0,
         wallpaperFit: "cover",
+        ...(alignedEffect ? { wallpaperEffect: alignedEffect } : {}),
       });
     }
   }, [applyVisualPack, updateProfile]);

@@ -949,7 +949,11 @@ function AppearanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColo
   ];
 
   const accentOptions: { id: string; label: string }[] = [
-    { id: "lime", label: "LiTT Lime (default)" },
+    // Signature Green is the product default (Larry's approved LiTT
+    // Signature theme, 2026-11-10) — it must be offered and labelled
+    // as the default; lime remains selectable but is not the default.
+    { id: "signature-green", label: "Signature Green (default)" },
+    { id: "lime", label: "LiTT Lime" },
     { id: "neon-green", label: "Neon Green" },
     { id: "hot-pink", label: "Hot Pink" },
     { id: "electric-blue", label: "Electric Blue" },

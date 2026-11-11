@@ -64,12 +64,16 @@ const defaultProfile: UserProfile = {
   videoLinks: {},
   socialLinks: {},
   badges: ["🔥 Early Adopter", "🤖 Agent Creator", "💬 Community"],
-  wallpaper: "afterglow",
+  // First-run appearance matches the default theme (LiTT Signature,
+  // light): the old defaults (afterglow photo + 0.46 dark veil +
+  // constellation dots) contradicted the default look before the user
+  // touched a single setting. Stored profiles are unaffected.
+  wallpaper: "minimal",
   customWallpaperUrl: null,
   wallpaperFit: "cover",
-  wallpaperOverlay: 0.46,
+  wallpaperOverlay: 0,
   wallpaperBlur: 0,
-  wallpaperEffect: "constellation",
+  wallpaperEffect: "none",
   sidebarStyle: "comfortable",
   accentColor: "#fbbf24",
 };

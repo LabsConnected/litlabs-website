@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { MoreVertical, Pin, Terminal, Settings, ExternalLink } from "lucide-react";
 import type { DashboardProject } from "./types";
 import { getPinnedProjects, togglePin } from "./types";
+import { useTheme } from "@/context/ThemeContext";
 
 interface RecentWorkProps {
   projects: DashboardProject[];
@@ -70,6 +71,11 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  // Theme-token driven (was hard-coded dark glass): follows the applied
+  // theme — light under the default LiTT Signature theme.
+  const { resolvedColors, theme } = useTheme();
+  const accent = resolvedColors.accentColor;
+  const onAccent = theme.mode === "light" ? "#ffffff" : "#0c1204";
 
   useEffect(() => {
     if (!openMenu) return;
@@ -107,21 +113,20 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
     <section
       className="flex flex-col gap-4 rounded-2xl border p-5 md:p-6"
       style={{
-        background: "rgba(18,18,21,0.7)",
-        borderColor: "rgba(255,255,255,0.06)",
-        backdropFilter: "blur(12px)",
+        background: resolvedColors.boxBg,
+        borderColor: resolvedColors.borderColor,
       }}
     >
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-[.18em] text-zinc-300">
+        <h2 className="text-sm font-bold uppercase tracking-[.18em]" style={{ color: resolvedColors.textColor }}>
           Recent projects
         </h2>
         <Link
           href="/projects"
           className="text-xs font-medium transition-colors"
-          style={{ color: "#a8ff2f" }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "#c6ff70")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = "#a8ff2f")}
+          style={{ color: accent }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = resolvedColors.linkColor)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = accent)}
         >
           View all
         </Link>
@@ -133,30 +138,30 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
             <div
               key={i}
               className="flex items-center gap-3 rounded-md p-3"
-              style={{ background: "rgba(255,255,255,0.02)" }}
+              style={{ background: `${resolvedColors.textColor}08` }}
             >
-              <div className="h-8 w-8 animate-pulse rounded" style={{ background: "rgba(255,255,255,0.06)" }} />
+              <div className="h-8 w-8 animate-pulse rounded" style={{ background: `${resolvedColors.textColor}14` }} />
               <div className="flex-1 space-y-1.5">
-                <div className="h-3.5 w-32 animate-pulse rounded" style={{ background: "rgba(255,255,255,0.06)" }} />
-                <div className="h-2.5 w-20 animate-pulse rounded" style={{ background: "rgba(255,255,255,0.04)" }} />
+                <div className="h-3.5 w-32 animate-pulse rounded" style={{ background: `${resolvedColors.textColor}14` }} />
+                <div className="h-2.5 w-20 animate-pulse rounded" style={{ background: `${resolvedColors.textColor}0d` }} />
               </div>
             </div>
           ))}
         </div>
       ) : sorted.length === 0 ? (
         <div className="py-6 text-center">
-          <p className="text-sm" style={{ color: "#71717a" }}>
+          <p className="text-sm" style={{ color: resolvedColors.textMuted }}>
             No projects yet. Start with a description and LiTT will create the workspace when you are ready.
           </p>
           <div className="mt-4 flex items-center justify-center gap-3">
             <a
               href="#dashboard-guided-start"
               className="rounded-md px-3 py-2 text-xs font-bold transition hover:brightness-110"
-              style={{ background: "#a8ff2f", color: "#0c1204" }}
+              style={{ background: accent, color: onAccent }}
             >
               Start with an idea
             </a>
-            <Link href="/projects" className="text-xs font-medium" style={{ color: "#a8ff2f" }}>
+            <Link href="/projects" className="text-xs font-medium" style={{ color: accent }}>
               Browse projects
             </Link>
           </div>
@@ -173,7 +178,7 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
               <div
                 key={project.id}
                 className="group relative flex items-center justify-between rounded-md p-3 transition-colors"
-                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(24,24,27,0.5)")}
+                onMouseEnter={(e) => (e.currentTarget.style.background = `${resolvedColors.textColor}0a`)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
                 <Link
@@ -182,26 +187,26 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
                 >
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded"
-                    style={{ background: "rgba(30,30,34,0.8)", color: "#a1a1aa" }}
+                    style={{ background: `${resolvedColors.textColor}0d`, color: resolvedColors.textMuted }}
                   >
                     <ProjectIcon type={project.type} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <h4
                       className="truncate text-sm font-medium transition-colors"
-                      style={{ color: "#fafafa" }}
+                      style={{ color: resolvedColors.textColor }}
                     >
                       {project.name}
                       {isPinned && (
                         <Pin
                           size={10}
                           className="ml-1.5 inline shrink-0"
-                          style={{ color: "#a8ff2f", fill: "#a8ff2f" }}
+                          style={{ color: accent, fill: accent }}
                         />
                       )}
                     </h4>
                     {updatedAgo ? (
-                      <p className="mt-0.5 font-mono text-xs" style={{ color: "#71717a" }}>
+                      <p className="mt-0.5 font-mono text-xs" style={{ color: resolvedColors.textMuted }}>
                         Updated {updatedAgo}
                       </p>
                     ) : null}
@@ -211,7 +216,7 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
                 <div className="flex items-center gap-2">
                   <div
                     className="flex items-center gap-1.5 rounded border px-2 py-1"
-                    style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(18,18,21,0.6)" }}
+                    style={{ borderColor: resolvedColors.borderColor, background: resolvedColors.boxBg }}
                   >
                     <span
                       className="h-1.5 w-1.5 rounded-full"
@@ -220,7 +225,7 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
                         animation: project.status === "building" ? "pulse 2s ease-in-out infinite" : undefined,
                       }}
                     />
-                    <span className="font-mono text-[10px]" style={{ color: "#a1a1aa" }}>
+                    <span className="font-mono text-[10px]" style={{ color: resolvedColors.textMuted }}>
                       {status.label}
                     </span>
                   </div>
@@ -230,7 +235,7 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
                     <button
                       onClick={() => setOpenMenu(openMenu === project.id ? null : project.id)}
                       className="flex items-center justify-center rounded p-2 opacity-100 transition-opacity md:p-1 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
-                      style={{ color: "#71717a" }}
+                      style={{ color: resolvedColors.textMuted }}
                       aria-label="Project options"
                     >
                       <MoreVertical size={14} />
@@ -239,9 +244,8 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
                       <div
                         className="absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border p-1.5 shadow-2xl"
                         style={{
-                          borderColor: "rgba(255,255,255,0.08)",
-                          background: "rgba(12,12,15,0.98)",
-                          backdropFilter: "blur(16px)",
+                          borderColor: resolvedColors.borderColor,
+                          background: resolvedColors.boxBg,
                         }}
                       >
                         {[
@@ -260,14 +264,14 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
                                 setOpenMenu(null);
                               }}
                               className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-xs font-medium transition-colors"
-                              style={{ color: "#a1a1aa" }}
+                              style={{ color: resolvedColors.textMuted }}
                               onMouseEnter={(e) => {
-                                e.currentTarget.style.background = "rgba(255,255,255,0.05)";
-                                e.currentTarget.style.color = "#fafafa";
+                                e.currentTarget.style.background = `${resolvedColors.textColor}0d`;
+                                e.currentTarget.style.color = resolvedColors.textColor;
                               }}
                               onMouseLeave={(e) => {
                                 e.currentTarget.style.background = "transparent";
-                                e.currentTarget.style.color = "#a1a1aa";
+                                e.currentTarget.style.color = resolvedColors.textMuted;
                               }}
                             >
                               <Icon size={14} />

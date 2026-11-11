@@ -516,30 +516,31 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // Drive to a known state: expanded. F1 workspace-first: expanding LiTT
-    // opens Slice B's floating overlay (no permanent column), not a column.
+    // Drive to a known state: expanded. F1 workspace-first, as amended
+    // by Larry's no-detached-pop-out ruling (2026-11-10): expanding LiTT
+    // widens the IN-FLOW column — Slice B's floating overlay is retired,
+    // so data-overlay stays "false" in both states.
     if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
       await user.click(screen.getByTestId("litt-hud-expand"));
       await settle();
     }
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "true");
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "false");
 
-    // Close the overlay — the canvas must stay mounted and take all
-    // remaining width. The overlay hides with display:none; the 64px rail
-    // returns in flow.
-    await user.click(screen.getByTestId("litt-panel-close"));
+    // Collapse — the canvas must stay mounted and take all remaining
+    // width; the 64px rail returns in flow.
+    await user.click(screen.getByTestId("litt-panel-collapse"));
     await settle();
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "false");
     expect(screen.getByTestId("studio-center-workspace")).toBeTruthy();
     expect(screen.queryByTestId("permanent-preview-column")).toBeNull();
 
-    // Expand again — overlay returns, canvas still mounted.
+    // Expand again — in-flow column returns, canvas still mounted.
     await user.click(screen.getByTestId("litt-hud-expand"));
     await settle();
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "true");
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "false");
     expect(screen.getByTestId("studio-center-workspace")).toBeTruthy();
   });
 

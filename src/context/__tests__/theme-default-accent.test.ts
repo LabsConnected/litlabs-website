@@ -1,11 +1,18 @@
 /**
- * PR-G regression: the product's default accent must be the J1 canonical lime.
+ * PR-G regression: the product's default accent must not drift to an
+ * unapproved accent.
  *
  * The ThemeContext default theme previously shipped `accent: "purple-haze"`,
  * which painted every theme-driven surface (cookie consent, docs, admin,
  * marketplace legends, focus rings via tokens.focus) violet — contradicting
  * the J1 lime decision (PRIMARY_ACCENT_DECISION = lime, decided 2026-09-16).
- * These tests pin the default so it cannot quietly drift back.
+ *
+ * SUPERSEDED IN PART (2026-11-10, Larry's standing design order): the
+ * default theme is now the LiTT Signature pack, whose accent is
+ * "signature-green" (deep green #177A36; lime survives as the highlight
+ * family — see theme-default-signature.test.ts). The J1 lime token
+ * itself is unchanged and remains selectable; these tests now pin the
+ * default to signature-green and keep the lime-token integrity checks.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -15,9 +22,9 @@ import {
 } from "@/context/ThemeContext";
 import { brand } from "@/lib/design/litt-tokens";
 
-describe("PR-G: default product accent is J1 lime", () => {
-  it("default theme selects the lime accent", () => {
-    expect(defaultTheme.accent).toBe("lime");
+describe("PR-G: default product accent is the approved Signature green", () => {
+  it("default theme selects the signature-green accent", () => {
+    expect(defaultTheme.accent).toBe("signature-green");
   });
 
   it("lime accent override resolves accentColor to the J1 lime candidate", () => {

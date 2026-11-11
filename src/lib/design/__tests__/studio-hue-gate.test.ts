@@ -68,8 +68,13 @@ const SETTINGS = "../../../app/(app)/settings/page.tsx";
 
 describe("J2b studio hue gate (blocking)", () => {
   describe("J1 token pipeline → theme wiring", () => {
-    it("default theme selects the J1 lime accent", () => {
-      expect(defaultTheme.accent).toBe("lime");
+    it("default theme selects the Signature accent (supersedes the J1 lime default)", () => {
+      // SUPERSESSION (Larry, 2026-11-10): the approved LiTT Signature
+      // theme is the product default, so defaultTheme.accent is
+      // "signature-green", not the J1 "lime" this test originally
+      // pinned. The lime accent itself is unchanged and still
+      // selectable — its token integrity is pinned by the next test.
+      expect(defaultTheme.accent).toBe("signature-green");
     });
 
     it("lime accent override resolves to the J1 lime candidate", () => {
@@ -157,13 +162,18 @@ describe("J2b studio hue gate (blocking)", () => {
   });
 
   describe("settings accent picker (signed-in surface)", () => {
-    it("offers LiTT Lime as the default accent option", () => {
+    it("offers Signature Green as the default accent option, lime still offered", () => {
       const source = src(SETTINGS);
-      expect(source).toContain('{ id: "lime", label: "LiTT Lime (default)" }');
-      // The picker highlights theme.accent === opt.id, and the default theme
-      // selects lime — so the picker opens with lime selected.
+      // Default label follows the product default (Larry's LiTT
+      // Signature ruling, 2026-11-10 — see the supersession note in
+      // the token-pipeline describe above).
+      expect(source).toContain('{ id: "signature-green", label: "Signature Green (default)" }');
+      expect(source).toContain('{ id: "lime", label: "LiTT Lime" }');
+      // The picker highlights theme.accent === opt.id, and the default
+      // theme selects signature-green — so the picker opens with the
+      // default selected.
       expect(source).toContain("theme.accent === opt.id");
-      expect(defaultTheme.accent).toBe("lime");
+      expect(defaultTheme.accent).toBe("signature-green");
     });
   });
 });

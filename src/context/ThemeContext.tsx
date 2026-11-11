@@ -533,6 +533,12 @@ export const VISUAL_PACKS: VisualPack[] = [
     backgroundMode: "minimal",
     layoutStyle: "classic",
     effects: { glow: true, particles: false, motion: true },
+    // The preset must BE the whole look: without a wallpaperId,
+    // applying Signature left the previous wallpaper (and its dark
+    // overlay veil) in place, so the app still rendered dark after
+    // the preset showed "Active" (verified live on Larry's account).
+    wallpaperId: "minimal",
+    overlayOpacity: 0,
   },
   {
     id: "honeycomb-core",
@@ -661,14 +667,50 @@ export const VISUAL_PACKS: VisualPack[] = [
   },
 ];
 
-// Default theme
+// Default theme — LiTT Signature (Larry's standing design order,
+// 2026-11-10): the approved white-into-green look is what the app
+// renders BY DEFAULT, field-for-field the litt-signature visual pack.
+// It was previously a dark theme (volcanic/nebula) with Signature as
+// an opt-in preset, so every account that had not explicitly picked
+// Signature rendered dark — the "my theme is not right" complaint.
+// Other presets remain selectable in Settings → Appearance.
 const defaultTheme: Theme = {
-  mode: "dark",
-  skin: "volcanic",
-  accent: "lime",
-  backgroundMode: "nebula",
-  layoutStyle: "glass",
+  mode: "light",
+  skin: "signature",
+  accent: "signature-green",
+  backgroundMode: "minimal",
+  layoutStyle: "classic",
 };
+
+/**
+ * A stored theme that merely repeats a former factory default is NOT
+ * an explicit user choice: the save effect persists the running theme
+ * on mount, so users who never picked anything carry the old default
+ * in storage. Those resolve to the current defaultTheme; anything
+ * else stored — a real choice, or any theme carrying customColors —
+ * wins unchanged. (Extends the migration precedent this file already
+ * applied to the sunset-orange/constellation factory default.)
+ */
+function isLegacyFactoryDefault(t: Theme): boolean {
+  if (t.customColors) return false;
+  if (t.mode !== "dark" || t.skin !== "volcanic") return false;
+  return (
+    (t.accent === "sunset-orange" && t.backgroundMode === "constellation") ||
+    (t.accent === "lime" && t.backgroundMode === "nebula")
+  );
+}
+
+/** Resolve the theme a session starts with from the raw stored value. */
+export function resolveInitialTheme(storedRaw: string | null): Theme {
+  if (!storedRaw) return defaultTheme;
+  try {
+    const saved = JSON.parse(storedRaw) as Theme;
+    if (isLegacyFactoryDefault(saved)) return defaultTheme;
+    return saved;
+  } catch {
+    return defaultTheme;
+  }
+}
 
 // Context
 interface ThemeContextType {
@@ -791,22 +833,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!mounted) return;
     try {
-      const stored = localStorage.getItem("litlabs-theme");
-      if (!stored) return;
-      const saved = JSON.parse(stored) as Theme;
-      // Move the former factory-default look to the cinematic studio system
-      // without changing themes that a member intentionally customized.
-      if (
-        saved.mode === "dark" &&
-        saved.skin === "volcanic" &&
-        saved.accent === "sunset-orange" &&
-        saved.backgroundMode === "constellation" &&
-        !saved.customColors
-      ) {
-        setTheme(defaultTheme);
-        return;
-      }
-      setTheme(saved);
+      // Stored explicit choices win; a stored repeat of a former
+      // factory default is not a choice and resolves to the current
+      // (LiTT Signature) default — see resolveInitialTheme.
+      setTheme(resolveInitialTheme(localStorage.getItem("litlabs-theme")));
     } catch {
       /* ignore */
     }

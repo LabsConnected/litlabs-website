@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { verifyProjectWorkspace, ProjectVerificationError } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
 
@@ -174,6 +174,20 @@ export async function GET(
     return NextResponse.json({ scaffolded, touched, starterContent });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to get workspace state";
+    // "No workspace yet" is an EXPECTED state for a project whose
+    // prepare never succeeded — not a server fault. It used to return
+    // 500 by design (code discarded), logging as a console error on
+    // every Studio mount. Return the same fail-soft fallback body
+    // with a 200 and the code attached; only unexpected throws 500.
+    if (
+      err instanceof ProjectVerificationError &&
+      (err.code === "WORKSPACE_NOT_PROVISIONED" || err.code === "WORKSPACE_NOT_READY")
+    ) {
+      return NextResponse.json(
+        { code: err.code, scaffolded: false, touched: false, starterContent: false },
+        { status: 200 },
+      );
+    }
     // Fail-soft: the caller treats an error as "unknown" and keeps the
     // default center surface. Never block Studio loading on this check.
     return NextResponse.json(

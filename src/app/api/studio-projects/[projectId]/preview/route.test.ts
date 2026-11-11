@@ -298,4 +298,39 @@ describe("studio-projects preview route — workspace failure code threading (wa
     expect(body.runtimeStatus).toBe("not_started");
     expect(body.runtimeErrorCode).toBeNull();
   });
+
+  // Route honesty (console-errors diagnosis): when the POST provisioning
+  // branch fails with the host-execution refusal, the status must match
+  // the code the body carries — 503, not an unmapped 500.
+  function postPreview() {
+    return POST(
+      new Request("https://x.test/api/studio-projects/proj-1/preview", { method: "POST" }) as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+  }
+
+  it("POST returns 503 when provisioning hits HOST_EXECUTION_DISABLED", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: HOST_EXEC_STORED, framework: "nextjs",
+    } as never);
+    provisionMock.mockRejectedValue(new Error(HOST_EXEC_STORED));
+    const res = await postPreview();
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("failed");
+    expect(body.runtimeErrorCode).toBe("HOST_EXECUTION_DISABLED");
+  });
+
+  it("POST keeps generic provisioning failures at 500", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "terminal down", framework: "nextjs",
+    } as never);
+    provisionMock.mockRejectedValue(new Error("terminal down"));
+    const res = await postPreview();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.runtimeErrorCode).toBeNull();
+  });
 });
