@@ -69,6 +69,17 @@ export interface LaunchFlowOptions {
    */
   requireProjectArtifacts?: boolean;
   /**
+   * Read-only run (kernel-classified workspace inspection): the run
+   * must NOT mutate the project, so completion is the tool lane's
+   * answer — not a mutation, an artifact, or a preview. When set, the
+   * flow returns the agent-loop result directly after phase 1: no
+   * zero-mutation reprompt (which would order the model to write
+   * files the user forbade), no build-capability guard, and no
+   * artifact/preview phases. Success requires at least one successful
+   * tool call and, when a quality session ran, its verdict.
+   */
+  readOnly?: boolean;
+  /**
    * Quality-loop opt-in, passed through to the main agent-loop phase.
    * When set, the build is gated by the UNDERSTAND→VERIFY evidence stages
    * plus the visual-quality judge. (Was silently dropped before AUTO-mode
@@ -116,7 +127,12 @@ export interface LaunchFlowOptions {
 
 export interface LaunchFlowResult {
   success: boolean;
-  status: "preview_ready" | "deployed" | "failed" | "cancelled";
+  /**
+   * "completed" = a read-only run finished with the tool lane's answer
+   * (no preview/deploy phases exist for it). All other statuses keep
+   * their build-flow meanings.
+   */
+  status: "preview_ready" | "deployed" | "failed" | "cancelled" | "completed";
   previewUrl?: string | null;
   productionUrl?: string | null;
   finalText: string;
@@ -650,9 +666,13 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           // consecutive steps with tool calls but zero file-writing calls
           // rules that model out for this run and switches to the next
           // registry build model — instead of burning the whole budget on
-          // a model that can read but never writes.
+          // a model that can read but never writes. Never armed for a
+          // read-only run: it never writes BY DESIGN, so the guard
+          // would only misread a correct read as incapability.
           buildCapabilityGuard:
-            options.requiresExecution === true ? { maxStepsWithoutFileWrite: 3 } : undefined,
+            options.requiresExecution === true && options.readOnly !== true
+              ? { maxStepsWithoutFileWrite: 3 }
+              : undefined,
           evalMetadata: options.evalMetadata,
           // A bounded reprompt continues the SAME conversation: pass the
           // previous loop's messages so a patch-recovery (validation error
@@ -801,6 +821,44 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     if (!pausedApproval) {
       const guarded = guardPhase1(agentResult);
       if (guarded) return guarded;
+
+      // Read-only inspection run: the phase-1 result IS the outcome.
+      // Zero mutations is the CORRECT end state here — the zero-mutation
+      // reprompt below exists for builds whose model announced writes it
+      // never made; for a read it would order the model to write files
+      // the user explicitly forbade, and its failure path then replaced
+      // the composed answer with a "tool execution unavailable" error
+      // (the live defect: a correct file listing never reached the
+      // chat). The artifact/preview phases likewise do not apply — a
+      // read has nothing to preview. Success = the quality verdict (when
+      // a session ran) AND at least one successful tool call; either way
+      // the agent's final text is delivered as the run's answer.
+      if (options.readOnly === true) {
+        const readAnswered = agentResult.toolCalls.some((c) => c.success);
+        const qualityOk = agentResult.qualityLoop
+          ? agentResult.qualityLoop.verdict.ok
+          : true;
+        const readSuccess = readAnswered && qualityOk;
+        emitStep(
+          progress,
+          steps,
+          readSuccess
+            ? "Inspection complete — the read tools answered the request."
+            : "Inspection did not complete — reporting what the run produced.",
+        );
+        return baseResult({
+          success: readSuccess,
+          status: readSuccess ? "completed" : "failed",
+          finalText:
+            agentResult.finalText ||
+            (readSuccess
+              ? "Inspection complete."
+              : "The inspection could not be completed."),
+          ...(readSuccess ? {} : { error: "INSPECTION_NOT_COMPLETED" }),
+          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
 
       // An execution request that ended with zero workspace mutations almost
       // always means a weak model closed its turn after announcing writes it

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { shouldDeferConversationUrlSync, useConversationStore } from "../stores/useConversationStore";
+import { shouldDeferConversationUrlSync, useConversationStore, type ChatMessage } from "../stores/useConversationStore";
+import { useExecutionStore } from "../stores/useExecutionStore";
 import type { Conversation, ConversationMessage } from "@/lib/studio/types";
 import type { SendResult } from "./useCanonicalConversation";
 import { useCanonicalConversation } from "./useCanonicalConversation";
@@ -623,5 +624,153 @@ describe("send() selection context — StudioSelectionPayload", () => {
     expect(sendResult?.accepted).toBe(true);
     expect(capturedBody.message).toBe("make it bigger");
     expect(capturedBody.previewSelection).toBeUndefined();
+  });
+});
+
+// ── Approval-gate derivation from canonical messages (approve-in-chat) ──
+// The pinned chat ApprovalCard is fed by the execution store's
+// pendingApproval — session-local state. Before this lane it was set only
+// by (a) this client's own send flow, or (b) loadMessages rehydration,
+// which requires !isRunning and runs only at load time. A session that
+// OPENS a conversation whose run is already paused in another session
+// (desktop pass 2026-11-11 07:17: the chat announced the gate, no card
+// existed anywhere in that client), or whose store tracks the run as
+// running, never got the card. The derivation below watches the canonical
+// messages — the server-persisted truth every session loads — and arms
+// the gate whenever the viewed conversation's latest assistant message
+// carries one, subject to the store's own anti-resurrection guards.
+describe("approval gate derivation from canonical messages", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const gatedMessage = (pausedRunId: string): ChatMessage => ({
+    id: "asst-gated",
+    role: "assistant",
+    content: "I need your approval to run image.stock.",
+    agentSlug: "litt",
+    agentMode: "standard",
+    status: "awaiting_approval",
+    createdAt: new Date().toISOString(),
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    pendingApproval: {
+      toolId: "image.stock",
+      reason: "Mutation requires approval in ACT mode",
+      pausedRunId,
+      inputs: { projectId: "proj-1", query: "people enjoying food in a food court" },
+    },
+  });
+
+  const jsonResponse = (body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  beforeEach(() => {
+    useConversationStore.getState().resetForProject();
+    useExecutionStore.getState().reset();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [], messages: [], revision: 1 });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useConversationStore.getState().resetForProject();
+    useExecutionStore.getState().reset();
+  });
+
+  async function renderAndSeed() {
+    const utils = renderHook(() => useCanonicalConversation({ serverProjectId: "proj-1" }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    return utils;
+  }
+
+  it("arms the gate in a session that did not start the run — even while it tracks the run as running", async () => {
+    await renderAndSeed();
+    // The observer session's store believes a run is active (it restored
+    // the other session's run) — the old loadMessages-only rehydration
+    // skipped arming in exactly this state.
+    act(() => {
+      useExecutionStore.getState().startRun();
+    });
+    expect(useExecutionStore.getState().isRunning).toBe(true);
+
+    act(() => {
+      useConversationStore.getState().setMessages("conv-1", [gatedMessage("paused-observer")]);
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+    const pending = useExecutionStore.getState().pendingApproval;
+    expect(pending?.toolId).toBe("image.stock");
+    expect(pending?.pausedRunId).toBe("paused-observer");
+    expect(pending?.conversationId).toBe("conv-1");
+    expect(pending?.inputs?.query).toBe("people enjoying food in a food court");
+  });
+
+  it("never resurrects a gate this session already decided", async () => {
+    await renderAndSeed();
+    act(() => {
+      useConversationStore.getState().setMessages("conv-1", [gatedMessage("paused-decided")]);
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(useExecutionStore.getState().pendingApproval?.pausedRunId).toBe("paused-decided");
+
+    act(() => {
+      useExecutionStore.getState().resolveApproval("approved");
+    });
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+
+    // The persisted message still carries the (now-decided) gate until the
+    // transcript reload lands — a messages refresh must not re-arm it.
+    act(() => {
+      useConversationStore.getState().setMessages("conv-1", [gatedMessage("paused-decided")]);
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+  });
+
+  it("does not reset an in-flight decision when messages refresh mid-submit", async () => {
+    await renderAndSeed();
+    act(() => {
+      useConversationStore.getState().setMessages("conv-1", [gatedMessage("paused-inflight")]);
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+    act(() => {
+      useExecutionStore.getState().beginApprovalSubmit();
+      useExecutionStore.getState().approvalAccepted();
+    });
+    expect(useExecutionStore.getState().approvalPhase).toBe("executing");
+
+    act(() => {
+      useConversationStore.getState().setMessages("conv-1", [gatedMessage("paused-inflight")]);
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+    expect(useExecutionStore.getState().approvalPhase).toBe("executing");
+    expect(useExecutionStore.getState().pendingApproval?.pausedRunId).toBe("paused-inflight");
   });
 });

@@ -6,7 +6,6 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
 import { track } from "@/lib/analytics";
 import CommandStudio from "./components/CommandStudio";
-import StudioPrimeLanding from "./components/StudioPrimeLanding";
 import FirstRunWelcome from "./components/FirstRunWelcome";
 import {
   peekFirstRunProjectId,
@@ -252,6 +251,10 @@ function StudioHub() {
   // a website build. So: creator=website with no ?project= creates
   // the blank project up front (the same POST the first-run flow
   // uses) and pins it in the URL. An explicit ?project= always wins.
+  // The POST opts in to empty-project reuse, so a repeat entry pins
+  // the previous entry's still-untouched blank instead of minting
+  // another duplicate (#892 intent preserved: never the selected
+  // repo project, never a project the user has actually worked in).
   const websiteIntent =
     searchParams.get("creator") === "website" && !searchParams.get("project");
   const websiteStartRef = useRef(false);
@@ -275,6 +278,10 @@ function StudioHub() {
           sourceType: "blank",
           name: "New Website",
           templateId: "blank-static",
+          // Repeat entries focus the still-untouched blank from the
+          // last entry instead of piling up identical empty projects;
+          // the server only reuses a provably untouched one.
+          reuseUntouchedBlank: true,
         }),
       });
       if (!res.ok) {
@@ -390,16 +397,16 @@ function StudioHub() {
     );
   }
 
-  // Studio prime (ART-20261110-029): a bare /studio visit lands on the
-  // prime landing — the universal create launcher + recent projects
-  // folded in from the retired dashboard, so Studio is the one
-  // signed-in home. Any deep link (?project=, ?tool=, ?creator=,
-  // ?prompt=…) opens the CommandStudio workspace directly, exactly as
-  // before; a pending first-run handoff does the same.
-  if (searchParams.toString() === "" && !peekFirstRunProjectId()) {
-    return <StudioPrimeLanding />;
-  }
-
+  // One-chat entry (Larry's directive, 2026-11-11; ART-20261111-031),
+  // superseding the Studio prime landing (ART-20261110-029): the
+  // "What do you want to make?" hub page is RETIRED. A bare /studio
+  // visit falls through to the CommandStudio workspace below — the
+  // one chat — exactly like every deep link (?project=, ?tool=,
+  // ?creator=, ?prompt=…) and like a pending first-run handoff. The
+  // creation-type chips survive only as entry hints inside that chat
+  // (LiTEmptyState, resolved by resolveEntryCreateType), and a
+  // describe typed at entry lands in the chat's own composer via
+  // ?prompt= (takeFirstRunPrompt) — typed once, never re-asked.
   return <CommandStudio />;
 }
 

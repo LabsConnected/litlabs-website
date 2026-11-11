@@ -190,6 +190,7 @@ import {
   resetExecutionRegistryForTests,
   getActiveExecution,
 } from "@/lib/studio/execution-registry";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { buildCanonicalRuntimeContext } from "@/lib/litt-intelligence/canonical-runtime-context";
 import { buildStudioContext } from "@/lib/studio/project-resolver";
@@ -1907,10 +1908,14 @@ describe("POST /api/studio/conversations/[conversationId]/messages — project r
 });
 
 describe("POST /api/studio/conversations/[conversationId]/messages — never-bound conversation guard", () => {
-  // A conversation with projectId=null (legacy/general chat) viewed inside a
-  // project must NOT be silently re-bound to the active project: its history
-  // is foreign context and rebinding would let an unrelated thread execute
-  // mutations inside this project's workspace. The server refuses instead.
+  // SUPERSEDED IN PART (2026-11-11, Larry's directive): an unbound chat
+  // (projectId=null, e.g. Global LiTT) acting in a project the user is
+  // viewing now BINDS to that ownership-verified project and runs — see
+  // the "run project resolution" describe. What remains guarded here: a
+  // viewed project that does NOT resolve for this user must refuse with
+  // the specific reason, and the server must never silently substitute a
+  // different project (the mock below resolves NO project, so the viewed
+  // project is unverifiable).
   beforeEach(() => {
     vi.clearAllMocks();
     resetExecutionRegistryForTests();
@@ -1941,15 +1946,15 @@ describe("POST /api/studio/conversations/[conversationId]/messages — never-bou
 
   const routeParams = { params: Promise.resolve({ conversationId: "conv-123" }) };
 
-  it("refuses to silently re-bind a project-less chat into the active project", async () => {
+  it("refuses when the viewed project cannot be verified for this user — no silent substitution", async () => {
     const req = makeRequest({ projectId: "proj-active", message: "edit index.html" });
     const res = await POST(req, routeParams);
     const body = await res.json();
 
     expect(res.status).toBe(409);
-    expect(body.code).toBe("PROJECT_MISMATCH");
-    // The repair fallback must not run for never-bound chats — no silent
-    // rebind, no workspace transport, no execution against the wrong project.
+    expect(body.code).toBe("PROJECT_NOT_AVAILABLE");
+    // No fallback to a different project, no workspace transport, no
+    // execution anywhere the user isn't looking.
     expect(resolveCurrentProject).not.toHaveBeenCalled();
     expect(createWorkspaceTransport).not.toHaveBeenCalled();
   });
@@ -1961,5 +1966,153 @@ describe("POST /api/studio/conversations/[conversationId]/messages — never-bou
     // Older clients keep the previous behavior: the fallback may rebind.
     expect(resolveCurrentProject).toHaveBeenCalled();
     expect(res.status).not.toBe(500);
+  });
+});
+
+describe("POST /api/studio/conversations/[conversationId]/messages — run project resolution (resolved project drives execution)", () => {
+  // Production defect 2026-11-11: a Global LiTT conversation (projectId=null)
+  // with project "New Website" selected and Ready failed every workspace
+  // tool with "This tool requires an active project workspace". Step 5
+  // resolved an effective project for the model-facing context, but the
+  // transport/V2/launch plumbing kept reading the conversation's raw stored
+  // projectId — null — so no workspace transport was ever created.
+  const routeParams = { params: Promise.resolve({ conversationId: "conv-123" }) };
+  const OWNED = new Set(["proj-active", "proj-viewed"]);
+  let bindUpdates: Array<Record<string, unknown>>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetExecutionRegistryForTests();
+    bindUpdates = [];
+
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    // Global LiTT shape: the conversation exists but was never bound.
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv-123",
+      projectId: null,
+      revision: 1,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    } as any);
+    // Ownership-scoped resolution: an id resolves iff it is the user's.
+    vi.mocked(buildStudioContext).mockImplementation(
+      async (_uid: string, _cid: string, pid: string) =>
+        (pid && OWNED.has(pid) ? { projectId: pid, projectName: `Project ${pid}` } : null) as any,
+    );
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: true,
+      workspaceId: "ws-123",
+      executionMode: "auto",
+    } as any);
+    vi.mocked(insertMessage).mockImplementation(async (args: any) => ({
+      message: { id: `msg-${args.role}`, ...args },
+      duplicate: false,
+      error: null,
+    }) as any);
+    vi.mocked(updateMessageStatus).mockResolvedValue(true as any);
+    vi.mocked(createWorkspaceTransport).mockImplementation(
+      async (pid: string) =>
+        ({ projectId: pid, userId: "user_123", workspaceId: "ws-123", fileOpsReachable: true }) as any,
+    );
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: "https://preview.example.com",
+      productionUrl: null,
+      finalText: "Done.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [
+          { toolId: "files.write", toolCallId: "tc1", inputs: { path: "index.html" }, success: true, mutating: true, summary: "saved", paths: ["index.html"] },
+        ],
+        workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true },
+        cancelled: false,
+        pendingApproval: null,
+      },
+      cancelled: false,
+      totalDurationMs: 10,
+    } as any);
+    actionRuntimeMocks.createActionRun.mockResolvedValue({
+      id: "action-run-123",
+      userId: "user_123",
+      projectId: "proj-active",
+      conversationId: "conv-123",
+      kind: "composite",
+      status: "queued",
+    } as any);
+    actionRuntimeMocks.transitionActionRunEventActivity.mockResolvedValue({} as any);
+    actionRuntimeMocks.transitionActionRun.mockResolvedValue({} as any);
+    actionRuntimeMocks.requestActionRunCancellation.mockResolvedValue({} as any);
+    // Capturing admin so the conversation-bind write is assertable.
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      rpc: vi.fn().mockResolvedValue({ data: 2, error: null }),
+      from: vi.fn(() => ({
+        update: vi.fn((values: Record<string, unknown>) => {
+          bindUpdates.push(values);
+          return { eq: vi.fn(() => ({ eq: vi.fn(() => ({})) })) };
+        }),
+      })),
+    } as any);
+  });
+
+  it("Larry's case: unbound Global chat, client omits projectId — the resolved current project drives the transport and the run", async () => {
+    vi.mocked(resolveCurrentProject).mockResolvedValue({ projectId: "proj-active" } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, routeParams);
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    // The run must execute against the resolved project — not fail closed
+    // on the conversation's raw null binding.
+    expect(createWorkspaceTransport).toHaveBeenCalledWith("proj-active", "user_123");
+    const launchOptions = vi.mocked(runLaunchFlow).mock.calls[0][0] as any;
+    expect(launchOptions.projectId).toBe("proj-active");
+    expect(launchOptions.transport.projectId).toBe("proj-active");
+    // The binding is persisted so future turns resolve directly.
+    expect(bindUpdates).toContainEqual({ project_id: "proj-active" });
+  });
+
+  it("unbound chat + client-supplied viewed project: binds to the viewed project, never substitutes the most-recent one", async () => {
+    // Decoy: most-recent resolution would pick a different project.
+    vi.mocked(resolveCurrentProject).mockResolvedValue({ projectId: "proj-active" } as any);
+
+    const req = makeRequest({ projectId: "proj-viewed" });
+    const res = await POST(req, routeParams);
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    expect(createWorkspaceTransport).toHaveBeenCalledWith("proj-viewed", "user_123");
+    expect(createWorkspaceTransport).not.toHaveBeenCalledWith("proj-active", "user_123");
+    expect(bindUpdates).toContainEqual({ project_id: "proj-viewed" });
+    const launchOptions = vi.mocked(runLaunchFlow).mock.calls[0][0] as any;
+    expect(launchOptions.projectId).toBe("proj-viewed");
+  });
+
+  it("unbound chat + viewed project that does not resolve for this user: honest refusal, no silent substitution", async () => {
+    vi.mocked(resolveCurrentProject).mockResolvedValue({ projectId: "proj-active" } as any);
+
+    const req = makeRequest({ projectId: "proj-foreign" });
+    const res = await POST(req, routeParams);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("PROJECT_NOT_AVAILABLE");
+    // The run must never execute in a different project than the one the
+    // user is viewing just because that one happens to resolve.
+    expect(resolveCurrentProject).not.toHaveBeenCalled();
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+    expect(runLaunchFlow).not.toHaveBeenCalled();
+  });
+
+  it("no project anywhere: unbound chat, no client project, no current project — honest 404, no transport", async () => {
+    vi.mocked(resolveCurrentProject).mockResolvedValue(null as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, routeParams);
+
+    expect(res.status).toBe(404);
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+    expect(runLaunchFlow).not.toHaveBeenCalled();
   });
 });

@@ -58,6 +58,7 @@ import {
   noteToolResult,
   noteMutationReadBack,
   noteStaticArtifactCheck,
+  noteStaticVisualAudit,
   runQualityInspection,
   snapshotQualityLoopSession,
   startQualityLoopSession,
@@ -68,6 +69,7 @@ import {
   type QualityLoopSnapshot,
   formatQualityVerdictBlock,
 } from "./quality-loop-flow";
+import type { QualityTaskScope } from "./quality-loop";
 // LiTT Tool Orchestrator (fix/litt-tool-orchestrator): goal → capability
 // planning, tool health, reference-match workflow, run observability.
 import { planCapabilities, buildCapabilityPlanPrompt } from "./capability-planner";
@@ -233,6 +235,14 @@ export interface AgentLoopConfig {
     userId: string;
     /** The user's original request (judge context). Falls back to the first user message. */
     userRequest?: string;
+    /**
+     * System-determined task scope from the kernel's classification
+     * (taskKind "inspection" → "inspection"). Forwarded to the quality
+     * session at creation; a resume ignores it (the snapshot's scope
+     * governs). Unset = the session derives scope from the request
+     * text, exactly as before.
+     */
+    taskScope?: QualityTaskScope;
     /** Server-persisted evidence restored after an approval pause. */
     state?: QualityLoopSnapshot;
   };
@@ -1484,6 +1494,14 @@ async function maybeEnrichStaticSiteVisuals(
     const report = await enrichStaticSiteVisuals(transport, {
       topicKeywords: qualitySession?.userRequest,
     });
+    // Feed the audit's surviving placeholder refs into the quality
+    // loop: while any remain, the run cannot earn a clean pass — the
+    // enrichment report alone never reached the gate before, so a page
+    // shipping placeholder imagery still completed "successfully"
+    // (production defect 2026-11-11).
+    if (qualitySession) {
+      noteStaticVisualAudit(qualitySession, report.unresolvedPlaceholders);
+    }
     if (report.imagesResolved > 0 || report.imagesFailed > 0 || report.filesChanged.length > 0) {
       localProgress.emit({
         type: "status",
@@ -1491,6 +1509,9 @@ async function maybeEnrichStaticSiteVisuals(
           `Visual enrichment: ${report.imagesResolved} image(s) resolved` +
           (report.imagesFailed > 0 ? `, ${report.imagesFailed} unavailable` : "") +
           (report.placeholdersUsed > 0 ? `, ${report.placeholdersUsed} placeholder fallback(s)` : "") +
+          (report.unresolvedPlaceholders.length > 0
+            ? `, ${report.unresolvedPlaceholders.length} unresolved placeholder(s): ${report.unresolvedPlaceholders.join(", ")}`
+            : "") +
           ` (${report.providersUsed.join(", ") || "no providers"}` +
           (report.providersFailed.length > 0 ? `; failed: ${report.providersFailed.join(", ")}` : "") +
           `).`,
@@ -1843,6 +1864,7 @@ async function runAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? userMessage,
       snapshot: cfg.qualityLoop.state,
       isStaticWorkspace: cfg.isStaticWorkspace,
+      taskScope: cfg.qualityLoop.taskScope,
     });
     cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
@@ -3564,6 +3586,7 @@ async function resumeAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? "",
       snapshot: cfg.qualityLoop.state,
       isStaticWorkspace: cfg.isStaticWorkspace,
+      taskScope: cfg.qualityLoop.taskScope,
     });
     cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }

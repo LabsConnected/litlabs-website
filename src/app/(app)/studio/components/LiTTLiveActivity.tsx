@@ -25,6 +25,7 @@ import {
   type ExecutionPhase,
 } from "../stores/useExecutionStore";
 import { toolActivityDotColor } from "./ExecutionBlock";
+import { deriveApprovalRequestDetails } from "./ApprovalCard";
 import type {
   RunOutcome,
   ToolActivityRecord,
@@ -108,6 +109,8 @@ export default function LiTTLiveActivity({
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
+  const approvalError = useExecutionStore((s) => s.approvalError);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
   const changesSummary = useExecutionStore((s) => s.changesSummary);
   const collapseEvent = useExecutionStore((s) => s.collapseEvent);
@@ -408,11 +411,15 @@ export default function LiTTLiveActivity({
               />
             </div>
 
-            {/* Pending Approval Card */}
+            {/* Pending Approval Card — same store gate as the chat card;
+                phase/error flow through so a decision made in chat locks
+                this card instead of leaving a stale actionable duplicate. */}
             {pendingApproval && (
               <ApprovalCard
                 approval={pendingApproval}
                 onResolve={onResolveApproval}
+                phase={approvalPhase}
+                error={approvalError}
               />
             )}
 
@@ -516,13 +523,28 @@ function EmptyState() {
 }
 
 /* ── Approval Card ──────────────────────────────────────────────── */
+/**
+ * The Activity view of the SAME store gate the chat card renders. It
+ * mirrors the chat card's decision state: the subject comes from the
+ * frozen inputs (shared derivation with the canonical ApprovalCard),
+ * and once a decision is in flight — wherever it was clicked — the
+ * buttons lock and the status line shows the resume, so this surface
+ * never offers a second, stale decision for a gate already decided.
+ * Retry for a failed decision lives on the chat card.
+ */
 function ApprovalCard({
   approval,
   onResolve,
+  phase = "idle",
+  error = null,
 }: {
-  approval: { toolId: string; reason: string; pausedRunId?: string };
+  approval: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> };
   onResolve?: (decision: "approved" | "rejected") => void;
+  phase?: "idle" | "submitting" | "executing" | "failed";
+  error?: string | null;
 }) {
+  const details = deriveApprovalRequestDetails(approval.inputs);
+  const buttonsDisabled = phase === "submitting" || phase === "executing" || phase === "failed";
   return (
     <div
       className="rounded-xl border p-2.5"
@@ -540,13 +562,39 @@ function ApprovalCard({
       <div className="text-[10px] leading-tight pb-2" style={{ color: "var(--text-secondary)" }}>
         <span className="font-bold">{approval.toolId.replace(/_/g, " ")}</span>
         <div className="pt-0.5" style={{ color: "var(--text-muted)" }}>{approval.reason}</div>
+        {details.subject && (
+          <div className="pt-0.5" style={{ color: "var(--text-secondary)" }}>
+            {details.subject.label}: {details.subject.value}
+          </div>
+        )}
+        {details.destination && (
+          <div className="pt-0.5 font-mono" style={{ color: "var(--text-muted)" }}>
+            → {details.destination}
+          </div>
+        )}
       </div>
+      {phase === "submitting" && (
+        <div className="pb-1.5 text-[10px] font-bold" style={{ color: "var(--text-secondary)" }}>
+          Submitting approval…
+        </div>
+      )}
+      {phase === "executing" && (
+        <div className="pb-1.5 text-[10px] font-bold" style={{ color: "var(--text-secondary)" }}>
+          Approved — running…
+        </div>
+      )}
+      {phase === "failed" && (
+        <div className="pb-1.5 text-[10px] font-bold" style={{ color: "#fca5a5" }} role="alert">
+          Approval failed{error ? `: ${error}` : ""} — retry from the chat card.
+        </div>
+      )}
       {onResolve && (
         <div className="flex gap-1.5">
           <button
             type="button"
             onClick={() => onResolve("approved")}
-            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10"
+            disabled={buttonsDisabled}
+            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
             style={{
               borderColor: "var(--litt-primary)40",
               backgroundColor: "var(--litt-primary)10",
@@ -558,7 +606,8 @@ function ApprovalCard({
           <button
             type="button"
             onClick={() => onResolve("rejected")}
-            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10"
+            disabled={buttonsDisabled}
+            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
             style={{
               borderColor: "var(--error)40",
               backgroundColor: "var(--error)10",

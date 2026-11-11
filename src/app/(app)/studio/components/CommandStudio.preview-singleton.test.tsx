@@ -265,7 +265,10 @@ const execState = vi.hoisted(() => {
     endRun: vi.fn(() => { state.pendingApproval = null; }),
     addEvent: vi.fn(),
     setPhase: vi.fn(),
-    setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; }),
+    // Mirrors the real store: a fresh gate always mounts at phase "idle"
+    // (useExecutionStore.setPendingApproval resets approvalPhase) — without
+    // this, a prior test's "executing" phase leaks into the next gate.
+    setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; state.approvalPhase = "idle"; }),
     resolveApproval: vi.fn(() => { state.pendingApproval = null; }),
     beginApprovalSubmit: vi.fn(() => { state.approvalPhase = "submitting"; }),
     approvalAccepted: vi.fn(() => { state.approvalPhase = "executing"; }),
@@ -607,6 +610,37 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     expect(screen.queryByTestId("studio-completion")).toBeNull();
   });
 
+  it("keeps the user on the Chat tab when a send pauses at an approval gate", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    // Larry's approve-in-chat directive (2026-11-11): the run pauses, the
+    // actionable card lives IN the chat — the send flow must not yank the
+    // user over to the Live/Activity tab to hunt the Approve button. (The
+    // pre-fix flow switched to "live" with the comment "where the
+    // Approve/Reject control lives".)
+    sendMock.mockResolvedValueOnce({
+      accepted: true,
+      persisted: true,
+      reply: "I need your approval to run image.stock.",
+      pendingApproval: {
+        toolId: "image.stock",
+        reason: "Mutation requires approval in ACT mode",
+        pausedRunId: "paused-gate-1",
+        inputs: { projectId: "proj-1", query: "people enjoying food in a food court" },
+      },
+    });
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    await user.type(screen.getByTestId("studio-command-input"), "build a food court page");
+    await user.click(screen.getByTestId("studio-send-button"));
+    await waitFor(() => expect(sendMock).toHaveBeenCalled());
+    await settle();
+
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
+    expect(screen.queryByTestId("studio-completion")).toBeNull();
+  });
+
   it("does NOT show a Done completion card when the assistant asks a clarifying question", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     sendMock.mockResolvedValueOnce({
@@ -634,6 +668,11 @@ describe("CommandStudio — approval gate convergence", () => {
     convState.loadMessages.mockClear();
     convState.reportSendError.mockClear();
     execState.state.pendingApproval = null;
+    // Tests below mount gates by direct assignment, which in the real
+    // store only ever happens alongside approvalPhase "idle" (a fresh
+    // gate). Reset it so a prior test's submit/executing phase cannot
+    // leak into the next gate and disable its buttons.
+    execState.state.approvalPhase = "idle";
     execState.state.isRunning = false;
     execState.state.events = [];
     approvalWatch.onSettled = null;
@@ -661,7 +700,8 @@ describe("CommandStudio — approval gate convergence", () => {
       expect.objectContaining({ conversationId: "conv-1", pausedRunId: "paused-1" }),
     );
 
-    // The paused run surfaced Live (where the Approve/Reject card lives).
+    // The user inspects the Live tab while the gate is pending (the
+    // actionable card itself lives in Chat since the approve-in-chat fix).
     await user.click(screen.getByTestId("litt-tab-live"));
     await settle();
     expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
@@ -683,7 +723,7 @@ describe("CommandStudio — approval gate convergence", () => {
     expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
   });
 
-  it("stays on Live when the resumed run pauses on a nested gate", async () => {
+  it("surfaces the fresh gate IN CHAT when the resumed run pauses on a nested gate", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     convState.selectedConversationId = "conv-1";
     execState.state.pendingApproval = {
@@ -717,11 +757,16 @@ describe("CommandStudio — approval gate convergence", () => {
     });
     await settle();
 
-    // A new gate mounted — the user must see the fresh Approve/Reject card.
+    // A new gate mounted — the user must see the fresh Approve/Reject
+    // card. CHANGED under Larry's approve-in-chat directive (2026-11-11):
+    // this test previously pinned "stays on Live", the exact behavior
+    // Larry rejected ("LiTT needs to have approve in chat"). The card
+    // lives in the chat transcript now, so the surface follows it there.
     expect(execState.state.setPendingApproval).toHaveBeenCalledWith(
       expect.objectContaining({ toolId: "files.delete", pausedRunId: "paused-2" }),
     );
-    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
   });
 
   it("does NOT report 'could not be resumed' when the gate already settled before the click", async () => {

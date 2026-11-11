@@ -172,6 +172,7 @@ export function useCanonicalConversation({
   onOpenProjectNameDialog,
   onOpenImageStudio,
   onOpenVideoStudio,
+  onOpenMusicStudio,
   serverProjectId,
   cameraState,
   previewSelection,
@@ -187,6 +188,8 @@ export function useCanonicalConversation({
   onOpenImageStudio?: (prompt: string) => void;
   /** Open the real Video Studio surface with the prompt prefilled. */
   onOpenVideoStudio?: (prompt: string) => void;
+  /** Open the real Music Studio surface with the request staged. */
+  onOpenMusicStudio?: (prompt: string) => void;
   serverProjectId?: string | null;
   /** Camera dock state — passed to the LLM so it knows camera is available */
   cameraState?: { active: boolean; status: string };
@@ -335,6 +338,42 @@ export function useCanonicalConversation({
     () => canonicalMessages.map(toUIMessage),
     [canonicalMessages],
   );
+
+  // ── Approval-gate derivation (approve-in-chat, 2026-11-11) ─────────
+  // The chat ApprovalCard is fed by the execution store's pendingApproval
+  // — session-local state. The send flow arms it for THIS client's runs
+  // and loadMessages rehydrates it at load time, but only when no run is
+  // active locally. A session that opens a conversation whose run paused
+  // in ANOTHER session (or that tracks that run as running) therefore
+  // saw the chat announce the gate with no actionable card anywhere —
+  // the desktop half of Larry's approve-in-chat report. The canonical
+  // messages are the server-persisted truth every session loads, so arm
+  // the gate from them whenever they change: latest assistant message
+  // carries a paused run, the store has no gate mounted, no decision is
+  // in flight (approvalPhase idle), and the gate was not already decided
+  // in this session (resolvedPausedRunIds — the store's own
+  // anti-resurrection record). Same gate shape as loadMessages
+  // rehydration; no gating semantics change.
+  useEffect(() => {
+    const conversationId = selectedConversationId;
+    if (!conversationId || conversationId.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)) return;
+    const lastAssistant = [...canonicalMessages].reverse().find((m) => m.role === "assistant");
+    if (!lastAssistant) return;
+    const gate = lastAssistant.pendingApproval;
+    if (!gate?.pausedRunId) return;
+    if (lastAssistant.status !== "awaiting_approval" && lastAssistant.status !== "streaming") return;
+    const exec = useExecutionStore.getState();
+    if (exec.pendingApproval) return;
+    if (exec.approvalPhase !== "idle") return;
+    if (exec.resolvedPausedRunIds.includes(gate.pausedRunId)) return;
+    exec.setPendingApproval({
+      toolId: gate.toolId,
+      reason: gate.reason,
+      pausedRunId: gate.pausedRunId,
+      conversationId,
+      inputs: gate.inputs,
+    });
+  }, [canonicalMessages, selectedConversationId]);
 
   // Load messages for a conversation
   const loadMessages = useCallback(async (conversationId: string) => {
@@ -1073,6 +1112,7 @@ export function useCanonicalConversation({
           onOpenProjectNameDialog,
           onOpenImageStudio,
           onOpenVideoStudio,
+          onOpenMusicStudio,
           onNavigate: (url) => {
             if (typeof window !== "undefined") window.location.href = url;
           },
@@ -1084,7 +1124,10 @@ export function useCanonicalConversation({
           // P1-1: the image intent opens the Image Studio surface — it is
           // not an agent run, so the "Done · No files changed" completion
           // card must not render (it would fake a generation success).
-          suppressCompletion: intent.intent === "generate_image",
+          // generate_music opens the Music Studio the same way, so it
+          // suppresses for the same reason (ART-20261111-035).
+          suppressCompletion:
+            intent.intent === "generate_image" || intent.intent === "generate_music",
         };
       }
 
@@ -1794,7 +1837,7 @@ export function useCanonicalConversation({
         // keeps offering Stop and the UI keeps claiming "working".
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, onOpenVideoStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply, serverProjectId, userId],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, onOpenVideoStudio, onOpenMusicStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply, serverProjectId, userId],
   );
 
   // Regenerate — calls canonical regenerate API

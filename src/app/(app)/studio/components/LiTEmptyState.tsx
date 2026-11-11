@@ -19,6 +19,11 @@
  *  - The starter chips (hidden while blocked): entry hints that
  *    prime the composer via `studio:ask-litt`; nothing runs until
  *    the user sends.
+ *  - The creation-type chips (hidden while blocked, only when the
+ *    host passes `onCreateType`): the seven creation types as entry
+ *    hints into this same conversation — the retired hub page's
+ *    chips, relocated into the chat by the one-chat entry directive
+ *    (2026-11-11; ART-20261111-031).
  *  - Recent conversations, when a selector was provided.
  */
 
@@ -29,9 +34,15 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDashed,
+  Code2,
+  Gamepad2,
   Globe,
+  Image as ImageIcon,
+  Layout,
   Loader2,
+  Music,
   Palette,
+  Play,
   Plus,
   Wand2,
   Wrench,
@@ -42,6 +53,7 @@ import type {
   FirstMissionFact,
   FirstMissionLaunchpadState,
 } from "../lib/first-mission-launchpad";
+import type { StudioEntryCreateType } from "../lib/studio-destinations";
 
 const FACT_META: Record<
   FirstMissionFact["status"],
@@ -67,6 +79,26 @@ const STARTER_CHIPS: { label: string; prompt: string; icon: typeof Globe }[] = [
   { label: "Surprise me", prompt: "Surprise me — build something cool", icon: Wand2 },
 ];
 
+/**
+ * Creation-type entry hints (one-chat entry, Larry's directive
+ * 2026-11-11; ART-20261111-031). The seven types the retired hub
+ * page offered as navigation now live here, inside the one chat:
+ * selecting one sets the chat's creation context / opens the
+ * matching pane in place via `onCreateType` (the routing plan is
+ * resolved by resolveEntryCreateType in studio-destinations).
+ * Labels match the hub's chips verbatim so the entry vocabulary
+ * users learned does not change.
+ */
+const CREATE_TYPE_CHIPS: { type: StudioEntryCreateType; label: string; icon: typeof Globe }[] = [
+  { type: "website", label: "Website", icon: Layout },
+  { type: "image", label: "Image", icon: ImageIcon },
+  { type: "video", label: "Video", icon: Play },
+  { type: "music", label: "Music", icon: Music },
+  { type: "code", label: "Code", icon: Code2 },
+  { type: "design", label: "Design", icon: Palette },
+  { type: "game", label: "Game", icon: Gamepad2 },
+];
+
 function primeComposer(prompt: string) {
   window.dispatchEvent(
     new CustomEvent("studio:ask-litt", { detail: { prompt } }),
@@ -90,10 +122,18 @@ export default function LiTEmptyState({
   launchpadState,
   onPrimaryAction,
   onSelectConversation,
+  onCreateType,
 }: {
   launchpadState: FirstMissionLaunchpadState;
   onPrimaryAction: (action: FirstMissionActionId) => void;
   onSelectConversation?: (conversationId: string) => void;
+  /**
+   * Creation-type entry hints. Provided by CommandStudio (the one
+   * chat) so the seven creation types render as in-chat chips; other
+   * surfaces that render the empty state without entry routing omit
+   * it and no chips render.
+   */
+  onCreateType?: (type: StudioEntryCreateType) => void;
 }) {
   const [showChecks, setShowChecks] = useState(false);
   const action = launchpadState.primaryAction;
@@ -256,6 +296,40 @@ export default function LiTEmptyState({
               </p>
             )}
           </section>
+        )}
+
+        {!isBlocked && onCreateType && (
+          <div>
+            <div
+              className="flex w-full flex-wrap items-center gap-2"
+              role="group"
+              aria-label="Start with a type"
+              data-testid="entry-create-type-chips"
+            >
+              {CREATE_TYPE_CHIPS.map((chip) => {
+                const Icon = chip.icon;
+                return (
+                  <button
+                    key={chip.type}
+                    type="button"
+                    onClick={() => onCreateType(chip.type)}
+                    className="flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[12px] font-bold transition-all hover:-translate-y-0.5 active:scale-[0.99]"
+                    style={{
+                      borderColor: "var(--studio-border-strong)",
+                      backgroundColor: "rgba(255,255,255,0.03)",
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    <Icon size={13} style={{ color: "var(--litt-primary)" }} aria-hidden />
+                    {chip.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
+              Pick a type and its workspace opens right here in this chat.
+            </p>
+          </div>
         )}
 
         {!isBlocked && (

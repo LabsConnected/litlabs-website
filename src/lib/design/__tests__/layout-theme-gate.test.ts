@@ -17,7 +17,6 @@ import { join } from "node:path";
 const src = (rel: string): string =>
   readFileSync(join(__dirname, rel), "utf8");
 
-const LANDING = "../../../app/(app)/studio/components/StudioPrimeLanding.tsx";
 const BUILD_CONSOLE = "../../../components/dashboard/v3/BuildConsole.tsx";
 const RECENT_WORK = "../../../components/dashboard/v3/RecentWork.tsx";
 const MISSION_FORGE = "../../../app/(app)/studio/tools/MissionForge.tsx";
@@ -33,14 +32,12 @@ const COMMAND_STUDIO = "../../../app/(app)/studio/components/CommandStudio.tsx";
 const STUDIO_SHELL = "../../../app/(app)/studio/components/shell/StudioShell.tsx";
 
 describe("layout/theme gate — landing", () => {
-  it("StudioPrimeLanding consumes theme tokens and is widened", () => {
-    const s = src(LANDING);
-    expect(s).not.toContain("#0b120d");
-    expect(s).toContain("tokens.background");
-    expect(s).not.toContain("max-w-4xl");
-    expect(s).toContain("max-w-6xl");
-  });
-
+  // The StudioPrimeLanding block was removed with the component
+  // itself: the hub landing was retired by the one-chat entry
+  // directive (Larry, 2026-11-11; ART-20261111-031) — /studio now
+  // opens straight into the CommandStudio chat. BuildConsole and
+  // RecentWork remain live on the Dashboard surface, so their
+  // theme-token pins stay.
   it("BuildConsole is theme-token driven (no hard-coded dark card)", () => {
     const s = src(BUILD_CONSOLE);
     expect(s).not.toContain("rgba(38,52,18");

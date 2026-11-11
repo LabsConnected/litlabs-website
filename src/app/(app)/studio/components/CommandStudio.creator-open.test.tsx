@@ -275,7 +275,8 @@ const execState = vi.hoisted(() => {
     endRun: vi.fn(() => { state.pendingApproval = null; }),
     addEvent: vi.fn(),
     setPhase: vi.fn(),
-    setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; }),
+    // Mirrors the real store: a fresh gate mounts at approvalPhase "idle".
+    setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; state.approvalPhase = "idle"; }),
     resolveApproval: vi.fn(() => { state.pendingApproval = null; }),
     beginApprovalSubmit: vi.fn(() => { state.approvalPhase = "submitting"; }),
     approvalAccepted: vi.fn(() => { state.approvalPhase = "executing"; }),

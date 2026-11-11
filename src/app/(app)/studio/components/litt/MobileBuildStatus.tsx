@@ -13,6 +13,7 @@
 import { Activity, CheckCircle2, ChevronDown } from "lucide-react";
 import { PHASE_META } from "../MissionCards";
 import { useExecutionStore } from "../../stores/useExecutionStore";
+import { approvalAwaitingDecision } from "../../lib/approval-awaiting";
 import { useStudioAgentStore, AGENT_META } from "../../stores/useStudioAgentStore";
 
 /* ── Design tokens (literals, matching MissionCards) ───────────── */
@@ -30,6 +31,11 @@ export interface MobileBuildStatusBarProps {
 export default function MobileBuildStatusBar({ open, onOpen }: MobileBuildStatusBarProps) {
   const phase = useExecutionStore((s) => s.phase);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
+  // pendingApproval stays mounted while the resumed run executes — the
+  // badge means "a decision is waiting on YOU", so it follows the shared
+  // approvalAwaitingDecision derivation, not mere presence.
+  const approvalWaiting = approvalAwaitingDecision(pendingApproval, approvalPhase);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
@@ -111,7 +117,7 @@ export default function MobileBuildStatusBar({ open, onOpen }: MobileBuildStatus
       )}
 
       {/* Pending approval badge */}
-      {pendingApproval && (
+      {approvalWaiting && (
         <span
           data-testid="mobile-build-approval"
           style={{

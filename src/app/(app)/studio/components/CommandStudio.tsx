@@ -19,6 +19,7 @@ import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
 import { downloadProjectExport } from "../lib/export-project";
 import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 import { latestRunOutcome, latestRunActivity, projectLastRun } from "../lib/last-run-outcome";
+import { approvalAwaitingDecision } from "../lib/approval-awaiting";
 import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
@@ -101,10 +102,12 @@ import {
   mapMediaIntentToDestination,
   destinationToLegacyTool,
   resolveCreatorDestination,
+  resolveEntryCreateType,
   workspaceStageToMode,
   type StudioDestination,
   type StudioMode,
   type CreateMode,
+  type StudioEntryCreateType,
   type MoreMode,
   type MissionMode,
   type InspectorTab,
@@ -130,6 +133,7 @@ const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
 const MusicTool = dynamic(() => import("../tools/MusicTool"), { ssr: false });
+const GameCreatorEmptyState = dynamic(() => import("../tools/GameCreatorEmptyState"), { ssr: false });
 const BuilderTool = dynamic(() => import("../tools/BuilderTool"), { ssr: false });
 const StudioPreviewPanel = dynamic(() => import("./StudioPreviewPanel"), { ssr: false });
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
@@ -171,6 +175,9 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<Record<str
   video: VideoTool,
   audio: AudioTool,
   music: MusicTool,
+  // "game" has no creator implementation — it renders the honest empty
+  // state (never another creator) until a real game tool exists.
+  game: GameCreatorEmptyState,
   build: BuilderTool,
   agents: AgentTool,
   assets: GalleryTool,
@@ -360,6 +367,7 @@ function CommandStudioContent() {
    */
   const [imageStudioPrompt, setImageStudioPrompt] = useState<string | null>(null);
   const [videoStudioPrompt, setVideoStudioPrompt] = useState<string | null>(null);
+  const [musicStudioPrompt, setMusicStudioPrompt] = useState<string | null>(null);
   // Canvas-first 2-zone layout: the live preview is the Preview workspace
   // tab's StudioPreviewPanel, consuming the full workspace width. Studio
   // never reserves canvas width for a second preview column.
@@ -1226,6 +1234,35 @@ function CommandStudioContent() {
     setPendingCommand(command);
   }, [capabilities.terminalStatus, handleOpenContextInspector, handleOpenDockTab, studioShellActive, openStageSurface]);
 
+  // One-chat entry chips (Larry's directive, 2026-11-11;
+  // ART-20261111-031): the creation-type hints in the chat's empty
+  // state execute their plan IN PLACE — the user never leaves the
+  // one chat, and no second prompt ever opens. Creator plans land in
+  // the exact state the retired hub's ?creator= deep links resolved
+  // to; tool plans route through handleRouteTool like every other
+  // in-Studio route. Website is the one exception: blank-project
+  // creation (mint/reuse + pin) is owned by the page-level website
+  // start, so the chip routes through the same ?creator=website URL
+  // the hub's Website chip used — StudioHub above us performs the
+  // create and pins the project, and this surface remounts bound to
+  // it, exactly as a deep link does.
+  const handleEntryCreateType = useCallback(
+    (type: StudioEntryCreateType) => {
+      const plan = resolveEntryCreateType(type);
+      if (plan.kind === "website-start") {
+        router.replace("/studio?creator=website");
+        return;
+      }
+      if (plan.kind === "creator") {
+        setCreateMode(plan.mode);
+        setDestination("create");
+        return;
+      }
+      handleRouteTool(plan.tool);
+    },
+    [router, handleRouteTool],
+  );
+
   // P1-1: the chat image intent ("generate an image of X") opens the REAL
   // Image Studio — the create destination's ImageTool — with the user's
   // prompt prefilled. This is what "Opening the image generator." promises.
@@ -1243,12 +1280,22 @@ function CommandStudioContent() {
     setDestination("create");
   }, []);
 
+  // One-chat music flow (ART-20261111-035): the chat music intent opens
+  // the real Music Studio with the request staged — the pane itself
+  // carries no prompt box, so the staged draft is how requests arrive.
+  const handleOpenMusicStudio = useCallback((prompt: string) => {
+    setMusicStudioPrompt(prompt || null);
+    setCreateMode("music");
+    setDestination("create");
+  }, []);
+
   // A prefilled image prompt only lives while the create destination is
   // active — leaving clears it so a later Image Studio visit starts clean.
   useEffect(() => {
     if (destination !== "create") {
       setImageStudioPrompt(null);
       setVideoStudioPrompt(null);
+      setMusicStudioPrompt(null);
     }
   }, [destination]);
 
@@ -1268,6 +1315,7 @@ function CommandStudioContent() {
     onOpenProjectNameDialog: openProjectNameDialog,
     onOpenImageStudio: handleOpenImageStudio,
     onOpenVideoStudio: handleOpenVideoStudio,
+    onOpenMusicStudio: handleOpenMusicStudio,
     // The URL's explicit ?project= is authoritative the instant it's present —
     // capabilities.projectId is resolved by an async fetch that can still be
     // in flight (or, if it started before the URL param was readable, can
@@ -1579,10 +1627,13 @@ function CommandStudioContent() {
           window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "assistant" } }));
         }
         if (result.pendingApproval) {
-          // The run paused at an approval gate — it is NOT done. Surface
-          // the Live tab (where the Approve/Reject control lives) instead
-          // of showing a false "Done · No files changed" completion card.
-          setLittActiveTab("live");
+          // The run paused at an approval gate — it is NOT done. Keep the
+          // user on the Chat tab: the actionable ApprovalCard is pinned
+          // in the chat transcript right above the composer (Larry's
+          // approve-in-chat directive, 2026-11-11 — never send the user
+          // hunting for Approve in the Activity/Live tab while the run
+          // waits). Still no false "Done · No files changed" card.
+          setLittActiveTab("chat");
           if (isMobileLitt) {
             setMobileLittOpen(true);
           } else if (studioShellActive) {
@@ -1735,6 +1786,11 @@ function CommandStudioContent() {
         // produced this gate — not whatever happens to be selected now.
         conversationId: opts.conversationId,
       });
+      // The fresh gate's card lives in the chat transcript — land the
+      // user there, wherever the decision was made from (approve-in-chat
+      // directive, 2026-11-11; supersedes the old "stays on Live so the
+      // fresh card is visible" behavior).
+      setLittActiveTab("chat");
       return;
     }
     setLittActiveTab("chat");
@@ -2557,6 +2613,9 @@ function CommandStudioContent() {
       if (createMode === "audio") return "audio";
       if (createMode === "music") return "music";
       if (createMode === "environment") return "space";
+      // Game must NOT fall through to the Image studio (the silent swap
+      // ART-20261111-035 removes): it resolves to its own honest surface.
+      if (createMode === "game") return "game";
       return "image";
     }
     if (destination === "assets") return "assets";
@@ -2803,6 +2862,7 @@ function CommandStudioContent() {
         onSelectConversation={handleSelectConversation}
         launchpadState={launchpadState}
         onFirstMissionAction={handleFirstMissionAction}
+        onCreateTypeAction={handleEntryCreateType}
         completion={completion}
         onDismissCompletion={() => setCompletion(null)}
         onUndoCompletion={handleUndoCompletion}
@@ -3151,6 +3211,7 @@ function CommandStudioContent() {
       >
         {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
         <CommandStudioHeader
+          viewedProjectId={activeProjectId ?? capabilities.projectId}
           onPreviewAction={handlePreview}
           onToggleDockAction={handleToggleDock}
           onOpenDockTabAction={handleOpenDockTab}
@@ -3180,7 +3241,11 @@ function CommandStudioContent() {
           mutationActionsAllowed={launchpadState.mutationActionsAllowed}
           capabilities={capabilities}
           busy={conversation.busy}
-          approvalPending={Boolean(pendingApproval)}
+          // Shared derivation (lib/approval-awaiting): a gate whose
+          // decision already landed (submitting/executing) is not
+          // "Approval needed" anymore, even though pendingApproval
+          // stays mounted while the resumed run executes.
+          approvalPending={approvalAwaitingDecision(pendingApproval, approvalPhase)}
           lastRunFailed={lastRunFailed}
           executionMode={executionMode}
           onExecutionModeChange={setExecutionMode}
@@ -3609,14 +3674,14 @@ function CommandStudioContent() {
                         <WorkspaceComponent
                           key={creatorDraftEpoch}
                           projectId={capabilities.projectId}
-                          initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : imageStudioPrompt}
+                          initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : activeLegacyTool === "music" ? musicStudioPrompt : imageStudioPrompt}
                         />
                       </StudioCreatorHost>
                     ) : (
                       <WorkspaceComponent
                         key={creatorDraftEpoch}
                         projectId={capabilities.projectId}
-                        initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : imageStudioPrompt}
+                        initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : activeLegacyTool === "music" ? musicStudioPrompt : imageStudioPrompt}
                       />
                     )}
                   </div>
@@ -4197,6 +4262,7 @@ function StudioWorkSurface({
   onSelectConversation,
   launchpadState,
   onFirstMissionAction,
+  onCreateTypeAction,
   completion,
   onDismissCompletion,
   onUndoCompletion,
@@ -4216,6 +4282,8 @@ function StudioWorkSurface({
   onSelectConversation?: (conversationId: string) => void;
   launchpadState: FirstMissionLaunchpadState;
   onFirstMissionAction: (action: FirstMissionActionId) => void;
+  /** One-chat entry chips: creation-type hints act in place. */
+  onCreateTypeAction?: (type: StudioEntryCreateType) => void;
   completion?: { changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null;
   onDismissCompletion?: () => void;
   onUndoCompletion?: () => void;
@@ -4255,6 +4323,7 @@ function StudioWorkSurface({
             launchpadState={launchpadState}
             onPrimaryAction={onFirstMissionAction}
             onSelectConversation={onSelectConversation}
+            onCreateType={onCreateTypeAction}
           />
         </div>
       ) : loading && messages.length === 0 ? (

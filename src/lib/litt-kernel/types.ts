@@ -155,6 +155,12 @@ export type LiTTControlDecision = {
     requiresPrivateData: boolean;
     requiresExecution: boolean;
     /**
+     * Execution task kind from intent classification: "inspection"
+     * when the turn is read-only workspace inspection. Optional — only
+     * set by the Kernel path, and only for inspection turns.
+     */
+    taskKind?: "inspection";
+    /**
      * Anaphoric follow-up marker from intent classification ("build it",
      * "do that again"). Optional — only set by the Kernel path.
      */
@@ -313,6 +319,16 @@ export type IntentClassification = {
   requiresCurrentInformation: boolean;
   requiresPrivateData: boolean;
   requiresExecution: boolean;
+  /**
+   * The kind of execution a turn needs, when the classifier can tell.
+   * "inspection" = read-only workspace inspection (the #905 pattern
+   * group): execution through the tool lane, but completion means the
+   * read tools answered — never a file mutation. Consumers (quality
+   * gate scope, launch-flow completion, route completion evidence)
+   * must use THIS signal rather than re-deriving read-only-ness from
+   * the message text. Unset for every other turn kind.
+   */
+  taskKind?: "inspection";
   confidence: number;
   reasoning: string;
   /**

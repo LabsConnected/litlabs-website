@@ -47,4 +47,35 @@ describe("public pages wear the light-locked design", () => {
       expect(read(page)).not.toContain("bg-[#03050a]");
     }
   });
+
+  it("hire and showcase public pages wear the light-locked scope", () => {
+    const pages = [
+      "src/app/(app)/hire/HireClient.tsx",
+      "src/app/(app)/showcase/[slug]/page.tsx",
+      "src/app/(app)/showcase/PublicShowcaseGallery.tsx",
+    ];
+    for (const page of pages) {
+      const src = read(page);
+      expect(src).toContain("litt-public-light");
+      expect(src).toContain("public-pages-tlc.css");
+      expect(src).not.toContain("bg-[#03050a]");
+      expect(src).not.toContain("bg-[#0a0d14]");
+      expect(src).not.toContain("text-white");
+    }
+  });
+
+  it("showcase demo accents are legible on the light theme", () => {
+    const src = read("src/app/(app)/showcase/projects.ts").toLowerCase();
+    for (const neon of ["#b58cff", "#65f4ff", "#a8ff2f"]) {
+      expect(src).not.toContain(neon);
+    }
+    const gallery = read("src/app/(app)/showcase/PublicShowcaseGallery.tsx");
+    expect(gallery).not.toContain("#65f4ff");
+  });
+
+  it("docs code panels use the brand deep-green, not the old blue-black", () => {
+    const src = read("src/app/(app)/docs/_components/DocPrimitives.tsx");
+    expect(src).not.toContain("#05070d");
+    expect(src).toContain("#0b120d");
+  });
 });

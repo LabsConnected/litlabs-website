@@ -210,6 +210,111 @@ export async function createBlankProject(
   return rowToCanonical(data as StudioProjectRow);
 }
 
+/** How many candidate projects to untouched-check per reuse lookup. */
+const PROJECT_REUSE_CANDIDATE_LIMIT = 10;
+
+type ProjectActivityTable =
+  | "studio_tasks"
+  | "agent_paused_runs"
+  | "user_project_deployments";
+
+/** Count rows in an activity table for one project, fail-safe. */
+async function countProjectActivity(
+  table: ProjectActivityTable,
+  userId: string,
+  projectId: string,
+): Promise<number> {
+  const { count, error } = await supabaseAdmin
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("project_id", projectId);
+  // Unknown counts as activity: never reuse on uncertainty.
+  if (error || count === null) return Number.POSITIVE_INFINITY;
+  return count;
+}
+
+/** Count conversation messages across every conversation in a project. */
+async function countProjectMessages(
+  userId: string,
+  projectId: string,
+): Promise<number> {
+  const { data: conversations, error } = await supabaseAdmin
+    .from("studio_conversations")
+    .select("id")
+    .eq("owner_id", userId)
+    .eq("project_id", projectId);
+  if (error || !conversations) return Number.POSITIVE_INFINITY;
+  if (conversations.length === 0) return 0;
+  const { count, error: countError } = await supabaseAdmin
+    .from("studio_conversation_messages")
+    .select("id", { count: "exact", head: true })
+    .in(
+      "conversation_id",
+      conversations.map((c) => c.id as string),
+    );
+  if (countError || count === null) return Number.POSITIVE_INFINITY;
+  return count;
+}
+
+/**
+ * "Untouched" is proven, not assumed: no conversation message, no task,
+ * no agent run, and no deployment has ever touched this project. Any
+ * single hit — or any count that cannot be proven — disqualifies it.
+ */
+async function isProjectUntouched(
+  userId: string,
+  projectId: string,
+): Promise<boolean> {
+  const [messages, tasks, pausedRuns, deployments] = await Promise.all([
+    countProjectMessages(userId, projectId),
+    countProjectActivity("studio_tasks", userId, projectId),
+    countProjectActivity("agent_paused_runs", userId, projectId),
+    countProjectActivity("user_project_deployments", userId, projectId),
+  ]);
+  return messages === 0 && tasks === 0 && pausedRuns === 0 && deployments === 0;
+}
+
+/**
+ * Find an existing blank project that a fresh entry may focus instead
+ * of minting another record — the project-level equivalent of
+ * findReusableEmptyConversation. Candidates are the user's own
+ * non-system blank projects whose stored name still equals the entry
+ * name (a renamed project never matches) and whose template matches;
+ * a candidate is returned only when it is provably untouched (see
+ * isProjectUntouched). Most recently updated wins. Bounded scan,
+ * mirroring the conversation rule.
+ *
+ * This is a hygiene guard for entry flows that always ask for the
+ * same default project (e.g. the Studio Website chip's "New Website");
+ * it is NOT a general create dedupe — callers opt in explicitly, and
+ * the per-submission idempotency key guarantee is unaffected.
+ */
+export async function findReusableEmptyBlankProject(
+  userId: string,
+  input: { name: string; templateId: ProjectTemplateId },
+): Promise<CanonicalProject | null> {
+  const name = normalizeProjectName(input.name);
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("source_type", "blank")
+    .eq("is_system", false)
+    .eq("template_id", input.templateId)
+    .eq("name", name)
+    .order("updated_at", { ascending: false })
+    .limit(PROJECT_REUSE_CANDIDATE_LIMIT);
+  // A failed lookup must never fall through to a guess — no reuse.
+  if (error || !data) return null;
+  for (const row of data) {
+    if (await isProjectUntouched(userId, (row as StudioProjectRow).id)) {
+      return rowToCanonical(row as StudioProjectRow);
+    }
+  }
+  return null;
+}
+
 /**
  * Thrown when a create would violate the one-project-per-repository
  * invariant. Carries the already-connected project so callers can surface

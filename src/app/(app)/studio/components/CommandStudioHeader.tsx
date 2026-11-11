@@ -92,6 +92,7 @@ export default function CommandStudioHeader({
   runtimeLoading,
   mutationActionsAllowed = false,
   capabilities,
+  viewedProjectId,
   busy = false,
   approvalPending = false,
   lastRunFailed = false,
@@ -128,6 +129,11 @@ export default function CommandStudioHeader({
   runtimeLoading: boolean;
   mutationActionsAllowed?: boolean;
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
+  /** The project the user is viewing in Studio (URL ?project= wins, else the
+   *  resolved active project) — the same value the docked chat sends as its
+   *  viewed project. Forwarded to the Global LiTT overlay so its runs can
+   *  inherit this project's workspace through the canonical messages route. */
+  viewedProjectId?: string | null;
   /** True while an agent/conversation turn is in flight. */
   busy?: boolean;
   /** True while an approval gate is waiting on the user. */
@@ -287,7 +293,7 @@ export default function CommandStudioHeader({
       />
 
       {/* Global LiTT — persistent operator, separate from ordinary projects */}
-      <GlobalLittStudioEntry />
+      <GlobalLittStudioEntry viewedProjectId={viewedProjectId ?? null} />
 
       {/* Agent-status pill — truthful: working / approval needed / ambient runtime.
           Clicking opens the full workspace-status popover. */}

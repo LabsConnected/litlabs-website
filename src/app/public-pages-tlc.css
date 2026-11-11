@@ -7,8 +7,8 @@
 
    Two scopes:
    - `.litt-public-light` — color-scheme lock for the Tailwind-chromed pages
-     (terms, about, agents, cli). Their colors are set in classNames using
-     the same palette values as homepage-tlc.css.
+     (terms, about, agents, cli, hire, showcase). Their colors are set in
+     classNames using the same palette values as homepage-tlc.css.
    - `.litt-legal` — the var-driven legal pages (privacy, cookies). Those
      pages paint themselves from the legacy --bg-color / --text-color /
      --header-color / --link-color / --border-color / --bg-card vars, so
