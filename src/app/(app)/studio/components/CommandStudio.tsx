@@ -48,6 +48,7 @@ import StudioDock, { type StudioDockTab } from "./StudioDock";
 import { ApprovalCard } from "./ApprovalCard";
 import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
+import { StudioCommandPalette } from "./StudioCommandPalette";
 import { MobileCommandNav, type MobileStudioSurface } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
@@ -530,6 +531,24 @@ function CommandStudioContent() {
     setDockTab(tab);
     setDockOpen(true);
   }, [studioShellActive, openStageSurface]);
+
+  // ── Ctrl+K / Cmd+K command palette ────────────────────────────────
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCommandPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+  const handlePaletteTerminal = useCallback(() => handleOpenDockTab("terminal"), [handleOpenDockTab]);
+  const handlePaletteActivity = useCallback(() => handleOpenDockTab("activity"), [handleOpenDockTab]);
+  const handlePaletteFocusWorkspace = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("studio:toggle-focus-workspace"));
+  }, []);
 
   // The query string written by the state→URL effect on its last pass —
   // used by URL→state to recognize (and skip) our own echoes.
@@ -3760,6 +3779,15 @@ function CommandStudioContent() {
 
         {/* Persistent music player — survives tool switches while audio plays */}
         <PersistentMusicPlayer />
+
+        {/* Ctrl+K command palette — projects, actions, developer, media, nav */}
+        <StudioCommandPalette
+          open={commandPaletteOpen}
+          onClose={() => setCommandPaletteOpen(false)}
+          onOpenTerminal={handlePaletteTerminal}
+          onOpenActivity={handlePaletteActivity}
+          onToggleFocusWorkspace={handlePaletteFocusWorkspace}
+        />
 
         {/* Mobile work-surface dock — Chat / Preview / Files / Activity / More.
             All surfaces operate on the same mission, conversation, preview,
