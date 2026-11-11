@@ -645,3 +645,67 @@ describe("useInworldSession — TTS state machine", () => {
     }));
   });
 });
+
+describe("useInworldSession — mid-session close notification (B-04)", () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    vi.stubGlobal(
+      "navigator",
+      Object.defineProperty({}, "mediaDevices", {
+        value: {
+          getUserMedia: vi.fn(async () => makeMockStream()),
+          enumerateDevices: vi.fn(async () => []),
+        },
+        configurable: true,
+      }),
+    );
+    process.env.NEXT_PUBLIC_VOICE_WS_URL = "ws://localhost:4002/voice";
+    useVoiceStore.getState().reset();
+    useVoiceStore.setState({ activeAgent: "litt" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    delete process.env.NEXT_PUBLIC_VOICE_WS_URL;
+  });
+
+  it("calls onClose when the socket closes mid-session (network drop)", async () => {
+    const onClose = vi.fn();
+    const { result } = renderHook(() => useInworldSession({ onClose }));
+    const ws = await connectAndWait(result);
+
+    act(() => ws.__fireClose(1006, ""));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose.mock.calls[0][0]).toMatch(/connection closed/i);
+  });
+
+  it("calls onClose with the auth message on a mid-session 4001 close", async () => {
+    const onClose = vi.fn();
+    const { result } = renderHook(() => useInworldSession({ onClose }));
+    const ws = await connectAndWait(result);
+
+    act(() => ws.__fireClose(4001, "Invalid or expired token"));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose.mock.calls[0][0]).toMatch(/Authentication failed/i);
+  });
+
+  it("does NOT call onClose for an intentional client disconnect", async () => {
+    const onClose = vi.fn();
+    const { result } = renderHook(() => useInworldSession({ onClose }));
+    const ws = await connectAndWait(result);
+
+    act(() => {
+      result.current.disconnect();
+    });
+    // Browsers fire the close event asynchronously after close() — the
+    // mock's close() doesn't, so fire it manually as the browser would.
+    act(() => ws.__fireClose(1000, "Client disconnect"));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

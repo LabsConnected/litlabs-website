@@ -200,12 +200,16 @@ export default function CommandComposer({
   } = useVoiceSession();
 
   // Canonical voice pipeline: final transcript -> onSend -> speakText.
+  // The handler RETURNS its promise (B-02): VoiceSessionContext releases
+  // the "sending" state when it settles, so a failed send or a TTS-off
+  // speakText early-return can no longer wedge the mic — and a rejection
+  // surfaces there instead of being swallowed here.
   useEffect(() => {
-    setOnTurn((text) => {
-      void onSend(text).then((result) => {
-        if (result?.reply) speakText(result.reply);
-      }).catch(() => {});
-    });
+    setOnTurn((text) =>
+      onSend(text).then((result) => {
+        if (result?.reply) void speakText(result.reply);
+      }),
+    );
   }, [onSend, setOnTurn, speakText]);
 
   // Unified dictation: finalized transcripts write directly into the composer.
@@ -978,6 +982,16 @@ export default function CommandComposer({
         <div className="px-1 text-[10px] font-bold" style={{ color: "#ef4444" }} role="alert">
           {STATUS_LABELS[voiceState]}
           {errorMessage && <span className="ml-1">— {errorMessage}</span>}
+        </div>
+      )}
+
+      {/* Notice set while idle (B-11): #882's "didn't hear anything"
+          message is written to errorMessage at the moment the state
+          returns to idle — rendering errors only in error states made
+          it invisible. It clears on the next mic start. */}
+      {voiceState === "idle" && errorMessage && (
+        <div className="px-1 text-[10px] font-bold" style={{ color: "#ef4444" }} role="alert">
+          {errorMessage}
         </div>
       )}
 
