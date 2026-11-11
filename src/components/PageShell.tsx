@@ -30,7 +30,7 @@ export default function PageShell({
       className={`relative min-h-[calc(100dvh-64px)] w-full overflow-x-hidden ${className}`}
       style={{
         color: T.textColor,
-        background: `linear-gradient(180deg, ${(T.bgColor || "#050812")}d0 0%, ${(T.bgColor || "#050812")}d0 72%, #03050bd0 100%)`,
+        background: `linear-gradient(180deg, ${(T.bgColor || "#f6f9f1")}d0 0%, ${(T.bgColor || "#f6f9f1")}d0 72%, ${(T.bgColor || "#f6f9f1")}d0 100%)`,
       }}
     >
       <div
@@ -45,7 +45,7 @@ export default function PageShell({
           className="relative w-full overflow-hidden border-b px-4 py-7 sm:px-6 sm:py-9"
           style={{
             borderColor: T.borderColor + "55",
-            background: `linear-gradient(110deg, ${T.boxBg || "#080c17"}e8, ${T.bgColor || "#050812"}d8)`,
+            background: `linear-gradient(110deg, ${T.boxBg || "#ffffff"}e8, ${T.bgColor || "#f6f9f1"}d8)`,
             boxShadow: "0 18px 60px rgba(0,0,0,.18)",
           }}
         >

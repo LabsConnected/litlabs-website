@@ -115,11 +115,11 @@ export function WallpaperSection() {
             <div className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: "#a855f7" }}>
               LiTT Originals
             </div>
-            <div className="mt-1 text-sm font-bold text-white/80">
+            <div className="mt-1 text-sm font-bold text-[#0e1510]/80">
               Cinematic scenes built for your workspace
             </div>
           </div>
-          <div className="hidden text-[10px] text-white/40 sm:block">
+          <div className="hidden text-[10px] text-[#0e1510]/40 sm:block">
             Premium collection
           </div>
         </div>
@@ -143,14 +143,14 @@ export function WallpaperSection() {
 
       {/* ── My Wallpapers — custom uploads ───────────────────────────── */}
       <div
-        className="rounded-xl border border-dashed border-white/10 p-4 transition-all hover:border-white/20"
+        className="rounded-xl border border-dashed border-[#0e1510]/10 p-4 transition-all hover:border-[#0e1510]/20"
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
       >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-bold text-white/80">My Wallpapers</div>
-            <p className="text-[10px] text-white/40">
+            <div className="text-xs font-bold text-[#0e1510]/80">My Wallpapers</div>
+            <p className="text-[10px] text-[#0e1510]/40">
               Drag and drop or browse — JPG, PNG, WebP, AVIF up to 10 MB
             </p>
             {uploadError && (
@@ -192,7 +192,7 @@ export function WallpaperSection() {
         </div>
         {isCustom && (
           <div
-            className="mt-3 aspect-video overflow-hidden rounded-lg border border-white/5"
+            className="mt-3 aspect-video overflow-hidden rounded-lg border border-[#0e1510]/5"
             style={{
               backgroundImage: `linear-gradient(rgba(0,0,0,${overlayOpacity}), rgba(0,0,0,${overlayOpacity + 0.2})), url(${profile.customWallpaperUrl})`,
               backgroundSize: fit,
@@ -214,12 +214,12 @@ export function WallpaperSection() {
 
       {/* ── Ambient & Minimal — collapsed by default ─────────────────── */}
       <details
-        className="group rounded-xl border border-white/8"
+        className="group rounded-xl border border-[#0e1510]/8"
         style={{ backgroundColor: "rgba(255,255,255,0.02)" }}
         open={ambientOpen}
         onToggle={(e) => setAmbientOpen((e.target as HTMLDetailsElement).open)}
       >
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-xs font-black text-white/50 transition hover:text-white/70">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-xs font-black text-[#0e1510]/50 transition hover:text-[#0e1510]/70">
           <ChevronRight
             size={14}
             className="pointer-events-none transition group-open:rotate-90"
@@ -227,7 +227,7 @@ export function WallpaperSection() {
           Ambient &amp; minimal styles
           <span className="font-normal opacity-60">({ambientWallpapers.length})</span>
         </summary>
-        <div className="grid grid-cols-2 gap-3 border-t border-white/5 p-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 border-t border-[#0e1510]/5 p-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {ambientWallpapers.map((wp) => (
             <WallpaperCard
               key={wp.id}
@@ -247,7 +247,7 @@ export function WallpaperSection() {
       <div className="grid gap-4 sm:grid-cols-2">
         {/* Fit mode */}
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">
             Fit mode
           </span>
           <div className="mt-1.5 flex gap-2">
@@ -271,7 +271,7 @@ export function WallpaperSection() {
 
         {/* Background effect */}
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">
             Background effect
           </span>
           <div className="mt-1.5 flex flex-wrap gap-2">
@@ -295,7 +295,7 @@ export function WallpaperSection() {
 
         {/* Overlay darkness */}
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">
             Overlay darkness: {Math.round(overlayOpacity * 100)}%
           </span>
           <input
@@ -311,7 +311,7 @@ export function WallpaperSection() {
 
         {/* Blur */}
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">
             Background blur: {blurPx}px
           </span>
           <input
@@ -326,12 +326,12 @@ export function WallpaperSection() {
         </div>
 
         {/* Active wallpaper info */}
-        <div className="flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-3 py-2.5">
+        <div className="flex items-center justify-between rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/5 px-3 py-2.5">
           <div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[#0e1510]/40">
               Active
             </div>
-            <div className="text-xs font-bold text-white/80">
+            <div className="text-xs font-bold text-[#0e1510]/80">
               {isCustom ? "Custom upload" : activeWallpaper.name}
             </div>
           </div>
@@ -339,7 +339,7 @@ export function WallpaperSection() {
             <button
               type="button"
               onClick={handleRemove}
-              className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-bold text-white/50 transition-all hover:text-white/80"
+              className="rounded-lg border border-[#0e1510]/10 px-2.5 py-1.5 text-[10px] font-bold text-[#0e1510]/50 transition-all hover:text-[#0e1510]/80"
             >
               Remove
             </button>
@@ -413,11 +413,11 @@ function WallpaperCard({ wp, isActive, previewFailed, onSelect, onPreviewFailed,
 
       {/* Label */}
       <div className={`absolute inset-x-0 bottom-0 ${large ? "p-3" : "p-2"}`}>
-        <div className={`${large ? "text-sm" : "text-[11px]"} font-bold text-white/90`}>
+        <div className={`${large ? "text-sm" : "text-[11px]"} font-bold text-[#0e1510]/90`}>
           {wp.name}
         </div>
         {large && (
-          <div className="mt-0.5 text-[10px] text-white/60">{wp.description}</div>
+          <div className="mt-0.5 text-[10px] text-[#0e1510]/60">{wp.description}</div>
         )}
       </div>
     </button>

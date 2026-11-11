@@ -13,11 +13,11 @@ export default function NotFound() {
   return (
     <div
       className="min-h-dvh flex items-center justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-16"
-      style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}
+      style={{ backgroundColor: "#f6f9f1", color: "#0e1510" }}
     >
-      <div className="max-w-md w-full rounded-xl p-8" style={{ border: "1px solid #2a2a3a", backgroundColor: "#1a1a24" }}>
+      <div className="max-w-md w-full rounded-xl p-8" style={{ border: "1px solid #cfdec4", backgroundColor: "#ffffff" }}>
         <div className="text-center mb-6">
-          <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: "#e2e8f0" }}>
+          <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: "#0e1510" }}>
             404
           </h1>
           <p className="text-xs opacity-60">
@@ -40,7 +40,7 @@ export default function NotFound() {
           <Link
             href="/marketplace"
             className="px-4 py-2 text-xs font-bold rounded-lg hover:opacity-90 transition-opacity"
-            style={{ backgroundColor: "transparent", color: "#94a3b8", border: "1px solid #2a2a3a", textDecoration: "none" }}
+            style={{ backgroundColor: "transparent", color: "#63745f", border: "1px solid #cfdec4", textDecoration: "none" }}
           >
             Marketplace →
           </Link>

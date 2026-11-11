@@ -201,9 +201,10 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
             maxHeight: "min(70vh, 560px)",
             overflowY: "auto",
             borderRadius: 12,
-            border: "1px solid var(--studio-border, #333)",
-            background: "var(--studio-bg, #1a1a1a)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            border: "1px solid var(--studio-border, #cfdec4)",
+            background: "var(--studio-surface, #ffffff)",
+            color: "#0e1510",
+            boxShadow: "0 8px 32px rgba(14,21,16,0.18)",
             padding: 8,
             backdropFilter: "blur(12px)",
             zIndex: 10000,
@@ -240,7 +241,7 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
                   background: isActive
                     ? isZeroBits
                       ? "rgba(239,68,68,0.15)"
-                      : "rgba(168,85,247,0.15)"
+                      : "rgba(23,122,54,0.12)"
                     : "transparent",
                   color: "inherit",
                   cursor: loading ? "wait" : "pointer",
@@ -283,7 +284,7 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
               marginTop: 4,
               fontSize: 10,
               opacity: 0.4,
-              borderTop: "1px solid var(--studio-border, #333)",
+              borderTop: "1px solid var(--studio-border, #cfdec4)",
             }}
           >
             Simulation never modifies Stripe. Reload to apply.

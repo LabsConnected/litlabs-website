@@ -117,13 +117,13 @@ export function CommandBar() {
   const overlayClassName =
     "fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] bg-black/40 backdrop-blur-sm";
   const panelClassName =
-    "w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-[#13101a] shadow-2xl";
+    "w-full max-w-xl overflow-hidden rounded-2xl border border-[#0e1510]/10 bg-white shadow-2xl";
   const panelContent = (
     <>
 
             {/* Input */}
-            <div className="flex items-center gap-3 border-b border-white/5 px-4 py-3">
-              <MagnifyingGlassIcon size={18} className="text-white/30" weight="regular" />
+            <div className="flex items-center gap-3 border-b border-[#0e1510]/5 px-4 py-3">
+              <MagnifyingGlassIcon size={18} className="text-[#0e1510]/30" weight="regular" />
               <input
                 ref={inputRef}
                 type="text"
@@ -134,16 +134,16 @@ export function CommandBar() {
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder="Search or ask LiTT anything... (e.g. /deploy, make the hero purple)"
-                className="flex-1 bg-transparent text-sm text-white/80 placeholder:text-white/20 focus:outline-none"
+                className="flex-1 bg-transparent text-sm text-[#0e1510]/80 placeholder:text-[#0e1510]/20 focus:outline-none"
               />
-              <kbd className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-white/30">ESC</kbd>
+              <kbd className="rounded bg-[#0e1510]/5 px-1.5 py-0.5 text-[10px] text-[#0e1510]/30">ESC</kbd>
             </div>
 
             {/* Results */}
             <div className="max-h-[400px] overflow-y-auto p-2">
               {filtered.length === 0 ? (
                 <div className="px-3 py-8 text-center">
-                  <p className="text-sm text-white/30">
+                  <p className="text-sm text-[#0e1510]/30">
                     {query.startsWith("/") ? "Command not found" : "Press Enter to ask LiTT"}
                   </p>
                 </div>
@@ -157,19 +157,19 @@ export function CommandBar() {
                       onMouseEnter={() => setSelectedIndex(index)}
                       onClick={() => executeCommand(cmd)}
                       className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
-                        active ? "bg-[#8b5cf6]/10" : "hover:bg-white/[0.02]"
+                        active ? "bg-[#8b5cf6]/10" : "hover:bg-[#0e1510]/[0.02]"
                       }`}
                     >
                       <Icon
                         size={16}
                         weight={active ? "fill" : "regular"}
-                        className={active ? "text-[#8b5cf6]" : "text-white/40"}
+                        className={active ? "text-[#8b5cf6]" : "text-[#0e1510]/40"}
                       />
-                      <span className={`text-sm ${active ? "text-white/80" : "text-white/50"}`}>
+                      <span className={`text-sm ${active ? "text-[#0e1510]/80" : "text-[#0e1510]/50"}`}>
                         {cmd.label}
                       </span>
                       {cmd.hint && (
-                        <span className="ml-auto font-mono text-[10px] text-white/20">{cmd.hint}</span>
+                        <span className="ml-auto font-mono text-[10px] text-[#0e1510]/20">{cmd.hint}</span>
                       )}
                     </button>
                   );
@@ -178,13 +178,13 @@ export function CommandBar() {
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between border-t border-white/5 px-4 py-2">
-              <div className="flex items-center gap-3 text-[10px] text-white/20">
+            <div className="flex items-center justify-between border-t border-[#0e1510]/5 px-4 py-2">
+              <div className="flex items-center gap-3 text-[10px] text-[#0e1510]/20">
                 <span>↑↓ Navigate</span>
                 <span>↵ Select</span>
                 <span>ESC Close</span>
               </div>
-              <span className="text-[10px] text-white/20">LiTT Command Bar</span>
+              <span className="text-[10px] text-[#0e1510]/20">LiTT Command Bar</span>
             </div>
     </>
   );

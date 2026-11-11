@@ -6,7 +6,7 @@ export default function DailyMissions() {
   ];
 
   return (
-    <section className="rounded-2xl bg-white/5 border border-white/10 p-4">
+    <section className="rounded-2xl bg-[#0e1510]/5 border border-[#0e1510]/10 p-4">
       <h2 className="font-black mb-4 text-white">Daily Missions</h2>
 
       <div className="space-y-3">
@@ -18,7 +18,7 @@ export default function DailyMissions() {
         ))}
       </div>
 
-      <button className="mt-4 w-full rounded-xl bg-white/10 py-2 text-sm font-bold text-white hover:bg-white/20 transition-colors">
+      <button className="mt-4 w-full rounded-xl bg-[#0e1510]/10 py-2 text-sm font-bold text-white hover:bg-[#0e1510]/20 transition-colors">
         View All Missions
       </button>
     </section>

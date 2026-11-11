@@ -9,7 +9,7 @@ export default function StudioImagePage() {
     router.replace("/studio?tool=image");
   }, [router]);
   return (
-    <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+    <div className="min-h-screen bg-[#edf3e4] flex items-center justify-center">
       <div className="text-accent animate-pulse text-sm">
         Redirecting to Studio…
       </div>

@@ -126,7 +126,7 @@ export function Dialog({
         aria-labelledby={ariaLabel ? undefined : titleId}
         tabIndex={-1}
         className={cn(
-          "relative w-full rounded-2xl border border-white/12 bg-[#10131b] p-5 sm:p-6",
+          "relative w-full rounded-2xl border border-[#0e1510]/12 bg-white p-5 sm:p-6",
           "shadow-[0_12px_40px_rgba(0,0,0,0.55)]",
           "focus-visible:outline-none",
           sizeClasses[size],
@@ -139,7 +139,7 @@ export function Dialog({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="absolute right-3 top-3 flex h-[44px] w-[44px] items-center justify-center rounded-xl text-white/60 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+            className="absolute right-3 top-3 flex h-[44px] w-[44px] items-center justify-center rounded-xl text-[#0e1510]/60 transition-colors hover:bg-[#0e1510]/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path
@@ -184,7 +184,7 @@ export function DialogDescription({
   children: React.ReactNode;
   className?: string;
 }) {
-  return <p className={cn("mt-1.5 text-sm text-white/60", className)}>{children}</p>;
+  return <p className={cn("mt-1.5 text-sm text-[#0e1510]/60", className)}>{children}</p>;
 }
 
 export function DialogActions({

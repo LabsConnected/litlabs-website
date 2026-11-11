@@ -18,7 +18,7 @@ export default function CategoryChips() {
         {categories.map((cat) => (
           <button
             key={cat}
-            className="rounded-2xl bg-white/5 border border-white/10 py-4 text-xs font-bold text-white hover:bg-white/10 hover:border-orange-500/50 transition-all"
+            className="rounded-2xl bg-[#0e1510]/5 border border-[#0e1510]/10 py-4 text-xs font-bold text-white hover:bg-[#0e1510]/10 hover:border-orange-500/50 transition-all"
           >
             {cat}
           </button>

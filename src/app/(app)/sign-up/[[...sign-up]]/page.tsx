@@ -25,23 +25,23 @@ function SignUpContent() {
   return (
     <div
       className="min-h-dvh flex items-center justify-center px-4 py-8"
-      style={{ backgroundColor: "#0f0f14" }}
+      style={{ backgroundColor: "#f6f9f1" }}
     >
       <SignupTracker />
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1
             className="text-xl font-black tracking-tight mb-1"
-            style={{ color: "#e2e8f0" }}
+            style={{ color: "#0e1510" }}
           >
             Create your free LiTT account
           </h1>
-          <p className="text-xs opacity-70" style={{ color: "#94a3b8" }}>
+          <p className="text-xs opacity-70" style={{ color: "#63745f" }}>
             Start with {formatBits(getPlanCreditAllowance("starter"))} credits. No credit card required.
           </p>
           <p
             className="text-[11px] mt-2 leading-relaxed opacity-60"
-            style={{ color: "#94a3b8" }}
+            style={{ color: "#63745f" }}
           >
             Verify your email, land in Studio, and give LiTT your first
             mission — you&apos;ll be building in under two minutes.
@@ -50,7 +50,7 @@ function SignUpContent() {
 
         <div
           className="rounded-xl p-1"
-          style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}
+          style={{ backgroundColor: "#ffffff", border: "1px solid #cfdec4" }}
         >
           <SignUp
             forceRedirectUrl={redirectUrl}
@@ -70,35 +70,35 @@ function SignUpContent() {
                   borderRadius: "8px",
                 },
                 formFieldInput: {
-                  backgroundColor: "#0f0f14",
-                  border: "1px solid #2a2a3a",
-                  color: "#e2e8f0",
+                  backgroundColor: "#f6f9f1",
+                  border: "1px solid #cfdec4",
+                  color: "#0e1510",
                   borderRadius: "8px",
                 },
                 footerActionLink: { color: brand.primary.DEFAULT },
-                headerTitle: { color: "#e2e8f0" },
-                headerSubtitle: { color: "#94a3b8" },
+                headerTitle: { color: "#0e1510" },
+                headerSubtitle: { color: "#63745f" },
                 socialButtonsBlockButton: {
-                  border: "1px solid #2a2a3a",
+                  border: "1px solid #cfdec4",
                   backgroundColor: "transparent",
                   borderRadius: "8px",
                 },
                 card: { backgroundColor: "transparent", boxShadow: "none" },
-                formFieldLabel: { color: "#94a3b8", fontSize: "12px" },
-                identityPreviewText: { color: "#e2e8f0" },
+                formFieldLabel: { color: "#63745f", fontSize: "12px" },
+                identityPreviewText: { color: "#0e1510" },
                 alternativeMethodsBlockButton: {
-                  border: "1px solid #2a2a3a",
-                  color: "#94a3b8",
+                  border: "1px solid #cfdec4",
+                  color: "#63745f",
                   borderRadius: "8px",
                 },
               },
               variables: {
                 colorPrimary: brand.primary.DEFAULT,
-                colorBackground: "#1a1a24",
-                colorForeground: "#e2e8f0",
-                colorMutedForeground: "#94a3b8",
-                colorInput: "#0f0f14",
-                colorInputForeground: "#e2e8f0",
+                colorBackground: "#ffffff",
+                colorForeground: "#0e1510",
+                colorMutedForeground: "#63745f",
+                colorInput: "#f6f9f1",
+                colorInputForeground: "#0e1510",
                 borderRadius: "8px",
                 fontFamily: "system-ui, -apple-system, sans-serif",
               },
@@ -107,12 +107,12 @@ function SignUpContent() {
         </div>
 
         <div className="text-center mt-5 space-y-2">
-          <p className="text-[11px] opacity-60" style={{ color: "#94a3b8" }}>
+          <p className="text-[11px] opacity-60" style={{ color: "#63745f" }}>
             By signing up you agree to our{" "}
             <Link
               href="/terms"
               className="hover:opacity-100 transition-opacity underline"
-              style={{ color: "#94a3b8" }}
+              style={{ color: "#63745f" }}
             >
               Terms
             </Link>{" "}
@@ -120,7 +120,7 @@ function SignUpContent() {
             <Link
               href="/privacy"
               className="hover:opacity-100 transition-opacity underline"
-              style={{ color: "#94a3b8" }}
+              style={{ color: "#63745f" }}
             >
               Privacy Policy
             </Link>
@@ -130,7 +130,7 @@ function SignUpContent() {
             <Link
               href="/"
               className="text-[11px] opacity-70 hover:opacity-100 transition-opacity"
-              style={{ color: "#94a3b8", textDecoration: "none" }}
+              style={{ color: "#63745f", textDecoration: "none" }}
             >
               ← Back to Home
             </Link>
@@ -145,7 +145,7 @@ export default function SignUpPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-dvh" style={{ backgroundColor: "#0f0f14" }} />
+        <div className="min-h-dvh" style={{ backgroundColor: "#f6f9f1" }} />
       }
     >
       <SignUpContent />

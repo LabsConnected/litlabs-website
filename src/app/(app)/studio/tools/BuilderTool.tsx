@@ -122,12 +122,12 @@ export default function BuilderTool() {
     <div className="mx-auto flex h-full w-full max-w-7xl flex-col gap-3 overflow-auto">
       <SystemTopologyPanel />
       <div className="grid flex-1 gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="rounded-2xl border border-white/10 bg-black/30 p-4">
+        <section className="rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/5 p-4">
           <div className="mb-4 flex items-center gap-2">
             <Code2 size={16} className="text-accent" />
             <div>
               <p className="text-xs font-black uppercase tracking-wider">AI Studio</p>
-              <p className="text-[10px] text-white/50">Prompt → assets → preview → review → repair</p>
+              <p className="text-[10px] text-[#0e1510]/50">Prompt → assets → preview → review → repair</p>
             </div>
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
@@ -138,39 +138,39 @@ export default function BuilderTool() {
             ].map(([Icon, title, copy]) => {
               const I = Icon as typeof Code2;
               return (
-                <div key={String(title)} className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
+                <div key={String(title)} className="rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/[0.035] p-3">
                   <I size={15} className="mb-2 text-accent" />
                   <p className="text-xs font-bold">{String(title)}</p>
-                  <p className="mt-1 text-[10px] text-white/50">{String(copy)}</p>
+                  <p className="mt-1 text-[10px] text-[#0e1510]/50">{String(copy)}</p>
                 </div>
               );
             })}
           </div>
 
-          <div className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="mt-4 grid gap-3 rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/[0.03] p-4">
             <div className="grid gap-2 md:grid-cols-2">
-              <label className="grid gap-1 text-xs text-white/70">
+              <label className="grid gap-1 text-xs text-[#0e1510]/70">
                 <span className="flex items-center justify-between">
                   Project
                   <button
                     type="button"
                     onClick={() => void refreshProjects()}
-                    className="inline-flex items-center gap-1 text-[10px] text-white/40 hover:text-white/70"
+                    className="inline-flex items-center gap-1 text-[10px] text-[#0e1510]/40 hover:text-[#0e1510]/70"
                   >
                     <RefreshCw size={10} /> Refresh
                   </button>
                 </span>
                 {projectsLoading ? (
-                  <div className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/50">Loading projects…</div>
+                  <div className="rounded-lg border border-[#0e1510]/10 bg-[#0e1510]/5 px-3 py-2 text-xs text-[#0e1510]/50">Loading projects…</div>
                 ) : projects.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-white/10 bg-black/40 px-3 py-2 text-xs text-white/40">
+                  <div className="rounded-lg border border-dashed border-[#0e1510]/10 bg-[#0e1510]/5 px-3 py-2 text-xs text-[#0e1510]/40">
                     {projectsError ? projectsError : "No projects yet — create one below."}
                   </div>
                 ) : (
                   <select
                     value={projectId}
                     onChange={(event) => setProjectId(event.target.value)}
-                    className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none"
+                    className="rounded-lg border border-[#0e1510]/10 bg-white px-3 py-2 text-xs text-white outline-none"
                   >
                     {projects.map((project) => (
                       <option key={project.id} value={project.id}>
@@ -180,49 +180,49 @@ export default function BuilderTool() {
                   </select>
                 )}
                 {selectedProject ? (
-                  <span className="text-[10px] text-white/40">
+                  <span className="text-[10px] text-[#0e1510]/40">
                     {selectedProject.framework ?? "static"} · workspace {selectedProject.workspaceStatus}
                   </span>
                 ) : null}
               </label>
-              <label className="grid gap-1 text-xs text-white/70">
+              <label className="grid gap-1 text-xs text-[#0e1510]/70">
                 Quality
-                <select value={quality} onChange={(event) => setQuality(event.target.value as typeof quality)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none">
+                <select value={quality} onChange={(event) => setQuality(event.target.value as typeof quality)} className="rounded-lg border border-[#0e1510]/10 bg-white px-3 py-2 text-xs text-white outline-none">
                   <option value="draft">Draft</option>
                   <option value="polished">Polished</option>
                   <option value="cinematic">Cinematic</option>
                 </select>
               </label>
-              <label className="grid gap-1 text-xs text-white/70">
+              <label className="grid gap-1 text-xs text-[#0e1510]/70">
                 Visual Source
-                <select value={visualSource} onChange={(event) => setVisualSource(event.target.value as typeof visualSource)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none">
+                <select value={visualSource} onChange={(event) => setVisualSource(event.target.value as typeof visualSource)} className="rounded-lg border border-[#0e1510]/10 bg-white px-3 py-2 text-xs text-white outline-none">
                   <option value="auto">Auto</option>
                   <option value="real-photos">Real Photos</option>
                   <option value="ai-generated">AI Generated</option>
                   <option value="project-assets">Project Assets</option>
                 </select>
               </label>
-              <label className="grid gap-1 text-xs text-white/70">
+              <label className="grid gap-1 text-xs text-[#0e1510]/70">
                 Image Source
-                <select value={imageSource} onChange={(event) => setImageSource(event.target.value as typeof imageSource)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none">
+                <select value={imageSource} onChange={(event) => setImageSource(event.target.value as typeof imageSource)} className="rounded-lg border border-[#0e1510]/10 bg-white px-3 py-2 text-xs text-white outline-none">
                   <option value="auto">Auto</option>
                   <option value="stock">Stock</option>
                   <option value="generated">Generated</option>
                   <option value="uploaded">Uploaded</option>
                 </select>
               </label>
-              <label className="grid gap-1 text-xs text-white/70 md:col-span-2">
+              <label className="grid gap-1 text-xs text-[#0e1510]/70 md:col-span-2">
                 Prompt
                 <textarea
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
                   rows={4}
-                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none"
+                  className="rounded-lg border border-[#0e1510]/10 bg-white px-3 py-2 text-xs text-white outline-none"
                 />
               </label>
-              <label className="grid gap-1 text-xs text-white/70">
+              <label className="grid gap-1 text-xs text-[#0e1510]/70">
                 Mockups
-                <select value={mockups} onChange={(event) => setMockups(event.target.value as typeof mockups)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none">
+                <select value={mockups} onChange={(event) => setMockups(event.target.value as typeof mockups)} className="rounded-lg border border-[#0e1510]/10 bg-white px-3 py-2 text-xs text-white outline-none">
                   <option value="off">Off</option>
                   <option value="browser">Browser</option>
                   <option value="mobile">Mobile</option>
@@ -239,7 +239,7 @@ export default function BuilderTool() {
             </button>
             {error ? <p className="text-xs text-red-300">{error}</p> : null}
             {result ? (
-              <div className="grid gap-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-white/75">
+              <div className="grid gap-2 rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/5 p-3 text-xs text-[#0e1510]/75">
                 <p><strong>Status:</strong> {buildStatus || "unknown"}</p>
                 <p><strong>Complete:</strong> {String(result.complete)}</p>
                 <p><strong>Repair applied:</strong> {String(result.repairApplied)}</p>
@@ -252,9 +252,9 @@ export default function BuilderTool() {
         </section>
         <aside className="space-y-3">
           <PreviewPanel status={buildStatus} previewUrl={previewUrl || null} onRefresh={() => undefined} />
-          <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+          <div className="rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/5 p-4">
             <p className="text-[9px] font-black uppercase tracking-[0.2em] text-accent">Project</p>
-            <p className="mt-2 text-[10px] leading-relaxed text-white/55">Select a project source to start building.</p>
+            <p className="mt-2 text-[10px] leading-relaxed text-[#0e1510]/55">Select a project source to start building.</p>
             <button
               onClick={() => {
                 const evt = new CustomEvent("studio:switch-tool", {
@@ -264,18 +264,18 @@ export default function BuilderTool() {
                   window.dispatchEvent(evt);
                 }
               }}
-              className="mt-4 inline-flex rounded-lg border border-white/10 px-3 py-2 text-[10px] font-bold"
+              className="mt-4 inline-flex rounded-lg border border-[#0e1510]/10 px-3 py-2 text-[10px] font-bold"
             >
               Open code workspace
             </button>
           </div>
         </aside>
       </div>
-      <section className="rounded-2xl border border-white/10 bg-black/30 p-4">
+      <section className="rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/5 p-4">
         <div className="mb-4">
           <p className="text-[9px] font-black uppercase tracking-[0.2em] text-accent">Project source</p>
           <h3 className="mt-1 text-sm font-black">Choose how to start your project</h3>
-          <p className="mt-1 text-[10px] text-white/50">GitHub, upload, template, or blank — this is the real project source used by Studio.</p>
+          <p className="mt-1 text-[10px] text-[#0e1510]/50">GitHub, upload, template, or blank — this is the real project source used by Studio.</p>
         </div>
         <ProjectSourceSelector />
       </section>

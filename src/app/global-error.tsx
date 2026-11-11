@@ -24,8 +24,8 @@ export default function GlobalError({
       </head>
       <body
         style={{
-          backgroundColor: "#0f0f14",
-          color: "#e2e8f0",
+          backgroundColor: "#f6f9f1",
+          color: "#0e1510",
           margin: 0,
           fontFamily: "system-ui, -apple-system, sans-serif",
         }}
@@ -43,8 +43,8 @@ export default function GlobalError({
             style={{
               maxWidth: 480,
               width: "100%",
-              border: "1px solid #2a2a3a",
-              backgroundColor: "#1a1a24",
+              border: "1px solid #cfdec4",
+              backgroundColor: "#ffffff",
               padding: "2rem",
               borderRadius: 12,
             }}
@@ -52,7 +52,7 @@ export default function GlobalError({
             <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
               <h1
                 style={{
-                  color: "#e2e8f0",
+                  color: "#0e1510",
                   fontSize: "1.125rem",
                   fontWeight: "bold",
                   letterSpacing: "-0.01em",
@@ -73,8 +73,8 @@ export default function GlobalError({
             </div>
             <div
               style={{
-                border: "1px solid #2a2a3a",
-                backgroundColor: "#0f0f14",
+                border: "1px solid #cfdec4",
+                backgroundColor: "#f6f9f1",
                 padding: "0.75rem",
                 marginBottom: "1.5rem",
                 fontSize: "0.625rem",
@@ -116,8 +116,8 @@ export default function GlobalError({
                   fontWeight: "bold",
                   borderRadius: 8,
                   backgroundColor: "transparent",
-                  color: "#94a3b8",
-                  border: "1px solid #2a2a3a",
+                  color: "#63745f",
+                  border: "1px solid #cfdec4",
                   textDecoration: "none",
                 }}
               >

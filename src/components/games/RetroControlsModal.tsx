@@ -291,21 +291,21 @@ export function RetroControlsModal({
       }}
     >
       <div
-        className="flex max-h-[80dvh] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-white/15 bg-[#0a0b12] shadow-2xl"
+        className="flex max-h-[80dvh] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-[#0e1510]/15 bg-[#0a0b12] shadow-2xl"
         style={{ width: "min(760px, calc(100vw - 24px))" }}
         role="dialog"
         aria-modal="true"
         aria-label={heading}
       >
         {/* Sticky title */}
-        <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-white/10 bg-[#0a0b12]/95 px-5 py-4 backdrop-blur">
+        <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-[#0e1510]/10 bg-[#0a0b12]/95 px-5 py-4 backdrop-blur">
           <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-fuchsia-400/30 bg-fuchsia-400/10">
               <Gamepad2 size={16} className="text-fuchsia-300" />
             </div>
             <div>
               <div className="text-sm font-black text-white">{heading}</div>
-              <div className="text-[10px] text-white/45">
+              <div className="text-[10px] text-[#0e1510]/45">
                 Keyboard &amp; gamepad mapping · {systemShort}
                 {detectedGamepadId ? ` · ${detectedGamepadId}` : " · no gamepad detected"}
               </div>
@@ -316,7 +316,7 @@ export function RetroControlsModal({
               cancelRemap();
               onClose();
             }}
-            className="rounded-lg p-1.5 text-white/45 transition hover:bg-white/10 hover:text-white"
+            className="rounded-lg p-1.5 text-[#0e1510]/45 transition hover:bg-[#0e1510]/10 hover:text-white"
             aria-label="Close controls"
           >
             <X size={16} />
@@ -327,16 +327,16 @@ export function RetroControlsModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {/* Controller type selector (Sega Genesis only) */}
           {isSegaGenesis && (
-            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-white/[.03] p-3">
-              <span className="text-[11px] font-bold text-white/60">Controller type:</span>
-              <div className="flex overflow-hidden rounded-lg border border-white/15">
+            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/[.03] p-3">
+              <span className="text-[11px] font-bold text-[#0e1510]/60">Controller type:</span>
+              <div className="flex overflow-hidden rounded-lg border border-[#0e1510]/15">
                 <button
                   type="button"
                   onClick={() => onControllerTypeChange("3-button")}
                   className={`px-3 py-1.5 text-[11px] font-bold transition ${
                     controllerType === "3-button"
                       ? "bg-fuchsia-500/20 text-fuchsia-200"
-                      : "text-white/55 hover:bg-white/5"
+                      : "text-[#0e1510]/55 hover:bg-[#0e1510]/5"
                   }`}
                 >
                   Genesis 3-button
@@ -347,7 +347,7 @@ export function RetroControlsModal({
                   className={`px-3 py-1.5 text-[11px] font-bold transition ${
                     controllerType === "6-button"
                       ? "bg-fuchsia-500/20 text-fuchsia-200"
-                      : "text-white/55 hover:bg-white/5"
+                      : "text-[#0e1510]/55 hover:bg-[#0e1510]/5"
                   }`}
                 >
                   Genesis 6-button
@@ -358,15 +358,15 @@ export function RetroControlsModal({
 
           {/* Compact controller diagram (Sega Genesis) */}
           {isSegaGenesis && (
-            <div className="mb-4 rounded-xl border border-white/10 bg-black/30 p-4">
-              <div className="flex flex-col items-center gap-2 font-mono text-[11px] text-white/70">
-                <div className="text-white/45">Start</div>
+            <div className="mb-4 rounded-xl border border-[#0e1510]/10 bg-black/30 p-4">
+              <div className="flex flex-col items-center gap-2 font-mono text-[11px] text-[#0e1510]/70">
+                <div className="text-[#0e1510]/45">Start</div>
                 <div className="flex gap-3">
                   {(controllerType === "6-button"
                     ? (["X", "Y", "Z"] as const)
                     : []
                   ).map((b) => (
-                    <span key={b} className="rounded border border-white/15 px-2 py-1 text-white/55">{b}</span>
+                    <span key={b} className="rounded border border-[#0e1510]/15 px-2 py-1 text-[#0e1510]/55">{b}</span>
                   ))}
                 </div>
                 <div className="flex gap-3">
@@ -374,16 +374,16 @@ export function RetroControlsModal({
                     <span key={b} className="rounded border border-fuchsia-400/30 bg-fuchsia-400/10 px-2 py-1 font-bold text-fuchsia-200">{b}</span>
                   ))}
                 </div>
-                <div className="mt-1 text-white/45">D-Pad</div>
+                <div className="mt-1 text-[#0e1510]/45">D-Pad</div>
                 {controllerType === "6-button" && (
-                  <div className="text-white/45">Mode</div>
+                  <div className="text-[#0e1510]/45">Mode</div>
                 )}
               </div>
             </div>
           )}
 
           {/* Controller layout section */}
-          <h3 className="mb-2 text-[11px] font-black uppercase tracking-wider text-white/40">
+          <h3 className="mb-2 text-[11px] font-black uppercase tracking-wider text-[#0e1510]/40">
             {profile.controllerName}
           </h3>
           <div className="space-y-1.5">
@@ -393,12 +393,12 @@ export function RetroControlsModal({
               return (
                 <div
                   key={c.id}
-                  className="flex flex-col gap-2 rounded-xl border border-white/8 bg-white/3 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-2 rounded-xl border border-[#0e1510]/8 bg-[#0e1510]/3 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-white/85">{c.label}</span>
+                    <span className="text-xs font-bold text-[#0e1510]/85">{c.label}</span>
                     {c.required && (
-                      <span className="rounded bg-white/10 px-1 text-[9px] font-bold text-white/40">required</span>
+                      <span className="rounded bg-[#0e1510]/10 px-1 text-[9px] font-bold text-[#0e1510]/40">required</span>
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -415,7 +415,7 @@ export function RetroControlsModal({
                       className={`flex min-h-[28px] items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[10px] font-bold transition ${
                         isRemapping
                           ? "border-fuchsia-400 bg-fuchsia-500/20 text-fuchsia-100 animate-pulse"
-                          : "border-white/10 bg-black/40 text-fuchsia-300 hover:border-fuchsia-400/40"
+                          : "border-[#0e1510]/10 bg-black/40 text-fuchsia-300 hover:border-fuchsia-400/40"
                       }`}
                       aria-label={isRemapping ? `Press a key for ${c.label}` : `Remap ${c.label} keyboard key`}
                     >
@@ -429,17 +429,17 @@ export function RetroControlsModal({
           </div>
 
           {/* Emulator shortcuts — separate section, never mixed with controller layout */}
-          <h3 className="mb-2 mt-5 text-[11px] font-black uppercase tracking-wider text-white/40">
+          <h3 className="mb-2 mt-5 text-[11px] font-black uppercase tracking-wider text-[#0e1510]/40">
             Emulator shortcuts
           </h3>
           <div className="space-y-1.5">
             {EMULATOR_SHORTCUTS.map((s) => (
               <div
                 key={s.id}
-                className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[.02] px-3 py-2"
+                className="flex items-center justify-between rounded-xl border border-[#0e1510]/8 bg-[#0e1510]/[.02] px-3 py-2"
               >
-                <span className="text-xs font-bold text-white/70">{s.label}</span>
-                <span className="flex items-center gap-1 rounded-md border border-white/10 bg-black/40 px-2 py-0.5 font-mono text-[10px] font-bold text-white/55">
+                <span className="text-xs font-bold text-[#0e1510]/70">{s.label}</span>
+                <span className="flex items-center gap-1 rounded-md border border-[#0e1510]/10 bg-black/40 px-2 py-0.5 font-mono text-[10px] font-bold text-[#0e1510]/55">
                   <Keyboard size={10} />
                   {s.keyboardDefault}
                 </span>
@@ -448,10 +448,10 @@ export function RetroControlsModal({
           </div>
 
           {/* Test controller — diagnostic only, does NOT alter mappings */}
-          <h3 className="mb-2 mt-5 text-[11px] font-black uppercase tracking-wider text-white/40">
+          <h3 className="mb-2 mt-5 text-[11px] font-black uppercase tracking-wider text-[#0e1510]/40">
             Test controller
           </h3>
-          <p className="mb-2 text-[10px] leading-relaxed text-white/40">
+          <p className="mb-2 text-[10px] leading-relaxed text-[#0e1510]/40">
             Press a physical button to light its semantic Sega control. This is
             diagnostic only — it never changes your mappings.
           </p>
@@ -464,7 +464,7 @@ export function RetroControlsModal({
                   className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition ${
                     isPressed
                       ? "border-emerald-400 bg-emerald-500/25 text-emerald-100 shadow-[0_0_8px_rgba(52,211,153,0.4)]"
-                      : "border-white/10 bg-white/[.02] text-white/50"
+                      : "border-[#0e1510]/10 bg-[#0e1510]/[.02] text-[#0e1510]/50"
                   }`}
                 >
                   {c.label}
@@ -475,7 +475,7 @@ export function RetroControlsModal({
 
           {/* Last-pressed mapping display: "Button N → Genesis X" */}
           {lastPressedButton != null && (
-            <div className="mt-2 rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-[10px] text-white/70">
+            <div className="mt-2 rounded-lg border border-[#0e1510]/10 bg-black/40 px-3 py-2 font-mono text-[10px] text-[#0e1510]/70">
               Button {lastPressedButton} → {gamepadToControl.get(lastPressedButton) ?? "unmapped"}
             </div>
           )}
@@ -484,27 +484,27 @@ export function RetroControlsModal({
           <button
             type="button"
             onClick={() => setShowRawInput((v) => !v)}
-            className="mt-2 min-h-[36px] rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-bold text-white/55 transition hover:bg-white/5"
+            className="mt-2 min-h-[36px] rounded-lg border border-[#0e1510]/10 px-3 py-1.5 text-[10px] font-bold text-[#0e1510]/55 transition hover:bg-[#0e1510]/5"
             aria-expanded={showRawInput}
           >
             {showRawInput ? "Hide raw input" : "Show raw input"}
           </button>
           {showRawInput && (
-            <div className="mt-2 space-y-1 rounded-lg border border-white/10 bg-black/50 p-3 font-mono text-[10px] leading-relaxed text-white/60">
+            <div className="mt-2 space-y-1 rounded-lg border border-[#0e1510]/10 bg-black/50 p-3 font-mono text-[10px] leading-relaxed text-[#0e1510]/60">
               <div>
-                <span className="text-white/40">gamepad id:</span>{" "}
+                <span className="text-[#0e1510]/40">gamepad id:</span>{" "}
                 {detectedGamepadId ?? "none"}
               </div>
               <div>
-                <span className="text-white/40">mapping type:</span>{" "}
+                <span className="text-[#0e1510]/40">mapping type:</span>{" "}
                 standard gamepad
               </div>
               <div>
-                <span className="text-white/40">pressed buttons:</span>{" "}
+                <span className="text-[#0e1510]/40">pressed buttons:</span>{" "}
                 {pressedButtons.size > 0 ? Array.from(pressedButtons).sort((a, b) => a - b).join(", ") : "—"}
               </div>
               <div>
-                <span className="text-white/40">axes:</span>{" "}
+                <span className="text-[#0e1510]/40">axes:</span>{" "}
                 {axisValues.length > 0 ? axisValues.map((v) => v.toFixed(2)).join(", ") : "—"}
               </div>
             </div>
@@ -512,11 +512,11 @@ export function RetroControlsModal({
         </div>
 
         {/* Sticky footer */}
-        <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-between gap-3 border-t border-white/10 bg-[#0a0b12]/95 px-5 py-3 backdrop-blur">
+        <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-between gap-3 border-t border-[#0e1510]/10 bg-[#0a0b12]/95 px-5 py-3 backdrop-blur">
           <button
             type="button"
             onClick={handleResetDefaults}
-            className="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-[11px] font-bold text-white/70 transition hover:bg-white/10"
+            className="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[#0e1510]/15 px-3 py-1.5 text-[11px] font-bold text-[#0e1510]/70 transition hover:bg-[#0e1510]/10"
           >
             <RotateCcw size={12} />
             Restore {isSegaGenesis ? "Sega" : profile.displayName} defaults

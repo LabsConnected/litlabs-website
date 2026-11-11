@@ -35,7 +35,7 @@ export function TopBar() {
   const status = statusConfig[littStatus];
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-white/5 bg-[#0d0a12] px-4">
+    <header className="flex h-16 items-center justify-between border-b border-[#0e1510]/5 bg-[#f2f7ea] px-4">
       {/* Left: Logo + Project Switcher */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
@@ -44,8 +44,8 @@ export function TopBar() {
         </div>
         {projectName && (
           <>
-            <div className="h-4 w-px bg-white/10" />
-            <span className="text-sm text-white/60">{projectName}</span>
+            <div className="h-4 w-px bg-[#0e1510]/10" />
+            <span className="text-sm text-[#0e1510]/60">{projectName}</span>
           </>
         )}
       </div>
@@ -54,16 +54,16 @@ export function TopBar() {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${status.color} ${littStatus === "working" ? "animate-pulse" : ""}`} />
-          <span className="text-xs text-white/60">LiTT {status.label}</span>
+          <span className="text-xs text-[#0e1510]/60">LiTT {status.label}</span>
         </div>
 
         <button
           onClick={() => toggleCommandBar()}
-          className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-1.5 text-xs text-white/40 transition-colors hover:bg-white/[0.04] hover:text-white/60"
+          className="flex items-center gap-2 rounded-lg border border-[#0e1510]/5 bg-[#0e1510]/[0.02] px-3 py-1.5 text-xs text-[#0e1510]/40 transition-colors hover:bg-[#0e1510]/[0.04] hover:text-[#0e1510]/60"
         >
           <MagnifyingGlassIcon size={14} weight="regular" />
           <span>Search or ask LiTT...</span>
-          <kbd className="ml-2 rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-white/30">⌘K</kbd>
+          <kbd className="ml-2 rounded bg-[#0e1510]/5 px-1.5 py-0.5 text-[10px] text-[#0e1510]/30">⌘K</kbd>
         </button>
       </div>
 
@@ -71,29 +71,29 @@ export function TopBar() {
       <div className="flex items-center gap-1">
         <button
           onClick={toggleLeftRail}
-          className={`rounded-md p-2 transition-colors ${leftRailOpen ? "text-white/60" : "text-white/20 hover:text-white/40"}`}
+          className={`rounded-md p-2 transition-colors ${leftRailOpen ? "text-[#0e1510]/60" : "text-[#0e1510]/20 hover:text-[#0e1510]/40"}`}
           title="Toggle Left Rail"
         >
           <SidebarSimpleIcon size={18} weight="regular" mirrored={leftRailOpen} />
         </button>
         <button
           onClick={toggleBottomDock}
-          className={`rounded-md p-2 transition-colors ${bottomDockOpen ? "text-white/60" : "text-white/20 hover:text-white/40"}`}
+          className={`rounded-md p-2 transition-colors ${bottomDockOpen ? "text-[#0e1510]/60" : "text-[#0e1510]/20 hover:text-[#0e1510]/40"}`}
           title="Toggle Bottom Dock"
         >
           <ListIcon size={18} weight="regular" />
         </button>
         <button
           onClick={toggleRightPanel}
-          className={`rounded-md p-2 transition-colors ${rightPanelOpen ? "text-white/60" : "text-white/20 hover:text-white/40"}`}
+          className={`rounded-md p-2 transition-colors ${rightPanelOpen ? "text-[#0e1510]/60" : "text-[#0e1510]/20 hover:text-[#0e1510]/40"}`}
           title="Toggle Right Inspector"
         >
           <SidebarSimpleIcon size={18} weight="regular" />
         </button>
-        <div className="mx-1 h-4 w-px bg-white/10" />
+        <div className="mx-1 h-4 w-px bg-[#0e1510]/10" />
         <button
           onClick={toggleFocusMode}
-          className={`rounded-md p-2 transition-colors ${focusMode ? "text-[#8b5cf6]" : "text-white/20 hover:text-white/40"}`}
+          className={`rounded-md p-2 transition-colors ${focusMode ? "text-[#8b5cf6]" : "text-[#0e1510]/20 hover:text-[#0e1510]/40"}`}
           title="Focus Mode (Ctrl+Shift+F)"
         >
           {focusMode ? <ArrowsInSimpleIcon size={18} weight="regular" /> : <ArrowsOutSimpleIcon size={18} weight="regular" />}

@@ -541,7 +541,7 @@ export function CodeWorkspace({
   // ─── Render ─────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
+    <div className="flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0b120d" }}>
       {/* Top bar: view toggle + repo info */}
       <div
         className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 glass-toolbar"
@@ -724,7 +724,7 @@ export function CodeWorkspace({
                       onClick={() => setActiveTab(tab.path)}
                       className="group flex shrink-0 cursor-pointer items-center gap-1.5 rounded-t px-2.5 py-1.5 text-[11px] font-medium transition"
                       style={{
-                        backgroundColor: isActive ? "#0a0b10" : "transparent",
+                        backgroundColor: isActive ? "#0b120d" : "transparent",
                         color: isActive ? "var(--text-primary)" : "var(--text-muted)",
                         borderBottom: isActive ? "2px solid #9b4dff" : "2px solid transparent",
                       }}

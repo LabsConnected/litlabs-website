@@ -369,10 +369,10 @@ export default function AgentsPageClient() {
   };
 
   return (
-    <main className="relative h-full overflow-y-auto bg-transparent pb-24 text-white">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_12%,rgba(168,255,47,.08),transparent_24%),radial-gradient(circle_at_88%_20%,rgba(169,112,255,.12),transparent_28%),radial-gradient(circle_at_50%_90%,rgba(34,211,238,.08),transparent_30%)]" />
+    <main className="relative h-full overflow-y-auto bg-transparent pb-24 text-[#0e1510]">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_12%,rgba(168,255,47,.08),transparent_24%),radial-gradient(circle_at_88%_20%,rgba(23,122,54,.12),transparent_28%),radial-gradient(circle_at_50%_90%,rgba(23,122,54,.08),transparent_30%)]" />
       <div className="relative mx-auto max-w-[1680px] space-y-3 px-2.5 py-3 sm:px-4 lg:px-5">
-        <header className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#070a12] px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,.3)]">
+        <header className="relative overflow-hidden rounded-2xl border border-[#0e1510]/10 bg-white px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,.3)]">
           <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full bg-violet-500/15 blur-3xl" />
           <div className="relative flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
             <div className="flex items-center gap-3">
@@ -384,13 +384,13 @@ export default function AgentsPageClient() {
                     {executionMode === "connected" ? "Connected runtime" : "Local draft mode"}
                   </span>
                 </div>
-                <p className="mt-0.5 text-[10px] text-white/40">LiTTree LabStudios™ · Build the crew, connect the work, run the mission.</p>
+                <p className="mt-0.5 text-[10px] text-[#0e1510]/40">LiTTree LabStudios™ · Build the crew, connect the work, run the mission.</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-xl border border-white/10 bg-white/[.035] px-3 py-2 text-[10px] text-white/45">{nodes.length} blocks · {edges.length} links</span>
-              <button onClick={saveFlow} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[.035] px-3 py-2 text-xs font-black text-white/65 hover:border-accent/40 hover:text-accent"><Save size={13} />{saved ? "Saved" : "Save"}</button>
-              <button onClick={resetFlow} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[.035] px-3 py-2 text-xs font-black text-white/65 hover:border-white/25"><RefreshCw size={13} />Reset</button>
+              <span className="rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/[.035] px-3 py-2 text-[10px] text-[#0e1510]/45">{nodes.length} blocks · {edges.length} links</span>
+              <button onClick={saveFlow} className="flex items-center gap-2 rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/[.035] px-3 py-2 text-xs font-black text-[#0e1510]/65 hover:border-accent/40 hover:text-accent"><Save size={13} />{saved ? "Saved" : "Save"}</button>
+              <button onClick={resetFlow} className="flex items-center gap-2 rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/[.035] px-3 py-2 text-xs font-black text-[#0e1510]/65 hover:border-[#0e1510]/25"><RefreshCw size={13} />Reset</button>
               <button onClick={() => void runWorkflow()} disabled={running || nodes.length < 2} className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-xs font-black text-on-accent shadow-accent-glow transition-colors hover:bg-accent-strong disabled:opacity-40">
                 {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />} Run workflow
               </button>
@@ -399,10 +399,10 @@ export default function AgentsPageClient() {
         </header>
 
         <section className="grid min-h-[600px] gap-2.5 lg:grid-cols-[190px_minmax(420px,1fr)_240px] 2xl:grid-cols-[210px_minmax(620px,1fr)_260px]">
-          <aside className="h-fit rounded-2xl border border-white/10 bg-[#070a12]/95 p-3 lg:sticky lg:top-3">
+          <aside className="h-fit rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/95 p-3 lg:sticky lg:top-3">
             <div className="flex items-center justify-between">
               <div><p className="text-[8px] font-black uppercase tracking-[.18em] text-accent">Add to mission</p><h2 className="mt-0.5 text-xs font-black">Crew & capabilities</h2></div>
-              <Plus size={16} className="text-white/35" />
+              <Plus size={16} className="text-[#0e1510]/35" />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-1.5">
               {PALETTE.map((item, index) => {
@@ -424,12 +424,12 @@ export default function AgentsPageClient() {
                       event.dataTransfer.setData("application/x-litlabs-palette", String(index));
                       event.dataTransfer.effectAllowed = "copy";
                     }}
-                    className="group flex min-h-[70px] cursor-grab flex-col items-start justify-between rounded-xl border border-white/10 bg-white/[.025] p-2 transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[.055] active:cursor-grabbing"
+                    className="group flex min-h-[70px] cursor-grab flex-col items-start justify-between rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/[.025] p-2 transition hover:-translate-y-0.5 hover:border-[#0e1510]/20 hover:bg-[#0e1510]/[.055] active:cursor-grabbing"
                     title={`Click or drag to add ${item.title}`}
                   >
                     <span className="flex w-full items-start justify-between">
                       <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border" style={{ borderColor: `${item.color}35`, backgroundColor: `${item.color}12`, color: item.color }}><Icon size={13} /></span>
-                      <span className="text-white/15 group-hover:text-white/45">+</span>
+                      <span className="text-[#0e1510]/15 group-hover:text-[#0e1510]/45">+</span>
                     </span>
                     <span className="line-clamp-2 text-[9px] font-black leading-3">{item.title}</span>
                   </div>
@@ -441,15 +441,15 @@ export default function AgentsPageClient() {
             </Link>
           </aside>
 
-          <div className="overflow-hidden rounded-3xl border border-accent/15 bg-[#050812] shadow-[inset_0_0_80px_rgba(0,0,0,.45),0_25px_80px_rgba(0,0,0,.3)]">
-            <div className="flex flex-col gap-2 border-b border-white/10 bg-black/20 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="overflow-hidden rounded-3xl border border-accent/15 bg-[#f2f7ea] shadow-[inset_0_0_80px_rgba(0,0,0,.45),0_25px_80px_rgba(0,0,0,.3)]">
+            <div className="flex flex-col gap-2 border-b border-[#0e1510]/10 bg-black/20 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 flex-1">
-                <label className="text-[8px] font-black uppercase tracking-[.18em] text-white/30">Mission name</label>
-                <input value={missionName} onChange={(event) => setMissionName(event.target.value)} className="mt-0.5 w-full bg-transparent text-xs font-black text-white outline-none placeholder:text-white/20" placeholder="Name the outcome you want…" />
+                <label className="text-[8px] font-black uppercase tracking-[.18em] text-[#0e1510]/30">Mission name</label>
+                <input value={missionName} onChange={(event) => setMissionName(event.target.value)} className="mt-0.5 w-full bg-transparent text-xs font-black text-[#0e1510] outline-none placeholder:text-[#0e1510]/20" placeholder="Name the outcome you want…" />
               </div>
               <div className="flex items-center gap-2">
-                {connectingFrom ? <span className="rounded-lg border border-accent/25 bg-accent/10 px-2.5 py-1.5 text-[9px] font-bold text-accent">Choose a target block</span> : <span className="hidden text-[9px] text-white/30 sm:block">Drag blocks · click to inspect</span>}
-                {connectingFrom && <button onClick={() => setConnectingFrom(null)} className="text-[9px] font-bold text-white/40 hover:text-white">Cancel</button>}
+                {connectingFrom ? <span className="rounded-lg border border-accent/25 bg-accent/10 px-2.5 py-1.5 text-[9px] font-bold text-accent">Choose a target block</span> : <span className="hidden text-[9px] text-[#0e1510]/30 sm:block">Drag blocks · click to inspect</span>}
+                {connectingFrom && <button onClick={() => setConnectingFrom(null)} className="text-[9px] font-bold text-[#0e1510]/40 hover:text-[#0e1510]">Cancel</button>}
               </div>
             </div>
             <div
@@ -462,10 +462,10 @@ export default function AgentsPageClient() {
               className="relative min-h-[550px] overflow-auto bg-cover bg-center"
               style={{
                 backgroundImage:
-                  "linear-gradient(105deg,rgba(3,5,11,.96),rgba(3,5,11,.72) 48%,rgba(3,5,11,.88)),url('/wallpapers/litt-afterglow.webp')",
+                  "linear-gradient(105deg,rgba(255,255,255,.97),rgba(255,255,255,.85) 48%,rgba(255,255,255,.92)),url('/wallpapers/litt-afterglow.webp')",
               }}
             >
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_48%_30%,rgba(101,244,255,.08),transparent_32%),radial-gradient(circle_at_78%_68%,rgba(169,112,255,.09),transparent_30%)]" />
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_48%_30%,rgba(23,122,54,.08),transparent_32%),radial-gradient(circle_at_78%_68%,rgba(23,122,54,.09),transparent_30%)]" />
               <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
                 <defs>
                   <linearGradient id="flow-line" x1="0" y1="0" x2="1" y2="0">
@@ -506,7 +506,7 @@ export default function AgentsPageClient() {
                       left: node.x,
                       top: node.y,
                       borderColor: isSelected || isConnecting ? `${node.color}aa` : `${node.color}45`,
-                      background: `linear-gradient(145deg, ${node.color}18, rgba(6,9,18,.96) 55%)`,
+                      background: `linear-gradient(145deg, ${node.color}18, rgba(255,255,255,.97) 55%)`,
                       boxShadow: isSelected ? `0 0 0 1px ${node.color}55, 0 0 34px ${node.color}20` : "0 18px 40px rgba(0,0,0,.32)",
                     }}
                   >
@@ -514,7 +514,7 @@ export default function AgentsPageClient() {
                       <span className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border" style={{ borderColor: `${node.color}45`, backgroundColor: `${node.color}15`, color: node.color }}>
                         {node.agentId ? <Image src={node.agentId === "spark" ? "/brand/spark-agent-hero-v2.png" : "/brand/litt-agent-hero-v2.png"} alt="" fill className="object-cover" /> : <Icon size={16} />}
                       </span>
-                      <span className="min-w-0"><span className="block truncate text-xs font-black">{node.title}</span><span className="mt-1 block line-clamp-2 text-[9px] leading-3 text-white/40">{node.subtitle}</span></span>
+                      <span className="min-w-0"><span className="block truncate text-xs font-black">{node.title}</span><span className="mt-1 block line-clamp-2 text-[9px] leading-3 text-[#0e1510]/40">{node.subtitle}</span></span>
                     </span>
                     <span className="absolute bottom-2 right-3 text-[7px] font-black uppercase tracking-widest" style={{ color: node.color }}>{node.kind}</span>
                   </button>
@@ -523,38 +523,38 @@ export default function AgentsPageClient() {
 
               {nodes.length === 0 && (
                 <div className="absolute inset-0 grid place-items-center p-8 text-center">
-                  <div><Workflow size={34} className="mx-auto text-white/15" /><h3 className="mt-3 text-sm font-black">Your forge is empty</h3><p className="mt-1 text-[10px] text-white/35">Drag LiTT and capability blocks here to begin.</p></div>
+                  <div><Workflow size={34} className="mx-auto text-[#0e1510]/15" /><h3 className="mt-3 text-sm font-black">Your forge is empty</h3><p className="mt-1 text-[10px] text-[#0e1510]/35">Drag LiTT and capability blocks here to begin.</p></div>
                 </div>
               )}
             </div>
           </div>
 
           <aside className="h-fit lg:sticky lg:top-3">
-            <section className="rounded-2xl border border-white/10 bg-[#070a12]/95 p-3.5">
-              <div className="flex items-center justify-between"><div><p className="text-[9px] font-black uppercase tracking-[.18em] text-accent">Inspector</p><h2 className="mt-1 text-sm font-black">{selected ? selected.title : "Select a block"}</h2></div><Settings2 size={15} className="text-white/30" /></div>
+            <section className="rounded-2xl border border-[#0e1510]/10 bg-[#0e1510]/95 p-3.5">
+              <div className="flex items-center justify-between"><div><p className="text-[9px] font-black uppercase tracking-[.18em] text-accent">Inspector</p><h2 className="mt-1 text-sm font-black">{selected ? selected.title : "Select a block"}</h2></div><Settings2 size={15} className="text-[#0e1510]/30" /></div>
               {selected ? (
                 <div className="mt-3 space-y-3">
                   <div>
-                    <label className="text-[8px] font-black uppercase tracking-wider text-white/30">Block name</label>
-                    <input value={selected.title} onChange={(event) => updateSelected({ title: event.target.value })} className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs font-bold outline-none focus:border-accent/50" />
+                    <label className="text-[8px] font-black uppercase tracking-wider text-[#0e1510]/30">Block name</label>
+                    <input value={selected.title} onChange={(event) => updateSelected({ title: event.target.value })} className="mt-1.5 w-full rounded-xl border border-[#0e1510]/10 bg-black/25 px-3 py-2 text-xs font-bold outline-none focus:border-accent/50" />
                   </div>
                   <div>
-                    <label className="text-[8px] font-black uppercase tracking-wider text-white/30">What it does</label>
-                    <textarea value={selected.subtitle} onChange={(event) => updateSelected({ subtitle: event.target.value })} rows={3} className="mt-1.5 w-full resize-none rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 outline-none focus:border-accent/50" />
+                    <label className="text-[8px] font-black uppercase tracking-wider text-[#0e1510]/30">What it does</label>
+                    <textarea value={selected.subtitle} onChange={(event) => updateSelected({ subtitle: event.target.value })} rows={3} className="mt-1.5 w-full resize-none rounded-xl border border-[#0e1510]/10 bg-black/25 px-3 py-2 text-xs leading-5 outline-none focus:border-accent/50" />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button onClick={() => setConnectingFrom(selected.id)} className="flex items-center justify-center gap-2 rounded-xl border border-accent/25 bg-accent/[.07] px-3 py-2.5 text-[9px] font-black text-accent hover:border-accent/50"><Link2 size={12} /> Connect</button>
                     <button onClick={removeSelected} className="flex items-center justify-center gap-2 rounded-xl border border-rose-400/20 bg-rose-400/[.06] px-3 py-2.5 text-[9px] font-black text-rose-300 hover:border-rose-400/45"><Trash2 size={12} /> Remove</button>
-                    <button onClick={duplicateSelected} className="col-span-2 flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[.035] px-3 py-2.5 text-[9px] font-black text-white/60 hover:border-accent/40 hover:text-accent"><Plus size={12} /> Duplicate block</button>
+                    <button onClick={duplicateSelected} className="col-span-2 flex items-center justify-center gap-2 rounded-xl border border-[#0e1510]/10 bg-[#0e1510]/[.035] px-3 py-2.5 text-[9px] font-black text-[#0e1510]/60 hover:border-accent/40 hover:text-accent"><Plus size={12} /> Duplicate block</button>
                   </div>
-                  <div className="rounded-2xl border border-white/8 bg-white/[.025] p-3">
-                    <div className="flex items-center justify-between text-[9px]"><span className="text-white/35">Incoming links</span><span className="font-black">{edges.filter((edge) => edge.to === selected.id).length}</span></div>
-                    <div className="mt-2 flex items-center justify-between text-[9px]"><span className="text-white/35">Outgoing links</span><span className="font-black">{edges.filter((edge) => edge.from === selected.id).length}</span></div>
-                    <div className="mt-2 flex items-center justify-between text-[9px]"><span className="text-white/35">Runtime</span><span className="font-black text-emerald-300">Ready</span></div>
+                  <div className="rounded-2xl border border-[#0e1510]/8 bg-[#0e1510]/[.025] p-3">
+                    <div className="flex items-center justify-between text-[9px]"><span className="text-[#0e1510]/35">Incoming links</span><span className="font-black">{edges.filter((edge) => edge.to === selected.id).length}</span></div>
+                    <div className="mt-2 flex items-center justify-between text-[9px]"><span className="text-[#0e1510]/35">Outgoing links</span><span className="font-black">{edges.filter((edge) => edge.from === selected.id).length}</span></div>
+                    <div className="mt-2 flex items-center justify-between text-[9px]"><span className="text-[#0e1510]/35">Runtime</span><span className="font-black text-emerald-300">Ready</span></div>
                   </div>
                   {(edges.some((edge) => edge.from === selected.id || edge.to === selected.id)) && (
                     <div>
-                      <div className="mb-2 text-[8px] font-black uppercase tracking-wider text-white/30">Connections</div>
+                      <div className="mb-2 text-[8px] font-black uppercase tracking-wider text-[#0e1510]/30">Connections</div>
                       <div className="space-y-1.5">
                         {edges
                           .filter((edge) => edge.from === selected.id || edge.to === selected.id)
@@ -562,9 +562,9 @@ export default function AgentsPageClient() {
                             const peerId = edge.from === selected.id ? edge.to : edge.from;
                             const peer = nodes.find((node) => node.id === peerId);
                             return (
-                              <div key={edge.id} className="flex items-center gap-2 rounded-xl border border-white/8 bg-black/20 px-2.5 py-2 text-[9px]">
+                              <div key={edge.id} className="flex items-center gap-2 rounded-xl border border-[#0e1510]/8 bg-black/20 px-2.5 py-2 text-[9px]">
                                 <Link2 size={10} className="text-accent" />
-                                <span className="min-w-0 flex-1 truncate text-white/55">
+                                <span className="min-w-0 flex-1 truncate text-[#0e1510]/55">
                                   {edge.from === selected.id ? "To" : "From"} {peer?.title || "Unknown block"}
                                 </span>
                                 <button onClick={() => removeEdge(edge.id)} className="rounded-lg p-1 text-rose-300/60 hover:bg-rose-400/10 hover:text-rose-300" aria-label={`Remove connection with ${peer?.title || "block"}`}>
@@ -577,34 +577,34 @@ export default function AgentsPageClient() {
                     </div>
                   )}
                 </div>
-              ) : <p className="mt-4 text-[10px] leading-5 text-white/35">Click any block on the canvas to rename it, explain its job, connect it, or remove it.</p>}
+              ) : <p className="mt-4 text-[10px] leading-5 text-[#0e1510]/35">Click any block on the canvas to rename it, explain its job, connect it, or remove it.</p>}
             </section>
           </aside>
         </section>
 
-        <details className="group rounded-2xl border border-white/10 bg-[#070a12]">
+        <details className="group rounded-2xl border border-[#0e1510]/10 bg-white">
           <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><p className="text-[9px] font-black uppercase tracking-[.18em] text-accent">{executionMode === "connected" ? "Real mission activity" : "Local mission drafts"}</p><h2 className="mt-1 text-sm font-black">{activeMissions.length ? `${activeMissions.length} mission${activeMissions.length === 1 ? "" : "s"} running` : executionMode === "connected" ? "Forge activity" : "Build now · connect later"}</h2></div>
           </div>
-            <span className="text-[9px] font-black text-white/35 group-open:text-accent">View activity +</span>
+            <span className="text-[9px] font-black text-[#0e1510]/35 group-open:text-accent">View activity +</span>
           </summary>
-          <div className="border-t border-white/8 px-4 pb-4">
+          <div className="border-t border-[#0e1510]/8 px-4 pb-4">
           {error && <div className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/[.06] px-3 py-2 text-[10px] text-rose-300">{error}</div>}
           <div className="mt-4 grid gap-2 lg:grid-cols-3">
             {loading && missions.length === 0 ? (
-              <div className="col-span-full grid min-h-24 place-items-center"><Loader2 className="animate-spin text-white/30" size={18} /></div>
+              <div className="col-span-full grid min-h-24 place-items-center"><Loader2 className="animate-spin text-[#0e1510]/30" size={18} /></div>
             ) : missions.length === 0 ? (
-              <div className="col-span-full rounded-2xl border border-dashed border-white/10 p-7 text-center"><Bot size={22} className="mx-auto text-white/15" /><p className="mt-2 text-xs font-black">No missions yet</p><p className="mt-1 text-[9px] text-white/30">Build the flow above, then press Run workflow.</p></div>
+              <div className="col-span-full rounded-2xl border border-dashed border-[#0e1510]/10 p-7 text-center"><Bot size={22} className="mx-auto text-[#0e1510]/15" /><p className="mt-2 text-xs font-black">No missions yet</p><p className="mt-1 text-[9px] text-[#0e1510]/30">Build the flow above, then press Run workflow.</p></div>
             ) : missions.slice(0, 6).map((mission) => {
               const meta = statusMeta(mission.status);
               const StatusIcon = meta.icon;
               const agent = AGENTS[mission.assigned_to];
               return (
-                <article key={mission.id} className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                <article key={mission.id} className="rounded-2xl border border-[#0e1510]/10 bg-black/20 p-3">
                   <div className="flex items-start gap-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl" style={{ color: meta.color, backgroundColor: `${meta.color}12` }}><StatusIcon size={13} className={mission.status === "processing" ? "animate-pulse" : ""} /></span>
-                    <span className="min-w-0 flex-1"><span className="block truncate text-[10px] font-black">{mission.task_input?.prompt || "Untitled mission"}</span><span className="mt-1 block text-[8px] text-white/30">{agent?.name || mission.assigned_to} · {relativeTime(mission.created_at)}</span></span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-[10px] font-black">{mission.task_input?.prompt || "Untitled mission"}</span><span className="mt-1 block text-[8px] text-[#0e1510]/30">{agent?.name || mission.assigned_to} · {relativeTime(mission.created_at)}</span></span>
                     <span className="text-[7px] font-black uppercase" style={{ color: meta.color }}>{meta.label}</span>
                   </div>
                 </article>
@@ -612,13 +612,13 @@ export default function AgentsPageClient() {
             })}
           </div>
           <div className="mt-4 flex items-center justify-between">
-            <button onClick={() => void loadMissions()} className="rounded-xl border border-white/10 p-2 text-white/40 hover:text-white" aria-label="Refresh missions"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
+            <button onClick={() => void loadMissions()} className="rounded-xl border border-[#0e1510]/10 p-2 text-[#0e1510]/40 hover:text-[#0e1510]" aria-label="Refresh missions"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
             <Link href="/studio" className="flex items-center gap-2 text-[10px] font-black text-accent">Open execution workspace <ArrowRight size={11} /></Link>
           </div>
           </div>
         </details>
 
-        <footer className="flex flex-col gap-2 border-t border-white/8 px-1 py-4 text-[9px] text-white/30 sm:flex-row sm:items-center sm:justify-between">
+        <footer className="flex flex-col gap-2 border-t border-[#0e1510]/8 px-1 py-4 text-[9px] text-[#0e1510]/30 sm:flex-row sm:items-center sm:justify-between">
           <span>© {new Date().getFullYear()} LiTTree LabStudios™. All rights reserved.</span>
           <span>LiTTree LabStudios™, LiTT™, and the LiTTree mark are trademarks of LiTTree LabStudios.</span>
         </footer>

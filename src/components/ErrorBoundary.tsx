@@ -35,8 +35,8 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
       }
 
       return (
-        <div className="min-h-dvh flex items-center justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-16" style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}>
-          <div className="max-w-md w-full rounded-xl p-8" style={{ border: "1px solid #2a2a3a", backgroundColor: "#1a1a24" }}>
+        <div className="min-h-dvh flex items-center justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-16" style={{ backgroundColor: "#f6f9f1", color: "#0e1510" }}>
+          <div className="max-w-md w-full rounded-xl p-8" style={{ border: "1px solid #cfdec4", backgroundColor: "#ffffff" }}>
             <div className="text-center mb-6">
               <AlertTriangle size={48} className="mx-auto mb-4" style={{ color: "#ef4444" }} />
               <h1 className="text-2xl font-bold mb-2">Something went wrong</h1>
@@ -49,7 +49,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
               <button
                 onClick={() => window.location.reload()}
                 className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg hover:opacity-90 transition-opacity"
-                style={{ backgroundColor: "#6366f1", color: "#fff" }}
+                style={{ backgroundColor: "#177a36", color: "#fff" }}
               >
                 <RefreshCw size={14} />
                 Try Again
@@ -57,7 +57,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
               <Link
                 href="/"
                 className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg hover:opacity-90 transition-opacity"
-                style={{ backgroundColor: "transparent", color: "#94a3b8", border: "1px solid #2a2a3a", textDecoration: "none" }}
+                style={{ backgroundColor: "transparent", color: "#63745f", border: "1px solid #cfdec4", textDecoration: "none" }}
               >
                 <Home size={14} />
                 Go Home
