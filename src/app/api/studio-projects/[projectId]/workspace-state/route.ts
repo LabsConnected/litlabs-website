@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { verifyProjectWorkspace, ProjectVerificationError } from "@/lib/projects/project-repository";
+import { getProject, verifyProjectWorkspace, ProjectVerificationError } from "@/lib/projects/project-repository";
+import { extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
 
@@ -183,8 +184,24 @@ export async function GET(
       err instanceof ProjectVerificationError &&
       (err.code === "WORKSPACE_NOT_PROVISIONED" || err.code === "WORKSPACE_NOT_READY")
     ) {
+      // Also name the underlying refusal: the project's stored
+      // workspaceError carries the terminal-server's machine code only as
+      // embedded JSON text (e.g. the fail-closed HOST_EXECUTION_DISABLED).
+      // Recovering it here gives the preview pane a reliable second
+      // channel — the preview payload threads the code only when the
+      // stored status/error still carry it, and settles code-less on
+      // real paths (same recovery the project-runtime route performs
+      // for its header state). A failed lookup must not break the
+      // fail-soft 200: the code is simply null then.
+      const project = await getProject(projectId, userId).catch(() => null);
       return NextResponse.json(
-        { code: err.code, scaffolded: false, touched: false, starterContent: false },
+        {
+          code: err.code,
+          workspaceErrorCode: extractEmbeddedErrorCode(project?.workspaceError),
+          scaffolded: false,
+          touched: false,
+          starterContent: false,
+        },
         { status: 200 },
       );
     }
