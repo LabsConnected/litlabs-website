@@ -66,6 +66,46 @@ describe("LiTTLiveActivity", () => {
     expect(screen.getByText("edit file")).toBeTruthy();
   });
 
+  // Approve-in-chat consistency (2026-11-11): the Activity card and the
+  // chat card are two views of the SAME store gate. The Activity card must
+  // show WHAT is being approved (subject from inputs) and must stop being
+  // actionable once a decision lands in chat (phase submitting/executing) —
+  // otherwise the same gate can be double-decided from the second surface.
+  it("shows the gate subject from inputs on the Activity card", () => {
+    act(() => {
+      useExecutionStore.getState().startRun();
+      useExecutionStore.getState().setPendingApproval({
+        toolId: "image.stock",
+        reason: "Mutation requires approval in ACT mode",
+        pausedRunId: "paused-1",
+        inputs: { projectId: "proj-1", query: "people enjoying food in a food court" },
+      });
+    });
+
+    render(<LiTTLiveActivity />);
+    expect(screen.getByText(/people enjoying food in a food court/)).toBeTruthy();
+  });
+
+  it("locks the Activity card once a decision is in flight from the chat card", () => {
+    const onResolveApproval = vi.fn();
+    act(() => {
+      useExecutionStore.getState().startRun();
+      useExecutionStore.getState().setPendingApproval({
+        toolId: "image.stock",
+        reason: "Mutation requires approval in ACT mode",
+        pausedRunId: "paused-1",
+        inputs: { projectId: "proj-1", query: "people enjoying food in a food court" },
+      });
+      useExecutionStore.getState().beginApprovalSubmit();
+      useExecutionStore.getState().approvalAccepted();
+    });
+
+    render(<LiTTLiveActivity onResolveApproval={onResolveApproval} />);
+    const approve = screen.getByRole("button", { name: /^approve$/i }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(screen.getByText(/Approved — running/)).toBeTruthy();
+  });
+
   it("shows checkpoint banner when checkpoint is set", () => {
     act(() => {
       useExecutionStore.getState().startRun();

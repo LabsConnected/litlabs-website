@@ -225,3 +225,135 @@ describe("GlobalLittStudioPanel composer keys + failed-run visibility (ART-20261
     await screen.findByText(/quality gate could not be satisfied/);
   });
 });
+
+describe("GlobalLittStudioPanel — approve in chat (2026-11-11 directive)", () => {
+  // Larry's rule: a run paused at a gate must be decidable IN the chat the
+  // user is looking at. The overlay used to render only the text "(Waiting
+  // for approval — open this project's chat to approve or reject.)" — the
+  // exact hunt-the-button flow he rejected. The canonical rows carry the
+  // paused run (pendingApproval incl. inputs); the panel must mount the
+  // canonical ApprovalCard and decide through the SAME approvals endpoint
+  // the docked chat uses.
+  const GATED_ROW = {
+    id: "m2",
+    role: "assistant",
+    content: "I need your approval to run image.stock.",
+    status: "awaiting_approval",
+    pendingApproval: {
+      toolId: "image.stock",
+      reason: "Mutation requires approval in ACT mode",
+      pausedRunId: "pr-overlay-1",
+      inputs: { projectId: "proj-viewed", query: "people enjoying food in a food court" },
+    },
+  };
+
+  function installGateFetchMock() {
+    const calls: FetchCall[] = [];
+    let decided: string | null = null;
+    // The returning-user open: the overlay caches its per-project
+    // conversation in localStorage, and that cached path is the one
+    // that loads the persisted thread on mount (the gate below was
+    // raised by the docked session; the overlay opens onto it).
+    localStorage.setItem(
+      "global-litt-overlay-conversation:proj-viewed",
+      JSON.stringify({ conversationId: "conv-1", revision: 2 }),
+    );
+    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const u = String(url);
+      const method = (init?.method ?? "GET").toUpperCase();
+      const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+      calls.push({ url: u, method, body });
+
+      if (u === "/api/studio/conversations" && method === "POST") {
+        return jsonResponse({ conversation: { id: "conv-1", revision: 1 }, projectId: "proj-viewed" }, 201);
+      }
+      if (u === "/api/studio/conversations/conv-1/messages" && method === "GET") {
+        if (decided) {
+          return jsonResponse({
+            messages: [
+              { id: "m1", role: "user", content: "Fix site up to look pro", status: "completed" },
+              { id: "m3", role: "assistant", content: "Done — the run finished.", status: "completed" },
+            ],
+            revision: 3,
+          });
+        }
+        return jsonResponse({
+          messages: [
+            { id: "m1", role: "user", content: "Fix site up to look pro", status: "completed" },
+            GATED_ROW,
+          ],
+          revision: 2,
+        });
+      }
+      if (u === "/api/studio/conversations/conv-1/approvals/pr-overlay-1" && method === "POST") {
+        decided = String(body?.decision ?? "");
+        return jsonResponse({ status: decided, runStatus: "processing" }, 202);
+      }
+      if (u === "/api/studio/conversations/conv-1/approvals/pr-overlay-1" && method === "GET") {
+        return jsonResponse({
+          id: "pr-overlay-1",
+          toolId: "image.stock",
+          status: "pending",
+          runStatus: null,
+          runResult: null,
+          runError: null,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${method} ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return calls;
+  }
+
+  it("renders an actionable ApprovalCard with tool + subject for a paused run — not a go-elsewhere note", async () => {
+    installGateFetchMock();
+    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+
+    const card = await screen.findByTestId("approval-card");
+    expect(card).toBeTruthy();
+    expect(screen.getByText(/people enjoying food in a food court/)).toBeTruthy();
+    expect(screen.getByTestId("approval-approve")).toBeTruthy();
+    expect(screen.getByTestId("approval-deny")).toBeTruthy();
+    expect(screen.queryByText(/open this project's chat to approve or reject/)).toBeNull();
+  });
+
+  it("rejecting posts the decision to the same approvals endpoint exactly once and the card settles", async () => {
+    const calls = installGateFetchMock();
+    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+
+    const deny = await screen.findByTestId("approval-deny");
+    fireEvent.click(deny);
+
+    await waitFor(() => {
+      const posts = calls.filter(
+        (c) => c.url === "/api/studio/conversations/conv-1/approvals/pr-overlay-1" && c.method === "POST",
+      );
+      expect(posts).toHaveLength(1);
+      expect(posts[0]?.body?.decision).toBe("rejected");
+    });
+    // The rejection settles immediately (nothing runs server-side): the
+    // thread reloads without the gate and the card is gone.
+    await screen.findByText("Done — the run finished.");
+    expect(screen.queryByTestId("approval-card")).toBeNull();
+  });
+
+  it("approving posts exactly once and the card enters the running state", async () => {
+    const calls = installGateFetchMock();
+    render(<GlobalLittStudioPanel onClose={() => {}} viewedProjectId="proj-viewed" />);
+
+    const approve = await screen.findByTestId("approval-approve");
+    fireEvent.click(approve);
+
+    await waitFor(() => {
+      const posts = calls.filter(
+        (c) => c.url === "/api/studio/conversations/conv-1/approvals/pr-overlay-1" && c.method === "POST",
+      );
+      expect(posts).toHaveLength(1);
+      expect(posts[0]?.body?.decision).toBe("approved");
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("approval-status").textContent).toMatch(/Approved — running/);
+    });
+    expect((screen.getByTestId("approval-approve") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
