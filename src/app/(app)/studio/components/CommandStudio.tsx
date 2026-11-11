@@ -19,6 +19,7 @@ import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
 import { downloadProjectExport } from "../lib/export-project";
 import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 import { latestRunOutcome, latestRunActivity, projectLastRun } from "../lib/last-run-outcome";
+import { approvalAwaitingDecision } from "../lib/approval-awaiting";
 import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
@@ -1626,10 +1627,13 @@ function CommandStudioContent() {
           window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "assistant" } }));
         }
         if (result.pendingApproval) {
-          // The run paused at an approval gate — it is NOT done. Surface
-          // the Live tab (where the Approve/Reject control lives) instead
-          // of showing a false "Done · No files changed" completion card.
-          setLittActiveTab("live");
+          // The run paused at an approval gate — it is NOT done. Keep the
+          // user on the Chat tab: the actionable ApprovalCard is pinned
+          // in the chat transcript right above the composer (Larry's
+          // approve-in-chat directive, 2026-11-11 — never send the user
+          // hunting for Approve in the Activity/Live tab while the run
+          // waits). Still no false "Done · No files changed" card.
+          setLittActiveTab("chat");
           if (isMobileLitt) {
             setMobileLittOpen(true);
           } else if (studioShellActive) {
@@ -1782,6 +1786,11 @@ function CommandStudioContent() {
         // produced this gate — not whatever happens to be selected now.
         conversationId: opts.conversationId,
       });
+      // The fresh gate's card lives in the chat transcript — land the
+      // user there, wherever the decision was made from (approve-in-chat
+      // directive, 2026-11-11; supersedes the old "stays on Live so the
+      // fresh card is visible" behavior).
+      setLittActiveTab("chat");
       return;
     }
     setLittActiveTab("chat");
@@ -3232,7 +3241,11 @@ function CommandStudioContent() {
           mutationActionsAllowed={launchpadState.mutationActionsAllowed}
           capabilities={capabilities}
           busy={conversation.busy}
-          approvalPending={Boolean(pendingApproval)}
+          // Shared derivation (lib/approval-awaiting): a gate whose
+          // decision already landed (submitting/executing) is not
+          // "Approval needed" anymore, even though pendingApproval
+          // stays mounted while the resumed run executes.
+          approvalPending={approvalAwaitingDecision(pendingApproval, approvalPhase)}
           lastRunFailed={lastRunFailed}
           executionMode={executionMode}
           onExecutionModeChange={setExecutionMode}
