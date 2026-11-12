@@ -162,4 +162,47 @@ describe("buildActionRunProjection", () => {
       message: "Railway build failed",
     });
   });
+
+  it("reconciles stale failed facets against a completed run's verdict", () => {
+    // Production run d205502f: the header read RUNTIME · COMPLETED while
+    // the Agent chip (quality verdict computed before resume evidence
+    // landed) and the Preview chip (a stale preview probe) still said
+    // failed. Facets are latest-event-wins; the settled run row is the
+    // terminal verdict and outranks superseded facet events.
+    const projection = buildActionRunProjection({
+      run: run({ status: "completed", currentActivity: "Task completed" }),
+      events: [
+        event("run.created"),
+        event("agent.started"),
+        event("tool.failed", { toolId: "preview.status", error: "Preview failed to start" }),
+        event("agent.failed", { error: "Quality gate failed: test evidence missing" }),
+        event("run.completed"),
+      ],
+      pausedRuns: [],
+    });
+
+    expect(projection.displayState).toBe("completed");
+    expect(projection.capabilities.agent.status).toBe("completed");
+    expect(projection.capabilities.preview.status).toBe("completed");
+  });
+
+  it("keeps a facet failed when its failure is the run's recorded failure", () => {
+    const projection = buildActionRunProjection({
+      run: run({
+        status: "completed",
+        failureCode: "PREVIEW_FAILED",
+        failureMessage: "Preview failed to start",
+      }),
+      events: [
+        event("agent.failed", { error: "Quality gate failed: test evidence missing" }),
+        event("preview.failed", { error: "Preview failed to start" }),
+      ],
+      pausedRuns: [],
+    });
+
+    // The preview failure is the failure the run itself recorded — it
+    // stays visible. The agent facet's unrelated stale failure does not.
+    expect(projection.capabilities.preview.status).toBe("failed");
+    expect(projection.capabilities.agent.status).toBe("completed");
+  });
 });
