@@ -1,0 +1,44 @@
+[
+  {
+    "id": "explicit-build-1",
+    "bucket": "explicit_build",
+    "expectedIntent": "mission",
+    "expectedLabel": "BUILD",
+    "prompt": "Build me a simple personal portfolio website with an index.html homepage."
+  },
+  {
+    "id": "explicit-build-2",
+    "bucket": "explicit_build",
+    "expectedIntent": "mission",
+    "expectedLabel": "BUILD",
+    "prompt": "Create a new project here and scaffold a basic Express API server."
+  },
+  {
+    "id": "normal-chat-1",
+    "bucket": "normal_conversation",
+    "expectedIntent": "chat",
+    "expectedLabel": "CHAT",
+    "prompt": "Hey, how's it going today?"
+  },
+  {
+    "id": "normal-chat-2",
+    "bucket": "normal_conversation",
+    "expectedIntent": "chat",
+    "expectedLabel": "CHAT",
+    "prompt": "What's the difference between let and const in JavaScript?"
+  },
+  {
+    "id": "ambiguous-1",
+    "bucket": "ambiguous",
+    "expectedIntent": "chat",
+    "expectedLabel": "CHAT",
+    "prompt": "I don't know, maybe we should look at this later."
+  },
+  {
+    "id": "ambiguous-2",
+    "bucket": "ambiguous",
+    "expectedIntent": "chat",
+    "expectedLabel": "CHAT",
+    "prompt": "Something's off with the thing we talked about."
+  }
+]

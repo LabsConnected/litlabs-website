@@ -1,0 +1,44 @@
+description: >
+  F3 builder-output verification — REAL end-to-end LiTT CLI. Each test
+  runs the canonical build output (`node packages/litt-cli/dist/index.js
+  ask "<prompt>"`) in a brand-new scratch project directory against PC
+  Ollama (qwen3:4b-instruct-fast, $0), then inspects the real filesystem
+  afterward. Assertions check actual persisted files, never the model's
+  own narration of what it did (F3 step 5).
+
+providers:
+  - id: file://provider/litt-e2e.cjs
+    label: litt-e2e
+
+prompts:
+  - "{{prompt}}"
+
+tests:
+  # Case 1: genuine build request. Expectation under test: a REAL
+  # successful build persists index.html. (Recorded as a finding either
+  # way — see evals/f3-routing/results/.)
+  - vars:
+      id: genuine-build
+      prompt: "Build me a simple website with a homepage index.html that says Hello World"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).newFiles.includes('index.html')"
+
+  # Case 2: non-build request. Expectation: no builder files appear.
+  - vars:
+      id: non-build-chat
+      prompt: "What's the difference between let and const in JavaScript?"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).newFiles.length === 0"
+
+  # Extra: ambiguous prompt must reach the model with the prompt text
+  # byte-for-byte intact (no paraphrase/rewrite before dispatch) — part
+  # of F3 step 3's "ambiguous -> CHAT, preserving the exact original
+  # prompt" requirement, checked against real CLI output, not a mock.
+  - vars:
+      id: ambiguous-preserves-exact-prompt
+      prompt: "Something's off with the thing we talked about."
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).rawStdoutTail.includes(\"Something's off with the thing we talked about.\")"
