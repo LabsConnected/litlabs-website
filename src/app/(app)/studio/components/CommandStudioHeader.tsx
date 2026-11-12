@@ -47,6 +47,7 @@ const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
   degraded: { color: "#e3b341", label: "Degraded" },
   unavailable: { color: "#ef4444", label: "Unavailable" },
   locked: { color: "#63745f", label: "Not configured" },
+  unknown: { color: "#8a8f98", label: "Checking" },
 };
 
 export type StudioTopBarMode = "plan" | "act" | "auto";

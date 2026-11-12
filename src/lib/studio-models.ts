@@ -147,11 +147,11 @@ export const CHAT_MODELS: StudioModel[] = [
   { id: "claude-sonnet", name: "Claude Sonnet (BYOK)", provider: "anthropic", cost: "paid", speed: "medium", icon: "🔑", category: "byok", apiModel: "claude-sonnet-4-5", description: "Provider bills you directly. No LiTT model markup.", bitsLabel: "No LiTTBits" },
 
   // ── Advanced Providers — raw provider models (collapsible) ───────
-  { id: "gemini-2.5-flash", name: "Gemini 3.6 Flash", provider: "gemini", cost: "free", speed: "fast", icon: "⚡", category: "advanced", apiModel: "gemini-2.5-flash", bitsLabel: "Included" },
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "gemini", cost: "free", speed: "fast", icon: "⚡", category: "advanced", apiModel: "gemini-2.5-flash", bitsLabel: "Included" },
   { id: "openrouter-free", name: "OpenRouter Free", provider: "openrouter", cost: "free", speed: "medium", icon: "🎁", category: "advanced", apiProvider: "openrouter-free", apiModel: "openrouter/free", bitsLabel: "Included" },
   { id: "deepseek-free", name: "Nemotron Ultra 550B", provider: "openrouter", cost: "free", speed: "medium", icon: "🐍", category: "advanced", apiProvider: "openrouter-deepseek", apiModel: "nvidia/nemotron-3-ultra-550b-a55b:free", bitsLabel: "Included" },
   { id: "llama-free", name: "Gemma 4 31B", provider: "openrouter", cost: "free", speed: "medium", icon: "🦙", category: "advanced", apiProvider: "openrouter-llama", apiModel: "google/gemma-4-31b-it:free", bitsLabel: "Included" },
-  { id: "groq-llama-70b", name: "Groq Llama 70B", provider: "groq", cost: "free", speed: "fast", icon: "🚀", category: "advanced", apiProvider: "groq", apiModel: "openai/gpt-oss-120b", bitsLabel: "Low LiTTBits" },
+  { id: "groq-llama-70b", name: "GPT-OSS 120B (Groq)", provider: "groq", cost: "free", speed: "fast", icon: "🚀", category: "advanced", apiProvider: "groq", apiModel: "openai/gpt-oss-120b", bitsLabel: "Low LiTTBits" },
   { id: "qwen-coder", name: "Nemotron Super 120B", provider: "openrouter", cost: "free", speed: "fast", icon: "⌨️", category: "advanced", apiProvider: "openrouter-qwen", apiModel: "nvidia/nemotron-3-super-120b-a12b:free", bitsLabel: "Low LiTTBits" },
   { id: "gemini-creative", name: "Gemini Creative", provider: "gemini", cost: "free", speed: "fast", icon: "🎨", category: "advanced", apiModel: "gemini-2.5-flash", bitsLabel: "Included" },
   { id: "gemini-vision", name: "Gemini Vision", provider: "gemini", cost: "free", speed: "fast", icon: "👁️", category: "advanced", apiModel: "gemini-2.5-flash", bitsLabel: "Included" },
@@ -159,8 +159,8 @@ export const CHAT_MODELS: StudioModel[] = [
 
 export const CODE_MODELS: StudioModel[] = [
   { id: "qwen-coder", name: "Qwen3 Coder", short: "Qwen", provider: "openrouter", cost: "free", speed: "fast", icon: "⌨️", apiProvider: "openrouter-qwen" },
-  { id: "gemini-flash", name: "Gemini 3.6 Flash", short: "Gemini", provider: "gemini", cost: "free", speed: "fast", icon: "⚡" },
-  { id: "groq-llama", name: "Groq Llama 70B", short: "Groq", provider: "groq", cost: "free", speed: "fast", icon: "🚀", apiProvider: "groq" },
+  { id: "gemini-flash", name: "Gemini Flash Latest", short: "Gemini", provider: "gemini", cost: "free", speed: "fast", icon: "⚡" },
+  { id: "groq-llama", name: "GPT-OSS 120B (Groq)", short: "Groq", provider: "groq", cost: "free", speed: "fast", icon: "🚀", apiProvider: "groq" },
   // BYOK only — consistent with the CHAT_MODELS entry above. Previously this
   // offered GPT-4o as a plain paid option with no `category: "byok"`, so the
   // code-model picker advertised a route that would have billed LiTT's own

@@ -12,6 +12,17 @@ import {
   formatBits,
   getPlanCreditAllowance,
 } from "@/config/plan-entitlements";
+import { PLANS, type PlanId } from "@/config/plans";
+
+/**
+ * Schema.org offer price for a plan, derived from the SAME plans config
+ * /pricing renders (PLANS[id].default_price) so the two surfaces can never
+ * drift. Cents → the bare numeric string schema.org expects:
+ * 0 → "0", 999 → "9.99", 1999 → "19.99", 3900 → "39".
+ */
+function planOfferPrice(id: PlanId): string {
+  return String((PLANS[id].default_price ?? 0) / 100);
+}
 
 // ISR — revalidate every 60s so CDN picks up new deploys without manual purge.
 export const revalidate = 60;
@@ -101,7 +112,7 @@ const homeSchema = {
         {
           "@type": "Offer",
           name: "Starter",
-          price: "0",
+          price: planOfferPrice("starter"),
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
@@ -110,7 +121,7 @@ const homeSchema = {
         {
           "@type": "Offer",
           name: "Creator Lite",
-          price: "9.99",
+          price: planOfferPrice("creator_lite"),
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
@@ -119,7 +130,7 @@ const homeSchema = {
         {
           "@type": "Offer",
           name: "Creator",
-          price: "19.99",
+          price: planOfferPrice("creator_beta"),
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
@@ -128,7 +139,7 @@ const homeSchema = {
         {
           "@type": "Offer",
           name: "Pro Builder",
-          price: "39",
+          price: planOfferPrice("pro_builder_beta"),
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:

@@ -416,7 +416,7 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
   }
 
   if (tab === "approvals") {
-    return <StudioHealthPanel mode="approvals" projectId={capabilities.projectId} refreshKey={data.workspaceRevision} />;
+    return <StudioHealthPanel mode="approvals" projectId={capabilities.projectId} conversationId={data.conversationId ?? null} refreshKey={data.workspaceRevision} />;
   }
 
   if (tab === "browser") {

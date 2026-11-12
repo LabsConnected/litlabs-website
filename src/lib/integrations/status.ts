@@ -115,6 +115,35 @@ async function testTerminalHealth(): Promise<{ serverReachable: boolean; url: st
   }
 }
 
+/**
+ * Header stats, computed FROM the integration rows so a stat can never
+ * contradict the row it summarizes:
+ * - "Platform ready" excludes rows in an error state: a present-but-invalid
+ *   key (e.g. Stripe failing its live account probe) is not ready.
+ * - "Needs config" counts EVERY unconfigured row, optionals included —
+ *   excluding category "optional" made Vercel / Cloudflare R2 / Anthropic
+ *   invisible to the header while their rows said "Not configured"
+ *   ("9 Platform ready, 0 Needs config" over three Not configured rows,
+ *   production audit 2026-11-11).
+ * - "User connected" likewise excludes error rows, and "not connected" is
+ *   the exact complement so the pair always adds up to the row count.
+ */
+export function summarizeIntegrations(integrations: IntegrationStatus[]): IntegrationStatusResponse["summary"] {
+  const userConnected = integrations.filter(
+    (i) => i.userConnected && i.state !== "error",
+  ).length;
+  return {
+    platformReady: integrations.filter(
+      (i) => i.platformConfigured && i.state !== "error",
+    ).length,
+    platformNeedsConfig: integrations.filter((i) => !i.platformConfigured).length,
+    optional: integrations.filter((i) => i.category === "optional").length,
+    userConnected,
+    userNotConnected: integrations.length - userConnected,
+    workspaceReady: integrations.filter((i) => i.workspaceReady).length,
+  };
+}
+
 export async function buildIntegrationStatus(
   userId: string | null,
 ): Promise<IntegrationStatusResponse> {
@@ -511,13 +540,8 @@ export async function buildIntegrationStatus(
     });
   }
 
-  // Summary
-  const platformReady = integrations.filter((i) => i.platformConfigured).length;
-  const platformNeedsConfig = integrations.filter((i) => !i.platformConfigured && i.category !== "optional").length;
-  const optional = integrations.filter((i) => i.category === "optional").length;
-  const userConnected = integrations.filter((i) => i.userConnected).length;
-  const userNotConnected = integrations.filter((i) => !i.userConnected).length;
-  const workspaceReady = integrations.filter((i) => i.workspaceReady).length;
+  const { platformReady, platformNeedsConfig, optional, userConnected, userNotConnected, workspaceReady } =
+    summarizeIntegrations(integrations);
 
   return {
     integrations,

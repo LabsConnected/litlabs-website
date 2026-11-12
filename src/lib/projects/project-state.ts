@@ -9,6 +9,15 @@
  * blue/purple/cyan/pink drift — lime is the brand accent.
  */
 
+import {
+  extractEmbeddedErrorCode,
+  HOST_EXECUTION_DISABLED_CODE,
+} from "@/lib/host-execution-guard";
+import {
+  HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+  HOST_EXECUTION_UNAVAILABLE_SHORT,
+} from "./runtime-state";
+
 export const STALE_PROVISIONING_MS = 30 * 60 * 1000; // 30 minutes
 
 export const LAST_OPENED_PROJECT_KEY = "litt:last-opened-project";
@@ -55,6 +64,18 @@ export function describeProjectState(
   const rt = project.runtimeStatus;
 
   if (["failed", "error"].includes(ws)) {
+    // A failure carrying HOST_EXECUTION_DISABLED is the fail-closed
+    // policy verdict for repo-backed workspaces, not a setup failure:
+    // honest copy and NO retry — re-POSTing prepare can never succeed
+    // until a verified sandbox exists.
+    if (extractEmbeddedErrorCode(project.workspaceError) === HOST_EXECUTION_DISABLED_CODE) {
+      return {
+        label: HOST_EXECUTION_UNAVAILABLE_SHORT,
+        color: AMBER,
+        detail: HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+        canRetry: false,
+      };
+    }
     return {
       label: "Setup failed",
       color: RED,

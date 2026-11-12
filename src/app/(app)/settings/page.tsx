@@ -1331,7 +1331,7 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
         <div className="space-y-1">
           {STUDIO_MODELS.map((m) => {
             const isSelected = selectedModel.id === m.id;
-            const health = providerHealth[m.provider] ?? "available";
+            const health = providerHealth[m.provider] ?? "unknown";
             const healthColor = health === "available" ? "#22c55e" : health === "degraded" ? "#f59e0b" : health === "unavailable" ? "#ef4444" : "#6b7280";
             return (
               <button
@@ -1366,7 +1366,7 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
             { name: "Groq", key: "groq" },
             { name: "OpenRouter", key: "openrouter" },
           ].map((p) => {
-            const health = providerHealth[p.key] ?? "available";
+            const health = providerHealth[p.key] ?? "unknown";
             const color = health === "available" ? "#22c55e" : health === "degraded" ? "#f59e0b" : health === "unavailable" ? "#ef4444" : "#6b7280";
             return (
               <div key={p.key} className="flex items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
@@ -1984,6 +1984,7 @@ type BillingData = {
     beta_promotional: number;
     total: number;
   } | null;
+  billingExempt?: boolean;
 };
 
 type UsageData = {
@@ -2053,6 +2054,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
   const planPrice = data?.plan?.monthlyPriceCents ?? 0;
   const isPaid = planPrice !== null && planPrice > 0;
   const balances = data?.balances;
+  const billingExempt = data?.billingExempt ?? false;
   const totalBalance = balances?.total ?? 0;
   const monthlyBalance = balances?.monthly ?? 0;
   const purchasedBalance = balances?.purchased ?? 0;
@@ -2123,12 +2125,14 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         ) : (
           <>
             <div className="rounded-xl border p-4" style={{ borderColor: `${T.accentColor}30`, backgroundColor: `${T.accentColor}08` }}>
-              <div className="text-2xl font-black" style={{ color: T.accentColor }}>{totalBalance.toLocaleString()} credits</div>
+              <div className="text-2xl font-black" style={{ color: T.accentColor }}>{billingExempt ? "DEV ∞" : `${totalBalance.toLocaleString()} credits`}</div>
               <p className="mt-1 text-xs text-white/40">
-                {betaBalance > 0 && `Includes ${betaBalance.toLocaleString()} Beta credits (no cash value)`}
-                {betaBalance === 0 && "Available balance"}
+                {billingExempt && "Owner account — billing exempt. Usage is metered; the wallet is never debited."}
+                {!billingExempt && betaBalance > 0 && `Includes ${betaBalance.toLocaleString()} Beta credits (no cash value)`}
+                {!billingExempt && betaBalance === 0 && "Available balance"}
               </p>
             </div>
+            {!billingExempt && (
             <div className="mt-3 grid grid-cols-3 gap-2">
               <div className="rounded-lg border border-white/5 bg-white/2 px-3 py-2 text-center">
                 <div className="text-sm font-bold text-white/80">{monthlyBalance.toLocaleString()}</div>
@@ -2143,7 +2147,8 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
                 <div className="text-[9px] uppercase tracking-wider text-white/40">Beta</div>
               </div>
             </div>
-            {betaBalance > 0 && (
+            )}
+            {!billingExempt && betaBalance > 0 && (
               <p className="mt-2 text-[10px] text-white/30">
                 Beta credits are consumed after paid credits. Expiration is defined per grant.
               </p>
@@ -2418,6 +2423,105 @@ function PerformanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
 
 /* ── Advanced ──────────────────────────────────────────────────────── */
 
+interface LlmHealthRouteInfo {
+  credential?: string;
+  state?: string;
+  available?: boolean;
+}
+
+const FALLBACK_PROVIDER_LABELS: Record<string, string> = {
+  gemini: "Gemini",
+  openrouter: "OpenRouter",
+  groq: "Groq",
+  mistral: "Mistral",
+  cloudflare: "Cloudflare Workers AI",
+  ollama: "Ollama (local)",
+  byok: "Your own key (BYOK)",
+  openai: "OpenAI",
+};
+
+// Which /api/llm/health `models` key names each provider's configured model.
+const FALLBACK_PROVIDER_MODEL_KEYS: Record<string, string> = {
+  gemini: "gemini",
+  openrouter: "openrouter-free",
+  groq: "groq",
+  ollama: "ollama",
+  openai: "openai",
+};
+
+/**
+ * The fallback chain, read live from /api/llm/health (the route planner's
+ * own diagnostics) instead of a hard-coded list. The previous static copy
+ * ("Gemini 2.5 Flash → Groq Llama 70B → OpenRouter Free") had the wrong
+ * order, a retired Groq model, and named the fallback Gemini model as if it
+ * were the primary. Order here is the planner's base order; per-request
+ * health, cost policy and the user's model pick can reorder or skip a rung.
+ */
+function ProviderFallbackCard() {
+  const [routes, setRoutes] = useState<Array<[string, LlmHealthRouteInfo]> | null>(null);
+  const [models, setModels] = useState<Record<string, string>>({});
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/llm/health", { cache: "no-store" })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (data.providers) {
+          setRoutes(Object.entries(data.providers as Record<string, LlmHealthRouteInfo>));
+          setModels((data.models ?? {}) as Record<string, string>);
+        } else {
+          setFailed(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <SettingsCard title="Provider fallback" description="Live AI routing order — read from the route planner">
+      {failed ? (
+        <p className="text-xs text-white/50">Live routing is unavailable right now — see AI &amp; Models for provider health.</p>
+      ) : !routes ? (
+        <p className="text-xs text-white/50">Checking live routing…</p>
+      ) : (
+        <div className="space-y-2">
+          {routes.map(([provider, route], i) => {
+            const modelKey = FALLBACK_PROVIDER_MODEL_KEYS[provider];
+            const model = modelKey ? models[modelKey] : undefined;
+            const status =
+              route.credential === "missing"
+                ? "Not configured"
+                : route.state === "disabled"
+                  ? "Unavailable (disabled)"
+                  : route.state === "cooldown"
+                    ? "Unavailable (cooldown)"
+                    : route.available === false
+                      ? "Unavailable"
+                      : route.state === "degraded"
+                        ? "Degraded"
+                        : "Ready";
+            return (
+              <div key={provider} className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
+                <span className="text-[10px] font-bold text-white/30">{i + 1}.</span>
+                <span className="text-xs font-bold text-white/80">{FALLBACK_PROVIDER_LABELS[provider] ?? provider}</span>
+                {model ? <span className="text-[10px] text-white/40">{model}</span> : null}
+                <span className="ml-auto text-[10px] font-bold text-white/50">{status}</span>
+              </div>
+            );
+          })}
+          <p className="text-[10px] text-white/35">Base order — per-request health, cost policy and your model pick can reorder or skip a rung. OpenAI runs only for entitled (LiTT-paid) requests; BYOK uses your own key.</p>
+        </div>
+      )}
+    </SettingsCard>
+  );
+}
+
 function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const { setActiveSection } = useSettingsStore();
   const [confirmResetAll, setConfirmResetAll] = useState(false);
@@ -2435,16 +2539,7 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
 
   return (
     <div className="space-y-4">
-      <SettingsCard title="Provider fallback" description="AI model fallback chain">
-        <div className="space-y-2">
-          {["Gemini 2.5 Flash", "Groq Llama 70B", "OpenRouter Free"].map((p, i) => (
-            <div key={p} className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
-              <span className="text-[10px] font-bold text-white/30">{i + 1}.</span>
-              <span className="text-xs font-bold text-white/80">{p}</span>
-            </div>
-          ))}
-        </div>
-      </SettingsCard>
+      <ProviderFallbackCard />
 
       <SettingsCard title="Diagnostics" description="Real health checks — every row opens a working surface">
         <div className="space-y-2">

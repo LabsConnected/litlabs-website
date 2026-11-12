@@ -113,7 +113,15 @@ export function auditStaticSiteHtml(html: string, files: ReadonlySet<string>): V
       } else {
         const rel = normalizeRelative(ref.src);
         const publicRel = `public/${rel}`;
-        if (!files.has(rel) && !files.has(publicRel)) {
+        if (isPlaceholderSrc(ref.src)) {
+          // A placeholder reference is unresolved BY MEANING — even when
+          // the placeholder file itself exists on disk. Production defect
+          // 2026-11-11 (LiTT Food Court): two slots shipped pointing at
+          // assets/images/placeholder.svg; the file existed, so the
+          // existence check below passed the refs as "resolved" and the
+          // quality gate saw a clean page with dark empty boxes.
+          placeholders.push(ref.src);
+        } else if (!files.has(rel) && !files.has(publicRel)) {
           broken.push(ref.src);
         }
       }
