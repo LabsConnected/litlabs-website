@@ -39,6 +39,8 @@ export default async function AgentDetailPage({
     notFound();
   }
 
+  // Founder is retired and unwired from checkout (src/config/product-truth.ts
+  // POLICY_STATUSES.founderCheckout) — no agent's minimumPlan may require it.
   const planLabel =
     agent.minimumPlan === "creator_lite"
       ? "Creator Lite"
@@ -46,9 +48,7 @@ export default async function AgentDetailPage({
         ? "Creator"
         : agent.minimumPlan === "pro_builder_beta"
           ? "Pro Builder"
-          : agent.minimumPlan === "founder"
-            ? "Founding Member"
-            : "Free";
+          : "Free";
 
   const planPrice =
     agent.minimumPlan === "creator_lite"
@@ -57,8 +57,6 @@ export default async function AgentDetailPage({
         ? "$19.99/month"
         : agent.minimumPlan === "pro_builder_beta"
           ? "$39.99/month"
-        : agent.minimumPlan === "founder"
-          ? "$149 one-time"
           : "Free";
 
   return (
