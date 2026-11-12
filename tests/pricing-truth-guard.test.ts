@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { PLANS, PLAN_LIST, formatPrice, type PlanId } from "@/config/plans";
 
@@ -68,7 +68,6 @@ describe("home ↔ pricing price unification", () => {
   });
 
   it("no user-facing surface carries a stale tier price ($79 tier or bare $19)", () => {
-    const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
     const roots = ["src/app", "src/components"];
     const files: string[] = [];
     const walk = (dir: string) => {
