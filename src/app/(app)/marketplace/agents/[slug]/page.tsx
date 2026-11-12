@@ -56,7 +56,7 @@ export default async function AgentDetailPage({
       : agent.minimumPlan === "creator_beta"
         ? "$19.99/month"
         : agent.minimumPlan === "pro_builder_beta"
-          ? "$39/month"
+          ? "$39.99/month"
         : agent.minimumPlan === "founder"
           ? "$149 one-time"
           : "Free";

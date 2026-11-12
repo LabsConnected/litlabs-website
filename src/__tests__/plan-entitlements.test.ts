@@ -5,7 +5,7 @@
  * - Starter: free, 1,500 LiTTBits ONE-TIME grant
  * - Creator Lite: $9.99/mo, LiTTBits/month TBD (0 until owner decision)
  * - Creator: $19.99/mo, 7,500 LiTTBits/month (preserved value)
- * - Pro Builder: $39/mo, 18,000 LiTTBits/month (preserved value)
+ * - Pro Builder: $39.99/mo, 18,000 LiTTBits/month (preserved value)
  * Credit amounts are preserved configuration values; profitability is
  * unverified.
  *
@@ -42,10 +42,10 @@ describe("PLAN_ENTITLEMENTS — rev-3 price sheet", () => {
     expect(PLAN_ENTITLEMENTS.creator_beta.monthlyPriceCents).toBe(1999);
   });
 
-  it("Pro Builder is $39/mo with 18,000 bits/month (40K is dead)", () => {
+  it("Pro Builder is $39.99/mo with 18,000 bits/month (40K is dead)", () => {
     expect(PLAN_ENTITLEMENTS.pro_builder_beta.monthlyBits).toBe(18000);
     expect(PLAN_ENTITLEMENTS.pro_builder_beta.oneTimeGrantBits).toBe(0);
-    expect(PLAN_ENTITLEMENTS.pro_builder_beta.monthlyPriceCents).toBe(3900);
+    expect(PLAN_ENTITLEMENTS.pro_builder_beta.monthlyPriceCents).toBe(3999);
     expect(PLAN_ENTITLEMENTS.pro_builder_beta.monthlyBits).not.toBe(40000);
   });
 

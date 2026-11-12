@@ -256,56 +256,68 @@ export const POLICY_STATUSES = {
   creditPacks: "NOT APPROVED — no catalog exists",
   monthlyRefresh: "APPROVED — per billing cycle for paid plans",
   creditExpiration: "APPROVED — monthly resets, starter/purchased do not expire",
-  founderCheckout: "RETIRED — no longer sold; $149 price object retained for historical purchases",
+  founderCheckout:
+    "RETIRED — never actually sold (owner-confirmed); $149 price and the " +
+    "Founding Member product are both archived in Stripe (active=false). " +
+    "STRIPE_PRICE_FOUNDER has been removed from the environment entirely.",
   refunds: "NO POLICY — do not promise refunds",
   automaticTax: "DISABLED — awaiting Stripe Tax configuration",
 } as const;
 
 // ---------------------------------------------------------------------------
-// Verified Stripe Catalog (as of 2026-08-04)
+// Verified Stripe Catalog (as of 2026-11-12)
 // ---------------------------------------------------------------------------
 
 /**
  * This is an inventory of Stripe state, not of what LiTT sells.
  *
- * pro_builder_beta ($39) and founder ($149) exist in LIVE Stripe at the
- * recorded prices. creator_lite ($9.99) and the repriced creator_beta
- * ($19.99) exist only in Stripe TEST mode (catalog created 2026-10-31);
- * their live price objects and the STRIPE_PRICE_CREATOR_LITE env var are
- * still pending owner provisioning — stripeStatus reflects that so no
- * report reads them as live-verified. The live creator_beta price object
- * still bills $15 until it is repointed.
+ * Rewired 2026-11-12 (issue #419): creator_lite ($9.99), creator_beta
+ * ($19.99), and pro_builder_beta ($39.99) are now the three canonical,
+ * live-mode, active plan prices in Stripe (account: Litreelabstudio).
+ * creator_lite was already its product's default price; creator_beta and
+ * pro_builder_beta were each set as their product's default price on
+ * 2026-11-12 (pro_builder_beta's $39.99 price is a newly created Price
+ * object — Stripe does not allow mutating an existing Price's amount).
+ * All three Railway env vars (STRIPE_PRICE_CREATOR_LITE,
+ * STRIPE_PRICE_CREATOR_BETA, STRIPE_PRICE_PRO_BUILDER_BETA) on the
+ * @litlabs/litt-shell production service point at these exact IDs.
  *
- * The founder entry is retained deliberately: the $149 price object still
- * exists and still backs historical purchases, so it must not be deleted.
- * What changed is that LiTT no longer offers it — PLANS.founder has no
- * stripePriceIdEnv and the retired founder plan is false, so
- * nothing can resolve a new checkout against it.
+ * The old $39.00/mo Pro, $15.00/mo Creator, duplicate $9.99/$19.99/$39.00
+ * prices on the retired membership products, and the $5/mo Starter are all
+ * archived (active=false) in Stripe. Do not resurrect or reference them.
+ *
+ * The founder entry is retained for documentation only: the $149 price
+ * object and the Founding Member product are both archived in Stripe
+ * (owner confirmed this tier was never supposed to exist), and
+ * STRIPE_PRICE_FOUNDER has been deleted from the Railway environment —
+ * there is no envVar for it anymore. The PLANS.founder definition in
+ * src/config/plans.ts stays, unrelated to Stripe catalog state, because it
+ * is load-bearing for people who already hold founder-plan entitlements.
  */
 export const VERIFIED_STRIPE_PLANS = {
   creator_lite: {
-    stripeStatus: "test_mode_pending_live",
+    stripeStatus: "exists",
     priceCents: 999,
     priceMode: "recurring" as const,
     envVar: "STRIPE_PRICE_CREATOR_LITE",
   },
   creator_beta: {
-    stripeStatus: "test_mode_pending_live",
+    stripeStatus: "exists",
     priceCents: 1999,
     priceMode: "recurring" as const,
     envVar: "STRIPE_PRICE_CREATOR_BETA",
   },
   pro_builder_beta: {
     stripeStatus: "exists",
-    priceCents: 3900,
+    priceCents: 3999,
     priceMode: "recurring" as const,
     envVar: "STRIPE_PRICE_PRO_BUILDER_BETA",
   },
   founder: {
-    stripeStatus: "exists",
+    stripeStatus: "archived",
     priceCents: 14900,
     priceMode: "one_time" as const,
-    envVar: "STRIPE_PRICE_FOUNDER",
+    envVar: null,
   },
 } as const;
 
