@@ -19,6 +19,7 @@ import {
 } from "@/lib/terminal-internal-client";
 import type { StudioProjectRow, LegacyProjectRow } from "./types";
 import { normalizeProjectName } from "./project-name";
+import { isWorkspaceSeedIdentical } from "./workspace-seed-check";
 import {
   rowToCanonical,
   legacyRowToCanonical,
@@ -257,22 +258,70 @@ async function countProjectMessages(
   return count;
 }
 
-/**
- * "Untouched" is proven, not assumed: no conversation message, no task,
- * no agent run, and no deployment has ever touched this project. Any
- * single hit — or any count that cannot be proven — disqualifies it.
- */
-async function isProjectUntouched(
+/** Activity counts for one project; unknown counts surface as Infinity. */
+interface ProjectActivityCounts {
+  messages: number;
+  tasks: number;
+  pausedRuns: number;
+  deployments: number;
+}
+
+async function getProjectActivityCounts(
   userId: string,
   projectId: string,
-): Promise<boolean> {
+): Promise<ProjectActivityCounts> {
   const [messages, tasks, pausedRuns, deployments] = await Promise.all([
     countProjectMessages(userId, projectId),
     countProjectActivity("studio_tasks", userId, projectId),
     countProjectActivity("agent_paused_runs", userId, projectId),
     countProjectActivity("user_project_deployments", userId, projectId),
   ]);
-  return messages === 0 && tasks === 0 && pausedRuns === 0 && deployments === 0;
+  return { messages, tasks, pausedRuns, deployments };
+}
+
+/**
+ * The reuse verdict for one candidate, in two tiers:
+ *
+ * 1. UNTOUCHED (the original #903 rule): zero messages, zero tasks,
+ *    zero paused runs, zero deployments — proven by counts alone.
+ * 2. ENTERED BUT CONTENTLESS: the project was entered (messages, tasks
+ *    or paused runs exist — the entry flow routes straight into chat,
+ *    so first use used to disqualify a shell forever and every
+ *    re-entry minted another duplicate) but it has NO deployments and
+ *    its workspace is still byte-identical to the seeded starter (see
+ *    workspace-seed-check.ts). Re-focusing it loses nothing: there is
+ *    no user-authored content in it yet.
+ *
+ * Hard lines, both tiers: a deployment always disqualifies (a deployed
+ * project is user value, whatever its files look like); any count that
+ * cannot be proven disqualifies (never reuse on uncertainty); and
+ * tier 2 requires the workspace proof — an entered project whose
+ * workspace differs from the seed in any byte (including an index.html
+ * overwritten to empty by a started-but-unfinished build, which is NOT
+ * the seed) is never reused.
+ */
+async function isProjectReusableBlank(
+  userId: string,
+  row: StudioProjectRow,
+): Promise<boolean> {
+  const counts = await getProjectActivityCounts(userId, row.id);
+  const known =
+    Number.isFinite(counts.messages) &&
+    Number.isFinite(counts.tasks) &&
+    Number.isFinite(counts.pausedRuns) &&
+    Number.isFinite(counts.deployments);
+  if (!known) return false;
+  if (counts.deployments > 0) return false;
+  if (counts.messages === 0 && counts.tasks === 0 && counts.pausedRuns === 0) {
+    return true;
+  }
+  return isWorkspaceSeedIdentical(userId, {
+    id: row.id,
+    templateId: row.template_id,
+    workspaceId: row.workspace_id,
+    workspaceStatus: row.workspace_status,
+    workspaceRoot: row.workspace_root,
+  });
 }
 
 /**
@@ -281,9 +330,10 @@ async function isProjectUntouched(
  * findReusableEmptyConversation. Candidates are the user's own
  * non-system blank projects whose stored name still equals the entry
  * name (a renamed project never matches) and whose template matches;
- * a candidate is returned only when it is provably untouched (see
- * isProjectUntouched). Most recently updated wins. Bounded scan,
- * mirroring the conversation rule.
+ * a candidate is returned only when it is provably reusable (see
+ * isProjectReusableBlank): untouched, or entered but still holding no
+ * user-authored content and no deployments. Most recently updated
+ * wins. Bounded scan, mirroring the conversation rule.
  *
  * This is a hygiene guard for entry flows that always ask for the
  * same default project (e.g. the Studio Website chip's "New Website");
@@ -308,7 +358,7 @@ export async function findReusableEmptyBlankProject(
   // A failed lookup must never fall through to a guess — no reuse.
   if (error || !data) return null;
   for (const row of data) {
-    if (await isProjectUntouched(userId, (row as StudioProjectRow).id)) {
+    if (await isProjectReusableBlank(userId, row as StudioProjectRow)) {
       return rowToCanonical(row as StudioProjectRow);
     }
   }

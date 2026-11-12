@@ -985,6 +985,34 @@ export async function POST(
         if (resumePreview?.ok) {
           noteBuildArtifacts(qualitySession, resumePreview.files);
           notePreviewReady(qualitySession, previewUrl);
+          if (resumeConfig.isStaticWorkspace && resolved.actionRunId) {
+            // The quality session is not the only ledger: the projection's
+            // Preview facet reads the action-event log, and the static
+            // branch of ensureProjectPreviewReady records no event there
+            // (the non-static path emits via startAndWaitForPreview), so a
+            // resumed static run kept whatever stale preview.failed an
+            // earlier probe wrote. Persist the ready fact into the event
+            // log so the facet can agree with the run's verdict.
+            // Best-effort: the settle below must not fail over an event
+            // write — the projection also reconciles facets against the
+            // run's terminal status.
+            try {
+              await appendActionEvent({
+                runId: resolved.actionRunId,
+                userId,
+                type: "preview.ready",
+                payload: { success: true, previewUrl, label: "Preview ready" },
+              });
+            } catch (error) {
+              studioLog("approval:preview_ready_event_failed", {
+                conversationId,
+                userId,
+                actionRunId: resolved.actionRunId,
+                pausedRunId,
+                errorClass: error instanceof Error ? error.message : "unknown",
+              });
+            }
+          }
         }
         // File the deployment the resumed run actually completed. The
         // approved project.deploy executed deployUserProject, which
