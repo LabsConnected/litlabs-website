@@ -1643,14 +1643,26 @@ export function registerInternalTools(): void {
           + "Write the project's files first — the deployment publishes what is "
           + "in the workspace, and requires an index.html. The live URL is "
           + "fetched and verified before this reports success, so only report "
-          + "the site as live if this tool returned a publicUrl.",
+          + "the site as live if this tool returned a publicUrl. "
+          + "Targets: omit `target` (or pass \"litt\") to publish on LiTT "
+          + "Hosting — the default. Pass target \"netlify\" ONLY when the user "
+          + "asked to deploy to Netlify; that publishes to the user's own "
+          + "connected Netlify account and fails honestly if none is connected.",
         source: "internal",
         version: "1.0.0",
-        // No projectId, userId, provider, account or service inputs: identity
-        // and target come from the authorized server-side transport, so the
-        // model cannot deploy another tenant's project or aim this at LiTT's
-        // own infrastructure.
-        inputSchema: { type: "object", properties: {}, required: [] },
+        // No projectId, userId, account or service inputs: identity comes
+        // from the authorized server-side transport, so the model cannot
+        // deploy another tenant's project or aim this at LiTT's own
+        // infrastructure. The only input is the publish TARGET the user
+        // chose; the credential for it is resolved server-side from the
+        // transport's owner, never from inputs.
+        inputSchema: {
+          type: "object",
+          properties: {
+            target: { type: "string", enum: ["litt", "netlify"] },
+          },
+          required: [],
+        },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
         requiredPermissions: ["deploy:create"],

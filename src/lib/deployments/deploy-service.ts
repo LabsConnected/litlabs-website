@@ -90,6 +90,13 @@ export interface DeploymentRecord {
   contentHash: string | null;
   errorClass: string | null;
   errorMessage: string | null;
+  /**
+   * External provider's site identifier for non-LiTT targets (e.g. the
+   * Netlify site id when target is "netlify"). Null for LiTT Hosting
+   * deployments. Lets a re-deploy update the SAME external site instead
+   * of creating a new one.
+   */
+  externalSiteId?: string | null;
 }
 
 export interface DeploymentCreateInput {
@@ -99,6 +106,7 @@ export interface DeploymentCreateInput {
   status: DeploymentStatus;
   target: string;
   contentHash?: string | null;
+  externalSiteId?: string | null;
 }
 
 export interface DeploymentStore {
@@ -246,7 +254,7 @@ export async function collectStaticArtifact(
 }
 
 /** Stable content identity for duplicate suppression. */
-function hashArtifact(files: ArtifactFile[]): string {
+export function hashArtifact(files: ArtifactFile[]): string {
   const hash = createHash("sha256");
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
     hash.update(file.path);
@@ -280,7 +288,7 @@ const deploySleep = (ms: number) => new Promise<void>((resolve) => setTimeout(re
  * elapses. Returns the latest observed record (possibly still in-flight, or
  * null when the row vanished).
  */
-async function waitForDeploymentResolved(
+export async function waitForDeploymentResolved(
   store: DeploymentStore,
   deploymentId: string,
   timeoutMs: number,

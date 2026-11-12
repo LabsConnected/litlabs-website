@@ -433,6 +433,47 @@ export function deriveApprovalRequestDetails(
   return details;
 }
 
+/**
+ * Approval details for a specific tool. Wraps the generic derivation
+ * with the one subject the generic pass cannot know: project.deploy's
+ * publish TARGET. A deploy gate must say WHERE the site will be
+ * published before the user approves it (Larry, 2026-11-11: the staging
+ * deploy card showed a bare tool name) — "Netlify" when the frozen
+ * inputs carry target "netlify", "LiTT Hosting" otherwise.
+ *
+ * Union with PR #924's structural subjects (merge, 2026-11-12): the
+ * delegation passes toolId/projectName through so every per-tool and
+ * structural subject resolves; for project.deploy the target subject
+ * below then replaces the generic structural one, because WHERE the
+ * site publishes is the fact the approver needs.
+ */
+export function deriveApprovalDetailsForTool(
+  toolId: string,
+  inputs?: Record<string, unknown>,
+  excludeValues: string[] = [],
+  opts: { projectName?: string } = {},
+): ApprovalRequestDetails {
+  const details = deriveApprovalRequestDetails(inputs, excludeValues, {
+    toolId,
+    projectName: opts.projectName,
+  });
+  if (toolId === "project.deploy") {
+    if (inputs?.target === "netlify") {
+      // An explicitly chosen external target is the salient fact.
+      details.subject = { label: "publish to", value: "Netlify" };
+    } else if (!opts.projectName) {
+      // No project name to name: name the default host instead.
+      details.subject = { label: "publish to", value: "LiTT Hosting" };
+    }
+    // With a project name and no explicit Netlify target, the generic
+    // structural subject (Publish "<name>" to its public site URL)
+    // stands — it names the project, which is the richer fact.
+    // The target is the subject now — don't repeat it as a param chip.
+    details.params = details.params.filter((p) => p.key !== "target");
+  }
+  return details;
+}
+
 /** Short scalar params (size, style, …) to show as chips; prompt handled separately. */
 function imageRequestParams(inputs?: Record<string, unknown>): Array<{ key: string; value: string }> {
   if (!inputs) return [];
@@ -482,8 +523,7 @@ export function ApprovalCard({
   // approval. image.generate keeps its dedicated block above.
   const requestDetails = isImageRequest
     ? null
-    : deriveApprovalRequestDetails(approval.inputs, affectedFiles.map((f) => f.path), {
-        toolId: approval.toolId,
+    : deriveApprovalDetailsForTool(approval.toolId, approval.inputs, affectedFiles.map((f) => f.path), {
         projectName,
       });
   const hasRequestDetails = Boolean(

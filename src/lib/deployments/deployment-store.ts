@@ -35,6 +35,8 @@ interface DeploymentRow {
   content_hash: string | null;
   error_class: string | null;
   error_message: string | null;
+  /** Added by the netlify_deployment_external_site migration; absent on older rows/DBs. */
+  external_site_id?: string | null;
 }
 
 function rowToRecord(row: DeploymentRow): DeploymentRecord {
@@ -52,6 +54,7 @@ function rowToRecord(row: DeploymentRow): DeploymentRecord {
     contentHash: row.content_hash,
     errorClass: row.error_class,
     errorMessage: row.error_message,
+    externalSiteId: row.external_site_id ?? null,
   };
 }
 
@@ -66,6 +69,7 @@ function patchToRow(patch: Partial<DeploymentRecord>): Record<string, unknown> {
   if (patch.contentHash !== undefined) row.content_hash = patch.contentHash;
   if (patch.errorClass !== undefined) row.error_class = patch.errorClass;
   if (patch.errorMessage !== undefined) row.error_message = patch.errorMessage;
+  if (patch.externalSiteId !== undefined) row.external_site_id = patch.externalSiteId;
   return row;
 }
 
@@ -120,18 +124,34 @@ export const supabaseDeploymentStore: DeploymentStore = {
 
   async create(input: DeploymentCreateInput) {
     const db = requireDb();
-    const { data, error } = await db
-      .from(TABLE)
-      .insert({
-        user_id: input.userId,
-        project_id: input.projectId,
-        workspace_id: input.workspaceId,
-        status: input.status,
-        target: input.target,
-        content_hash: input.contentHash ?? null,
-      })
-      .select()
-      .single();
+    const baseRow = {
+      user_id: input.userId,
+      project_id: input.projectId,
+      workspace_id: input.workspaceId,
+      status: input.status,
+      target: input.target,
+      content_hash: input.contentHash ?? null,
+    };
+    const withSite =
+      input.externalSiteId != null
+        ? { ...baseRow, external_site_id: input.externalSiteId }
+        : baseRow;
+    const { data, error } = await db.from(TABLE).insert(withSite).select().single();
+    if (error?.code === "PGRST204" && input.externalSiteId != null) {
+      // The external_site_id migration may not be applied yet — retry
+      // without it (same precedent as putFiles' encoding retry). The
+      // deployment proceeds; the site id simply isn't persisted, and the
+      // Netlify adapter's deterministic name lookup still finds the site.
+      const { data: retryData, error: retryError } = await db
+        .from(TABLE)
+        .insert(baseRow)
+        .select()
+        .single();
+      if (retryError) {
+        throw new Error(`Deployment create failed: ${retryError.message}`);
+      }
+      return rowToRecord(retryData as DeploymentRow);
+    }
     if (error) throw new Error(`Deployment create failed: ${error.message}`);
     return rowToRecord(data as DeploymentRow);
   },
@@ -329,11 +349,37 @@ export async function findLatestDeploymentForProject(
 }
 
 /**
- * The latest deployment per project for a user (newest first).
+ * The most recent deployment for a project on ONE target, whatever its
+ * state. Target-scoped sibling of findLatestDeploymentForProject: a
+ * project can be live on LiTT Hosting and on Netlify independently, and
+ * each target's surface must read its own latest record.
+ */
+export async function findLatestDeploymentForProjectTarget(
+  projectId: string,
+  userId: string,
+  target: string,
+): Promise<DeploymentRecord | null> {
+  if (!supabaseAdmin) return null;
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .eq("target", target)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToRecord(data as DeploymentRow);
+}
+
+/**
+ * The latest deployment per project AND target for a user (newest first).
  *
  * Powers the "Published sites" section of the /deployments page: one row
- * per project, showing the live LiTT Hosting URL when the deployment is
- * ready and verified. Returns [] when storage is unavailable.
+ * per project per target, showing the live URL when the deployment is
+ * ready and verified — a project published to both LiTT Hosting and
+ * Netlify shows both. Returns [] when storage is unavailable.
  */
 export async function listLatestDeploymentsForUser(
   userId: string,
@@ -349,8 +395,9 @@ export async function listLatestDeploymentsForUser(
   const seen = new Set<string>();
   const latest: DeploymentRecord[] = [];
   for (const row of data as DeploymentRow[]) {
-    if (seen.has(row.project_id)) continue;
-    seen.add(row.project_id);
+    const key = `${row.project_id} ${row.target}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     latest.push(rowToRecord(row));
   }
   return latest;
