@@ -281,3 +281,81 @@ describe("StudioProjectPicker dropdown placement (mobile regression)", () => {
     await waitFor(() => expect(screen.queryByTestId("project-picker-menu")).toBeNull());
   });
 });
+
+describe("StudioProjectPicker project search", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    cleanup();
+  });
+
+  it("filters canonical and legacy rows by name substring, case-insensitively", async () => {
+    mockListFetch();
+    await openPicker();
+
+    const menu = screen.getByTestId("project-picker-menu");
+    fireEvent.change(within(menu).getByLabelText("Search projects"), {
+      target: { value: "ALP" },
+    });
+
+    expect(within(menu).getByText("Alpha")).toBeTruthy();
+    expect(within(menu).queryByText("Beta")).toBeNull();
+    expect(within(menu).queryByText("Oldie")).toBeNull();
+  });
+
+  it("matches legacy-only projects too", async () => {
+    mockListFetch();
+    await openPicker();
+
+    const menu = screen.getByTestId("project-picker-menu");
+    fireEvent.change(within(menu).getByLabelText("Search projects"), {
+      target: { value: "old" },
+    });
+
+    expect(within(menu).getByText("Oldie")).toBeTruthy();
+    expect(within(menu).queryByText("Alpha")).toBeNull();
+    expect(within(menu).queryByText("Beta")).toBeNull();
+  });
+
+  it("shows a no-match row when nothing fits the query", async () => {
+    mockListFetch();
+    await openPicker();
+
+    const menu = screen.getByTestId("project-picker-menu");
+    fireEvent.change(within(menu).getByLabelText("Search projects"), {
+      target: { value: "zzz" },
+    });
+
+    expect(within(menu).getByText(/No projects match/)).toBeTruthy();
+    expect(within(menu).queryByText("Alpha")).toBeNull();
+    expect(within(menu).queryByText("Beta")).toBeNull();
+    expect(within(menu).queryByText("Oldie")).toBeNull();
+  });
+
+  it("restores every row when the query is cleared", async () => {
+    mockListFetch();
+    await openPicker();
+
+    const menu = screen.getByTestId("project-picker-menu");
+    const input = within(menu).getByLabelText("Search projects");
+    fireEvent.change(input, { target: { value: "alp" } });
+    expect(within(menu).queryByText("Beta")).toBeNull();
+
+    fireEvent.change(input, { target: { value: "" } });
+    expect(within(menu).getByText("Alpha")).toBeTruthy();
+    expect(within(menu).getByText("Beta")).toBeTruthy();
+    expect(within(menu).getByText("Oldie")).toBeTruthy();
+  });
+
+  it("selects a filtered row through the same onSelect path", async () => {
+    mockListFetch();
+    const { onSelect } = await openPicker();
+
+    const menu = screen.getByTestId("project-picker-menu");
+    fireEvent.change(within(menu).getByLabelText("Search projects"), {
+      target: { value: "bet" },
+    });
+    fireEvent.click(within(menu).getByText("Beta"));
+
+    expect(onSelect).toHaveBeenCalledWith("p2");
+  });
+});

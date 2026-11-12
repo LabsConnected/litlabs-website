@@ -113,6 +113,38 @@ export function getVisibleMainNav(): NavItem[] {
   return APP_NAV_MAIN;
 }
 
+/**
+ * Carry the active Studio project across top-bar navigation.
+ *
+ * Studio project identity lives in the `?project=` URL param (see
+ * resolveStudioProjectId). The canonical Studio hrefs above are bare
+ * (`/studio?tool=assets`), so following one from inside a project used
+ * to DROP the param — the Studio then fell back to server-side
+ * most-recent resolution and landed on a different project (production
+ * audit ART-20261111-082: Assets opened from a project reverted the
+ * header to the repo project and showed an empty bucket).
+ *
+ * Given the project id from the CURRENT URL, return the items with the
+ * param set on every `/studio` href (replacing any stale value).
+ * Non-Studio hrefs pass through untouched; without an id the input is
+ * returned as-is. Inputs are never mutated.
+ */
+export function withActiveProjectContext(
+  items: NavItem[],
+  projectId: string | null | undefined,
+): NavItem[] {
+  const id = projectId?.trim();
+  if (!id) return items;
+  return items.map((item) => {
+    if (!item.href) return item;
+    const [path, query] = item.href.split("?");
+    if (path !== "/studio") return item;
+    const params = new URLSearchParams(query ?? "");
+    params.set("project", id);
+    return { ...item, href: `${path}?${params.toString()}` };
+  });
+}
+
 export function getVisibleMoreNav(): NavItem[] {
   return APP_NAV_MORE.filter((item) => {
     if (item.href === "/games") return isFeatureEnabled("retroGameRuntime");
@@ -159,11 +191,17 @@ export function isAppNavActive(
   // href carrying ?tool=X is active only on that exact tool.
   if (path === "/studio") {
     if (!(pathname === "/studio" || pathname.startsWith("/studio/"))) return false;
-    if (!query) {
+    // `project` in an href is CONTEXT (which project is active), not
+    // destination identity — top-bar hrefs carry it via
+    // withActiveProjectContext, and it must not change which nav item
+    // lights up. An href left with no destination params after removing
+    // it behaves exactly like the bare "/studio" href.
+    const hrefParams = new URLSearchParams(query ?? "");
+    hrefParams.delete("project");
+    if (hrefParams.toString() === "") {
       const tool = searchParams.get("tool");
       return tool === null || !STUDIO_DESTINATION_TOOLS.has(tool);
     }
-    const hrefParams = new URLSearchParams(query);
     return pathname === "/studio" &&
       Array.from(hrefParams.entries()).every(([k, v]) => searchParams.get(k) === v);
   }
