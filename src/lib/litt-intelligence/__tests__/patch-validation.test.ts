@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
 import type { WorkspaceTransport } from "../workspace-transport";
-import { buildPatchRecoveryMessage, findTailwindImportTrap, findTailwindThemeV3Config, validateApplyPatchInputs, validateFilesWriteInputs } from "../patch-validation";
+import { buildPatchRecoveryMessage, destructiveContentLoss, existingFileRewriteError, findTailwindImportTrap, findTailwindThemeV3Config, validateApplyPatchInputs, validateFilesWriteInputs } from "../patch-validation";
 import { normalizeWorkspaceRelativePath } from "../workspace-path";
 
 /**
@@ -654,5 +654,107 @@ describe("validateApplyPatchInputs — resulting-file Tailwind check (partial pa
       fakeTransport(STYLED_FILE),
     );
     expect(err).toBeNull();
+  });
+});
+
+describe("destructiveContentLoss — content-preservation measure (P0)", () => {
+  // Multi-section page shaped like the incident site (~1.5KB): nav,
+  // sections, images, footer and an inline theme.
+  const SITE = `<!doctype html><html><head><title>Ember Oak</title><style>
+body{font-family:Georgia,serif;background:#f7f2ea;color:#2c2420}
+nav{display:flex;gap:18px;padding:14px 24px}
+.gallery{display:grid;gap:16px}
+</style></head><body>
+<nav><a href="#menu">Menu</a><a href="#about">About</a></nav>
+<header><h1>EMBER OAK</h1><p>Small-batch roasted coffee</p></header>
+<section class="gallery"><img src="g1.jpg"><img src="g2.jpg"><img src="g3.jpg"></section>
+<section class="menu"><h2>Menu</h2><ul><li>Pour Over — 4</li><li>Espresso — 3</li></ul></section>
+<section class="about"><h2>About</h2><p>Roasted in-house every week.</p></section>
+<footer><p>Visit us — 12 Roast Lane</p></footer>
+</body></html>`;
+
+  it("passes an identical rewrite and a small targeted change", () => {
+    expect(destructiveContentLoss(SITE, SITE)).toBeNull();
+    const edit = SITE.replace("<h1>EMBER OAK</h1>", "<h1>EMBER OAK ROASTED</h1>");
+    expect(destructiveContentLoss(SITE, edit)).toBeNull();
+  });
+
+  it("passes a value-level theme rewrite (selectors and copy survive)", () => {
+    // Every color value changes; every selector and all copy stays.
+    const rethemed = SITE.replaceAll("#f7f2ea", "#5b3a29").replaceAll("#2c2420", "#f5ead9").replaceAll("#efe6d8", "#6b4a32");
+    expect(destructiveContentLoss(SITE, rethemed)).toBeNull();
+  });
+
+  it("fires when most of the file's content is deleted", () => {
+    const gutted = `<!doctype html><html><head><title>Ember Oak Roasted</title><style>
+body{background:#5b3a29;color:#f5ead9}
+</style></head><body><h1>EMBER OAK ROASTED</h1></body></html>`;
+    const loss = destructiveContentLoss(SITE, gutted);
+    expect(loss).not.toBeNull();
+    expect(loss!.retention).toBeLessThan(0.4);
+    expect(loss!.blocksLost).toBe(true);
+  });
+
+  it("fires on wholesale semantic-block loss even at borderline token retention", () => {
+    // Retain most tokens by echoing the CSS and headings, but delete every
+    // <section>/<nav>/<header>/<footer> region.
+    const skeleton = `<!doctype html><html><head><title>Ember Oak</title><style>
+body{font-family:Georgia,serif;background:#f7f2ea;color:#2c2420}
+nav{display:flex;gap:18px;padding:14px 24px}
+.gallery{display:grid;gap:16px}
+</style></head><body>
+<div><h1>EMBER OAK</h1><p>Small-batch roasted coffee</p></div>
+<div class="gallery"><img src="g1.jpg"><img src="g2.jpg"><img src="g3.jpg"></div>
+<div><h2>Menu</h2><ul><li>Pour Over — 4</li><li>Espresso — 3</li></ul></div>
+<div><h2>About</h2><p>Roasted in-house every week.</p></div>
+<div><p>Visit us — 12 Roast Lane</p></div>
+</body></html>`;
+    const loss = destructiveContentLoss(SITE, skeleton);
+    expect(loss).not.toBeNull();
+    expect(loss!.blocksLost).toBe(true);
+  });
+
+  it("exempts files below the byte floor — a one-line file's edit is not 'destruction'", () => {
+    const tiny = `<footer>Ember Roast · 2024 · Handcrafted coffee.</footer>`;
+    expect(destructiveContentLoss(tiny, "<div>everything new</div>")).toBeNull();
+  });
+});
+
+describe("existingFileRewriteError — files.write pre-approval floor (P0)", () => {
+  const SITE = `<!doctype html><html><body>
+<nav><a href="#a">A</a><a href="#b">B</a></nav>
+<header><h1>EMBER OAK</h1><p>Small-batch roasted coffee beans from the highlands</p></header>
+<section><img src="g1.jpg"><img src="g2.jpg"><img src="g3.jpg"></section>
+<section><h2>Menu</h2><ul><li>Pour Over — 4</li><li>Espresso — 3</li></ul></section>
+<footer><p>Visit us — 12 Roast Lane, every morning from six</p></footer>
+</body></html>`;
+
+  it("refuses a rewrite deleting most of the file and routes to apply_patch", async () => {
+    const err = await existingFileRewriteError(
+      { path: "index.html", content: "<html><body><h1>EMBER OAK ROASTED</h1></body></html>" },
+      fakeTransport(SITE),
+    );
+    expect(err).toContain("index.html");
+    expect(err).toContain("existing content");
+    expect(err).toContain("apply_patch");
+    expect(err).toContain("verbatim");
+  });
+
+  it("passes a preserving rewrite, a new file, and the welcome scaffold", async () => {
+    const preserving = SITE.replace("EMBER OAK", "EMBER OAK ROASTED");
+    expect(
+      await existingFileRewriteError({ path: "index.html", content: preserving }, fakeTransport(SITE)),
+    ).toBeNull();
+    // Unreadable target = new file — nothing to preserve.
+    expect(
+      await existingFileRewriteError({ path: "new.html", content: "<html></html>" }, fakeTransport(null)),
+    ).toBeNull();
+    // The welcome scaffold exists precisely to be replaced.
+    expect(
+      await existingFileRewriteError(
+        { path: "index.html", content: "<html></html>" },
+        fakeTransport("<!-- LITT-WELCOME-SCREEN --><html><body>" + "x".repeat(600) + "</body></html>"),
+      ),
+    ).toBeNull();
   });
 });
