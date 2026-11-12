@@ -69,6 +69,14 @@ export default function StudioShell({
       return 320;
     }
   });
+
+  // External focus-workspace toggle — the Ctrl+K command palette dispatches
+  // "studio:toggle-focus-workspace"; the shell owns the persisted state.
+  useEffect(() => {
+    const onToggle = () => setWorkspaceExpanded((v) => !v);
+    window.addEventListener("studio:toggle-focus-workspace", onToggle);
+    return () => window.removeEventListener("studio:toggle-focus-workspace", onToggle);
+  }, []);
   const inspectorWidthRef = useRef(inspectorWidth);
 
   useEffect(() => {
