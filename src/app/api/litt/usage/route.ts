@@ -54,22 +54,29 @@ export async function GET(request: NextRequest) {
     .order("created_at", { ascending: false })
     .limit(50);
 
-  // Get model usage stats from model_usage (if table exists)
+  // Get model usage stats from usage_events — the canonical metering store
+  // written by src/lib/metering.ts (one row per user action, with model,
+  // provider, and token counts). The legacy model_usage table has no writer
+  // anywhere in the codebase, so aggregating it always produced zeros.
+  // A usage_events row exists only for a completed user action (failed
+  // provider attempts write cost_events only), so every row counts as a
+  // success. usage_events carries no per-row charged-bits column, so
+  // credits stays 0 — the same effective value the dead table produced;
+  // actual charges live in credit_ledger (summarized above).
   const { data: modelStats } = await supabaseAdmin
-    .from("model_usage")
-    .select("litt_alias, model, provider, total_tokens, credits_cost, success")
+    .from("usage_events")
+    .select("model, provider, input_tokens, output_tokens")
     .eq("user_id", user.id)
-    .gte("called_at", since);
+    .gte("started_at", since);
 
   // Aggregate by model
   const byModel = new Map<string, { calls: number; tokens: number; credits: number; successes: number }>();
   for (const stat of modelStats ?? []) {
-    const key = stat.litt_alias ?? stat.model ?? "unknown";
+    const key = stat.model ?? stat.provider ?? "unknown";
     const existing = byModel.get(key) ?? { calls: 0, tokens: 0, credits: 0, successes: 0 };
     existing.calls += 1;
-    existing.tokens += stat.total_tokens ?? 0;
-    existing.credits += stat.credits_cost ?? 0;
-    if (stat.success) existing.successes += 1;
+    existing.tokens += (stat.input_tokens ?? 0) + (stat.output_tokens ?? 0);
+    existing.successes += 1;
     byModel.set(key, existing);
   }
 

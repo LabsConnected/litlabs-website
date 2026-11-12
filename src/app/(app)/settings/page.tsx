@@ -1984,6 +1984,7 @@ type BillingData = {
     beta_promotional: number;
     total: number;
   } | null;
+  billingExempt?: boolean;
 };
 
 type UsageData = {
@@ -2053,6 +2054,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
   const planPrice = data?.plan?.monthlyPriceCents ?? 0;
   const isPaid = planPrice !== null && planPrice > 0;
   const balances = data?.balances;
+  const billingExempt = data?.billingExempt ?? false;
   const totalBalance = balances?.total ?? 0;
   const monthlyBalance = balances?.monthly ?? 0;
   const purchasedBalance = balances?.purchased ?? 0;
@@ -2123,12 +2125,14 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         ) : (
           <>
             <div className="rounded-xl border p-4" style={{ borderColor: `${T.accentColor}30`, backgroundColor: `${T.accentColor}08` }}>
-              <div className="text-2xl font-black" style={{ color: T.accentColor }}>{totalBalance.toLocaleString()} credits</div>
+              <div className="text-2xl font-black" style={{ color: T.accentColor }}>{billingExempt ? "DEV ∞" : `${totalBalance.toLocaleString()} credits`}</div>
               <p className="mt-1 text-xs text-white/40">
-                {betaBalance > 0 && `Includes ${betaBalance.toLocaleString()} Beta credits (no cash value)`}
-                {betaBalance === 0 && "Available balance"}
+                {billingExempt && "Owner account — billing exempt. Usage is metered; the wallet is never debited."}
+                {!billingExempt && betaBalance > 0 && `Includes ${betaBalance.toLocaleString()} Beta credits (no cash value)`}
+                {!billingExempt && betaBalance === 0 && "Available balance"}
               </p>
             </div>
+            {!billingExempt && (
             <div className="mt-3 grid grid-cols-3 gap-2">
               <div className="rounded-lg border border-white/5 bg-white/2 px-3 py-2 text-center">
                 <div className="text-sm font-bold text-white/80">{monthlyBalance.toLocaleString()}</div>
@@ -2143,7 +2147,8 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
                 <div className="text-[9px] uppercase tracking-wider text-white/40">Beta</div>
               </div>
             </div>
-            {betaBalance > 0 && (
+            )}
+            {!billingExempt && betaBalance > 0 && (
               <p className="mt-2 text-[10px] text-white/30">
                 Beta credits are consumed after paid credits. Expiration is defined per grant.
               </p>
