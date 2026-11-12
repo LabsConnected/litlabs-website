@@ -9,7 +9,7 @@
  * - Starter: free, 1,500 LiTTBits ONE-TIME grant (not monthly, not renewing)
  * - Creator Lite: $9.99/mo, LiTTBits/month TBD (pending owner decision)
  * - Creator: $19.99/mo, 7,500 LiTTBits/month (preserved value)
- * - Pro Builder: $39/mo, 18,000 LiTTBits/month (preserved value)
+ * - Pro Builder: $39.99/mo, 18,000 LiTTBits/month (preserved value)
  *
  * PROFITABILITY UNVERIFIED: the preserved 7,500/18,000 credit amounts are
  * carried forward as configuration values only. Unit economics vs. real
@@ -137,7 +137,7 @@ export const PLAN_ENTITLEMENTS: Record<PlanId, PlanEntitlements> = {
   pro_builder_beta: {
     monthlyBits: 18000,
     oneTimeGrantBits: 0,
-    monthlyPriceCents: 3900,
+    monthlyPriceCents: 3999,
     agentStartsPer5h: 8,
     browserStartsPer5h: 8,
     maxConcurrency: 8,
