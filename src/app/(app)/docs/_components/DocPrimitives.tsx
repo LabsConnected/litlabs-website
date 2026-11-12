@@ -6,7 +6,9 @@ import type { ReactNode } from "react";
 
 /**
  * Shared docs content primitives. All styling goes through the theme so
- * docs stay consistent with the site's dark premium UI in every theme.
+ * docs stay consistent with the site in every theme. Code panels keep the
+ * brand deep-green (#0b120d) the CLI page's code bars use — an intentional
+ * dark accent on the light-locked public pages, not the page theme.
  */
 
 export function DocH1({ children }: { children: ReactNode }) {
@@ -109,7 +111,7 @@ export function CodeBlock({
   return (
     <div
       className="mb-4 overflow-hidden rounded-xl border"
-      style={{ backgroundColor: "#05070d", borderColor: T.borderColor }}
+      style={{ backgroundColor: "#0b120d", borderColor: T.borderColor }}
     >
       {label && (
         <div
