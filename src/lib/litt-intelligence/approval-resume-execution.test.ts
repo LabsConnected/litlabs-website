@@ -291,3 +291,250 @@ describe("resumeAgentLoopV2 — mid-build stall recovery", () => {
     expect(result.finalText).toBe("Footer created. Done.");
   });
 });
+
+describe("resumeAgentLoopV2 — premature completion recovery", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  /**
+   * Transport where the approved files.mkdir FAILS — the resume then has
+   * zero successful mutations, the exact premature-completion setup.
+   * writeFile/readFile are stateful so overwrite guards and read-back
+   * verification see a realistic filesystem.
+   */
+  function makeFailingTransport() {
+    const files = new Map<string, string>();
+    return {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      mkdir: vi.fn(async () => {
+        throw new Error("mkdir failed (ECONNREFUSED): terminal server unreachable");
+      }),
+      writeFile: vi.fn(async (path: string, content: string) => {
+        files.set(path, content);
+        return { saved: true };
+      }),
+      readFile: vi.fn(async (path: string) => {
+        const content = files.get(path);
+        if (content === undefined) throw new Error(`ENOENT: ${path} does not exist`);
+        return { content, size: Buffer.byteLength(content, "utf-8") };
+      }),
+      createCheckpointBeforeMutation: vi.fn(async () => null),
+      discoverPackageInfo: vi.fn(async () => ({ packageManager: "npm" })),
+    } as unknown as WorkspaceTransport;
+  }
+
+  /** Mirrors the approvals route: every resume is an execution turn. */
+  const EXEC_CONFIG = {
+    systemPrompt: "You are LiTT.",
+    executionMode: "auto" as const,
+    executionRequested: true,
+    enableBuildFix: false,
+  };
+
+  it("reprompts once and completes when the model claims done with no applied mutation", async () => {
+    // The approved mkdir failed, the model shrugged and said "done" —
+    // the required project files were never created. The loop must spend
+    // ONE bounded reprompt demanding the missing work, then accept the
+    // recovered build.
+    const transport = makeFailingTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "All done — the site is built and ready!",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          {
+            toolId: "files.write",
+            toolCallId: "tc-w1",
+            inputs: { projectId: "p-test", path: "index.html", content: "<h1>Hi</h1>" },
+          },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "Wrote index.html — the site is built.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await resumeAgentLoopV2(
+      makePausedInput({ config: EXEC_CONFIG }),
+      transport,
+    );
+
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(3);
+    const repromptMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as LLMMessage[];
+    expect(
+      repromptMessages.some(
+        (m) => m.role === "user" && m.content.includes("do not report completion yet"),
+      ),
+    ).toBe(true);
+    expect(transport.writeFile).toHaveBeenCalledWith("index.html", "<h1>Hi</h1>");
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.cancelled).toBe(false);
+    expect(result.finalText).toBe("Wrote index.html — the site is built.");
+  });
+
+  it("fails honestly when the model claims completion again after the reprompt", async () => {
+    const transport = makeFailingTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "Done!",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "All finished — nothing left to do.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await resumeAgentLoopV2(
+      makePausedInput({ config: EXEC_CONFIG }),
+      transport,
+    );
+
+    // Exactly one reprompt — no provider-call loop.
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(2);
+    expect(result.failedHonestly).toContain("without any successful workspace mutation");
+    expect(result.finalText).toBe(result.failedHonestly);
+    expect(result.cancelled).toBe(false);
+    expect(transport.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("fails honestly without reprompting when no step capacity remains", async () => {
+    const transport = makeFailingTransport();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done!",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await resumeAgentLoopV2(
+      makePausedInput({
+        config: { ...EXEC_CONFIG, maxSteps: 6 },
+        stepsUsedBeforePause: 5,
+      }),
+      transport,
+    );
+
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(1);
+    expect(result.failedHonestly).toContain("without any successful workspace mutation");
+  });
+
+  it("accepts a prose final immediately when the approved mutation succeeded", async () => {
+    // files.write approved and landed — mutation evidence exists, so a
+    // closing summary is a legitimate final answer, not a premature stop.
+    const { transport } = makeTransport();
+    const writtenFiles = new Map<string, string>();
+    transport.writeFile = vi.fn(async (path: string, content: string) => {
+      writtenFiles.set(path, content);
+      return { saved: true };
+    });
+    transport.readFile = vi.fn(async (path: string) => {
+      const content = writtenFiles.get(path);
+      if (content === undefined) throw new Error(`ENOENT: ${path} does not exist`);
+      return { content, size: Buffer.byteLength(content, "utf-8") };
+    });
+    const assistantMsg = buildAssistantToolCallMessage(
+      [
+        {
+          toolId: "files.write",
+          toolCallId: "tc-write-1",
+          inputs: { projectId: "p-test", path: "index.html", content: "<h1>Built</h1>" },
+        },
+      ],
+      "Writing index.html.",
+      undefined,
+    );
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done — index.html is written.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await resumeAgentLoopV2(
+      makePausedInput({
+        pausedMessages: [
+          { role: "user", content: "Build a site" },
+          assistantMsg,
+        ],
+        toolId: "files.write",
+        toolCallId: "tc-write-1",
+        inputs: { projectId: "p-test", path: "index.html", content: "<h1>Built</h1>" },
+        config: EXEC_CONFIG,
+      }),
+      transport,
+    );
+
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(1);
+    const messages = vi.mocked(callLLMWithTools).mock.calls[0][1] as LLMMessage[];
+    expect(
+      messages.some((m) => m.role === "user" && m.content.includes("do not report completion yet")),
+    ).toBe(false);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.cancelled).toBe(false);
+  });
+
+  it("does not reprompt a rejected approval — the model may legitimately stop", async () => {
+    const transport = makeFailingTransport();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Understood — I won't make that change.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await resumeAgentLoopV2(
+      makePausedInput({
+        decision: "rejected",
+        rejectionReason: "not now",
+        config: EXEC_CONFIG,
+      }),
+      transport,
+    );
+
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(1);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.cancelled).toBe(false);
+  });
+
+  it("does not reprompt on non-execution resumes — chat turns keep prose finals", async () => {
+    const transport = makeFailingTransport();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Here's my answer.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await resumeAgentLoopV2(
+      makePausedInput({
+        config: {
+          systemPrompt: "You are LiTT.",
+          executionMode: "act",
+          enableBuildFix: false,
+        },
+      }),
+      transport,
+    );
+
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(1);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.cancelled).toBe(false);
+  });
+});
