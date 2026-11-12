@@ -112,10 +112,12 @@ describe("AppShell top bar", () => {
     );
     const header = getHeader();
     const scope = within(header);
-    // Canonical main pills + the More overflow button.
-    // Create lives in the Studio prime landing composer — it no longer lives in the AppShell nav.
-    // There is no Home pill: Studio is the prime landing surface.
-    for (const label of ["Studio", "Assets", "Agents", "Missions"]) {
+    // Canonical main pills + the More overflow button (issue #627 Studio
+    // Merge). Assets/Agents/Missions/Create lost their own pills — they
+    // are internal Studio surfaces now, reached from inside Studio, not
+    // the global nav. There is still no Home pill: Studio is the prime
+    // landing surface.
+    for (const label of ["Studio", "Discover", "Projects", "Settings"]) {
       expect(scope.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
     expect(scope.getAllByTestId("nav-more").length).toBeGreaterThanOrEqual(1);
@@ -129,7 +131,9 @@ describe("AppShell top bar", () => {
     );
     const header = getHeader();
     // Secondary routes are not inline — they live in the More dropdown.
-    for (const secondary of ["Projects", "Games", "Marketplace", "Wallet", "Settings", "Showcase", "Music"]) {
+    // Projects/Settings are now Main pills (issue #627), so they're
+    // deliberately not in this not-inline list anymore.
+    for (const secondary of ["Games", "Marketplace", "Wallet", "Showcase", "Music"]) {
       expect(within(header).queryByText(secondary)).toBeNull();
     }
     // Open More — flag-gated Games must appear (retroGameRuntime enabled).
@@ -137,24 +141,27 @@ describe("AppShell top bar", () => {
     fireEvent.click(within(header).getAllByTestId("nav-more")[0]);
     const menu = document.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
-    for (const label of ["Projects", "Marketplace", "CLI", "Docs", "Deployments"]) {
+    for (const label of ["Marketplace", "CLI", "Docs", "Deployments"]) {
       expect(within(menu as HTMLElement).getByText(label)).toBeTruthy();
     }
-    // Games + Discover appear only when their flags are on; assert on the
-    // canonical data rather than the mocked flags (feature-flags module is
-    // not mocked here, so real flag state applies — games is enabled).
+    // Games appears only when its flag is on; assert on the canonical
+    // data rather than the mocked flags (feature-flags module is not
+    // mocked here, so real flag state applies — games is enabled).
     expect(within(menu as HTMLElement).queryByText("Games")).toBeTruthy();
   });
 
   it("marks the current page with aria-current on every nav surface", () => {
-    mockPathname = "/discover";
+    // /discover moved to the Main nav in the Studio Merge (issue #627);
+    // /marketplace is still a More destination, so it still exercises
+    // the "More carries aria-current for an active child" behavior.
+    mockPathname = "/marketplace";
     render(
       <AppShell>
         <div>content</div>
       </AppShell>,
     );
-    // /discover is a More destination — both More buttons (desktop inline
-    // nav + mobile strip) carry aria-current when a child is active.
+    // /marketplace is a More destination — both More buttons (desktop
+    // inline nav + mobile strip) carry aria-current when a child is active.
     const moreButtons = Array.from(
       getHeader().querySelectorAll('[data-testid="nav-more"][aria-current="page"]'),
     );

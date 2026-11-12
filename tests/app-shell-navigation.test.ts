@@ -1,16 +1,19 @@
 /**
  * AppShell navigation regression tests.
  *
- * Verifies the ONE canonical authenticated global nav:
- *   Main: Studio · Assets · Agents · Missions · More
- *   More: Projects · Discover · Marketplace · Showcase · Games · CLI ·
- *         Deployments · Docs
+ * Verifies the ONE canonical authenticated global nav (issue #627 —
+ * Studio Merge, 2026-11-12, superseding the prior Assets/Agents/Missions
+ * pill layout this file used to encode):
+ *   Main: Studio · Discover · Projects · Settings
+ *   More: Marketplace · Showcase · Games · CLI · Deployments · Docs
  *
  * Studio is the prime signed-in surface — there is no Home item and no
  * /dashboard destination (the route only redirects into Studio).
  *
- * Assets/Agents/Missions are Studio destinations (?tool=…) and must light
- * up independently of the bare-Studio pill (isAppNavActive).
+ * Assets/Agents/Missions/Create are internal Studio surfaces now
+ * (?tool=…), reached from inside Studio itself — they have no nav pill
+ * of their own anymore, so the bare Studio pill is active across the
+ * whole /studio tree regardless of which internal tool is open.
  */
 
 import { describe, it, expect } from "vitest";
@@ -28,9 +31,9 @@ describe("AppShell Navigation", () => {
       const labels = APP_NAV_MAIN.map((i) => i.label);
       expect(labels).toEqual([
         "Studio",
-        "Assets",
-        "Agents",
-        "Missions",
+        "Discover",
+        "Projects",
+        "Settings",
       ]);
     });
 
@@ -38,9 +41,9 @@ describe("AppShell Navigation", () => {
       const hrefs = APP_NAV_MAIN.map((i) => i.href);
       expect(hrefs).toEqual([
         "/studio",
-        "/studio?tool=assets",
-        "/studio?tool=agents",
-        "/studio?tool=workflows",
+        "/discover",
+        "/projects",
+        "/settings",
       ]);
     });
 
@@ -76,8 +79,6 @@ describe("AppShell Navigation", () => {
     it("carries every secondary destination", () => {
       const labels = APP_NAV_MORE.map((i) => i.label);
       expect(labels).toEqual([
-        "Projects",
-        "Discover",
         "Marketplace",
         "Showcase",
         "Games",
@@ -141,34 +142,19 @@ describe("AppShell Navigation", () => {
       ).toBe(true);
     });
 
-    it("Studio is NOT active while a sibling destination owns the URL", () => {
-      for (const tool of ["assets", "agents", "workflows"]) {
+    it("Studio stays active for any internal tool — no sibling nav item to carve out against anymore", () => {
+      // Assets/Agents/Missions/Create lost their own nav pills in the
+      // Studio Merge (issue #627) — they are internal Studio surfaces
+      // now, so the bare Studio pill owns the whole /studio tree
+      // regardless of ?tool=.
+      for (const tool of ["assets", "agents", "workflows", "chat", "build"]) {
         expect(
           isAppNavActive("/studio", new URLSearchParams(`tool=${tool}`), "/studio"),
-        ).toBe(false);
+        ).toBe(true);
       }
-    });
-
-    it("Assets/Agents/Missions light up only on their own tool param", () => {
-      expect(
-        isAppNavActive("/studio", new URLSearchParams("tool=assets"), "/studio?tool=assets"),
-      ).toBe(true);
-      expect(
-        isAppNavActive("/studio", new URLSearchParams("tool=agents"), "/studio?tool=agents"),
-      ).toBe(true);
-      expect(
-        isAppNavActive("/studio", new URLSearchParams("tool=workflows"), "/studio?tool=workflows"),
-      ).toBe(true);
-      // Wrong tool → not active
-      expect(
-        isAppNavActive("/studio", new URLSearchParams("tool=chat"), "/studio?tool=assets"),
-      ).toBe(false);
-      expect(
-        isAppNavActive("/studio", new URLSearchParams("tool=assets"), "/studio?tool=agents"),
-      ).toBe(false);
       // Not on /studio at all → not active
       expect(
-        isAppNavActive("/projects", new URLSearchParams("tool=assets"), "/studio?tool=assets"),
+        isAppNavActive("/projects", new URLSearchParams("tool=assets"), "/studio"),
       ).toBe(false);
     });
 

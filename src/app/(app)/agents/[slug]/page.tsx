@@ -3,5 +3,5 @@ export const dynamic = "force-dynamic";
 import { redirect } from "next/navigation";
 
 export default function AgentPage() {
-  redirect("/studio?tool=workflows");
+  redirect("/studio?tool=agents");
 }
