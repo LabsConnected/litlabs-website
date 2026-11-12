@@ -233,7 +233,7 @@ export function MissionProgress({ title, steps, elapsedMs, width = 80 }: Mission
         return (
           <Box key={i}>
             <Text color={color} bold>{glyph} </Text>
-            <Text color={step.status === "pending" ? COLORS.secondaryDim : COLORS.text} dimColor={step.status === "pending"}>
+            <Text color={step.status === "pending" ? COLORS.secondaryDim : COLORS.text}>
               {step.label}
             </Text>
           </Box>

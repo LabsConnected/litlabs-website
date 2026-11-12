@@ -836,6 +836,28 @@ function suggestToolName(toolId: string, toolDefs: ToolDefinition[]): string | n
 }
 
 /**
+ * Separator-tolerant tool-id canonicalization for weak local models.
+ * Small models routinely emit "project_diff" or "project-diff" for the
+ * canonical "project.diff" — the id is right, only the namespace
+ * separator is wrong. When the emitted id is not an exact match but
+ * its separator-stripped form matches EXACTLY ONE registered id, the
+ * canonical id is substituted; anything else is returned unchanged so
+ * the unknown-tool path still reports it honestly.
+ *
+ * Deliberately conservative: never fuzzy-matches substrings (that is
+ * suggestToolName's job, for the error message only), never resolves
+ * ambiguity, and never invents an id that was not emitted.
+ */
+function canonicalizeToolId(toolId: string, toolDefs: ToolDefinition[]): string {
+  if (toolDefs.some((t) => t.id === toolId)) return toolId;
+  const squash = (s: string) => s.toLowerCase().replace(/[._\-/\s]+/g, "");
+  const want = squash(toolId);
+  if (!want) return toolId;
+  const matches = toolDefs.filter((t) => squash(t.id) === want);
+  return matches.length === 1 ? matches[0].id : toolId;
+}
+
+/**
  * Validate a parsed tool call's arguments before dispatch. Returns an
  * error message string when the arguments are invalid (placeholders,
  * missing required fields, malformed values), or null when valid.
@@ -1857,7 +1879,10 @@ export async function runAgentLoop(
     // answer silently discarded: the round is dispatched as a tool call
     // and never returns its content, so the prose only survives as
     // internal model context, never reaching the caller/UI.
-    const rawToolCalls = parseToolCalls(modelContent);
+    const rawToolCalls = parseToolCalls(modelContent).map((c) => {
+      const canonical = canonicalizeToolId(c.toolId, toolDefs);
+      return canonical === c.toolId ? c : { ...c, toolId: canonical };
+    });
     let allToolCalls = filterRedundantToolCalls(rawToolCalls, toolCalls);
     if (allToolCalls.length === 0 && rawToolCalls.length > 0 && !stripToolCallBlocks(modelContent).trim()) {
       // Every call in this turn was a redundant repeat AND there is no

@@ -35,6 +35,109 @@ export function isStreamEntry(entry: ActivityEntry): boolean {
   return entry.type === "tool.stdout" || entry.type === "tool.stderr" || entry.type === "agent.delta";
 }
 
+/** Fixed-column metrics shared by the renderer and the height estimator —
+ *  the budget math MUST match the render math or the fixed-height region
+ *  overflows (the 100×30 line-collision bug). */
+export interface ActivityFeedMetrics {
+  /** Indent for expanded detail lines (aligns under the message column). */
+  prefixWidth: number;
+  /** Max chars per message/detail line. */
+  msgMax: number;
+}
+
+export function activityFeedMetrics(termWidth: number): ActivityFeedMetrics {
+  const innerWidth = Math.max(20, termWidth - 2);
+  const prefixWidth = 2 + 1 + TAG_WIDTH + 1 + 1; // indent + glyph + tag + space + indicator col
+  const msgMax = Math.max(10, innerWidth - prefixWidth);
+  return { prefixWidth, msgMax };
+}
+
+/** Whether the entry carries a `fullText` payload richer than `text`. */
+export function entryHasDetails(entry: ActivityEntry): boolean {
+  return !!entry.fullText && entry.fullText !== entry.text && entry.fullText.length > entry.text.length;
+}
+
+/** Whether the entry renders expanded: global details flag or per-row id. */
+export function isEntryExpanded(
+  entry: ActivityEntry,
+  details: boolean,
+  expandedIds?: ReadonlySet<string>,
+): boolean {
+  return (details || expandedIds?.has(entry.id) === true) && entryHasDetails(entry);
+}
+
+/** Rendered row count for one feed entry (1 + expanded detail lines). */
+export function estimateActivityEntryHeight(
+  entry: ActivityEntry,
+  metrics: ActivityFeedMetrics,
+  details: boolean,
+  expandedIds?: ReadonlySet<string>,
+): number {
+  if (!isEntryExpanded(entry, details, expandedIds)) return 1;
+  const lines = wrapText(redactSecrets(entry.fullText!), metrics.msgMax).length;
+  return 1 + Math.min(DETAIL_MAX_LINES, lines) + (lines > DETAIL_MAX_LINES ? 1 : 0);
+}
+
+export interface FittedActivityFeed {
+  entries: ActivityEntry[];
+  /** Rendered rows the picked entries occupy. */
+  rows: number;
+  /** Total rendered rows across the whole visible feed. */
+  totalRows: number;
+  /** Effective scroll offset applied (clamped to [0, maxScroll]). */
+  scrollBack: number;
+  /** Largest scrollBack that still shows the oldest entry. */
+  maxScroll: number;
+}
+
+/**
+ * Window of the visible feed that fits `maxRows` rendered rows.
+ * `scrollBack` = rendered rows above the live tail (0 = newest).
+ * Used by the shell to budget the live feed under the WorkstreamDock —
+ * the dock is the compact summary, this is the detailed operator feed —
+ * and by the scrollable activity-history overlay.
+ *
+ * Entries straddling a window edge are skipped rather than partially
+ * rendered, so the picked set can never exceed maxRows rows.
+ */
+export function fitActivityFeed(
+  entries: ActivityEntry[],
+  maxRows: number,
+  termWidth: number,
+  details = false,
+  expandedIds?: ReadonlySet<string>,
+  scrollBack = 0,
+): FittedActivityFeed {
+  const empty: FittedActivityFeed = { entries: [], rows: 0, totalRows: 0, scrollBack: 0, maxScroll: 0 };
+  if (maxRows < 1 || entries.length === 0) return empty;
+  const metrics = activityFeedMetrics(termWidth);
+  const visible = visibleEvents(entries, Math.min(entries.length, 80));
+  const heights = visible.map((e) => estimateActivityEntryHeight(e, metrics, details, expandedIds));
+  const totalRows = heights.reduce((a, b) => a + b, 0);
+  const maxScroll = Math.max(0, totalRows - (heights[0] ?? 0));
+  const back = Math.max(0, Math.min(scrollBack, maxScroll));
+  const w1 = Math.max(0, totalRows - back);   // window bottom (exclusive)
+  const w0 = Math.max(0, w1 - maxRows);       // window top
+
+  const picked: ActivityEntry[] = [];
+  let rows = 0;
+  let acc = 0; // rendered rows at/below current entry (from the bottom)
+  for (let i = visible.length - 1; i >= 0; i--) {
+    const h = heights[i];
+    const entryTop = totalRows - acc - h;
+    const entryBottom = totalRows - acc;
+    acc += h;
+    if (entryTop < w0) break;                 // this and all older entries are above the window
+    if (entryBottom <= w1) {                  // fully inside the window
+      picked.unshift(visible[i]);
+      rows += h;
+    }
+    // Entries straddling the bottom edge are skipped — the next scroll
+    // step reveals them whole.
+  }
+  return { entries: picked, rows, totalRows, scrollBack: back, maxScroll };
+}
+
 /** Tags suppressed from the live feed — pure diagnostic noise that
  *  duplicates what the transcript already shows (the user message echo)
  *  or belongs in the optional debug view (/activity), not conversation. */
@@ -100,6 +203,16 @@ export function wrapText(text: string, max: number): string[] {
     const words = paragraph.split(/\s+/);
     let line = "";
     for (const word of words) {
+      if (word.length > max) {
+        // Hard-break unbroken runs (paths, minified output, base64) so the
+        // rendered row count matches estimateActivityEntryHeight.
+        if (line.length > 0) {
+          out.push(line);
+          line = "";
+        }
+        for (let i = 0; i < word.length; i += max) out.push(word.slice(i, i + max));
+        continue;
+      }
       if (line.length === 0) {
         line = word;
       } else if (line.length + 1 + word.length <= max) {
@@ -164,7 +277,7 @@ export function semanticGlyphOf(entry: ActivityEntry): { glyph: string; color: s
   return SEMANTIC_GLYPH[semanticOf(entry)];
 }
 
-function inferTag(entry: ActivityEntry): string {
+export function inferTag(entry: ActivityEntry): string {
   if (entry.tag) return entry.tag;
 
   const t = entry.type;
@@ -235,6 +348,56 @@ export interface ActivityStreamProps {
   compact?: boolean;
 }
 
+export interface ActivityFeedRowProps {
+  entry: ActivityEntry;
+  metrics: ActivityFeedMetrics;
+  /** Expand every row that has a `fullText` payload. */
+  details?: boolean;
+  /** Per-row expansion — ids toggled individually (Ctrl+G on latest). */
+  expandedIds?: ReadonlySet<string>;
+}
+
+/** One feed row — shared by ActivityStream (live tail) and the
+ *  scrollable activity history overlay. Render math lives ONLY here. */
+export function ActivityFeedRow({ entry, metrics, details = false, expandedIds }: ActivityFeedRowProps): React.ReactElement {
+  const tag = inferTag(entry).padEnd(TAG_WIDTH);
+  const color = activityColor(tag.trim());
+  const semantic = semanticGlyphOf(entry);
+  const hasDetails = entryHasDetails(entry);
+  const isStream = isStreamEntry(entry);
+  const msg = truncate(redactSecrets(entry.text), metrics.msgMax);
+  const expanded = isEntryExpanded(entry, details, expandedIds);
+  const detailLines = expanded ? wrapText(redactSecrets(entry.fullText!), metrics.msgMax) : [];
+
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Text dimColor>{"  "}</Text>
+        <Text color={semantic.color}>{semantic.glyph} </Text>
+        <Text color={color} bold={!isStream}>{tag}</Text>
+        <Text dimColor> </Text>
+        {hasDetails && (
+          <Text dimColor>{expanded ? "− " : "+ "}</Text>
+        )}
+        {!hasDetails && <Text dimColor>  </Text>}
+        <Text color={color} dimColor={isStream}>{msg}</Text>
+      </Box>
+      {expanded && (
+        <Box flexDirection="column" marginLeft={metrics.prefixWidth}>
+          {detailLines
+            .slice(0, DETAIL_MAX_LINES)
+            .map((line, i) => (
+              <Text key={i} color={COLORS.secondary}>{line}</Text>
+            ))}
+          {detailLines.length > DETAIL_MAX_LINES && (
+            <Text color={COLORS.secondary}>…</Text>
+          )}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 export function ActivityStream({
   entries,
   maxEntries = 4,
@@ -244,12 +407,7 @@ export function ActivityStream({
 }: ActivityStreamProps): React.ReactElement {
   const { stdout } = useStdout();
   const termWidth = widthProp ?? stdout?.columns ?? 80;
-
-  // Rows render as `  ✓ TAG   message` — the semantic glyph leads, the
-  // tool verb follows, the message fills the shared content column.
-  const innerWidth = Math.max(20, termWidth - 2);
-  const prefixWidth = 2 + 1 + TAG_WIDTH + 1 + 1; // indent + glyph + tag + space + indicator col
-  const msgMax = Math.max(10, innerWidth - prefixWidth);
+  const metrics = activityFeedMetrics(termWidth);
 
   const finalVisible = visibleEvents(entries, maxEntries);
 
@@ -258,43 +416,15 @@ export function ActivityStream({
       {finalVisible.length === 0 ? (
         <Text dimColor>{"  "}…working</Text>
       ) : (
-        finalVisible.map((entry) => {
-          const tag = inferTag(entry).padEnd(TAG_WIDTH);
-          const color = activityColor(tag.trim());
-          const semantic = semanticGlyphOf(entry);
-          const hasDetails = !!entry.fullText && entry.fullText !== entry.text && entry.fullText.length > entry.text.length;
-          const isStream = isStreamEntry(entry);
-          const msg = truncate(redactSecrets(entry.text), msgMax);
-          const expanded = (details || expandedIds?.has(entry.id) === true) && hasDetails;
-
-          return (
-            <Box key={entry.id} flexDirection="column">
-              <Box>
-                <Text dimColor>{"  "}</Text>
-                <Text color={semantic.color}>{semantic.glyph} </Text>
-                <Text color={color} bold={!isStream}>{tag}</Text>
-                <Text dimColor> </Text>
-                {hasDetails && (
-                  <Text dimColor>{expanded ? "− " : "+ "}</Text>
-                )}
-                {!hasDetails && <Text dimColor>  </Text>}
-                <Text color={color} dimColor={isStream || entry.type === "info"}>{msg}</Text>
-              </Box>
-              {expanded && (
-                <Box flexDirection="column" marginLeft={prefixWidth}>
-                  {wrapText(redactSecrets(entry.fullText!), msgMax)
-                    .slice(0, DETAIL_MAX_LINES)
-                    .map((line, i) => (
-                      <Text key={i} color={COLORS.secondary} dimColor>{line}</Text>
-                    ))}
-                  {wrapText(redactSecrets(entry.fullText!), msgMax).length > DETAIL_MAX_LINES && (
-                    <Text color={COLORS.secondary} dimColor>…</Text>
-                  )}
-                </Box>
-              )}
-            </Box>
-          );
-        })
+        finalVisible.map((entry) => (
+          <ActivityFeedRow
+            key={entry.id}
+            entry={entry}
+            metrics={metrics}
+            details={details}
+            expandedIds={expandedIds}
+          />
+        ))
       )}
     </Box>
   );

@@ -29,7 +29,7 @@
  * | textBright| #FAFAFA   | user text / important results          |
  * | secondary | #8B8FA3   | metadata — muted slate gray            |
  * | secondaryBright | #A6AAB8 | emphasized metadata (branch names) |
- * | secondaryDim | #5C5F6E | dim gray — de-emphasized             |
+ * | secondaryDim | #78809A | dim gray — de-emphasized, ≥4.5:1 on brand black |
  * | success   | #4ADE80   | green — pass/complete                  |
  * | working   | #A855F7   | active work — LiTT purple (identity)   |
  * | warning   | #FBBF24   | amber — warn (non-blocking attention)  |
@@ -61,8 +61,9 @@ export const COLORS = {
   /** Slightly brighter gray — branch names, emphasized metadata. */
   secondaryBright: "#A6AAB8",
 
-  /** Dim gray — de-emphasized (routing footers, inactive states). */
-  secondaryDim: "#5C5F6E",
+  /** Dim gray — de-emphasized (routing footers, inactive states).
+   *  #78809A ≈ 5.2:1 on #090711 — informational text stays readable. */
+  secondaryDim: "#78809A",
 
   /** Success, pass, complete — green. */
   success: "#4ADE80",
