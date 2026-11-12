@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import StudioProjectFiles from "./StudioProjectFiles";
+import { clearHostExecSettled } from "@/lib/studio/host-exec-session";
 
 const { getToken } = vi.hoisted(() => ({ getToken: vi.fn().mockResolvedValue("test-token") }));
 
@@ -19,6 +20,7 @@ describe("StudioProjectFiles", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     cleanup();
+    clearHostExecSettled();
   });
 
   it("loads nested files, opens text, and saves through the project API", async () => {
@@ -89,6 +91,42 @@ describe("StudioProjectFiles", () => {
     await waitFor(() => expect((editorAfter as HTMLTextAreaElement).value).toBe("v2 written by LiTT"));
     expect(screen.queryByText(/LiTT changed this file while you had unsaved edits/i)).toBeNull();
     expect((screen.getByRole("button", { name: /^Save$/i }) as HTMLButtonElement).disabled).toBe(true); // clean, nothing to save
+  });
+
+  it("settles after one HOST_EXECUTION_DISABLED prepare — no prepare loop, no Prepare affordance", async () => {
+    let prepareCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/workspace/prepare")) {
+        prepareCalls += 1;
+        return new Response(
+          JSON.stringify({
+            error: "Execution is unavailable on this deployment. No verified sandbox isolation exists.",
+            code: "HOST_EXECUTION_DISABLED",
+            context: "workspace.prepare",
+          }),
+          { status: 503 },
+        );
+      }
+      // Files stay unavailable (workspace never becomes ready).
+      return new Response(JSON.stringify({ error: "Workspace not ready", code: "WORKSPACE_NOT_READY" }), { status: 503 });
+    });
+
+    render(<StudioProjectFiles projectId="project-repo" repositoryName="owner/repo" branch="main" workspaceStatus="failed" writeAccess />);
+
+    // The honest unavailable explanation appears (banner + error surface).
+    await screen.findAllByText(/secure sandbox/i);
+    expect(prepareCalls).toBe(1);
+
+    // Give any retry loop ample opportunity to fire, then use the manual
+    // Refresh — neither may produce another prepare POST.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    fireEvent.click(screen.getByRole("button", { name: /refresh project files/i }));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(prepareCalls).toBe(1);
+    expect(screen.queryByRole("button", { name: /^Prepare$/i })).toBeNull();
+    expect(screen.queryByText(/could not be re-prepared automatically/i)).toBeNull();
   });
 
   it("reloads a clean open file silently when LiTT rewrites it", async () => {
