@@ -590,6 +590,103 @@ async function main() {
       markupHit ? `leaked protocol token ${JSON.stringify(markupHit)}` : "no raw markup in streamed text");
     await shot(page, "06-after-build");
 
+    // ── Step 5.9: drive the FULL approval chain before preview checks ──
+    // The resumed run only mutates the workspace after EVERY gated tool is
+    // approved — file writes routinely land in hop 2+, so checking the
+    // preview iframe while later pauses are still pending guarantees a
+    // false "no iframe" failure. Drive the whole chain now (each hop is
+    // still an explicit per-tool approval, exactly like a user clicking
+    // Approve on each card); the deploy reporting steps below consume the
+    // captured results.
+    const DEPLOY_TOOL_IDS = new Set(["project.deploy", "deploy.execute", "deploy.preview", "deploy.production"]);
+    const pauseChain = approvalEvents.map((e) => e.toolId);
+    let deployApprovalMeta = null;
+    let chainError = null;
+    if (DEPLOY_REQUESTED) {
+      const chainDeadline = Date.now() + 15 * 60 * 1000; // covers every hop
+      let currentPause = firstPause;
+      let pendingResponse = firstApprovalResponse;
+      let pendingBody = firstApprovalBody;
+      let hops = 0;
+
+      while (currentPause?.pausedRunId && convId && hops < 8 && Date.now() < chainDeadline) {
+        hops++;
+        // Async approval contract: POST returns 202 immediately, then poll
+        // GET for the resumed execution result. This avoids the Cloudflare
+        // 524 timeout that occurred when the approval endpoint synchronously
+        // awaited the full resumed agent loop (deploy + model continuation).
+        const approval = pendingResponse ?? await page.request.post(
+          `${BASE}/api/studio/conversations/${convId}/approvals/${currentPause.pausedRunId}`,
+          { data: { decision: "approved" }, timeout: 30_000 },
+        ).catch(() => null);
+        const approvalBody = pendingBody ?? (approval ? await approval.json().catch(() => null) : null);
+        pendingResponse = null;
+        pendingBody = null;
+        if (DEPLOY_TOOL_IDS.has(currentPause.toolId)) {
+          deployApprovalMeta = { status: approval?.status() ?? null, body: approvalBody };
+          writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
+        }
+
+        let runResult = approvalBody?.runResult ?? null;
+        let runError = approvalBody?.runError ?? null;
+        const seedStatus = approvalBody?.runStatus ?? approvalBody?.status ?? "processing";
+        if (!runResult && !runError && seedStatus === "processing") {
+          while (Date.now() < chainDeadline) {
+            await page.waitForTimeout(3000);
+            const statusResp = await page.request.get(
+              `${BASE}/api/studio/conversations/${convId}/approvals/${currentPause.pausedRunId}`,
+              { timeout: 15_000 },
+            ).catch(() => null);
+            if (!statusResp || !statusResp.ok()) continue;
+            const statusBody = await statusResp.json().catch(() => null);
+            if (!statusBody) continue;
+            if (statusBody.runStatus === "completed" && statusBody.runResult) {
+              runResult = statusBody.runResult;
+              break;
+            }
+            if (statusBody.runStatus === "failed") {
+              runError = statusBody.runError ?? "Execution failed";
+              break;
+            }
+            // Still processing — keep polling
+          }
+        }
+
+        const deployCall = (runResult?.toolCalls ?? []).find((c) => DEPLOY_TOOL_IDS.has(c.toolId));
+        if (deployCall) {
+          // summarizeToolResult JSON-encodes object results; publicUrl may be
+          // truncated at 200 chars, so fall back to constructing the URL from
+          // the deploymentId (both fields sit early in the serialized object).
+          const summary = String(deployCall.summary ?? "");
+          productionUrl = productionUrl
+            ?? summary.match(/"publicUrl":"(https?:\/\/[^"]+)"/)?.[1]
+            ?? (() => { const id = summary.match(/"deploymentId":"([^"]+)"/)?.[1]; return id ? `${BASE}/sites/${id}` : null; })()
+            ?? summary.match(/https?:\/\/[^\s"'\\]+\/sites\/[^\s"'\\]+/)?.[0]
+            ?? null;
+          deployResult = deployResult ?? {
+            success: deployCall.success === true && !!productionUrl && /"status":"ready"/.test(summary),
+            productionUrl,
+            error: String(summary).slice(0, 200),
+          };
+          if (deployCall.toolId !== "project.deploy") {
+            verdict.notes.push(`Deploy executed via station alias ${deployCall.toolId} — registered delegate of project.deploy (same canonical execution path).`);
+          }
+        }
+
+        const nested = runResult?.pendingApproval ?? null;
+        if (nested?.pausedRunId) {
+          currentPause = { toolId: nested.toolId, pausedRunId: nested.pausedRunId, reason: nested.reason };
+          pauseChain.push(nested.toolId);
+          continue;
+        }
+        if (nested && !nested.pausedRunId) {
+          verdict.notes.push(`resumed run paused again on ${nested.toolId} but no pausedRunId was persisted — the gate is unresumable`);
+        }
+        if (runError) chainError = runError;
+        break;
+      }
+    }
+
     // ── Step 6: live preview verification ──
     // The StudioPreviewPanel polls /preview independently; wait for iframe.
     const iframe = page.getByTestId("preview-iframe");
@@ -659,7 +756,6 @@ async function main() {
     // of it (src/lib/station-control/stations/deploy.ts setDelegateToolId).
     // The model may legitimately reach the deploy through any alias — the
     // gate and the completion evidence are the same.
-    const DEPLOY_TOOL_IDS = new Set(["project.deploy", "deploy.execute", "deploy.preview", "deploy.production"]);
     // project.deploy is a sensitive action: the run MUST pause for explicit
     // approval even in AUTO mode. A deployment that executed without a
     // pending_approval pause would mean the gate was bypassed.
@@ -671,92 +767,6 @@ async function main() {
     // whole chain exactly like a user clicking Approve on each card, then
     // reads the deploy hop's toolCalls for the deployment outcome.
     if (DEPLOY_REQUESTED) {
-      const chainDeadline = Date.now() + 15 * 60 * 1000; // covers every hop
-      const pauseChain = approvalEvents.map((e) => e.toolId);
-      let currentPause = firstPause;
-      let pendingResponse = firstApprovalResponse;
-      let pendingBody = firstApprovalBody;
-      let deployApprovalMeta = null;
-      let chainError = null;
-      let hops = 0;
-
-      while (currentPause?.pausedRunId && convId && hops < 8 && Date.now() < chainDeadline) {
-        hops++;
-        // Async approval contract: POST returns 202 immediately, then poll
-        // GET for the resumed execution result. This avoids the Cloudflare
-        // 524 timeout that occurred when the approval endpoint synchronously
-        // awaited the full resumed agent loop (deploy + model continuation).
-        const approval = pendingResponse ?? await page.request.post(
-          `${BASE}/api/studio/conversations/${convId}/approvals/${currentPause.pausedRunId}`,
-          { data: { decision: "approved" }, timeout: 30_000 },
-        ).catch(() => null);
-        const approvalBody = pendingBody ?? (approval ? await approval.json().catch(() => null) : null);
-        pendingResponse = null;
-        pendingBody = null;
-        if (DEPLOY_TOOL_IDS.has(currentPause.toolId)) {
-          deployApprovalMeta = { status: approval?.status() ?? null, body: approvalBody };
-          writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
-        }
-
-        let runResult = approvalBody?.runResult ?? null;
-        let runError = approvalBody?.runError ?? null;
-        const seedStatus = approvalBody?.runStatus ?? approvalBody?.status ?? "processing";
-        if (!runResult && !runError && seedStatus === "processing") {
-          while (Date.now() < chainDeadline) {
-            await page.waitForTimeout(3000);
-            const statusResp = await page.request.get(
-              `${BASE}/api/studio/conversations/${convId}/approvals/${currentPause.pausedRunId}`,
-              { timeout: 15_000 },
-            ).catch(() => null);
-            if (!statusResp || !statusResp.ok()) continue;
-            const statusBody = await statusResp.json().catch(() => null);
-            if (!statusBody) continue;
-            if (statusBody.runStatus === "completed" && statusBody.runResult) {
-              runResult = statusBody.runResult;
-              break;
-            }
-            if (statusBody.runStatus === "failed") {
-              runError = statusBody.runError ?? "Execution failed";
-              break;
-            }
-            // Still processing — keep polling
-          }
-        }
-
-        const deployCall = (runResult?.toolCalls ?? []).find((c) => DEPLOY_TOOL_IDS.has(c.toolId));
-        if (deployCall) {
-          // summarizeToolResult JSON-encodes object results; publicUrl may be
-          // truncated at 200 chars, so fall back to constructing the URL from
-          // the deploymentId (both fields sit early in the serialized object).
-          const summary = String(deployCall.summary ?? "");
-          productionUrl = productionUrl
-            ?? summary.match(/"publicUrl":"(https?:\/\/[^"]+)"/)?.[1]
-            ?? (() => { const id = summary.match(/"deploymentId":"([^"]+)"/)?.[1]; return id ? `${BASE}/sites/${id}/` : null; })()
-            ?? summary.match(/https?:\/\/[^\s"'\\]+\/sites\/[^\s"'\\]+/)?.[0]
-            ?? null;
-          deployResult = deployResult ?? {
-            success: deployCall.success === true && !!productionUrl && /"status":"ready"/.test(summary),
-            productionUrl,
-            error: String(summary).slice(0, 200),
-          };
-          if (deployCall.toolId !== "project.deploy") {
-            verdict.notes.push(`Deploy executed via station alias ${deployCall.toolId} — registered delegate of project.deploy (same canonical execution path).`);
-          }
-        }
-
-        const nested = runResult?.pendingApproval ?? null;
-        if (nested?.pausedRunId) {
-          currentPause = { toolId: nested.toolId, pausedRunId: nested.pausedRunId, reason: nested.reason };
-          pauseChain.push(nested.toolId);
-          continue;
-        }
-        if (nested && !nested.pausedRunId) {
-          verdict.notes.push(`resumed run paused again on ${nested.toolId} but no pausedRunId was persisted — the gate is unresumable`);
-        }
-        if (runError) chainError = runError;
-        break;
-      }
-
       const deployGateSeen = pauseChain.some((t) => DEPLOY_TOOL_IDS.has(t));
       step("deploy_approval_gate", deployGateSeen, deployGateSeen
         ? `approval chain: ${pauseChain.join(" → ")}`
