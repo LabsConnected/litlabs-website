@@ -72,3 +72,39 @@ jobs:
           # it will authenticate when passed via RAILWAY_API_TOKEN instead.
           echo "=== RAILWAY_TOKEN value probed AS RAILWAY_API_TOKEN ==="
           railway whoami || true
+
+      - name: Stripe env MODE probe — prefixes only, never values
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        continue-on-error: true
+        run: |
+          probe_env() {
+            local label="$1"; shift
+            echo "===== $label ====="
+            local vars
+            vars="$("$@" 2>&1)" || true
+            if echo "$vars" | grep -qi "not found\|Unauthorized\|Invalid"; then echo "$vars" | head -3; return; fi
+            for name in STRIPE_SECRET_KEY NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY STRIPE_WEBHOOK_SECRET STRIPE_MODE STRIPE_PRICE_CREATOR_LITE STRIPE_PRICE_CREATOR_BETA STRIPE_PRICE_PRO_BUILDER_BETA STRIPE_PRICE_FOUNDER; do
+              local line
+              line="$(echo "$vars" | grep -oE "${name}[[:space:]]*[=│][^│]*" | head -1)"
+              if [ -z "$line" ]; then echo "$name: ABSENT"; continue; fi
+              local val="${line#*=}"
+              val="$(echo "$val" | tr -d ' |')"
+              case "$val" in
+                sk_live_*) echo "$name: sk_live_ (live mode)";;
+                sk_test_*) echo "$name: sk_test_ (TEST mode)";;
+                pk_live_*) echo "$name: pk_live_ (live mode)";;
+                pk_test_*) echo "$name: pk_test_ (TEST mode)";;
+                whsec_*)  echo "$name: whsec_ present";;
+                price_*)  echo "$name: ${val:0:10}… (id present)";;
+                "")        echo "$name: EMPTY";;
+                *)         echo "$name: present (unrecognized prefix ${val:0:6}…)";;
+              esac
+            done
+          }
+          echo "=== account-token: services/environments visible ==="
+          RAILWAY_API_TOKEN="$RAILWAY_API_TOKEN" railway status 2>&1 | head -20
+          probe_env "prod env via API token" env RAILWAY_TOKEN="$RAILWAY_API_TOKEN" railway variables --service "@litlabs/litt-shell" --environment production
+          probe_env "prod env via API token (env=prod)" env RAILWAY_TOKEN="$RAILWAY_API_TOKEN" railway variables --service "@litlabs/litt-shell" --environment prod
+          probe_env "project token (bound env)" railway variables --service "@litlabs/litt-shell"
