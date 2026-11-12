@@ -1372,8 +1372,8 @@ function UnifiedSelectorPopover({
 
       {byokModels.map((m) => {
         const isActive = selectedModelId === m.id;
-        const health = providerHealth[m.provider] ?? "available";
-        const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : "#ef4444";
+        const health = providerHealth[m.provider] ?? "unknown";
+        const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : health === "unknown" ? "#8a8f98" : "#ef4444";
         return (
           <button
             key={m.id}
@@ -1487,8 +1487,8 @@ function UnifiedSelectorPopover({
           {/* Raw provider models */}
           {advancedProviderModels.map((m) => {
             const isActive = selectedModelId === m.id;
-            const health = providerHealth[m.provider] ?? "available";
-            const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : "#ef4444";
+            const health = providerHealth[m.provider] ?? "unknown";
+            const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : health === "unknown" ? "#8a8f98" : "#ef4444";
             return (
               <button
                 key={m.id}
