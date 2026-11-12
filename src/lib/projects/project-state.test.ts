@@ -46,6 +46,22 @@ describe("describeProjectState — reference derivation (used by /projects)", ()
     expect(s.label).toBe("Ready");
   });
 
+  it("failed workspace carrying HOST_EXECUTION_DISABLED reads as unavailable with NO retry", () => {
+    const s = describeProjectState(
+      {
+        workspaceStatus: "failed",
+        runtimeStatus: "stopped",
+        updatedAt: iso(1000),
+        workspaceError:
+          'Workspace prepare failed (503): {"error":"Execution is unavailable on this deployment.","code":"HOST_EXECUTION_DISABLED"}',
+      },
+      NOW,
+    );
+    expect(s.label).toBe("Repo workspace unavailable");
+    expect(s.canRetry).toBe(false);
+    expect(s.detail).toMatch(/secure sandbox/i);
+  });
+
   it("failed workspace reads as Setup failed with retry", () => {
     const s = describeProjectState(
       {
