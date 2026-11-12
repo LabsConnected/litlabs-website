@@ -1,11 +1,8 @@
 // Connect all workspace integrations via Supabase
 // This inserts records for GitHub repo, Vercel project, and Supabase project
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://rokbfvuoqildggnhappy.supabase.co";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-
-// We need the service role key to insert records
-// Let's try using the API instead
+// Read-only: this script only queries the public system-health endpoint.
+// It previously carried an unused Supabase URL fallback to production — removed.
 
 async function main() {
   // Check current state via the API

@@ -7,8 +7,14 @@ import { test, expect } from "@playwright/test";
  * the row exists in Supabase via the service-role REST API.
  */
 
-const SUPABASE_URL = "https://rokbfvuoqildggnhappy.supabase.co";
+const PROD_PROJECT_REF = "rokbfvuoqildggnhappy";
+const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+// Never let an automated test write to the production project unless the
+// operator explicitly opts in.
+const PROD_BLOCKED =
+  SUPABASE_URL.includes(PROD_PROJECT_REF) &&
+  process.env.LITT_ALLOW_PROD_TARGET !== "1";
 
 test("Hire form creates verified row in Supabase", async ({ page }) => {
   // /hire is retired from the public V1 product: the page now redirects to
@@ -18,6 +24,8 @@ test("Hire form creates verified row in Supabase", async ({ page }) => {
   // both this test and the page.
   test.skip(true, "/hire retired from public V1 (hireServices flag disabled)");
   test.skip(!SERVICE_KEY, "SUPABASE_SERVICE_ROLE_KEY not set");
+  test.skip(!SUPABASE_URL, "SUPABASE_URL not set");
+  test.skip(PROD_BLOCKED, "refusing production Supabase target without LITT_ALLOW_PROD_TARGET=1");
 
   const testEmail = `e2e-hire-test-${Date.now()}@litlabs.net`;
 
