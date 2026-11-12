@@ -60,6 +60,7 @@ export const OLLAMA_ROUTE_ENV_VARS = {
   lan: "OLLAMA_LAN_URL",
   lanLegacy: ["OLLAMA_HOST_PC", "OLLAMA_HOST", "OLLAMA_BASE_URL"],
   tailscale: "OLLAMA_TAILSCALE_URL",
+  order: "OLLAMA_ROUTE_ORDER",
 } as const;
 
 /**
@@ -86,7 +87,6 @@ export function resolveOllamaRouteCandidates(getEnv: EnvGetter): OllamaRouteCand
   };
 
   const localUrl = normalizeOllamaEndpoint(getEnv(OLLAMA_ROUTE_ENV_VARS.local)) ?? DEFAULT_OLLAMA_URL;
-  push("local", localUrl);
 
   const lanUrl =
     normalizeOllamaEndpoint(getEnv(OLLAMA_ROUTE_ENV_VARS.lan)) ??
@@ -94,9 +94,29 @@ export function resolveOllamaRouteCandidates(getEnv: EnvGetter): OllamaRouteCand
       (found, key) => found ?? normalizeOllamaEndpoint(getEnv(key)),
       null,
     );
-  push("lan", lanUrl);
 
-  push("tailscale", normalizeOllamaEndpoint(getEnv(OLLAMA_ROUTE_ENV_VARS.tailscale)));
+  const tailscaleUrl = normalizeOllamaEndpoint(getEnv(OLLAMA_ROUTE_ENV_VARS.tailscale));
+
+  // OLLAMA_ROUTE_ORDER ("tailscale,lan,local") re-prioritises the tiers.
+  // Listed valid tiers go first in the given order; unlisted tiers keep
+  // the canonical order afterwards, so a partial list can never silently
+  // drop a fallback route. Invalid tokens are ignored entirely.
+  const DEFAULT_TIER_ORDER: readonly OllamaRouteTier[] = ["local", "lan", "tailscale"];
+  const rawOrder = (getEnv(OLLAMA_ROUTE_ENV_VARS.order) ?? "")
+    .split(/[\s,]+/)
+    .filter((t): t is OllamaRouteTier =>
+      (DEFAULT_TIER_ORDER as readonly string[]).includes(t),
+    );
+  const tierOrder = [
+    ...new Set<OllamaRouteTier>([...rawOrder, ...DEFAULT_TIER_ORDER]),
+  ];
+
+  const endpoints: Record<OllamaRouteTier, string | null> = {
+    local: localUrl,
+    lan: lanUrl,
+    tailscale: tailscaleUrl,
+  };
+  for (const tier of tierOrder) push(tier, endpoints[tier]);
 
   return candidates;
 }
