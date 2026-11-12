@@ -72,3 +72,15 @@ jobs:
           # it will authenticate when passed via RAILWAY_API_TOKEN instead.
           echo "=== RAILWAY_TOKEN value probed AS RAILWAY_API_TOKEN ==="
           railway whoami || true
+
+      - name: Pull staging web logs — approval-handoff forensic lines
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          echo "=== recent @litlabs/litt-shell deploy logs (approval handoff lines) ==="
+          railway logs --service "@litlabs/litt-shell" -n 2000 2>&1 \
+            | grep -E "approval_handoff_derived|nested_handoff_settled|nested_paused_run|paused_run:" \
+            | tail -80 || true
+          echo "=== last 40 raw lines for context ==="
+          railway logs --service "@litlabs/litt-shell" -n 40 2>&1 | tail -40 || true
