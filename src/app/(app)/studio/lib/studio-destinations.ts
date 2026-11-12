@@ -318,6 +318,15 @@ export function mapLegacyToolToDestination(
     case "clibridge":
       return { destination: "more", legacyTool: tool as StudioTool, mode: tool as MoreMode };
 
+    // Memory → Studio/Work. There is no dedicated project-memory browser
+    // inside Studio yet (the real memory UI today lives under Settings →
+    // "What LiTT Knows", and per-agent memory lives in the Agents detail
+    // panel) — this intentionally opens the chat surface, mirroring the
+    // camera/screen/space fallback above, so the user can ask LiTT what
+    // it remembers rather than silently falling through to the default.
+    case "memory":
+      return { destination: "studio", legacyTool: "memory", mode: "work" };
+
     // Unknown / default → Studio with Preview as the primary surface.
     // Chat lives in the LiTT panel (left); Preview gets the main workspace.
     default:
@@ -414,4 +423,5 @@ export type StudioTool =
   | "clibridge"
   | "loops"
   | "preview"
-  | "game";
+  | "game"
+  | "memory";
