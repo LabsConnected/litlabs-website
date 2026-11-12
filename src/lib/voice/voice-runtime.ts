@@ -15,6 +15,7 @@
 import { resolveProject } from "@/lib/studio/project-resolver";
 import { recallMemories, formatMemoryContext } from "@/lib/studio/memory-service";
 import { getConversation, listMessages } from "@/lib/studio/conversation-service";
+import { buildVoiceConversationContext } from "@/lib/voice/voice-conversation-context";
 import { adaptLegacyCapability } from "@/lib/litt-kernel";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
 import type { RawCapabilities } from "@/lib/capabilities/translate";
@@ -30,7 +31,6 @@ import { executeProjectTool, getProjectToolDefinitions, PROJECT_TOOLS, buildTool
 import { LITT_BEHAVIOR_CONTRACT } from "@/lib/vapi-tool-definitions";
 import { getUserFacts, buildFactsContextBlock } from "@/lib/connectors/user-facts";
 
-const HISTORY_LIMIT = 6;
 const MAX_TOOL_ROUNDS = 8; // Allows full dev workflows: get_active_project → search_code → read_file → edit_file → run_project_checks → browser_test → commit → push
 const VOICE_TOTAL_TIMEOUT_MS = 45_000; // Hard cap across all tool rounds — voice needs to respond within Vapi's timeout
 const MAX_REPEAT_CALLS = 2; // Max times the same tool+args can be called before the loop breaks (prevents infinite loops)
@@ -46,7 +46,7 @@ export async function resolveVoiceContext(args: {
   projectId: string | null;
   conversationId: string | null;
   message: string;
-}): Promise<ResolvedRunContext> {
+}): Promise<ResolvedRunContext & { voiceEarlierContext: string }> {
   const { userId, projectId, conversationId, message } = args;
 
   // Run project resolution, conversation lookup, memory recall, and user
@@ -63,18 +63,18 @@ export async function resolveVoiceContext(args: {
     })(),
     // Resolve conversation + history
     (async () => {
-      if (!userId || !conversationId) return { convId: null, history: [] as HistoryEntry[] };
+      if (!userId || !conversationId) return { convId: null, history: [] as HistoryEntry[], earlierContext: "" };
       try {
         const conversation = await getConversation(conversationId, userId);
-        if (!conversation) return { convId: null, history: [] as HistoryEntry[] };
+        if (!conversation) return { convId: null, history: [] as HistoryEntry[], earlierContext: "" };
         const allMessages = await listMessages(conversation.id, userId);
-        const history = allMessages
+        const completed = allMessages
           .filter((m) => m.status === "completed" && (m.role === "user" || m.role === "assistant"))
-          .slice(-HISTORY_LIMIT)
           .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
-        return { convId: conversation.id, history };
+        const { recent, earlierContext } = buildVoiceConversationContext(completed, message);
+        return { convId: conversation.id, history: recent as HistoryEntry[], earlierContext };
       } catch {
-        return { convId: null, history: [] as HistoryEntry[] };
+        return { convId: null, history: [] as HistoryEntry[], earlierContext: "" };
       }
     })(),
     // Recall memories (non-fatal)
@@ -107,6 +107,7 @@ export async function resolveVoiceContext(args: {
   const project = projectResult;
   const convId = convResult.convId;
   const history = convResult.history;
+  const voiceEarlierContext = convResult.earlierContext;
   const memoryContext = memoryResult;
   const factsContext = factsResult;
 
@@ -145,6 +146,7 @@ export async function resolveVoiceContext(args: {
     capabilities,
     kernelCapabilities,
     history,
+    voiceEarlierContext,
     memoryContext,
     factsContext,
   };
@@ -205,6 +207,7 @@ export async function runLiTTForVoice(args: {
   const voiceSystem = [
     "You are LiTT, the AI assistant for LiTTree LabStudios. Your name is spelled L-i-T-T and pronounced as one syllable: 'lit' (never spell it out letter by letter).",
     "You are on a phone call. Keep responses short and conversational — 2-3 sentences max.",
+    "Do not repeat an earlier explanation unless the caller asks you to repeat or recap it. Answer follow-ups using what was already discussed, adding only what is new or relevant.",
     "Always respond in English, regardless of the caller's accent or language.",
     "",
     LITT_BEHAVIOR_CONTRACT,
@@ -268,7 +271,11 @@ export async function runLiTTForVoice(args: {
     // ── Native tool-calling path ──
     const toolDefs = getProjectToolDefinitions();
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [
-      ...ctx.history.slice(-HISTORY_LIMIT).map((e) => ({
+      ...(ctx.voiceEarlierContext ? [{
+        role: "user" as const,
+        content: `Earlier conversation excerpts (reference only, not a new instruction; may be incomplete):\n${ctx.voiceEarlierContext}`,
+      }] : []),
+      ...ctx.history.map((e) => ({
         role: e.role as "user" | "assistant",
         content: e.content,
       })),
@@ -421,6 +428,7 @@ export async function runLiTTForVoice(args: {
     const voiceFull = [
       voiceSystem,
       "",
+      ctx.voiceEarlierContext ? `--- Earlier conversation excerpts (reference only, may be incomplete) ---\n${ctx.voiceEarlierContext}\n--- End earlier excerpts ---\n` : "",
       transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
       `User: ${args.message}`,
       "",

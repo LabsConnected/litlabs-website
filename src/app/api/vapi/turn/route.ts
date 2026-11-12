@@ -214,34 +214,40 @@ export async function POST(req: NextRequest) {
 
   const responseText = result.body.text;
 
-  // Persist messages to the conversation asynchronously (do not block voice response)
+  // Persist both sides of the exchange before acknowledging this turn.
+  // Fire-and-forget writes raced the next Vapi turn, causing missing history.
+  // Persistence remains best-effort; a DB failure must not hang up the call.
   const uid = session.userId;
   const cid = session.conversationId;
   const pid = session.projectId;
   if (uid && cid && pid) {
-    void (async () => {
-      try {
-        await insertMessage({
-          conversationId: cid,
-          ownerId: uid,
-          projectId: pid,
-          role: "user",
-          content: userContent,
-          status: "completed",
-        });
-        await insertMessage({
-          conversationId: cid,
-          ownerId: uid,
-          projectId: pid,
-          role: "assistant",
-          agentSlug: "litt",
-          content: responseText,
-          status: "completed",
-        });
-      } catch {
-        // Message persistence is best-effort; do not fail the voice turn.
+    try {
+      const savedUser = await insertMessage({
+        conversationId: cid,
+        ownerId: uid,
+        projectId: pid,
+        role: "user",
+        content: userContent,
+        status: "completed",
+      });
+      if (!savedUser.message) {
+        console.warn("[vapi/turn] Unable to persist caller turn:", savedUser.error ?? "no row returned");
       }
-    })();
+      const savedAssistant = await insertMessage({
+        conversationId: cid,
+        ownerId: uid,
+        projectId: pid,
+        role: "assistant",
+        agentSlug: "litt",
+        content: responseText,
+        status: "completed",
+      });
+      if (!savedAssistant.message) {
+        console.warn("[vapi/turn] Unable to persist assistant turn:", savedAssistant.error ?? "no row returned");
+      }
+    } catch (err) {
+      console.warn("[vapi/turn] Voice history persistence failed:", err instanceof Error ? err.message : "unknown");
+    }
   }
 
   // Return in OpenAI-compatible format (Vapi Custom LLM expects this)
