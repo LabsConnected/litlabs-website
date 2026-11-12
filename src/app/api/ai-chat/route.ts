@@ -145,4 +145,21 @@ Output the code files immediately.`;
   }
 }
 
-export const POST = withRateLimit(handler, 10, 60);
+const limitedHandler = withRateLimit(handler, 10, 60);
+
+export async function POST(req: NextRequest) {
+  // Auth gate runs BEFORE the rate limiter. The limiter keys anonymous
+  // traffic on a per-IP bucket shared across all rate-limited routes, so an
+  // unauthenticated request could otherwise be answered 429 (bucket already
+  // exhausted) instead of the truthful 401 — as observed on staging. Auth
+  // must always win: anonymous requests short-circuit here and never touch
+  // the bucket. Authenticated callers are then limited on their verified
+  // user ID (overriding any client-supplied value) rather than the shared
+  // IP bucket.
+  const { userId } = await auth(req);
+  if (!userId) {
+    return jsonError(401, "Authentication required", newRequestId());
+  }
+  req.headers.set("x-clerk-user-id", userId);
+  return limitedHandler(req);
+}
