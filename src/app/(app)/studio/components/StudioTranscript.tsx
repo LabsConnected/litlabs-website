@@ -198,7 +198,7 @@ function StreamingProgress() {
     .map((e) => ({ id: e.id, summary: e.summary, dotColor: eventDotColor(e) }));
 
   return (
-    <div data-testid="studio-live-progress" className="mb-2 border-b pb-2" style={{ borderColor: "rgba(155,77,255,0.14)" }} aria-live="polite">
+    <div data-testid="studio-live-progress" className="mb-2 border-b pb-2" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 18%, transparent)" }} aria-live="polite">
       <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--text-main)" }}>
         <span className="studio-anim-blink inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--litt-primary)" }} aria-hidden />
         {headline}
@@ -530,16 +530,21 @@ function CodeBlockWithCopy({ code, children }: { code: string; children: React.R
         onClick={handleCopy}
         className="absolute right-1.5 top-1.5 z-10 rounded border px-1.5 py-0.5 text-[8px] font-bold opacity-0 transition group-hover:opacity-100 focus:opacity-100"
         style={{
-          borderColor: "rgba(255,255,255,0.15)",
-          backgroundColor: "rgba(0,0,0,0.5)",
-          color: copied ? "#a3e635" : "rgba(255,255,255,0.6)",
+          borderColor: "var(--studio-border)",
+          backgroundColor: "var(--studio-surface)",
+          color: copied ? "var(--color-accent)" : "var(--text-muted)",
         }}
         aria-label={copied ? "Code copied" : "Copy code"}
         title={copied ? "Copied!" : "Copy code"}
       >
         {copied ? "Copied" : "Copy"}
       </button>
-      <pre className="overflow-x-auto rounded-lg bg-black/40 p-2 text-[11px]">{children}</pre>
+      <pre
+        className="overflow-x-auto rounded-lg border p-2 text-[11px]"
+        style={{ backgroundColor: "var(--studio-bg)", borderColor: "var(--studio-border)" }}
+      >
+        {children}
+      </pre>
     </div>
   );
 }
@@ -748,7 +753,7 @@ export default function StudioTranscript({
               >
                 <div
                   className={`mb-1 flex items-center gap-2 px-1 text-[9px] font-black uppercase tracking-[.14em] ${isUser ? "flex-row-reverse" : ""}`}
-                  style={{ color: isUser ? "#fb923c" : agentColor }}
+                  style={{ color: isUser ? "var(--color-accent)" : agentColor }}
                 >
                   <span>{isUser ? "You" : agentMeta.displayName}</span>
                   {!isUser && (
@@ -767,7 +772,7 @@ export default function StudioTranscript({
                       onClick={() => onRouteToolAction?.("terminal", command)}
                       disabled={!ptyUsable}
                       className="rounded-lg border px-2.5 py-1.5 text-[9px] font-bold transition disabled:cursor-not-allowed disabled:opacity-35"
-                      style={{ borderColor: "rgba(114,242,56,0.2)", backgroundColor: "rgba(114,242,56,0.05)", color: "#a3e635" }}
+                      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 30%, transparent)", backgroundColor: "color-mix(in srgb, var(--color-accent) 7%, transparent)", color: "var(--color-accent)" }}
                       aria-label={`Run ${command} in terminal`}
                       title={`Run ${command} in terminal`}
                     >
@@ -788,24 +793,31 @@ export default function StudioTranscript({
                   style={{
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
+                    // Chat beauty (2026-11-11): bubbles wear the Studio
+                    // shell's Signature tokens (white worked into green)
+                    // like every other shell surface. They used to be
+                    // hard-coded dark-purple glass (rgba(20,15,31,*))
+                    // with prose-invert markdown, whatever theme was
+                    // applied.
                     borderColor: isFailed
                       ? "rgba(239,68,68,0.3)"
-                      : isUser ? "rgba(155,77,255,0.2)" : "rgba(155,77,255,0.12)",
-                    background: isFailed
-                      ? "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))"
                       : isUser
-                        ? "rgba(20,15,31,0.72)"
-                        : isStreaming
-                          ? `linear-gradient(135deg, ${agentColor}14, rgba(255,255,255,0.03))`
-                          : "rgba(20,15,31,0.6)",
-                    color: isUser ? "var(--text-main)" : "var(--text-main)",
-                    backdropFilter: "blur(12px) saturate(130%)",
-                    WebkitBackdropFilter: "blur(12px) saturate(130%)",
+                        ? "color-mix(in srgb, var(--color-accent) 35%, transparent)"
+                        : "var(--studio-border)",
+                    ...(isFailed
+                      ? {
+                          background:
+                            "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))",
+                        }
+                      : {
+                          backgroundColor: isUser
+                            ? "color-mix(in srgb, var(--color-accent) 14%, var(--studio-card))"
+                            : "var(--studio-card)",
+                        }),
+                    color: "var(--text-main)",
                     boxShadow: isFailed
                       ? "0 4px 16px rgba(239,68,68,0.1)"
-                      : isUser
-                        ? "0 4px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)"
-                        : `0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.03), 0 0 12px rgba(155,77,255,0.04)`,
+                      : "0 4px 16px rgba(14,60,26,0.10), 0 0 12px rgba(23,122,54,0.05)",
                   }}
                   aria-busy={showThinkingPlaceholder}
                 >
@@ -813,7 +825,10 @@ export default function StudioTranscript({
                   {isUser ? (
                     <span className="select-text">{message.content}</span>
                   ) : showThinkingPlaceholder ? (
-                    <div className="flex min-h-[2.25rem] items-center gap-2 text-[12px] text-white/55">
+                    <div
+                      className="flex min-h-[2.25rem] items-center gap-2 text-[12px]"
+                      style={{ color: "var(--text-muted)" }}
+                    >
                       <span className="flex gap-1" aria-hidden>
                         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[color:var(--litt-primary)] [animation-delay:-0.3s]" />
                         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[color:var(--litt-primary)] [animation-delay:-0.15s]" />
@@ -822,7 +837,7 @@ export default function StudioTranscript({
                       <span>LiTT is thinking…</span>
                     </div>
                   ) : (
-                    <div className="prose prose-invert prose-sm max-w-none select-text prose-p:my-1 prose-pre:my-1">
+                    <div className="prose prose-sm max-w-none select-text prose-p:my-1 prose-pre:my-1">
                       <ReactMarkdown
                         components={{
                           img: ({ src, alt }) => (
@@ -987,7 +1002,7 @@ export default function StudioTranscript({
               {onUndoCompletion && completedMutationCount > 0 && (
                 <button type="button" onClick={onUndoCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold hover:bg-white/8" style={{ color: "#fca5a5" }}>Undo</button>
               )}
-              <button type="button" onClick={onContinueCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: "rgba(155,77,255,0.14)", color: "#c4b5fd" }}>Continue</button>
+              <button type="button" onClick={onContinueCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: "color-mix(in srgb, var(--color-accent) 14%, transparent)", color: "var(--color-accent)" }}>Continue</button>
             </div>
           </div>
         )}

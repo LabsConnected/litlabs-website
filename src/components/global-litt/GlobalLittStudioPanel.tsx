@@ -31,6 +31,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { X, Send, Loader2 } from "lucide-react";
 import { useGlobalLitt } from "@/components/global-litt/GlobalLittProvider";
+import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { ApprovalCard } from "@/app/(app)/studio/components/ApprovalCard";
 import { submitApprovalAndPoll } from "@/app/(app)/studio/lib/approval-polling";
@@ -123,6 +124,7 @@ export default function GlobalLittStudioPanel({
   viewedProjectId?: string | null;
 }) {
   const { projectId, project } = useGlobalLitt();
+  const { tokens } = useTheme();
   const { getToken } = useClerkAuth();
   const canonicalProjectId =
     typeof viewedProjectId === "string" && viewedProjectId
@@ -583,12 +585,41 @@ export default function GlobalLittStudioPanel({
     [gateState?.expired, resolveGate, authHeaders, loadCanonicalMessages],
   );
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter") return;
+    if (!e.shiftKey) {
       e.preventDefault();
       void sendMessage();
+      return;
     }
+    // Shift+Enter is the newline chord (chat beauty, 2026-11-11). It used
+    // to be a silent no-op here: the handler let the browser default run
+    // into a one-row controlled textarea that never grew, so the newline
+    // never became visible. Insert it at the caret into the controlled
+    // value explicitly and restore the caret after the newline; the
+    // auto-size effect below makes the new line visible.
+    e.preventDefault();
+    const el = e.currentTarget;
+    const start = el.selectionStart ?? input.length;
+    const end = el.selectionEnd ?? input.length;
+    const next = input.slice(0, start) + "\n" + input.slice(end);
+    setInput(next);
+    const caret = start + 1;
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
   };
+
+  // Composer auto-size: grow with the draft (bounded) so inserted
+  // newlines and wrapped lines are visible — the docked composer's
+  // presentation contract.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(128, Math.max(40, el.scrollHeight))}px`;
+  }, [input]);
 
   // Only the LATEST gated message gets the actionable card — a decided
   // run's row can briefly coexist with a newer gate after a reload, and
@@ -613,28 +644,39 @@ export default function GlobalLittStudioPanel({
         aria-hidden="true"
       />
 
-      {/* Panel — bottom sheet on mobile, centered dialog on desktop */}
+      {/* Panel — bottom sheet on mobile, centered dialog on desktop.
+          Chat beauty (2026-11-11): the panel wears the APPLIED theme
+          (useTheme tokens) like every other Studio surface — it used to
+          hard-code the old black palette (#0a0a0f / white text) that no
+          theme scope could override. */}
       <div
-        className="relative flex w-full flex-col overflow-hidden bg-[#0a0a0f] sm:max-w-2xl sm:rounded-2xl"
+        className="relative flex w-full flex-col overflow-hidden sm:max-w-2xl sm:rounded-2xl"
         style={{
           height: "min(85vh, 700px)",
           maxHeight: "calc(100dvh - env(safe-area-inset-top) - 1rem)",
           marginBottom: "env(safe-area-inset-bottom)",
-          border: "1px solid rgba(255,255,255,0.1)",
+          backgroundColor: tokens.surface,
+          color: tokens.text,
+          border: `1px solid ${tokens.border}`,
+          boxShadow: "0 24px 60px rgba(14, 60, 26, 0.28)",
         }}
+        data-testid="global-litt-panel-surface"
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <div className="flex items-center gap-2">
+        <div
+          className="flex items-center justify-between border-b px-4 py-3"
+          style={{ borderColor: tokens.border }}
+        >
+          <div className="flex min-w-0 items-center gap-2">
             <div
-              className="flex h-8 w-8 items-center justify-center rounded-full"
-              style={{ backgroundColor: "var(--color-accent)" }}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+              style={{ backgroundColor: tokens.primary }}
             >
-              <span className="text-sm font-bold text-black">L</span>
+              <span className="text-sm font-bold" style={{ color: tokens.textInverse }}>L</span>
             </div>
-            <div>
-              <div className="text-sm font-semibold text-white">Global LiTT</div>
-              <div className="text-xs text-white/50">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold" style={{ color: tokens.text }}>Global LiTT</div>
+              <div className="truncate text-xs" style={{ color: tokens.textMuted }}>
                 {project?.name || "Your persistent operator"}
               </div>
             </div>
@@ -643,7 +685,8 @@ export default function GlobalLittStudioPanel({
             type="button"
             onClick={onClose}
             aria-label="Close Global LiTT"
-            className="rounded-lg p-2 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            className="shrink-0 rounded-lg p-2 transition-colors hover:bg-black/5"
+            style={{ color: tokens.textMuted }}
           >
             <X size={20} />
           </button>
@@ -652,12 +695,15 @@ export default function GlobalLittStudioPanel({
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-4" data-testid="global-litt-messages">
           {messages.length === 0 && (
-            <div className="flex h-full items-center justify-center text-center">
-              <div className="max-w-xs">
-                <div className="mb-2 text-sm font-medium text-white/80">
+            <div className="flex h-full items-center justify-center px-2 text-center">
+              <div className="w-full max-w-md" data-testid="global-litt-welcome">
+                <div className="mb-2 text-sm font-medium" style={{ color: tokens.text }}>
                   Hey, I&apos;m LiTT.
                 </div>
-                <div className="text-sm text-white/50">
+                <div
+                  className="whitespace-normal text-sm leading-relaxed"
+                  style={{ color: tokens.textMuted, overflowWrap: "anywhere" }}
+                >
                   I remember our conversations across Studio. Ask me anything,
                   or tell me what to build.
                 </div>
@@ -670,16 +716,17 @@ export default function GlobalLittStudioPanel({
                 className={`mb-3 flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                    m.role === "user"
-                      ? "text-black"
-                      : "border border-white/10 bg-white/5 text-white"
-                  }`}
-                  style={
-                    m.role === "user"
-                      ? { backgroundColor: "var(--color-accent)" }
-                      : undefined
-                  }
+                  className="min-w-0 max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
+                  style={{
+                    overflowWrap: "anywhere",
+                    ...(m.role === "user"
+                      ? { backgroundColor: tokens.primary, color: tokens.textInverse }
+                      : {
+                          backgroundColor: tokens.background,
+                          color: tokens.text,
+                          border: `1px solid ${tokens.border}`,
+                        }),
+                  }}
                 >
                   {m.content}
                 </div>
@@ -723,14 +770,23 @@ export default function GlobalLittStudioPanel({
           ))}
           {busy && (
             <div className="mb-3 flex justify-start">
-              <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5">
-                <Loader2 size={16} className="animate-spin text-white/60" />
-                <span className="text-sm text-white/60">Thinking…</span>
+              <div
+                className="flex items-center gap-2 rounded-2xl px-4 py-2.5"
+                style={{
+                  backgroundColor: tokens.background,
+                  border: `1px solid ${tokens.border}`,
+                }}
+              >
+                <Loader2 size={16} className="animate-spin" style={{ color: tokens.textMuted }} />
+                <span className="text-sm" style={{ color: tokens.textMuted }}>Thinking…</span>
               </div>
             </div>
           )}
           {error && (
-            <div className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-red-300">
+            <div
+              className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm"
+              style={{ color: tokens.danger, overflowWrap: "anywhere" }}
+            >
               {error}
             </div>
           )}
@@ -739,8 +795,11 @@ export default function GlobalLittStudioPanel({
 
         {/* Composer — safe-area aware */}
         <div
-          className="border-t border-white/10 px-4 pt-3"
-          style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}
+          className="border-t px-4 pt-3"
+          style={{
+            borderColor: tokens.border,
+            paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))",
+          }}
         >
           <div className="flex items-end gap-2">
             <textarea
@@ -751,8 +810,13 @@ export default function GlobalLittStudioPanel({
               placeholder="Ask LiTT anything…"
               rows={1}
               disabled={busy}
-              className="max-h-32 flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-white/40 outline-none focus:border-white/25 disabled:opacity-50"
-              style={{ fontSize: "16px" }} // Prevents iOS zoom
+              className="max-h-32 min-w-0 flex-1 resize-none rounded-xl border px-4 py-2.5 text-sm outline-none disabled:opacity-50"
+              style={{
+                fontSize: "16px", // Prevents iOS zoom
+                backgroundColor: tokens.background,
+                borderColor: tokens.border,
+                color: tokens.text,
+              }}
               data-testid="global-litt-composer"
             />
             <button
@@ -760,14 +824,14 @@ export default function GlobalLittStudioPanel({
               onClick={() => void sendMessage()}
               disabled={busy || !input.trim()}
               aria-label="Send message"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-black transition-opacity disabled:opacity-40"
-              style={{ backgroundColor: "var(--color-accent)" }}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-opacity disabled:opacity-40"
+              style={{ backgroundColor: tokens.primary, color: tokens.textInverse }}
               data-testid="global-litt-send"
             >
               {busy ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
             </button>
           </div>
-          <div className="mt-2 pb-1 text-center text-[11px] text-white/30">
+          <div className="mt-2 pb-1 text-center text-[11px]" style={{ color: tokens.textMuted }}>
             Persistent across Studio • Remembers this conversation
           </div>
         </div>
