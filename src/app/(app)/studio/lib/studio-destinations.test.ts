@@ -124,6 +124,13 @@ describe("studio-destinations", () => {
       expect(mapLegacyToolToDestination("screen").destination).toBe("studio");
     });
 
+    it("maps memory to Studio/Work, not the default fallthrough (regression: ?tool=memory used to silently land on the default case)", () => {
+      const result = mapLegacyToolToDestination("memory");
+      expect(result.destination).toBe("studio");
+      expect(result.mode).toBe("work");
+      expect(result.legacyTool).toBe("memory");
+    });
+
     it("maps space to Studio / Work (skybox is a LiTT capability)", () => {
       const result = mapLegacyToolToDestination("space");
       expect(result.destination).toBe("studio");
