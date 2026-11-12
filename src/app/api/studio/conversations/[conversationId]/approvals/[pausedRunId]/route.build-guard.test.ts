@@ -89,7 +89,9 @@ import {
   getPausedRun,
   resolvePausedRun,
   markRunProcessing,
+  createPausedRun,
 } from "@/lib/litt-intelligence/paused-run-store";
+import { transitionActionRunEventActivity } from "@/lib/action-runtime";
 import { resumeAgentLoopV2 } from "@/lib/litt-intelligence/agent-loop-v2";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getActionRun } from "@/lib/action-runtime";
@@ -199,5 +201,105 @@ describe("build capability guard arming on resume", () => {
   it("leaves the guard off when the paused run has no project", async () => {
     const config = await postAndCaptureConfig({ projectId: null });
     expect(config.buildCapabilityGuard).toBeUndefined();
+  });
+});
+
+describe("nested deploy-gate handoff", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123" } as never);
+    vi.mocked(markRunProcessing).mockResolvedValue(true as never);
+    vi.mocked(getActionRun).mockResolvedValue({ id: "run-parent-1", status: "working" } as never);
+    vi.mocked(verifyProjectWorkspace).mockResolvedValue({ workspaceId: "ws-123" } as never);
+    vi.mocked(getAwaitingApprovalAssistantMessage).mockResolvedValue(
+      { id: "msg-1", content: "Approval required." } as never,
+    );
+  });
+
+  it("persists a resumed run's project.deploy pause as a resumable nested gate", async () => {
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "I need your approval to run `project.deploy`.",
+      stepsUsed: 4,
+      toolCalls: [
+        { toolId: "image.stock", success: true, mutating: true },
+        { toolId: "site.compose", success: true, mutating: true },
+      ],
+      cancelled: false,
+      pendingApproval: {
+        toolId: "project.deploy",
+        toolCallId: "tc-deploy-1",
+        inputs: {},
+        reason: "Sensitive action — requires explicit approval",
+        pausedMessages: [{ role: "user", content: "Build a landing site" }],
+        qualityLoopState: undefined,
+        deferredToolCalls: [],
+        stepsUsedAtPause: 4,
+        hadInterveningMutationAtPause: true,
+        priorToolCalls: [{ toolId: "files.list", success: true, mutating: false }],
+      },
+    } as never);
+    vi.mocked(createPausedRun).mockResolvedValue({ id: "nested-deploy-1" } as never);
+
+    const run = makePendingRun();
+    vi.mocked(getPausedRun).mockResolvedValue(run as never);
+    vi.mocked(resolvePausedRun).mockResolvedValue({ ...run, status: "approved" } as never);
+    const response = await POST(makeRequest(), routeParams);
+    expect(response.status).toBe(202);
+
+    await vi.waitFor(() => expect(createPausedRun).toHaveBeenCalled());
+    expect(vi.mocked(createPausedRun).mock.calls[0][0]).toMatchObject({
+      toolId: "project.deploy",
+      toolCallId: "tc-deploy-1",
+    });
+
+    // The settle must hand the client a resumable gate — the nested
+    // pausedRunId, never undefined (regression: staging smoke 42962987371
+    // delivered pendingApproval with no gate identity → deploy hop dead).
+    await vi.waitFor(() => {
+      const calls = vi.mocked(transitionActionRunEventActivity).mock.calls;
+      const handoff = calls.find((c) => {
+        const arg = c[0] as { eventType?: string; status?: string; payload?: { result?: { pendingApproval?: { pausedRunId?: string } } } };
+        return arg.eventType === "approval.required" && arg.status === "waiting_for_user";
+      });
+      expect(handoff).toBeDefined();
+      const arg = handoff![0] as { payload?: { result?: { pendingApproval?: { toolId?: string; pausedRunId?: string } } } };
+      expect(arg.payload?.result?.pendingApproval).toEqual({
+        toolId: "project.deploy",
+        pausedRunId: "nested-deploy-1",
+        reason: "Sensitive action — requires explicit approval",
+      });
+    });
+  });
+
+  it("fails loudly instead of persisting a nested gate with no tool identity", async () => {
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "I need your approval to continue.",
+      stepsUsed: 4,
+      toolCalls: [],
+      cancelled: false,
+      pendingApproval: {
+        toolId: undefined,
+        toolCallId: undefined,
+        inputs: {},
+        reason: "Mutation requires approval",
+        pausedMessages: [{ role: "user", content: "Build a landing site" }],
+      },
+    } as never);
+
+    const run = makePendingRun();
+    vi.mocked(getPausedRun).mockResolvedValue(run as never);
+    vi.mocked(resolvePausedRun).mockResolvedValue({ ...run, status: "approved" } as never);
+    const response = await POST(makeRequest(), routeParams);
+    expect(response.status).toBe(202);
+
+    await vi.waitFor(() => {
+      const calls = vi.mocked(transitionActionRunEventActivity).mock.calls;
+      const failed = calls.find((c) => {
+        const arg = c[0] as { eventType?: string; status?: string };
+        return arg.eventType === "run.failed" && arg.status === "failed";
+      });
+      expect(failed).toBeDefined();
+    });
+    expect(createPausedRun).not.toHaveBeenCalled();
   });
 });

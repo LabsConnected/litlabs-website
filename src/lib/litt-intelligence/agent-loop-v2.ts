@@ -58,6 +58,7 @@ import {
   noteToolResult,
   noteMutationReadBack,
   noteStaticArtifactCheck,
+  noteStaticVisualAudit,
   runQualityInspection,
   snapshotQualityLoopSession,
   startQualityLoopSession,
@@ -67,6 +68,7 @@ import {
   type QualityLoopSession,
   type QualityLoopSnapshot,
   formatQualityVerdictBlock,
+  stripQualityStageMarkers,
 } from "./quality-loop-flow";
 import type { QualityTaskScope } from "./quality-loop";
 // LiTT Tool Orchestrator (fix/litt-tool-orchestrator): goal → capability
@@ -663,7 +665,13 @@ export function seedToolCallRecordsFromHistory(
   return records;
 }
 
-const FILE_GENERATION_TOOL_IDS = new Set([...FILE_WRITE_TOOL_IDS, "code.writeFile", "code.refactor", "files.patch"]);
+// site.compose/site.patch generate and edit the canvas page artifact
+// (compiled to index.html on save) — they ARE the file-writing path for a
+// canvas-first build, even though they never touch files.write directly.
+// Omitting them let the build-capability guard settle resumed image-first
+// builds as "no file writes" before project.deploy (staging smoke
+// 42962987371, 2026-11-11).
+const FILE_GENERATION_TOOL_IDS = new Set([...FILE_WRITE_TOOL_IDS, "code.writeFile", "code.refactor", "files.patch", "site.compose", "site.patch"]);
 export function isFileWritingTool(toolId: string): boolean { return FILE_GENERATION_TOOL_IDS.has(toolId); }
 
 /** Server-persisted tool results, not assistant completion claims. */
@@ -1487,6 +1495,14 @@ async function maybeEnrichStaticSiteVisuals(
     const report = await enrichStaticSiteVisuals(transport, {
       topicKeywords: qualitySession?.userRequest,
     });
+    // Feed the audit's surviving placeholder refs into the quality
+    // loop: while any remain, the run cannot earn a clean pass — the
+    // enrichment report alone never reached the gate before, so a page
+    // shipping placeholder imagery still completed "successfully"
+    // (production defect 2026-11-11).
+    if (qualitySession) {
+      noteStaticVisualAudit(qualitySession, report.unresolvedPlaceholders);
+    }
     if (report.imagesResolved > 0 || report.imagesFailed > 0 || report.filesChanged.length > 0) {
       localProgress.emit({
         type: "status",
@@ -1494,6 +1510,9 @@ async function maybeEnrichStaticSiteVisuals(
           `Visual enrichment: ${report.imagesResolved} image(s) resolved` +
           (report.imagesFailed > 0 ? `, ${report.imagesFailed} unavailable` : "") +
           (report.placeholdersUsed > 0 ? `, ${report.placeholdersUsed} placeholder fallback(s)` : "") +
+          (report.unresolvedPlaceholders.length > 0
+            ? `, ${report.unresolvedPlaceholders.length} unresolved placeholder(s): ${report.unresolvedPlaceholders.join(", ")}`
+            : "") +
           ` (${report.providersUsed.join(", ") || "no providers"}` +
           (report.providersFailed.length > 0 ? `; failed: ${report.providersFailed.join(", ")}` : "") +
           `).`,
@@ -2932,10 +2951,24 @@ async function runAgentLoopV2Inner(
     finalText: effectiveFinalText,
     localProgress,
   });
+  // User-visible copy (chat beauty, 2026-11-11): the finalize above has
+  // already harvested the final text's QUALITY stage declarations into
+  // the ledger — they are evidence, not prose, and must not reach the
+  // persisted message the docked chat and overlay render. A reply that
+  // was ONLY declarations falls back to the factual silent-outcome
+  // description instead of persisting as an empty message.
+  const visibleFinalText = qualitySession
+    ? stripQualityStageMarkers(effectiveFinalText)
+    : effectiveFinalText;
+  const userFinalText =
+    visibleFinalText ||
+    (qualitySession
+      ? describeSilentOutcome(toolCallLog, cancelled, cancelReason)
+      : visibleFinalText);
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
-      : effectiveFinalText;
+      ? `${userFinalText}${formatQualityVerdictBlock(qualityFinale)}`
+      : userFinalText;
 
   // What did this run actually do to the files?
   //
@@ -4534,10 +4567,22 @@ async function resumeAgentLoopV2Inner(
     finalText: effectiveFinalText,
     localProgress,
   });
+  // User-visible copy (chat beauty, 2026-11-11): same contract as the
+  // initial loop — declarations harvested above stay in the ledger,
+  // never in the persisted message; a declarations-only reply falls
+  // back to the factual silent-outcome description.
+  const visibleFinalText = qualitySession
+    ? stripQualityStageMarkers(effectiveFinalText)
+    : effectiveFinalText;
+  const userFinalText =
+    visibleFinalText ||
+    (qualitySession
+      ? describeSilentOutcome(toolCallLog, cancelled, cancelReason)
+      : visibleFinalText);
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
-      : effectiveFinalText;
+      ? `${userFinalText}${formatQualityVerdictBlock(qualityFinale)}`
+      : userFinalText;
 
   // What did this run actually do to the files?
   //
