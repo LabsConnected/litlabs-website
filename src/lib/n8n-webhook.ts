@@ -19,7 +19,9 @@
  *
  * Security:
  * - The shared secret (LITT_N8N_BRIDGE_SECRET) is NEVER sent in the body.
- * - The signature is computed over the exact JSON-serialized payload bytes.
+ * - The signature is computed over "{timestamp}.{body}" — the timestamp is
+ *   inside the HMAC, so a captured request cannot be replayed with a forged
+ *   fresh timestamp (replay protection is actually enforced).
  * - Timestamps prevent replay attacks (5-minute window).
  * - Verification uses timingSafeEqual to avoid timing side-channels.
  */
@@ -92,7 +94,7 @@ export function signWebhookPayload(payload: N8nWebhookPayload): SignedWebhook {
   const timestamp = Math.floor(Date.now() / 1000);
 
   const hmac = createHmac("sha256", secret);
-  hmac.update(body);
+  hmac.update(`${timestamp}.${body}`);
   const signature = hmac.digest("hex");
 
   return { body, signature, timestamp };
@@ -122,9 +124,9 @@ export function verifyWebhookSignature(
     return false;
   }
 
-  // ── Recompute the expected signature over the raw body ──
+  // ── Recompute the expected signature over "{timestamp}.{body}" ──
   const hmac = createHmac("sha256", secret);
-  hmac.update(body);
+  hmac.update(`${timestamp}.${body}`);
   const expected = hmac.digest("hex");
 
   // ── Timing-safe comparison ──
