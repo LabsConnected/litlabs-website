@@ -185,7 +185,7 @@ describe("Product-truth consistency", () => {
       // VERIFIED_STRIPE_PLANS is an inventory of Stripe, so the $149 price
       // stays recorded — historical purchases refer to it. plans.ts no longer
       // points at it, which is what closes the purchase path.
-      expect(VERIFIED_STRIPE_PLANS.founder.envVar).toBe("STRIPE_PRICE_FOUNDER");
+      expect(VERIFIED_STRIPE_PLANS.founder.envVar).toBeNull();
       expect(PLANS.founder.stripePriceIdEnv).toBeUndefined();
     });
 

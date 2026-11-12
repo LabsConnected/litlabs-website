@@ -18,7 +18,7 @@ import { PLANS, type PlanId } from "@/config/plans";
  * Schema.org offer price for a plan, derived from the SAME plans config
  * /pricing renders (PLANS[id].default_price) so the two surfaces can never
  * drift. Cents → the bare numeric string schema.org expects:
- * 0 → "0", 999 → "9.99", 1999 → "19.99", 3900 → "39".
+ * 0 → "0", 999 → "9.99", 1999 → "19.99", 3999 → "39.99".
  */
 function planOfferPrice(id: PlanId): string {
   return String((PLANS[id].default_price ?? 0) / 100);

@@ -305,7 +305,7 @@ describe("8. Stripe subscription state is never modified", () => {
     expect(PLANS.starter.monthlyPriceCents).toBe(0);
     expect(PLANS.creator_lite.monthlyPriceCents).toBe(999);
     expect(PLANS.creator_beta.monthlyPriceCents).toBe(1999);
-    expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3900);
+    expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3999);
     expect(PLANS.founder.monthlyPriceCents).toBe(14900);
   });
 });

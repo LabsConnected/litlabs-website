@@ -7,14 +7,14 @@ import { PLANS, PLAN_LIST, formatPrice, type PlanId } from "@/config/plans";
  * Pricing truth guard (ART-20261111-084).
  *
  * Canonical prices live ONLY in src/config/plans.ts (verified against live
- * Stripe): Creator Lite $9.99/mo, Creator $19.99/mo, Pro Builder $39/mo,
+ * Stripe): Creator Lite $9.99/mo, Creator $19.99/mo, Pro Builder $39.99/mo,
  * Starter free with a 1,500 one-time grant. /pricing renders them via
  * formatPrice(PLANS[id].default_price); the home page's JSON-LD offers must
  * derive from the same field so the two surfaces can never drift again.
  */
 
 const PUBLISHED: PlanId[] = ["starter", "creator_lite", "creator_beta", "pro_builder_beta"];
-const CANONICAL_OFFER_STRINGS = ["0", "9.99", "19.99", "39"];
+const CANONICAL_OFFER_STRINGS = ["0", "9.99", "19.99", "39.99"];
 
 /** The exact derivation used by the home page's planOfferPrice(). */
 function homeOfferPrice(id: PlanId): string {
@@ -38,7 +38,7 @@ describe("home ↔ pricing price unification", () => {
     expect(PLANS.creator_lite.monthlyCredits).toBe(2500);
     expect(PLANS.creator_beta.default_price).toBe(1999);
     expect(PLANS.creator_beta.monthlyCredits).toBe(7500);
-    expect(PLANS.pro_builder_beta.default_price).toBe(3900);
+    expect(PLANS.pro_builder_beta.default_price).toBe(3999);
     expect(PLANS.pro_builder_beta.monthlyCredits).toBe(18000);
   });
 
@@ -57,7 +57,7 @@ describe("home ↔ pricing price unification", () => {
     for (const id of PUBLISHED) {
       expect(home).toContain(`planOfferPrice("${id}")`);
     }
-    expect(home).not.toMatch(/price:\s*"(0|9\.99|19\.99|39)"/);
+    expect(home).not.toMatch(/price:\s*"(0|9\.99|19\.99|39\.99)"/);
   });
 
   it("/pricing still derives every card price from PLANS", () => {
