@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { useStudioTasks } from "./useStudioTasks";
+import {
+  useStudioTasks,
+  clearStudioTaskAssociationCache,
+  TASK_ASSOCIATION_UNAVAILABLE_MESSAGE,
+} from "./useStudioTasks";
 
 const { mockAuth } = vi.hoisted(() => ({
   mockAuth: {
@@ -157,5 +161,92 @@ describe("useStudioTasks.createTask", () => {
         }),
       }),
     );
+  });
+});
+
+describe("useStudioTasks.createTask — association 403 handling", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    clearStudioTaskAssociationCache();
+  });
+
+  function mockStatusFetch(post: { status: number; body: unknown }) {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST" && url === "/api/studio/tasks") {
+        return { ok: post.status < 300, status: post.status, json: async () => post.body };
+      }
+      return { ok: true, status: 200, json: async () => ({ tasks: [], closedTasks: [] }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function postCalls(fetchMock: ReturnType<typeof vi.fn>) {
+    return fetchMock.mock.calls.filter(
+      ([url, init]) => url === "/api/studio/tasks" && (init as RequestInit)?.method === "POST",
+    );
+  }
+
+  it("treats the association 403 as handled: quiet, and never re-POSTs for the same pair", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = mockStatusFetch({
+      status: 403,
+      body: { error: TASK_ASSOCIATION_UNAVAILABLE_MESSAGE },
+    });
+    const { result } = renderHook(() => useStudioTasks("proj-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let first: unknown = "unset";
+    await act(async () => {
+      first = await result.current.createTask({ title: "Adopt", taskType: "general", conversationId: "conv-foreign" });
+    });
+    expect(first).toBeNull();
+    expect(postCalls(fetchMock)).toHaveLength(1);
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    // The adoption effect re-running (remount/round-trip) must not
+    // re-issue the doomed POST.
+    let second: unknown = "unset";
+    await act(async () => {
+      second = await result.current.createTask({ title: "Adopt", taskType: "general", conversationId: "conv-foreign" });
+    });
+    expect(second).toBeNull();
+    expect(postCalls(fetchMock)).toHaveLength(1);
+    errorSpy.mockRestore();
+  });
+
+  it("does NOT cache other failures: a 500 is surfaced and a later call retries", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = mockStatusFetch({ status: 500, body: { error: "database unavailable" } });
+    const { result } = renderHook(() => useStudioTasks("proj-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.createTask({ title: "Adopt", taskType: "general", conversationId: "conv-x" });
+    });
+    expect(errorSpy).toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.createTask({ title: "Adopt", taskType: "general", conversationId: "conv-x" });
+    });
+    expect(postCalls(fetchMock)).toHaveLength(2);
+    errorSpy.mockRestore();
+  });
+
+  it("a 403 with a different message is a real failure, not the association verdict", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = mockStatusFetch({ status: 403, body: { error: "Forbidden" } });
+    const { result } = renderHook(() => useStudioTasks("proj-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.createTask({ title: "Adopt", taskType: "general", conversationId: "conv-y" });
+    });
+    await act(async () => {
+      await result.current.createTask({ title: "Adopt", taskType: "general", conversationId: "conv-y" });
+    });
+    expect(postCalls(fetchMock)).toHaveLength(2);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });

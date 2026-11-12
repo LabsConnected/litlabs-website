@@ -1096,6 +1096,58 @@ describe("runAgentLoopV2 — required first tool call (immediate execution)", ()
   });
 });
 
+describe("runAgentLoopV2 — user-visible final text (chat beauty, 2026-11-11)", () => {
+  // Production defect: a quality-gated run's final answer reached the
+  // persisted transcript (and therefore BOTH the docked chat and the
+  // Global overlay) with its internal stage declarations still in the
+  // text — "QUALITY: understand — … / QUALITY: plan — …" as the visible
+  // reply prefix. The markers are machine evidence: they must still be
+  // harvested for the gate, but the user-visible finalText must be the
+  // answer only.
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("strips QUALITY stage declarations from finalText while the gate still sees them", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text:
+        "QUALITY: understand — The user wants the project's file list.\n" +
+        "QUALITY: plan — Answer from the workspace listing.\n" +
+        "\n" +
+        "Your project contains index.html and an assets folder.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "gemini-2.5-flash",
+    });
+
+    const result = await runAgentLoopV2(
+      "List the files in this project",
+      fakeTransport,
+      {
+        model: "gemini-2.5-flash",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        isStaticWorkspace: true,
+        qualityLoop: {
+          enabled: true,
+          runId: "quality-visible-text",
+          projectId: "p-test",
+          userId: "u-test",
+          userRequest: "List the files in this project",
+          taskScope: "inspection",
+        },
+      },
+    );
+
+    expect(result.finalText).toBe("Your project contains index.html and an assets folder.");
+    expect(result.finalText).not.toContain("QUALITY:");
+    // The declarations were still harvested as gate evidence — the
+    // inspection-scope verdict passes on understand + plan.
+    expect(result.qualityLoop?.verdict.ok).toBe(true);
+  });
+});
+
 describe("runAgentLoopV2 — persistEvent hook (item 5a)", () => {
   beforeEach(() => {
     vi.mocked(callLLMWithTools).mockReset();

@@ -543,7 +543,7 @@ function ApprovalCard({
   phase?: "idle" | "submitting" | "executing" | "failed";
   error?: string | null;
 }) {
-  const details = deriveApprovalRequestDetails(approval.inputs);
+  const details = deriveApprovalRequestDetails(approval.inputs, [], { toolId: approval.toolId });
   const buttonsDisabled = phase === "submitting" || phase === "executing" || phase === "failed";
   return (
     <div
