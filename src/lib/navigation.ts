@@ -5,16 +5,14 @@ import {
   ShoppingBag,
   BarChart3,
   Bookmark,
-  Bot,
   Layers,
   FileText,
   Star,
-  Workflow,
   FolderKanban,
   Gamepad2 as GamesIcon,
   Compass,
   Terminal,
-  FolderOpen,
+  Settings,
 } from "lucide-react";
 
 export type NavItem = {
@@ -36,32 +34,39 @@ export type NavSection = {
 
 
 /* ─── Canonical App Shell navigation ───────────────────────────────────
- * ONE canonical authenticated global nav:
- *   Main: Studio · Assets · Agents · Missions · More
- *   More: Projects · Discover · Marketplace · Showcase · Games · CLI ·
- *         Deployments · Docs
+ * ONE canonical authenticated global nav (issue #627 — Studio Merge):
+ *   Main: Studio · Discover · Projects · Settings
+ *   More: Marketplace · Showcase · Games · CLI · Deployments · Docs
  *
- * Studio is the prime signed-in surface and the post-sign-in landing —
- * there is no separate Home/dashboard page (the /dashboard route only
- * redirects into Studio). Assets/Agents/Missions resolve to their real
- * Studio destinations (?tool=assets|agents|workflows — the same
- * canonical URLs the Studio router writes back via
- * destinationToLegacyTool). Legacy creation routes (/builder,
- * /ai-builder, /chat, /generate, …) all redirect into Studio, so they
- * are not separate destinations.
+ * Studio is the one primary work surface and the prime signed-in
+ * landing — there is still no separate Home item and no /dashboard
+ * destination (Larry's one-chat-entry directive, 2026-11-11,
+ * ART-20261111-031; /dashboard only redirects into Studio and must
+ * never appear in nav — see tests/dashboard-create-integration.test.ts
+ * and tests/app-shell-navigation.test.ts). The owner's 2026-11-12
+ * Studio Merge bundle listed "Home" first in its canonical-nav
+ * shorthand, but that pre-existing, explicitly tested invariant reads
+ * it as "Studio is home," not a literal 5th pill — flagged for the
+ * owner to confirm; a real Home item was NOT added here.
+ *
+ * Assets / Agents / Missions / Create / More are no longer separate
+ * nav destinations either — they are internal Studio surfaces, reached
+ * from inside Studio itself (not from the global nav), per owner ruling
+ * 2026-11-12: "No Agents tab — wasted space. Everything lives in
+ * Studio, one main tab." Legacy ?tool=assets|agents|workflows URLs
+ * still resolve (studio-destinations.ts), they just have no global
+ * pill anymore.
  */
 
 export const APP_NAV_MAIN: NavItem[] = [
   { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
-  { label: "Assets", href: "/studio?tool=assets", icon: FolderOpen },
-  { label: "Agents", href: "/studio?tool=agents", icon: Bot },
-  { label: "Missions", href: "/studio?tool=workflows", icon: Workflow },
+  { label: "Discover", href: "/discover", icon: Compass },
+  { label: "Projects", href: "/projects", icon: FolderKanban },
+  { label: "Settings", href: "/settings", icon: Settings },
 ];
 
 /* Secondary destinations behind the More menu — real routes only. */
 export const APP_NAV_MORE: NavItem[] = [
-  { label: "Projects", href: "/projects", icon: FolderKanban },
-  { label: "Discover", href: "/discover", icon: Compass },
   { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
   { label: "Showcase", href: "/showcase", icon: Star },
   { label: "Games", href: "/games", icon: GamesIcon },
@@ -77,8 +82,8 @@ export interface NavMenuSection {
 }
 
 export const APP_NAV_MORE_SECTIONS: NavMenuSection[] = [
-  { id: "build", label: "Build", items: APP_NAV_MORE.filter((item) => ["Projects", "CLI", "Deployments"].includes(item.label)) },
-  { id: "explore", label: "Explore", items: APP_NAV_MORE.filter((item) => ["Discover", "Marketplace", "Showcase", "Games"].includes(item.label)) },
+  { id: "build", label: "Build", items: APP_NAV_MORE.filter((item) => ["CLI", "Deployments"].includes(item.label)) },
+  { id: "explore", label: "Explore", items: APP_NAV_MORE.filter((item) => ["Marketplace", "Showcase", "Games"].includes(item.label)) },
   { id: "learn", label: "Learn", items: APP_NAV_MORE.filter((item) => item.label === "Docs") },
 ];
 
@@ -108,7 +113,8 @@ export const APP_NAV_SECONDARY: NavSection[] = [
 /* ─── Flag-gated visibility ──────────────────────────────────────────── */
 // /games hides while the retroGameRuntime flag is off (see
 // src/app/(app)/games/layout.tsx) so no nav surface ever links to a 404.
-// /discover is flag-gated the same way (communitySocial).
+// Discover moved to the always-on Main nav (issue #627) and lost this
+// gate in the process — see navigation.test.ts for the flagged caveat.
 export function getVisibleMainNav(): NavItem[] {
   return APP_NAV_MAIN;
 }
@@ -117,12 +123,15 @@ export function getVisibleMainNav(): NavItem[] {
  * Carry the active Studio project across top-bar navigation.
  *
  * Studio project identity lives in the `?project=` URL param (see
- * resolveStudioProjectId). The canonical Studio hrefs above are bare
- * (`/studio?tool=assets`), so following one from inside a project used
- * to DROP the param — the Studio then fell back to server-side
+ * resolveStudioProjectId). Following the Studio nav item from inside a
+ * project used to DROP the param — Studio then fell back to server-side
  * most-recent resolution and landed on a different project (production
- * audit ART-20261111-082: Assets opened from a project reverted the
- * header to the repo project and showed an empty bucket).
+ * audit ART-20261111-082: a Studio-destination link opened from a
+ * project reverted the header to the repo project and showed an empty
+ * bucket). Kept generic (any `/studio` href) even though the Studio
+ * Merge (issue #627) collapsed Assets/Agents/Missions out of the global
+ * nav — in-Studio links to those internal surfaces still carry `tool=`
+ * params through the same `/studio` path and benefit identically.
  *
  * Given the project id from the CURRENT URL, return the items with the
  * param set on every `/studio` href (replacing any stale value).
@@ -148,7 +157,6 @@ export function withActiveProjectContext(
 export function getVisibleMoreNav(): NavItem[] {
   return APP_NAV_MORE.filter((item) => {
     if (item.href === "/games") return isFeatureEnabled("retroGameRuntime");
-    if (item.href === "/discover") return isFeatureEnabled("communitySocial");
     return true;
   });
 }
@@ -161,49 +169,23 @@ export function getVisibleMoreNavSections(): NavMenuSection[] {
 }
 
 /**
- * Studio `?tool=` values that route to their own top-level nav
- * destinations (Assets / Agents / Missions / More) rather than the
- * default Studio surface — see mapLegacyToolToDestination.
- */
-const STUDIO_DESTINATION_TOOLS = new Set([
-  "assets",
-  "agents",
-  "workflows",
-  "pipeline",
-  "plugins",
-  "clibridge",
-]);
-
-/**
- * Active-route check for the new AppShell navigation.
- * Matches by path prefix, with special handling for /studio destinations.
+ * Active-route check for the AppShell navigation.
+ * Matches by path prefix, with special handling for the Studio item.
  */
 export function isAppNavActive(
   pathname: string | null,
-  searchParams: URLSearchParams,
+  _searchParams: URLSearchParams,
   href?: string,
 ): boolean {
   if (!pathname || !href) return false;
-  const [path, query] = href.split("?");
-  // /studio: a bare "/studio" href is the DEFAULT Studio surface — it must
-  // not light up while a sibling destination owns the URL (?tool=assets,
-  // agents, workflows, plugins, clibridge get their own nav items). An
-  // href carrying ?tool=X is active only on that exact tool.
+  const [path] = href.split("?");
+  // /studio: Studio is the ONE main tab (issue #627 — Studio Merge).
+  // Assets/Agents/Missions/Create/More no longer have sibling nav items
+  // to carve out against, so the bare "/studio" href is active for the
+  // whole /studio tree regardless of ?tool=/?project= — there is no
+  // other nav item left that could claim ownership of a destination.
   if (path === "/studio") {
-    if (!(pathname === "/studio" || pathname.startsWith("/studio/"))) return false;
-    // `project` in an href is CONTEXT (which project is active), not
-    // destination identity — top-bar hrefs carry it via
-    // withActiveProjectContext, and it must not change which nav item
-    // lights up. An href left with no destination params after removing
-    // it behaves exactly like the bare "/studio" href.
-    const hrefParams = new URLSearchParams(query ?? "");
-    hrefParams.delete("project");
-    if (hrefParams.toString() === "") {
-      const tool = searchParams.get("tool");
-      return tool === null || !STUDIO_DESTINATION_TOOLS.has(tool);
-    }
-    return pathname === "/studio" &&
-      Array.from(hrefParams.entries()).every(([k, v]) => searchParams.get(k) === v);
+    return pathname === "/studio" || pathname.startsWith("/studio/");
   }
   // Exact match for root-level, prefix for others
   if (path === "/") return pathname === "/";

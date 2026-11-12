@@ -10,9 +10,10 @@ describe("getVisibleMoreNav — flag-gated nav items", () => {
     const { getVisibleMoreNav } = await import("./navigation");
     const hrefs = getVisibleMoreNav().map((i) => i.href);
     expect(hrefs).toContain("/games");
-    // The rest of More stays intact
+    // The rest of More stays intact. /projects/discover live in Main
+    // now (issue #627 Studio Merge) — they are not More items anymore.
     expect(hrefs).toEqual(
-      expect.arrayContaining(["/projects", "/marketplace", "/docs", "/deployments"]),
+      expect.arrayContaining(["/marketplace", "/docs", "/deployments"]),
     );
   });
 
@@ -24,24 +25,6 @@ describe("getVisibleMoreNav — flag-gated nav items", () => {
     expect(getVisibleMoreNav().map((i) => i.href)).not.toContain("/games");
   });
 
-  it("hides /discover when communitySocial is disabled", async () => {
-    vi.doMock("@/config/feature-flags", () => ({
-      isFeatureEnabled: (flag: string) => flag !== "communitySocial",
-    }));
-    const { getVisibleMoreNav } = await import("./navigation");
-    expect(getVisibleMoreNav().map((i) => i.href)).not.toContain("/discover");
-  });
-
-  it("shows gated items when both flags are enabled", async () => {
-    vi.doMock("@/config/feature-flags", () => ({
-      isFeatureEnabled: () => true,
-    }));
-    const { getVisibleMoreNav } = await import("./navigation");
-    const hrefs = getVisibleMoreNav().map((i) => i.href);
-    expect(hrefs).toContain("/games");
-    expect(hrefs).toContain("/discover");
-  });
-
   it("never mutates the canonical APP_NAV_MORE", async () => {
     vi.doMock("@/config/feature-flags", () => ({
       isFeatureEnabled: () => false,
@@ -49,7 +32,6 @@ describe("getVisibleMoreNav — flag-gated nav items", () => {
     const { getVisibleMoreNav, APP_NAV_MORE } = await import("./navigation");
     getVisibleMoreNav();
     expect(APP_NAV_MORE.map((i) => i.href)).toContain("/games");
-    expect(APP_NAV_MORE.map((i) => i.href)).toContain("/discover");
   });
 
   it("main nav is never flag-gated", async () => {
@@ -61,15 +43,25 @@ describe("getVisibleMoreNav — flag-gated nav items", () => {
   });
 });
 
+/**
+ * Discover moved from the flag-gated More menu into the always-on Main
+ * nav as part of the Studio Merge (issue #627). Main nav is never
+ * flag-gated (see above) — Discover's prior `communitySocial` gate no
+ * longer applies to its nav visibility. Flagged in the Step 2 report as
+ * a behavior change worth the owner's explicit sign-off, not something
+ * this test suite silently re-litigates.
+ */
+
 describe("withActiveProjectContext — Studio nav keeps the active project", () => {
-  it("carries the active project into every Studio destination href", async () => {
+  it("carries the active project into the Studio href", async () => {
     const { withActiveProjectContext, APP_NAV_MAIN } = await import("./navigation");
     const items = withActiveProjectContext(APP_NAV_MAIN, "proj-9");
     const byLabel = new Map(items.map((i) => [i.label, i.href]));
     expect(byLabel.get("Studio")).toBe("/studio?project=proj-9");
-    expect(byLabel.get("Assets")).toBe("/studio?tool=assets&project=proj-9");
-    expect(byLabel.get("Agents")).toBe("/studio?tool=agents&project=proj-9");
-    expect(byLabel.get("Missions")).toBe("/studio?tool=workflows&project=proj-9");
+    // Non-Studio Main items are untouched
+    expect(byLabel.get("Discover")).toBe("/discover");
+    expect(byLabel.get("Projects")).toBe("/projects");
+    expect(byLabel.get("Settings")).toBe("/settings");
   });
 
   it("leaves non-Studio hrefs untouched", async () => {
@@ -80,12 +72,12 @@ describe("withActiveProjectContext — Studio nav keeps the active project", () 
 
   it("replaces a stale project param instead of duplicating it", async () => {
     const { withActiveProjectContext, APP_NAV_MAIN } = await import("./navigation");
-    const assets = APP_NAV_MAIN.find((i) => i.label === "Assets")!;
+    const studio = APP_NAV_MAIN.find((i) => i.label === "Studio")!;
     const items = withActiveProjectContext(
-      [{ ...assets, href: "/studio?tool=assets&project=stale" }],
+      [{ ...studio, href: "/studio?tool=code&project=stale" }],
       "proj-9",
     );
-    expect(items[0].href).toBe("/studio?tool=assets&project=proj-9");
+    expect(items[0].href).toBe("/studio?tool=code&project=proj-9");
   });
 
   it("is a no-op without an active project id", async () => {
@@ -100,29 +92,32 @@ describe("withActiveProjectContext — Studio nav keeps the active project", () 
     withActiveProjectContext(APP_NAV_MAIN, "proj-9");
     expect(APP_NAV_MAIN.map((i) => i.href)).toEqual([
       "/studio",
-      "/studio?tool=assets",
-      "/studio?tool=agents",
-      "/studio?tool=workflows",
+      "/discover",
+      "/projects",
+      "/settings",
     ]);
   });
 });
 
-describe("isAppNavActive — project param is context, not destination", () => {
-  it("lights the Assets item for a project-carrying Assets href on the Assets surface", async () => {
+describe("isAppNavActive — Studio is the one main tab (issue #627)", () => {
+  it("lights the Studio item for any /studio path regardless of ?tool=/?project=", async () => {
     const { isAppNavActive } = await import("./navigation");
-    const params = new URLSearchParams("tool=assets&project=proj-9");
-    expect(isAppNavActive("/studio", params, "/studio?tool=assets&project=proj-9")).toBe(true);
-  });
-
-  it("does NOT light the Studio item on a sibling destination surface", async () => {
-    const { isAppNavActive } = await import("./navigation");
-    const params = new URLSearchParams("tool=assets&project=proj-9");
-    expect(isAppNavActive("/studio", params, "/studio?project=proj-9")).toBe(false);
-  });
-
-  it("lights the Studio item on the default surface", async () => {
-    const { isAppNavActive } = await import("./navigation");
-    expect(isAppNavActive("/studio", new URLSearchParams("project=proj-9"), "/studio?project=proj-9")).toBe(true);
+    expect(isAppNavActive("/studio", new URLSearchParams(), "/studio")).toBe(true);
+    expect(isAppNavActive("/studio", new URLSearchParams("tool=assets&project=proj-9"), "/studio")).toBe(true);
     expect(isAppNavActive("/studio", new URLSearchParams("tool=chat&project=proj-9"), "/studio?project=proj-9")).toBe(true);
+    // Nested /studio routes (e.g. /studio/github) still count as Studio.
+    expect(isAppNavActive("/studio/github", new URLSearchParams(), "/studio")).toBe(true);
+  });
+
+  it("does not light the Studio item off the /studio tree", async () => {
+    const { isAppNavActive } = await import("./navigation");
+    expect(isAppNavActive("/discover", new URLSearchParams(), "/studio")).toBe(false);
+  });
+
+  it("matches non-Studio Main items by path prefix", async () => {
+    const { isAppNavActive } = await import("./navigation");
+    expect(isAppNavActive("/settings/connections", new URLSearchParams(), "/settings")).toBe(true);
+    expect(isAppNavActive("/discover", new URLSearchParams(), "/discover")).toBe(true);
+    expect(isAppNavActive("/projects", new URLSearchParams(), "/discover")).toBe(false);
   });
 });

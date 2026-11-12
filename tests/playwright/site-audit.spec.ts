@@ -32,7 +32,7 @@ const PUBLIC_ROUTES = [
   { path: "/terms", name: "Terms", expectedText: /Terms|terms/i },
   { path: "/cookies", name: "Cookies", expectedText: /Cookie|cookie/i },
   { path: "/showcase", name: "Showcase", expectedText: /Showcase|project|Project|Gallery/i },
-  { path: "/voice", name: "Voice", expectedText: /Voice|voice|speak|Speak|Studio|Sign/i },
+  { path: "/voice", name: "Voice", expectedText: /Voice|voice|speak|Speak|Studio|Sign/i, redirectsTo: "/studio" },
   { path: "/sign-up", name: "Signup", expectedText: /Sign|sign|Create|create|free|Free|Clerk|clerk/i, allowRedirect: true },
   { path: "/discover", name: "Discover", expectedText: /Discover|Community|community|Creator|creator/i },
   { path: "/agents", name: "Agents", expectedText: /Agent|agent|AI/i },

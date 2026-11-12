@@ -239,7 +239,7 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 //   /deployments, /settings/*, /profile/*, /admin/*, /owner,
 //   /library/*, /memories, /flow, /code, /agent-chat,
 //   /ai-builder, /builder, /chat, /generate,
-//   /litt, /litt-terminal, /runtime-test, /order/*
+//   /litt, /litt-terminal, /order/*
 
 const isProtectedRouteInner = createRouteMatcher([
   // Protected page routes
@@ -264,7 +264,6 @@ const isProtectedRouteInner = createRouteMatcher([
   "/generate(.*)",
   "/litt(.*)",
   "/litt-terminal(.*)",
-  "/runtime-test(.*)",
   "/order(.*)",
   // /hire is retired from the public V1 surface and redirects to /studio.
   // Guests hitting it directly are sent to /sign-in with redirect_url=/hire
@@ -292,7 +291,6 @@ const isProtectedRouteInner = createRouteMatcher([
   "/generate(.*)",
   "/litt(.*)",
   "/litt-terminal(.*)",
-  "/runtime-test(.*)",
   "/order(.*)",
   // Protected API routes
   "/api/user-agents(.*)",
@@ -303,7 +301,6 @@ const isProtectedRouteInner = createRouteMatcher([
   "/api/users/(.*)",
   "/api/account",
   "/api/orchestrate",
-  "/api/runtime-test(.*)",
   "/api/ghl/test(.*)",
   "/api/marketplace/agents/(.*)/install(.*)",
   "/api/marketplace/agents/(.*)/checkout(.*)",
