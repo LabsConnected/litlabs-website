@@ -35,7 +35,7 @@ export const metadata: Metadata = {
     path: "/",
     index: true,
   }),
-  title: { absolute: "LiTT — AI Project Operator & Creative Workspace | LiTTree LabStudios · litlabs.net" },
+  title: { absolute: "LiTT — AI Project Operator & Creative Workspace | LiTTreeLabStudios · litlabs.net" },
 };
 
 const homeSchema = {
@@ -50,20 +50,10 @@ const homeSchema = {
         "Lit Labs",
         "LiTTree",
         "LiTTree Labs",
-        "LiTTree LabStudio",
         "LiTT Labs",
         "litlabs.net",
       ],
       url: SITE_URL,
-      telephone: "+1-231-428-5411",
-      address: {
-        "@type": "PostalAddress",
-        streetAddress: "17082 Ontario Dr",
-        addressLocality: "Spring Lake",
-        addressRegion: "MI",
-        postalCode: "49456",
-        addressCountry: "US",
-      },
       sameAs: [
         "https://github.com/LabsConnected",
         "https://www.youtube.com/@LiTTreeLabStudios",
