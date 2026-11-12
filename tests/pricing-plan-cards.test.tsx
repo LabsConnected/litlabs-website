@@ -83,7 +83,7 @@ describe("PricingClient plan cards", () => {
     within(creator).getByText("Most popular");
 
     const pro = cardFor("Pro Builder");
-    within(pro).getByText("$39");
+    within(pro).getByText("$39.99");
 
     // Regression guard: the 1999-cent plan must not render the rounded "$20".
     expect(screen.queryByText("$20")).toBeNull();
