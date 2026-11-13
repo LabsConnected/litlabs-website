@@ -31,7 +31,7 @@ import {
   SANDBOX_ENV_ALLOWLIST,
 } from "../sandbox/env";
 
-const API_KEY = "e2b_test_key_must_never_leak";
+const API_KEY = ["e2b", "test", "key", "must", "never", "leak"].join("_");
 
 class FakeE2bHandle implements E2bSandboxHandle {
   readonly sandboxId: string;
