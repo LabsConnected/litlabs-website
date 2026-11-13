@@ -333,6 +333,12 @@ export function useInworldSession(
     if (!playbackGainRef.current || playbackGainRef.current.context !== ctx) {
       const gain = ctx.createGain();
       gain.gain.value = clampVolume(useMixerStore.getState().outputVolume);
+      // The master gain must terminate at the context destination. Without
+      // this edge every scheduled chunk renders into a dead end — the
+      // session cycles normally but nothing is audible (regression from
+      // 44ed62be, which routed sources through this gain without ever
+      // connecting the gain onward).
+      gain.connect(ctx.destination);
       playbackGainRef.current = gain;
     }
     return playbackGainRef.current;
@@ -388,6 +394,12 @@ export function useInworldSession(
 
       source.start(startTime);
       isPlayingRef.current = true;
+      // Audio is now genuinely scheduled on the playback context — this is
+      // the honest point to record "TTS audio played" for the caller's
+      // double-speak guard. It used to be set on delta receipt, which let
+      // a dead playback hop suppress the audible fallback chain even
+      // though nothing had been heard.
+      ttsAudioPlayedRef.current = true;
     }
   }, [ensurePlaybackGain]);
 
@@ -881,7 +893,11 @@ export function useInworldSession(
                 // when not interrupted (auto-response cancellation).
                 if (explicitTtsRef.current && !interruptedRef.current && data.delta) {
                   if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] TTS audio received", { chunkSize: data.delta.length });
-                  ttsAudioPlayedRef.current = true;
+                  // NOTE: ttsAudioPlayedRef is deliberately NOT set here on
+                  // receipt — schedulePendingChunks sets it once a chunk is
+                  // actually scheduled for playback, so the caller's
+                  // fallback chain can still rescue a session whose
+                  // playback hop is dead.
                   const buffer = decodePcm16ToAudioBuffer(data.delta);
                   if (buffer) {
                     playbackQueueRef.current.push(buffer);
