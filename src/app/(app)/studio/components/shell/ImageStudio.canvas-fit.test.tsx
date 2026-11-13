@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ImageStudio from "./ImageStudio";
 
 vi.mock("@/context/ThemeContext", () => ({
@@ -112,8 +112,14 @@ describe("ImageStudio canvas fit regression", () => {
     expect(Number.parseInt(frame.style.height, 10)).toBeLessThanOrEqual(800);
 
     const canvas = screen.getByTestId("image-studio-canvas");
-    expect(canvas).toHaveAttribute("width", "1024");
-    expect(canvas).toHaveAttribute("height", "1024");
+    // Canvas width/height are set imperatively by a passive useEffect
+    // (renderOpsToCanvas), not during render — wait for the effect to flush
+    // instead of racing it. Under full-suite load the flush can lag the
+    // frame's appearance, which made this assertion flaky (width = null).
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute("width", "1024");
+      expect(canvas).toHaveAttribute("height", "1024");
+    });
     expect(canvas).toHaveClass("h-full", "w-full");
   });
 
@@ -126,8 +132,12 @@ describe("ImageStudio canvas fit regression", () => {
     expect(Number.parseInt(frame.style.height, 10)).toBeLessThanOrEqual(800);
 
     const canvas = screen.getByTestId("image-studio-canvas");
-    expect(canvas).toHaveAttribute("width", "768");
-    expect(canvas).toHaveAttribute("height", "1344");
+    // Same passive-effect race as the square case above: wait for the
+    // sizing effect to flush before asserting the canvas attributes.
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute("width", "768");
+      expect(canvas).toHaveAttribute("height", "1344");
+    });
     expect(canvas).toHaveClass("h-full", "w-full");
   });
 });
