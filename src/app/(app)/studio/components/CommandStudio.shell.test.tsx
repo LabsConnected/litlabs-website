@@ -524,10 +524,15 @@ describe("StudioShell — desktop operating shell", () => {
     expect(rail.style.display).not.toBe("none");
   });
 
-  it("does not render the classic workspace tabs or bottom dock", async () => {
+  it("does not render the classic workspace tabs; the Phase 2 bottom dock starts collapsed", async () => {
     await renderStudioShell();
     expect(screen.queryByTestId("workspace-tab-preview")).toBeNull();
-    expect(screen.queryByTestId("studio-dock")).toBeNull();
+    // Phase 2 (Directive §2): StudioShell gained a bottom-panel slot —
+    // the StudioDock is present in shell mode too, starting collapsed
+    // so it mounts no tab content until expanded.
+    expect(screen.getByTestId("studio-dock")).toBeTruthy();
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
     // And no floating-window launcher from the superseded compositor.
     expect(screen.queryByTestId("studio-canvas-open-tool")).toBeNull();
   });
@@ -543,7 +548,7 @@ describe("StudioShell — desktop operating shell", () => {
   it("rail switches the stage surface and keeps visited surfaces mounted", async () => {
     const { user } = await renderStudioShell();
     await waitFor(() => screen.getByTestId("studio-preview-panel"));
-    await user.click(screen.getByTestId("workspace-rail-design"));
+    await user.click(screen.getByTestId("workspace-stage-canvas-design"));
     await waitFor(() => {
       expect(screen.getByTestId("stage-surface-design")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("visual-canvas-builder")).toBeTruthy();
@@ -820,14 +825,15 @@ describe("StudioShell — left chat dock", () => {
   });
 });
 describe("MissionCards — shell center activity stage surface", () => {
-  it("renders the mission cards once in the center activity surface (shell mode has no bottom dock)", async () => {
+  it("renders the mission cards once in the center activity surface (the shell's Phase 2 bottom dock carries the activity feed, not a second MissionCards)", async () => {
     const { user } = await renderStudioShell();
     await user.click(screen.getByTestId("workspace-rail-activity"));
     await waitFor(() => {
       expect(screen.getByTestId("stage-surface-activity")).toHaveAttribute("data-active", "true");
     });
-    // The shell renders no bottom dock, so the center surface carries the
-    // single MissionCards instance in this layout.
+    // The center surface carries the single MissionCards instance in
+    // this layout — the shell bottom dock's Activity tab deliberately
+    // does not mount a second one.
     expect(screen.getAllByTestId("mission-cards")).toHaveLength(1);
   });
 });
@@ -864,5 +870,95 @@ describe("MissionCards — classic desktop dock", () => {
       activityContent.querySelector('[data-testid="mission-cards"]'),
     ).toBeTruthy();
     expect(activityContent.querySelector('[data-testid="studio-activity-panel"]')).toBeTruthy();
+  });
+});
+
+describe("Phase 2 — five Directive stages, Files sidebar, Preview dock, bottom dock", () => {
+  it("rail presents exactly the five stages; secondary surfaces and the terminal stay reachable", async () => {
+    await renderStudioShell();
+    for (const stage of ["plan", "canvas-design", "code", "preview", "media"]) {
+      expect(screen.getByTestId(`workspace-stage-${stage}`)).toBeTruthy();
+    }
+    expect(screen.getByTestId("workspace-rail-terminal")).toBeTruthy();
+    expect(screen.getByTestId("workspace-rail-activity")).toBeTruthy();
+    expect(screen.getByTestId("workspace-rail-files")).toBeTruthy();
+    expect(screen.getByTestId("workspace-rail-assets")).toBeTruthy();
+  });
+
+  it("Files sidebar renders beside chat by default and collapses from the layout toolbar", async () => {
+    const { user } = await renderStudioShell();
+    expect(screen.getByTestId("studio-files-panel")).toBeTruthy();
+    // Chat stays mounted beside it (its expanded-on-open default is
+    // pinned by the first test in this file — #937 behavior).
+    expect(screen.getByTestId("litt-panel")).toBeTruthy();
+    await user.click(screen.getByTestId("dock-files-toggle"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("studio-files-panel")).toBeNull();
+    });
+  });
+
+  it("Preview dock toggle mounts the live preview panel beside the stage", async () => {
+    const { user } = await renderStudioShell();
+    expect(screen.queryByTestId("studio-preview-dock-panel")).toBeNull();
+    await user.click(screen.getByTestId("dock-preview-toggle"));
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-preview-dock-panel")).toBeTruthy();
+    });
+    // The SAME StudioPreviewPanel as the Preview stage: the stage's
+    // instance (mounted by default) plus the dock's — no second
+    // preview implementation exists.
+    expect(screen.getAllByTestId("studio-preview-panel")).toHaveLength(2);
+  });
+
+  it("Canvas & Design stage carries the Build/Design toggle; Design mode can be selected in-stage", async () => {
+    const { user } = await renderStudioShell();
+    await user.click(screen.getByTestId("workspace-stage-canvas-design"));
+    await waitFor(() => {
+      expect(screen.getByTestId("canvas-design-stage")).toBeTruthy();
+    });
+    expect(screen.getByTestId("canvas-design-mode-build")).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByTestId("canvas-design-mode-design"));
+    await waitFor(() => {
+      expect(screen.getByTestId("canvas-design-mode-design")).toHaveAttribute("aria-selected", "true");
+    });
+    // The retired floating DesignCanvas tool never renders.
+    expect(screen.queryByTestId("design-canvas")).toBeNull();
+  });
+
+  it("Plan stage opens the inspector on its Plan tab (the shell's station contract: Plan is not a center station)", async () => {
+    const { user } = await renderStudioShell();
+    await user.click(screen.getByTestId("workspace-stage-plan"));
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-context-inspector")).toBeTruthy();
+    });
+    // The center homes on the shell's home surface.
+    expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
+  });
+
+  it("the shell bottom dock expands; its Terminal tab explains the jump to the terminal station", async () => {
+    const { user } = await renderStudioShell();
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
+    await user.click(screen.getByTestId("dock-tab-terminal"));
+    await waitFor(() => {
+      expect(screen.getByTestId("dock-terminal-jump")).toBeTruthy();
+    });
+  });
+});
+
+describe("Phase 2 — ?tool=design deep link", () => {
+  beforeEach(() => {
+    stableSearchParams.set("tool", "design");
+  });
+  afterEach(() => {
+    stableSearchParams.set("tool", "chat");
+  });
+
+  it("lands in the Canvas & Design stage with Design mode preselected, never the retired DesignCanvas", async () => {
+    await renderStudioShell();
+    await waitFor(() => {
+      expect(screen.getByTestId("stage-surface-design")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("canvas-design-mode-design")).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.queryByTestId("design-canvas")).toBeNull();
   });
 });

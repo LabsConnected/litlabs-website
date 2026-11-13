@@ -100,7 +100,7 @@ const TOOL_ROWS: ToolRow[] = [
   },
   {
     id: "canvas",
-    label: "Open Canvas",
+    label: "Open Canvas & Design",
     description: "Visual canvas builder",
     icon: Layout,
     onOpen: (p) => p.onOpenCanvas,
