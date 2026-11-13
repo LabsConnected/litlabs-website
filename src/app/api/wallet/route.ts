@@ -33,15 +33,24 @@ async function getHandler(req: NextRequest) {
     const wallet = await getCreditBalances(clerkId);
     const ownerSim = isOwnerClerkId(clerkId) ? await getActiveSimulation() : null;
     const exempt = isBillingExempt(clerkId, ownerSim);
+    // Zero-LiTTBits test-mode simulation: the balance is treated as 0 —
+    // the same rule /api/billing/subscription applies — so the wallet,
+    // the subscription surface, and Studio chat billing all agree.
+    // Display-side only: the real ledger is untouched, and this state
+    // can only occur behind the owner-only litt_test_mode cookie.
+    const simulatedZeroBalance = ownerSim === "zero_bits";
     return NextResponse.json({
-      balance: wallet.total,
-      balances: {
-        monthly: wallet.monthly,
-        purchased: wallet.purchased,
-        beta_promotional: wallet.betaPromotional,
-      },
+      balance: simulatedZeroBalance ? 0 : wallet.total,
+      balances: simulatedZeroBalance
+        ? { monthly: 0, purchased: 0, beta_promotional: 0 }
+        : {
+            monthly: wallet.monthly,
+            purchased: wallet.purchased,
+            beta_promotional: wallet.betaPromotional,
+          },
       last_claim_date: wallet.lastDailyClaim,
       configured: true,
+      simulatedZeroBalance,
       // Owner billing exemption: display "DEV ∞" instead of numeric balance.
       // Usage is metered but the wallet is never debited.
       billingExempt: exempt,

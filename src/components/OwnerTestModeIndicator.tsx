@@ -55,6 +55,9 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
   // it was invisible and unclickable. The menu is portaled to <body> and
   // positioned from the trigger's rect instead.
   const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  // Portal host for the dropdown, resolved in the badge click handler
+  // (see renderMenu). Null until the first open.
+  const [menuHost, setMenuHost] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     if (notOwnerChecked) return;
@@ -136,8 +139,23 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
   const badgeBg = isTestMode ? "rgba(245,158,11,0.15)" : "rgba(16,185,129,0.15)";
 
   const isInline = placement === "inline";
+  // The menu is portaled into the Studio shell subtree when one wraps
+  // this indicator: it is styled with shell-scoped tokens (--studio-bg,
+  // --text-*) whose light TLC values exist ONLY under .studio-shell.
+  // Portaling to <body> resolved the background to the :root near-black
+  // #08060f while the text inherited the light pack's dark ink —
+  // dark-on-dark, ~1.3:1 contrast. The shell carries no transform or
+  // filter, so the fixed-position anchoring from the trigger rect is
+  // unaffected, and as a direct child of the shell (not of the header)
+  // the menu still escapes the header's overflow clipping — the reason
+  // the portal exists. The host element is captured in the click
+  // handler below (refs may be read there, not during render); the
+  // fallback is <body>, and the menu's explicit color/background
+  // styles keep it readable either way.
   const renderMenu = (node: ReactNode) =>
-    isInline && typeof document !== "undefined" ? createPortal(node, document.body) : node;
+    isInline && typeof document !== "undefined"
+      ? createPortal(node, menuHost ?? document.body)
+      : node;
 
   return (
     <div
@@ -163,7 +181,10 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setMenuHost(triggerRef.current?.closest(".studio-shell") ?? document.body);
+          setOpen((v) => !v);
+        }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -201,9 +222,14 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
             maxHeight: "min(70vh, 560px)",
             overflowY: "auto",
             borderRadius: 12,
-            border: "1px solid var(--studio-border, #333)",
-            background: "var(--studio-bg, #1a1a1a)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            border: "1px solid var(--studio-border, #cfdec4)",
+            background: "var(--studio-bg, #edf3e4)",
+            // Same-scope text color: set explicitly on the container so
+            // the inherited `color: "inherit"` on the option buttons can
+            // never pair the light shell background with an ink from a
+            // different scope again.
+            color: "var(--text-primary, #0e1510)",
+            boxShadow: "0 8px 32px rgba(14,60,26,0.28)",
             padding: 8,
             backdropFilter: "blur(12px)",
             zIndex: 10000,
@@ -215,7 +241,7 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
               fontSize: 11,
               fontWeight: 700,
               textTransform: "uppercase",
-              opacity: 0.5,
+              color: "var(--text-secondary, #47614a)",
               letterSpacing: 0.5,
             }}
           >
@@ -240,7 +266,7 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
                   background: isActive
                     ? isZeroBits
                       ? "rgba(239,68,68,0.15)"
-                      : "rgba(168,85,247,0.15)"
+                      : "rgba(23,122,54,0.14)"
                     : "transparent",
                   color: "inherit",
                   cursor: loading ? "wait" : "pointer",
@@ -254,7 +280,7 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
                     {opt.label}
                     {isActive && <Check size={12} style={{ opacity: 0.7 }} />}
                   </div>
-                  <div style={{ fontSize: 11, opacity: 0.5, marginTop: 2 }}>{opt.description}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted, #63745f)", marginTop: 2 }}>{opt.description}</div>
                 </div>
               </button>
             );
@@ -281,9 +307,9 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
             style={{
               padding: "6px 12px",
               marginTop: 4,
-              fontSize: 10,
-              opacity: 0.4,
-              borderTop: "1px solid var(--studio-border, #333)",
+              fontSize: 11,
+              color: "var(--text-muted, #63745f)",
+              borderTop: "1px solid var(--studio-border, #cfdec4)",
             }}
           >
             Simulation never modifies Stripe. Reload to apply.

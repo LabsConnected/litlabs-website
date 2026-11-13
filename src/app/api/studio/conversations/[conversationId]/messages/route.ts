@@ -43,6 +43,7 @@ import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-tran
 import { createPausedRun, getLatestPausedRunForConversation, getPendingPausedRunForConversation, pausedRunBelongsToMessage } from "@/lib/litt-intelligence/paused-run-store";
 import { getActiveExecution, registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
 import { getOwnerAwareEntitlements } from "@/lib/entitlements";
+import type { SimulatedPlan } from "@/lib/owner";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
   buildCanonicalRuntimeContext,
@@ -169,10 +170,27 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // it is derived from the authenticated user's plan/owner status.
   // This enables OpenAI (LiTT's own key) for entitled users.
   let allowLittPaidProviders = false;
+  // The owner's active test-mode simulation (null when not simulating).
+  // Threaded into the billing reservation below so a simulated tier is
+  // charged like a real customer. No-op for everyone else: non-owners
+  // and owners without an active simulation resolve to null here —
+  // the simulation exists only behind the owner-only litt_test_mode
+  // cookie.
+  let activeSimulation: SimulatedPlan | null = null;
   if (clerkId) {
     try {
       const entitlements = await getOwnerAwareEntitlements(clerkId);
-      allowLittPaidProviders = entitlements.isOwner || entitlements.premiumModels;
+      activeSimulation = entitlements.simulation;
+      // Under an active simulation the isOwner short-circuit must NOT
+      // apply: paid-provider access follows the SIMULATED tier's
+      // entitlements, so e.g. Testing-As Starter (premiumModels=false)
+      // actually loses premium models. Without a simulation, real owner
+      // sessions are unchanged (full access via isOwner).
+      const simulationActive =
+        entitlements.simulation !== null && entitlements.simulation !== "owner";
+      allowLittPaidProviders = simulationActive
+        ? entitlements.premiumModels
+        : entitlements.isOwner || entitlements.premiumModels;
     } catch {
       // On entitlement lookup failure, default-deny (safe)
       allowLittPaidProviders = false;
@@ -953,6 +971,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         messageId: assistantMessage.id,
         idempotencyKey: clientRequestId,
         model: runtimeAgent.model,
+        // Simulation-aware billing: agent-billing's isBillingExempt
+        // check receives the resolved simulation, so under a simulated
+        // tier (including Zero-LiTTBits) the reservation actually
+        // engages instead of being skipped as owner-exempt. Null when
+        // no simulation is active — behavior unchanged.
+        simulation: activeSimulation,
       },
       estimatedCost,
     );
