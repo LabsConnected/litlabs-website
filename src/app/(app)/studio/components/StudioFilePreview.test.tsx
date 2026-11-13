@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { StudioFilePreview, type FileSelectionState } from "./StudioFilePreview";
 
@@ -235,6 +235,39 @@ describe("StudioFilePreview", () => {
       />,
     );
     expect(screen.getByTestId("file-preview-binary")).toBeTruthy();
+  });
+
+  it("fits the whole image in the pane at 100% zoom and downloads via the blob URL", async () => {
+    // Regression pin: the image used to render with max-h-full only (no
+    // max-w-full) inside a justify/align-centered flex scroller, so wide
+    // images overflowed at 100% zoom with their edges clipped out of
+    // scroll reach — the picture looked cut in half until zoom ~75%.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        blob: async () => new Blob(["png"], { type: "image/png" }),
+      })),
+    );
+    try {
+      render(
+        <StudioFilePreview
+          projectId="test-proj"
+          selection={makeSelection({ path: "art/lion.png", size: 3 })}
+        />,
+      );
+      const img = await screen.findByTestId("file-preview-image");
+      expect(img.className).toContain("max-w-full");
+      expect(img.className).toContain("max-h-full");
+      // Margin-auto centering keeps overflow scrollable on all sides.
+      expect(img.className).toContain("m-auto");
+      // Download must use the fetched blob URL, not the raw route (which
+      // serves Content-Disposition: inline and can display not save).
+      const downloadLink = screen.getByTitle("Download");
+      expect(downloadLink.getAttribute("href")).toContain("blob:mock-url");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("formats file sizes correctly", () => {
