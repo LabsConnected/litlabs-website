@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => {
     isMicPaused: vi.fn(() => false),
     getVadState: vi.fn((): string => "idle"),
     getLastSpeechDurationMs: vi.fn(() => 0),
+    getPeakLevel: vi.fn(() => 0),
     didLastTtsPlayAudio: vi.fn(() => false),
     isConnected: true,
     isListening: false,
@@ -75,6 +76,7 @@ beforeEach(() => {
   mocks.state.timing = createInitialTimingMetrics();
   mocks.inworld.getLastSpeechDurationMs.mockReturnValue(0);
   mocks.inworld.getVadState.mockReturnValue("idle");
+  mocks.inworld.getPeakLevel.mockReturnValue(0);
 
   vi.stubGlobal(
     "navigator",
@@ -158,5 +160,30 @@ describe("final transcript delivery — no silent drops", () => {
     });
 
     expect(getSession().errorMessage).toMatch(/didn't hear/i);
+  });
+
+  it("does NOT blame the mic when the capture stream carried real sound but no transcript arrived", async () => {
+    const getSession = mountSession();
+    await act(async () => {
+      await getSession().startVoice();
+    });
+
+    // The VAD gate never declared speech (duration 0, state idle) but the
+    // raw capture stream peaked well above the silence threshold — the
+    // mic demonstrably delivered audio (quiet/short speech the gate
+    // under-detected). The feedback must say "heard but not understood",
+    // not "check your microphone".
+    mocks.inworld.getPeakLevel.mockReturnValue(0.2);
+    vi.useFakeTimers();
+    act(() => {
+      getSession().stopVoice();
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(8_000);
+    });
+
+    expect(getSession().errorMessage).toMatch(/heard sound/i);
+    expect(getSession().errorMessage).not.toMatch(/didn't hear/i);
   });
 });

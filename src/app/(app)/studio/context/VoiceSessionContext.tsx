@@ -844,6 +844,17 @@ export function VoiceSessionProvider({
         : 0;
     const heardSpeech =
       lastSpeechMs > 0 || inworldSession.getVadState() === "speech_detected";
+    // Peak level is measured on the raw capture stream, independent of
+    // the VAD gate: it separates "the mic delivered real sound but the
+    // gate/transcription missed it" from genuine silence. The VAD speech
+    // metadata alone is unreliable on this Stop path (see the transcript
+    // handler's note), and blaming the user's microphone when the mic
+    // demonstrably delivered audio sends them chasing the wrong fix.
+    const peakLevel =
+      typeof inworldSession.getPeakLevel === "function"
+        ? inworldSession.getPeakLevel()
+        : 0;
+    const heardAudio = peakLevel >= VOICE_GATE_CONFIG.vad.silenceRmsThreshold;
     if (inworldConnectedRef.current) {
       // Stop the mic and commit the audio buffer so Inworld can finish STT.
       // Do NOT disconnect the WebSocket — the STT response
@@ -883,7 +894,13 @@ export function VoiceSessionProvider({
         voiceStateRef.current === "processing"
       ) {
         console.debug("[Voice] STT timeout — returning to idle");
-        if (!heardSpeech) {
+        if (!heardSpeech && heardAudio) {
+          // The mic captured real sound but no transcript came back —
+          // that is a detection/transcription miss, not a dead mic.
+          setErrorMessage(
+            "I heard sound but couldn't make out any words — try speaking a little louder or closer to the microphone, then tap the mic and try again.",
+          );
+        } else if (!heardSpeech) {
           setErrorMessage(
             "I didn't hear anything — check that the right microphone is selected and not muted, then tap the mic and try again.",
           );
