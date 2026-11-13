@@ -963,3 +963,161 @@ describe("approval gate derivation from canonical messages", () => {
     expect(useExecutionStore.getState().pendingApproval?.pausedRunId).toBe("paused-inflight");
   });
 });
+
+// ── Project guard — stop-and-ask (B5) ────────────────────────────────
+// The server stops a send that would run against (or silently rebind
+// to) an unconfirmed project with 409 PROJECT_MISMATCH /
+// PROJECT_CONTEXT_CONFIRM naming BOTH projects. The hook must surface
+// the blocking prompt (not a generic error), and only an explicit
+// user decision resubmits — with the decision flag and the SAME
+// clientRequestId, so the server continues the persisted message.
+describe("send() project guard — stop-and-ask prompt + confirmed resubmit", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-old",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const makeMsg = (overrides: Partial<ConversationMessage>): ConversationMessage => ({
+    id: "msg-x",
+    conversationId: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-old",
+    role: "assistant",
+    agentSlug: "litt",
+    agentMode: "standard",
+    agentInstanceId: null,
+    content: "",
+    status: "completed",
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    clientRequestId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  let postBodies: Array<Record<string, unknown>> = [];
+
+  beforeEach(() => {
+    postBodies = [];
+    useConversationStore.getState().resetForProject();
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        postBodies.push(JSON.parse(String(init?.body ?? "{}")));
+        if (postBodies.length === 1) {
+          // First send: the guard stops it — the chat belongs to
+          // proj-old, the user is viewing proj-new.
+          return jsonResponse({
+            error: "Project mismatch",
+            code: "PROJECT_MISMATCH",
+            detail: "You're viewing \"New Project\", but this chat belongs to \"Old Project\".",
+            conversationProject: { id: "proj-old", name: "Old Project" },
+            viewedProject: { id: "proj-new", name: "New Project" },
+          }, 409);
+        }
+        // Confirmed resubmit: the run completes (JSON completion shape).
+        return jsonResponse({
+          userMessage: makeMsg({ id: "user-1", role: "user", content: "Build me a website" }),
+          assistantMessage: makeMsg({ id: "asst-1", role: "assistant", content: "Done." }),
+          revision: 3,
+        });
+      }
+      // The refusal reloads canonical messages — the user message WAS
+      // persisted before the gate stopped the turn.
+      if (method === "GET" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return jsonResponse({
+          messages: [makeMsg({ id: "user-1", role: "user", content: "Build me a website" })],
+          revision: 2,
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useConversationStore.getState().resetForProject();
+  });
+
+  async function renderAndSend() {
+    const { result } = renderHook(() => useCanonicalConversation({ serverProjectId: "proj-new" }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+    });
+    let sendResult: SendResult | undefined;
+    await act(async () => {
+      sendResult = await result.current.send("Build me a website");
+    });
+    return { result, sendResult };
+  }
+
+  it("surfaces the blocking prompt naming both projects instead of a generic error", async () => {
+    const { result, sendResult } = await renderAndSend();
+
+    expect(sendResult?.accepted).toBe(false);
+    expect(sendResult?.errorKind).toBe("conflict");
+    expect(postBodies).toHaveLength(1);
+    expect(postBodies[0].projectContextDecision).toBeUndefined();
+    // The prompt carries BOTH projects; the plain error banner stays empty.
+    expect(result.current.projectDecisionPrompt).toMatchObject({
+      code: "PROJECT_MISMATCH",
+      conversationProject: { id: "proj-old", name: "Old Project" },
+      viewedProject: { id: "proj-new", name: "New Project" },
+    });
+    expect(result.current.sendError).toBeNull();
+  });
+
+  it("Stay cancels the send — no resubmit is fired", async () => {
+    const { result } = await renderAndSend();
+    expect(result.current.projectDecisionPrompt).not.toBeNull();
+
+    act(() => {
+      result.current.dismissProjectDecision();
+    });
+
+    expect(result.current.projectDecisionPrompt).toBeNull();
+    expect(postBodies).toHaveLength(1);
+  });
+
+  it("Switch resubmits with the decision and the SAME clientRequestId", async () => {
+    const { result } = await renderAndSend();
+    const firstRequestId = postBodies[0].clientRequestId;
+    expect(typeof firstRequestId).toBe("string");
+
+    await act(async () => {
+      await result.current.confirmProjectDecision("switch");
+    });
+
+    expect(result.current.projectDecisionPrompt).toBeNull();
+    expect(postBodies).toHaveLength(2);
+    expect(postBodies[1].projectContextDecision).toBe("switch");
+    expect(postBodies[1].clientRequestId).toBe(firstRequestId);
+    // The resubmit uses the revision refreshed by the refusal reload.
+    expect(postBodies[1].expectedRevision).toBe(2);
+  });
+});
