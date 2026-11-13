@@ -47,6 +47,7 @@ import GenerationHistoryCard from "../components/GenerationHistoryCard";
 
 import { apiFetch, type ApiJson } from "@/lib/api-response";
 import { notifyAssetsChanged } from "../hooks/useAssetsRefresh";
+import { downloadMediaFile } from "../lib/download-media";
 import { useStudioContext } from "../context/StudioContext";
 
 type Workspace = {
@@ -1256,20 +1257,13 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
   );
 
   const handleDownload = useCallback(async (url: string, name: string) => {
-    try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `${name.replace(/[^a-z0-9]+/gi, "_").slice(0, 40)}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(url, "_blank");
-    }
+    // Shared blob-based downloader: works for cross-origin provider URLs
+    // (a bare <a download> is ignored there) and revokes the object URL
+    // after a delay — revoking synchronously can cancel the download.
+    await downloadMediaFile(
+      url,
+      `${name.replace(/[^a-z0-9]+/gi, "_").slice(0, 40)}.jpg`,
+    );
   }, []);
 
   const handleQuickAction = useCallback(

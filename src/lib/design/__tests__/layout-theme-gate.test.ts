@@ -108,10 +108,20 @@ describe("layout/theme gate — chat presentation", () => {
     expect(s).toContain("useTheme");
   });
 
-  it("Studio chat defaults to the integrated dock with an explicit-choice marker", () => {
+  it("Studio chat lives only in the left panel, expanded on open (2026-11-12 rule)", () => {
     const s = src(COMMAND_STUDIO);
-    expect(s).toContain("CHAT_DOCK_EXPLICIT_KEY");
+    // Supersedes the 2026-11-10 integrated-dock pin: Larry's
+    // 2026-11-12 ruling removed the dock-position system entirely —
+    // no bottom command layer, no left/bottom switcher, no
+    // explicit-choice marker. The chat is the left panel, and a
+    // fresh visit always opens it expanded (collapse is
+    // session-scoped only; the legacy localStorage value is unread).
+    expect(s).not.toContain("CHAT_DOCK_EXPLICIT_KEY");
+    expect(s).not.toContain("LiTTCommandLayer");
+    expect(s).not.toContain("ChatDockSwitcher");
     expect(s).not.toContain("overlay={!littCollapsed}");
+    // The shell has no bottom chat slot either.
+    expect(src(STUDIO_SHELL)).not.toContain("LiTTCommandLayer");
   });
 
   it("StudioShell chrome uses the shell scope tokens", () => {

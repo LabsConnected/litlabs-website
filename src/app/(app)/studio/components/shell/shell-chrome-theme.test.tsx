@@ -8,7 +8,6 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import WorktabBar from "../WorktabBar";
 import WorkspaceRail from "./WorkspaceRail";
 import ContextInspector from "./ContextInspector";
-import LiTTCommandLayer from "./LiTTCommandLayer";
 import StudioOperatorBar from "./StudioOperatorBar";
 import ContextDrawer from "../context/ContextDrawer";
 import { useExecutionStore } from "../../stores/useExecutionStore";
@@ -194,22 +193,6 @@ describe("shell chrome follows the applied theme", () => {
     await expectSurface(screen.getByTestId("studio-inspector-open"), LIGHT_SURFACE);
   });
 
-  it("LiTTCommandLayer renders the applied LIGHT theme", async () => {
-    seedTheme(LIGHT_THEME);
-    renderWithTheme(
-      <LiTTCommandLayer
-        storageKey="test"
-        busy={false}
-        expanded={false}
-        onExpandedChange={vi.fn()}
-        transcript={<div>transcript</div>}
-        composer={<div>composer</div>}
-        statusBar={<div>status</div>}
-      />,
-    );
-    await expectSurface(screen.getByTestId("litt-command-layer"), LIGHT_SURFACE);
-  });
-
   it("StudioOperatorBar renders the applied LIGHT theme (surface + border tokens)", async () => {
     seedTheme(LIGHT_THEME);
     renderWithTheme(<StudioOperatorBar terminalStatus="Terminal ready" modelLabel="LiTT Auto" />);
@@ -242,7 +225,6 @@ describe("shell-chrome sources carry no hard-coded dark surface literals", () =>
       "../WorktabBar.tsx",
       "./WorkspaceRail.tsx",
       "./ContextInspector.tsx",
-      "./LiTTCommandLayer.tsx",
       "./StudioOperatorBar.tsx",
       "../context/ContextDrawer.tsx",
     ]) {

@@ -35,7 +35,6 @@ import type { ReactNode } from "react";
 import { MessageSquare, Activity, PanelLeftClose, X } from "lucide-react";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 import LiTTAmbientHUD from "./litt/LiTTAmbientHUD";
-import ChatDockSwitcher, { type ChatDockPosition } from "./ChatDockSwitcher";
 import type { DeviceStatus } from "@/lib/litt/live/types";
 
 export type LiTTTab = "chat" | "live";
@@ -70,13 +69,6 @@ interface LiTTPanelProps {
    * spec's 300–500px range is reachable at common desktop viewports.
    */
   expandedMaxWidth?: string;
-  /**
-   * Chat dock position — when provided (with onDockPositionChange), the
-   * tab header renders the Left/Bottom dock switcher. The legacy path
-   * does not pass these, so its header is unchanged.
-   */
-  dockPosition?: ChatDockPosition;
-  onDockPositionChange?: (position: ChatDockPosition) => void;
 }
 
 export default function LiTTPanel({
@@ -92,8 +84,6 @@ export default function LiTTPanel({
   microphoneStatus,
   expandedWidth = 320,
   expandedMaxWidth,
-  dockPosition,
-  onDockPositionChange,
 }: LiTTPanelProps) {
   return (
     <aside
@@ -190,9 +180,6 @@ export default function LiTTPanel({
             Activity
           </button>
           <div className="flex-1" />
-          {dockPosition && onDockPositionChange && (
-            <ChatDockSwitcher position={dockPosition} onChange={onDockPositionChange} />
-          )}
           {overlay ? (
             <button
               type="button"
