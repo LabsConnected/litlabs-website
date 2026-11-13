@@ -61,8 +61,13 @@ export interface ProjectRuntimeState {
   sourceKind: "managed" | "github" | null;
   /** Display label for the source: "LiTT Managed" or "GitHub". */
   sourceLabel: string | null;
-  /** Provisioning state of the source itself, separate from the agent. */
-  sourceStatus: "provisioning" | "ready" | "error" | "needs_setup" | null;
+  /**
+   * Provisioning state of the source itself, separate from the agent.
+   * "unavailable" is the deliberate repo gate: a GitHub-backed project
+   * whose live workspace the hosted service does not offer yet (no
+   * verified sandbox) — a product decision, not an error.
+   */
+  sourceStatus: "provisioning" | "ready" | "error" | "needs_setup" | "unavailable" | null;
   /** Whether the workspace has a Git repository. Managed projects do. */
   versionControl: "git" | "none";
   /** Whether a GitHub repository is connected. Optional by design. */
