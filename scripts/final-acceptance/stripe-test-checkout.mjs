@@ -304,20 +304,41 @@ async function main() {
     }
     await page.waitForTimeout(2000);
 
-    const cardSel = 'input[name="cardNumber"], #cardNumber';
-    const expirySel = 'input[name="cardExpiry"], #cardExpiry';
-    const cvcSel = 'input[name="cardCvc"], #cardCvc';
+    // Payment Element rendering: after the Card option expands, Stripe
+    // mounts its fields inside Stripe iframes that attach asynchronously.
+    // Wait for such an iframe to appear before polling so the field probe
+    // doesn't race the mount. (Harmless timeout on the classic rendering.)
+    await page.waitForFunction(
+      () => [...document.querySelectorAll("iframe")].some(
+        (f) => /elements-inner|js\.stripe\.com/.test(f.src || f.name || ""),
+      ),
+      null,
+      { timeout: 15_000 },
+    ).catch(() => {});
+
+    // Stripe has shipped two hosted-Checkout renderings of the card fields:
+    // the classic inputs (name="cardNumber" / #cardNumber) and the current
+    // Payment Element inside Stripe iframes, whose inputs are
+    // #Field-numberInput / #Field-expiryInput / #Field-cvcInput with
+    // autocomplete="cc-number" / "cc-exp" / "cc-csc". Probe BOTH — the
+    // camelCase name probe alone can never match the Payment Element, which
+    // is why Step 5 timed out with "card input not found" on a healthy page.
+    const cardSel = 'input[name="cardNumber"], #cardNumber, #Field-numberInput, input[autocomplete="cc-number"]';
+    const expirySel = 'input[name="cardExpiry"], #cardExpiry, #Field-expiryInput, input[autocomplete="cc-exp"]';
+    const cvcSel = 'input[name="cardCvc"], #cardCvc, #Field-cvcInput, input[autocomplete="cc-csc"]';
+    // Probe order: top document first, then Stripe's own iframes
+    // (elements-inner / js.stripe.com), then any remaining frame.
+    const orderedContexts = () => {
+      const frames = page.frames().filter((f) => f !== page.mainFrame());
+      const stripe = frames.filter((f) => /elements-inner|js\.stripe\.com/.test(f.url()));
+      return [page, ...stripe, ...frames.filter((f) => !stripe.includes(f))];
+    };
     let cardCtx = null;
     const fieldDeadline = Date.now() + 45_000;
     while (Date.now() < fieldDeadline && !cardCtx) {
-      if (await page.locator(cardSel).first().isVisible().catch(() => false)) {
-        cardCtx = page;
-        break;
-      }
-      for (const frame of page.frames()) {
-        if (frame === page.mainFrame()) continue;
-        if (await frame.locator(cardSel).first().isVisible().catch(() => false)) {
-          cardCtx = frame;
+      for (const ctx of orderedContexts()) {
+        if (await ctx.locator(cardSel).first().isVisible().catch(() => false)) {
+          cardCtx = ctx;
           break;
         }
       }
@@ -326,8 +347,19 @@ async function main() {
     if (!cardCtx) {
       const frames = page.frames().map((f) => f.url());
       const inputs = await page.locator("input")
-        .evaluateAll((els) => els.map((e) => ({ id: e.id, name: e.name, type: e.type })))
+        .evaluateAll((els) => els.map((e) => ({ id: e.id, name: e.name, type: e.type, autocomplete: e.autocomplete })))
         .catch(() => []);
+      // The card fields live in iframes on the current rendering, so dump
+      // every frame's inputs too — the top-document list alone cannot show
+      // what Stripe actually rendered.
+      const frameInputs = [];
+      for (const frame of page.frames()) {
+        if (frame === page.mainFrame()) continue;
+        const ins = await frame.locator("input")
+          .evaluateAll((els) => els.map((e) => ({ id: e.id, name: e.name, type: e.type, autocomplete: e.autocomplete })))
+          .catch(() => []);
+        frameInputs.push({ url: frame.url(), inputs: ins });
+      }
       const radiogroup = await page.evaluate(() => {
         const g = document.querySelector('[role="radiogroup"],[role="listbox"]');
         return g ? g.outerHTML.slice(0, 4000) : null;
@@ -339,11 +371,11 @@ async function main() {
         return el ? el.outerHTML.slice(0, 6000) : document.body.innerHTML.slice(0, 6000);
       }).catch(() => null);
       writeFileSync(path.join(ARTIFACT_DIR, "checkout-dom.json"),
-        JSON.stringify({ cardClicked, frames, inputs, radiogroup, paySection }, null, 2));
+        JSON.stringify({ cardClicked, frames, inputs, frameInputs, probedSelectors: { cardSel, expirySel, cvcSel }, radiogroup, paySection }, null, 2));
       writeFileSync(path.join(ARTIFACT_DIR, "checkout-body.html"),
         await page.evaluate(() => document.body.innerHTML).catch(() => ""));
       await shot(page, "stripe-checkout-no-fields");
-      throw new Error("card input not found in page or any frame (see checkout-dom.json)");
+      throw new Error(`card input not found in page or any frame — probed card=[${cardSel}] expiry=[${expirySel}] cvc=[${cvcSel}] (see checkout-dom.json)`);
     }
 
     // Informational only — the cs_test_ session gate is authoritative.
@@ -354,9 +386,19 @@ async function main() {
       testBadgeVisible ? "TEST MODE/Sandbox marker present" : "marker not detected (sessionId gate is authoritative)");
     await shot(page, "stripe-checkout");
 
+    // On the Payment Element rendering each field can live in its OWN
+    // Stripe iframe, so resolve expiry/CVC in whichever context actually
+    // holds them (falling back to the card field's context — correct for
+    // the classic single-context rendering).
+    const fieldCtx = async (sel) => {
+      for (const ctx of orderedContexts()) {
+        if (await ctx.locator(sel).first().isVisible().catch(() => false)) return ctx;
+      }
+      return cardCtx;
+    };
     await cardCtx.locator(cardSel).first().fill("4242424242424242");
-    await cardCtx.locator(expirySel).first().fill("1234");
-    await cardCtx.locator(cvcSel).first().fill("123");
+    await (await fieldCtx(expirySel)).locator(expirySel).first().fill("1234");
+    await (await fieldCtx(cvcSel)).locator(cvcSel).first().fill("123");
     const nameSel = 'input[name="billingName"], #billingName';
     if (await cardCtx.locator(nameSel).first().isVisible().catch(() => false)) {
       await cardCtx.locator(nameSel).first().fill("LiTT Acceptance");
