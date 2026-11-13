@@ -2194,6 +2194,52 @@ export async function runAgentLoop(
     // Reset the counter on a successful tool resolution.
     unknownToolRetries = 0;
 
+    // ─── Repeated-failure guard ────────────────────────────────────
+    // A VALID tool call that already failed once with the exact same
+    // {toolId, inputs} must not be re-executed verbatim — re-dispatching
+    // a deterministic failure cannot produce a different result, it only
+    // burns a round and (observed on weak local models) repeats until the
+    // total timeout kills the run. The first failure was already fed back
+    // to the model below so it could self-correct with DIFFERENT args;
+    // an identical re-issue is not a correction, so the run ends here
+    // with an explicit error instead of burning the round limit.
+    //
+    // Skipped when an escalation hook is active: repeated failures are
+    // the signal that lane uses to decide a model swap, so the run must
+    // reach the escalation threshold rather than terminating first.
+    const repeatedFailure = (missionId && escalation)
+      ? undefined
+      : callsToExecute.find(({ call }) =>
+        toolCalls.some(
+          (tc) =>
+            !tc.result.success &&
+            tc.toolId === call.toolId &&
+            JSON.stringify(tc.inputs) === JSON.stringify(call.inputs),
+        ),
+      );
+    if (repeatedFailure) {
+      const prior = toolCalls.find(
+        (tc) =>
+          !tc.result.success &&
+          tc.toolId === repeatedFailure.call.toolId &&
+          JSON.stringify(tc.inputs) === JSON.stringify(repeatedFailure.call.inputs),
+      );
+      return {
+        content:
+          `Repeated identical failing tool call: ${repeatedFailure.call.toolId}. ` +
+          `This exact call already failed earlier in the run` +
+          (prior?.result.message ? ` (${prior.result.message})` : "") +
+          ` — re-issuing it verbatim cannot produce a different result. ` +
+          `The task was NOT completed. No success is being claimed.`,
+        toolCalls,
+        rounds,
+        durationMs: Date.now() - startTime,
+        usage: { total_tokens: totalTokens },
+        termination: "error",
+        escalations: escalationEvents.length ? escalationEvents : undefined,
+      };
+    }
+
     // ─── Execute tool calls (parallel if all read-only, else single) ───
     // Dispatch goes through the ONE shared path defined above — the same
     // one the runtime's deterministic evidence acquisition uses.

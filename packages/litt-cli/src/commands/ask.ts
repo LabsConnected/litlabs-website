@@ -47,12 +47,24 @@ const EXACT_ANSWER_RE = /^\s*(?:reply|respond|answer|say)\s+with\s+exactly\s*(?:
 const PROJECT_EVIDENCE_RE = /\b(project|repo|repository|file|path|git|build|test|check|code|command|tool|read|write|edit|search|status|diff|log|package)\b/i;
 
 /**
- * True only for literal echo-style asks such as `Reply with exactly: OK`.
- * Multi-part or repository-aware requests keep tools enabled.
+ * True for asks that need no repository evidence:
+ * literal echo-style asks such as `Reply with exactly: OK`, and short
+ * plain questions — at most 12 words and at most one sentence-ending
+ * punctuation mark — that carry no project-evidence signal. Anything
+ * mentioning the project/repo/tools keeps tools enabled:
+ * PROJECT_EVIDENCE_RE is the safety net that preserves the tool surface
+ * for requests like "fix the build", "run the tests", or "git status".
  */
 export function isExactAnswerPrompt(question: string): boolean {
   const match = EXACT_ANSWER_RE.exec(question);
-  return !!match && !PROJECT_EVIDENCE_RE.test(match[1]);
+  if (match) return !PROJECT_EVIDENCE_RE.test(match[1]);
+
+  const trimmed = question.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 12) return false;
+  const sentenceEnders = trimmed.match(/[.!?]/g)?.length ?? 0;
+  if (sentenceEnders > 1) return false;
+  return !PROJECT_EVIDENCE_RE.test(trimmed);
 }
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
@@ -125,9 +137,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const store = new RuntimeStore();
   const shell = createShellExecutor(projectRoot);
   const executor = new CommandExecutor(shell, store);
-  // Exact-answer prompts need no repository evidence. Keeping tools enabled
-  // lets weak local models invoke expensive checks for a prompt that cannot
-  // use their results (observed: `Reply with exactly...` -> project.check).
+  // Evidence-free asks (echo prompts, short plain questions) need no
+  // repository evidence. Keeping tools enabled lets weak local models
+  // invoke expensive calls for a prompt that cannot use their results
+  // (observed: `Say hello in five words` -> project.run retried verbatim
+  // until the total timeout; `Reply with exactly...` -> project.check).
   const directAnswerOnly = isExactAnswerPrompt(question);
   const tools = new ToolRegistry(undefined, { includeDefaults: !directAnswerOnly });
   // A no-tools ask needs no agent contract either. The default compact

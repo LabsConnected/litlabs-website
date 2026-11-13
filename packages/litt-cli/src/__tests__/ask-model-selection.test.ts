@@ -77,12 +77,35 @@ describe("litt ask explicit model selection", () => {
 });
 
 describe("litt ask exact-answer tool boundary", () => {
-  it("recognizes only literal echo-style asks", () => {
+  it("recognizes literal echo-style asks and short plain questions", () => {
     expect(isExactAnswerPrompt("Reply with exactly: OK")).toBe(true);
     expect(isExactAnswerPrompt("Say with exactly \"LiTT local model works\"")).toBe(true);
     expect(isExactAnswerPrompt("Reply with exactly: OK, then run project.check")).toBe(false);
     expect(isExactAnswerPrompt("Reply with exactly: the project status")).toBe(false);
     expect(isExactAnswerPrompt("Inspect the project and reply with exactly one sentence")).toBe(false);
+  });
+
+  it("recognizes short plain questions as evidence-free asks", () => {
+    expect(isExactAnswerPrompt("Say hello in five words")).toBe(true);
+    expect(isExactAnswerPrompt("What is the meaning of life?")).toBe(true);
+    expect(isExactAnswerPrompt("how are you")).toBe(true);
+  });
+
+  it("keeps tools for project-evidence asks, multi-clause asks, and long asks", () => {
+    expect(isExactAnswerPrompt("How do I fix the build?")).toBe(false);
+    expect(isExactAnswerPrompt("git status?")).toBe(false);
+    expect(isExactAnswerPrompt("Hi. What is the meaning of life?")).toBe(false);
+    expect(
+      isExactAnswerPrompt(
+        "tell me a very long question that goes well beyond twelve words so it must keep tools",
+      ),
+    ).toBe(false);
+  });
+
+  it("gives a short plain question an empty tool surface", async () => {
+    expect(await askCommand(["Say", "hello", "in", "five", "words"], session)).toBe(0);
+    const options = vi.mocked(runAgentLoop).mock.calls.at(-1)?.[1];
+    expect(options?.tools.list()).toHaveLength(0);
   });
 
   it("gives literal echo asks an empty tool surface", async () => {

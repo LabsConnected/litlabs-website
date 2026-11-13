@@ -409,11 +409,14 @@ describe("Agent loop max-rounds — truthful partial answer from tool evidence",
 
     // Model keeps calling tools — never gives a final answer.
     // This exhausts maxRounds with mixed success/failure tool evidence.
+    // The second project.check carries DIFFERENT args: a verbatim repeat
+    // of an already-failed signature now trips the repeated-failure guard
+    // and ends the run as "error" instead of reaching maxRounds.
     const model = makeMockModel([
       '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```',
       '```tool_call\n{ "tool": "project.check", "inputs": {} }\n```',
       '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```',
-      '```tool_call\n{ "tool": "project.check", "inputs": {} }\n```',
+      '```tool_call\n{ "tool": "project.check", "inputs": { "strict": true } }\n```',
     ]);
 
     const result = await runAgentLoop("scan and see whats needed", {
