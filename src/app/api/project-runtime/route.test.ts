@@ -23,12 +23,14 @@ import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state
 import { auth } from "@/lib/auth";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getProject } from "@/lib/projects/project-repository";
+import { describeProjectSource } from "@/lib/projects/project-source";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 
 const mockAuth = vi.mocked(auth);
 const mockResolve = vi.mocked(resolveCurrentProject);
 const mockGetProject = vi.mocked(getProject);
 const mockProvision = vi.mocked(provisionWorkspaceForProject);
+const mockDescribeSource = vi.mocked(describeProjectSource);
 const project = (status: string, updatedAt = new Date().toISOString()) => ({
   id: "p1", userId: "u1", name: "Demo", sourceType: "blank", workspaceId: null,
   workspaceRoot: null, workspaceError: status === "failed" ? "terminal down" : null,
@@ -112,5 +114,61 @@ describe("project-runtime host-execution truth (wave-4)", () => {
     expect(body.error.code).toBe("WORKSPACE_PROVISIONING_FAILED");
     expect(body.error.message).toBe("terminal down");
     expect(body.error.recoveryAction).toBe("retry_workspace");
+  });
+});
+
+describe("project-runtime repo gate (B2)", () => {
+  // The gate is computed from first principles: GitHub-owned source
+  // (the real describeProjectSource's verdict, mocked here) in an
+  // environment where host execution is not permitted — vitest has no
+  // local-execution opt-in, so the guard denies throughout this file.
+  const githubSource = {
+    kind: "github", label: "GitHub", status: "needs_setup", versionControl: "none",
+    githubConnected: true, githubRepository: "owner/repo", branch: "main",
+  };
+
+  const repoProject = (overrides: Record<string, unknown> = {}) => ({
+    id: "p1", userId: "u1", name: "Repo", sourceType: "github", workspaceId: null,
+    workspaceRoot: null, workspaceError: null,
+    workspaceStatus: "not_prepared", updatedAt: new Date().toISOString(), previewUrl: null,
+    ...overrides,
+  }) as never;
+
+  it("gates a FRESH repo project from the first poll — no doomed recovery, no stored refusal needed", async () => {
+    mockDescribeSource.mockReturnValue(githubSource as never);
+    mockGetProject.mockResolvedValue(repoProject());
+    const body = await (await get()).json();
+    expect(afterCallbacks).toHaveLength(0);
+    expect(body.phase).toBe("workspace_not_provisioned");
+    expect(body.error.code).toBe("HOST_EXECUTION_DISABLED");
+    expect(body.error.message).toBe(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+    expect(body.error.recoveryAction).toBeUndefined();
+    expect(body.sourceStatus).toBe("unavailable");
+  });
+
+  it("never schedules the failed-retry backoff for a gated repo project", async () => {
+    mockDescribeSource.mockReturnValue({ ...githubSource, status: "unavailable" } as never);
+    mockGetProject.mockResolvedValue(repoProject({
+      workspaceStatus: "failed",
+      workspaceError: "terminal down",
+      updatedAt: new Date(Date.now() - 120_000).toISOString(),
+    }));
+    const body = await (await get()).json();
+    expect(afterCallbacks).toHaveLength(0);
+    expect(body.error.code).toBe("HOST_EXECUTION_DISABLED");
+    expect(body.sourceStatus).toBe("unavailable");
+  });
+
+  it("leaves a ready repo workspace fully ready (gate applies only when not ready)", async () => {
+    mockDescribeSource.mockReturnValue({ ...githubSource, status: "ready", versionControl: "git" } as never);
+    mockGetProject.mockResolvedValue(repoProject({
+      workspaceStatus: "ready",
+      workspaceId: "ws-1",
+      workspaceRoot: "/data/ws-1",
+    }));
+    const body = await (await get()).json();
+    expect(body.phase).toBe("ready");
+    expect(body.error).toBeUndefined();
+    expect(body.sourceStatus).toBe("ready");
   });
 });
