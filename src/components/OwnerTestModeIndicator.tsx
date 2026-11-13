@@ -182,7 +182,7 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => {
-          setMenuHost(triggerRef.current?.closest(".studio-shell") ?? document.body);
+          setMenuHost((triggerRef.current?.closest(".studio-shell") as HTMLElement | null) ?? document.body);
           setOpen((v) => !v);
         }}
         style={{
