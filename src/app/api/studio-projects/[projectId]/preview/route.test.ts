@@ -202,10 +202,12 @@ describe("studio-projects preview route — static guards", () => {
     expect(createPreviewTokenMock).not.toHaveBeenCalled();
   });
 
-  it("GET returns not_started when the terminal is unreachable", async () => {
-    // The static GET path regressed to waiting on the terminal service before
-    // returning static preview URLs. Prove that a missing terminal now returns
-    // not_started and does not call the dev-server status path.
+  it("GET returns unreachable when the terminal is unreachable", async () => {
+    // A failed runtime CHECK (terminal threw / timed out / not configured)
+    // says nothing about whether the preview was ever started — the static
+    // branch must report "unreachable", mirroring the dev-server branch,
+    // never not_started. Only an authoritative terminal 404 may mean
+    // not_started (see the index.html-missing test below).
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new Error("TerminalNotConfiguredError");
     }));
@@ -216,11 +218,32 @@ describe("studio-projects preview route — static guards", () => {
     );
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeStatus).toBe("unreachable");
     expect(body.previewUrl).toBeNull();
     expect(body.framework).toBe("static");
     expect(getPreviewStatusMock).not.toHaveBeenCalled();
-    // TerminalNotConfiguredError must not leave the studio panel stuck loading.
+    // No preview token may be minted off a failed runtime check.
+    expect(createPreviewTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("GET returns unreachable when the terminal answers a non-404 error", async () => {
+    // A 5xx from /ws-files/read is a failed check, not proof the file is
+    // missing — only a 404 authoritatively means "never started".
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "internal" }), { status: 500 })),
+    );
+
+    const res = await GET(
+      new Request("https://x.test/api/studio-projects/proj-1/preview") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("unreachable");
+    expect(body.previewUrl).toBeNull();
+    expect(body.runtimeError).toContain("500");
+    expect(getPreviewStatusMock).not.toHaveBeenCalled();
     expect(createPreviewTokenMock).not.toHaveBeenCalled();
   });
 
