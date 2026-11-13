@@ -29,7 +29,8 @@ export type SkinPreset =
   | "cosmic"
   | "miami"
   | "honeycomb"
-  | "signature";
+  | "signature"
+  | "neon-grove";
 
 // Layout style — controls visual structure, not just color
 export type LayoutStyle =
@@ -54,7 +55,8 @@ export type AccentColor =
   | "sunset-orange"
   | "ocean-blue"
   | "purple-haze"
-  | "signature-green";
+  | "signature-green"
+  | "neon-grove";
 
 // Theme structure
 export interface Theme {
@@ -74,19 +76,22 @@ export interface Theme {
   };
 }
 
+// Skin color slots. `textMuted` is optional: most skins derive it from
+// textColor (see mixMuted), but a skin whose design specifies an exact
+// muted tone (Neon Grove, from the approved Projects mockup) carries it.
+export interface SkinColors {
+  bgColor: string;
+  textColor: string;
+  linkColor: string;
+  headerColor: string;
+  borderColor: string;
+  accentColor: string;
+  boxBg: string;
+  textMuted?: string;
+}
+
 // Default dark skins
-const darkSkins: Record<
-  SkinPreset,
-  {
-    bgColor: string;
-    textColor: string;
-    linkColor: string;
-    headerColor: string;
-    borderColor: string;
-    accentColor: string;
-    boxBg: string;
-  }
-> = {
+const darkSkins: Record<SkinPreset, SkinColors> = {
   cyberpunk: {
     bgColor: "#0c0c14",
     textColor: "#d4d4e8",
@@ -253,21 +258,29 @@ const darkSkins: Record<
     accentColor: "#177A36",
     boxBg: "#FFFFFF",
   },
+  // Neon Grove — the approved Projects mockup palette (futuristic dark,
+  // neon green), kept as a selectable pack (2026-11-13). Values
+  // come from the Phase 1 audit's mockup mapping: bg #050D10, cards
+  // #0C2020, text #F5FAF7, muted #A5B8B5, accent #00E85D, bright green
+  // #39FF88. The mockup's border rgba(80,255,150,0.14) is stored as its
+  // hex composite over the pack background (#102F23) so the codebase's
+  // `${borderColor}55` alpha-suffix pattern stays valid. Sidebar
+  // (#09151A) and elevated panels (#11282A) have no skin slot — those
+  // mockup tones exist only in the design reference, not in code.
+  "neon-grove": {
+    bgColor: "#050D10",
+    textColor: "#F5FAF7",
+    linkColor: "#39FF88",
+    headerColor: "#39FF88",
+    borderColor: "#102F23",
+    accentColor: "#00E85D",
+    boxBg: "#0C2020",
+    textMuted: "#A5B8B5",
+  },
 };
 
 // Light mode variants — deep navy text for crisp daytime contrast
-const lightSkins: Record<
-  SkinPreset,
-  {
-    bgColor: string;
-    textColor: string;
-    linkColor: string;
-    headerColor: string;
-    borderColor: string;
-    accentColor: string;
-    boxBg: string;
-  }
-> = {
+const lightSkins: Record<SkinPreset, SkinColors> = {
   cyberpunk: {
     bgColor: "#f5f5fa",
     textColor: "#1a1a2e",
@@ -433,6 +446,20 @@ const lightSkins: Record<
     accentColor: "#177A36",
     boxBg: "#FFFFFF",
   },
+  // Neon Grove is DARK-LOCKED by design (same precedent as signature's
+  // light-lock): the approved design is a dark design, so the "light"
+  // entry carries the same dark tokens — a mode flip must never repaint
+  // it into a light theme it was never designed as.
+  "neon-grove": {
+    bgColor: "#050D10",
+    textColor: "#F5FAF7",
+    linkColor: "#39FF88",
+    headerColor: "#39FF88",
+    borderColor: "#102F23",
+    accentColor: "#00E85D",
+    boxBg: "#0C2020",
+    textMuted: "#A5B8B5",
+  },
 };
 
 // Accent color overrides
@@ -495,6 +522,13 @@ const accentOverrides: Record<
     headerColor: "#0C5A26",
     accentColor: "#177A36",
   },
+  // Neon Grove: bright green links/headers over the deep-teal dark,
+  // accent is the mockup's primary neon green.
+  "neon-grove": {
+    linkColor: "#39FF88",
+    headerColor: "#39FF88",
+    accentColor: "#00E85D",
+  },
 };
 
 // Visual pack — a complete preset that applies multiple theme settings at once
@@ -539,6 +573,26 @@ export const VISUAL_PACKS: VisualPack[] = [
     // the preset showed "Active" (verified live on Larry's account).
     wallpaperId: "minimal",
     overlayOpacity: 0,
+  },
+  {
+    // Neon Grove — from the approved Projects mockup (2026-11-13,
+    // Projects redesign Decisions A–D): futuristic dark, neon green.
+    // Ships as a SELECTABLE pack only; it does NOT replace the LiTT
+    // Signature platform default, and no page forces it (Larry's
+    // all-light ruling, 2026-11-13, superseded the /projects scoping
+    // in Decision A).
+    id: "neon-grove",
+    name: "Neon Grove",
+    description:
+      "Futuristic deep-teal dark with neon-green energy — the approved Projects design standard",
+    themeMode: "dark",
+    skin: "neon-grove",
+    accent: "neon-grove",
+    backgroundMode: "minimal",
+    layoutStyle: "classic",
+    wallpaperId: "minimal",
+    overlayOpacity: 0,
+    effects: { glow: true, particles: false, motion: true },
   },
   {
     id: "honeycomb-core",
@@ -792,7 +846,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return {
       bgColor: custom.bgColor || skinColors.bgColor,
       textColor: custom.textColor || skinColors.textColor,
-      textMuted: mixMuted(custom.textColor || skinColors.textColor),
+      // A skin may specify its exact muted tone (Neon Grove); the rest
+      // derive it from the text color as before.
+      textMuted:
+        skinColors.textMuted ??
+        mixMuted(custom.textColor || skinColors.textColor),
       linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
       headerColor:
         accent?.headerColor || custom.headerColor || skinColors.headerColor,
@@ -956,9 +1014,20 @@ export const ACCENT_MAP: Record<AccentColor, { hex: string }> = {
   "ocean-blue": { hex: "#0ea5e9" },
   "purple-haze": { hex: "#a855f7" },
   "signature-green": { hex: "#177A36" },
+  "neon-grove": { hex: "#00E85D" },
 };
 
 export { darkSkins, lightSkins, accentOverrides, defaultTheme };
+
+/*
+ * Neon Grove note (2026-11-13): the pack stays registered above as a
+ * user-selectable theme, but NO page scopes itself to it anymore.
+ * Larry's all-light ruling later the same day superseded Decision A's
+ * /projects scoping — every page, /projects included, renders in the
+ * user's normal theme (default LiTT Signature light) via useTheme().
+ * The former getNeonGroveColors() page-scoping helper was removed
+ * with that rework (branch agent/projects-light-unify).
+ */
 
 /* ------------------------------------------------------------------ */
 /*  Global CRT Toggle — single source of truth for scanline overlay    */
