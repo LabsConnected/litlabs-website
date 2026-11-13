@@ -90,6 +90,7 @@ import { PtySessionManager, probeHostPty, type PtySessionSnapshot } from "./pty-
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
+import { createSandboxExecStack } from "./sandbox/exec-router";
 import {
   assertHostExecutionPermitted,
   evaluateTerminalIsolation,
@@ -290,6 +291,13 @@ initRuntime(io);
 // idle timeout, absolute lifetime, and max concurrent PTYs per user.
 const ptyManager = new PtySessionManager();
 ptyManager.startSweeper();
+
+// ─── Sandbox exec stack (Phase 1) ──────────────────────────────────
+// Provider + canary verification + gate + router for the ONE routed
+// surface (workspace.exec below). With no explicit E2B configuration
+// the factory yields the disabled provider and the gate can never
+// open, so default deployments behave exactly as before Phase 1.
+const sandboxStack = createSandboxExecStack(process.env);
 
 /**
  * How long a PTY survives with no socket attached. Long enough to cover a
@@ -1075,6 +1083,47 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   }
 
   auditCommand(userId, workspaceId, command, false);
+
+  // ─── Sandbox route (Phase 1) ─────────────────────────────────────
+  // Exactly one surface routes into a verified sandbox: this one, and
+  // only when the Phase 1 gate passes (E2B provider configured +
+  // staging + owner + fresh green canary — see sandbox/exec-router.ts).
+  // When the gate is closed the router returns null and the request
+  // continues down the pre-Phase-1 path below, untouched. A provider
+  // failure after the gate opened is surfaced as an execution failure;
+  // it never falls back to host execution here.
+  const sandboxStartTime = Date.now();
+  try {
+    const sandboxOutcome = await sandboxStack.router.tryExecute({
+      userId,
+      projectId: ws.projectId,
+      workspaceId,
+      command,
+      stdin: stdinInput,
+      timeoutMs: 120_000,
+    });
+    if (sandboxOutcome) {
+      res.json({
+        exitCode: sandboxOutcome.result.exitCode,
+        stdout: sandboxOutcome.result.stdout,
+        stderr: sandboxOutcome.result.stderr,
+        durationMs: sandboxOutcome.result.durationMs,
+        runId: `sandbox:${sandboxOutcome.sandboxId}`,
+        policyEffect: "sandbox_exec",
+        approved: true,
+      });
+      return;
+    }
+  } catch (err) {
+    const durationMs = Date.now() - sandboxStartTime;
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      error: "Sandbox execution failed",
+      message,
+      durationMs,
+    });
+    return;
+  }
 
   // ─── Route through the canonical ExecutionGateway ───────────────
   // This endpoint previously called child_process.execFile directly
@@ -2035,7 +2084,19 @@ server.listen(PORT, BIND.host, () => {
   console.log(`   Allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
   console.log(`   Workspace root: ${WORKSPACE_ROOT}`);
   console.log(`   Docker mode: ${USE_DOCKER}`);
+  console.log(
+    `   Sandbox provider: ${sandboxStack.config.providerName}` +
+      (sandboxStack.config.providerName === "e2b"
+        ? ` (template ${sandboxStack.config.templateId}, staging=${sandboxStack.config.staging})`
+        : ""),
+  );
   warnIfOwnerAllowlistUnset();
+  // Phase 1: when a real provider is configured, start the canary so
+  // the verification signal exists for the exec gate. The disabled
+  // provider's canary can never pass, so this stays off there.
+  if (sandboxStack.config.providerName !== "disabled") {
+    sandboxStack.verification.start();
+  }
 });
 
 // Graceful shutdown
