@@ -47,6 +47,8 @@ import GenerationHistoryCard from "../components/GenerationHistoryCard";
 
 import { apiFetch, type ApiJson } from "@/lib/api-response";
 import { notifyAssetsChanged } from "../hooks/useAssetsRefresh";
+import { useElementSize } from "../hooks/useElementSize";
+import { fitWithinBox, type CanvasSize } from "../lib/canvas-fit";
 import { downloadMediaFile } from "../lib/download-media";
 import { useStudioContext } from "../context/StudioContext";
 
@@ -86,6 +88,8 @@ type Generation = {
   provider: ProviderSelection;
   fileUrl?: string;
   thumbUrl?: string;
+  width?: number;
+  height?: number;
   status: GenerationStatus;
   error?: string;
   createdAt: number;
@@ -560,7 +564,22 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
     }
   });
   const [imgError, setImgError] = useState<string | null>(null);
+  const desktopCanvasRef = useRef<HTMLDivElement>(null);
+  const desktopCanvasSize = useElementSize(desktopCanvasRef);
+  const [loadedImageSize, setLoadedImageSize] = useState<CanvasSize | null>(null);
   const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setLoadedImageSize(null);
+  }, [currentResult?.id, currentResult?.fileUrl]);
+  const resultImageSize: CanvasSize =
+    loadedImageSize ??
+    (currentResult?.width && currentResult?.height
+      ? { width: currentResult.width, height: currentResult.height }
+      : { width: currentAspect.width, height: currentAspect.height });
+  const desktopCanvasFrameSize = fitWithinBox(
+    resultImageSize,
+    desktopCanvasSize,
+  );
   const [imageHovered, setImageHovered] = useState(false);
   // Mobile: which generation is open in the full-screen preview (null = closed)
   const [previewGen, setPreviewGen] = useState<Generation | null>(null);
@@ -1053,6 +1072,8 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
         prompt: activePrompt,
         negativePrompt: negativePrompt.trim(),
         provider: providerId,
+        width: currentAspect.width,
+        height: currentAspect.height,
         status: "submitting",
         createdAt: Date.now(),
         cost: providerCost,
@@ -3569,28 +3590,46 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
 
               {/* Canvas */}
               <div
+                ref={desktopCanvasRef}
                 className="flex-1 flex items-center justify-center relative overflow-hidden"
                 style={{
                   background: `radial-gradient(circle at 50% 35%, ${T.accentColor}17, transparent 40%), ${tokens.background}`,
                 }}
+                data-testid="image-tool-desktop-canvas"
               >
                 {currentResult?.fileUrl ? (
                   <>
                     <div
-                      className="relative max-w-full max-h-full"
+                      className="relative max-w-full max-h-full shrink-0"
+                      style={
+                        desktopCanvasFrameSize.width > 0
+                          ? desktopCanvasFrameSize
+                          : { width: "100%", height: "100%" }
+                      }
                       onMouseEnter={() => setImageHovered(true)}
                       onMouseLeave={() => setImageHovered(false)}
+                      data-testid="image-tool-desktop-canvas-frame"
                     >
                       <Image
                         src={currentResult.fileUrl}
                         alt={currentResult.prompt}
-                        width={1024}
-                        height={1024}
+                        width={resultImageSize.width}
+                        height={resultImageSize.height}
                         unoptimized={currentResult.fileUrl.startsWith("blob:") || currentResult.fileUrl.startsWith("data:")}
-                        className="object-contain"
-                        style={{ borderRadius: "4px", maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto" }}
+                        className="block h-full w-full object-contain"
+                        style={{ borderRadius: "4px" }}
                         onError={() => setImgError("Image failed to load.")}
-                        onLoad={() => setImgError(null)}
+                        onLoad={(event) => {
+                          const image = event.currentTarget;
+                          if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                            setLoadedImageSize({
+                              width: image.naturalWidth,
+                              height: image.naturalHeight,
+                            });
+                          }
+                          setImgError(null);
+                        }}
+                        data-testid="image-tool-desktop-canvas-image"
                       />
                       {/* Favorite heart button — top right */}
                       <button
