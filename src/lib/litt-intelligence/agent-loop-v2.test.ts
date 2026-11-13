@@ -6,7 +6,7 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
   callLLMWithTools: vi.fn(),
 }));
 
-import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, type ResumeInput } from "./agent-loop-v2";
+import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, buildPatchRecoveryForceMessage, MAX_PATCH_RECOVERY_FORCES, type ResumeInput } from "./agent-loop-v2";
 import type { ProgressEvent } from "./progress-events";
 import { callLLMWithTools, AgentBudgetExhaustedError } from "./llm-tool-calling";
 import { toolRegistry } from "./tool-registry";
@@ -376,6 +376,214 @@ describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate
     expect(result.finalText).toContain("No mutation was executed");
     expect(result.toolCalls.filter((tool) => tool.toolId === "apply_patch")).toHaveLength(2);
     expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("runAgentLoopV2 — patch rejection recovery forcing (acceptance run #36)", () => {
+  // Staging-acceptance run #36, iteration 4: the follow-up's apply_patch
+  // was rejected because its search text was not verbatim in the built
+  // file, the model's next response contained no tool call, and the loop
+  // closed the run as failed — the edit was never attempted again.
+  // Iterations 2 and 3 recovered unaided. These tests pin the structural
+  // replacement for that voluntary recovery in capability-guarded runs:
+  // a bounded corrective step that hands the model the rejection detail
+  // and requires a corrected patch or the files.write fallback.
+  const FOOTER = "<footer>Ember Roast · 2024 · Handcrafted coffee.</footer>";
+  const GUARDED = {
+    model: "test-model",
+    systemPrompt: "You are LiTT.",
+    executionMode: "auto",
+    enableBuildFix: false,
+    buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+  } as const;
+
+  function diskTransport() {
+    const disk = new Map<string, string>([["index.html", FOOTER]]);
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      readFile: vi.fn(async (path: string) => {
+        const content = disk.get(path);
+        if (content === undefined) throw new Error(`readFile failed (404): ${path}`);
+        return { content, size: content.length };
+      }),
+      writeFile: vi.fn(async (path: string, content: string) => {
+        disk.set(path, content);
+      }),
+      applyPatch: vi.fn(async (path: string, patches: { search: string; replace: string }[]) => {
+        let content = disk.get(path);
+        if (content === undefined) throw new Error(`applyPatch failed (404): ${path}`);
+        for (const patch of patches) {
+          if (!content.includes(patch.search)) throw new Error(`applyPatch search not found in ${path}`);
+          content = content.replace(patch.search, patch.replace);
+        }
+        disk.set(path, content);
+        return { applied: true };
+      }),
+      createCheckpointBeforeMutation: vi.fn(async () => null),
+    } as unknown as WorkspaceTransport;
+    return { transport, disk };
+  }
+
+  const badPatchReply = {
+    text: "",
+    toolCalls: [{
+      toolCallId: "tc-bad-patch",
+      toolId: "apply_patch",
+      inputs: {
+        path: "index.html",
+        patches: [{ search: "<footer>Hallucinated content that was never written</footer>", replace: "<footer>new</footer>" }],
+      },
+    }],
+    finishReason: "tool_calls",
+    model: "test-model",
+  };
+  const silentReply = (text: string) => ({ text, toolCalls: [], finishReason: "stop", model: "test-model" });
+  const correctedPatchReply = {
+    text: "",
+    toolCalls: [{
+      toolCallId: "tc-fixed-patch",
+      toolId: "apply_patch",
+      inputs: {
+        path: "index.html",
+        patches: [{ search: "Handcrafted coffee.", replace: "Freshly roasted, delivered daily." }],
+      },
+    }],
+    finishReason: "tool_calls",
+    model: "test-model",
+  };
+
+  function forcedMessages(result: { finalMessages?: { role: string; content?: unknown }[] }) {
+    return (result.finalMessages ?? []).filter(
+      (m) => m.role === "user" && typeof m.content === "string" && m.content.includes("was rejected before execution"),
+    );
+  }
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("buildPatchRecoveryForceMessage names the path, the rejection detail, and both recovery routes", () => {
+    const message = buildPatchRecoveryForceMessage({
+      path: "index.html",
+      error: "apply_patch search string not found in current content of index.html",
+    });
+    expect(message).toContain("index.html");
+    expect(message).toContain("search string not found in current content");
+    expect(message).toContain("apply_patch");
+    expect(message).toContain("files.write");
+  });
+
+  it("(a) a no-tool-call response after a rejection triggers the corrective step instead of closing the run", async () => {
+    const { transport } = diskTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(badPatchReply)
+      .mockResolvedValueOnce(silentReply("The patch did not apply."))
+      .mockResolvedValueOnce(correctedPatchReply)
+      .mockResolvedValueOnce(silentReply("Footer updated."));
+
+    const result = await runAgentLoopV2("change the footer tagline", transport, { ...GUARDED });
+
+    // Pre-fix behavior (still pinned for non-guarded runs by the tests
+    // above): the silent reply after the rejection closed the run at 2
+    // model calls. The force must ask again, with the rejection detail
+    // and the required recovery action in the conversation.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(4);
+    const forced = forcedMessages(result);
+    expect(forced).toHaveLength(1);
+    expect(forced[0].content).toContain("index.html");
+    expect(forced[0].content).toContain("files.write");
+    expect(result.events.some((e) => e.type === "status" && e.summary.includes("requiring a corrected patch"))).toBe(true);
+  });
+
+  it("(b) recovery via a corrected patch succeeds", async () => {
+    const { transport, disk } = diskTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(badPatchReply)
+      .mockResolvedValueOnce(silentReply("The patch did not apply."))
+      .mockResolvedValueOnce(correctedPatchReply)
+      .mockResolvedValueOnce(silentReply("Footer updated."));
+
+    const result = await runAgentLoopV2("change the footer tagline", transport, { ...GUARDED });
+
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.toolCalls.some((t) => t.toolId === "apply_patch" && !t.success)).toBe(true);
+    expect(result.toolCalls.some((t) => t.toolId === "apply_patch" && t.success)).toBe(true);
+    expect(disk.get("index.html")).toContain("Freshly roasted, delivered daily.");
+    expect(result.finalText).toContain("Footer updated.");
+  });
+
+  it("(c) recovery via the files.write fallback succeeds", async () => {
+    const { transport, disk } = diskTransport();
+    const rewritten = "<footer>Ember Roast · 2024 · Golden Acceptance follow-up verified</footer>";
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(badPatchReply)
+      .mockResolvedValueOnce(silentReply("The patch did not apply."))
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-fallback-write",
+          toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: rewritten },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce(silentReply("Footer rewritten."));
+
+    const result = await runAgentLoopV2("change the footer tagline", transport, { ...GUARDED });
+
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.toolCalls.some((t) => t.toolId === "files.write" && t.success)).toBe(true);
+    expect(disk.get("index.html")).toBe(rewritten);
+    expect(result.finalText).toContain("Footer rewritten.");
+  });
+
+  it("(d) exhausting the recovery budget still closes the run as failed", async () => {
+    const { transport } = diskTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(badPatchReply)
+      .mockResolvedValueOnce(silentReply("Understood."))
+      .mockResolvedValueOnce(silentReply("Understood."))
+      .mockResolvedValueOnce(silentReply("Understood."));
+
+    const result = await runAgentLoopV2("change the footer tagline", transport, { ...GUARDED });
+
+    // One call for the rejected patch, then one silent reply per force,
+    // then the final silent reply the budget no longer rescues: the run
+    // closes through the ordinary path and the completion guard reports
+    // the honest build failure — never a silent fake-complete.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2 + MAX_PATCH_RECOVERY_FORCES);
+    expect(forcedMessages(result)).toHaveLength(MAX_PATCH_RECOVERY_FORCES);
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toBe("The build produced no successful file-writing operation, so it is not complete.");
+    expect(result.finalText).toBe("The build produced no successful file-writing operation, so it is not complete.");
+  });
+
+  it("(e) repeated invalid patches still hit the two-strike cancel in a guarded run", async () => {
+    const { transport } = diskTransport();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "",
+      toolCalls: [{
+        toolCallId: "tc-repeat",
+        toolId: "apply_patch",
+        inputs: { path: "index.html", patches: [{ search: "stale content", replace: "new content" }] },
+      }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2("change the footer", transport, { ...GUARDED });
+
+    expect(result.cancelled).toBe(true);
+    expect(result.finalText).toContain("No mutation was executed");
+    expect(result.toolCalls.filter((tool) => tool.toolId === "apply_patch")).toHaveLength(2);
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+    expect(forcedMessages(result)).toHaveLength(0);
   });
 });
 
