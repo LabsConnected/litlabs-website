@@ -87,6 +87,83 @@ export function modeToWorkspaceStage(mode: StudioMode): WorkspaceStage | null {
   }
 }
 
+/**
+ * Phase 2 (Master Build Directive §2) — the five PRESENTED stages.
+ *
+ * This is the shell-facing taxonomy Larry approved: the top navigation
+ * is exactly Plan | Canvas & Design | Code | Preview | Media. It is an
+ * adapter over the legacy taxonomies above (WorkspaceStage / StudioMode
+ * / StudioDestination), NOT a replacement for them — persisted URLs,
+ * localStorage keys, and the destination router keep resolving through
+ * the older mappings, extended here rather than rewritten. The full
+ * taxonomy consolidation is Phase 3 work.
+ *
+ * "canvas-design" is ONE stage with two modes (see CanvasDesignMode):
+ * there is deliberately no separate "design" stage and no floating
+ * Design tool — the legacy `design` StudioMode lands inside this stage
+ * with the Design mode preselected.
+ */
+export type DirectiveStage = "plan" | "canvas-design" | "code" | "preview" | "media";
+
+/** The two modes inside the single Canvas & Design stage. */
+export type CanvasDesignMode = "build" | "design";
+
+export const DIRECTIVE_STAGES: readonly DirectiveStage[] = [
+  "plan",
+  "canvas-design",
+  "code",
+  "preview",
+  "media",
+];
+
+export const DIRECTIVE_STAGE_LABELS: Record<DirectiveStage, string> = {
+  plan: "Plan",
+  "canvas-design": "Canvas & Design",
+  code: "Code",
+  preview: "Preview",
+  media: "Media",
+};
+
+/** Map a Directive stage to the legacy StudioMode internal it drives. */
+export function directiveStageToMode(stage: DirectiveStage): StudioMode {
+  switch (stage) {
+    case "plan":
+      return "work";
+    case "canvas-design":
+      return "files";
+    case "code":
+      return "code";
+    case "preview":
+      return "preview";
+    case "media":
+      return "media";
+  }
+}
+
+/**
+ * Reverse: map a legacy StudioMode back to its Directive stage.
+ * Unlike modeToWorkspaceStage, "design" DOES map here — to the
+ * Canvas & Design stage (its mode is recovered separately via the
+ * canvas/design landing helpers in station-url.ts).
+ */
+export function modeToDirectiveStage(mode: StudioMode): DirectiveStage | null {
+  switch (mode) {
+    case "work":
+      return "plan";
+    case "files":
+    case "design":
+      return "canvas-design";
+    case "code":
+      return "code";
+    case "preview":
+      return "preview";
+    case "media":
+      return "media";
+    default:
+      return null;
+  }
+}
+
 /** UI labels for canonical creator kinds. */
 export const CREATOR_KIND_LABELS: Record<CreatorKind, string> = {
   image: "Image",

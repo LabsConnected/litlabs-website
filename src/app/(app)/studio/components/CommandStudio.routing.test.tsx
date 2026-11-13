@@ -46,7 +46,9 @@ function currentMode() {
 /** No primary workspace stage tab is active — the signature of the
     Builder surface (contextual work mode + workSurface "builder"). */
 function expectBuilderSurfaceActive() {
-  for (const id of ["canvas", "code", "preview"]) {
+  // Phase 2: the tab row presents the five Directive stages; on the
+  // Builder surface none of them is active.
+  for (const id of ["plan", "canvas-design", "code", "preview", "media"]) {
     const tab = screen.queryByTestId(`workspace-tab-${id}`);
     expect(tab, `workspace-tab-${id} should be rendered`).toBeTruthy();
     expect(tab!.className, `workspace-tab-${id} should be inactive`).not.toContain("glass-active");
@@ -698,10 +700,11 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("direct ?tool=build mounts the Builder surface with the workspace chrome", async () => {
       setUrl("tool=build");
       await renderCommandStudio();
-      // The primary workspace row remains visible. Plan is a contextual
-      // surface, not a fourth competing primary workspace mode.
-      expect(screen.queryByTestId("workspace-tab-plan")).toBeNull();
-      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      // The primary workspace row remains visible with the five
+      // Directive stage tabs (Phase 2); the Builder surface activates
+      // none of them.
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-canvas-design")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
       expectBuilderSurfaceActive();
@@ -843,7 +846,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const view = await renderCommandStudio();
       expectBuilderSurfaceActive();
       const user = userEvent.setup();
-      const canvasBtn = screen.getByTestId("workspace-tab-canvas");
+      const canvasBtn = screen.getByTestId("workspace-tab-canvas-design");
       await user.click(canvasBtn);
       await waitFor(() => expect(canvasBtn.className).toContain("glass-active"));
       await waitFor(() => expect(currentTool()).toBe("canvas"));
@@ -1075,11 +1078,14 @@ describe("CommandStudio — mounted Work-surface routing", () => {
   });
 
   describe("canonical workspace tabs", () => {
-    it("renders exactly four workspace tabs: Plan, Canvas, Code, Preview", async () => {
+    it("renders exactly the five Directive stage tabs: Plan, Canvas & Design, Code, Preview, Media", async () => {
       await renderCommandStudio();
-      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-canvas-design")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-media")).toBeTruthy();
+      expect(screen.getAllByTestId(/^workspace-tab-/)).toHaveLength(5);
     });
 
     it("Preview tab is active by default (preview is primary surface)", async () => {
@@ -1088,9 +1094,9 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(previewBtn.className).toContain("glass-active");
     });
 
-    it("clicking Canvas switches to canvas stage", async () => {
+    it("clicking Canvas & Design switches to the Canvas & Design stage", async () => {
       const { user } = await renderCommandStudio();
-      const canvasBtn = screen.getByTestId("workspace-tab-canvas");
+      const canvasBtn = screen.getByTestId("workspace-tab-canvas-design");
       await user.click(canvasBtn);
       await waitFor(() => {
         expect(canvasBtn.className).toContain("glass-active");
@@ -1115,16 +1121,20 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       });
     });
 
-    it("keeps Plan contextual while the primary workspace stays reduced", async () => {
+    it("Plan is a first-class stage tab (Phase 2) and activates the Plan stage", async () => {
       const { user } = await renderCommandStudio();
       // Go to Code first.
       await user.click(screen.getByTestId("workspace-tab-code"));
-      // Plan is no longer a persistent competing tab. The contextual route
-      // remains available through existing Studio routing and the primary
-      // row exposes only Design / Code / Preview.
-      expect(screen.queryByTestId("workspace-tab-plan")).toBeNull();
-      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      // Phase 2 supersedes the old "Plan is contextual only" rule:
+      // Plan is one of the five presented stages, in the same row.
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-canvas-design")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
+      const planBtn = screen.getByTestId("workspace-tab-plan");
+      await user.click(planBtn);
+      await waitFor(() => {
+        expect(planBtn.className).toContain("glass-active");
+      });
       const previewBtn = screen.getByTestId("workspace-tab-preview");
       await user.click(previewBtn);
       await waitFor(() => {
@@ -1212,9 +1222,9 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const { user } = await renderCommandStudio();
       // Collapse LiTT
       await user.click(screen.getByTestId("litt-panel-collapse"));
-      // The reduced primary workspace tabs should still be present.
-      expect(screen.queryByTestId("workspace-tab-plan")).toBeNull();
-      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      // The five Directive stage tabs should still be present.
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-canvas-design")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
     });
