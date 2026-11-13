@@ -153,13 +153,27 @@ describe("shell chrome follows the applied theme", () => {
 
   it("WorkspaceRail renders the applied LIGHT theme", async () => {
     seedTheme(LIGHT_THEME);
-    renderWithTheme(<WorkspaceRail active="preview" onSelect={vi.fn()} />);
+    renderWithTheme(
+      <WorkspaceRail
+        activeStage="preview"
+        activeSurface="preview"
+        onSelectStage={vi.fn()}
+        onSelectSurface={vi.fn()}
+      />,
+    );
     await expectSurface(screen.getByTestId("studio-workspace-rail"), LIGHT_SURFACE);
   });
 
   it("WorkspaceRail renders the applied DARK theme", async () => {
     seedTheme(DARK_THEME);
-    renderWithTheme(<WorkspaceRail active="preview" onSelect={vi.fn()} />);
+    renderWithTheme(
+      <WorkspaceRail
+        activeStage="preview"
+        activeSurface="preview"
+        onSelectStage={vi.fn()}
+        onSelectSurface={vi.fn()}
+      />,
+    );
     await expectSurface(screen.getByTestId("studio-workspace-rail"), DARK_SURFACE);
   });
 

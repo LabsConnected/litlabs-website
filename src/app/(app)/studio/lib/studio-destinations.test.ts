@@ -7,12 +7,17 @@ import {
   resolveEntryCreateType,
   DESTINATION_LABELS,
   type StudioDestination,
+  type StudioMode,
   type WorkspaceStage,
   type CreatorKind,
   type StudioEntryCreateType,
   workspaceStageToMode,
   modeToWorkspaceStage,
   CREATOR_KIND_LABELS,
+  DIRECTIVE_STAGES,
+  DIRECTIVE_STAGE_LABELS,
+  directiveStageToMode,
+  modeToDirectiveStage,
 } from "./studio-destinations";
 
 describe("studio-destinations", () => {
@@ -378,5 +383,42 @@ describe("studio-destinations", () => {
         expect(resolveEntryCreateType(kind)).toBeTruthy();
       }
     });
+  });
+});
+
+describe("Directive stages (Phase 2 — Master Build Directive §2)", () => {
+  it("presents exactly five stages in Larry's locked order", () => {
+    expect(DIRECTIVE_STAGES).toEqual(["plan", "canvas-design", "code", "preview", "media"]);
+    expect(DIRECTIVE_STAGE_LABELS["canvas-design"]).toBe("Canvas & Design");
+  });
+
+  it("every stage maps to a legacy StudioMode and back", () => {
+    for (const stage of DIRECTIVE_STAGES) {
+      expect(modeToDirectiveStage(directiveStageToMode(stage))).toBe(stage);
+    }
+  });
+
+  it("the legacy design mode lands in the Canvas & Design stage (unlike the WorkspaceStage mapping, which has none)", () => {
+    // The Phase 1 audit's structural finding: design had NO
+    // WorkspaceStage. The Directive adapter is where design gains its
+    // stage home — as a mode of Canvas & Design, never a sixth stage.
+    expect(modeToWorkspaceStage("design")).toBeNull();
+    expect(modeToDirectiveStage("design")).toBe("canvas-design");
+    expect(modeToDirectiveStage("files")).toBe("canvas-design");
+  });
+
+  it("?tool=design and ?tool=canvas both resolve into the studio destination the stage renders", () => {
+    const design = mapLegacyToolToDestination("design");
+    const canvas = mapLegacyToolToDestination("canvas");
+    expect(design.destination).toBe("studio");
+    expect(canvas.destination).toBe("studio");
+    // design keeps its legacy mode (which the stage reads as Design
+    // mode); canvas keeps the files mode (Build mode).
+    expect(design.mode).toBe("design");
+    expect(canvas.mode).toBe("files");
+    // The mapping's mode field is a loose union across destinations;
+    // for the studio destination both values are StudioModes.
+    expect(modeToDirectiveStage((design.mode ?? "preview") as StudioMode)).toBe("canvas-design");
+    expect(modeToDirectiveStage((canvas.mode ?? "preview") as StudioMode)).toBe("canvas-design");
   });
 });
