@@ -506,12 +506,77 @@ async function main() {
       await phoneField.fill("2015550123").catch(() => {});
     }
 
-    const payBtn = page.getByRole("button", { name: /subscribe|pay|complete/i }).first();
-    if (await payBtn.isVisible().catch(() => false)) {
-      await payBtn.click();
-    } else {
-      await page.locator('button[type="submit"]').first().click();
+    // ── Submit the checkout ──
+    // Run #23 failure mode: stripe_checkout_filled passed, then the old
+    // code sampled a page-scoped role locator with ONE instantaneous
+    // isVisible() check — the button was not visible in that instant
+    // (Stripe re-renders and validates after the last field fill and
+    // the Link interactions above), so it fell through to
+    // page.locator('button[type="submit"]'), which waited the full
+    // 30s for an element this rendering never mounts in the top
+    // document and timed out without ever clicking. The submit
+    // control is not reliably a top-document button[type="submit"]:
+    // its label varies ("Subscribe", "Pay $9.99", "Complete order"),
+    // it can live inside the payment form frame on some layouts, and
+    // it stays disabled until the form validates. So — exactly like
+    // the Step 5 interactions — search every context in
+    // orderedContexts() order, prefer role/text matches, and POLL for
+    // a visible AND enabled button instead of sampling once. The role
+    // name is anchored so express buttons ("Apple Pay", "Cash App
+    // Pay") can never be mistaken for the submit button.
+    const submitCandidates = (ctx) => [
+      ctx.getByRole("button", { name: /^(subscribe|pay|complete)\b/i }),
+      ctx.locator('button[type="submit"], input[type="submit"]'),
+      ctx.getByText(/^\s*(subscribe|pay|complete)\b/i),
+    ];
+    const urlBeforeSubmit = page.url();
+    let submitClicked = null;
+    const submitDeadline = Date.now() + 45_000;
+    while (Date.now() < submitDeadline && !submitClicked) {
+      for (const ctx of orderedContexts()) {
+        for (const cand of submitCandidates(ctx)) {
+          const el = cand.first();
+          const ready = await el.isVisible().catch(() => false)
+            && await el.isEnabled().catch(() => false);
+          if (!ready) continue;
+          const clicked = await el.click({ timeout: 10_000 }).then(() => true).catch(() => false);
+          if (clicked) {
+            submitClicked = ctx === page ? "document" : "frame";
+            break;
+          }
+        }
+        if (submitClicked) break;
+      }
+      if (!submitClicked) await page.waitForTimeout(500);
     }
+    if (!submitClicked) {
+      await shot(page, "stripe-checkout-no-submit");
+      throw new Error('checkout submit button not found or never enabled in page or any frame — probed role=button[name~/^(subscribe|pay|complete)/i], button[type="submit"], and anchored subscribe/pay/complete text across all contexts');
+    }
+
+    // Verify the click actually started the payment: within ~20s the
+    // page should navigate away from the checkout URL or show a
+    // processing state. Step 6's 90s redirect wait below remains the
+    // authoritative check — this poll only distinguishes "clicked but
+    // nothing happened" (e.g. a silent validation block) from a slow
+    // redirect in the verdict detail.
+    let submitTransition = null;
+    const transitionDeadline = Date.now() + 20_000;
+    while (Date.now() < transitionDeadline && !submitTransition) {
+      if (page.url() !== urlBeforeSubmit) {
+        submitTransition = `navigated to ${page.url()}`;
+        break;
+      }
+      for (const ctx of orderedContexts()) {
+        if (await ctx.getByText(/processing|completing|confirming/i).first().isVisible().catch(() => false)) {
+          submitTransition = "processing indicator visible";
+          break;
+        }
+      }
+      if (!submitTransition) await page.waitForTimeout(500);
+    }
+    step("stripe_checkout_submitted", true,
+      `submit clicked in ${submitClicked} context; transition: ${submitTransition ?? "not observed within 20s (Step 6 redirect wait still applies)"}`);
 
     // ── Step 6: success redirect back to staging ──
     let redirected = false;
