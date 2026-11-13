@@ -60,6 +60,7 @@ import StudioBrowserStatusChip from "./StudioBrowserStatusChip";
 import { ChatBrowserLiveView } from "./ChatBrowserLiveView";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
+import ProjectDecisionPrompt from "./ProjectDecisionPrompt";
 import WorktabBar from "./WorktabBar";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
 import MobileBuildStatusBar from "./litt/MobileBuildStatus";
@@ -2902,6 +2903,16 @@ function CommandStudioContent() {
         }}
       />
       {chatErrorBanner}
+      {/* Stop-and-ask project guard — pinned with the other decision
+          chrome: a send stopped on a project mismatch stays stopped
+          until the user explicitly chooses Switch / move / Stay. */}
+      {conversation.projectDecisionPrompt && (
+        <ProjectDecisionPrompt
+          prompt={conversation.projectDecisionPrompt}
+          onConfirm={conversation.confirmProjectDecision}
+          onDismiss={conversation.dismissProjectDecision}
+        />
+      )}
       {/* Approval gate — pinned directly above the composer so the
           approve/deny decision is always one glance away. Deploy
           approvals are visually distinct: project.deploy always

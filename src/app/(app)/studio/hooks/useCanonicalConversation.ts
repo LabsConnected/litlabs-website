@@ -46,6 +46,32 @@ import {
 
 export type SendErrorKind = "auth" | "conflict" | "network" | "provider" | "validation" | "cancelled";
 
+/** A project identity as named by the server's project guard. */
+export interface ProjectRef {
+  id: string;
+  name: string | null;
+}
+
+/**
+ * A stopped send awaiting the user's project decision (stop-and-ask).
+ * Set when the messages route refuses with 409 PROJECT_MISMATCH or
+ * PROJECT_CONTEXT_CONFIRM: nothing ran, and the send only proceeds when
+ * the user explicitly picks a decision (confirmProjectDecision) or
+ * cancels it (dismissProjectDecision). The route never moves or rebinds
+ * a conversation on its own.
+ */
+export interface ProjectDecisionPrompt {
+  code: "PROJECT_MISMATCH" | "PROJECT_CONTEXT_CONFIRM";
+  detail: string;
+  conversationProject: ProjectRef | null;
+  viewedProject: ProjectRef | null;
+  targetProject: ProjectRef | null;
+  /** The stopped send's original text/attachments, for the resubmit. */
+  message: string;
+  attachments?: string[];
+  clientRequestId: string;
+}
+
 /**
  * Identity of the server-side execution started by send(). Tracked so an
  * explicit Stop can reach the right run via the cancel endpoint even when
@@ -215,6 +241,10 @@ export function useCanonicalConversation({
     sendErrorRef.current = value;
     setSendErrorState(value);
   }, []);
+  // Stop-and-ask project guard: a send the server stopped because it
+  // would run against (or silently rebind to) an unconfirmed project.
+  const [projectDecisionPrompt, setProjectDecisionPrompt] =
+    useState<ProjectDecisionPrompt | null>(null);
   const [requiresReauth, setRequiresReauth] = useState(false);
   const requestAbortRef = useRef<AbortController | null>(null);
   // Distinguishes an explicit user Stop from an involuntary transport loss —
@@ -869,7 +899,11 @@ export function useCanonicalConversation({
 
   // The send function — matches useStudioConversation's contract
   const send = useCallback(
-    async (value: string, attachments?: string[]): Promise<SendResult> => {
+    async (
+      value: string,
+      attachments?: string[],
+      projectResume?: { decision: "switch" | "rebind"; clientRequestId: string },
+    ): Promise<SendResult> => {
       const text = value.trim();
       if ((!text && !attachments?.length) || busy) return { accepted: false, persisted: false };
 
@@ -1153,7 +1187,10 @@ export function useCanonicalConversation({
       // cleanly on any failure (401, 403, network, conflict, abort).
       const previousConversationId = s.selectedConversationId;
       const previousMessagesByConversationId = { ...s.messagesByConversationId };
-      const clientRequestId = generateClientRequestId();
+      // A project-guard resubmit reuses the original clientRequestId so
+      // the server treats it as the idempotent continuation of the
+      // stopped send (whose user message is already persisted).
+      const clientRequestId = projectResume?.clientRequestId ?? generateClientRequestId();
       const optimisticUserId = `optimistic_${clientRequestId}`;
       const optimisticAssistantId = `optimistic_assistant_${clientRequestId}`;
       const optimisticTimestamp = new Date().toISOString();
@@ -1187,7 +1224,9 @@ export function useCanonicalConversation({
         // made earlier LiTT replies appear to vanish from the page.
         current.setMessages(id, [
           ...current.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
-          optimisticUserMessage,
+          // On a project-guard resubmit the user message is already
+          // persisted and visible — stage only the assistant bubble.
+          ...(projectResume ? [] : [optimisticUserMessage]),
           optimisticAssistantMessage,
         ]);
       };
@@ -1254,6 +1293,9 @@ export function useCanonicalConversation({
 
       // Clear any previous send error
       setSendError(null);
+      // A fresh send supersedes any stopped send still awaiting a
+      // project decision; a resubmit IS that decision, so it keeps it.
+      if (!projectResume) setProjectDecisionPrompt(null);
 
       // 4. Real LLM call through canonical API
       getStore().setStreaming(true);
@@ -1325,6 +1367,9 @@ export function useCanonicalConversation({
               // an explicit error on mismatch, instead of silently mutating
               // the wrong project's workspace.
               projectId: getActiveProjectId(serverProjectId, userId) || undefined,
+              // The user's explicit stop-and-ask decision — present ONLY
+              // on a confirmed resubmit after a project-guard 409.
+              projectContextDecision: projectResume?.decision,
               provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
               category: isAutoBest ? "auto" : selectedModel.category,
               model: selectedModel.model,
@@ -1361,9 +1406,45 @@ export function useCanonicalConversation({
             error?: string;
             detail?: string;
             code?: string;
+            conversationProject?: ProjectRef | null;
+            viewedProject?: ProjectRef | null;
+            targetProject?: ProjectRef | null;
           } | null;
           const isStaleRevision =
             !conflictData?.code && (conflictData?.error ?? "").toLowerCase().includes("revision");
+          if (
+            !isStaleRevision &&
+            (conflictData?.code === "PROJECT_MISMATCH" ||
+              conflictData?.code === "PROJECT_CONTEXT_CONFIRM")
+          ) {
+            // Stop-and-ask: the server refused to run this send against
+            // a project the user hasn't confirmed (and refused to
+            // silently rebind the chat). The user message WAS persisted
+            // before the gate — reload canonical truth, then hand the
+            // choice to the blocking prompt. No error banner: the
+            // prompt IS the surface for this decision.
+            await loadMessages(activeConversationId);
+            const sGuard = getStore();
+            sGuard.setMessages(
+              activeConversationId,
+              sGuard.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
+            );
+            setProjectDecisionPrompt({
+              code: conflictData.code,
+              detail:
+                conflictData.detail ??
+                conflictData.error ??
+                "This chat belongs to a different project.",
+              conversationProject: conflictData.conversationProject ?? null,
+              viewedProject: conflictData.viewedProject ?? null,
+              targetProject: conflictData.targetProject ?? null,
+              message: text,
+              attachments,
+              clientRequestId,
+            });
+            mobileDiag("chat_api", "project_decision_required", { code: conflictData.code });
+            return { accepted: false, persisted: true, errorKind: "conflict" };
+          }
           if (!isStaleRevision) {
             // The user message WAS persisted server-side before the gate —
             // reload so the transcript shows canonical truth, then surface
@@ -2143,10 +2224,34 @@ export function useCanonicalConversation({
     }
   }, [setActiveAgentId, getStore, authHeaders]);
 
+  // Stop-and-ask project guard: the user's explicit choice on a stopped
+  // send. Confirming resubmits the SAME send (same clientRequestId) with
+  // the decision, so the server continues the already-persisted user
+  // message under the confirmed project context; dismissing leaves the
+  // send cancelled — nothing runs and nothing is rebound.
+  const confirmProjectDecision = useCallback(
+    (decision: "switch" | "rebind") => {
+      const prompt = projectDecisionPrompt;
+      if (!prompt) return undefined;
+      setProjectDecisionPrompt(null);
+      return send(prompt.message, prompt.attachments, {
+        decision,
+        clientRequestId: prompt.clientRequestId,
+      });
+    },
+    [projectDecisionPrompt, send],
+  );
+  const dismissProjectDecision = useCallback(() => {
+    setProjectDecisionPrompt(null);
+  }, []);
+
   return {
     messages,
     busy,
     send,
+    projectDecisionPrompt,
+    confirmProjectDecision,
+    dismissProjectDecision,
     cancel,
     regenerate,
     clear,
