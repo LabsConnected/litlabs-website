@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { POST } from "@/app/api/studio-projects/[projectId]/workspace/prepare/route";
 
 /**
@@ -73,5 +73,78 @@ describe("POST /workspace/prepare — host-execution mapping", () => {
     const body = await res.json();
     expect(body.error).toBe("terminal down");
     expect(body.code).toBeUndefined();
+  });
+});
+
+describe("POST /workspace/prepare — repo gate (B2)", () => {
+  // The gate keys on the environment being production-like (host
+  // execution not permitted). Vitest runs with no local-execution
+  // opt-in, so the guard denies; stub the opt-in vars empty to keep
+  // that true even if the surrounding shell exports them.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("LITT_LOCAL_EXECUTION_OPT_IN", "");
+    vi.stubEnv("LITT_ISOLATION_VERIFIED", "");
+    authMock.mockResolvedValue({ userId: "user-1" } as never);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const githubProject = (overrides: Record<string, unknown> = {}) => ({
+    id: "proj-1",
+    userId: "user-1",
+    sourceType: "github",
+    githubFullName: "owner/repo",
+    workspaceStatus: "not_prepared",
+    workspaceId: null,
+    ...overrides,
+  }) as never;
+
+  it("answers a not-ready repo project with the coded gate WITHOUT provisioning", async () => {
+    getProjectMock.mockResolvedValue(githubProject());
+    const res = await postPrepare();
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.code).toBe("HOST_EXECUTION_DISABLED");
+    expect(body.error).not.toContain("{");
+    // The whole point: no doomed attempt is run, so the project row is
+    // never stamped "failed" for a deliberate product decision.
+    expect(provisionMock).not.toHaveBeenCalled();
+  });
+
+  it("gates a previously failed repo project the same way", async () => {
+    getProjectMock.mockResolvedValue(githubProject({ workspaceStatus: "failed" }));
+    const res = await postPrepare();
+    expect(res.status).toBe(503);
+    expect((await res.json()).code).toBe("HOST_EXECUTION_DISABLED");
+    expect(provisionMock).not.toHaveBeenCalled();
+  });
+
+  it("lets a ready repo workspace fall through to provisioning (mirror refresh)", async () => {
+    getProjectMock.mockResolvedValue(
+      githubProject({ workspaceStatus: "ready", workspaceId: "ws-1" }),
+    );
+    provisionMock.mockResolvedValue("ws-1");
+    const res = await postPrepare();
+    expect(provisionMock).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
+    expect((await res.json()).workspaceStatus).toBe("ready");
+  });
+
+  it("does not gate managed projects — provisioning runs as before", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1",
+      userId: "user-1",
+      sourceType: "blank",
+      githubFullName: null,
+      workspaceStatus: "not_prepared",
+      workspaceId: null,
+    } as never);
+    provisionMock.mockResolvedValue("ws-9");
+    const res = await postPrepare();
+    expect(provisionMock).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
   });
 });
