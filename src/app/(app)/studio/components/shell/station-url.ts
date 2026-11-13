@@ -14,6 +14,7 @@
  * resolves to the Preview station.
  */
 import type { StudioStageSurface } from "./stage-surfaces";
+import type { CanvasDesignMode } from "../../lib/studio-destinations";
 
 /** Stations the center may render (plan intentionally excluded). */
 export const CENTER_STATIONS: readonly StudioStageSurface[] = [
@@ -58,7 +59,31 @@ const TOOL_TO_STATION: Record<string, StudioStageSurface> = {
   plan: "preview",
   work: "preview",
   build: "design",
+  // Phase 2: the Media stage's surface is the images workspace.
+  media: "images",
 };
+
+/**
+ * Phase 2 — which mode of the ONE Canvas & Design stage a `?tool=`
+ * value preselects when it lands there. `?tool=design` and
+ * `?tool=canvas` both land in the Canvas & Design stage (the legacy
+ * floating DesignCanvas tool is retired into it); design preselects
+ * Design mode, canvas/build preselect Build mode. null = the param
+ * makes no Canvas & Design claim.
+ */
+export function toolParamToCanvasDesignMode(
+  tool: string | null | undefined,
+): CanvasDesignMode | null {
+  switch (tool) {
+    case "design":
+      return "design";
+    case "canvas":
+    case "build":
+      return "build";
+    default:
+      return null;
+  }
+}
 
 export function stationToToolParam(station: StudioStageSurface): string {
   if (station === "plan") return "preview";

@@ -92,20 +92,26 @@ import StudioDeploySurface from "./shell/StudioDeploySurface";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ElementInspectorPanel from "./shell/ElementInspectorPanel";
 import ImageStudio from "./shell/ImageStudio";
-import { canonicalSurfaceToPersist, modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
-import { centerStation, resolveInitialStation, stationToToolParam, toolParamToStation } from "./shell/station-url";
+import { canonicalSurfaceToPersist, directiveStageToSurface, modeToStageSurface, resolveStageSurface, surfaceToDirectiveStage, type StudioStageSurface } from "./shell/stage-surfaces";
+import { centerStation, resolveInitialStation, stationToToolParam, toolParamToCanvasDesignMode, toolParamToStation } from "./shell/station-url";
 import { useCanvasBuilderStore } from "./canvas/builder/store";
 import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
 import ProjectNameDialog from "./ProjectNameDialog";
 import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
+  DIRECTIVE_STAGES,
+  DIRECTIVE_STAGE_LABELS,
+  directiveStageToMode,
   mapLegacyToolToDestination,
   mapMediaIntentToDestination,
   destinationToLegacyTool,
+  modeToDirectiveStage,
   resolveCreatorDestination,
   resolveEntryCreateType,
   workspaceStageToMode,
+  type CanvasDesignMode,
+  type DirectiveStage,
   type StudioDestination,
   type StudioMode,
   type CreateMode,
@@ -139,7 +145,12 @@ const GameCreatorEmptyState = dynamic(() => import("../tools/GameCreatorEmptySta
 const BuilderTool = dynamic(() => import("../tools/BuilderTool"), { ssr: false });
 const StudioPreviewPanel = dynamic(() => import("./StudioPreviewPanel"), { ssr: false });
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
-const DesignCanvas = dynamic(() => import("../tools/DesignCanvas"), { ssr: false });
+// DesignCanvas is intentionally NOT imported anymore (Phase 2): the
+// legacy floating Design tool surface is retired INTO the unified
+// Canvas & Design stage — ?tool=design lands there with Design mode
+// preselected (see toolParamToCanvasDesignMode). The component file
+// stays in the tree for Phase 3's formal retirement; no surface
+// routes to it.
 const AgentTool = dynamic(() => import("../tools/AgentTool"), { ssr: false });
 const GalleryTool = dynamic(() => import("../tools/GalleryTool"), { ssr: false });
 const StudioTerminalDrawer = dynamic(() => import("./StudioTerminalDrawer"), { ssr: false });
@@ -172,7 +183,8 @@ type WorkSurface = import("../lib/studio-destinations").WorkSurface;
 // conversation is handled by useStudioConversation + StudioTranscript.
 const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<Record<string, unknown>>>> = {
   canvas: CanvasTool,
-  design: DesignCanvas,
+  // "design" has no tool component anymore — it renders the unified
+  // Canvas & Design stage (Phase 2), never the retired DesignCanvas.
   image: ImageTool,
   video: VideoTool,
   audio: AudioTool,
@@ -516,25 +528,79 @@ function CommandStudioContent() {
     setMountedSurfaces((prev) => (prev.has(surface) ? prev : new Set(prev).add(surface)));
   }, []);
 
+  // ── Phase 2 (Master Build Directive §2) — presented-stage state ──
+  // The Canvas & Design stage's Build/Design mode. A deep link
+  // preselects it (?tool=design → design, ?tool=canvas → build); the
+  // legacy `design` StudioMode also forces Design mode at render time
+  // (see effectiveCanvasDesignMode below), so the creator route and
+  // the stage toggle can never disagree.
+  const [canvasDesignMode, setCanvasDesignMode] = useState<CanvasDesignMode>(
+    () => toolParamToCanvasDesignMode(searchParams.get("tool")) ?? "build",
+  );
+  // The dockable live Preview panel (Larry's Phase 2 decision: Preview
+  // is BOTH a stage AND a right-side panel). Mounted lazily on first
+  // open, then kept mounted (hidden) so its iframe/session survives
+  // toggling — same stay-alive rule as the stage surfaces.
+  const [previewDockOpen, setPreviewDockOpen] = useState(false);
+  const [previewDockMounted, setPreviewDockMounted] = useState(false);
+  const handleTogglePreviewDock = useCallback(() => {
+    setPreviewDockMounted(true);
+    setPreviewDockOpen((v) => !v);
+  }, []);
+  // The shell's bottom panel (StudioDock) open state. Classic mode has
+  // its own dockOpen state; the two layouts never render at once.
+  const [shellDockOpen, setShellDockOpen] = useState(false);
+
+  /** Rail stage selection — a Directive stage drives its primary surface. */
+  const openDirectiveStage = useCallback(
+    (stage: DirectiveStage) => {
+      if (stage === "plan") {
+        // The shell's deliberate station contract (station-url.ts):
+        // Plan is not a center station — Mission / Checkpoints / Next
+        // actions live in the inspector's Plan tab, and any stored or
+        // linked "plan" surface resolves to the Preview home. The
+        // Plan stage therefore homes the center and opens the
+        // inspector on its Plan tab. (Classic/mobile render the full
+        // StudioPlanSurface as the center Plan stage, unchanged.)
+        openStageSurface("preview");
+        setInspectorTab("plan");
+        setInspectorOpen(true);
+        return;
+      }
+      openStageSurface(directiveStageToSurface(stage));
+    },
+    [openStageSurface],
+  );
+
   // Design-surface node selection → the inspector shows the real
   // property editor (builder store is module-scoped; reads stay cheap).
   const builderSelectedNodeId = useCanvasBuilderStore((s) => s.selectedNodeId);
 
   const handleToggleDock = useCallback(() => {
     if (studioShellActive) {
-      openStageSurface("activity");
+      // Phase 2: the shell has a real bottom panel now — the toggle
+      // opens/closes the StudioDock instead of hijacking the stage.
+      setShellDockOpen((v) => !v);
       return;
     }
     setDockOpen((v) => !v);
-  }, [studioShellActive, openStageSurface]);
+  }, [studioShellActive]);
   const handleOpenDockTab = useCallback((tab: StudioDockTab) => {
     if (studioShellActive) {
       if (tab === "inspector") {
         setInspectorOpen(true);
-      } else {
-        const surface = DOCK_TAB_TO_SURFACE[tab];
-        if (surface) openStageSurface(surface);
+        return;
       }
+      // Phase 2: dock tabs open the shell's bottom panel on that tab.
+      // The terminal tab is the one exception — the PTY lives in the
+      // Terminal station (a second drawer would start a competing
+      // session), so it still routes to the station.
+      if (tab === "terminal") {
+        openStageSurface("terminal");
+        return;
+      }
+      setDockTab(tab);
+      setShellDockOpen(true);
       return;
     }
     setDockTab(tab);
@@ -616,6 +682,10 @@ function CommandStudioContent() {
     if (mapped.destination === "studio") {
       const newMode = (mapped.mode as StudioMode) ?? "preview";
       setStudioMode((cur) => (cur === newMode ? cur : newMode));
+      // Phase 2: ?tool=design / ?tool=canvas preselect the mode of the
+      // ONE Canvas & Design stage they both land in.
+      const cdMode = toolParamToCanvasDesignMode(fromUrl);
+      if (cdMode) setCanvasDesignMode(cdMode);
       // workSurface is part of the canonical Builder identity —
       // ?tool=build restores it; drawer-overlay routes (e.g. terminal)
       // preserve the active surface — same rule as handleRouteTool;
@@ -1170,6 +1240,9 @@ function CommandStudioContent() {
     setDestination(mapped.destination);
     if (mapped.destination === "studio") {
       setStudioMode((mapped.mode as StudioMode) ?? "work");
+      // Phase 2: tool routes into Canvas & Design preselect its mode.
+      const cdMode = toolParamToCanvasDesignMode(tool);
+      if (cdMode) setCanvasDesignMode(cdMode);
       // Explicit Build route → builder surface. Routes that only open a
       // drawer overlay (e.g. terminal) preserve the active surface —
       // everything else returns to the conversation.
@@ -2649,9 +2722,32 @@ function CommandStudioContent() {
     : {};
   const isPlan = destination === "studio" && studioMode === "work" && workSurface !== "builder";
   const isCanvas = destination === "studio" && studioMode === "files";
+  // Phase 2: the legacy `design` mode renders the SAME unified
+  // Canvas & Design stage as `files` — the retired DesignCanvas tool
+  // is never rendered again.
+  const isCanvasDesign = isCanvas || (destination === "studio" && studioMode === "design");
   const isCode = destination === "studio" && studioMode === "code";
   const isPreview = destination === "studio" && studioMode === "preview";
   const isMedia = destination === "studio" && studioMode === "media";
+  // The stage's effective mode: the legacy design mode (creator route,
+  // ?tool=design) forces Design; the in-stage toggle owns the rest.
+  const effectiveCanvasDesignMode: CanvasDesignMode =
+    studioMode === "design" ? "design" : canvasDesignMode;
+  const handleCanvasDesignModeChange = useCallback(
+    (mode: CanvasDesignMode) => {
+      setCanvasDesignMode(mode);
+      if (mode === "design") {
+        // Design mode = styling: the style properties live in the
+        // inspector (element/builder property panels), so surface it.
+        setStudioMode("design");
+        setInspectorOpen(true);
+      } else if (studioMode === "design") {
+        setStudioMode("files");
+      }
+      if (studioShellActive) openStageSurface("design");
+    },
+    [studioMode, studioShellActive, openStageSurface],
+  );
   const mobileSurface: MobileStudioSurface | null = mobileToolsOpen
     ? "more"
     : mobileLittOpen
@@ -2665,18 +2761,16 @@ function CommandStudioContent() {
   // time. The live preview is the Preview workspace tab — never a second
   // column beside the workspace.
 
-  // Primary workspace tabs. Plan and Media remain available through their
-  // existing routes/drawers, but Design / Code / Preview are the only
-  // persistent workspace modes competing for the main workspace.
-  // These map through workspaceStageToMode() to legacy StudioMode internals.
+  // Primary workspace tabs — Phase 2: the five Directive stages
+  // (Plan | Canvas & Design | Code | Preview | Media), presented the
+  // same on desktop and mobile. They map through
+  // directiveStageToMode() to legacy StudioMode internals; the older
+  // taxonomies keep working underneath (adapter, not replacement).
   // Chat lives inside the LiTT left panel (Chat | Live tabs).
-  // Files/Components live in the contextual right drawer.
   // Media shows generated images, video, music, and audio artifacts.
-  const workspaceTabs: { id: WorkspaceStage; label: string }[] = [
-    { id: "canvas", label: "Design" },
-    { id: "code", label: "Code" },
-    { id: "preview", label: "Preview" },
-  ];
+  const workspaceTabs: { id: DirectiveStage; label: string }[] = DIRECTIVE_STAGES.map(
+    (id) => ({ id, label: DIRECTIVE_STAGE_LABELS[id] }),
+  );
 
   // LiTT Chat/Live content — built ONCE per render and reused by whichever
   // single LiTT surface is actually mounted (desktop/laptop rail via
@@ -3033,6 +3127,193 @@ function CommandStudioContent() {
     </>
   );
 
+  // ── Phase 2 shared compositions ─────────────────────────────────
+  // The ONE Canvas & Design stage (Master Build Directive §5): the
+  // existing visual builder under a Build/Design mode toggle. Build =
+  // structure, components, layout (the builder's own palette/layers);
+  // Design = styling, where the style properties live in the
+  // inspector's existing element/builder property panels — switching
+  // to Design surfaces the inspector. Both modes operate on the same
+  // project through the builder's existing write paths (untouched).
+  // Shared by the shell stage and the classic/mobile workspace so the
+  // stage is identical in every layout.
+  const renderCanvasDesignStage = () => (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="canvas-design-stage">
+      <div
+        className="flex shrink-0 items-center gap-2 border-b px-2 py-1"
+        style={{ borderColor: "var(--studio-border)", background: "var(--studio-surface)" }}
+      >
+        <span
+          className="text-[11px] font-black uppercase tracking-[0.12em]"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          Canvas &amp; Design
+        </span>
+        <div
+          role="tablist"
+          aria-label="Canvas and Design mode"
+          className="flex items-center gap-0.5 rounded-lg border p-0.5"
+          style={{ borderColor: "var(--studio-border)" }}
+        >
+          {(["build", "design"] as CanvasDesignMode[]).map((m) => {
+            const selected = effectiveCanvasDesignMode === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                data-testid={`canvas-design-mode-${m}`}
+                onClick={() => handleCanvasDesignModeChange(m)}
+                className="min-h-7 rounded-md px-2.5 text-[11px] font-bold transition-colors"
+                style={{
+                  color: selected ? "var(--text-main)" : "var(--text-muted)",
+                  backgroundColor: selected
+                    ? "color-mix(in srgb, var(--color-accent) 14%, transparent)"
+                    : "transparent",
+                }}
+              >
+                {m === "build" ? "Build" : "Design"}
+              </button>
+            );
+          })}
+        </div>
+        <span className="hidden truncate text-[11px] lg:block" style={{ color: "var(--text-muted)" }}>
+          {effectiveCanvasDesignMode === "build"
+            ? "Structure, components, layout"
+            : "Colors, typography, spacing — style the selected element in the inspector"}
+        </span>
+      </div>
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+        <VisualCanvasBuilder onPreviewSelectionChange={(sel) => setPreviewSelection(sel)} />
+      </div>
+    </div>
+  );
+
+  // The project-files composition (header + StudioProjectFiles) —
+  // ONE element definition reused by the shell's Files sidebar, the
+  // classic bottom dock, and the shell's bottom dock, so the file
+  // tree is the same component with the same wiring everywhere.
+  const projectFilesContent = (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div
+        className="flex shrink-0 items-center justify-between border-b px-2.5 py-2"
+        style={{ borderColor: "var(--studio-border)" }}
+      >
+        <span
+          className="text-[10px] font-black uppercase tracking-[0.12em]"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          Files / Components
+        </span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
+        <StudioProjectFiles
+          projectId={capabilities.projectId}
+          repositoryName={capabilities.repositoryName}
+          branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+          workspaceStatus={capabilities.workspaceStatus}
+          writeAccess={capabilities.writeAccess}
+          onSaved={() => setWorkspaceRevision((value) => value + 1)}
+          onMutation={() => setWorkspaceRevision((value) => value + 1)}
+          onWorkspacePrepared={() => { void refreshCapabilities(); }}
+        />
+      </div>
+    </div>
+  );
+
+  // The dockable live Preview panel (Phase 2): the SAME
+  // StudioPreviewPanel component + props as the Preview stage — no
+  // second preview implementation — rendering the same active
+  // project's files. Mounted only after first open (latch), then kept
+  // mounted hidden by the shell slot so its session survives toggles.
+  const previewDockPanel = previewDockMounted ? (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="studio-preview-dock-panel">
+      <StudioPreviewPanel
+        projectId={capabilities.projectId}
+        projectName={capabilities.projectName}
+        repositoryName={capabilities.repositoryName}
+        branch={capabilities.activeBranch}
+        sourceKind={capabilities.sourceKind}
+        sourceStatus={capabilities.sourceStatus}
+        versionControl={capabilities.versionControl}
+        workspaceStatus={capabilities.workspaceStatus ?? null}
+        lastRunFailureNote={lastRunFailureNote}
+        onSelectionChange={setPreviewSelection}
+      />
+    </div>
+  ) : null;
+
+  // A bottom-dock tab whose canonical home is another slot (the
+  // Terminal station / the right Inspector). Honest jump panel — the
+  // dock never starts a competing PTY or a second inspector.
+  const dockJumpPanel = (
+    title: string,
+    text: string,
+    actionLabel: string,
+    onAction: () => void,
+    testId: string,
+  ) => (
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center" data-testid={testId}>
+      <span className="text-xs font-bold" style={{ color: "var(--text-main)" }}>{title}</span>
+      <span className="max-w-sm text-[11px] leading-5" style={{ color: "var(--text-muted)" }}>{text}</span>
+      <button
+        type="button"
+        onClick={onAction}
+        className="mt-1 min-h-8 rounded-md border px-3 text-xs font-bold hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        style={{ borderColor: "var(--studio-border)", color: "var(--text-main)" }}
+      >
+        {actionLabel}
+      </button>
+    </div>
+  );
+
+  // The shell's bottom panel (Phase 2): the existing StudioDock with
+  // Terminal/Output/Activity homes. Activity and Files carry their
+  // real content; Terminal and Inspector jump to their single homes.
+  const shellBottomDock = (
+    <StudioDock
+      open={shellDockOpen}
+      activeTab={dockTab}
+      onTabChange={setDockTab}
+      onClose={() => setShellDockOpen(false)}
+      onToggle={() => setShellDockOpen((v) => !v)}
+      height={dockHeight}
+      onHeightChange={setDockHeight}
+      activityPulse={conversation.busy}
+      terminalBadge={["error", "pty_failed", "auth_failed"].includes(capabilities.terminalStatus)}
+      activityContent={
+        // No MissionCards here: in shell mode the mission cards live
+        // on the Activity surface (their single home — the shell test
+        // pins exactly one mounted instance); the dock's Activity tab
+        // carries the live activity feed.
+        <StudioActivityPanel
+          runId={activityRunId}
+          busy={conversation.busy}
+          modelLabel={modelLabel}
+          projectName={capabilities.projectName}
+          terminalStatus={terminalHealthOf(capabilities).label}
+        />
+      }
+      filesContent={projectFilesContent}
+      terminalContent={dockJumpPanel(
+        "Terminal",
+        "The workspace terminal runs as its own station so its PTY session stays live and attached to this project.",
+        "Open terminal",
+        () => { setShellDockOpen(false); openStageSurface("terminal"); },
+        "dock-terminal-jump",
+      )}
+      inspectorContent={dockJumpPanel(
+        "Inspector",
+        "The contextual inspector lives in the right-hand panel — plan, changes, files, preview, checks, and approvals for the current selection.",
+        "Open inspector",
+        () => setInspectorOpen(true),
+        "dock-inspector-jump",
+      )}
+      mediaContent={<MediaUtilityDock />}
+    />
+  );
+
   // ── Stage surface content — the shell's central Stage renders the
   // active workspace surface for the active task. Visited surfaces stay
   // mounted (hidden) so preview iframes, PTY sessions, files, and canvas
@@ -3055,7 +3336,9 @@ function CommandStudioContent() {
           />
         );
       case "design":
-        return <VisualCanvasBuilder onPreviewSelectionChange={(sel) => setPreviewSelection(sel)} />;
+        // Phase 2: the design surface IS the unified Canvas & Design
+        // stage (Build/Design toggle around the same builder).
+        return renderCanvasDesignStage();
       case "preview":
         return (
           <StudioPreviewPanel
@@ -3354,10 +3637,17 @@ function CommandStudioContent() {
             }
             rail={
               <WorkspaceRail
-                active={stageSurface}
-                onSelect={openStageSurface}
+                activeStage={surfaceToDirectiveStage(stageSurface)}
+                activeSurface={stageSurface}
+                onSelectStage={openDirectiveStage}
+                onSelectSurface={openStageSurface}
               />
             }
+            filesPanel={projectFilesContent}
+            bottomPanel={shellBottomDock}
+            previewPanel={previewDockPanel ?? undefined}
+            previewPanelOpen={previewDockOpen}
+            onTogglePreviewPanel={handleTogglePreviewDock}
             stage={
               <>
                 {Array.from(
@@ -3574,7 +3864,7 @@ function CommandStudioContent() {
                 one mode at a time; the Preview tab is the live preview —
                 it always consumes the full workspace width. */}
             <div
-              className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
+              className="glass-shell no-scrollbar flex shrink-0 items-center gap-0.5 overflow-x-auto border-b px-2"
               style={{
                 height: 36,
                 backgroundColor: "var(--studio-surface)",
@@ -3582,8 +3872,8 @@ function CommandStudioContent() {
               }}
             >
               {workspaceTabs.map((t) => {
-                const tabMode = workspaceStageToMode(t.id);
-                const isActive = destination === "studio" && studioMode === tabMode
+                const tabMode = directiveStageToMode(t.id);
+                const isActive = destination === "studio" && modeToDirectiveStage(studioMode) === t.id
                   && (t.id !== "plan" || workSurface !== "builder");
                 return (
                   <button
@@ -3592,10 +3882,13 @@ function CommandStudioContent() {
                     onClick={() => {
                       setDestination("studio");
                       setStudioMode(tabMode);
+                      // Entering the stage from its tab starts in Build
+                      // mode; the in-stage toggle switches to Design.
+                      if (t.id === "canvas-design") setCanvasDesignMode("build");
                       // Any explicit stage selection exits the Builder surface.
                       setWorkSurface("conversation");
                     }}
-                    className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
+                    className={`relative shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
                     style={{
                       color: isActive ? "var(--text-main)" : "var(--text-dim)",
                       backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -3643,9 +3936,9 @@ function CommandStudioContent() {
                       onRollback={handleRollback}
                     />
                   </div>
-                ) : isCanvas ? (
+                ) : isCanvasDesign ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    <VisualCanvasBuilder onPreviewSelectionChange={(sel) => setPreviewSelection(sel)} />
+                    {renderCanvasDesignStage()}
                   </div>
                 ) : isCode ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -3753,33 +4046,7 @@ function CommandStudioContent() {
                   }
                 />
               }
-              filesContent={
-                <div className="flex h-full flex-col overflow-hidden">
-                  <div
-                    className="flex shrink-0 items-center justify-between border-b px-2.5 py-2"
-                    style={{ borderColor: "rgba(255,255,255,0.07)" }}
-                  >
-                    <span
-                      className="text-[10px] font-black uppercase tracking-[0.12em]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      Files / Components
-                    </span>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
-                    <StudioProjectFiles
-                      projectId={capabilities.projectId}
-                      repositoryName={capabilities.repositoryName}
-                      branch={capabilities.activeBranch ?? capabilities.defaultBranch}
-                      workspaceStatus={capabilities.workspaceStatus}
-                      writeAccess={capabilities.writeAccess}
-                      onSaved={() => setWorkspaceRevision((value) => value + 1)}
-                      onMutation={() => setWorkspaceRevision((value) => value + 1)}
-                      onWorkspacePrepared={() => { void refreshCapabilities(); }}
-                    />
-                  </div>
-                </div>
-              }
+              filesContent={projectFilesContent}
               terminalContent={
                 <StudioTerminalDrawer
                   projectId={capabilities.projectId}
@@ -3829,33 +4096,7 @@ function CommandStudioContent() {
               onClose={() => setContextDrawerOpen(false)}
               width={contextResize.width}
               workContent={littLiveContent}
-              filesContent={
-                <div className="flex h-full flex-col overflow-hidden">
-                  <div
-                    className="flex shrink-0 items-center justify-between border-b px-2.5 py-2"
-                    style={{ borderColor: "var(--studio-border)" }}
-                  >
-                    <span
-                      className="text-[10px] font-black uppercase tracking-[0.12em]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      Files / Components
-                    </span>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
-                    <StudioProjectFiles
-                      projectId={capabilities.projectId}
-                      repositoryName={capabilities.repositoryName}
-                      branch={capabilities.activeBranch ?? capabilities.defaultBranch}
-                      workspaceStatus={capabilities.workspaceStatus}
-                      writeAccess={capabilities.writeAccess}
-                      onSaved={() => setWorkspaceRevision((value) => value + 1)}
-                      onMutation={() => setWorkspaceRevision((value) => value + 1)}
-                      onWorkspacePrepared={() => { void refreshCapabilities(); }}
-                    />
-                  </div>
-                </div>
-              }
+              filesContent={projectFilesContent}
               assetsContent={
                 <AssetsPanel projectId={capabilities.projectId} />
               }
