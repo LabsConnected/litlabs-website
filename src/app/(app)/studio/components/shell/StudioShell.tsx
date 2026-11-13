@@ -17,7 +17,6 @@ export default function StudioShell({
   inspector,
   inspectorOpen,
   onOpenInspector,
-  littLayer,
   leftPanel,
   leftWidth,
   onResetLeftWidth,
@@ -34,9 +33,8 @@ export default function StudioShell({
   /** Controlled inspector visibility, shared with ContextInspector. */
   inspectorOpen: boolean;
   onOpenInspector: () => void;
-  /** Bottom LiTT command layer (null when the chat is left-docked). */
-  littLayer: ReactNode;
-  /** Left-docked LiTT panel, kept mounted while focus mode is active. */
+  /** Left-docked LiTT panel — the only chat surface — kept mounted
+      while focus mode is active. */
   leftPanel?: ReactNode;
   /** Width of leftPanel, from the same hook that sizes the panel itself. */
   leftWidth: number;
@@ -314,9 +312,6 @@ export default function StudioShell({
         </div>
       )}
 
-      <div style={{ display: workspaceExpanded ? "none" : undefined }} data-testid="studio-chat-layer-slot">
-        {littLayer}
-      </div>
     </div>
   );
 }
