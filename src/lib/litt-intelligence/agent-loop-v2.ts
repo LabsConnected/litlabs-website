@@ -709,6 +709,36 @@ const CONTINUATION_MARKERS: RegExp[] = [
 /** How many times a run may nudge a stalled model before failing honestly. */
 const MAX_CONTINUATION_NUDGES = 2;
 
+/**
+ * How many times a run may force a recovery step after an apply_patch
+ * rejection before it may close as failed (acceptance run #36: in
+ * iteration 4 the model's patch was rejected, its next response had no
+ * tool call, and the run ended with the edit never attempted again —
+ * while iterations 2 and 3 recovered on their own). Bounded per run, so
+ * a model that keeps answering in prose still ends the run promptly.
+ */
+export const MAX_PATCH_RECOVERY_FORCES = 2;
+
+/**
+ * The corrective step injected when a response that follows an
+ * apply_patch rejection contains no tool call: hands the model the
+ * rejection detail and requires a recovery action — a corrected patch
+ * (its search text copied verbatim from the current file content the
+ * rejection feedback already carried) or the files.write fallback.
+ */
+export function buildPatchRecoveryForceMessage(rejection: { path: string; error: string }): string {
+  const path = rejection.path || "the requested file";
+  return (
+    `Your apply_patch for ${path} was rejected before execution — no file was changed. ` +
+    `Rejection detail: ${rejection.error} ` +
+    `Your last reply contained no tool call, so the requested edit is still not done and this run cannot finish yet. ` +
+    `Recover now — do not answer in prose: either (1) emit a corrected apply_patch for ${path} whose search text is copied ` +
+    `verbatim from the current file content provided in the rejection feedback (a short search string that appears exactly ` +
+    `once), re-reading the file with files.read first if you need the exact bytes, or (2) use files.write to write the ` +
+    `complete corrected contents of ${path}.`
+  );
+}
+
 export function announcesMoreWork(text: string): boolean {
   return CONTINUATION_MARKERS.some((re) => re.test(text));
 }
@@ -1904,6 +1934,12 @@ async function runAgentLoopV2Inner(
   // verdict too, so a replayed claim keeps the original persisted truth.
   const executedMutations = new Map<string, ExecutedMutation>();
   const patchRecoveryAttempts = new Map<string, number>();
+  // The latest apply_patch rejection that no file-writing response has
+  // answered yet, and how many corrective forces this run has spent on
+  // post-rejection silence. Set by the pre-approval validation block;
+  // consumed by the zero-tool-call branch (MAX_PATCH_RECOVERY_FORCES).
+  let pendingPatchRejection: { path: string; error: string } | null = null;
+  let patchRecoveryForcesUsed = 0;
 
   // Collect progress events
   const localProgress = new ProgressEmitter((event) => {
@@ -2200,6 +2236,34 @@ async function runAgentLoopV2Inner(
         continue;
       }
       const zeroCallText = llmResponse.text ?? "";
+      // Patch-rejection recovery (acceptance run #36, iteration 4): a
+      // patch was rejected earlier in this run and this response STILL
+      // contains no tool call. In a capability-guarded run that prose
+      // finish can never be a legitimate final answer — the completion
+      // guard below would fail the run for producing no successful file
+      // write — so instead of closing, force a bounded corrective step
+      // that hands the model the rejection detail and requires a
+      // corrected patch or a files.write fallback. Iterations 2 and 3
+      // of that run recovered unaided; this makes the chance structural
+      // instead of voluntary. Once the force budget is spent, the
+      // normal resolution below closes the run exactly as before.
+      // Non-guarded turns are untouched: a prose reply after a rejected
+      // patch stays a valid final answer there.
+      if (
+        pendingPatchRejection &&
+        cfg.buildCapabilityGuard != null &&
+        patchRecoveryForcesUsed < MAX_PATCH_RECOVERY_FORCES
+      ) {
+        patchRecoveryForcesUsed++;
+        localProgress.emit({
+          type: "status",
+          summary:
+            "The model's patch was rejected and its reply contained no recovery action — requiring a corrected patch or files.write...",
+        });
+        llmMessages.push({ role: "assistant", content: zeroCallText });
+        llmMessages.push({ role: "user", content: buildPatchRecoveryForceMessage(pendingPatchRejection) });
+        continue;
+      }
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
         // Small lane exists to mutate files: until a mutation lands, a
         // prose-only reply can never be the final answer — bounded nudges
@@ -2266,6 +2330,14 @@ async function runAgentLoopV2Inner(
     // The model emitted tool calls — the required-first-call contract is
     // satisfied and later steps run under "auto" tool choice.
     emittedToolCalls = true;
+
+    // A response carrying any file-writing call IS the model's recovery
+    // attempt for a pending patch rejection — clear the pending state.
+    // If that attempt is itself rejected, the validation block below
+    // records the fresh rejection; if it lands, the rejection is answered.
+    if (pendingPatchRejection && llmResponse.toolCalls.some((c) => isFileWritingTool(c.toolId))) {
+      pendingPatchRejection = null;
+    }
 
     // Emit a reasoning summary for tool-calling steps (what LiTT is about to do)
     if (llmResponse.text) {
@@ -2527,6 +2599,15 @@ async function runAgentLoopV2Inner(
             cancelReason = "The model repeated an unsafe patch after the file was re-read; no mutation was executed";
             finalText = "I could not safely apply that change after re-reading the current file. No mutation was executed.";
             break;
+          }
+          if (toolCall.toolId === "apply_patch") {
+            // A rejection the model still has to answer: if its next
+            // response contains no tool call, the zero-tool-call branch
+            // forces a bounded recovery instead of closing the run.
+            pendingPatchRejection = {
+              path: String(toolCall.inputs.path ?? ""),
+              error: writeError,
+            };
           }
           continue;
         }
