@@ -44,3 +44,12 @@ ce0065c8bbc238767570795d03c6b7bbe905e65b:packages/litt-cli/src/__tests__/repair-
 # Fingerprint from the gitleaks PR-range run that stopped the merge train
 # on head 4c409ed9 (adjudicated by Muse 2026-11-11: synthetic, test-only).
 5e2ab74d1ea6bfae395e1777dffd367e3359a407:src/app/(app)/studio/components/ApprovalCard.subjects.test.tsx:generic-api-key:148
+# Synthetic sandbox-provider test fixture — not a real credential.
+# The test file pins a made-up E2B-style key literal to prove the provider
+# boundary rejects platform secrets; a later commit builds the sentinel at
+# runtime instead. Recorded from the 2026-11-13 repository-wide scan.
+1bcb7a6320327fbd515b8f9abb9534db4e2be58f:terminal-server/__tests__/sandbox-e2b-provider.test.ts:generic-api-key:34
+# Same ApprovalCard redaction fixture as the 5e2ab74d entry above, in an
+# earlier history commit (fingerprints are commit-scoped). Synthetic,
+# test-only; recorded from the 2026-11-13 repository-wide scan.
+f7c7b18344fa1550bd3aee97a09743f0f638e3de:src/app/(app)/studio/components/ApprovalCard.subjects.test.tsx:generic-api-key:148
