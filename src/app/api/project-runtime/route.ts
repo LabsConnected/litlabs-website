@@ -6,7 +6,7 @@ import type { ProjectRuntimeState, RuntimePhase, ProjectRuntimeError } from "@/l
 import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state";
 import { describeProjectSource } from "@/lib/projects/project-source";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
-import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
+import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE, isHostExecutionPermitted } from "@/lib/host-execution-guard";
 
 const FAILED_RECOVERY_BACKOFF_MS = 30_000;
 const STALE_PROVISIONING_MS = 45_000;
@@ -104,13 +104,24 @@ export async function GET(request: NextRequest) {
   // the same backoff used by GET /workspace, and only observes a healthy
   // provisioning owner while its heartbeat keeps updated_at fresh. This
   // prevents every 15s poll from creating another worker.
+  // Repo gate (B2): on the hosted service a GitHub-backed project's
+  // workspace prepare is fail-closed BY DESIGN (terminal isolation
+  // policy — deliberately no override), so the gate is knowable from
+  // project facts alone: GitHub-owned source + an environment where
+  // host execution is not permitted. A gated project is a deliberate
+  // product state, not a failure: recovery is never scheduled for it
+  // (each attempt would only re-earn the same refusal and re-stamp the
+  // project "failed"), and its runtime state reports the gate from the
+  // first poll — no doomed prepare has to happen first.
+  const repoGate = source.kind === "github" && !isHostExecutionPermitted();
+
   const updatedAtMs = Date.parse(project.updatedAt);
   const ageMs = Number.isNaN(updatedAtMs) ? Number.POSITIVE_INFINITY : Date.now() - updatedAtMs;
   const recoveryDue =
     project.workspaceStatus === "not_prepared" ||
     (project.workspaceStatus === "failed" && ageMs > FAILED_RECOVERY_BACKOFF_MS) ||
     (project.workspaceStatus === "provisioning" && ageMs > STALE_PROVISIONING_MS);
-  if (recoveryDue) scheduleWorkspaceRecovery(project.id, userId);
+  if (recoveryDue && !repoGate) scheduleWorkspaceRecovery(project.id, userId);
 
   // Determine workspace phase
   let phase: RuntimePhase;
@@ -120,9 +131,14 @@ export async function GET(request: NextRequest) {
   // transient failure — repo-backed workspaces cannot open on the hosted
   // service until a verified sandbox exists, and retrying can never
   // succeed. Name the code, use the honest message, and offer no retry.
+  // The gate now also applies from first principles (repoGate above):
+  // any not-ready workspace state of a gated project reports the gate,
+  // including a fresh project that has never attempted a prepare.
   const hostExecBlocked =
-    (workspaceStatus === "failed" || workspaceStatus === "error") &&
-    extractEmbeddedErrorCode(project.workspaceError) === HOST_EXECUTION_DISABLED_CODE;
+    workspaceStatus !== "ready" &&
+    (repoGate ||
+      ((workspaceStatus === "failed" || workspaceStatus === "error") &&
+        extractEmbeddedErrorCode(project.workspaceError) === HOST_EXECUTION_DISABLED_CODE));
 
   if (!workspaceId) {
     phase = "workspace_not_provisioned";
@@ -176,7 +192,10 @@ export async function GET(request: NextRequest) {
     sourceType: project.sourceType ?? (repository ? "github" : "blank"),
     sourceKind: source.kind,
     sourceLabel: source.label,
-    sourceStatus: source.status,
+    // A gated project reports the gate, never "error": the source view
+    // already maps the stored-refusal case; the first-principles gate
+    // covers fresh projects with no stored refusal yet.
+    sourceStatus: hostExecBlocked ? "unavailable" : source.status,
     versionControl: source.versionControl,
     githubConnected: source.githubConnected,
     workspaceId,

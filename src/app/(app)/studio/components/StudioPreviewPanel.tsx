@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, Download, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { formatSourceSummary } from "@/lib/projects/project-source";
+import { formatSourceSummary, isRepoWorkspaceGated } from "@/lib/projects/project-source";
 import { HOST_EXECUTION_DISABLED_CODE, extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
 import {
   HOST_EXECUTION_UNAVAILABLE_LABEL,
@@ -281,7 +281,7 @@ export default function StudioPreviewPanel({
   /** Who owns the durable source: LiTT ("managed") or GitHub. */
   sourceKind?: "managed" | "github" | null;
   /** Provisioning state of the source itself. */
-  sourceStatus?: "provisioning" | "ready" | "error" | "needs_setup" | null;
+  sourceStatus?: "provisioning" | "ready" | "error" | "needs_setup" | "unavailable" | null;
   /** Whether the workspace has a Git repository. Managed projects do. */
   versionControl?: "git" | "none";
   refreshKey?: number;
@@ -1215,6 +1215,14 @@ export default function StudioPreviewPanel({
   // detail, notice card, source line): the honest notice replaces the
   // generic failure copy only in the settled states #901 covered.
   const hostExecBlocked = hostExecKnown && (state === "failed" || state === "not_started");
+  // Repo gate (B2): when the project's live workspace is not offered on
+  // the hosted service, there is no preview runtime to configure — the
+  // Project secrets editor (Clerk keys FOR the preview) is a dead end
+  // and is not rendered at all. Known either from a refusal this session
+  // (hostExecKnown) or from the canonical runtime state, which now
+  // reports gated repo projects as sourceStatus "unavailable" from the
+  // first poll.
+  const repoWorkspaceGated = hostExecKnown || isRepoWorkspaceGated({ kind: sourceKind, status: sourceStatus });
   // The RESTART GATES, however, key on hostExecKnown in ANY state
   // (follow-up to #901, production f9ad12cd): the refusal can be known
   // while the panel sits in "unreachable" — a state hostExecBlocked
@@ -1509,7 +1517,10 @@ export default function StudioPreviewPanel({
               : <Download size={12} className="pointer-events-none" />}
           </button>
         )}
-        {/* Project secrets — Clerk keys for the preview runtime */}
+        {/* Project secrets — Clerk keys for the preview runtime.
+            Not rendered for repo-gated projects: no preview runtime
+            exists there to hold keys (see repoWorkspaceGated). */}
+        {!repoWorkspaceGated && (
         <button
           type="button"
           onClick={() => setSecretsOpen((v) => !v)}
@@ -1526,6 +1537,7 @@ export default function StudioPreviewPanel({
         >
           <KeyRound size={12} className="pointer-events-none" />
         </button>
+        )}
         {/* Maximize */}
         {isLive && (
           <button
@@ -1540,8 +1552,10 @@ export default function StudioPreviewPanel({
           </button>
         )}
       </div>
-      {/* Project secrets section — collapsible, above the preview surface */}
-      {secretsOpen && projectId && (
+      {/* Project secrets section — collapsible, above the preview surface.
+          The !repoWorkspaceGated guard also covers a secretsOpen left
+          true by the auth-config CTA: a gated project never mounts it. */}
+      {secretsOpen && projectId && !repoWorkspaceGated && (
         <div
           className="max-h-[45%] shrink-0 overflow-y-auto border-b"
           style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}

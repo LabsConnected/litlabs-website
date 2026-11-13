@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ChevronDown, CircleCheck, Clock3, Loader2, Play, RefreshCw, ShieldCheck, Zap } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useProjectRuntime } from "../hooks/useProjectRuntime";
-import { runtimePhaseLabel, runtimeRecoveryActions } from "@/lib/projects/runtime-state";
+import { HOST_EXECUTION_UNAVAILABLE_LABEL, runtimePhaseLabel, runtimeRecoveryActions } from "@/lib/projects/runtime-state";
+import { HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 import type { ActionRunDisplayState } from "./ActionRunStatusPanel";
@@ -330,7 +331,13 @@ export default function StudioHealthPanel({
 
   // Runtime status banner — shows recovery actions instead of "workspace is not ready"
   const showRuntimeBanner = runtime.phase !== "ready" && runtime.phase !== "idle" && runtime.phase !== "resolving";
-  const recoveryActions = runtimeRecoveryActions(runtime.phase);
+  // Repo gate: a HOST_EXECUTION_DISABLED runtime is a deliberate product
+  // state (repo workspaces not offered on the hosted service yet), not a
+  // failure — neutral styling, the gate label instead of the phase's
+  // failure wording, and NO recovery actions: every offered retry would
+  // be refused by the same policy.
+  const hostExecGated = runtime.error?.code === HOST_EXECUTION_DISABLED_CODE;
+  const recoveryActions = hostExecGated ? [] : runtimeRecoveryActions(runtime.phase);
 
   return (
     <div className="space-y-3" data-testid="studio-health-panel">
@@ -366,11 +373,11 @@ export default function StudioHealthPanel({
 
       {/* Runtime status banner with recovery actions */}
       {showRuntimeBanner && (
-        <div className="rounded-xl border px-2.5 py-2.5" style={{ borderColor: "rgba(239,68,68,0.25)", backgroundColor: "rgba(239,68,68,0.04)" }}>
+        <div className="rounded-xl border px-2.5 py-2.5" style={hostExecGated ? { borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" } : { borderColor: "rgba(239,68,68,0.25)", backgroundColor: "rgba(239,68,68,0.04)" }}>
           <div className="flex items-start gap-2">
-            <AlertCircle size={13} className="mt-0.5 shrink-0" style={{ color: "#fca5a5" }} />
+            <AlertCircle size={13} className="mt-0.5 shrink-0" style={{ color: hostExecGated ? "var(--text-muted)" : "#fca5a5" }} />
             <div className="min-w-0 flex-1">
-              <div className="text-[10px] font-bold" style={{ color: "#fca5a5" }}>{runtimePhaseLabel(runtime.phase)}</div>
+              <div className="text-[10px] font-bold" style={{ color: hostExecGated ? "var(--text-primary)" : "#fca5a5" }}>{hostExecGated ? HOST_EXECUTION_UNAVAILABLE_LABEL : runtimePhaseLabel(runtime.phase)}</div>
               <div className="mt-0.5 text-[9px] leading-4" style={{ color: "var(--text-muted)" }}>
                 {runtime.error?.message ?? "The workspace is not fully connected."}
               </div>
