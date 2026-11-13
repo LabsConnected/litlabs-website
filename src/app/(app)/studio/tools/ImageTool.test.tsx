@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MockInstance } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { apiFetch } from "@/lib/api-response";
@@ -531,5 +531,104 @@ describe("fallthrough gaps: default selection + serving-provider identity (batte
       const entries = JSON.parse(raw!) as Array<{ provider: string }>;
       expect(entries[0].provider).toBe("cloudflare");
     });
+  });
+});
+
+describe("desktop canvas fit regression", () => {
+  const apiFetchMock = vi.mocked(apiFetch);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    studioCtx.projectId = PROJECT_ID;
+    localStorage.clear();
+
+    // jsdom has no layout engine. Give the desktop canvas the same
+    // definite 1000x800 content box used in the diagnosis measurements;
+    // the component must fit the image inside both of those dimensions.
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private callback: ResizeObserverCallback) {}
+        observe(target: Element) {
+          this.callback(
+            [
+              {
+                target,
+                contentRect: { width: 1000, height: 800 },
+              } as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({}), { status: 200 }),
+    );
+    apiFetchMock.mockImplementation((async (input: string | URL) => {
+      if (String(input).includes("/api/media/generate")) {
+        return {
+          downloadUrl: "https://cdn.example.com/gen.png",
+          free: true,
+          cost: 0,
+        };
+      }
+      return {};
+    }) as typeof apiFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function startGenerate() {
+    const input = screen.getAllByTestId("image-prompt-input")[0];
+    fireEvent.change(input, { target: { value: "a lion portrait" } });
+    fireEvent.click(screen.getAllByTestId("generate-image-button")[0]);
+  }
+
+  it("bounds a square generation by the fixed desktop canvas height", async () => {
+    render(<ImageTool />);
+    startGenerate();
+
+    const frame = await screen.findByTestId("image-tool-desktop-canvas-frame");
+    expect(frame.style.width).toBe("800px");
+    expect(frame.style.height).toBe("800px");
+    expect(Number.parseInt(frame.style.width, 10)).toBeLessThanOrEqual(1000);
+    expect(Number.parseInt(frame.style.height, 10)).toBeLessThanOrEqual(800);
+
+    const image = screen.getByTestId("image-tool-desktop-canvas-image");
+    expect(image).toHaveAttribute("width", "1024");
+    expect(image).toHaveAttribute("height", "1024");
+    expect(image).toHaveClass("h-full", "w-full", "object-contain");
+  });
+
+  it("bounds a portrait generation by both fixed desktop canvas dimensions", async () => {
+    render(<ImageTool />);
+
+    const settingsTabs = screen.getAllByRole("button", { name: "Settings" });
+    fireEvent.click(settingsTabs[0]);
+    const portraitButtons = await screen.findAllByRole("button", {
+      name: /9:16/,
+    });
+    const enabledPortrait = portraitButtons.filter(
+      (button) => !(button as HTMLButtonElement).disabled,
+    );
+    expect(enabledPortrait.length).toBeGreaterThan(0);
+    fireEvent.click(enabledPortrait[0]);
+
+    startGenerate();
+
+    const frame = await screen.findByTestId("image-tool-desktop-canvas-frame");
+    expect(frame.style.width).toBe("457px");
+    expect(frame.style.height).toBe("800px");
+    expect(Number.parseInt(frame.style.width, 10)).toBeLessThanOrEqual(1000);
+    expect(Number.parseInt(frame.style.height, 10)).toBeLessThanOrEqual(800);
+
+    const image = screen.getByTestId("image-tool-desktop-canvas-image");
+    expect(image).toHaveAttribute("width", "768");
+    expect(image).toHaveAttribute("height", "1344");
   });
 });
