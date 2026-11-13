@@ -22,6 +22,8 @@ import {
 import type { StudioAsset } from "@/lib/assets/types";
 import { useTheme } from "@/context/ThemeContext";
 import { notifyAssetsChanged, useAssetsRefreshTrigger } from "../../hooks/useAssetsRefresh";
+import { useElementSize } from "../../hooks/useElementSize";
+import { fitWithinBox } from "../../lib/canvas-fit";
 import { useStudioContext } from "../../context/StudioContext";
 import {
   clampCrop, currentOps, canRedo, canUndo, defaultOps,
@@ -62,6 +64,7 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const stageSize = useElementSize(stageRef);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // ── asset list ──────────────────────────────────────────────────────
@@ -126,6 +129,11 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
   const out = useMemo(
     () => (image ? outputSize(ops, image.naturalWidth || image.width, image.naturalHeight || image.height) : { w: 0, h: 0 }),
     [image, ops],
+  );
+  const fittedCanvasSize = fitWithinBox(
+    { width: out.w, height: out.h },
+    stageSize,
+    720,
   );
 
   useEffect(() => {
@@ -373,7 +381,7 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
         </div>
 
         {/* canvas area */}
-        <div ref={stageRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4" style={{ background: `radial-gradient(circle at 50% 40%, ${tokens.primary}0D, transparent 50%)` }}>
+        <div ref={stageRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4" style={{ background: `radial-gradient(circle at 50% 40%, ${tokens.primary}0D, transparent 50%)` }} data-testid="image-studio-stage">
           {loadState === "idle" && (
             <div className="text-center" style={{ color: tokens.textMuted }}>
               <ImageIcon size={22} className="mx-auto mb-2 opacity-60" />
@@ -386,11 +394,19 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
             <div className="max-w-xs text-center text-[11px]" style={{ color: tokens.danger }}>{loadError}</div>
           )}
           {loadState === "ready" && image && (
-            <div className="relative" style={{ maxWidth: "100%", maxHeight: "100%" }}>
+            <div
+              className="relative max-h-full max-w-full shrink-0"
+              style={
+                fittedCanvasSize.width > 0
+                  ? fittedCanvasSize
+                  : { maxWidth: "100%", maxHeight: "100%" }
+              }
+              data-testid="image-studio-canvas-frame"
+            >
               <canvas
                 ref={canvasRef}
-                className="block max-h-full max-w-full rounded-md border"
-                style={{ borderColor: tokens.border, cursor: cropMode ? "crosshair" : "default", maxWidth: "min(100%, 720px)", maxHeight: "100%" }}
+                className="block h-full max-h-full w-full max-w-full rounded-md border"
+                style={{ borderColor: tokens.border, cursor: cropMode ? "crosshair" : "default", width: "100%", height: "100%" }}
                 data-testid="image-studio-canvas"
                 onPointerDown={onCropDown}
                 onPointerMove={onCropMove}
