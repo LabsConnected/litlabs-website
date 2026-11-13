@@ -102,14 +102,33 @@ export async function GET(
           "X-Workspace-Id": project.workspaceId,
         },
         body: JSON.stringify({ path: "index.html", encoding: "utf-8" }),
-        signal: AbortSignal.timeout(10000),
+        // 15s, matching the preview serving route's /ws-files/read budget
+        // (src/app/api/preview/[projectId]/[[...path]]/route.ts).
+        signal: AbortSignal.timeout(15000),
       });
       if (!checkResp.ok) {
-        // index.html doesn't exist yet — workspace is empty
+        if (checkResp.status === 404) {
+          // The terminal authoritatively reports index.html missing —
+          // the workspace is empty and the preview was never started.
+          return NextResponse.json({
+            runtimeStatus: "not_started",
+            previewUrl: null,
+            runtimeError: null,
+            framework: "static",
+            developmentCommand: null,
+            packageManager: null,
+            logs: [],
+          });
+        }
+        // Any other error (5xx, auth, …) means the runtime CHECK failed —
+        // it says nothing about whether the preview was started. Report
+        // "unreachable", mirroring the dev-server branch below, so clients
+        // retry instead of concluding the preview doesn't exist.
         return NextResponse.json({
-          runtimeStatus: "not_started",
+          runtimeStatus: "unreachable",
           previewUrl: null,
-          runtimeError: null,
+          runtimeError: `Terminal file read failed (HTTP ${checkResp.status})`,
+          runtimeErrorCode: workspaceFailureCode,
           framework: "static",
           developmentCommand: null,
           packageManager: null,
@@ -132,12 +151,16 @@ export async function GET(
           });
         }
       }
-    } catch {
-      // Terminal unavailable — report not_started rather than broken ready
+    } catch (err) {
+      // The terminal is unreachable or too slow (fetch threw or timed
+      // out), or it isn't configured at all. That is a failed runtime
+      // CHECK, not evidence the preview was never started — report
+      // "unreachable", mirroring the dev-server branch below.
       return NextResponse.json({
-        runtimeStatus: "not_started",
+        runtimeStatus: "unreachable",
         previewUrl: null,
-        runtimeError: null,
+        runtimeError: err instanceof Error ? err.message : "Preview runtime unreachable",
+        runtimeErrorCode: workspaceFailureCode,
         framework: "static",
         developmentCommand: null,
         packageManager: null,
@@ -155,7 +178,7 @@ export async function GET(
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${terminalToken}`, "X-Workspace-Id": project.workspaceId! },
         body: JSON.stringify({ path, encoding: "utf-8" }),
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(15000),
       });
       if (!asset.ok) return null;
       const payload = (await asset.json().catch(() => null)) as { content?: unknown } | null;
