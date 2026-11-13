@@ -221,6 +221,13 @@ interface UseInworldSessionReturn {
   getVadState: () => VadState;
   /** Get the last speech duration detected by VAD (ms). */
   getLastSpeechDurationMs: () => number;
+  /**
+   * Peak chunk RMS observed since the current capture started (0–1).
+   * Unlike the VAD speech metadata, this reflects ALL audio the mic
+   * actually delivered — including speech the VAD gate under-detected —
+   * so callers can tell true silence apart from "heard but not gated".
+   */
+  getPeakLevel: () => number;
   isConnected: boolean;
   isListening: boolean;
   error: string | null;
@@ -269,6 +276,8 @@ export function useInworldSession(
   const vadRef = useRef<VoiceActivityDetector | null>(null);
   const vadStateRef = useRef<VadState>("idle");
   const vadSpeechDurationRef = useRef(0);
+  /** Peak per-chunk RMS since capture start — see getPeakLevel. */
+  const peakLevelRef = useRef(0);
   /** Whether the mic is currently paused (during TTS playback). */
   const micPausedRef = useRef(false);
   /** Session generation — incremented on each startListening. Stale callbacks
@@ -512,24 +521,31 @@ export function useInworldSession(
       });
 
       // ── Client-side VAD ──
-      // Only send audio to Inworld when real speech is detected.
-      // This prevents background noise from being transcribed.
+      // The VAD state machine controls endpointing/commit. Audio chunks
+      // are additionally sent whenever a chunk itself is above the
+      // silence threshold (see onaudioprocess), so speech onsets and
+      // quiet speech are not discarded before the VAD declares speech.
       shouldSendAudioRef.current = false;
       bufferHasAudioRef.current = false;
       bufferCommittedRef.current = false;
       vadSpeechDurationRef.current = 0;
       vadStateRef.current = "idle";
+      peakLevelRef.current = 0;
+      // Clear any stale server-side audio buffer ONCE, at capture start.
+      // (This used to happen on every VAD speech-start, which wiped the
+      // onset chunks that had just been appended.)
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
+      }
       const vad = new VoiceActivityDetector(analyser, {
         onSpeechStart: () => {
           if (process.env.NODE_ENV !== "production") console.debug("[Voice VAD] speech started");
           shouldSendAudioRef.current = true;
-          // Clear any previous audio buffer when speech starts
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
-          }
-          // The buffer was just cleared — nothing captured or committed yet.
-          bufferHasAudioRef.current = false;
-          bufferCommittedRef.current = false;
+          // Do NOT clear the audio buffer here: onset chunks above the
+          // silence threshold are appended before the VAD declares
+          // speech (see onaudioprocess), and clearing would delete the
+          // beginning of the utterance. The buffer is cleared once at
+          // capture start instead.
         },
         onSpeechEnd: (durationMs) => {
           if (process.env.NODE_ENV !== "production") console.debug("[Voice VAD] speech ended", { durationMs });
@@ -554,10 +570,31 @@ export function useInworldSession(
 
       processor.onaudioprocess = (e) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-        // Gate: only send audio when VAD detects speech OR mic is paused
-        if (!shouldSendAudioRef.current || micPausedRef.current) return;
+        if (micPausedRef.current) return;
 
         const inputData = e.inputBuffer.getChannelData(0);
+
+        // Per-chunk RMS on the same scale the VAD uses. Track the peak
+        // for diagnostics, and send any chunk that is itself above the
+        // silence threshold even before the VAD state machine declares
+        // speech: the VAD needs 450ms of sustained above-threshold audio
+        // before speech_detected, and previously EVERY chunk in that
+        // window (plus all quieter speech that never trips the gate)
+        // was thrown away — the server received nothing, no transcript
+        // could ever come back, and the user was told their mic was at
+        // fault. The buffer is only transcribed on commit, and commit
+        // still requires a VAD endpoint or an explicit stop after audio
+        // was captured, so background noise is not transcribed.
+        let sumSquares = 0;
+        for (let i = 0; i < inputData.length; i++) {
+          sumSquares += inputData[i] * inputData[i];
+        }
+        const chunkRms = Math.sqrt(sumSquares / inputData.length);
+        if (chunkRms > peakLevelRef.current) peakLevelRef.current = chunkRms;
+
+        // Gate: send while the VAD hears speech, plus above-threshold
+        // onset/quiet chunks the state machine hasn't caught up with.
+        if (!shouldSendAudioRef.current && chunkRms < VOICE_GATE_CONFIG.vad.silenceRmsThreshold) return;
 
         // Convert Float32 to PCM16
         const pcm16 = new Int16Array(inputData.length);
@@ -1396,6 +1433,8 @@ export function useInworldSession(
 
   const getLastSpeechDurationMs = useCallback(() => vadSpeechDurationRef.current, []);
 
+  const getPeakLevel = useCallback(() => peakLevelRef.current, []);
+
   const didLastTtsPlayAudio = useCallback(() => ttsAudioPlayedRef.current, []);
 
   return {
@@ -1412,6 +1451,7 @@ export function useInworldSession(
     isMicPaused,
     getVadState,
     getLastSpeechDurationMs,
+    getPeakLevel,
     didLastTtsPlayAudio,
     isConnected,
     isListening,

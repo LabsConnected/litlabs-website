@@ -101,6 +101,52 @@ describe("StudioPreviewPanel — host-execution truth (wave-4)", () => {
     expect(action).toHaveTextContent("Restart preview");
     expect(screen.getByTestId("preview-restart")).toBeInTheDocument();
     expect(screen.getByTestId("preview-source-summary")).toHaveTextContent("Source error");
+    // Not gated: the Project secrets editor stays available — the gate
+    // must hide it ONLY for repo-gated projects (tests below).
+    expect(screen.getByTestId("preview-secrets-toggle")).toBeInTheDocument();
+  });
+
+  it("hides the Project secrets dead end once the refusal is known", async () => {
+    mockFetch({
+      runtimeStatus: "not_started",
+      previewUrl: null,
+      runtimeError: null,
+      runtimeErrorCode: "HOST_EXECUTION_DISABLED",
+    });
+    renderPanel();
+
+    await screen.findByTestId("preview-host-exec-notice");
+    // No preview runtime exists to hold Clerk keys — the toggle (and
+    // therefore the form) is not rendered at all.
+    expect(screen.queryByTestId("preview-secrets-toggle")).toBeNull();
+    expect(screen.queryByTestId("preview-secrets-section")).toBeNull();
+  });
+
+  it("hides the Project secrets dead end from the first render when runtime state reports the gate", async () => {
+    mockFetch({
+      runtimeStatus: "not_started",
+      previewUrl: null,
+      runtimeError: null,
+      runtimeErrorCode: null,
+    });
+    render(
+      <StudioPreviewPanel
+        projectId="project-1"
+        projectName="LabsConnected/litlabs-website"
+        repositoryName="LabsConnected/litlabs-website"
+        branch="main"
+        workspaceStatus="failed"
+        sourceKind="github"
+        sourceStatus="unavailable"
+      />,
+    );
+
+    // sourceStatus "unavailable" is the canonical gate signal from
+    // /api/project-runtime — no refusal needs to arrive first.
+    await waitFor(() => {
+      expect(screen.queryByTestId("preview-secrets-toggle")).toBeNull();
+    });
+    expect(screen.queryByTestId("preview-secrets-section")).toBeNull();
   });
 });
 
