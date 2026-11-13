@@ -257,39 +257,103 @@ async function main() {
     // (Payment Element). Probe the top document, then every frame.
     await page.goto(sessionUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
 
-    const emailSel = 'input[name="email"], #email';
-    await page.locator(emailSel).first()
-      .waitFor({ state: "visible", timeout: 45_000 })
-      .catch(() => {});
-    await page.locator(emailSel).first()
-      .fill(`litt-acceptance-${STAMP}@litlabs.net`)
-      .catch(() => {});
+    // The current hosted Checkout renders the contact + payment form
+    // INSIDE the cross-origin Stripe Payment Element iframe — page-level
+    // locators and page.evaluate only ever see the top document, so every
+    // interaction below must iterate browsing contexts (page first for the
+    // classic rendering, then Stripe's frames, then any remaining frame).
+    // Probe order mirrors the field probe further down.
+    const orderedContexts = () => {
+      const frames = page.frames().filter((f) => f !== page.mainFrame());
+      const stripe = frames.filter((f) => /elements-inner|js\.stripe\.com/.test(f.url()));
+      return [page, ...stripe, ...frames.filter((f) => !stripe.includes(f))];
+    };
+    // The payment form (email section + payment-method accordion + card
+    // fields) lives in the elements-inner frame flagged
+    // componentName=paymentForm; fall back to any elements-inner frame.
+    const paymentFormFrame = () =>
+      page.frames().find((f) => /elements-inner/.test(f.url()) && /componentName=paymentForm/.test(f.url()))
+      ?? page.frames().find((f) => /elements-inner/.test(f.url()));
 
-    // Some layouts gate the payment fields behind an email "Continue" step.
-    const cont = page.getByRole("button", { name: /continue|next/i }).first();
-    if (await cont.isVisible().catch(() => false)) {
-      await cont.click().catch(() => {});
-      await page.waitForTimeout(2000);
+    // The email input lives in the paymentForm frame on the current
+    // rendering (Link authentication section). Wait for the first visible
+    // one across contexts, then fill in whichever context holds it —
+    // a page-only fill silently no-ops and burns the wait budget.
+    const emailSel = 'input[name="email"], #email';
+    let emailCtx = null;
+    const emailDeadline = Date.now() + 45_000;
+    while (Date.now() < emailDeadline && !emailCtx) {
+      for (const ctx of orderedContexts()) {
+        if (await ctx.locator(emailSel).first().isVisible().catch(() => false)) {
+          emailCtx = ctx;
+          break;
+        }
+      }
+      if (!emailCtx) await page.waitForTimeout(500);
+    }
+    if (emailCtx) {
+      await emailCtx.locator(emailSel).first()
+        .fill(`litt-acceptance-${STAMP}@litlabs.net`)
+        .catch(() => {});
+    }
+
+    // Some layouts gate the payment fields behind an email "Continue"
+    // step — the button lives in the same context as the email field.
+    for (const ctx of emailCtx ? [emailCtx, page] : orderedContexts()) {
+      const cont = ctx.getByRole("button", { name: /continue|next/i }).first();
+      if (await cont.isVisible().catch(() => false)) {
+        await cont.click().catch(() => {});
+        await page.waitForTimeout(2000);
+        break;
+      }
     }
 
     // Accordion payment-method layout: the card inputs only mount after the
     // "Card" option is selected. The option's accessible name includes the
     // card-brand text, so match loosely and fall back to a text-node click
     // that bubbles into the row's handler. No-op when Card is the sole method.
+    // The accordion rows live inside the paymentForm iframe on the current
+    // rendering and are not native inputs, so search by role/text across
+    // contexts: page first (classic layouts still work), then the frames.
     let cardClicked = null;
-    for (const cand of [
-      page.getByRole("radio", { name: /card/i }),
-      page.getByRole("option", { name: /card/i }),
-      page.getByRole("button", { name: /^card$/i }),
-      page.locator('[role="radio"]:has-text("Card")'),
-      page.locator('[data-testid*="card"], [id*="card" i]'),
-      page.getByText(/^\s*Card\s*$/),
-      page.locator('label:has-text("Card")'),
-    ]) {
-      const el = cand.first();
-      if (await el.isVisible().catch(() => false)) {
-        await el.click({ timeout: 5_000 }).then(() => { cardClicked = "locator"; }).catch(() => {});
+    const clickCardIn = async (ctx) => {
+      for (const cand of [
+        ctx.getByRole("radio", { name: /card/i }),
+        ctx.getByRole("option", { name: /card/i }),
+        ctx.getByRole("button", { name: /^card$/i }),
+        ctx.locator('[role="radio"]:has-text("Card")'),
+        ctx.locator('[data-testid*="card"], [id*="card" i]'),
+        ctx.getByText(/^\s*Card\s*$/),
+        ctx.locator('label:has-text("Card")'),
+      ]) {
+        const el = cand.first();
+        if (await el.isVisible().catch(() => false)) {
+          const clicked = await el.click({ timeout: 5_000 }).then(() => true).catch(() => false);
+          if (clicked) return true;
+        }
+      }
+      return false;
+    };
+    for (const ctx of orderedContexts()) {
+      if (await clickCardIn(ctx)) {
+        cardClicked = ctx === page ? "locator" : "frame-locator";
         break;
+      }
+    }
+    // Evaluate fallbacks: leaf-element text click, first inside the
+    // payment form frame (where the accordion lives now), then in the top
+    // document (classic rendering).
+    if (!cardClicked) {
+      const pf = paymentFormFrame();
+      if (pf) {
+        cardClicked = await pf.evaluate(() => {
+          const els = [...document.querySelectorAll("*")].filter(
+            (e) => e.offsetParent && e.children.length === 0 && /^card$/i.test(e.textContent.trim()),
+          );
+          if (!els.length) return null;
+          els[0].click();
+          return "frame-evaluate";
+        }).catch(() => null);
       }
     }
     if (!cardClicked) {
@@ -316,6 +380,24 @@ async function main() {
       { timeout: 15_000 },
     ).catch(() => {});
 
+    // Verify the selection actually expanded the Card section before the
+    // main probe: poll briefly for the card input to mount in any context.
+    // cardExpanded is recorded in the failure dump below, so a click that
+    // landed but never expanded is distinguishable from the run #22 mode,
+    // where the click itself never landed (cardClicked stayed null).
+    const cardSel = 'input[name="cardNumber"], #cardNumber, #Field-numberInput, input[autocomplete="cc-number"]';
+    let cardExpanded = false;
+    const expandDeadline = Date.now() + 15_000;
+    while (Date.now() < expandDeadline && !cardExpanded) {
+      for (const ctx of orderedContexts()) {
+        if (await ctx.locator(cardSel).first().isVisible().catch(() => false)) {
+          cardExpanded = true;
+          break;
+        }
+      }
+      if (!cardExpanded) await page.waitForTimeout(500);
+    }
+
     // Stripe has shipped two hosted-Checkout renderings of the card fields:
     // the classic inputs (name="cardNumber" / #cardNumber) and the current
     // Payment Element inside Stripe iframes, whose inputs are
@@ -323,16 +405,10 @@ async function main() {
     // autocomplete="cc-number" / "cc-exp" / "cc-csc". Probe BOTH — the
     // camelCase name probe alone can never match the Payment Element, which
     // is why Step 5 timed out with "card input not found" on a healthy page.
-    const cardSel = 'input[name="cardNumber"], #cardNumber, #Field-numberInput, input[autocomplete="cc-number"]';
     const expirySel = 'input[name="cardExpiry"], #cardExpiry, #Field-expiryInput, input[autocomplete="cc-exp"]';
     const cvcSel = 'input[name="cardCvc"], #cardCvc, #Field-cvcInput, input[autocomplete="cc-csc"]';
-    // Probe order: top document first, then Stripe's own iframes
-    // (elements-inner / js.stripe.com), then any remaining frame.
-    const orderedContexts = () => {
-      const frames = page.frames().filter((f) => f !== page.mainFrame());
-      const stripe = frames.filter((f) => /elements-inner|js\.stripe\.com/.test(f.url()));
-      return [page, ...stripe, ...frames.filter((f) => !stripe.includes(f))];
-    };
+    // Probe contexts in the orderedContexts() order defined above: top
+    // document first, then Stripe's own iframes, then any remaining frame.
     let cardCtx = null;
     const fieldDeadline = Date.now() + 45_000;
     while (Date.now() < fieldDeadline && !cardCtx) {
@@ -360,10 +436,18 @@ async function main() {
           .catch(() => []);
         frameInputs.push({ url: frame.url(), inputs: ins });
       }
-      const radiogroup = await page.evaluate(() => {
+      // The accordion's radiogroup (if any) renders inside the payment
+      // form frame on the current layout, so probe that frame as well as
+      // the top document — a page-only probe can never see it.
+      const radiogroupProbe = (root) => root.evaluate(() => {
         const g = document.querySelector('[role="radiogroup"],[role="listbox"]');
         return g ? g.outerHTML.slice(0, 4000) : null;
       }).catch(() => null);
+      let radiogroup = await radiogroupProbe(page);
+      if (!radiogroup) {
+        const pf = paymentFormFrame();
+        if (pf) radiogroup = await radiogroupProbe(pf);
+      }
       const paySection = await page.evaluate(() => {
         const el = [...document.querySelectorAll("div,section,fieldset,form")].find(
           (e) => e.textContent.includes("Cash App Pay") && e.textContent.length < 4000,
@@ -371,7 +455,7 @@ async function main() {
         return el ? el.outerHTML.slice(0, 6000) : document.body.innerHTML.slice(0, 6000);
       }).catch(() => null);
       writeFileSync(path.join(ARTIFACT_DIR, "checkout-dom.json"),
-        JSON.stringify({ cardClicked, frames, inputs, frameInputs, probedSelectors: { cardSel, expirySel, cvcSel }, radiogroup, paySection }, null, 2));
+        JSON.stringify({ cardClicked, cardExpanded, frames, inputs, frameInputs, probedSelectors: { cardSel, expirySel, cvcSel }, radiogroup, paySection }, null, 2));
       writeFileSync(path.join(ARTIFACT_DIR, "checkout-body.html"),
         await page.evaluate(() => document.body.innerHTML).catch(() => ""));
       await shot(page, "stripe-checkout-no-fields");
