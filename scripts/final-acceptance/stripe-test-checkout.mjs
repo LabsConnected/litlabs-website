@@ -483,16 +483,74 @@ async function main() {
     await cardCtx.locator(cardSel).first().fill("4242424242424242");
     await (await fieldCtx(expirySel)).locator(expirySel).first().fill("1234");
     await (await fieldCtx(cvcSel)).locator(cvcSel).first().fill("123");
-    const nameSel = 'input[name="billingName"], #billingName';
-    if (await cardCtx.locator(nameSel).first().isVisible().catch(() => false)) {
-      await cardCtx.locator(nameSel).first().fill("LiTT Acceptance");
+    // Run #24 root cause: "Name on card" and "ZIP code" render in the
+    // checkout DOCUMENT context, not in the card iframe — the old probe
+    // looked only in cardCtx with classic name-attribute selectors and
+    // silently skipped both fields when they weren't there. Stripe's
+    // submit validation then blocked the payment with no error surfaced
+    // anywhere this script looks: no navigation, no processing state,
+    // and payment_success_redirect burned its full wait on the Stripe
+    // page. Sweep every context in orderedContexts() order (document
+    // first, then frames) with anchored label/placeholder locators —
+    // the classic attribute selectors stay as fallback — polling like
+    // the submit step below, and read each value back: a field only
+    // counts as filled when its input actually holds text.
+    const billingFields = [
+      {
+        name: "Name on card",
+        value: "LiTT E2E",
+        candidates: (ctx) => [
+          ctx.getByLabel(/name on card/i),
+          ctx.getByPlaceholder(/name on card/i),
+          ctx.locator('input[name="billingName"], #billingName, input[autocomplete="cc-name"]'),
+        ],
+      },
+      {
+        name: "ZIP code",
+        value: "49417",
+        candidates: (ctx) => [
+          ctx.getByLabel(/\b(zip|postal code)\b/i),
+          ctx.getByPlaceholder(/\bzip\b/i),
+          ctx.locator('input[name="billingPostalCode"], #billingPostalCode, input[autocomplete="postal-code"]'),
+        ],
+      },
+    ];
+    const filledBilling = []; // { name, where, cand } — cand kept for the pre-submit guard
+    const billingDeadline = Date.now() + 20_000;
+    for (const field of billingFields) {
+      let hit = null;
+      while (Date.now() < billingDeadline && !hit) {
+        for (const ctx of orderedContexts()) {
+          for (const cand of field.candidates(ctx)) {
+            const el = cand.first();
+            if (!(await el.isVisible().catch(() => false))) continue;
+            await el.fill(field.value).catch(() => {});
+            const readBack = await el.inputValue().catch(() => "");
+            if (readBack.trim()) {
+              hit = { name: field.name, where: ctx === page ? "document" : "frame", cand };
+              break;
+            }
+          }
+          if (hit) break;
+        }
+        if (!hit) await page.waitForTimeout(500);
+      }
+      if (hit) filledBilling.push(hit);
     }
-    const zipSel = 'input[name="billingPostalCode"], #billingPostalCode';
-    if (await cardCtx.locator(zipSel).first().isVisible().catch(() => false)) {
-      await cardCtx.locator(zipSel).first().fill("10001");
+    // Pre-submit guard (part 1): both billing fields must be filled —
+    // never submit blind. Fail the filled step honestly, naming what is
+    // missing, instead of discovering it as a silent redirect timeout.
+    const missingBilling = billingFields
+      .map((f) => f.name)
+      .filter((n) => !filledBilling.some((h) => h.name === n));
+    if (missingBilling.length) {
+      step("stripe_checkout_filled", false,
+        `could not fill required billing field(s): ${missingBilling.join(", ")} — refusing to submit blind`);
+      await shot(page, "stripe-checkout-filled");
+      throw new Error(`stripe_checkout_filled: required billing field(s) not filled: ${missingBilling.join(", ")}`);
     }
     step("stripe_checkout_filled", true,
-      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context`);
+      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context; name+ZIP filled (${filledBilling.map((h) => `${h.name}: ${h.where}`).join(", ")})`);
     await shot(page, "stripe-checkout-filled");
 
     // Stripe's Link opt-in is checked by default and demands a phone number
@@ -504,6 +562,20 @@ async function main() {
     const phoneField = page.locator('input[type="tel"], input[name*="phone" i], #phoneNumber').first();
     if (await phoneField.isVisible().catch(() => false)) {
       await phoneField.fill("2015550123").catch(() => {});
+    }
+
+    // Pre-submit guard (part 2): the Link/phone interactions above can
+    // re-render the form — re-read the billing inputs through the same
+    // locators that filled them and refuse to click submit if either
+    // was emptied, so a silent validation block can never be recorded
+    // as a "submitted" step.
+    for (const hit of filledBilling) {
+      const now = await hit.cand.first().inputValue().catch(() => "");
+      if (!now.trim()) {
+        step("stripe_checkout_filled", false,
+          `pre-submit guard: ${hit.name} is empty at submit time — refusing to submit blind`);
+        throw new Error(`stripe_checkout_filled: pre-submit guard found ${hit.name} empty`);
+      }
     }
 
     // ── Submit the checkout ──
@@ -531,17 +603,24 @@ async function main() {
     ];
     const urlBeforeSubmit = page.url();
     let submitClicked = null;
+    // Which candidate clicked is recorded alongside the context (run
+    // #24 Q3): a click landing on a non-submitting look-alike element
+    // was indistinguishable from a real submit in the old detail.
+    const submitCandidateNames = ["role button", 'button[type="submit"]', "anchored text"];
+    let submitCandidate = null;
     const submitDeadline = Date.now() + 45_000;
     while (Date.now() < submitDeadline && !submitClicked) {
       for (const ctx of orderedContexts()) {
-        for (const cand of submitCandidates(ctx)) {
-          const el = cand.first();
+        const cands = submitCandidates(ctx);
+        for (let ci = 0; ci < cands.length; ci++) {
+          const el = cands[ci].first();
           const ready = await el.isVisible().catch(() => false)
             && await el.isEnabled().catch(() => false);
           if (!ready) continue;
           const clicked = await el.click({ timeout: 10_000 }).then(() => true).catch(() => false);
           if (clicked) {
             submitClicked = ctx === page ? "document" : "frame";
+            submitCandidate = ci;
             break;
           }
         }
@@ -575,8 +654,36 @@ async function main() {
       }
       if (!submitTransition) await page.waitForTimeout(500);
     }
+    // Diagnostics (run #24 Q3): when the probe expires with no
+    // transition, sweep every context once for visible error/alert
+    // text — a silent validation block or a rendered card error is
+    // otherwise indistinguishable from "nothing happened" in the
+    // verdict. Findings are appended to the step detail; no verdict
+    // or wait changes.
+    let errorSweep = "";
+    if (!submitTransition) {
+      const texts = new Set();
+      for (const ctx of orderedContexts()) {
+        const found = await ctx.evaluate(() => {
+          const re = /declined|error|incomplete|invalid|incorrect|check your|unable|required/i;
+          const out = [];
+          for (const e of document.querySelectorAll('[role="alert"]')) {
+            const t = e.offsetParent ? e.textContent.trim() : "";
+            if (t) out.push(t.slice(0, 200));
+          }
+          for (const e of document.querySelectorAll("body *")) {
+            if (e.children.length || !e.offsetParent) continue;
+            const t = e.textContent.trim();
+            if (t && re.test(t)) out.push(t.slice(0, 200));
+          }
+          return out;
+        }).catch(() => []);
+        for (const t of found) texts.add(t);
+      }
+      if (texts.size) errorSweep = `; error sweep: ${[...texts].slice(0, 3).join(" | ")}`;
+    }
     step("stripe_checkout_submitted", true,
-      `submit clicked in ${submitClicked} context; transition: ${submitTransition ?? "not observed within 20s (Step 6 redirect wait still applies)"}`);
+      `submit clicked in ${submitClicked} context via candidate-${submitCandidate} (${submitCandidateNames[submitCandidate]}); transition: ${submitTransition ?? "not observed within 20s (Step 6 redirect wait still applies)"}${errorSweep}`);
 
     // ── Step 6: success redirect back to staging ──
     let redirected = false;
