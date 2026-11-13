@@ -498,6 +498,17 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     expect(previewBtn.className).toContain("glass-active");
   });
 
+  it("opens with the LiTT panel expanded on the Chat tab (owner always-show rule)", async () => {
+    // Larry's rule (2026-11-12): the chat panel always shows on open —
+    // expanded, on the Chat tab. A legacy localStorage collapse value
+    // (written automatically by the old behaviour) must not pin it shut
+    // on a fresh visit.
+    localStorage.setItem("littree:studio:litt-collapsed", "true");
+    await renderCommandStudio();
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
+  });
+
   describe("serverProjectId resolution (fresh-conversation 409 race)", () => {
     // Regression coverage for the fresh-account "stale revision" 409 on
     // message #1: capabilities.projectId resolves via an async fetch that
@@ -1379,19 +1390,11 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.queryByTestId("mobile-build-status")).toBeNull();
     });
 
-    it("laptop tier defaults to the collapsed LiTT rail when no preference is stored", async () => {
-      // F1 workspace-first: LiTT opens on the 64px ambient HUD rail (no
-      // permanent desktop column) unless the user has an explicit persisted
-      // preference. Expanding opens the floating overlay panel.
-      globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
-      await renderCommandStudio();
-      await waitFor(() => {
-        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
-      });
-    });
-
-    it("laptop tier does not override an explicit stored preference", async () => {
-      localStorage.setItem("littree:studio:litt-collapsed", "false");
+    it("laptop tier defaults to the expanded LiTT panel when no preference is stored", async () => {
+      // Larry's rule (2026-11-12, superseding the F1 collapsed-rail
+      // default): LiTT opens EXPANDED — the permanent left column shows
+      // on first open. The 64px rail is only a state the user picks by
+      // collapsing.
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
       await renderCommandStudio();
       await waitFor(() => {
@@ -1399,12 +1402,23 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       });
     });
 
-    it("desktop tier (>=1440px) defaults to the collapsed LiTT rail when no preference is stored", async () => {
-      // F1 workspace-first: same collapsed-rail default on desktop.
-      globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    it("laptop tier does not override an explicit session preference", async () => {
+      // A deliberate in-session collapse is stored session-scoped and
+      // honoured on reload within the session.
+      sessionStorage.setItem("littree:studio:litt-collapsed", "true");
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
       await renderCommandStudio();
       await waitFor(() => {
         expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
+      });
+    });
+
+    it("desktop tier (>=1440px) defaults to the expanded LiTT panel when no preference is stored", async () => {
+      // Same always-show default on desktop (Larry's rule, 2026-11-12).
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+      await renderCommandStudio();
+      await waitFor(() => {
+        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
       });
     });
 

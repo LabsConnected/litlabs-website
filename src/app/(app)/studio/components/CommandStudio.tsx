@@ -679,24 +679,22 @@ function CommandStudioContent() {
   // LiTT panel — always present on desktop/laptop, expand/collapse.
   // Phase C2: moved from right to left. Phase C2.1: viewport-tier aware
   // (desktop/laptop rail vs mobile overlay sheet), single canonical tab
-  // state, and a laptop first-run default (collapsed) that never
-  // overrides an explicit stored user preference.
+  // state, and a first-run default (expanded, left dock — Larry's rule,
+  // 2026-11-12) that never overrides an explicit stored user preference.
   const LITT_COLLAPSED_KEY = "littree:studio:litt-collapsed";
   const MOBILE_LITT_OPEN_KEY = "littree:studio:mobile-litt-open";
 
   // Whether the user has an explicit stored collapse preference — captured
   // once at init (constant state) so the mount-time persistence write below
-  // can't race the shell first-run default.
+  // can't race the shell first-run default. Session-scoped only: the old
+  // localStorage key was written automatically by the previous behaviour,
+  // so a value there is residue, not evidence of a deliberate choice, and
+  // no longer counts (Larry's rule, 2026-11-12: the panel always shows on
+  // open — a legacy stored "true" must not resurrect a hidden start).
   const [littCollapsedHadStoredPref] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     try {
-      // A value written by the previous localStorage behaviour is still
-      // honoured as an explicit preference, so a user who deliberately
-      // collapsed the dock is not silently overridden by this change.
-      return (
-        sessionStorage.getItem(LITT_COLLAPSED_KEY) !== null ||
-        localStorage.getItem(LITT_COLLAPSED_KEY) !== null
-      );
+      return sessionStorage.getItem(LITT_COLLAPSED_KEY) !== null;
     } catch {
       return false;
     }
@@ -704,23 +702,26 @@ function CommandStudioContent() {
 
   // Studio enters with LiTT Chat + Workspace, not a collapsed rail.
   //
-  // The collapse preference is session-scoped: a manual collapse is honoured
-  // for the rest of the session (so refresh and in-session navigation keep the
-  // correct state) but no longer pins the panel shut permanently across
-  // sessions. Previously the preference lived in localStorage, so once a user
-  // collapsed the dock it stayed collapsed on every future visit and the
-  // conversation composer rendered hidden.
+  // Larry's rule (2026-11-12): the left chat panel ALWAYS shows when
+  // Studio opens — the user can hide it, but hidden is never the starting
+  // state. So the default here is expanded (false), and the only stored
+  // value honoured on load is this session's: a manual collapse sticks
+  // for the rest of the session (refresh and in-session navigation keep
+  // it), but a fresh visit always starts expanded. The legacy
+  // localStorage value is deliberately NOT read on load: the previous
+  // behaviour wrote it automatically, so an old stored "true" is residue
+  // that would otherwise pin the panel shut on every future visit and
+  // render the conversation composer hidden — the exact hidden start
+  // Larry reported.
   const [littCollapsed, setLittCollapsed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
+    if (typeof window === "undefined") return false;
     try {
       const session = sessionStorage.getItem(LITT_COLLAPSED_KEY);
       if (session !== null) return session === "true";
-      const legacy = localStorage.getItem(LITT_COLLAPSED_KEY);
-      if (legacy !== null) return legacy === "true";
     } catch {
       // noop
     }
-    return true;
+    return false;
   });
   useEffect(() => {
     try {
@@ -731,29 +732,29 @@ function CommandStudioContent() {
   }, [littCollapsed]);
 
   // Chat dock position — "left" (persistent left panel, 360px default) or
-  // "bottom" (the integrated bottom command layer). Larry's ruling
-  // (2026-11-10): chat must open INTEGRATED in the composition — not
-  // stuck to the left and not a detached pop-out — so the default is
-  // now "bottom". An explicit switcher choice still wins, tracked with
-  // an explicit marker: the old code persisted on mount, which wrote
-  // the default "left" into storage on every first run and made a
-  // stored "left" indistinguishable from a real choice. Migration:
-  // a stored "bottom" could only come from the switcher (the old
-  // default never produced it), so it stays honored; a stored "left"
-  // without the explicit marker is treated as unset.
+  // "bottom" (the integrated bottom command layer). Larry's rule
+  // (2026-11-12, superseding his 2026-11-10 integrated-bottom ruling):
+  // the chat panel opens ON THE LEFT and always shows on first open, so
+  // the default is "left". A stored value is honoured only when it
+  // carries the explicit-choice marker — the switcher writes both keys,
+  // so a deliberate "bottom" pick still wins on later visits — while a
+  // stored value WITHOUT the marker is legacy residue (older code
+  // persisted defaults on mount) and is treated as unset: the owner's
+  // left default wins on load, so a saved bottom state can never
+  // resurrect a hidden start on a fresh visit.
   const CHAT_DOCK_KEY = "littree:studio:chat-dock";
   const CHAT_DOCK_EXPLICIT_KEY = "littree:studio:chat-dock:explicit";
   const [chatDock, setChatDock] = useState<"left" | "bottom">(() => {
-    if (typeof window === "undefined") return "bottom";
+    if (typeof window === "undefined") return "left";
     try {
       const stored = localStorage.getItem(CHAT_DOCK_KEY);
-      if (stored === "bottom") return "bottom";
-      if (stored === "left" && localStorage.getItem(CHAT_DOCK_EXPLICIT_KEY) === "1") {
-        return "left";
+      const explicit = localStorage.getItem(CHAT_DOCK_EXPLICIT_KEY) === "1";
+      if (explicit && (stored === "left" || stored === "bottom")) {
+        return stored;
       }
-      return "bottom";
+      return "left";
     } catch {
-      return "bottom";
+      return "left";
     }
   });
   const handleChatDockChange = useCallback((next: "left" | "bottom") => {
@@ -830,10 +831,12 @@ function CommandStudioContent() {
     setMobileLittOpen(false);
   };
 
-  // F1 workspace-first: LiTT opens on the 64px rail (no permanent
-  // desktop column). Expanding widens the in-flow column (the Slice B
-  // floating overlay was retired 2026-11-10 — no detached pop-outs).
-  // A stored explicit preference is never overridden.
+  // F1 history: LiTT used to open on the 64px rail. Larry's rule
+  // (2026-11-12) reverses that default: the panel opens EXPANDED as the
+  // permanent left column (the Slice B floating overlay stays retired
+  // 2026-11-10 — no detached pop-outs). The 64px rail is now only a
+  // state the user chooses by collapsing. A stored explicit preference
+  // is never overridden.
   const laptopDefaultAppliedRef = useRef(false);
   useEffect(() => {
     if (laptopDefaultAppliedRef.current) return;
@@ -845,8 +848,10 @@ function CommandStudioContent() {
   // Shell first-run default: the left chat dock is persistent per the
   // spec, so it opens EXPANDED on first run in the shell path. A stored
   // explicit preference always wins (captured at init — the persistence
-  // effect below writes on mount, so localStorage can't be re-read here).
-  // The legacy (non-shell) path keeps its own collapsed-first-run default.
+  // effect above writes on mount, so sessionStorage can't be re-read
+  // here). Since 2026-11-12 the expanded start is the shared initializer
+  // default on BOTH paths (Larry's always-show rule); this effect stays
+  // as the shell path's safety net for the stored-preference case.
   const shellDockDefaultAppliedRef = useRef(false);
   useEffect(() => {
     if (shellDockDefaultAppliedRef.current) return;

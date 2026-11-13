@@ -39,7 +39,7 @@ export default function ChatDockSwitcher({ position, onChange }: ChatDockSwitche
           key={target}
           type="button"
           onClick={() => onChange(target)}
-          className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
+          className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-black/5"
           style={{
             color: position === target ? "var(--color-accent)" : "var(--text-muted)",
             backgroundColor:
