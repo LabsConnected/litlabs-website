@@ -199,6 +199,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     typeof body.projectId === "string" && body.projectId.trim()
       ? body.projectId.trim()
       : undefined;
+  // Explicit user confirmation for a project-context decision (step 5).
+  // Sent ONLY by the client's stop-and-ask prompt after a 409
+  // PROJECT_MISMATCH / PROJECT_CONTEXT_CONFIRM refusal: "switch" runs in
+  // the conversation's own project; "rebind" moves the conversation to
+  // the viewed/resolved project and persists the new binding. Absent on
+  // every ordinary send — a binding is never changed without it.
+  const projectContextDecision =
+    body.projectContextDecision === "switch" || body.projectContextDecision === "rebind"
+      ? (body.projectContextDecision as "switch" | "rebind")
+      : undefined;
   const executionMode = typeof body.executionMode === "string" && ["plan", "act", "auto"].includes(body.executionMode)
     ? (body.executionMode as "plan" | "act" | "auto")
     : undefined;
@@ -264,7 +274,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       }
       runtimeAgent = result.agent;
       // Use the agent template slug for memory/capability routing
-      agentSlug = (result.agent.agentId ? "litt" : "litt") as AgentSlug; // fallback for type compat
+      agentSlug = (result.agent.templateSlug && isValidAgentSlug(result.agent.templateSlug)
+        ? result.agent.templateSlug
+        : "litt") as AgentSlug;
     }
   } else {
     // Builtin agent
@@ -317,11 +329,24 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       (m) => m.parentMessageId === userMessage.id && m.role === "assistant",
     );
 
-    return NextResponse.json({
-      userMessage,
-      assistantMessage: assistantMsg ?? undefined,
-      duplicate: true,
-      revision: conversation.revision,
+    if (assistantMsg || !projectContextDecision) {
+      return NextResponse.json({
+        userMessage,
+        assistantMessage: assistantMsg ?? undefined,
+        duplicate: true,
+        revision: conversation.revision,
+      });
+    }
+
+    // Confirmed project-context resubmit: the original send was stopped
+    // at the step-5 project guard (409) BEFORE any assistant run existed,
+    // and the user has now explicitly confirmed how to proceed. Fall
+    // through and execute against the already-persisted user message
+    // instead of returning a duplicate that never runs.
+    studioLog("message:duplicate_confirmed_resubmit", {
+      conversationId: conversation.id,
+      userId,
+      clientRequestId,
     });
   }
 
@@ -337,56 +362,148 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // a verified workspace existed while every workspace tool failed with
   // "This tool requires an active project workspace".)
   //
-  // Resolution priority:
+  // STOP-AND-ASK (Larry's ruling, 2026-11-12): a conversation's project
+  // binding is NEVER changed silently. Resolution may DISCOVER that the
+  // run would operate in a different project than the stored binding —
+  // the viewed project differs from the chat's, a stale binding no
+  // longer resolves, an unbound chat would take its first bind — but it
+  // must not persist that change or execute against it. The send stops
+  // with a structured 409 naming BOTH projects, and only an explicit
+  // user confirmation (`projectContextDecision`, parsed above) lets the
+  // resubmitted send proceed:
+  //   "switch" — run in the conversation's own project (no rebind).
+  //   "rebind" — move the chat to the viewed/resolved project, persist
+  //              the new binding, and run there.
+  //
+  // Resolution priority (unchanged):
   //   1. The conversation's own bound project (ownership-verified by
   //      buildStudioContext → resolveProject, which is user-scoped).
   //   2. The project the user is viewing (client-supplied, verified the
-  //      same way). An unbound conversation BINDS to it: the user is
-  //      acting in that project, and refusing would force manual chat
-  //      bookkeeping. If it does NOT resolve for this user, refuse with
+  //      same way). If it does NOT resolve for this user, refuse with
   //      the specific reason — never silently substitute a different
   //      project the user isn't looking at.
-  //   3. The user's current project (resolveCurrentProject) — repairs a
-  //      stale binding, or gives an unbound chat the canonical current
-  //      project when the client supplied none.
-  // A bound conversation whose viewed project DIFFERS still refuses at
-  // 5.2: executing in project A while the user watches project B is how
-  // writes land in the wrong workspace (#551).
-  let ctx = conversation.projectId
-    ? await buildStudioContext(userId, conversation.id, conversation.projectId, agentSlug)
+  //   3. The user's current project (resolveCurrentProject).
+  const boundProjectId = conversation.projectId;
+  let ctx = boundProjectId
+    ? await buildStudioContext(userId, conversation.id, boundProjectId, agentSlug)
     : null;
-  let effectiveProjectId: string | null = ctx ? conversation.projectId : null;
+  let effectiveProjectId: string | null = ctx ? boundProjectId : null;
 
-  if (!ctx && clientProjectId) {
-    const clientCtx = await buildStudioContext(userId, conversation.id, clientProjectId, agentSlug);
-    if (clientCtx) {
-      ctx = clientCtx;
+  // The viewed project resolves independently so a stop-and-ask refusal
+  // can name BOTH projects, and a confirmed "rebind" has a verified
+  // target. (Skipped when it equals the binding — priority 1 already
+  // resolved that project.)
+  let viewedCtx: Awaited<ReturnType<typeof buildStudioContext>> = null;
+  if (clientProjectId && clientProjectId !== boundProjectId) {
+    viewedCtx = await buildStudioContext(userId, conversation.id, clientProjectId, agentSlug);
+  }
+
+  const projectRef = (id: string | null, name: string | null) =>
+    id ? { id, name } : null;
+
+  if (ctx) {
+    // Priority 1: the chat's own project resolved. It stays the run's
+    // home unless the user — told about the mismatch — explicitly chose
+    // to move the chat to the project they're viewing.
+    if (clientProjectId && clientProjectId !== boundProjectId) {
+      if (projectContextDecision === "rebind" && viewedCtx) {
+        // Confirmed: move the chat to the viewed project and run there.
+        // The new binding is persisted below — with consent, this once.
+        ctx = viewedCtx;
+        effectiveProjectId = clientProjectId;
+      } else if (projectContextDecision !== "switch") {
+        // Executing in project A while the user watches project B is
+        // how writes land in the wrong workspace (#551). Stop and ask,
+        // naming both projects; change nothing.
+        const viewedName = viewedCtx?.projectName ?? null;
+        return NextResponse.json(
+          {
+            error: "Project mismatch",
+            code: "PROJECT_MISMATCH",
+            detail:
+              `You're viewing "${viewedName ?? "another project"}", but this chat belongs to "${ctx.projectName}". ` +
+              `Switch to "${ctx.projectName}" to run it there, or move this chat to "${viewedName ?? "the project you're viewing"}" — nothing ran anywhere yet.`,
+            conversationProject: projectRef(boundProjectId, ctx.projectName),
+            viewedProject: projectRef(clientProjectId, viewedName),
+          },
+          { status: 409 },
+        );
+      }
+      // decision === "switch": confirmed — run in the chat's own
+      // project; the client moves its view. No rebind, nothing persisted.
+    }
+  } else if (clientProjectId) {
+    // The binding is stale (no longer resolves) or the chat is unbound,
+    // and the user is viewing a project.
+    if (!viewedCtx) {
+      if (!boundProjectId) {
+        // Unbound chat + unverifiable viewed project: refuse with the
+        // specific reason — never substitute a different project.
+        return NextResponse.json(
+          {
+            error: "Project not available",
+            code: "PROJECT_NOT_AVAILABLE",
+            detail:
+              "The project you're viewing couldn't be verified for your account, " +
+              "so this chat can't run project tasks in it.",
+          },
+          { status: 409 },
+        );
+      }
+      // Bound-but-stale + unverifiable viewed project: fall through to
+      // the current-project check below.
+    } else if (projectContextDecision === "rebind") {
+      // Confirmed: bind (or re-bind) the chat to the viewed project.
+      ctx = viewedCtx;
       effectiveProjectId = clientProjectId;
-    } else if (!conversation.projectId) {
+    } else {
+      // Running in the viewed project would CHANGE this chat's binding
+      // (first bind of an unbound chat, or repair of a stale one).
+      // Stop and ask — never bind silently.
       return NextResponse.json(
         {
-          error: "Project not available",
-          code: "PROJECT_NOT_AVAILABLE",
-          detail:
-            "The project you're viewing couldn't be verified for your account, " +
-            "so this chat can't run project tasks in it.",
+          error: "Project confirmation needed",
+          code: "PROJECT_CONTEXT_CONFIRM",
+          detail: boundProjectId
+            ? `This chat's saved project couldn't be verified, so nothing ran. Tie this chat to "${viewedCtx.projectName}" — the project you're viewing — and continue?`
+            : `This chat isn't tied to a project yet, so nothing ran. Tie it to "${viewedCtx.projectName}" — the project you're viewing — and continue?`,
+          conversationProject: projectRef(boundProjectId, null),
+          viewedProject: projectRef(clientProjectId, viewedCtx.projectName),
+          targetProject: projectRef(clientProjectId, viewedCtx.projectName),
         },
         { status: 409 },
       );
     }
-    // Bound-but-stale + unverifiable viewed project: fall through to the
-    // current-project repair below.
   }
 
   if (!ctx) {
-    // Stale binding or unbound chat with no client signal — resolve the
-    // user's current project.
+    // No viewed-project resolution: the user's current project is the
+    // only remaining candidate. Binding the chat to it is a binding
+    // change whenever it differs from the stored binding — the same
+    // stop-and-ask rule applies.
     const activeProject = await resolveCurrentProject({ userId });
-    if (activeProject && activeProject.projectId !== conversation.projectId) {
+    if (activeProject && activeProject.projectId !== boundProjectId) {
       const activeCtx = await buildStudioContext(userId, conversation.id, activeProject.projectId, agentSlug);
       if (activeCtx) {
-        ctx = activeCtx;
-        effectiveProjectId = activeProject.projectId;
+        if (projectContextDecision === "rebind") {
+          // Confirmed: bind the chat to the current project and run.
+          ctx = activeCtx;
+          effectiveProjectId = activeProject.projectId;
+        } else {
+          return NextResponse.json(
+            {
+              error: "Project confirmation needed",
+              code: "PROJECT_CONTEXT_CONFIRM",
+              detail:
+                `This chat isn't tied to "${activeCtx.projectName}" yet, so nothing ran. ` +
+                `Tie it to "${activeCtx.projectName}" — your most recent project — and continue?`,
+              conversationProject: projectRef(boundProjectId, null),
+              viewedProject: projectRef(clientProjectId ?? null, viewedCtx?.projectName ?? null),
+              targetProject: projectRef(activeProject.projectId, activeCtx.projectName),
+            },
+            { status: 409 },
+          );
+        }
       }
     }
   }
@@ -395,35 +512,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  // Persist a newly established binding (unbound chat bound to the viewed
-  // or current project, stale binding repaired) so future messages resolve
-  // directly. One-time fix per conversation.
-  if (effectiveProjectId && effectiveProjectId !== conversation.projectId) {
+  // Persist a binding change ONLY when the user confirmed it — the
+  // "rebind" branches above are the sole paths that set an
+  // effectiveProjectId different from the stored binding. The silent
+  // persist that used to live here is gone: without a decision, any
+  // would-be change already stopped at a 409 above.
+  if (effectiveProjectId && effectiveProjectId !== boundProjectId) {
     await admin
       .from("studio_conversations")
       .update({ project_id: effectiveProjectId })
       .eq("id", conversation.id)
       .eq("owner_id", userId);
-  }
-
-  // 5.2. Project reconciliation — the chat must belong to the project the
-  // user is acting in. A conversation viewed inside a different project
-  // (e.g. a stale chat kept open after switching projects) would otherwise
-  // silently mutate the conversation's project while the user watches
-  // another. Refuse with an explicit, user-visible error — never silently
-  // re-bind (stranding conversation context is worse than a clear error).
-  // Older clients that omit projectId keep the previous behavior.
-  if (clientProjectId && clientProjectId !== effectiveProjectId) {
-    return NextResponse.json(
-      {
-        error: "Project mismatch",
-        code: "PROJECT_MISMATCH",
-        detail:
-          `This chat belongs to project "${ctx.projectName}", but you are viewing a different project. ` +
-          `Start a new chat in this project, or switch back to "${ctx.projectName}".`,
-      },
-      { status: 409 },
-    );
   }
 
   // The ONE project identity for this run's execution (step 5). Every

@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState, useEffect, useMemo } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import StudioProjectPicker from "../components/StudioProjectPicker";
+import { downloadMediaFile } from "../lib/download-media";
 import { useStudioContextOptional } from "../context/StudioContext";
 import {
   LayoutGrid,
@@ -468,13 +469,10 @@ export default function GalleryTool({
   };
 
   const handleDownload = (url: string, name: string) => {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.target = "_blank";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    // Generated media lives on cross-origin provider URLs, where a bare
+    // <a download> is ignored and target="_blank" just opens a tab — the
+    // file never saves. Route through the blob-based downloader instead.
+    void downloadMediaFile(url, name);
   };
 
   const sourceIcon = (source: string) => {

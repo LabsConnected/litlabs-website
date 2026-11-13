@@ -197,7 +197,8 @@ import { buildStudioContext } from "@/lib/studio/project-resolver";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getConversation, insertMessage, listMessages, updateMessageStatus } from "@/lib/studio/conversation-service";
 import { createPausedRun, getPendingPausedRunForConversation, getLatestPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
-import { persistMemory } from "@/lib/studio/memory-service";
+import { persistMemory, recallMemories } from "@/lib/studio/memory-service";
+import { isValidAgentSlug } from "@/lib/studio/agent-registry";
 import { resolveRuntimeAgent } from "@/lib/agent-runtime";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { reserveCredits, settleRun } from "@/lib/agent-billing";
@@ -1852,10 +1853,13 @@ describe("POST /api/studio/conversations/[conversationId]/messages — project r
       activeAgentSlug: "litt",
       ownerId: "user_123",
     } as any);
-    vi.mocked(buildStudioContext).mockResolvedValue({
-      projectId: "proj-old",
-      projectName: "Old Project",
-    } as any);
+    vi.mocked(buildStudioContext).mockImplementation(
+      async (_uid: string, _cid: string, pid: string) =>
+        ({
+          projectId: pid,
+          projectName: pid === "proj-new" ? "New Project" : "Old Project",
+        }) as any,
+    );
     vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
       workspaceExecutionAvailable: true,
       workspaceId: "ws-123",
@@ -1879,6 +1883,11 @@ describe("POST /api/studio/conversations/[conversationId]/messages — project r
     expect(body.code).toBe("PROJECT_MISMATCH");
     expect(body.error).toBe("Project mismatch");
     expect(body.detail).toContain("Old Project");
+    expect(body.detail).toContain("New Project");
+    // BOTH projects are named, by id and display name — the client's
+    // stop-and-ask prompt is built from these fields.
+    expect(body.conversationProject).toEqual({ id: "proj-old", name: "Old Project" });
+    expect(body.viewedProject).toEqual({ id: "proj-new", name: "New Project" });
     // The run must never start — no workspace transport is created, so no
     // mutation can reach the wrong project's workspace.
     expect(createWorkspaceTransport).not.toHaveBeenCalled();
@@ -1910,12 +1919,14 @@ describe("POST /api/studio/conversations/[conversationId]/messages — project r
 describe("POST /api/studio/conversations/[conversationId]/messages — never-bound conversation guard", () => {
   // SUPERSEDED IN PART (2026-11-11, Larry's directive): an unbound chat
   // (projectId=null, e.g. Global LiTT) acting in a project the user is
-  // viewing now BINDS to that ownership-verified project and runs — see
-  // the "run project resolution" describe. What remains guarded here: a
-  // viewed project that does NOT resolve for this user must refuse with
-  // the specific reason, and the server must never silently substitute a
-  // different project (the mock below resolves NO project, so the viewed
-  // project is unverifiable).
+  // viewing binds to that ownership-verified project — SUPERSEDED AGAIN
+  // (2026-11-12, Larry's stop-and-ask ruling): the bind now happens only
+  // after the user's explicit confirmation (see the "run project
+  // resolution" and "project-context guard" describes). What remains
+  // guarded here: a viewed project that does NOT resolve for this user
+  // must refuse with the specific reason, and the server must never
+  // silently substitute a different project (the mock below resolves NO
+  // project, so the viewed project is unverifiable).
   beforeEach(() => {
     vi.clearAllMocks();
     resetExecutionRegistryForTests();
@@ -1959,11 +1970,13 @@ describe("POST /api/studio/conversations/[conversationId]/messages — never-bou
     expect(createWorkspaceTransport).not.toHaveBeenCalled();
   });
 
-  it("still allows the legacy rebind path when the client omits projectId", async () => {
+  it("still consults the current-project fallback when the client omits projectId", async () => {
     const req = makeRequest({});
     const res = await POST(req, routeParams);
 
-    // Older clients keep the previous behavior: the fallback may rebind.
+    // The fallback resolution still runs — it now feeds the stop-and-ask
+    // confirmation instead of a silent rebind. With no project resolving
+    // at all, the outcome is the honest 404, never a 500.
     expect(resolveCurrentProject).toHaveBeenCalled();
     expect(res.status).not.toBe(500);
   });
@@ -2055,10 +2068,30 @@ describe("POST /api/studio/conversations/[conversationId]/messages — run proje
     } as any);
   });
 
-  it("Larry's case: unbound Global chat, client omits projectId — the resolved current project drives the transport and the run", async () => {
+  it("Larry's case: unbound Global chat, client omits projectId — stop-and-ask, no silent bind to the current project", async () => {
     vi.mocked(resolveCurrentProject).mockResolvedValue({ projectId: "proj-active" } as any);
 
     const req = makeRequest({});
+    const res = await POST(req, routeParams);
+    const body = await res.json();
+
+    // Binding this chat to the resolved current project is a binding
+    // change — under the stop-and-ask ruling it stops with a structured
+    // confirmation naming the target project. Nothing persists, nothing
+    // runs (previously this bound silently and executed).
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("PROJECT_CONTEXT_CONFIRM");
+    expect(body.conversationProject).toBeNull();
+    expect(body.targetProject).toEqual({ id: "proj-active", name: "Project proj-active" });
+    expect(bindUpdates.filter((u) => "project_id" in u)).toEqual([]);
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+    expect(runLaunchFlow).not.toHaveBeenCalled();
+  });
+
+  it("Larry's case, confirmed: with projectContextDecision 'rebind', the resolved current project drives the transport and the run", async () => {
+    vi.mocked(resolveCurrentProject).mockResolvedValue({ projectId: "proj-active" } as any);
+
+    const req = makeRequest({ projectContextDecision: "rebind" });
     const res = await POST(req, routeParams);
     expect(res.status).toBe(200);
     await readSSE(res);
@@ -2069,15 +2102,34 @@ describe("POST /api/studio/conversations/[conversationId]/messages — run proje
     const launchOptions = vi.mocked(runLaunchFlow).mock.calls[0][0] as any;
     expect(launchOptions.projectId).toBe("proj-active");
     expect(launchOptions.transport.projectId).toBe("proj-active");
-    // The binding is persisted so future turns resolve directly.
+    // The binding is persisted — now with the user's explicit consent.
     expect(bindUpdates).toContainEqual({ project_id: "proj-active" });
   });
 
-  it("unbound chat + client-supplied viewed project: binds to the viewed project, never substitutes the most-recent one", async () => {
+  it("unbound chat + client-supplied viewed project: stop-and-ask naming the viewed project, never substitutes the most-recent one", async () => {
     // Decoy: most-recent resolution would pick a different project.
     vi.mocked(resolveCurrentProject).mockResolvedValue({ projectId: "proj-active" } as any);
 
     const req = makeRequest({ projectId: "proj-viewed" });
+    const res = await POST(req, routeParams);
+    const body = await res.json();
+
+    // The first bind is a binding change — it stops for confirmation,
+    // aimed at the VIEWED project (the fallback is never even consulted,
+    // so the most-recent project can't be substituted in).
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("PROJECT_CONTEXT_CONFIRM");
+    expect(body.targetProject).toEqual({ id: "proj-viewed", name: "Project proj-viewed" });
+    expect(resolveCurrentProject).not.toHaveBeenCalled();
+    expect(bindUpdates.filter((u) => "project_id" in u)).toEqual([]);
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+  });
+
+  it("unbound chat + viewed project, confirmed 'rebind': binds to the viewed project, never substitutes the most-recent one", async () => {
+    // Decoy: most-recent resolution would pick a different project.
+    vi.mocked(resolveCurrentProject).mockResolvedValue({ projectId: "proj-active" } as any);
+
+    const req = makeRequest({ projectId: "proj-viewed", projectContextDecision: "rebind" });
     const res = await POST(req, routeParams);
     expect(res.status).toBe(200);
     await readSSE(res);
@@ -2114,5 +2166,344 @@ describe("POST /api/studio/conversations/[conversationId]/messages — run proje
     expect(res.status).toBe(404);
     expect(createWorkspaceTransport).not.toHaveBeenCalled();
     expect(runLaunchFlow).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/studio/conversations/[conversationId]/messages — project-context guard (B5: stop-and-ask)", () => {
+  // Larry's ruling (2026-11-12 19:46 ET): on a project mismatch Studio
+  // must STOP AND ASK FIRST — never silently move or rebind. The route
+  // returns a structured 409 naming BOTH projects and persists nothing;
+  // only a resubmit carrying an explicit projectContextDecision
+  // ("switch" | "rebind") may proceed.
+  const routeParams = { params: Promise.resolve({ conversationId: "conv-123" }) };
+  const OWNED = new Set(["proj-old", "proj-new", "proj-active", "proj-viewed"]);
+  let bindUpdates: Array<Record<string, unknown>>;
+  let conversationProjectId: string | null;
+  let duplicateInsert = false;
+  const projectBinds = () => bindUpdates.filter((u) => "project_id" in u);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetExecutionRegistryForTests();
+    bindUpdates = [];
+    conversationProjectId = "proj-old";
+    duplicateInsert = false;
+
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getConversation).mockImplementation(async () => ({
+      id: "conv-123",
+      projectId: conversationProjectId,
+      revision: 1,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    }) as any);
+    // Ownership-scoped resolution: an id resolves iff it is the user's.
+    vi.mocked(buildStudioContext).mockImplementation(
+      async (_uid: string, _cid: string, pid: string) =>
+        (pid && OWNED.has(pid) ? { projectId: pid, projectName: `Project ${pid}` } : null) as any,
+    );
+    vi.mocked(resolveCurrentProject).mockResolvedValue({ projectId: "proj-active" } as any);
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: true,
+      workspaceId: "ws-123",
+      executionMode: "auto",
+    } as any);
+    vi.mocked(insertMessage).mockImplementation(async (args: any) => ({
+      message: { id: `msg-${args.role}`, ...args },
+      duplicate: duplicateInsert,
+      error: null,
+    }) as any);
+    vi.mocked(listMessages).mockResolvedValue([] as any);
+    vi.mocked(updateMessageStatus).mockResolvedValue(true as any);
+    vi.mocked(createWorkspaceTransport).mockImplementation(
+      async (pid: string) =>
+        ({ projectId: pid, userId: "user_123", workspaceId: "ws-123", fileOpsReachable: true }) as any,
+    );
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: "https://preview.example.com",
+      productionUrl: null,
+      finalText: "Done.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [
+          { toolId: "files.write", toolCallId: "tc1", inputs: { path: "index.html" }, success: true, mutating: true, summary: "saved", paths: ["index.html"] },
+        ],
+        workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true },
+        cancelled: false,
+        pendingApproval: null,
+      },
+      cancelled: false,
+      totalDurationMs: 10,
+    } as any);
+    actionRuntimeMocks.createActionRun.mockResolvedValue({
+      id: "action-run-123",
+      userId: "user_123",
+      projectId: "proj-old",
+      conversationId: "conv-123",
+      kind: "composite",
+      status: "queued",
+    } as any);
+    actionRuntimeMocks.transitionActionRunEventActivity.mockResolvedValue({} as any);
+    actionRuntimeMocks.transitionActionRun.mockResolvedValue({} as any);
+    actionRuntimeMocks.requestActionRunCancellation.mockResolvedValue({} as any);
+    // Capturing admin so conversation-bind writes are assertable.
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      rpc: vi.fn().mockResolvedValue({ data: 2, error: null }),
+      from: vi.fn(() => ({
+        update: vi.fn((values: Record<string, unknown>) => {
+          bindUpdates.push(values);
+          return { eq: vi.fn(() => ({ eq: vi.fn(() => ({})) })) };
+        }),
+      })),
+    } as any);
+  });
+
+  it("bound chat viewed in another project: 409 PROJECT_MISMATCH naming BOTH projects — persists nothing, runs nothing", async () => {
+    const res = await POST(makeRequest({ projectId: "proj-new" }), routeParams);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("PROJECT_MISMATCH");
+    expect(body.conversationProject).toEqual({ id: "proj-old", name: "Project proj-old" });
+    expect(body.viewedProject).toEqual({ id: "proj-new", name: "Project proj-new" });
+    expect(body.detail).toContain("Project proj-old");
+    expect(body.detail).toContain("Project proj-new");
+    expect(projectBinds()).toEqual([]);
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+    expect(runLaunchFlow).not.toHaveBeenCalled();
+  });
+
+  it("confirmed 'switch': runs in the chat's own project and persists no rebind", async () => {
+    const res = await POST(
+      makeRequest({ projectId: "proj-new", projectContextDecision: "switch" }),
+      routeParams,
+    );
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    expect(createWorkspaceTransport).toHaveBeenCalledWith("proj-old", "user_123");
+    expect(createWorkspaceTransport).not.toHaveBeenCalledWith("proj-new", "user_123");
+    expect(projectBinds()).toEqual([]);
+  });
+
+  it("confirmed 'rebind': runs in the viewed project and persists the new binding", async () => {
+    const res = await POST(
+      makeRequest({ projectId: "proj-new", projectContextDecision: "rebind" }),
+      routeParams,
+    );
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    expect(createWorkspaceTransport).toHaveBeenCalledWith("proj-new", "user_123");
+    expect(projectBinds()).toContainEqual({ project_id: "proj-new" });
+  });
+
+  it("viewed project matches the chat's project: proceeds untouched, no decision needed", async () => {
+    const res = await POST(makeRequest({ projectId: "proj-old" }), routeParams);
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    expect(createWorkspaceTransport).toHaveBeenCalledWith("proj-old", "user_123");
+    expect(projectBinds()).toEqual([]);
+  });
+
+  it("two-round trip: refusal, then the confirmed resubmit (same clientRequestId) executes the already-persisted message", async () => {
+    const first = await POST(
+      makeRequest({ clientRequestId: "req-guard-2round", projectId: "proj-new" }),
+      routeParams,
+    );
+    expect(first.status).toBe(409);
+    expect((await first.json()).code).toBe("PROJECT_MISMATCH");
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+
+    // The resubmit reuses the clientRequestId — the server sees the
+    // already-persisted user message as a duplicate, and the explicit
+    // decision is what lets it continue into execution instead of
+    // returning a duplicate that never runs.
+    duplicateInsert = true;
+    const second = await POST(
+      makeRequest({
+        clientRequestId: "req-guard-2round",
+        expectedRevision: 2,
+        projectId: "proj-new",
+        projectContextDecision: "switch",
+      }),
+      routeParams,
+    );
+    expect(second.status).toBe(200);
+    await readSSE(second);
+    expect(createWorkspaceTransport).toHaveBeenCalledWith("proj-old", "user_123");
+    expect(projectBinds()).toEqual([]);
+  });
+
+  it("stale binding + viewed project: 409 PROJECT_CONTEXT_CONFIRM instead of a silent repair; confirmed rebind repairs it openly", async () => {
+    conversationProjectId = "proj-stale"; // no longer resolves for this user
+
+    const res = await POST(makeRequest({ projectId: "proj-viewed" }), routeParams);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("PROJECT_CONTEXT_CONFIRM");
+    expect(body.conversationProject).toEqual({ id: "proj-stale", name: null });
+    expect(body.targetProject).toEqual({ id: "proj-viewed", name: "Project proj-viewed" });
+    expect(projectBinds()).toEqual([]);
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+
+    const confirmed = await POST(
+      makeRequest({ projectId: "proj-viewed", projectContextDecision: "rebind" }),
+      routeParams,
+    );
+    expect(confirmed.status).toBe(200);
+    await readSSE(confirmed);
+    expect(createWorkspaceTransport).toHaveBeenCalledWith("proj-viewed", "user_123");
+    expect(projectBinds()).toContainEqual({ project_id: "proj-viewed" });
+  });
+});
+
+describe("POST /api/studio/conversations/[conversationId]/messages — marketplace agentSlug (M4)", () => {
+  // The route used to route EVERY marketplace instance as "litt"
+  // (`result.agent.agentId ? "litt" : "litt"`), so memory/capability
+  // lookups for a bought agent ran under the built-in agent's identity.
+  // They must use the resolved template's own slug (agents.slug, via
+  // RuntimeAgent.templateSlug), falling back to "litt" only when the
+  // template slug is missing or not a known slug.
+  const routeParams = { params: Promise.resolve({ conversationId: "conv-123" }) };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetExecutionRegistryForTests();
+
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv-123",
+      projectId: "proj-123",
+      revision: 1,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    } as any);
+    vi.mocked(buildStudioContext).mockResolvedValue({
+      projectId: "proj-123",
+      projectName: "Project proj-123",
+    } as any);
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: true,
+      workspaceId: "ws-123",
+      executionMode: "auto",
+    } as any);
+    vi.mocked(insertMessage).mockImplementation(async (args: any) => ({
+      message: { id: `msg-${args.role}`, ...args },
+      duplicate: false,
+      error: null,
+    }) as any);
+    vi.mocked(updateMessageStatus).mockResolvedValue(true as any);
+    vi.mocked(createWorkspaceTransport).mockImplementation(
+      async (pid: string) =>
+        ({ projectId: pid, userId: "user_123", workspaceId: "ws-123", fileOpsReachable: true }) as any,
+    );
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: "https://preview.example.com",
+      productionUrl: null,
+      finalText: "Done.",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [
+          { toolId: "files.write", toolCallId: "tc1", inputs: { path: "index.html" }, success: true, mutating: true, summary: "saved", paths: ["index.html"] },
+        ],
+        workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true },
+        cancelled: false,
+        pendingApproval: null,
+      },
+      cancelled: false,
+      totalDurationMs: 10,
+    } as any);
+    actionRuntimeMocks.createActionRun.mockResolvedValue({
+      id: "action-run-123",
+      userId: "user_123",
+      projectId: "proj-123",
+      conversationId: "conv-123",
+      kind: "composite",
+      status: "queued",
+    } as any);
+    actionRuntimeMocks.transitionActionRunEventActivity.mockResolvedValue({} as any);
+    actionRuntimeMocks.transitionActionRun.mockResolvedValue({} as any);
+    actionRuntimeMocks.requestActionRunCancellation.mockResolvedValue({} as any);
+    vi.mocked(parseAgentSelection).mockReturnValue({ kind: "instance", id: "inst-1" } as any);
+    // Realistic slug validation (the module mock defaults to always-true).
+    vi.mocked(isValidAgentSlug).mockImplementation((s: string) =>
+      ["litt", "spark", "researcher", "writer", "marketer", "coder", "analyst", "nova", "forge", "echo"].includes(s),
+    );
+    vi.mocked(reserveCredits).mockResolvedValue({
+      ok: true,
+      runId: "run-1",
+      reservedCredits: 10,
+      reservationId: "res-1",
+    } as any);
+  });
+
+  const agentWith = (templateSlug: string | null) =>
+    ({
+      ok: true,
+      agent: {
+        agentInstanceId: "inst-1",
+        agentId: "tpl-uuid-1",
+        templateSlug,
+        agentVersionId: "ver-1",
+        model: "test-model",
+        memoryNamespace: "ns-1",
+      },
+    }) as any;
+
+  it("routes memory/capability lookups by the marketplace template's own slug", async () => {
+    vi.mocked(resolveRuntimeAgent).mockResolvedValue(agentWith("researcher"));
+
+    const res = await POST(makeRequest({ agentInstanceId: "inst-1" }), routeParams);
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    expect(recallMemories).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "proj-123",
+      expect.objectContaining({ agentSlug: "researcher" }),
+    );
+    expect(buildPrompt).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ agentSlug: "researcher" }),
+      expect.anything(),
+    );
+  });
+
+  it("falls back to 'litt' when the template slug is missing", async () => {
+    vi.mocked(resolveRuntimeAgent).mockResolvedValue(agentWith(null));
+
+    const res = await POST(makeRequest({ agentInstanceId: "inst-1" }), routeParams);
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    expect(recallMemories).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "proj-123",
+      expect.objectContaining({ agentSlug: "litt" }),
+    );
+  });
+
+  it("falls back to 'litt' when the template slug is not a known agent slug", async () => {
+    vi.mocked(resolveRuntimeAgent).mockResolvedValue(agentWith("bogus-slug"));
+
+    const res = await POST(makeRequest({ agentInstanceId: "inst-1" }), routeParams);
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    expect(recallMemories).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "proj-123",
+      expect.objectContaining({ agentSlug: "litt" }),
+    );
   });
 });
