@@ -188,9 +188,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       // sessions are unchanged (full access via isOwner).
       const simulationActive =
         entitlements.simulation !== null && entitlements.simulation !== "owner";
-      allowLittPaidProviders = simulationActive
-        ? entitlements.premiumModels
-        : entitlements.isOwner || entitlements.premiumModels;
+      allowLittPaidProviders = entitlements.isOwner || entitlements.premiumModels;
+      if (simulationActive) {
+        // Simulation overrides the isOwner short-circuit above: access
+        // follows only the simulated tier's own entitlements.
+        allowLittPaidProviders = entitlements.premiumModels;
+      }
     } catch {
       // On entitlement lookup failure, default-deny (safe)
       allowLittPaidProviders = false;
