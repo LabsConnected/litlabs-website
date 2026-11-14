@@ -47,9 +47,9 @@ const MORE_MODES: { id: MoreMode; label: string; icon: typeof Puzzle; group: str
 /**
  * CommandStudioNav — premium icon rail (56px wide).
  *
- * Compact vertical icon rail with LiTT green active indicator, soft green
- * hover treatment, and a plan/usage footer pill. The "More" destination
- * opens a drawer of secondary tools.
+ * Compact vertical icon rail with LiTT green active coloring (no
+ * indicator bar), soft green hover treatment, and a plan/usage footer
+ * pill. The "More" destination opens a drawer of secondary tools.
  */
 export default function CommandStudioNav({
   active,
@@ -110,16 +110,11 @@ export default function CommandStudioNav({
               aria-label={item.label}
               aria-current={isActive ? "page" : undefined}
             >
-              {isActive && (
-                <span
-                  className="absolute -left-1 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full"
-                  style={{
-                    backgroundColor: "var(--litt-primary)",
-                    boxShadow: "0 0 6px var(--litt-primary)",
-                  }}
-                  aria-hidden
-                />
-              )}
+              {/* No left-edge active indicator bar (Larry, 2026-11-13:
+                  no highlighted bar over anything — the page opens
+                  clean). Active state is carried by the accent color,
+                  background tint, and aria-current, same as the mobile
+                  bottom nav. */}
               <Icon
                 size={17}
                 strokeWidth={isActive ? 2.2 : 1.7}

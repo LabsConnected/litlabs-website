@@ -2997,12 +2997,12 @@ function CommandStudioContent() {
           cards: mission · checkpoints · next actions. All data comes from
           the same stores as the plan surface; no fabricated content.
           Mobile (<1024px): the card stack is replaced by the single
-          MobileBuildStatusBar; the full cards live in the Build sheet. */}
-      {isMobileLitt ? (
-        <div className="shrink-0 px-3 pt-2">
-          <MobileBuildStatusBar open={mobileBuildOpen} onOpen={() => setMobileBuildOpen(true)} />
-        </div>
-      ) : null}
+          MobileBuildStatusBar control; the full cards live in the Build
+          sheet. Clean-open (Larry, 2026-11-13): that control is NOT
+          rendered here anymore — the old dark bar pinned above the
+          transcript sat over the first message. It now renders in the
+          LiTTMobileSheet header chrome (buildStatusSlot below), light
+          and in the sheet's own layout flow. */}
       <StudioWorkSurface
         messages={conversation.messages}
         conversationId={conversation.selectedConversationId ?? null}
@@ -4294,6 +4294,9 @@ function CommandStudioContent() {
               chatContent={littChatContent}
               liveContent={littLiveContent}
               filesContent={projectFilesContent}
+              buildStatusSlot={(
+                <MobileBuildStatusBar open={mobileBuildOpen} onOpen={() => setMobileBuildOpen(true)} />
+              )}
               projectName={capabilities.projectName}
               branch={capabilities.activeBranch}
               onOpenTools={() => setMobileToolsOpen(true)}

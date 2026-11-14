@@ -91,6 +91,13 @@ describe("MobileBuildStatusBar", () => {
     expect(screen.queryByTestId("mobile-build-approval")).not.toBeInTheDocument();
   });
 
+  it("renders on the light studio surface — no dark bar (clean-open)", () => {
+    renderBar();
+    const bar = screen.getByTestId("mobile-build-status");
+    expect(bar.style.backgroundColor).toBe("var(--studio-surface)");
+    expect(bar.style.backgroundColor).not.toContain("16,12,26");
+  });
+
   it("clicking the bar calls onOpen", () => {
     const { onOpen } = renderBar();
 

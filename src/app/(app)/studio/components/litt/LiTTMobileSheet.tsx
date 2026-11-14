@@ -31,6 +31,12 @@ export interface LiTTMobileSheetProps {
   filesContent?: ReactNode;
   /** Optional approval UI rendered full-width at the top of the sheet, above the tabs */
   approvalSlot?: ReactNode;
+  /** Build status control (MobileBuildStatusBar) rendered in the sheet's
+   *  header chrome, under the tab row. Clean-open (Larry, 2026-11-13):
+   *  the opener lives here — in the sheet's own layout flow, on light
+   *  tokens — never as a dark bar over the chat transcript. When omitted,
+   *  no build status row renders. */
+  buildStatusSlot?: ReactNode;
   /** Project context for the slim second header row (mobile density redesign) */
   projectName?: string | null;
   branch?: string | null;
@@ -48,6 +54,7 @@ export default function LiTTMobileSheet({
   liveContent,
   filesContent,
   approvalSlot,
+  buildStatusSlot,
   projectName,
   branch,
   onOpenTools,
@@ -132,15 +139,19 @@ export default function LiTTMobileSheet({
         style={{
           top: "0px",
           height: `${sheetHeight}px`,
-          backgroundColor: "#0d0916",
-          borderColor: "rgba(255,255,255,0.07)",
+          backgroundColor: "var(--studio-surface)",
+          borderColor: "var(--studio-border)",
         }}
         data-testid="litt-mobile-sheet"
         role="dialog"
         aria-label="LiTT assistant"
         aria-modal="true"
       >
-        <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/20" aria-hidden />
+        <div
+          className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full"
+          style={{ backgroundColor: "var(--studio-border-strong)" }}
+          aria-hidden
+        />
 
         {approvalSlot && (
           <div className="w-full shrink-0" data-testid="litt-mobile-approval-slot">
@@ -151,15 +162,15 @@ export default function LiTTMobileSheet({
         <div
           className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5"
           style={{
-            borderColor: "rgba(255,255,255,0.07)",
-            backgroundColor: "rgba(24,18,38,0.96)",
+            borderColor: "var(--studio-border)",
+            backgroundColor: "var(--studio-surface)",
           }}
         >
           <div
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
             style={{
               background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 20%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
-              border: "1px solid rgba(255,255,255,0.13)",
+              border: "1px solid var(--studio-border-strong)",
             }}
             aria-hidden
           >
@@ -230,7 +241,7 @@ export default function LiTTMobileSheet({
             <button
               type="button"
               onClick={onOpenTools}
-              className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-white/10"
+              className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Open tools"
               data-testid="litt-mobile-tools-button"
@@ -241,7 +252,7 @@ export default function LiTTMobileSheet({
           <button
             type="button"
             onClick={onClose}
-            className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-white/10"
+            className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-black/5"
             style={{ color: "var(--text-muted)" }}
             aria-label="Close LiTT"
             data-testid="litt-mobile-sheet-close"
@@ -250,10 +261,23 @@ export default function LiTTMobileSheet({
           </button>
         </div>
 
+        {buildStatusSlot && (
+          <div
+            className="shrink-0 border-b px-2 py-1.5"
+            style={{
+              borderColor: "var(--studio-border)",
+              backgroundColor: "var(--studio-surface)",
+            }}
+            data-testid="litt-mobile-build-status-slot"
+          >
+            {buildStatusSlot}
+          </div>
+        )}
+
         {(projectName || branch) && (
           <div
             className="flex shrink-0 items-center border-b px-3 py-1"
-            style={{ borderColor: "rgba(255,255,255,0.07)" }}
+            style={{ borderColor: "var(--studio-border)" }}
             data-testid="litt-mobile-context"
           >
             <span
