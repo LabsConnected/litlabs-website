@@ -213,6 +213,20 @@ export async function chargeLlmUsage(
   }
 
   const idempotencyKey = `llm:${input.callId}`;
+
+  // debit_credits returns success=true on an idempotent replay — identical
+  // to a fresh debit — so the response row cannot distinguish the two. The
+  // ledger key is the only reliable signal: check for it before the call.
+  // The RPC's advisory lock makes the ledger write atomic, so a pre-existing
+  // key means this billable attempt already ran.
+  const { data: priorRows } = await admin
+    .from("credit_ledger")
+    .select("id")
+    .eq("user_id", user.id)
+    .like("idempotency_key", `${idempotencyKey}:%`)
+    .limit(1);
+  const replayed = (priorRows?.length ?? 0) > 0;
+
   const { data, error } = await admin.rpc("debit_credits", {
     p_user_id: user.id,
     p_amount: cost.retailLiTTBits,
@@ -236,7 +250,6 @@ export async function chargeLlmUsage(
 
   const row = Array.isArray(data) ? data[0] : data;
   const balance = Number(row?.remaining ?? row?.total_after ?? 0);
-  const replayed = row?.success === false && balance > 0;
 
   // Insufficient balance
   if (row?.success === false && balance < cost.retailLiTTBits) {
