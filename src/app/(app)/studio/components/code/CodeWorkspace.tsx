@@ -63,11 +63,11 @@ type DialogState =
 type MutationAction = "write" | "delete" | "mkdir" | "rename";
 
 const GIT_BADGE_COLORS: Record<NonNullable<FileEntry["gitStatus"]>, { bg: string; color: string; label: string }> = {
-  M: { bg: "rgba(227,179,65,0.15)", color: "#e3b341", label: "Modified" },
-  A: { bg: "rgba(114,242,56,0.15)", color: "#72f238", label: "Added" },
-  D: { bg: "rgba(239,68,68,0.15)", color: "#ef4444", label: "Deleted" },
-  U: { bg: "rgba(96,165,250,0.15)", color: "#60a5fa", label: "Untracked" },
-  C: { bg: "rgba(34,211,238,0.15)", color: "#22d3ee", label: "Conflict" },
+  M: { bg: "rgba(227,179,65,0.15)", color: "#b45309", label: "Modified" },
+  A: { bg: "rgba(114,242,56,0.15)", color: "#16a34a", label: "Added" },
+  D: { bg: "rgba(239,68,68,0.15)", color: "#dc2626", label: "Deleted" },
+  U: { bg: "rgba(96,165,250,0.15)", color: "#2563eb", label: "Untracked" },
+  C: { bg: "rgba(34,211,238,0.15)", color: "#0891b2", label: "Conflict" },
 };
 
 function normalizePath(value: string): string {
@@ -541,7 +541,7 @@ export function CodeWorkspace({
   // ─── Render ─────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
+    <div className="flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "var(--studio-surface)" }}>
       {/* Top bar: view toggle + repo info */}
       <div
         className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 glass-toolbar"
@@ -560,7 +560,7 @@ export function CodeWorkspace({
         )}
         <div className="flex-1" />
         {/* View mode toggle */}
-        <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
+        <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: "rgba(0,0,0,0.04)" }}>
           {CODE_VIEW_MODES.map((mode) => {
             const Icon = mode.icon;
             const isActive = viewMode === mode.id;
@@ -586,7 +586,7 @@ export function CodeWorkspace({
 
       {/* Error banner */}
       {error && (
-        <div className="shrink-0 border-b px-3 py-1.5 text-[11px]" style={{ borderColor: "rgba(239,68,68,0.2)", backgroundColor: "rgba(239,68,68,0.06)", color: "#fca5a5" }}>
+        <div className="shrink-0 border-b px-3 py-1.5 text-[11px]" style={{ borderColor: "rgba(239,68,68,0.2)", backgroundColor: "rgba(239,68,68,0.06)", color: "#dc2626" }}>
           {error}
           <button type="button" onClick={() => setError(null)} className="ml-2 text-[10px] underline">dismiss</button>
         </div>
@@ -658,7 +658,7 @@ export function CodeWorkspace({
                 style={{ borderColor: "var(--studio-border)", color: "var(--text-primary)" }}
                 aria-label="Name"
               />
-              <button type="submit" className="rounded p-1" style={{ backgroundColor: "var(--litt-primary)", color: "#000" }} aria-label="Confirm">
+              <button type="submit" className="rounded p-1" style={{ backgroundColor: "var(--litt-primary)", color: "#fff" }} aria-label="Confirm">
                 <Save size={10} />
               </button>
               <button type="button" onClick={() => setDialog(null)} className="rounded p-1 hover:bg-white/8" style={{ color: "var(--text-muted)" }} aria-label="Cancel">
@@ -672,7 +672,7 @@ export function CodeWorkspace({
             </div>
           )}
           {(workspaceStatus === "failed" || workspaceStatus === "error") && (
-            <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.2)", color: "#fca5a5" }}>
+            <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.2)", color: "#dc2626" }}>
               <span>Workspace recovery failed</span>
               <button
                 type="button"
@@ -724,7 +724,7 @@ export function CodeWorkspace({
                       onClick={() => setActiveTab(tab.path)}
                       className="group flex shrink-0 cursor-pointer items-center gap-1.5 rounded-t px-2.5 py-1.5 text-[11px] font-medium transition"
                       style={{
-                        backgroundColor: isActive ? "#0a0b10" : "transparent",
+                        backgroundColor: isActive ? "var(--studio-bg)" : "transparent",
                         color: isActive ? "var(--text-primary)" : "var(--text-muted)",
                         borderBottom: isActive ? "2px solid #9b4dff" : "2px solid transparent",
                       }}
@@ -761,13 +761,13 @@ export function CodeWorkspace({
 
               {/* External-change conflict strip — saving a stale tab must be explicit */}
               {activeTab && conflictPaths.has(activeTab) && (
-                <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)", color: "#fca5a5" }}>
+                <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)", color: "#dc2626" }}>
                   <span className="min-w-0 flex-1">LiTT changed this file while you had unsaved edits. Saving now would overwrite those changes.</span>
                   <button
                     type="button"
                     onClick={() => void reloadTabContent(activeTab)}
                     className="shrink-0 rounded-md px-2 py-1 font-bold"
-                    style={{ backgroundColor: "rgba(239,68,68,0.15)", color: "#fecaca" }}
+                    style={{ backgroundColor: "rgba(239,68,68,0.15)", color: "#b91d1c" }}
                   >
                     Reload latest
                   </button>
