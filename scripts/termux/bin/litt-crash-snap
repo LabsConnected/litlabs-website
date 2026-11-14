@@ -1,0 +1,56 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# litt-crash-snap — post-kill forensic capture. Run IMMEDIATELY after a
+# suspected Android LMK/DuraSpeed kill of a Termux process: the SELinux
+# audit flood evicts the kernel log buffer in ~1h, so evidence is
+# perishable.
+#
+# Writes ~/lmk-evidence-<yyyymmdd-hhmmss>.log containing:
+#   - timestamp + meminfo + memory pressure (PSI) if exposed
+#   - VmHWM/VmRSS/VmSize for live devin/node/ollama/llama-server procs
+#   - logcat -b all filtered for lmkd/lowmemorykiller/duraspeed/killed/
+#     oom/anr lines (best effort — needs READ_LOGS or root for full buffer)
+#
+# Read-only with respect to the system: creates exactly ONE file per run,
+# never signals or modifies any process.
+set -u
+
+if [ -d /data/data/com.termux/files/home ]; then
+  HOME_DIR=/data/data/com.termux/files/home
+else
+  HOME_DIR="$HOME"
+fi
+TS="$(date +%Y%m%d-%H%M%S)"
+OUT="${LITT_CRASH_SNAP_OUT:-$HOME_DIR/lmk-evidence-$TS.log}"
+LOGCAT=/data/data/com.termux/files/usr/bin/logcat
+[ -x "$LOGCAT" ] || LOGCAT="$(command -v logcat 2>/dev/null || true)"
+
+{
+  echo "=== litt-crash-snap $(date -Is) ==="
+  echo "--- /proc/meminfo ---"
+  grep -E '^(MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree|Committed_AS):' /proc/meminfo
+  if [ -r /proc/pressure/memory ]; then
+    echo "--- /proc/pressure/memory ---"; cat /proc/pressure/memory
+  fi
+  echo "--- VmHWM/VmRSS/VmSize: devin node ollama llama-server ---"
+  for d in /proc/[0-9]*; do
+    p=${d#/proc/}
+    c=$(cat "$d/comm" 2>/dev/null) || continue
+    case "$c" in
+      devin|node|ollama|llama-server|llama.cpp|python*|pnpm*)
+        line=$(grep -E '^(VmHWM|VmRSS|VmSize):' "$d/status" 2>/dev/null | tr '\n' ' ')
+        [ -n "$line" ] && echo "pid $p ($c): $line" ;;
+    esac
+  done
+  echo "--- logcat -b all (filtered) ---"
+  if [ -n "$LOGCAT" ]; then
+    timeout 45 "$LOGCAT" -d -b all 2>&1 \
+      | grep -iE 'lmkd|lowmemorykiller|low_memory|duraspeed|killed|sigkill|oom|anr in|out of memory|audit_lost' \
+      | tail -400
+    echo "--- end logcat filter ---"
+  else
+    echo "logcat unavailable"
+  fi
+} >"$OUT" 2>&1
+
+echo "litt-crash-snap: wrote $OUT ($(wc -l <"$OUT" 2>/dev/null) lines)"
+echo "  review: grep -iE 'lmk|duraspeed|kill' $OUT | head"

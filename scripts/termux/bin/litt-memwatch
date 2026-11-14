@@ -1,0 +1,136 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# litt-memwatch — lightweight memory sampler for Android/Termux sessions.
+#
+# Appends one line every INTERVAL (default 30s) to LOG (default
+# ~/litt-memwatch.log):
+#
+#   <epoch> <iso8601> MemAvailable=<kB> SwapFree=<kB> [LOW-MEM]
+#
+# LOW-MEM is appended when MemAvailable < LOW_KB (default 700 MB).
+# LOG-ONLY: never signals, kills, or renices any process — automatic
+# process termination is explicitly out of scope by policy.
+#
+# Bounded: once per TRIM_EVERY samples the log is checked; when it
+# exceeds MAX_BYTES it is trimmed to the newest KEEP_LINES lines, so a
+# long-running watch can never fill the disk.
+#
+# Usage:
+#   litt-memwatch run [--interval S] [--samples N]   foreground loop
+#   litt-memwatch once                             one sample
+#   litt-memwatch start                            background (nohup)
+#   litt-memwatch stop                             stop background run
+#   litt-memwatch status                           state + last samples
+#
+# Env: LITT_MEMWATCH_LOG, LITT_MEMWATCH_INTERVAL, LITT_MEMWATCH_LOW_KB,
+#      LITT_MEMWATCH_MAX_BYTES, LITT_HOME.
+set -u
+
+if [ -d /data/data/com.termux/files/home ]; then
+  HOME_DIR=/data/data/com.termux/files/home
+  PREFIX=/data/data/com.termux/files/usr
+else
+  HOME_DIR="$HOME"
+  PREFIX=/usr
+fi
+LOG="${LITT_MEMWATCH_LOG:-$HOME_DIR/litt-memwatch.log}"
+PID_FILE="${TMPDIR:-$PREFIX/tmp}/litt-memwatch.pid"
+INTERVAL="${LITT_MEMWATCH_INTERVAL:-30}"
+LOW_KB="${LITT_MEMWATCH_LOW_KB:-716800}"            # 700 MB
+MAX_BYTES="${LITT_MEMWATCH_MAX_BYTES:-4194304}"     # 4 MB hard cap
+KEEP_LINES=8000
+TRIM_EVERY=20                                     # trim check ~every 10 min
+
+memavail() {
+  awk '/^MemAvailable:/{a=$2}/^SwapFree:/{s=$2}END{print a+0, s+0}' /proc/meminfo
+}
+
+sample() {  # write one log line; echoes it to stdout when $1=echo
+  local a s line
+  read -r a s <<EOF
+$(memavail)
+EOF
+  line="$(date +%s) $(date -Is) MemAvailable=${a}kB SwapFree=${s}kB"
+  [ "$a" -lt "$LOW_KB" ] && line="$line LOW-MEM"
+  printf '%s\n' "$line" >>"$LOG"
+  [ "${1:-}" = "echo" ] && printf '%s\n' "$line"
+}
+
+trim_log() {
+  [ -f "$LOG" ] || return 0
+  local sz
+  sz=$(wc -c <"$LOG" 2>/dev/null || echo 0)
+  [ "$sz" -le "$MAX_BYTES" ] && return 0
+  local tmp="$LOG.tmp.$$"
+  if tail -n "$KEEP_LINES" "$LOG" >"$tmp" 2>/dev/null; then
+    mv "$tmp" "$LOG"
+    printf '# %s litt-memwatch: trimmed log to last %s lines (was %sB)\n' \
+      "$(date -Is)" "$KEEP_LINES" "$sz" >>"$LOG"
+  else
+    rm -f "$tmp"
+  fi
+}
+
+is_running() {  # prints pid when a live memwatch is recorded
+  [ -f "$PID_FILE" ] || return 1
+  local p
+  p=$(cat "$PID_FILE" 2>/dev/null || true)
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null || return 1
+  # Confirm it is really us, not a reused pid.
+  tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | grep -q "litt-memwatch" || return 1
+  echo "$p"
+}
+
+cmd_run() {
+  local samples=0 i=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --interval) INTERVAL="$2"; shift 2 ;;
+      --samples)  samples="$2"; shift 2 ;;
+      *) echo "litt-memwatch: unknown arg $1"; exit 2 ;;
+    esac
+  done
+  while :; do
+    sample
+    i=$((i + 1))
+    [ "$samples" -gt 0 ] && [ "$i" -ge "$samples" ] && break
+    [ $((i % TRIM_EVERY)) -eq 0 ] && trim_log
+    sleep "$INTERVAL"
+  done
+  trim_log
+}
+
+case "${1:-run}" in
+  run) shift; cmd_run "$@" ;;
+  once) sample echo ;;
+  start)
+    if p=$(is_running); then
+      echo "litt-memwatch: already running (pid $p, log $LOG)"; exit 0
+    fi
+    nohup "$0" run >>/dev/null 2>&1 &
+    echo $! >"$PID_FILE"
+    echo "litt-memwatch: started pid $(cat "$PID_FILE") -> $LOG"
+    ;;
+  stop)
+    if p=$(is_running); then
+      kill "$p" 2>/dev/null && echo "litt-memwatch: stopped pid $p"
+    else
+      echo "litt-memwatch: not running"
+    fi
+    rm -f "$PID_FILE"
+    ;;
+  status)
+    if p=$(is_running); then
+      echo "running (pid $p, interval ${INTERVAL}s)"
+    else
+      echo "not running"
+    fi
+    echo "log: $LOG ($([ -f "$LOG" ] && wc -c <"$LOG" || echo 0) bytes, cap $MAX_BYTES)"
+    echo "low-mem marker below ${LOW_KB}kB MemAvailable"
+    read -r a s <<EOF
+$(memavail)
+EOF
+    echo "now: MemAvailable=${a}kB SwapFree=${s}kB"
+    [ -f "$LOG" ] && { echo "--- last 3 ---"; tail -3 "$LOG"; }
+    ;;
+  *) echo "usage: litt-memwatch [run [--interval S] [--samples N]|once|start|stop|status]"; exit 2 ;;
+esac

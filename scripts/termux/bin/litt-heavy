@@ -1,0 +1,174 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# litt-heavy — one-at-a-time gate + memory preflight for heavy workloads
+# on this phone (Ollama model loads, benchmarks, Node builds/typechecks).
+#
+#   litt-heavy <cmd> [args...]    run cmd under the workload mutex
+#   litt-heavy check              print mem/swap vs thresholds (exit 0/4)
+#   litt-heavy status             lock holder + memory headroom
+#   litt-heavy flock-test         self-test the mutex (2nd holder refused)
+#
+# Concurrency protection: an exclusive non-blocking flock on $LOCK. A
+# second concurrent heavy task is REFUSED (exit 3) with the recorded
+# holder — heavy work serializes or fails fast instead of stacking into
+# an Android LMK/DuraSpeed kill.
+#
+# Memory preflight (conservative): commands whose basename matches
+#   *bench* *warm* quiet-test* gen_once* *acceptance* *failover*
+#   ollama llama-server pnpm npm node npx tsc vitest
+# (or any command when LITT_HEAVY_PREFLIGHT=1 or --preflight is given)
+# must clear, before launch:
+#   MemAvailable >= MIN_MEM_KB      (default 3 GB = on-device 1.7B floor)
+#   SwapFree     >= MIN_SWAP_PCT%   of SwapTotal (default 40)
+# Refusal prints the measured numbers and exits 4. Nothing is killed.
+#
+# For >4B-class local model loads raise the floor:
+#   LITT_HEAVY_MIN_MEM_KB=4500000 litt-heavy <cmd>
+# >4B on-device is refused by policy in the LiTT CLI itself — route those
+# to the PC instead.
+#
+# Re-entrancy: LITT_HEAVY_INSIDE=1 is exported for the wrapped command so
+# nested helpers (dex-ctl inside quiet-test.sh, etc.) skip re-acquisition
+# and do not self-deadlock.
+#
+# Exit codes: 2 usage · 3 lock held · 4 preflight refused · wrapped cmd's code.
+set -u
+
+if [ -d /data/data/com.termux/files/usr/tmp ]; then
+  LDIR=/data/data/com.termux/files/usr/tmp
+else
+  LDIR="${TMPDIR:-/tmp}"
+fi
+LOCK="$LDIR/litt-heavy.lock"
+HOLDER="$LDIR/litt-heavy.holder"
+
+MIN_MEM_KB="${LITT_HEAVY_MIN_MEM_KB:-3000000}"   # 3 GB floor (1.7B-4B class)
+MIN_SWAP_PCT="${LITT_HEAVY_MIN_SWAP_PCT:-40}"
+
+memstats() {
+  awk '/^MemAvailable:/{a=$2}/^SwapTotal:/{t=$2}/^SwapFree:/{f=$2}
+       END{print a+0, t+0, f+0}' /proc/meminfo
+}
+
+preflight() {  # $1 = command basename; exit 4 on refusal
+  local a t f swpct
+  read -r a t f <<EOF
+$(memstats)
+EOF
+  swpct=0; [ "$t" -gt 0 ] && swpct=$((f * 100 / t))
+  local ok=1 why=""
+  if [ "$a" -lt "$MIN_MEM_KB" ]; then
+    ok=0; why="MemAvailable ${a}kB < ${MIN_MEM_KB}kB floor"
+  fi
+  if [ "$swpct" -lt "$MIN_SWAP_PCT" ]; then
+    ok=0; why="${why:+$why; }SwapFree ${swpct}% < ${MIN_SWAP_PCT}% of SwapTotal"
+  fi
+  if [ "$ok" = 0 ]; then
+    echo "litt-heavy: PREFLIGHT REFUSED ($1): $why" >&2
+    echo "litt-heavy: retry after memory frees, or override with" >&2
+    echo "  LITT_HEAVY_MIN_MEM_KB / LITT_HEAVY_MIN_SWAP_PCT (at your own risk)" >&2
+    return 4
+  fi
+  return 0
+}
+
+needs_preflight() {  # $1 = basename of wrapped command
+  case "$1" in
+    *bench*|*warm*|quiet-test*|gen_once*|*acceptance*|*failover*|\
+    ollama|llama-server|pnpm|npm|node|npx|tsc|vitest) return 0 ;;
+  esac
+  [ "${LITT_HEAVY_PREFLIGHT:-0}" = "1" ]
+}
+
+acquire() {  # non-blocking exclusive lock; exit 3 if held
+  exec 9>"$LOCK"
+  if ! flock -n 9; then
+    local h
+    h=$(cat "$HOLDER" 2>/dev/null || echo "unknown")
+    echo "litt-heavy: REFUSED — another heavy task holds the lock:" >&2
+    echo "  $h" >&2
+    echo "  (serialize: wait for it, or check 'litt-heavy status')" >&2
+    exit 3
+  fi
+  printf '%s %s %s\n' "$$" "$(date -Is)" "$*" >"$HOLDER"
+}
+
+release() { rm -f "$HOLDER" 2>/dev/null || true; }
+
+cmd_check() {
+  local a t f swpct
+  read -r a t f <<EOF
+$(memstats)
+EOF
+  swpct=0; [ "$t" -gt 0 ] && swpct=$((f * 100 / t))
+  echo "MemAvailable: ${a}kB  (preflight floor ${MIN_MEM_KB}kB)"
+  echo "SwapFree:     ${f}kB of ${t}kB (${swpct}%, floor ${MIN_SWAP_PCT}%)"
+  if [ "$a" -ge "$MIN_MEM_KB" ] && [ "$swpct" -ge "$MIN_SWAP_PCT" ]; then
+    echo "preflight: PASS"; return 0
+  else
+    echo "preflight: REFUSE (heavy commands exit 4)"; return 4
+  fi
+}
+
+cmd_status() {
+  cmd_check || true
+  if [ -f "$HOLDER" ]; then
+    echo "--- lock ---"; cat "$HOLDER"
+  else
+    echo "--- lock ---"; echo "free"
+  fi
+}
+
+cmd_flock_test() {
+  local held
+  held=$(mktemp "$LDIR/litt-heavy-test.XXXXXX")
+  # Hold the lock in a background subshell, then prove a second is refused.
+  ( exec 8>"$LOCK"; flock -x 8; echo ready >"$held"; sleep 8 ) &
+  local hp=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$held" ] && break; sleep 0.2; done
+  if "$0" /bin/true 2>/dev/null; then
+    echo "flock-test: FAIL — second acquisition succeeded while held"
+    kill "$hp" 2>/dev/null; wait "$hp" 2>/dev/null; rm -f "$held"; return 1
+  else
+    local rc=$?
+    [ "$rc" = 3 ] && echo "flock-test: PASS — held lock refused second holder (exit 3)" \
+                  || echo "flock-test: PASS? — refused but exit $rc (expected 3)"
+  fi
+  kill "$hp" 2>/dev/null; wait "$hp" 2>/dev/null; rm -f "$held"
+  # Also verify acquisition works once free.
+  "$0" /bin/true && echo "flock-test: PASS — acquired after release"
+}
+
+PREFLIGHT_FORCE=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --preflight) PREFLIGHT_FORCE=1; shift ;;
+    --min-mem-kb) MIN_MEM_KB="$2"; shift 2 ;;
+    --) shift; break ;;
+    -*) echo "litt-heavy: unknown flag $1"; exit 2 ;;
+    *) break ;;
+  esac
+done
+
+case "${1:-}" in
+  "") echo "usage: litt-heavy [--preflight] [--min-mem-kb N] <cmd> [args...] | check | status | flock-test"; exit 2 ;;
+  check) cmd_check ;;
+  status) cmd_status ;;
+  flock-test) cmd_flock_test ;;
+  *)
+    # Already inside a litt-heavy-wrapped parent? Run unguarded — the
+    # parent owns the lock (re-entrant helpers must not self-deadlock).
+    if [ "${LITT_HEAVY_INSIDE:-0}" = "1" ]; then
+      exec "$@"
+    fi
+    acquire "$@"
+    trap release EXIT
+    base=$(basename "$1")
+    if [ "$PREFLIGHT_FORCE" = 1 ] || needs_preflight "$base"; then
+      preflight "$base" || exit 4
+    fi
+    export LITT_HEAVY_INSIDE=1
+    "$@"
+    rc=$?
+    exit "$rc"
+    ;;
+esac

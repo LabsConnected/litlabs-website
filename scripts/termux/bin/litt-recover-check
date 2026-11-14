@@ -1,0 +1,87 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# litt-recover-check — read-only "what was interrupted?" report.
+#
+#   1. Devin session locks: scans session_locks/*.lock; a lock whose
+#      recorded PID is dead means that session's CLI died mid-work —
+#      prints `devin --resume <name>` for each (never resumes anything
+#      itself).
+#   2. LiTT worktrees: lists ~/litt-worktrees/*/ that have uncommitted
+#      changes or a non-checked-in state (branch + dirty file count).
+#   3. Current memory headroom (context for deciding what is safe to
+#      resume).
+#
+# READ-ONLY: creates nothing, deletes nothing, kills nothing, resumes
+# nothing. Safe to run any time, including right after a crash.
+set -u
+
+if [ -d /data/data/com.termux/files/home ]; then
+  HOME_DIR=/data/data/com.termux/files/home
+else
+  HOME_DIR="$HOME"
+fi
+WT_ROOT="$HOME_DIR/litt-worktrees"
+
+# Devin CLI state may live under proot (/root) or the Termux home,
+# depending on where the CLI runs. Check every candidate that exists.
+CLI_DIRS=""
+for d in /root/.local/share/devin/cli "$HOME/.local/share/devin/cli" \
+         "$HOME_DIR/.local/share/devin/cli"; do
+  [ -d "$d/session_locks" ] || continue
+  case " $CLI_DIRS " in *" $d "*) continue ;; esac   # dedupe /root == $HOME
+  CLI_DIRS="$CLI_DIRS $d"
+done
+
+echo "=== litt-recover-check $(date -Is) ==="
+echo
+
+echo "-- Devin sessions --"
+if [ -z "$CLI_DIRS" ]; then
+  echo "no devin cli session_locks dir found (checked /root, \$HOME, Termux home)"
+else
+  for cli in $CLI_DIRS; do
+    echo "[locks: $cli/session_locks]"
+    stale=0; live=0
+    for f in "$cli/session_locks"/*.lock; do
+      [ -e "$f" ] || continue
+      name=$(basename "$f" .lock)
+      pid=$(cat "$f" 2>/dev/null | tr -d '[:space:]')
+      if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        live=$((live + 1))
+      else
+        stale=$((stale + 1))
+        echo "  STALE  $name  (pid ${pid:-?} dead)  →  devin --resume $name"
+      fi
+    done
+    echo "  $live live, $stale stale lock(s)"
+  done
+fi
+echo
+
+echo "-- LiTT worktrees with uncommitted work ($WT_ROOT) --"
+dirty=0
+if [ -d "$WT_ROOT" ]; then
+  for wt in "$WT_ROOT"/*/; do
+    [ -d "$wt/.git" ] || [ -f "$wt/.git" ] || continue
+    n=$(git -C "$wt" status --porcelain 2>/dev/null | wc -l)
+    if [ "$n" -gt 0 ]; then
+      dirty=$((dirty + 1))
+      br=$(git -C "$wt" branch --show-current 2>/dev/null)
+      echo "  DIRTY  ${wt%/}  [$br]  $n uncommitted path(s)"
+    fi
+  done
+fi
+[ "$dirty" = 0 ] && echo "  all worktrees clean"
+echo
+
+echo "-- Memory now --"
+awk '/^MemAvailable:/{a=$2}/^SwapTotal:/{t=$2}/^SwapFree:/{f=$2}
+     END{printf "MemAvailable=%dkB  SwapFree=%dkB/%dkB (%d%%)\n", a, f, t, (t?f*100/t:0)}' \
+     /proc/meminfo
+echo
+
+echo "-- Recovery --"
+echo "  resume a session:      devin --resume <name>      (manual, by choice)"
+echo "  inspect a worktree:    git -C <worktree> status"
+echo "  crash forensics:       litt-crash-snap   (run within ~1h of a kill)"
+echo "  backups:               $HOME_DIR/litt-backups/  + sessions-backup-*.db next to sessions.db"
+echo "  nothing above was executed — this report only reads state."

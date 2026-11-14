@@ -43,7 +43,15 @@ else
 fi
 ROOT="${LITT_SUPERVISOR_DIR:-$HOME_DIR/.litt-supervisor}"
 CANON="$HOME_DIR/litt-canonical"
-HEAVY="$HOME_DIR/bin/litt-heavy"
+# litt-heavy is device infra that historically lives in ~/bin; accept a
+# $PREFIX/bin install too so either layout works.
+if [ -x "$HOME_DIR/bin/litt-heavy" ]; then
+  HEAVY="$HOME_DIR/bin/litt-heavy"
+elif [ -x "${PREFIX:-/data/data/com.termux/files/usr}/bin/litt-heavy" ]; then
+  HEAVY="${PREFIX:-/data/data/com.termux/files/usr}/bin/litt-heavy"
+else
+  HEAVY="$HOME_DIR/bin/litt-heavy"   # reported missing by run_one
+fi
 BIN="$HOME_DIR/bin"
 
 Q="$ROOT/queue"; A="$ROOT/awaiting"; R="$ROOT/running"
