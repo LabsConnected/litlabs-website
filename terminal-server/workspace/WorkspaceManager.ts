@@ -40,6 +40,49 @@ export interface PrepareInput {
 /** Managed workspaces are always initialised on this branch. */
 const DEFAULT_BRANCH = "main";
 
+/**
+ * Environment handed to package-manager child processes (dependency
+ * install and the TypeScript pre-install in prepareWorkspace).
+ *
+ * The host path historically spread the terminal's ENTIRE process
+ * environment into these calls (`{ ...process.env, ... }`). Package
+ * scripts are repo-controlled code: they must never receive the
+ * terminal's platform secrets (Clerk/Supabase/Stripe keys, the E2B
+ * API key, internal service keys) just because an install ran. Only
+ * the benign variables a package manager actually needs are passed,
+ * plus NODE_ENV=development (forced, as before, so devDependencies
+ * are installed despite the service running NODE_ENV=production).
+ * The sandbox install path (design note §4.4) uses the same rule via
+ * sandbox/env.ts; this is the host path's equivalent — the whole-env
+ * spread must not be ported anywhere.
+ */
+export const PACKAGE_SCRIPT_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "TERM",
+  "LANG",
+  "LC_ALL",
+  "SHELL",
+  "TMPDIR",
+  "USER",
+  "LOGNAME",
+  "PNPM_HOME",
+] as const;
+
+export function buildPackageScriptEnv(
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const env: Record<string, string> = {};
+  for (const key of PACKAGE_SCRIPT_ENV_ALLOWLIST) {
+    const value = source[key];
+    if (value) env[key] = value;
+  }
+  // Constructed as one literal: this repo augments NodeJS.ProcessEnv with
+  // NODE_ENV required and read-only, so the forced value must be present
+  // at construction rather than assigned afterward.
+  return { ...env, NODE_ENV: "development" };
+}
+
 const workspaces = new Map<string, WorkspaceDescriptor>();
 
 const PERSIST_PATH = resolve(
@@ -156,7 +199,7 @@ export async function prepareWorkspace(
         cwd: root,
         stdio: "pipe",
         timeout: 300_000,
-        env: { ...process.env, NODE_ENV: "development" },
+        env: buildPackageScriptEnv(),
       });
     } catch {
       // Non-fatal — the workspace is still usable for file browsing and
@@ -184,7 +227,7 @@ export async function prepareWorkspace(
             cwd: root,
             stdio: "pipe",
             timeout: 120_000,
-            env: { ...process.env, NODE_ENV: "development" },
+            env: buildPackageScriptEnv(),
           });
         } catch {
           // Non-fatal — Next.js will attempt its own auto-install.

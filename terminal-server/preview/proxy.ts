@@ -6,8 +6,10 @@
  * running application.
  *
  * Access is protected by a preview token query parameter (or
- * X-Preview-Token header). The check is FAIL-CLOSED: when
- * PREVIEW_ACCESS_TOKEN is not configured, all requests are denied.
+ * X-Preview-Token header): a signed per-workspace token (Phase 2,
+ * preferred) or the legacy global PREVIEW_ACCESS_TOKEN during the
+ * transition. The check is FAIL-CLOSED: when neither channel is
+ * configured, all requests are denied.
  *
  * This handler lives in its own module — rather than inline in
  * server.ts — so the routing-parity regression tests exercise the SAME
@@ -69,10 +71,12 @@ export function registerPreviewProxyRoute(
   app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response) => {
     const workspaceId = req.params.workspaceId;
 
-    // Verify preview token — fail CLOSED when the token is not configured.
-    // (checkPreviewToken denies every request if PREVIEW_ACCESS_TOKEN is unset.)
+    // Verify preview token — fail CLOSED when no auth channel is
+    // configured. The workspaceId binds signed per-workspace tokens
+    // to exactly this mount; the legacy global token still works
+    // during the transition (see preview-auth.ts).
     const previewToken = String(req.query.token || req.headers["x-preview-token"] || "");
-    const previewAuth = checkPreviewToken(previewToken);
+    const previewAuth = checkPreviewToken(previewToken, workspaceId);
     if (!previewAuth.ok) {
       res.status(previewAuth.status).json({ error: previewAuth.error, errorCode: previewAuth.errorCode });
       return;

@@ -120,6 +120,87 @@ const IDENTITY_ENV_VARS: ReadonlySet<string> = new Set([
   "LITTREE_SANDBOX_ID",
 ]);
 
+// ─── Value-based check for per-command project env ──────────────────
+//
+// The name-based check above is the right guard for a sandbox's BASE
+// environment (create time): the terminal composes that env itself,
+// so a platform-secret NAME appearing in it is always a bug or an
+// attack. It is the WRONG guard for per-command PROJECT env (design
+// note §3.4): a project's own Clerk keys are legitimately named
+// CLERK_SECRET_KEY / NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, and a preview
+// or build legitimately needs them. What must never cross is the
+// terminal's OWN secret VALUES — the platform's credentials. So the
+// per-command channel is guarded by value: any project-env value
+// equal to one of the terminal's own platform-secret values is
+// refused, whatever name it travels under.
+
+/**
+ * Values shorter than this are never treated as platform secrets for
+ * the value check: short strings ("true", "0", a region name) collide
+ * by accident, and a real credential is never this short. The name
+ * check on the base env has no such exemption.
+ */
+export const MIN_PLATFORM_SECRET_VALUE_LENGTH = 8;
+
+/**
+ * Collect the terminal's OWN platform-secret values from an env
+ * source (normally process.env): the values a per-command project
+ * env must never reproduce. Names come from PLATFORM_SECRET_ENV_VARS
+ * plus TERMINAL_AUTH_SECRET (the preview-token signing root, which
+ * the web-side list carries and this list reaches via compose paths).
+ */
+export function collectPlatformSecretValues(
+  env: Record<string, string | undefined>,
+): ReadonlySet<string> {
+  const values = new Set<string>();
+  for (const key of [...PLATFORM_SECRET_ENV_VARS, "TERMINAL_AUTH_SECRET"]) {
+    const value = env[key];
+    if (value && value.length >= MIN_PLATFORM_SECRET_VALUE_LENGTH) {
+      values.add(value);
+    }
+  }
+  return values;
+}
+
+/**
+ * Throw SandboxEnvSecretError if any value in `env` equals one of the
+ * terminal's own platform-secret values. The error names the
+ * project-env KEY that carried the colliding value — never the value
+ * itself, and never which platform secret it matched.
+ */
+export function assertNoPlatformSecretValues(
+  env: Record<string, string>,
+  platformSecretValues: ReadonlySet<string>,
+): void {
+  if (platformSecretValues.size === 0) return;
+  for (const [key, value] of Object.entries(env)) {
+    if (value && platformSecretValues.has(value)) {
+      throw new SandboxEnvSecretError(key);
+    }
+  }
+}
+
+/**
+ * Prepare caller-supplied PER-COMMAND project env for one execution:
+ * identity variables are dropped (identity is composed by the
+ * provider and always wins), and every remaining value is checked
+ * against the terminal's own platform-secret values. A project's own
+ * secrets — including its own CLERK_SECRET_KEY — pass as long as
+ * their VALUES are the project's, not the platform's.
+ */
+export function guardPerCommandProjectEnv(
+  projectEnv: Record<string, string>,
+  platformSecretValues: ReadonlySet<string>,
+): Record<string, string> {
+  const cleaned: Record<string, string> = {};
+  for (const [key, value] of Object.entries(projectEnv)) {
+    if (IDENTITY_ENV_VARS.has(key)) continue; // identity always wins
+    cleaned[key] = value;
+  }
+  assertNoPlatformSecretValues(cleaned, platformSecretValues);
+  return cleaned;
+}
+
 /**
  * Compose a sandbox's full environment: caller-supplied project-scoped
  * variables UNDER the identity environment (identity always wins), then
