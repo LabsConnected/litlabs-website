@@ -212,10 +212,12 @@ export class FakeSandboxProvider implements SandboxProvider {
         : result(0, content);
     }
 
-    // printenv <NAME>
+    // printenv <NAME> — per-command env (input.env) layers over the
+    // sandbox's create-time env for this call only, like a real
+    // provider's envs-for-one-command semantics.
     m = command.match(/^printenv (\S+)$/);
     if (m) {
-      const value = record.env[m[1]];
+      const value = input.env?.[m[1]] ?? record.env[m[1]];
       return value === undefined ? result(1) : result(0, `${value}\n`);
     }
 

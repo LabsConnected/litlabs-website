@@ -42,7 +42,12 @@ import {
   type TerminalConnectOptions,
   type TerminalTransport,
 } from "./provider";
-import { assertNoPlatformSecrets, composeSandboxEnv } from "./env";
+import {
+  assertNoPlatformSecrets,
+  collectPlatformSecretValues,
+  composeSandboxEnv,
+  guardPerCommandProjectEnv,
+} from "./env";
 
 /** Default E2B template: built and published from ../sandbox.Dockerfile. */
 export const DEFAULT_E2B_TEMPLATE_ID = "litt-sandbox-v1";
@@ -382,12 +387,26 @@ export class E2bSandboxProvider implements SandboxProvider {
     if (entry.instance.state === "stopped") {
       await this.start(sandboxId);
     }
+    // Per-command project env (Phase 2): guarded by VALUE against the
+    // terminal's own platform secrets and layered over the composed
+    // base env for this command only — the stored base env is never
+    // mutated, so a later command without env sees the base again.
+    // The guard runs before any SDK call, exactly like create().
+    const envs = input.env
+      ? {
+          ...entry.env,
+          ...guardPerCommandProjectEnv(
+            input.env,
+            collectPlatformSecretValues(process.env),
+          ),
+        }
+      : entry.env;
     const startedMs = this.now();
     const result = await entry.handle.runCommand(input.command, {
       cwd: input.cwd ?? "/workspace",
       timeoutMs: input.timeoutMs ?? 60_000,
       stdin: input.stdin,
-      envs: entry.env,
+      envs,
     });
     entry.instance.lastActiveAt = this.isoNow();
     return {

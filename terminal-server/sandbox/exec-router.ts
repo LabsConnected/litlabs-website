@@ -10,8 +10,12 @@
  *   1. provider-enabled — the factory built a real provider (E2B),
  *      not the disabled default (config claim, necessary not
  *      sufficient);
- *   2. staging — this process is the staging deployment (cohort
- *      gate; production never routes in Phase 1);
+ *   2. routing-enabled environment — Phase 1 routed on the staging
+ *      deployment only (cohort gate). Phase 2 (Larry's production
+ *      unlock, 2026-11-14) adds the production deployment, and only
+ *      when SANDBOX_PRODUCTION_ENABLED=true was set explicitly —
+ *      see config.ts `routingEnabled`. Configuring the provider
+ *      alone never opens production routing;
  *   3. owner — the requesting user is on the terminal owner
  *      allowlist (TERMINAL_OWNER_CLERK_IDS via terminal-owner-gate);
  *   4. canary-verified — SandboxVerificationService.isVerified() is
@@ -46,7 +50,7 @@ import { SandboxVerificationService } from "./verification";
 
 export type SandboxGateDenialReason =
   | "provider-disabled"
-  | "not-staging"
+  | "routing-not-enabled"
   | "not-owner"
   | "canary-not-verified";
 
@@ -58,8 +62,12 @@ export interface SandboxGateDecision {
 export interface SandboxExecGateOptions {
   /** True when a real provider was configured (not the disabled default). */
   providerEnabled: boolean;
-  /** True when this process is a staging deployment. */
-  staging: boolean;
+  /**
+   * True when this process may route: a staging deployment, or a
+   * production deployment with SANDBOX_PRODUCTION_ENABLED=true
+   * (config.ts `routingEnabled`).
+   */
+  routingEnabled: boolean;
   /** Owner check. Defaults to the terminal owner allowlist. */
   isOwner?: (userId: string) => boolean;
   /** The ONLY isolation proof the gate consults. */
@@ -68,20 +76,20 @@ export interface SandboxExecGateOptions {
 
 export class SandboxExecGate {
   private readonly providerEnabled: boolean;
-  private readonly staging: boolean;
+  private readonly routingEnabled: boolean;
   private readonly isOwner: (userId: string) => boolean;
   private readonly isVerified: () => boolean;
 
   constructor(options: SandboxExecGateOptions) {
     this.providerEnabled = options.providerEnabled;
-    this.staging = options.staging;
+    this.routingEnabled = options.routingEnabled;
     this.isOwner = options.isOwner ?? isTerminalOwner;
     this.isVerified = options.isVerified;
   }
 
   decide(userId: string): SandboxGateDecision {
     if (!this.providerEnabled) return { allowed: false, reason: "provider-disabled" };
-    if (!this.staging) return { allowed: false, reason: "not-staging" };
+    if (!this.routingEnabled) return { allowed: false, reason: "routing-not-enabled" };
     if (!this.isOwner(userId)) return { allowed: false, reason: "not-owner" };
     if (!this.isVerified()) return { allowed: false, reason: "canary-not-verified" };
     return { allowed: true, reason: "ok" };
@@ -96,6 +104,13 @@ export interface SandboxExecRequest {
   stdin?: string;
   timeoutMs?: number;
   cwd?: string;
+  /**
+   * Per-command PROJECT env (design note §1.6/§3.4): a project's own
+   * variables for this one command. Providers guard it by VALUE
+   * against the terminal's own platform secrets (env.ts) — never by
+   * name — so a project's own Clerk keys are not rejected.
+   */
+  env?: Record<string, string>;
 }
 
 export interface SandboxExecOutcome {
@@ -172,6 +187,7 @@ export class SandboxExecRouter {
       stdin: req.stdin,
       timeoutMs: req.timeoutMs,
       cwd: req.cwd,
+      env: req.env,
     });
     this.log(
       `[sandbox-exec] exec sandbox=${sandboxId} user=${req.userId} project=${req.projectId} workspace=${req.workspaceId} exit=${result.exitCode}`,
@@ -241,7 +257,7 @@ export function createSandboxExecStack(
   });
   const gate = new SandboxExecGate({
     providerEnabled: config.providerName !== "disabled",
-    staging: config.staging,
+    routingEnabled: config.routingEnabled,
     isOwner: deps.isOwner,
     isVerified: () => verification.isVerified(),
   });
