@@ -283,6 +283,15 @@ export async function createWorkspaceTransport(
 const FILE_OP_TIMEOUT_MS = 30_000;
 const BINARY_WRITE_TIMEOUT_MS = 120_000;
 /**
+ * Command-execution budget. Matches the terminal server's own exec
+ * budget (terminal-server/server.ts, timeoutMs: 120_000): the old 30s
+ * web-side budget aborted a cold sandbox's first exec while the server
+ * was still working, surfacing an error instead of the command's
+ * output (Step 6 fix, 2026-11-14). The fetch deadline is this plus a
+ * 5s grace for the response to land.
+ */
+export const EXEC_TIMEOUT_MS = 120_000;
+/**
  * How long the reachability probe may take. Shorter than
  * FILE_OP_TIMEOUT_MS: the probe runs at transport creation (every chat
  * turn with a project), so a dead terminal server must fail fast rather
@@ -484,7 +493,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   // ── Command execution ──
 
-  async exec(command: string, timeoutMs = 30_000, stdin?: string): Promise<ExecResult> {
+  async exec(command: string, timeoutMs = EXEC_TIMEOUT_MS, stdin?: string): Promise<ExecResult> {
     const t0 = Date.now();
     const resp = await fetch(
       `${terminalBase()}/internal/workspace/${this.workspaceId}/exec`,

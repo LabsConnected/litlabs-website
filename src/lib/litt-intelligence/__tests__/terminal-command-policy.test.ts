@@ -309,7 +309,7 @@ describe("execution path — permission gate + existing handler", () => {
     const outcome = await gatedExecute("git status", "auto", transport);
     expect(outcome.executed).toBe(true);
     expect(outcome.requiresApproval).toBe(false);
-    expect(transport.exec).toHaveBeenCalledWith("git status", 30_000);
+    expect(transport.exec).toHaveBeenCalledWith("git status", 120_000);
   });
 
   it("deny command never reaches the handler, in every mode", async () => {
@@ -332,6 +332,6 @@ describe("execution path — permission gate + existing handler", () => {
     const outcome = await gatedExecute("npm install", "act", approved);
     expect(outcome.executed).toBe(true);
     expect(outcome.requiresApproval).toBe(true);
-    expect(approved.exec).toHaveBeenCalledWith("npm install", 30_000);
+    expect(approved.exec).toHaveBeenCalledWith("npm install", 120_000);
   });
 });

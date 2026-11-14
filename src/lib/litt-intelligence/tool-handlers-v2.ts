@@ -18,7 +18,7 @@ import { destructiveRewriteViolation, existingPageOverwriteError, placeholderVio
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
 import { fitImageForPublish, PUBLISH_MAX_IMAGE_BYTES } from "./asset-image-fit";
 import { sniffImageMimeType } from "@/lib/image-sniff";
-import type { WorkspaceTransport } from "./workspace-transport";
+import { EXEC_TIMEOUT_MS, type WorkspaceTransport } from "./workspace-transport";
 
 // ─── Tool Handler Signature ───────────────────────────────────────
 
@@ -371,7 +371,7 @@ export const handleTerminalExecute: ToolHandler = async (inputs, transport) => {
   if (badCommand) return { success: false, error: badCommand };
 
   try {
-    const result = await transport.exec(command, 30_000);
+    const result = await transport.exec(command, EXEC_TIMEOUT_MS);
     return {
       success: result.exitCode === 0,
       command,

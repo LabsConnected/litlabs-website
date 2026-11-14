@@ -62,6 +62,65 @@ describe("describeProjectState — reference derivation (used by /projects)", ()
     expect(s.detail).toMatch(/secure sandbox/i);
   });
 
+  it("failed workspace carrying HOST_EXECUTION_DISABLED reads as a retryable Setup failed when the sandbox IS available", () => {
+    // Stored-refusal fix (2026-11-14): the stored code records a
+    // prepare refused by the pre-sandbox host policy. With sandboxed
+    // execution available — the same truth Studio's workspace-state
+    // route acts on — the card must not keep presenting the project
+    // as permanently unavailable; retry is exactly how the stored
+    // error gets cleared.
+    const s = describeProjectState(
+      {
+        workspaceStatus: "failed",
+        runtimeStatus: "stopped",
+        updatedAt: iso(1000),
+        workspaceError:
+          'Workspace prepare failed (503): {"error":"Execution is unavailable on this deployment.","code":"HOST_EXECUTION_DISABLED"}',
+        sandboxAvailable: true,
+      },
+      NOW,
+    );
+    expect(s.label).toBe("Setup failed");
+    expect(s.canRetry).toBe(true);
+    // The serialized refusal payload is not user-facing copy.
+    expect(s.detail).toBe(
+      "Workspace setup failed before it finished. Your project is safe.",
+    );
+    expect(s.detail).not.toMatch(/HOST_EXECUTION_DISABLED/);
+  });
+
+  it("failed workspace carrying HOST_EXECUTION_DISABLED stays unavailable when the sandbox probe says no", () => {
+    const s = describeProjectState(
+      {
+        workspaceStatus: "error",
+        runtimeStatus: "stopped",
+        updatedAt: iso(1000),
+        workspaceError:
+          'Workspace prepare failed (503): {"error":"Execution is unavailable on this deployment.","code":"HOST_EXECUTION_DISABLED"}',
+        sandboxAvailable: false,
+      },
+      NOW,
+    );
+    expect(s.label).toBe("Repo workspace unavailable");
+    expect(s.canRetry).toBe(false);
+  });
+
+  it("sandbox availability does not soften an ordinary setup failure's detail", () => {
+    const s = describeProjectState(
+      {
+        workspaceStatus: "failed",
+        runtimeStatus: "stopped",
+        updatedAt: iso(1000),
+        workspaceError: "Provisioning timed out",
+        sandboxAvailable: true,
+      },
+      NOW,
+    );
+    expect(s.label).toBe("Setup failed");
+    expect(s.detail).toContain("Provisioning timed out");
+    expect(s.canRetry).toBe(true);
+  });
+
   it("failed workspace reads as Setup failed with retry", () => {
     const s = describeProjectState(
       {
