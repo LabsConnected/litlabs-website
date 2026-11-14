@@ -96,6 +96,11 @@ jobs:
         env:
           CI: true
 
+      - name: Test @litt/agent-core
+        run: pnpm --filter @litt/agent-core test
+        env:
+          CI: true
+
       - name: Test @litlabs1/litt-cli
         run: pnpm --filter @litlabs1/litt-cli test
         env:

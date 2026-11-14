@@ -911,10 +911,76 @@ function unwrapNestedInputs(inputs: Record<string, unknown>): Record<string, unk
   return cur;
 }
 
+/**
+ * Aliases a weak model emits for the project root when asked for a
+ * filesystem path ("project root", "<root>", "/"). All mean "." — the
+ * tool's cwd-relative root. Compared case-insensitively.
+ */
+const PROJECT_ROOT_PATH_ALIASES: ReadonlySet<string> = new Set([
+  "project root",
+  "project_root",
+  "root",
+  "repo root",
+  "repository root",
+  "<project root>",
+  "<root>",
+  "/",
+  "./",
+  ".\\",
+]);
+
+/**
+ * Normalize a filesystem-path argument for a project tool:
+ *   - strip surrounding quotes/backticks
+ *   - project-root aliases → "."
+ *   - absolute path inside cwd → the cwd-relative path (the sandbox
+ *     re-validates it downstream)
+ *   - absolute path outside cwd → unchanged (the sandbox still blocks it)
+ *
+ * Windows absolute paths are evaluated with path.win32 semantics on
+ * every host, and only relativized against a Windows-flavored cwd — a
+ * drive-letter path can never be inside a POSIX workspace root, so on a
+ * POSIX workspace it stays untouched for the sandbox to block.
+ * Returns null when no normalization applied.
+ */
+function normalizeToolPathArg(
+  toolId: string,
+  raw: string,
+  cwd?: string,
+): string | null {
+  if (toolId !== "project.list_files" && toolId !== "project.read_file") {
+    return null;
+  }
+  const trimmed = raw.trim().replace(/^["'`]+|["'`]+$/g, "");
+  if (trimmed !== raw && trimmed === "") return ".";
+  if (PROJECT_ROOT_PATH_ALIASES.has(trimmed.toLowerCase())) return ".";
+  if (!cwd) return trimmed !== raw ? trimmed : null;
+  if (/^[a-z]:[\\/]|^\\\\/i.test(trimmed)) {
+    // Windows absolute (drive-letter or UNC) — win32 semantics regardless
+    // of the host platform running this code.
+    if (!/^[a-z]:[\\/]|^\\\\/i.test(cwd)) return null;
+    const rel = path.win32.relative(
+      path.win32.resolve(cwd),
+      path.win32.resolve(trimmed),
+    );
+    if (rel === "") return ".";
+    if (!rel || rel.startsWith("..") || path.win32.isAbsolute(rel)) return null;
+    return rel.replace(/\\/g, path.sep);
+  }
+  if (trimmed.startsWith("/")) {
+    const rel = path.relative(path.resolve(cwd), path.resolve(trimmed));
+    if (rel === "") return ".";
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+    return rel;
+  }
+  return trimmed !== raw ? trimmed : null;
+}
+
 export function normalizeToolCallArgs(
   toolId: string,
   inputs: Record<string, unknown>,
   toolDefs: ToolDefinition[],
+  cwd?: string,
 ): { inputs: Record<string, unknown>; renames: Array<[string, string]>; changed: boolean } {
   const def = toolDefs.find((t) => t.id === toolId);
   const base = unwrapNestedInputs(inputs);
@@ -942,6 +1008,21 @@ export function normalizeToolCallArgs(
       renames.push([donors[0], field]);
     }
   }
+
+  // Bounded path normalization — a project-root alias or an in-tree
+  // absolute path becomes the cwd-relative path the tools expect.
+  // Recorded the same way donor renames are (from → to on the "path"
+  // argument). Paths outside the sandbox are left untouched so
+  // resolveSandboxedPath still blocks them.
+  const rawPath = out.path;
+  if (typeof rawPath === "string") {
+    const normalized = normalizeToolPathArg(toolId, rawPath, cwd);
+    if (normalized !== null && normalized !== rawPath) {
+      out.path = normalized;
+      renames.push([`path:${rawPath}`, `path:${normalized}`]);
+    }
+  }
+
   return { inputs: out, renames, changed: changed || renames.length > 0 };
 }
 
@@ -1231,7 +1312,7 @@ export async function runAgentLoop(
         );
       } catch { /* debug only */ }
     }
-    const normalized = normalizeToolCallArgs(parsed.toolId, parsed.inputs, toolDefs);
+    const normalized = normalizeToolCallArgs(parsed.toolId, parsed.inputs, toolDefs, options.cwd);
     const inputs = normalized.changed ? normalized.inputs : parsed.inputs;
 
     let res: ToolResult;

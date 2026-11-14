@@ -780,38 +780,69 @@ describe("Option values are not path operands", () => {
     }
   });
 
-  it("treats findstr/dir/more `/` tokens as options, not root paths", async () => {
+  it("treats findstr/dir/more `/` tokens as options on Windows, path roots on POSIX", async () => {
     const ws = makeTempDir("ws-dos-flags");
     fs.writeFileSync(path.join(ws, "file.txt"), "needle\n");
     const outside = makeTempDir("outside-dos");
     const listFile = path.join(outside, "list.txt");
     fs.writeFileSync(listFile, "needle\n");
+    // Confinement decisions are made before spawn, so a stub executor
+    // exercises them on every host without needing findstr/dir binaries.
+    const spawnLog: string[] = [];
+    const stubShell = (platform: NodeJS.Platform | string) => ({
+      cwd: ws,
+      platform,
+      environment: {},
+      cancel: async () => [] as number[],
+      execute: async (opts: { command: string; args?: string[] }) => {
+        spawnLog.push(`${opts.command} ${(opts.args ?? []).join(" ")}`);
+        return {
+          ok: true, status: "success" as const, stdout: "", stderr: "",
+          exitCode: 0, durationMs: 0,
+          command: opts.command, args: opts.args ?? [],
+          truncated: false, pid: null,
+        };
+      },
+    });
+    const opts = { cwd: ws, workspaceRoot: ws };
     try {
-      const shell = createShellExecutor(ws);
-      // Options starting with "/" are flags, not path operands.
-      const ok = await runCommandSecure(shell, "findstr", ["/I", "/N", "needle", "file.txt"], {
-        cwd: ws,
-        workspaceRoot: ws,
-      });
-      assert.notEqual(ok.data.code, "PATH_ARG_ESCAPE");
-      // /G:<file> reads a pattern file — confined like any operand.
-      const gFlag = await runCommandSecure(shell, "findstr", [`/G:${listFile}`, "file.txt"], {
-        cwd: ws,
-        workspaceRoot: ws,
-      });
-      assert.equal(gFlag.data.code, "PATH_ARG_ESCAPE");
-      // A second file operand is still confined.
-      const fileOperand = await runCommandSecure(shell, "findstr", ["needle", listFile], {
-        cwd: ws,
-        workspaceRoot: ws,
-      });
+      // /G:<file> reads a pattern file — confined like any operand,
+      // on both platforms.
+      for (const platform of ["win32", process.platform]) {
+        const gFlag = await runCommandSecure(
+          stubShell(platform), "findstr", [`/G:${listFile}`, "file.txt"], opts);
+        assert.equal(gFlag.data.code, "PATH_ARG_ESCAPE", `platform=${platform}`);
+      }
+      // A second file operand is still confined. (Host platform only:
+      // a Windows-absolute operand only resolves meaningfully on a
+      // Windows host — CI covers that leg there.)
+      const fileOperand = await runCommandSecure(
+        stubShell(process.platform), "findstr", ["needle", listFile], opts);
       assert.equal(fileOperand.data.code, "PATH_ARG_ESCAPE");
-      // dir /B stays inside when the operand does.
-      const dirOk = await runCommandSecure(shell, "dir", ["/B", "."], {
-        cwd: ws,
-        workspaceRoot: ws,
-      });
+      // On a Windows executor "/X" tokens are options: `/I /N` are
+      // flags and `dir /B` stays inside when the operand does.
+      const winShell = stubShell("win32");
+      const ok = await runCommandSecure(winShell, "findstr", ["/I", "/N", "needle", "file.txt"], opts);
+      assert.notEqual(ok.data.code, "PATH_ARG_ESCAPE");
+      assert.equal(ok.success, true);
+      const dirOk = await runCommandSecure(winShell, "dir", ["/B", "."], opts);
       assert.notEqual(dirOk.data.code, "PATH_ARG_ESCAPE");
+      assert.equal(dirOk.success, true);
+      // The "allowed" cases really reached execution (not a vacuous pass).
+      assert.ok(spawnLog.some((l) => l.startsWith("findstr /I /N")));
+      assert.ok(spawnLog.some((l) => l.startsWith("dir /B")));
+      // On a POSIX executor a leading "/" is a filesystem root —
+      // `more`, which ships on POSIX, must not read outside the
+      // workspace, and the same DOS-flag tokens are confined paths.
+      if (process.platform !== "win32") {
+        const posixShell = stubShell(process.platform);
+        const moreEscape = await runCommandSecure(posixShell, "more", [listFile], opts);
+        assert.equal(moreEscape.data.code, "PATH_ARG_ESCAPE");
+        const moreInside = await runCommandSecure(posixShell, "more", ["file.txt"], opts);
+        assert.equal(moreInside.success, true);
+        const slashEscape = await runCommandSecure(posixShell, "findstr", ["/I", "needle", "file.txt"], opts);
+        assert.equal(slashEscape.data.code, "PATH_ARG_ESCAPE");
+      }
     } finally {
       cleanup(ws);
       cleanup(outside);

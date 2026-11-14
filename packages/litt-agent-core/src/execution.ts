@@ -1704,16 +1704,27 @@ function wordPathOperands(args: string[], ospec: OperandSpec): string[] {
 }
 
 /**
- * dos grammar: `/X` option tokens (findstr, dir, more). A leading "/" is
- * an option prefix — never a filesystem root — so it is never collected.
- * `/X:value` forms are checked when the flag names a path-bearing option
- * (findstr /G list-file, /F file-list, /D dirlist).
+ * dos grammar: `/X` option tokens (findstr, dir, more). On a Windows
+ * shell a leading "/" is an option prefix — never a filesystem root —
+ * so it is never collected, except `/X:value` forms whose flag names a
+ * path-bearing option (findstr /G list-file, /F file-list, /D dirlist).
+ * On POSIX a leading "/" IS a filesystem root — `more /etc/passwd`
+ * really opens that path — so every "/"-leading token is collected and
+ * confined like any other operand.
  */
-function dosPathOperands(args: string[], ospec: OperandSpec): string[] {
+function dosPathOperands(
+  args: string[],
+  ospec: OperandSpec,
+  dosOptions: boolean,
+): string[] {
   const operands: string[] = [];
   let seenFirst = false;
   for (const arg of args) {
     if (arg.length > 1 && arg.startsWith("/")) {
+      if (!dosOptions) {
+        operands.push(arg);
+        continue;
+      }
       const colon = arg.indexOf(":");
       if (colon > 0 && ospec.dosPathFlags?.has(arg.slice(0, colon).toUpperCase())) {
         operands.push(arg.slice(colon + 1));
@@ -1735,12 +1746,13 @@ function nonSearchPathOperands(
   command: string,
   spec: CommandSpec,
   args: string[],
+  platform: string,
 ): string[] {
   const ospec = OPERAND_SPECS[command];
   if (!ospec) {
     return args.filter((arg) => arg && !(arg.length > 1 && arg.startsWith("-")));
   }
-  if (ospec.mode === "dos") return dosPathOperands(args, ospec);
+  if (ospec.mode === "dos") return dosPathOperands(args, ospec, platform === "win32");
   if (ospec.mode === "word") return wordPathOperands(args, ospec);
   return getoptPathOperands(args, ospec, spec);
 }
@@ -1750,6 +1762,7 @@ function validateOperandPaths(
   args: string[],
   cwd: string,
   workspaceRoot: string,
+  platform: string,
 ): ExecutionError | null {
   const normalized = normalizeCommand(command);
   const spec = COMMAND_SPECS[normalized];
@@ -1757,7 +1770,7 @@ function validateOperandPaths(
   const operands =
     normalized === "grep" || normalized === "rg"
       ? searchCommandPathOperands(normalized, args)
-      : nonSearchPathOperands(normalized, spec, args);
+      : nonSearchPathOperands(normalized, spec, args, platform);
   for (const arg of operands) {
     const resolved = path.resolve(cwd, arg);
     if (!isWithinWorkspace(resolved, workspaceRoot)) {
@@ -2066,7 +2079,7 @@ export async function runCommand(
   }
 
   // 6b. For file-reading commands, confine path operands to the workspace
-  const operandError = validateOperandPaths(command, args, cwd, workspaceRoot);
+  const operandError = validateOperandPaths(command, args, cwd, workspaceRoot, shell.platform);
   if (operandError) {
     return executionError(operandError);
   }

@@ -64,5 +64,8 @@ jobs:
       - name: Type-check
         run: pnpm --filter @litlabs1/litt-cli exec tsc --noEmit
 
+      - name: Agent-core test suite (platform behaviors)
+        run: pnpm --filter @litt/agent-core test
+
       - name: Repair tests and incident evaluation
         run: pnpm --filter @litlabs1/litt-cli exec vitest run repair
