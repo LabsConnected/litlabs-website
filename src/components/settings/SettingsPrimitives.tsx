@@ -2,6 +2,15 @@
 
 import type { ReactNode } from "react";
 
+/**
+ * Settings primitives — shared building blocks for every /settings
+ * section. Colors follow the platform's all-light standard (the same
+ * light look as the LiTTAppShell frame the sections render inside):
+ * white cards, dark zinc text, black-alpha borders and washes. These
+ * components used to carry dark-theme-era colors (bg-black/30 cards,
+ * text-white headings), which rendered white-on-white inside the
+ * light shell — the headings and card text were invisible.
+ */
 export function SettingsCard({
   title,
   description,
@@ -14,12 +23,12 @@ export function SettingsCard({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/30 p-5">
+    <div className="rounded-2xl border border-black/10 bg-white p-5">
       <div className="mb-3 flex items-center gap-2">
         {icon && <span className="text-accent">{icon}</span>}
         <div>
-          <h3 className="text-sm font-bold text-white">{title}</h3>
-          {description && <p className="mt-0.5 text-xs text-white/60">{description}</p>}
+          <h3 className="text-sm font-bold text-zinc-900">{title}</h3>
+          {description && <p className="mt-0.5 text-xs text-zinc-500">{description}</p>}
         </div>
       </div>
       {children}
@@ -30,8 +39,8 @@ export function SettingsCard({
 export function SectionHeader({ title, description }: { title: string; description?: string }) {
   return (
     <div className="mb-4">
-      <h1 className="text-2xl font-black tracking-tight text-white">{title}</h1>
-      {description && <p className="mt-1 text-[13px] text-white/60">{description}</p>}
+      <h1 className="text-2xl font-black tracking-tight text-zinc-900">{title}</h1>
+      {description && <p className="mt-1 text-[13px] text-zinc-500">{description}</p>}
     </div>
   );
 }
@@ -54,12 +63,12 @@ export function ToggleRow({
   configureLabel?: string;
 }) {
   return (
-    <label className="flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 cursor-pointer">
+    <label className="flex items-center justify-between gap-3 rounded-lg border border-black/[0.07] bg-black/[0.02] px-3 py-2.5 cursor-pointer">
       <div className="flex items-center gap-2 min-w-0">
-        {icon && <span className="text-white/40 shrink-0">{icon}</span>}
+        {icon && <span className="text-zinc-400 shrink-0">{icon}</span>}
         <div className="min-w-0">
-          <p className="text-xs font-bold text-white truncate">{title}</p>
-          {description && <p className="text-[9px] text-white/55 truncate">{description}</p>}
+          <p className="text-xs font-bold text-zinc-900 truncate">{title}</p>
+          {description && <p className="text-[9px] text-zinc-500 truncate">{description}</p>}
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
@@ -77,7 +86,7 @@ export function ToggleRow({
           role="switch"
           aria-checked={checked}
           onClick={() => onChange(!checked)}
-          className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? "bg-accent" : "bg-white/15"}`}
+          className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? "bg-accent" : "bg-black/20"}`}
         >
           <span
             className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${checked ? "left-4.5" : "left-0.5"}`}
@@ -103,13 +112,13 @@ export function SettingsInput({
 }) {
   return (
     <label className="block">
-      <span className="text-[10px] font-bold uppercase tracking-wider text-white/55">{label}</span>
+      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">{label}</span>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-accent/40"
+        className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-xs text-zinc-900 outline-none focus:border-accent/40"
       />
     </label>
   );

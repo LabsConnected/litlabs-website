@@ -134,7 +134,7 @@ export function WhatLiTTKnowsSection({
               className="flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[11px] font-bold transition-all"
               style={{
                 background: isActive ? `${T.accentColor}15` : "transparent",
-                color: isActive ? T.accentColor : "rgba(255,255,255,0.5)",
+                color: isActive ? T.accentColor : T.textMuted,
               }}
             >
               <Icon size={12} />
@@ -182,7 +182,7 @@ function ProfileTab({ data, T }: { data: LittKnowsData; T: ReturnType<typeof use
                 <span className="text-[11px] font-bold opacity-60">{row.label}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold" style={{ color: row.value ? T.textColor : "rgba(255,255,255,0.3)" }}>
+                <span className="text-[11px] font-semibold" style={{ color: row.value ? T.textColor : T.textMuted }}>
                   {row.value || "Not set"}
                 </span>
                 {row.value && <Check size={12} style={{ color: "#22c55e" }} />}
@@ -350,7 +350,7 @@ function ConnectionsTab({
             <div className="flex items-center gap-3">
               <div
                 className="flex h-9 w-9 items-center justify-center rounded-lg text-sm font-black"
-                style={{ background: conn.connected ? `${T.accentColor}15` : "rgba(255,255,255,0.05)", color: conn.connected ? T.accentColor : "rgba(255,255,255,0.3)" }}
+                style={{ background: conn.connected ? `${T.accentColor}15` : `${T.textColor}0D`, color: conn.connected ? T.accentColor : T.textMuted }}
               >
                 {conn.label.charAt(0)}
               </div>
@@ -362,20 +362,20 @@ function ConnectionsTab({
             <div className="flex items-center gap-2">
               {conn.connected ? (
                 <>
-                  <span className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-400">
+                  <span className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-600">
                     <Check size={10} /> Connected
                   </span>
                   <button
                     type="button"
                     onClick={() => void handleRevoke(conn.provider)}
                     disabled={revoking === conn.provider}
-                    className="rounded-lg border border-red-400/20 px-2.5 py-1 text-[10px] font-bold text-red-400 transition-all hover:bg-red-400/10 disabled:opacity-30"
+                    className="rounded-lg border border-red-400/20 px-2.5 py-1 text-[10px] font-bold text-red-600 transition-all hover:bg-red-400/10 disabled:opacity-30"
                   >
                     {revoking === conn.provider ? "Disconnecting…" : "Disconnect"}
                   </button>
                 </>
               ) : (
-                <span className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-bold opacity-40">
+                <span className="flex items-center gap-1.5 rounded-lg border border-black/10 px-2.5 py-1 text-[10px] font-bold opacity-40">
                   <X size={10} /> Not connected
                 </span>
               )}
@@ -479,7 +479,7 @@ function ActivityTab({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }
   return (
     <div className="space-y-1.5">
       {entries.map((entry) => {
-        const color = statusColors[entry.status] ?? "rgba(255,255,255,0.5)";
+        const color = statusColors[entry.status] ?? T.textMuted;
         const time = new Date(entry.createdAt).toLocaleString();
         return (
           <div
