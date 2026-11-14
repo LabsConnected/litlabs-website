@@ -155,6 +155,47 @@ describe("GET workspace-state — deterministic refusal derivation", () => {
     expect(sandboxAvailableMock).toHaveBeenCalledWith("user-123");
   });
 
+  // Stored-refusal fix (2026-11-14): a stored error embedding the
+  // HOST_EXECUTION_DISABLED code (stamped by pre-sandbox failed
+  // prepares) must ALSO retire when the sandbox reports available —
+  // before this fix the embedded code won unconditionally and the
+  // availability probe never even ran for this shape, so the Studio
+  // banner could never clear.
+  it("verify NOT_READY + repo-backed failed project with embedded HOST_EXECUTION_DISABLED + sandbox available → stored refusal retired", async () => {
+    sandboxAvailableMock.mockResolvedValue(true);
+    verifyMock.mockRejectedValue(
+      new ProjectVerificationError("Workspace not ready (current: failed)", "WORKSPACE_NOT_READY"),
+    );
+    getProjectMock.mockResolvedValue({
+      sourceType: "github",
+      workspaceStatus: "failed",
+      workspaceError: 'Workspace prepare failed (503): {"error":"Execution is unavailable","code":"HOST_EXECUTION_DISABLED"}',
+    } as never);
+    const res = await callRoute();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.code).toBe("WORKSPACE_NOT_READY");
+    expect(body.workspaceErrorCode).toBeNull();
+    expect(sandboxAvailableMock).toHaveBeenCalledWith("user-123");
+  });
+
+  it("verify NOT_READY + repo-backed failed project with embedded HOST_EXECUTION_DISABLED + sandbox unavailable → stored refusal stands", async () => {
+    sandboxAvailableMock.mockResolvedValue(false);
+    verifyMock.mockRejectedValue(
+      new ProjectVerificationError("Workspace not ready (current: failed)", "WORKSPACE_NOT_READY"),
+    );
+    getProjectMock.mockResolvedValue({
+      sourceType: "github",
+      workspaceStatus: "failed",
+      workspaceError: 'Workspace prepare failed (503): {"error":"Execution is unavailable","code":"HOST_EXECUTION_DISABLED"}',
+    } as never);
+    const res = await callRoute();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.code).toBe("WORKSPACE_NOT_READY");
+    expect(body.workspaceErrorCode).toBe("HOST_EXECUTION_DISABLED");
+  });
+
   it("unconfigured terminal + managed failed project → the explicit 503 stands", async () => {
     vi.stubEnv("TERMINAL_SERVER_INTERNAL_URL", "");
     terminalUrlMock.mockReturnValue("");
