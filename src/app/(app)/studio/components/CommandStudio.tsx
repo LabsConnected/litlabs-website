@@ -855,6 +855,10 @@ function CommandStudioContent() {
   // Workspace-first focus: selecting a real work surface collapses the large
   // welcome/chat panel to the compact rail. Chat stays mounted and one click
   // away through the rail, so this only changes emphasis, not availability.
+  // Only USER selections count: the task-binding sync below pre-seeds this
+  // tracker when it restores a task's remembered surface, so a restore on
+  // entry (or on a task switch) never collapses the panel — Larry's rule
+  // (2026-11-12): the panel always shows when Studio opens.
   const previousStageSurfaceRef = useRef<StudioStageSurface>(stageSurface);
   useEffect(() => {
     if (previousStageSurfaceRef.current === stageSurface) return;
@@ -2576,6 +2580,18 @@ function CommandStudioContent() {
     // surface (acceptance: tool=preview rendered the stale "plan" surface).
     const urlStation = isFirstSync ? toolParamToStation(searchParams.get("tool")) : null;
     const mapped = urlStation ?? centerStation(resolveStageSurface(task?.lastOpenedSurface));
+    // A restored surface is not a user stage selection: seed the
+    // workspace-first tracker with the restored value BEFORE applying
+    // it, so the auto-collapse effect above does not read the restore
+    // as "user picked a work surface" and collapse the chat panel.
+    // Without this, any task whose remembered surface differs from the
+    // initial station (e.g. "design" vs the Preview default) opened
+    // Studio on the 64px rail — violating Larry's always-show rule
+    // (2026-11-12) — and the phantom collapse was then persisted to
+    // sessionStorage as if it were a deliberate choice. Explicit
+    // selections (rail, dock, deep links) do not pass through here and
+    // keep the workspace-first collapse.
+    previousStageSurfaceRef.current = mapped;
     setStageSurface((current) => (current === mapped ? current : mapped));
     setMountedSurfaces((prev) => (prev.has(mapped) ? prev : new Set(prev).add(mapped)));
     // searchParams is read only on the first sync — deliberately not a dep.

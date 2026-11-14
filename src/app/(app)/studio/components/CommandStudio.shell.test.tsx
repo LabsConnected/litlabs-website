@@ -326,7 +326,11 @@ vi.mock("../stores/useExecutionStore", () => {
     (selector: (s: Record<string, unknown>) => unknown) => selector(execState.state),
     { getState: () => execState.state },
   );
-  return { useExecutionStore };
+  // useWorktabBadges calls this once per worktab — with no server tasks
+  // it never runs, which is why the stub could be missing until a test
+  // served a real task. "idle" is the real function's answer for a tab
+  // with no live execution snapshot.
+  return { useExecutionStore, deriveWorktabBadge: () => "idle" as const };
 });
 
 vi.mock("../stores/useConversationStore", () => ({
@@ -810,6 +814,81 @@ describe("StudioShell — left chat dock", () => {
     });
   });
 
+  it("restoring a task's remembered non-Preview surface on entry does not collapse the panel", async () => {
+    // Regression (Larry's production walkthrough, 2026-11-14): on a
+    // fresh open, the task-binding sync restores the active task's
+    // lastOpenedSurface (here "design" — Larry's repo project). That
+    // restore is not a user stage selection, so the workspace-first
+    // auto-collapse must not fire on it: Studio opens with the left
+    // chat panel EXPANDED (Larry's always-show rule, 2026-11-12), and
+    // the collapse is never written to the session as if it were a
+    // deliberate choice.
+    const restoredTask = {
+      id: "task-open-state",
+      userId: "user-1",
+      projectId: "project-1",
+      title: "Roofing site",
+      taskType: "build",
+      status: "working",
+      conversationId: "conv-open-state",
+      activeActionRunId: null,
+      latestActionRunId: null,
+      browserSessionId: null,
+      previewWorkspaceId: null,
+      previewUrl: null,
+      selectedArtifact: null,
+      verificationState: {},
+      metadata: {},
+      lastOpenedSurface: "design",
+      lastOpenedAt: "2026-11-14T00:00:00Z",
+      archivedAt: null,
+      createdAt: "2026-11-14T00:00:00Z",
+      updatedAt: "2026-11-14T00:00:00Z",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/api/studio/tasks")) {
+          return {
+            ok: true,
+            json: async () => ({ tasks: [restoredTask], closedTasks: [] }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    // A bare /studio URL: the harness default (?tool=chat) is an
+    // explicit Preview deep link, which legitimately beats the
+    // remembered surface on first sync and would mask the restore.
+    stableSearchParams.delete("tool");
+    try {
+      await renderStudioShell();
+      // The restore lands: Canvas & Design becomes the active surface…
+      await waitFor(() => {
+        expect(screen.getByTestId("stage-surface-design")).toHaveAttribute(
+          "data-active",
+          "true",
+        );
+      });
+      // …and after the open has fully settled, the left chat panel is
+      // STILL expanded, with no phantom collapse persisted to the
+      // session. (The settle window matters: the defect's collapse
+      // lands one effect pass after the restore, so an instant
+      // assertion can race past it.)
+      await new Promise((r) => setTimeout(r, 500));
+      expect(screen.getByTestId("litt-panel")).toHaveAttribute(
+        "data-collapsed",
+        "false",
+      );
+      expect(
+        window.sessionStorage.getItem("littree:studio:litt-collapsed"),
+      ).not.toBe("true");
+    } finally {
+      vi.unstubAllGlobals();
+      stableSearchParams.set("tool", "chat");
+    }
+  });
+
   it("Ask LiTT expands a collapsed left dock panel", async () => {
     const { user } = await renderStudioShell();
     await user.click(screen.getByTestId("litt-panel-collapse"));
@@ -873,13 +952,20 @@ describe("MissionCards — classic desktop dock", () => {
   });
 });
 
-describe("Phase 2 — Directive stages (Plan rail button removed), Files sidebar, Preview dock, bottom dock", () => {
-  it("rail presents the four non-Plan stages (standalone Plan rail button removed by Larry); secondary surfaces and the terminal stay reachable", async () => {
+describe("Phase 2 — Directive stages, Files sidebar, Preview dock, bottom dock", () => {
+  it("rail presents all five Directive stages with Plan first; secondary surfaces and the terminal stay reachable", async () => {
     await renderStudioShell();
-    for (const stage of ["canvas-design", "code", "preview", "media"]) {
+    for (const stage of ["plan", "canvas-design", "code", "preview", "media"]) {
       expect(screen.getByTestId(`workspace-stage-${stage}`)).toBeTruthy();
     }
-    expect(screen.queryByTestId("workspace-stage-plan")).toBeNull();
+    // Plan is the FIRST stage in the rail (Master Build Directive §2
+    // order), ahead of Canvas & Design.
+    const planButton = screen.getByTestId("workspace-stage-plan");
+    const canvasButton = screen.getByTestId("workspace-stage-canvas-design");
+    expect(
+      planButton.compareDocumentPosition(canvasButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(screen.getByTestId("workspace-rail-terminal")).toBeTruthy();
     expect(screen.getByTestId("workspace-rail-activity")).toBeTruthy();
     expect(screen.getByTestId("workspace-rail-files")).toBeTruthy();
@@ -926,12 +1012,18 @@ describe("Phase 2 — Directive stages (Plan rail button removed), Files sidebar
     expect(screen.queryByTestId("design-canvas")).toBeNull();
   });
 
-  it("no standalone Plan rail button — Plan lives in the inspector's Plan tab (Larry, 2026-11-13)", async () => {
-    await renderStudioShell();
-    // The button is gone; Plan stage functionality (the inspector's
-    // Plan tab and the station contract) is untouched.
-    expect(screen.queryByTestId("workspace-stage-plan")).toBeNull();
-    // The center still homes on the shell's home surface.
+  it("Plan stage button runs the station contract: center homes on Preview and the inspector opens on its Plan tab", async () => {
+    // The rail button was retired 2026-11-13 and restored 2026-11-14
+    // (Larry's walkthrough: no Plan stage in the nav). Plan is not a
+    // center station — selecting it homes the center on Preview and
+    // opens the inspector, whose default tab is Plan (Mission /
+    // Checkpoints / Next actions).
+    const { user } = await renderStudioShell();
+    expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
+    await user.click(screen.getByTestId("workspace-stage-plan"));
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-context-inspector")).toBeTruthy();
+    });
     expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
   });
 
