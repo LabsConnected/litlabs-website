@@ -31,6 +31,33 @@ export function stripPreviewAuthHeaders(
 }
 
 /**
+ * Sandbox-aware variant (Phase 2 lifecycle, design note §3.5): the
+ * same auth/forwarding stripping as the host path, but the request
+ * carries the PROVIDER host (the sandbox URL must resolve and route)
+ * and the provider's traffic-token header from the runtime's
+ * in-memory upstream. The token is added here — the one place it is
+ * allowed to travel — and never comes from the incoming request.
+ */
+export function buildSandboxUpstreamHeaders(
+  headers: Headers,
+  upstream: { origin: string; headers: Record<string, string> },
+): Record<string, string> {
+  const upstreamHeaders: Record<string, string> = {};
+
+  for (const [key, value] of headers) {
+    if (!AUTH_FORWARDING_HEADERS.has(key.toLowerCase())) {
+      upstreamHeaders[key] = value;
+    }
+  }
+
+  upstreamHeaders.host = new URL(upstream.origin).host;
+  for (const [key, value] of Object.entries(upstream.headers)) {
+    upstreamHeaders[key.toLowerCase()] = value;
+  }
+  return upstreamHeaders;
+}
+
+/**
  * Return true only for redirects that remain inside this workspace's preview
  * mount. Absolute redirects must also point back to the current proxy host.
  */

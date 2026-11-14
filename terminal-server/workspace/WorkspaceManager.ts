@@ -9,7 +9,37 @@ import {
   buildWelcomeReactVite,
 } from "./welcome-screen";
 import { writeScaffoldManifest } from "./scaffold";
+import { writeFileAtomic } from "./atomic-write";
 
+/**
+ * The sandbox binding for a workspace (Phase 2 lifecycle, design
+ * note §2.2). One optional block on the existing descriptor — the
+ * registry stays a bare JSON array, so a rollback to the previous
+ * terminal build preserves bindings instead of erasing them
+ * (loadPersisted keeps each object whole).
+ *
+ * NEVER persisted here: the provider's traffic token, the provider
+ * URL, the GitHub token, project secrets. The traffic token comes
+ * back from the provider on connect/expose; the rest never belong
+ * on disk at all.
+ */
+export interface WorkspaceSandboxBinding {
+  /** Provider name, e.g. "e2b". */
+  provider: string;
+  sandboxId: string;
+  /** Template build the sandbox was created from. */
+  templateId: string;
+  state: "provisioning" | "running" | "paused" | "lost";
+  createdAt: string;
+  /** ISO time of the last completed sandbox → volume sync-back. */
+  lastSyncBackAt: string | null;
+  /** HEAD sha inside the sandbox at the last sync-back. */
+  lastSyncedHead: string | null;
+  /** Volume paths not yet pushed into a live sandbox (§1.3). */
+  pendingForward: string[];
+  /** Sandbox-side port the preview dev server listens on. */
+  previewPort: number | null;
+}
 
 export interface WorkspaceDescriptor {
   workspaceId: string;
@@ -19,6 +49,8 @@ export interface WorkspaceDescriptor {
   branch: string;
   commitSha: string;
   ready: boolean;
+  /** Phase 2 lifecycle binding. Absent = no sandbox for this workspace. */
+  sandbox?: WorkspaceSandboxBinding;
 }
 
 export interface PrepareInput {
@@ -71,16 +103,14 @@ export const PACKAGE_SCRIPT_ENV_ALLOWLIST = [
 
 export function buildPackageScriptEnv(
   source: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
+): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of PACKAGE_SCRIPT_ENV_ALLOWLIST) {
     const value = source[key];
     if (value) env[key] = value;
   }
-  // Constructed as one literal: this repo augments NodeJS.ProcessEnv with
-  // NODE_ENV required and read-only, so the forced value must be present
-  // at construction rather than assigned afterward.
-  return { ...env, NODE_ENV: "development" };
+  env.NODE_ENV = "development";
+  return env;
 }
 
 const workspaces = new Map<string, WorkspaceDescriptor>();
@@ -107,9 +137,17 @@ function loadPersisted(): void {
 function persistWorkspaces(): void {
   try {
     const data = Array.from(workspaces.values());
-    writeFileSync(PERSIST_PATH, JSON.stringify(data), "utf-8");
-  } catch {
-    // Non-fatal — persistence is best-effort
+    // Atomic + loud (design note §2.2): the registry now carries
+    // sandbox bindings, and a silently lost binding is a leaked,
+    // billed sandbox. writeFileAtomic replaces the file by rename,
+    // so a crash mid-write can never truncate the registry; a failed
+    // persist is logged, never swallowed.
+    writeFileAtomic(PERSIST_PATH, JSON.stringify(data));
+  } catch (err) {
+    console.error(
+      `[WorkspaceManager] FAILED to persist workspace registry to ${PERSIST_PATH}: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
   }
 }
 
@@ -119,15 +157,75 @@ export function getWorkspace(workspaceId: string): WorkspaceDescriptor | undefin
   return workspaces.get(workspaceId);
 }
 
+/** Every registered descriptor (boot reconcile iterates these). */
+export function listAllWorkspaceDescriptors(): WorkspaceDescriptor[] {
+  return Array.from(workspaces.values());
+}
+
+/** Insert or replace a descriptor and persist. */
+export function upsertWorkspaceDescriptor(descriptor: WorkspaceDescriptor): void {
+  workspaces.set(descriptor.workspaceId, descriptor);
+  persistWorkspaces();
+}
+
+/**
+ * Set or clear a workspace's sandbox binding and persist. Returns
+ * false when the workspace is not registered.
+ */
+export function updateWorkspaceSandboxBinding(
+  workspaceId: string,
+  binding: WorkspaceSandboxBinding | undefined,
+): boolean {
+  const ws = workspaces.get(workspaceId);
+  if (!ws) return false;
+  if (binding) ws.sandbox = binding;
+  else delete ws.sandbox;
+  persistWorkspaces();
+  return true;
+}
+
 export function getWorkspaceRoot(workspaceId: string, userId?: string): string | null {
   const ws = workspaces.get(workspaceId);
   if (userId && ws?.userId !== userId) return null;
   return ws?.root ?? null;
 }
 
+/**
+ * Sandbox prepare dispatch (Phase 2 lifecycle, design note §4.1/§5).
+ *
+ * The sandbox workspace executor registers itself here at server
+ * boot. When it reports itself available for the requesting user
+ * (the §4.6 predicate: real provider + fresh green canary + owner),
+ * prepareWorkspace's host body is replaced wholesale by the sandbox
+ * sequence — clone and install happen inside the sandbox. When it is
+ * not available, prepare falls through to the host body below,
+ * untouched, whose first act is the existing host-execution guard.
+ * Registration lives here (rather than the executor importing this
+ * module's prepare) so the dependency runs one way:
+ * executor → WorkspaceManager, never the reverse.
+ */
+export interface SandboxPrepareHandler {
+  isAvailableFor(userId: string): boolean;
+  prepare(input: PrepareInput): Promise<WorkspaceDescriptor>;
+}
+
+let sandboxPrepareHandler: SandboxPrepareHandler | null = null;
+
+export function registerSandboxPrepareHandler(
+  handler: SandboxPrepareHandler | null,
+): void {
+  sandboxPrepareHandler = handler;
+}
+
 export async function prepareWorkspace(
   input: PrepareInput,
 ): Promise<WorkspaceDescriptor> {
+  // Sandbox branch first: availability is the executor's predicate,
+  // evaluated per request. A closed gate changes nothing below.
+  if (sandboxPrepareHandler?.isAvailableFor(input.userId)) {
+    return sandboxPrepareHandler.prepare(input);
+  }
+
   // Durable, project-identified root — see managedWorkspaceRoot(). A
   // GitHub-backed workspace must also resolve to the same path across
   // provisions, otherwise the "already cloned, just fetch" branch below
