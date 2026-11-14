@@ -611,6 +611,28 @@ function CommandStudioContent() {
     setDockOpen(true);
   }, [studioShellActive, openStageSurface]);
 
+  // Agent-initiated dock intents (STUDIO_EVENT_OPEN_DOCK) are PRESELECTION
+  // ONLY (Phase 0, Larry 2026-11-14): they may record which dock tab would
+  // show, but they must never open the dock — in either layout. The shell
+  // has no dock terminal or dock inspector (the terminal lives in its
+  // Terminal station and the inspector in the right panel), so those two
+  // intents keep their existing non-dock routing there; in the classic
+  // layout, where every tab lives inside the dock, preselection (setting
+  // the tab without opening) is all that happens.
+  const handlePreselectDockTab = useCallback((tab: StudioDockTab) => {
+    if (studioShellActive) {
+      if (tab === "inspector") {
+        setInspectorOpen(true);
+        return;
+      }
+      if (tab === "terminal") {
+        openStageSurface("terminal");
+        return;
+      }
+    }
+    setDockTab(tab);
+  }, [studioShellActive, openStageSurface]);
+
   // The query string written by the state→URL effect on its last pass —
   // used by URL→state to recognize (and skip) our own echoes.
   const lastWrittenUrlRef = useRef<string | null>(null);
@@ -1148,7 +1170,9 @@ function CommandStudioContent() {
         return;
       }
       if (tab === "activity" || tab === "terminal" || tab === "inspector" || tab === "media") {
-        handleOpenDockTab(tab);
+        // Agent intents preselect only — they never open the dock
+        // (Phase 0). The dock opens only by the user's hand.
+        handlePreselectDockTab(tab);
       }
     };
     const requestDeploy = (e: Event) => {
@@ -1184,7 +1208,7 @@ function CommandStudioContent() {
       window.removeEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
       window.removeEventListener(STUDIO_EVENT_OPEN_FILE, openFile);
     };
-  }, [handleOpenDockTab, handleOpenFilesPanel]);
+  }, [handlePreselectDockTab, handleOpenFilesPanel]);
 
   // Dock open helpers — both are OPEN actions (switch tab + ensure
   // open), never a toggle-closed. The dock's own close button and the
@@ -1644,17 +1668,12 @@ function CommandStudioContent() {
   // reopened dialog mints a fresh one.
   const createSubmissionRef = useRef<CreateSubmission | null>(null);
 
-  // Auto-reveal the dock Activity tab when LiTT starts executing,
-  // without stealing focus. This does NOT call .focus() on any
-  // element — the user's current focus (e.g., the composer) is preserved.
-  const prevBusyRef = useRef(false);
-  useEffect(() => {
-    const isBusy = conversation.busy || creatingProject;
-    if (isBusy && !prevBusyRef.current) {
-      handleOpenDockTab("activity");
-    }
-    prevBusyRef.current = isBusy;
-  }, [conversation.busy, creatingProject, handleOpenDockTab]);
+  // Phase 0 (chat-first redesign, Larry 2026-11-14): the bottom dock NEVER
+  // auto-opens. A chat send / run start must not change dock open state in
+  // either layout — the dock opens only by the user's hand (header toggle,
+  // the collapsed strip, Cmd/Ctrl+J, Esc, explicit drawer deep links). Run
+  // progress stays visible on the collapsed strip's activity pulse dot.
+  // (The busy-edge auto-reveal effect that used to live here is deleted.)
 
   // ── Auto-switch workspace to Media when LiTT generates an artifact ──
   // When a new assistant message contains an image/video/music artifact,

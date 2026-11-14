@@ -278,12 +278,16 @@ const convState = vi.hoisted(() => ({
   selectedConversationId: null as string | null,
   loadMessages: vi.fn(async () => {}),
   reportSendError: vi.fn(),
+  // Phase 0 tests flip this to drive conversation.busy edges (run starts)
+  // through the mocked conversation hook. Defaults to false, which is what
+  // every pre-existing test in this file observed.
+  busy: false,
 }));
 
 vi.mock("../hooks/useCanonicalConversation", () => ({
   useCanonicalConversation: () => ({
     messages: [],
-    busy: false,
+    busy: convState.busy,
     send: sendMock,
     regenerate: vi.fn(),
     clear: vi.fn(),
@@ -1092,5 +1096,144 @@ describe("Phase 2 — ?tool=design deep link", () => {
       expect(screen.getByTestId("canvas-design-mode-design")).toHaveAttribute("aria-selected", "true");
     });
     expect(screen.queryByTestId("design-canvas")).toBeNull();
+  });
+});
+
+// ── Phase 0 (chat-first redesign, Larry 2026-11-14): the bottom dock NEVER
+// auto-opens. A chat send / run start (the conversation.busy edge) and agent
+// STUDIO_EVENT_OPEN_DOCK intents must leave a closed dock closed in BOTH
+// layouts; agent intents only preselect the tab. The dock opens solely by
+// the user's hand (collapsed-strip toggle, header toggle, Cmd/Ctrl+J, Esc,
+// explicit drawer deep links).
+function dispatchAgentOpenDock(tab: string) {
+  act(() => {
+    window.dispatchEvent(new CustomEvent("studio:open-dock", { detail: { tab } }));
+  });
+}
+
+describe("Phase 0 — shell layout: the dock never auto-opens", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sendMock.mockResolvedValue({ accepted: true });
+    capState.projectId = "project-1";
+    capState.projectName = "Test Project";
+    convState.busy = false;
+    window.localStorage.removeItem("litt:studio:layout-mode");
+    window.localStorage.removeItem("litt-studio-layout");
+    window.sessionStorage.removeItem("studio-dock-open");
+    globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
+    window.innerWidth = DESKTOP_WIDTH;
+    window.innerHeight = DESKTOP_HEIGHT;
+  });
+  afterEach(() => {
+    convState.busy = false;
+    window.sessionStorage.removeItem("studio-dock-open");
+  });
+
+  it("a run start (busy edge) leaves a closed dock closed — twice", async () => {
+    const { rerender } = await renderStudioShell();
+    expect(screen.getByTestId("studio-dock")).toBeTruthy();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+
+    // First run starts: busy flips false → true, as every chat send does.
+    convState.busy = true;
+    rerender(<CommandStudio />);
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+
+    // The run ends and a second run starts — the dock still never opens.
+    convState.busy = false;
+    rerender(<CommandStudio />);
+    convState.busy = true;
+    rerender(<CommandStudio />);
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+  });
+
+  it("an agent open-dock event preselects the tab without opening; the user's strip toggle then reveals that tab", async () => {
+    const { user } = await renderStudioShell();
+    dispatchAgentOpenDock("media");
+    // Preselection only: the dock stayed collapsed — no tab content mounted.
+    expect(screen.queryByTestId("dock-content-media")).toBeNull();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
+    const media = await screen.findByTestId("dock-content-media");
+    expect(media.style.display).not.toBe("none");
+    expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("dock-tab-activity")).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByTestId("dock-content-activity").style.display).toBe("none");
+  });
+
+  it("an agent open-terminal event routes to the Terminal station and still does not open the dock", async () => {
+    await renderStudioShell();
+    dispatchAgentOpenDock("terminal");
+    await waitFor(() => {
+      expect(screen.getByTestId("stage-surface-terminal")).toHaveAttribute("data-active", "true");
+    });
+    expect(screen.queryByTestId("dock-content-terminal")).toBeNull();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+  });
+
+  it("the user's own strip toggle opens the dock and its close button closes it", async () => {
+    const { user } = await renderStudioShell();
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
+    expect(await screen.findByTestId("dock-content-activity")).toBeTruthy();
+    await user.click(screen.getByTestId("dock-close"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    });
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+  });
+});
+
+describe("Phase 0 — classic layout: the dock never auto-opens", () => {
+  beforeEach(() => {
+    // Force the classic layout (the mobile base body and the desktop
+    // escape hatch); the shell layout is covered above.
+    window.localStorage.setItem("litt:studio:layout-mode", "classic");
+    // Classic dockOpen restores sessionStorage "studio-dock-open" — start
+    // from the user-closed state so only this test's actions can open it.
+    window.sessionStorage.removeItem("studio-dock-open");
+    convState.busy = false;
+  });
+  afterEach(() => {
+    window.localStorage.removeItem("litt:studio:layout-mode");
+    window.sessionStorage.removeItem("studio-dock-open");
+    convState.busy = false;
+  });
+
+  async function renderClassicStudio() {
+    const user = userEvent.setup();
+    const view = render(<CommandStudio />);
+    await waitFor(() => {
+      if (!screen.queryByTestId("studio-dock")) {
+        throw new Error("StudioDock has not mounted");
+      }
+    });
+    return { user, ...view };
+  }
+
+  it("a run start (busy edge) leaves a closed dock closed", async () => {
+    const { rerender } = await renderClassicStudio();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+
+    convState.busy = true;
+    rerender(<CommandStudio />);
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+  });
+
+  it("an agent open-dock event preselects the tab without opening; the user's strip toggle then reveals that tab", async () => {
+    const { user } = await renderClassicStudio();
+    dispatchAgentOpenDock("media");
+    expect(screen.queryByTestId("dock-content-media")).toBeNull();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
+    const media = await screen.findByTestId("dock-content-media");
+    expect(media.style.display).not.toBe("none");
+    expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("dock-content-activity").style.display).toBe("none");
   });
 });
