@@ -22,6 +22,8 @@ import { Toast, useToastState } from "./Toast";
 export interface FeedHandle {
   /** Prepend a freshly-published post to the top of the list. */
   prependPost: (post: PostDTO) => void;
+  /** Switch the active feed tab (same path as the tab bar buttons). */
+  switchTab: (tab: FeedTab) => void;
 }
 
 const TABS: { id: FeedTab; label: string; icon: typeof Flame }[] = [
@@ -52,10 +54,14 @@ const TAB_EMPTY: Record<FeedTab, { title: string; description: string }> = {
  * skeletons / empty / error states. Renders only backend-provided posts —
  * never fake data.
  */
-export const Feed = forwardRef<FeedHandle, { initialTab?: FeedTab }>(function Feed(
-  { initialTab = "for-you" },
-  ref,
-) {
+export const Feed = forwardRef<
+  FeedHandle,
+  {
+    initialTab?: FeedTab;
+    /** Notified after the active tab changes (tab bar or handle). */
+    onTabChange?: (tab: FeedTab) => void;
+  }
+>(function Feed({ initialTab = "for-you", onTabChange }, ref) {
   const { tokens } = useTheme();
   const { isSignedIn } = useClerkAuth();
   const [toast, showToast] = useToastState();
@@ -107,12 +113,16 @@ export const Feed = forwardRef<FeedHandle, { initialTab?: FeedTab }>(function Fe
     [fetchPage],
   );
 
-  const switchTab = (next: FeedTab) => {
-    if (next === tab) return;
-    requestId.current += 1;
-    setTab(next);
-    loadInitial(next, requestId.current);
-  };
+  const switchTab = useCallback(
+    (next: FeedTab) => {
+      if (next === tab) return;
+      requestId.current += 1;
+      setTab(next);
+      onTabChange?.(next);
+      loadInitial(next, requestId.current);
+    },
+    [tab, loadInitial, onTabChange],
+  );
 
   useEffect(() => {
     const myRequest = ++requestId.current;
@@ -147,11 +157,16 @@ export const Feed = forwardRef<FeedHandle, { initialTab?: FeedTab }>(function Fe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor, loadingMore, initialLoading, error, tab, fetchPage]);
 
-  useImperativeHandle(ref, () => ({
-    prependPost: (post: PostDTO) => {
-      setPosts((prev) => (prev.some((p) => p.id === post.id) ? prev : [post, ...prev]));
-    },
-  }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      prependPost: (post: PostDTO) => {
+        setPosts((prev) => (prev.some((p) => p.id === post.id) ? prev : [post, ...prev]));
+      },
+      switchTab,
+    }),
+    [switchTab],
+  );
 
   const updatePost = useCallback((next: PostDTO) => {
     setPosts((prev) => prev.map((p) => (p.id === next.id ? next : p)));
