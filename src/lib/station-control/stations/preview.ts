@@ -207,11 +207,15 @@ async function resolveStaticPreviewUrl(
 }
 
 /** workspaceId → preview URL, or null when the start result lacks one. */
-function previewUrlFrom(startResult: StationResult): string | null {
+function previewUrlFrom(startResult: StationResult, ctx: StationExecutionContext): string | null {
   const inner = getToolResult(startResult);
   const workspaceId = inner?.workspaceId;
   if (typeof workspaceId !== "string" || !workspaceId) return null;
-  return buildPreviewProxyUrl(workspaceId);
+  // Scope the minted token to the acting user + project when the
+  // project is known; without a project the legacy channel applies.
+  return ctx.projectId
+    ? buildPreviewProxyUrl(workspaceId, { userId: ctx.userId, projectId: ctx.projectId })
+    : buildPreviewProxyUrl(workspaceId);
 }
 
 defineAction({
@@ -228,7 +232,7 @@ defineAction({
     const startError = toolFailureMessage(launched);
     if (startError) return fail(startError, "execution_failed");
     const inner = getToolResult(launched) ?? {};
-    const url = previewUrlFrom(launched);
+    const url = previewUrlFrom(launched, ctx);
     return ok({ ...inner, ...(url ? { previewUrl: url } : {}) });
   },
 });
@@ -254,7 +258,7 @@ defineAction({
       );
     }
     const inner = getToolResult(started) ?? {};
-    const url = previewUrlFrom(started);
+    const url = previewUrlFrom(started, ctx);
     return ok({
       ...inner,
       ...(url ? { previewUrl: url } : {}),
@@ -292,7 +296,7 @@ async function capturePreview(
     const launched = await previewStartExecute({}, ctx);
     const startError = toolFailureMessage(launched);
     if (startError) return fail(startError, "execution_failed");
-    url = previewUrlFrom(launched);
+    url = previewUrlFrom(launched, ctx);
     if (!url) {
       return fail("preview.start did not return a workspaceId — cannot build the preview URL.", "execution_failed");
     }

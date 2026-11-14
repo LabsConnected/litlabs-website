@@ -459,6 +459,38 @@ export async function createGithubProject(
 }
 
 /**
+ * Re-mint a stored preview URL on read (Phase 2 build-list §3.3).
+ *
+ * Scoped preview URLs carry a signed token that expires after five
+ * minutes, so the URL persisted on the project row is NOT durable —
+ * any reader that treats it as such hands the browser a dead link.
+ * When the row says the runtime is ready and the stored URL targets
+ * the terminal preview proxy, replace it with a freshly minted scoped
+ * URL for this read. The row itself is left untouched (the next start
+ * or reconcile persists its own URL); non-proxy URLs (e.g. static
+ * serve paths) and non-ready rows pass through unchanged.
+ */
+export function refreshStoredPreviewUrl(project: CanonicalProject): CanonicalProject {
+  if (project.runtimeStatus !== "ready" || !project.workspaceId || !project.previewUrl) {
+    return project;
+  }
+  let pathname: string;
+  try {
+    pathname = new URL(project.previewUrl).pathname;
+  } catch {
+    return project;
+  }
+  if (!pathname.startsWith("/preview/")) return project;
+  return {
+    ...project,
+    previewUrl: buildPreviewProxyUrl(project.workspaceId, {
+      userId: project.userId,
+      projectId: project.id,
+    }),
+  };
+}
+
+/**
  * Get a single canonical project by ID.
  * Checks studio_projects first, then falls back to legacy projects table.
  * Verifies ownership.
@@ -483,7 +515,7 @@ export async function getProject(
       rowToCanonical(studioRow as StudioProjectRow),
       userId,
     );
-    return reconcileStaleStartingStatus(project);
+    return refreshStoredPreviewUrl(await reconcileStaleStartingStatus(project));
   }
 
   // Fall back to legacy table
@@ -547,7 +579,10 @@ export async function reconcileStaleStartingStatus(
     ? live.status === "ready"
       ? {
           runtimeStatus: "ready" as const,
-          previewUrl: buildPreviewProxyUrl(project.workspaceId),
+          previewUrl: buildPreviewProxyUrl(project.workspaceId, {
+            userId: project.userId,
+            projectId: project.id,
+          }),
           runtimeError: null,
         }
       : live.status === "failed"
@@ -709,10 +744,9 @@ export async function listProjects(userId: string): Promise<ProjectListResult> {
       .map((p) => p.github_repository_id),
   );
 
-  const canonical = await reconcileListedProjects(
-    studioProjects.map(rowToCanonical),
-    userId,
-  );
+  const canonical = (
+    await reconcileListedProjects(studioProjects.map(rowToCanonical), userId)
+  ).map(refreshStoredPreviewUrl);
   const legacyOnly = legacyProjects
     .filter((p) => !studioGithubRepoIds.has(p.repository_id))
     .map(legacyRowToCanonical);

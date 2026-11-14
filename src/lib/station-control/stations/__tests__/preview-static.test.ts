@@ -286,7 +286,13 @@ describe("preview station — error truth", () => {
     const res = await run("preview.inspect", {});
     expect(res.success).toBe(true);
     expect(callsFor("preview.start")).toHaveLength(1);
-    expect((res as { url?: string }).url).toBe("http://localhost:4001/preview/ws_1");
+    // Phase 2 §3.3: the fall-through URL now carries a signed preview
+    // token scoped to the acting user + project (this suite sets a
+    // test TERMINAL_AUTH_SECRET, so minting succeeds) instead of the
+    // bare token-less URL.
+    expect((res as { url?: string }).url).toMatch(
+      /^http:\/\/localhost:4001\/preview\/ws_1\?token=[^&]+$/,
+    );
   });
 
   it("a project lookup failure falls through to the existing preview.start path", async () => {

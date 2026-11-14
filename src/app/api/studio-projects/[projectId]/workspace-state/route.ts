@@ -8,6 +8,7 @@ import {
 } from "@/lib/host-execution-guard";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -166,17 +167,26 @@ async function isTouched(workspaceId: string, userId: string): Promise<boolean> 
  *     excluded — their workspaces prepare through a different path and
  *     a restart can genuinely succeed.
  */
-function deriveWorkspaceRefusalCode(project: {
-  workspaceError?: string | null;
-  workspaceStatus?: string | null;
-  sourceType?: string | null;
-}): string | null {
+function deriveWorkspaceRefusalCode(
+  project: {
+    workspaceError?: string | null;
+    workspaceStatus?: string | null;
+    sourceType?: string | null;
+  },
+  // Phase 2: when the terminal reports sandboxed execution available
+  // for the user, the deterministic refusal no longer holds — the
+  // failure is retryable through the sandbox. An embedded code still
+  // wins (it records what actually happened); this only suppresses the
+  // derived fallback.
+  sandboxAvailable = false,
+): string | null {
   const embedded = extractEmbeddedErrorCode(project.workspaceError);
   if (embedded) return embedded;
   if (
     project.sourceType === "github" &&
     (project.workspaceStatus === "failed" || project.workspaceStatus === "error") &&
-    !isHostExecutionPermitted()
+    !isHostExecutionPermitted() &&
+    !sandboxAvailable
   ) {
     return HOST_EXECUTION_DISABLED_CODE;
   }
@@ -203,7 +213,22 @@ export async function GET(
   } catch {
     project = null;
   }
-  const storedRefusalCode = project ? deriveWorkspaceRefusalCode(project) : null;
+  // Phase 2 availability probe: only for the exact shape the derived
+  // refusal covers (repo-backed + settled failure + no embedded code +
+  // host guard refusing) — every other project derives exactly as
+  // before, with no terminal round-trip. The probe fails closed, so an
+  // unreachable terminal keeps today's coded refusal.
+  const sandboxAvailable =
+    project &&
+    !extractEmbeddedErrorCode(project.workspaceError) &&
+    project.sourceType === "github" &&
+    (project.workspaceStatus === "failed" || project.workspaceStatus === "error") &&
+    !isHostExecutionPermitted()
+      ? await isSandboxExecutionAvailable(userId)
+      : false;
+  const storedRefusalCode = project
+    ? deriveWorkspaceRefusalCode(project, sandboxAvailable)
+    : null;
 
   const terminalUnavailable = terminalNotConfiguredResponse();
   if (terminalUnavailable) {
