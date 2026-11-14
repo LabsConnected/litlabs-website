@@ -31,14 +31,42 @@ export interface DockerSessionDeps {
  *
  * HARDENING STATUS (necessary but NOT sufficient: hardening alone is never
  * proof of isolation; production stays closed by isolation-policy.ts):
- *   done:    --read-only, --pids-limit, cpu/memory limits, no-new-privileges
+ *   done:    --read-only, --pids-limit, cpu/memory limits, no-new-privileges,
+ *            env allowlist instead of {...process.env} for the docker CLI
+ *            (Phase 2 §3.5: buildDockerCliEnv below)
  *   missing: --cap-drop=ALL (needs a --user mapping first: root + host bind
  *            mount needs DAC_OVERRIDE), non-root --user (image has no USER),
  *            egress-restricted network (littree-terminal allows outbound),
- *            env allowlist instead of {...process.env} for the docker CLI,
  *            image pinned by digest, and a canary container-start probe
  *            before claiming verified isolation.
  */
+
+/**
+ * Environment for the docker CLI process itself (Phase 2 §3.5,
+ * mirroring buildPackageScriptEnv's allowlist rule in
+ * workspace/WorkspaceManager.ts): the CLI needs PATH/HOME to find
+ * its config and binaries, TERM for its output, and DOCKER_* config
+ * vars (DOCKER_HOST, DOCKER_CONFIG, DOCKER_CONTEXT, TLS settings).
+ * Everything else in the terminal's environment — platform secrets
+ * above all — stays out. The container receives only its three
+ * explicit -e vars, exactly as before; this governs the CLI process.
+ */
+export const DOCKER_CLI_ENV_ALLOWLIST = ["PATH", "HOME", "TERM"] as const;
+
+export function buildDockerCliEnv(
+  source: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of DOCKER_CLI_ENV_ALLOWLIST) {
+    const value = source[key];
+    if (value) env[key] = value;
+  }
+  for (const [key, value] of Object.entries(source)) {
+    if (key.startsWith("DOCKER_") && value) env[key] = value;
+  }
+  env.TERM = "xterm-256color";
+  return env;
+}
 export function createDockerSession(
   { userId, sessionId, workspace, onData }: DockerSessionOptions,
   deps: DockerSessionDeps = {},
@@ -89,10 +117,7 @@ export function createDockerSession(
 
   const proc = spawnFn("docker", args, {
     stdio: ["pipe", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      TERM: "xterm-256color",
-    },
+    env: buildDockerCliEnv(),
   });
 
   // Exit is reported exactly once, whether the process exits, crashes or
@@ -163,12 +188,18 @@ export function createDockerSession(
 }
 
 export function ensureDockerNetwork(): void {
-  const proc = spawn("docker", ["network", "inspect", "littree-terminal"], { stdio: "ignore" });
+  const proc = spawn("docker", ["network", "inspect", "littree-terminal"], {
+    stdio: "ignore",
+    env: buildDockerCliEnv(),
+  });
   // Missing docker binary must not crash the server.
   proc.on("error", (err) => console.error(`[Docker] network inspect failed: ${err.message}`));
   proc.on("exit", (code) => {
     if (code !== 0) {
-      const create = spawn("docker", ["network", "create", "littree-terminal"], { stdio: "inherit" });
+      const create = spawn("docker", ["network", "create", "littree-terminal"], {
+        stdio: "inherit",
+        env: buildDockerCliEnv(),
+      });
       create.on("error", (err) => console.error(`[Docker] network create failed: ${err.message}`));
     }
   });

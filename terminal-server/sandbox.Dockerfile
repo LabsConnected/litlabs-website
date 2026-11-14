@@ -51,10 +51,23 @@ RUN mkdir -p /workspace && chmod 755 /workspace
 
 WORKDIR /workspace
 
+# ─── Sandbox home (Phase 2 lifecycle, design note §4.3) ──────────
+# HOME lives OUTSIDE the project tree: /workspace is the synced
+# workspace root, and a HOME inside it would copy ~/.npm,
+# ~/.gitconfig and ~/.config/gh onto the shared volume on every
+# sync-back. /home/litt is never synced (it is outside /workspace).
+RUN mkdir -p /home/litt && chmod 777 /home/litt
+ENV HOME=/home/litt
+
+# git housekeeping default for workspace repos: never auto-gc, so
+# packs are not rewritten between syncs (design note §1.2). Written
+# into the sandbox home's gitconfig; repos also get it per-repo at
+# clone/mirror time.
+RUN git config --global gc.auto 0
+
 # ─── Default shell ───────────────────────────────────────────────
 # Bash is the default. PowerShell Core is available as `pwsh`.
 ENV SHELL=/bin/bash
-ENV HOME=/workspace
 ENV TERM=xterm-256color
 ENV LANG=en_US.UTF-8
 
