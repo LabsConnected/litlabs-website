@@ -16,6 +16,10 @@
  *   createProxyDeniedEgressFakeProvider() an intermediary answers the
  *                                        metadata request with its own
  *                                        error (403, no metadata header)
+ *                                        — a refusal: no metadata is
+ *                                        served, so the canary's
+ *                                        verdict rule counts the
+ *                                        target as blocked
  *   createNoLimitsFakeProvider()         requested limits ignored
  *   createUnhealthyFakeProvider()        health() reports unhealthy
  *
