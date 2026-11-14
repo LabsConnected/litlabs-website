@@ -71,6 +71,38 @@ describe("getTerminalTokenResult", () => {
     expect(calls).toBe(2);
   });
 
+  it("maps a coded-200 TERMINAL_DISABLED response to TerminalDisabledError", async () => {
+    // The token route now answers the standing disabled verdict as a coded
+    // 200 (no token in the body) so the browser does not log a console
+    // error for it; the client contract — typed error, honest message —
+    // is identical to the legacy 403 shape.
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse(200, {
+        code: "TERMINAL_DISABLED",
+        error: "The terminal is not available yet.",
+        terminalAvailable: false,
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(getTerminalTokenResult()).rejects.toBeInstanceOf(TerminalDisabledError);
+    await expect(getTerminalTokenResult()).rejects.toThrow(/not available yet/);
+  });
+
+  it("caches the coded-200 disabled verdict — a second call does not refetch", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, {
+        code: "TERMINAL_DISABLED",
+        error: "The terminal is not available yet.",
+        terminalAvailable: false,
+      }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(getTerminalTokenResult()).rejects.toBeInstanceOf(TerminalDisabledError);
+    await expect(getTerminalTokenResult()).rejects.toBeInstanceOf(TerminalDisabledError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("maps a 409 WORKSPACE_NOT_READY response to WorkspaceNotReadyError", async () => {
     globalThis.fetch = vi.fn(async () =>
       jsonResponse(409, { code: "WORKSPACE_NOT_READY", error: "Prepare the project workspace first." }),
