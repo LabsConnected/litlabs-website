@@ -31,7 +31,7 @@ function packMatchesTheme(pack: VisualPack, theme: ReturnType<typeof useTheme>["
 }
 
 export function VisualPackSettings() {
-  const { theme, applyVisualPack } = useTheme();
+  const { theme, applyVisualPack, resolvedColors: T } = useTheme();
   const { updateProfile } = useProfile();
   const [previewing, setPreviewing] = useState<string | null>(null);
 
@@ -74,13 +74,13 @@ export function VisualPackSettings() {
             onMouseLeave={() => setPreviewing(null)}
             className="group relative overflow-hidden rounded-2xl border p-4 text-left transition-all"
             style={{
-              borderColor: isActive ? "rgba(245,158,11,0.4)" : "rgba(255,255,255,0.08)",
-              backgroundColor: isActive ? "rgba(245,158,11,0.06)" : "rgba(255,255,255,0.02)",
+              borderColor: isActive ? "rgba(180,83,9,0.4)" : `${T.borderColor}66`,
+              backgroundColor: isActive ? "rgba(245,158,11,0.08)" : T.boxBg,
             }}
           >
             {/* Thumbnail preview */}
             <div
-              className="mb-3 h-20 w-full rounded-xl border border-white/5"
+              className="mb-3 h-20 w-full rounded-xl border border-black/10"
               style={{ background: PACK_PREVIEWS[pack.id] ?? "#0a0a0f" }}
             >
               <div className="flex h-full items-end gap-1.5 p-2">
@@ -92,28 +92,28 @@ export function VisualPackSettings() {
 
             {/* Active badge */}
             {isActive && (
-              <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
+              <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "#b45309" }}>
                 <Check size={10} className="pointer-events-none" />
                 Active
               </span>
             )}
 
             {/* Pack info */}
-            <div className="text-sm font-bold text-white/90">{pack.name}</div>
-            <p className="mt-1 text-xs leading-5 text-white/40">{pack.description}</p>
+            <div className="text-sm font-bold" style={{ color: T.textColor }}>{pack.name}</div>
+            <p className="mt-1 text-xs leading-5" style={{ color: T.textMuted }}>{pack.description}</p>
 
             {/* Included settings */}
             <div className="mt-3 flex flex-wrap gap-1.5">
-              <span className="rounded-md bg-white/5 px-2 py-0.5 text-[10px] font-bold capitalize text-white/50">{pack.skin}</span>
-              <span className="rounded-md bg-white/5 px-2 py-0.5 text-[10px] font-bold capitalize text-white/50">{pack.layoutStyle}</span>
+              <span className="rounded-md bg-black/5 px-2 py-0.5 text-[10px] font-bold capitalize" style={{ color: T.textMuted }}>{pack.skin}</span>
+              <span className="rounded-md bg-black/5 px-2 py-0.5 text-[10px] font-bold capitalize" style={{ color: T.textMuted }}>{pack.layoutStyle}</span>
               {pack.effects?.glow && (
-                <span className="rounded-md bg-white/5 px-2 py-0.5 text-[10px] font-bold text-white/50">glow</span>
+                <span className="rounded-md bg-black/5 px-2 py-0.5 text-[10px] font-bold" style={{ color: T.textMuted }}>glow</span>
               )}
             </div>
 
             {/* Preview hint */}
             {isPreviewing && !isActive && (
-              <div className="mt-2 text-[10px] font-bold text-white/30">Click to apply</div>
+              <div className="mt-2 text-[10px] font-bold" style={{ color: T.textMuted }}>Click to apply</div>
             )}
           </button>
         );
