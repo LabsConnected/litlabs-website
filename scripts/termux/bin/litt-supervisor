@@ -197,9 +197,11 @@ recover() { # requeue running tasks whose pid is dead (supervisor or LMK kill)
     [ -e "$f" ] || continue
     id=$(tget "$f" id); p=$(tget "$f" pid)
     proc_alive "$p" "$R/$id.starttime" && continue
-    # dead or unverifiable → bounded requeue, never mark complete
-    local at; at=$(($(tget "$f" attempts 0) + 1))
-    tset "$f" attempts "$at"; tset "$f" pid ""
+    # dead or unverifiable → bounded requeue, never mark complete.
+    # attempts already counted the interrupted launch; the next launch
+    # consumes another, so crash-loops stay bounded by max_attempts.
+    local at; at=$(tget "$f" attempts 0)
+    tset "$f" pid ""
     if [ "$at" -ge "$(tget "$f" max_attempts 3)" ]; then
       tset "$f" status failed; tset "$f" failed_reason "interrupted; exceeded max attempts"
       mv "$f" "$F/$(basename "$f")"; rm -f "$R/$id".{starttime,cancel}
@@ -218,7 +220,7 @@ finish_task() { # finish_task <file> <exitcode>
     tset "$f" status done; tset "$f" exit_code "$rc"; tset "$f" finished "$(iso)"
     mv "$f" "$D/$(basename "$f")"; journal "task $id DONE (rc=0)"
   else
-    local at; at=$(($(tget "$f" attempts 0) + 1)); tset "$f" attempts "$at"
+    local at; at=$(tget "$f" attempts 0)
     if [ "$at" -ge "$(tget "$f" max_attempts 3)" ]; then
       tset "$f" status failed; tset "$f" exit_code "$rc"; tset "$f" finished "$(iso)"
       mv "$f" "$F/$(basename "$f")"; journal "task $id FAILED rc=$rc (attempts exhausted)"
@@ -248,10 +250,11 @@ run_one() { # claim + execute the next due task; echoes 0 ran / 1 none-due
     fi
   fi
 
-  # Atomic claim
+  # Atomic claim — every real launch consumes one attempt.
   local rf="$R/$(basename "$f")"
   mv "$f" "$rf" || return 1
   tset "$rf" status running; tset "$rf" started "$(iso)"
+  tset "$rf" attempts "$(($(tget "$rf" attempts 0) + 1))"
 
   local cwd="${wt:-$HOME_DIR}"
   mkdir -p "$L"
