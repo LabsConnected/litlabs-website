@@ -38,6 +38,16 @@ import type { CanaryProvider } from "./provider";
 /** Default freshness window for a green canary: five minutes. */
 export const DEFAULT_VERIFICATION_MAX_AGE_MS = 5 * 60_000;
 
+/**
+ * Default canary refresh interval: four minutes. This MUST stay below
+ * {@link DEFAULT_VERIFICATION_MAX_AGE_MS}: the boot canary alone leaves
+ * the signal "verified" for only one freshness window, after which the
+ * exec gate closes until the next restart. Refreshing inside the window
+ * keeps a healthy provider continuously verified while still letting a
+ * provider that stops passing go stale/failed honestly.
+ */
+export const DEFAULT_VERIFICATION_REFRESH_INTERVAL_MS = 4 * 60_000;
+
 export type SandboxVerificationState = "verified" | "failed" | "stale" | "never-run";
 
 export interface VerifiedSandboxSignal {
@@ -74,6 +84,7 @@ export class SandboxVerificationService {
   private lastReport: CanaryReport | null = null;
   private lastFinishedMs = 0;
   private inFlight: Promise<CanaryReport> | null = null;
+  private refreshTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(provider: CanaryProvider, options: SandboxVerificationServiceOptions = {}) {
     this.provider = provider;
@@ -98,6 +109,47 @@ export class SandboxVerificationService {
       // runNow() does not reject by design; this guard exists so a
       // future regression can never crash server boot.
     });
+  }
+
+  /**
+   * Start re-running the canary on an interval so the verification
+   * signal can stay fresh for the life of the process (see
+   * {@link DEFAULT_VERIFICATION_REFRESH_INTERVAL_MS}). Idempotent.
+   *
+   * Failure handling is deliberately boring: a refresh whose run throws
+   * is swallowed — the previous report stays in place and ages into
+   * "stale" on schedule — and a refresh whose canary fails lands as a
+   * "failed" report. A refresh can therefore never crash the server and
+   * never mark the provider verified; only a passing canary does that.
+   * The timer is unref'd so it never keeps a process alive on its own.
+   */
+  startPeriodicRefresh(
+    intervalMs: number = DEFAULT_VERIFICATION_REFRESH_INTERVAL_MS,
+  ): void {
+    if (this.refreshTimer) return;
+    this.refreshTimer = setInterval(() => {
+      void this.runNow().catch(() => {
+        // runNow() does not reject by design; this guard keeps a future
+        // regression in the run path from ever crashing the host server.
+      });
+    }, intervalMs);
+    const timer = this.refreshTimer as { unref?: unknown };
+    if (typeof timer.unref === "function") {
+      (timer.unref as () => void).call(this.refreshTimer);
+    }
+  }
+
+  /** Stop the periodic refresh started by {@link startPeriodicRefresh}. */
+  stopPeriodicRefresh(): void {
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+  }
+
+  /** Whether the periodic refresh is currently scheduled. */
+  get periodicRefreshActive(): boolean {
+    return this.refreshTimer !== null;
   }
 
   /**
