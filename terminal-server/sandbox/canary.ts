@@ -137,14 +137,23 @@ export const CANARY_TOKENS = {
   memoryHog: "MEMORY_HOG",
 } as const;
 
-/** Node one-liner: prints EGRESS_OPEN <status> if any HTTP response arrives, else EGRESS_BLOCKED. */
+/**
+ * Node one-liner: prints `EGRESS_OPEN <status> flavor=<present|absent>`
+ * if any HTTP response arrives, else EGRESS_BLOCKED. `flavor` records
+ * whether the response carries the `Metadata-Flavor: Google` header —
+ * the signature of a real metadata service. The canary's verdict (see
+ * the network-egress check) treats an answer as REACHABLE only when it
+ * carries that signature or is a 2xx success; a non-2xx answer without
+ * the signature is a refusal (an intermediary such as an egress proxy
+ * denying the request, or a fabric auth gate) and counts as blocked.
+ */
 export function buildEgressProbeCommand(url: string): string {
   const script =
     `/*${CANARY_TOKENS.egressProbe}*/` +
     `const u=${JSON.stringify(url)};` +
     `const m=u.startsWith("https")?require("https"):require("http");` +
     `let done=false;const fin=(s)=>{if(!done){done=true;console.log(s);}};` +
-    `try{const req=m.get(u,{timeout:2500},(res)=>{fin("EGRESS_OPEN "+res.statusCode);res.resume();req.destroy();});` +
+    `try{const req=m.get(u,{timeout:2500},(res)=>{const fl=res.headers&&res.headers["metadata-flavor"]==="Google"?"present":"absent";fin("EGRESS_OPEN "+res.statusCode+" flavor="+fl);res.resume();req.destroy();});` +
     `req.on("timeout",()=>{req.destroy();fin("EGRESS_BLOCKED");});` +
     `req.on("error",()=>fin("EGRESS_BLOCKED"));}catch(e){fin("EGRESS_BLOCKED");}`;
   return `node -e '${script}'`;
@@ -433,11 +442,47 @@ export async function runSandboxCanary(
           let allBlocked = true;
           for (const url of targets) {
             const res = await exec(aId, buildEgressProbeCommand(url));
-            const blocked = res.stdout.includes("EGRESS_BLOCKED") && !res.stdout.includes("EGRESS_OPEN");
-            if (!blocked) allBlocked = false;
-            verdicts.push(
-              `${url} -> ${blocked ? "blocked" : res.stdout.includes("EGRESS_OPEN") ? "REACHABLE" : `no verdict (exit ${res.exitCode})`}`,
-            );
+            const hasOpen = res.stdout.includes("EGRESS_OPEN");
+            const hasBlocked = !hasOpen && res.stdout.includes("EGRESS_BLOCKED");
+            const open = res.stdout.match(/EGRESS_OPEN (\d+)(?: flavor=(present|absent))?/);
+            let verdict: string;
+            let reachable: boolean;
+            if (hasBlocked) {
+              verdict = "blocked";
+              reachable = false;
+            } else if (open) {
+              const status = Number(open[1]);
+              const flavor = open[2] ?? "unknown";
+              // Verdict rule: an HTTP answer proves the metadata
+              // endpoint is REACHABLE only when it carries the
+              // metadata signature (flavor=present, at any status —
+              // a real metadata server is answering) or is a success
+              // (2xx — a metadata endpoint never "succeeds" at
+              // refusing, and proxy block-pages served with 200 keep
+              // failing). A non-2xx answer WITHOUT the signature is
+              // a refusal: whoever answered (an egress proxy
+              // enforcing denyOut, a fabric auth gate) handed back
+              // an error and no metadata. Staging evidence,
+              // 2026-11-13: once denyOut ["169.254.0.0/16"] was in
+              // place, the metadata address answered 401 with
+              // flavor=absent. An unrecognised flavor counts as
+              // reachable — only a positively signature-free refusal
+              // passes.
+              reachable = flavor !== "absent" || (status >= 200 && status < 300);
+              verdict = reachable
+                ? `REACHABLE (status=${status} flavor=${flavor})`
+                : `REFUSED (status=${status} flavor=${flavor})`;
+            } else if (hasOpen) {
+              // EGRESS_OPEN with no parseable status: an HTTP
+              // response we cannot classify — fail closed.
+              verdict = "REACHABLE";
+              reachable = true;
+            } else {
+              verdict = `no verdict (exit ${res.exitCode})`;
+              reachable = true;
+            }
+            if (reachable) allBlocked = false;
+            verdicts.push(`${url} -> ${verdict}`);
           }
           log.add(
             "network-egress",

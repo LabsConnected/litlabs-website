@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { MessageSquare, Activity, Wrench, X } from "lucide-react";
+import { MessageSquare, Activity, FolderOpen, Component, Wrench, X } from "lucide-react";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 import { mobileDiag } from "../../lib/mobileDiagnostics";
 import type { LiTTTab } from "../LiTTPanel";
@@ -24,6 +24,11 @@ export interface LiTTMobileSheetProps {
   onClose: () => void;
   chatContent: ReactNode;
   liveContent: ReactNode;
+  /** Files / Components surface (StudioProjectFiles) — when provided,
+   *  the sheet's tab row gains Files and Components tabs beside Chat
+   *  and Activity (Larry's placement decision, 2026-11-13). Both tabs
+   *  show this one combined surface, mounted once. */
+  filesContent?: ReactNode;
   /** Optional approval UI rendered full-width at the top of the sheet, above the tabs */
   approvalSlot?: ReactNode;
   /** Project context for the slim second header row (mobile density redesign) */
@@ -41,6 +46,7 @@ export default function LiTTMobileSheet({
   onClose,
   chatContent,
   liveContent,
+  filesContent,
   approvalSlot,
   projectName,
   branch,
@@ -187,6 +193,38 @@ export default function LiTTMobileSheet({
             <Activity size={12} className="pointer-events-none" />
             Activity
           </button>
+          {filesContent ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onTabChange("files")}
+                className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                style={{
+                  color: activeTab === "files" ? "var(--color-accent)" : "var(--text-muted)",
+                  backgroundColor: activeTab === "files" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+                }}
+                aria-pressed={activeTab === "files"}
+                data-testid="litt-mobile-tab-files"
+              >
+                <FolderOpen size={12} className="pointer-events-none" />
+                Files
+              </button>
+              <button
+                type="button"
+                onClick={() => onTabChange("components")}
+                className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                style={{
+                  color: activeTab === "components" ? "var(--color-accent)" : "var(--text-muted)",
+                  backgroundColor: activeTab === "components" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+                }}
+                aria-pressed={activeTab === "components"}
+                data-testid="litt-mobile-tab-components"
+              >
+                <Component size={12} className="pointer-events-none" />
+                Components
+              </button>
+            </>
+          ) : null}
           <div className="flex-1" />
           {onOpenTools && (
             <button
@@ -256,6 +294,19 @@ export default function LiTTMobileSheet({
           >
             {liveContent}
           </div>
+          {filesContent ? (
+            <div
+              className="absolute inset-0 flex min-w-0 flex-col overflow-hidden"
+              style={{
+                visibility: activeTab === "files" || activeTab === "components" ? "visible" : "hidden",
+                pointerEvents: activeTab === "files" || activeTab === "components" ? "auto" : "none",
+              }}
+              data-active={activeTab === "files" || activeTab === "components"}
+              data-testid="litt-mobile-files-panel"
+            >
+              {filesContent}
+            </div>
+          ) : null}
         </div>
       </div>
     </>
