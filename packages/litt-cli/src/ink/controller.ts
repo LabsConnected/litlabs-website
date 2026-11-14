@@ -73,6 +73,7 @@ import {
   resolveRequestedLocalModel,
   resolveModelArg,
   remoteSelectionOf,
+  currentLocalPressureFacts,
   type LocalRoutePolicy,
 } from "../lib/local-model-resolution.js";
 import {
@@ -1076,7 +1077,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     if (resolveRoutePolicy(store, signedIn).kind !== "local-required") return null;
     if (opts.force) resetLocalLaneCache();
     const lane = await probeLocalLane();
-    const outcome = resolveLocalModel(lane, requestedLocalModel(store.state.selectedModel));
+    const outcome = resolveLocalModel(lane, requestedLocalModel(store.state.selectedModel), currentLocalPressureFacts());
     if (!outcome.ok) {
       // Background retries stay quiet: each error activity is a state
       // update, and a retry loop that repaints on every miss is the idle

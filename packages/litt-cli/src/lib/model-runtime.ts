@@ -46,6 +46,7 @@ import {
   resolveLocalModel,
   localRoutedModel,
   isLocalModelId,
+  currentLocalPressureFacts,
   type LocalModelResolution,
 } from "./local-model-resolution.js";
 
@@ -193,7 +194,10 @@ export class ModelRuntime {
     requested: string | null,
     options?: { purpose?: LocalLanePurpose },
   ): RoutedModel {
-    const outcome = resolveLocalModel(lane, requested, options);
+    const outcome = resolveLocalModel(lane, requested, {
+      ...options,
+      ...currentLocalPressureFacts(),
+    });
     if (!outcome.ok) throw new Error(outcome.error);
     this.registerLocalModel(outcome.resolution);
     return localRoutedModel(outcome.resolution);

@@ -124,6 +124,77 @@ describe("resolveOllamaRouteCandidates — priority and shape", () => {
     assert.equal(candidates.length, 1);
     assert.equal(candidates[0].tier, "local");
   });
+
+  it("OLLAMA_ROUTE_ORDER reorders the probe tiers (PC-first)", () => {
+    const candidates = resolveOllamaRouteCandidates(
+      envFromMap({
+        OLLAMA_ROUTE_ORDER: "tailscale,lan,local",
+        OLLAMA_LAN_URL: "192.168.0.77:11434",
+        OLLAMA_TAILSCALE_URL: "pc.tailnet-name.ts.net:11434",
+      }),
+    );
+    assert.deepEqual(
+      candidates.map((c) => c.tier),
+      ["tailscale", "lan", "local"],
+    );
+  });
+
+  it("partial OLLAMA_ROUTE_ORDER keeps unlisted tiers in default order after", () => {
+    const candidates = resolveOllamaRouteCandidates(
+      envFromMap({
+        OLLAMA_ROUTE_ORDER: "lan",
+        OLLAMA_LAN_URL: "192.168.0.77:11434",
+        OLLAMA_TAILSCALE_URL: "pc.tailnet-name.ts.net:11434",
+      }),
+    );
+    assert.deepEqual(
+      candidates.map((c) => c.tier),
+      ["lan", "local", "tailscale"],
+    );
+  });
+
+  it("unusable OLLAMA_ROUTE_ORDER values fall back to the default order", () => {
+    for (const order of ["garbage,,,", "LANX", "  "]) {
+      const candidates = resolveOllamaRouteCandidates(
+        envFromMap({
+          OLLAMA_ROUTE_ORDER: order,
+          OLLAMA_LAN_URL: "192.168.0.77:11434",
+          OLLAMA_TAILSCALE_URL: "pc.tailnet-name.ts.net:11434",
+        }),
+      );
+      assert.deepEqual(
+        candidates.map((c) => c.tier),
+        ["local", "lan", "tailscale"],
+        `order="${order}"`,
+      );
+    }
+  });
+
+  it("OLLAMA_ROUTE_ORDER tokens are case- and space-insensitive, junk dropped", () => {
+    const candidates = resolveOllamaRouteCandidates(
+      envFromMap({
+        OLLAMA_ROUTE_ORDER: " Tailscale , junk, LAN ",
+        OLLAMA_LAN_URL: "192.168.0.77:11434",
+        OLLAMA_TAILSCALE_URL: "pc.tailnet-name.ts.net:11434",
+      }),
+    );
+    assert.deepEqual(
+      candidates.map((c) => c.tier),
+      ["tailscale", "lan", "local"],
+    );
+  });
+
+  it("LITT_OLLAMA_URL still short-circuits OLLAMA_ROUTE_ORDER", () => {
+    const candidates = resolveOllamaRouteCandidates(
+      envFromMap({
+        LITT_OLLAMA_URL: "http://10.10.10.10:11434",
+        OLLAMA_ROUTE_ORDER: "tailscale,lan,local",
+        OLLAMA_TAILSCALE_URL: "pc.tailnet-name.ts.net:11434",
+      }),
+    );
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].endpoint, "http://10.10.10.10:11434");
+  });
 });
 
 // ─── probeOllamaRoute — selection behaviour ──────────────────────────

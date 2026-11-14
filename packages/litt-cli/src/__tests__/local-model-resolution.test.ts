@@ -22,6 +22,8 @@ import {
   localRoutedModel,
   isLocalModelId,
   ollamaTagOf,
+  modelParamsBillions,
+  localHeavyInferenceGate,
 } from "../lib/local-model-resolution.js";
 import { shouldBlockModelPath } from "../lib/capability-gate.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
@@ -351,5 +353,95 @@ describe("local model id helpers", () => {
   it("strips the canonical prefix without touching a bare tag", () => {
     expect(ollamaTagOf("ollama:qwen3:4b-instruct")).toBe("qwen3:4b-instruct");
     expect(ollamaTagOf("qwen3:4b-instruct")).toBe("qwen3:4b-instruct");
+  });
+});
+
+// ─── 7. On-device pressure gate (3.4 — no silent heavy fallback) ────
+
+describe("modelParamsBillions", () => {
+  it("parses parameter counts, never context sizes", () => {
+    expect(modelParamsBillions("qwen3:4b")).toBe(4);
+    expect(modelParamsBillions("qwen3:4b-instruct")).toBe(4);
+    expect(modelParamsBillions("litt-oc-phone:1.7b-8k")).toBe(1.7);
+    expect(modelParamsBillions("llama3.1:8b")).toBe(8);
+    expect(modelParamsBillions("litt-hermes:64k")).toBeNull();
+    expect(modelParamsBillions("litt-coder:8k")).toBeNull();
+    expect(modelParamsBillions("litt-fast:2k")).toBeNull();
+  });
+});
+
+describe("localHeavyInferenceGate", () => {
+  const LOW = 2_000_000;   // 2 GB — below every floor
+  const HIGH = 6_000_000;  // 6 GB — above the heavy floor
+
+  it("blocks >4B on-device under low memory without explicit permission", () => {
+    const g = localHeavyInferenceGate({ tag: "llama3.1:8b", memAvailableKb: LOW });
+    expect(g.kind).toBe("blocked");
+    if (g.kind === "blocked") expect(g.message).toContain("LITT_ALLOW_HEAVY_LOCAL");
+  });
+
+  it("permits >4B under low memory only with explicit permission — and warns", () => {
+    const g = localHeavyInferenceGate({ tag: "llama3.1:8b", memAvailableKb: LOW, allowHeavyLocal: true });
+    expect(g.kind).toBe("warn");
+    if (g.kind === "warn") expect(g.message).toContain("permitted explicitly");
+  });
+
+  it("does not gate >4B with comfortable headroom", () => {
+    expect(localHeavyInferenceGate({ tag: "llama3.1:8b", memAvailableKb: HIGH }).kind).toBe("ok");
+  });
+
+  it("warns (not blocks) a small model under low memory", () => {
+    const g = localHeavyInferenceGate({ tag: "litt-oc-phone:1.7b-8k", memAvailableKb: LOW });
+    expect(g.kind).toBe("warn");
+  });
+
+  it("does not treat ctx-only tags as heavy — small-model rules apply", () => {
+    // "64k" is a context size, not 64B params: under low memory it gets
+    // the small-model warning, never the heavy-model block.
+    const g = localHeavyInferenceGate({ tag: "litt-hermes:64k", memAvailableKb: LOW });
+    expect(g.kind).toBe("warn");
+    expect(localHeavyInferenceGate({ tag: "litt-hermes:64k", memAvailableKb: HIGH }).kind).toBe("ok");
+  });
+
+  it("warns rather than blocking when memory is unmeasurable", () => {
+    expect(localHeavyInferenceGate({ tag: "llama3.1:8b", memAvailableKb: null }).kind).toBe("warn");
+  });
+});
+
+describe("resolveLocalModel — pressure gate wiring", () => {
+  const PHONE_LANE: LocalLaneStatus = {
+    available: true,
+    models: ["llama3.1:8b", "litt-oc-phone:1.7b-8k"],
+    endpoint: ENDPOINT,
+    reason: null,
+    route: "local",
+  };
+  const LOW = { memAvailableKb: 2_000_000 };
+
+  it("refuses a heavy fallback to the device under low memory", () => {
+    const outcome = resolveLocalModel(PHONE_LANE, "ollama:llama3.1:8b", LOW);
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error).toContain("LITT_ALLOW_HEAVY_LOCAL");
+  });
+
+  it("permits with LITT_ALLOW_HEAVY_LOCAL and surfaces a warning", () => {
+    const outcome = resolveLocalModel(PHONE_LANE, "ollama:llama3.1:8b",
+      { memAvailableKb: 2_000_000, allowHeavyLocal: true });
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.resolution.warning).toBeTruthy();
+      expect(outcome.resolution.reason).toContain("permitted explicitly");
+    }
+  });
+
+  it("never gates a PC route — lan/tailscale lanes serve heavy models freely", () => {
+    const pcLane: LocalLaneStatus = { ...PHONE_LANE, route: "lan" };
+    const outcome = resolveLocalModel(pcLane, "ollama:llama3.1:8b", LOW);
+    expect(outcome.ok).toBe(true);
+  });
+
+  it("omitting pressure preserves pre-gate behaviour (backwards compatible)", () => {
+    const outcome = resolveLocalModel(PHONE_LANE, "ollama:llama3.1:8b");
+    expect(outcome.ok).toBe(true);
   });
 });

@@ -24,6 +24,7 @@ import { probeLocalLane, type LocalLaneStatus } from "../local-lane.js";
 import {
   localRoutedModel,
   resolveLocalModel,
+  currentLocalPressureFacts,
 } from "../local-model-resolution.js";
 import { selectLocalModel } from "../local-lane.js";
 import {
@@ -68,13 +69,14 @@ function localHandle(
   if (!lane.available) {
     return { ok: false, error: `Local model daemon unavailable at ${lane.endpoint}: ${lane.reason ?? "no reason"}` };
   }
-  let outcome = resolveLocalModel(lane, requested);
+  const pressure = currentLocalPressureFacts();
+  let outcome = resolveLocalModel(lane, requested, pressure);
   if (!outcome.ok && (strict || !requested)) return { ok: false, error: outcome.error };
   if (!outcome.ok) {
     // Default candidate missed — try the lane's own preference order.
     const picked = selectLocalModel(lane.models);
     if (!picked) return { ok: false, error: outcome.error };
-    outcome = resolveLocalModel(lane, picked);
+    outcome = resolveLocalModel(lane, picked, pressure);
     if (!outcome.ok) return { ok: false, error: outcome.error };
   }
   const routed = localRoutedModel(outcome.resolution);

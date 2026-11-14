@@ -22,6 +22,9 @@
  * the probed lane status (lib/local-lane.ts) and the session facts.
  */
 
+import { readFileSync } from "node:fs";
+import { freemem } from "node:os";
+
 import type { LocalLanePurpose, LocalLaneStatus } from "./local-lane.js";
 import { selectLocalModel } from "./local-lane.js";
 import type { ExecutionTarget } from "./execution-target.js";
@@ -210,11 +213,139 @@ export interface LocalModelResolution {
    * "fallback" — it's the default path).
    */
   isRouteChange: boolean;
+  /**
+   * Non-fatal pressure warning — set when the resolution is allowed to
+   * proceed but the caller should surface it (heavy local inference under
+   * low memory explicitly permitted via LITT_ALLOW_HEAVY_LOCAL, or a
+   * small model running below its comfortable floor). Never set when
+   * the gate blocked — that path is an error, not a warning.
+   */
+  warning?: string;
 }
 
 export type LocalModelOutcome =
   | { ok: true; resolution: LocalModelResolution }
   | { ok: false; error: string };
+
+// ─── 2a. Heavy-local-inference pressure gate ────────────────────────
+
+/**
+ * Measured memory facts the caller supplies for the on-device pressure
+ * gate. Kept injectable so resolveLocalModel stays pure/testable — the
+ * production call sites pass currentLocalPressureFacts().
+ */
+export interface LocalPressureFacts {
+  /** MemAvailable (or free-mem fallback) in kB. null = unmeasurable. */
+  memAvailableKb: number | null;
+  /** Explicit operator opt-in for heavy on-device inference. */
+  allowHeavyLocal?: boolean;
+}
+
+/** >4B params counts as "heavy" on-device inference on this class of hardware. */
+export const HEAVY_LOCAL_PARAMS_B = 4;
+/** A heavy local model wants at least this much headroom (≈4.5 GB). */
+export const HEAVY_LOCAL_MIN_MEM_KB = 4_500_000;
+/** A ≤4B local model still wants ≈3 GB — below that, warn. */
+export const LOCAL_MODEL_MIN_MEM_KB = 3_000_000;
+
+export type LocalPressureGate =
+  | { kind: "ok" }
+  | { kind: "warn"; message: string }
+  | { kind: "blocked"; message: string };
+
+/**
+ * Parse the parameter count out of a model tag: "qwen3:4b" → 4,
+ * "litt-oc-phone:1.7b-8k" → 1.7, "llama3.1:8b" → 8. Returns null for
+ * tags with no size suffix — context sizes ("litt-hermes:64k",
+ * "litt-coder:8k") are NOT parameter counts and must not match.
+ */
+export function modelParamsBillions(tag: string): number | null {
+  const m = /(\d+(?:\.\d+)?)b(?![a-z0-9])/i.exec(tag);
+  return m ? Number.parseFloat(m[1]) : null;
+}
+
+/**
+ * The no-silent-fallback rule: when the elected route is THIS device
+ * (tier "local" — on the phone, the last-resort daemon), a heavy (>4B)
+ * model under memory pressure is REFUSED unless the operator explicitly
+ * permitted it via LITT_ALLOW_HEAVY_LOCAL=1. Permitted-but-pressured and
+ * small-but-pressured cases surface a warning instead — a route that
+ * lands on the device is never allowed to pretend nothing is wrong.
+ */
+export function localHeavyInferenceGate(input: {
+  tag: string;
+  memAvailableKb: number | null;
+  allowHeavyLocal?: boolean;
+}): LocalPressureGate {
+  const params = modelParamsBillions(input.tag);
+  const heavy = params !== null && params > HEAVY_LOCAL_PARAMS_B;
+  const mem = input.memAvailableKb;
+  const memMb = mem === null ? null : Math.round(mem / 1024);
+
+  if (heavy) {
+    if (mem !== null && mem < HEAVY_LOCAL_MIN_MEM_KB) {
+      const detail = `"${input.tag}" (~${params}B params) with MemAvailable ${memMb} MB < ${HEAVY_LOCAL_MIN_MEM_KB / 1000} MB`;
+      if (!input.allowHeavyLocal) {
+        return {
+          kind: "blocked",
+          message:
+            `Refusing heavy on-device inference: ${detail}. ` +
+            `The PC route is preferred for large models — restore Tailscale/PC ` +
+            `connectivity, or explicitly permit this device with LITT_ALLOW_HEAVY_LOCAL=1.`,
+        };
+      }
+      return {
+        kind: "warn",
+        message:
+          `Heavy on-device inference permitted explicitly: ${detail} ` +
+          `(LITT_ALLOW_HEAVY_LOCAL=1). Expect pressure on the Android LMK.`,
+      };
+    }
+    if (mem === null) {
+      return {
+        kind: "warn",
+        message:
+          `Heavy on-device inference for "${input.tag}" (~${params}B params) ` +
+          `with memory unmeasurable — proceeding unverified.`,
+      };
+    }
+    return { kind: "ok" };
+  }
+
+  if (mem !== null && mem < LOCAL_MODEL_MIN_MEM_KB) {
+    return {
+      kind: "warn",
+      message:
+        `Low memory for local inference: "${input.tag}" with MemAvailable ` +
+        `${memMb} MB < ${LOCAL_MODEL_MIN_MEM_KB / 1000} MB.`,
+    };
+  }
+  return { kind: "ok" };
+}
+
+/**
+ * MemAvailable in kB — /proc/meminfo on Linux/Android, os.freemem()
+ * elsewhere. null when neither is readable.
+ */
+export function memAvailableKb(): number | null {
+  try {
+    const text = readFileSync("/proc/meminfo", "utf8");
+    const m = /^MemAvailable:\s*(\d+)\s*kB/im.exec(text);
+    if (m) return Number.parseInt(m[1], 10);
+  } catch {
+    /* non-Linux or unreadable — fall through to os.freemem */
+  }
+  const free = freemem();
+  return Number.isFinite(free) && free > 0 ? Math.floor(free / 1024) : null;
+}
+
+/** Production facts: measured memory + the explicit-permission env flag. */
+export function currentLocalPressureFacts(): LocalPressureFacts {
+  return {
+    memAvailableKb: memAvailableKb(),
+    allowHeavyLocal: /^(1|true|yes)$/i.test(process.env.LITT_ALLOW_HEAVY_LOCAL?.trim() ?? ""),
+  };
+}
 
 /**
  * Pick the installed model that will serve a LOCAL request.
@@ -227,12 +358,56 @@ export type LocalModelOutcome =
  * being trustworthy.
  *
  * With no explicit request, the lane's own preference order applies.
+ *
+ * `pressure` is optional: when supplied AND the elected route is this
+ * device (tier "local"), the heavy-local-inference gate applies — heavy
+ * (>4B) models under low memory are refused unless explicitly permitted
+ * via LITT_ALLOW_HEAVY_LOCAL=1, and pressured-but-allowed resolutions
+ * carry a `warning` the caller can surface. Omitting it preserves the
+ * pre-gate behaviour exactly (tests, fixtures).
  */
+/**
+ * Optional knobs for resolveLocalModel — a single options bag so callers
+ * can pass a purpose hint, pressure facts, or both. `memAvailableKb` /
+ * `allowHeavyLocal` at the top level ARE the pressure facts; the gate
+ * only arms when at least one of them is present.
+ */
+export interface ResolveLocalModelOptions {
+  /** Lane purpose hint for preference-order selection. */
+  purpose?: LocalLanePurpose;
+  /** MemAvailable (or free-mem fallback) in kB. null = unmeasurable. */
+  memAvailableKb?: number | null;
+  /** Explicit operator opt-in for heavy on-device inference. */
+  allowHeavyLocal?: boolean;
+}
+
 export function resolveLocalModel(
   lane: LocalLaneStatus,
   requested: string | null,
-  options?: { purpose?: LocalLanePurpose },
+  options?: ResolveLocalModelOptions,
 ): LocalModelOutcome {
+  // The pressure gate is armed only when the caller actually supplied
+  // pressure facts — an options bag with just `{ purpose }` preserves
+  // the pre-gate behaviour exactly.
+  const pressure: LocalPressureFacts | undefined =
+    options && (options.memAvailableKb !== undefined || options.allowHeavyLocal !== undefined)
+      ? { memAvailableKb: options.memAvailableKb ?? null, allowHeavyLocal: options.allowHeavyLocal }
+      : undefined;
+  // Evaluate the on-device pressure gate for a chosen tag. Only fires
+  // when the probe landed on THIS device — a PC route (lan/tailscale)
+  // is the preferred heavy lane and is never gated here.
+  const gate = (tag: string): { blocked?: string; warning?: string } => {
+    if (!pressure || lane.route !== "local") return {};
+    const g = localHeavyInferenceGate({
+      tag,
+      memAvailableKb: pressure.memAvailableKb,
+      allowHeavyLocal: pressure.allowHeavyLocal,
+    });
+    if (g.kind === "blocked") return { blocked: g.message };
+    if (g.kind === "warn") return { warning: g.message };
+    return {};
+  };
+
   // Track the configured input and its source so callers (doctor, ask,
   // TUI) can surface route-change decisions instead of silently serving
   // a different model than the one the operator named.
@@ -263,6 +438,8 @@ export function resolveLocalModel(
           `Run \`ollama pull ${tag}\`, or unset LITT_MODEL to use an installed model.`,
       };
     }
+    const g = gate(hit);
+    if (g.blocked) return { ok: false, error: g.blocked };
     return {
       ok: true,
       resolution: {
@@ -270,12 +447,15 @@ export function resolveLocalModel(
         canonicalId: `${OLLAMA_CANONICAL_PREFIX}${hit}`,
         provider: "ollama",
         endpoint: lane.endpoint,
-        reason: hit === tag
-          ? `explicitly requested local model "${tag}"`
-          : `explicitly requested "${tag}" → installed "${hit}"`,
+        reason:
+          (hit === tag
+            ? `explicitly requested local model "${tag}"`
+            : `explicitly requested "${tag}" → installed "${hit}"`) +
+          (g.warning ? ` — ${g.warning}` : ""),
         configuredInput,
         configuredSource: "env",
         isRouteChange: hit !== tag,
+        warning: g.warning,
       },
     };
   }
@@ -287,6 +467,8 @@ export function resolveLocalModel(
       error: `No local model available: the daemon at ${lane.endpoint} has no models installed.`,
     };
   }
+  const g = gate(picked);
+  if (g.blocked) return { ok: false, error: g.blocked };
   return {
     ok: true,
     resolution: {
@@ -294,10 +476,13 @@ export function resolveLocalModel(
       canonicalId: `${OLLAMA_CANONICAL_PREFIX}${picked}`,
       provider: "ollama",
       endpoint: lane.endpoint,
-      reason: `local lane preference order selected "${picked}"`,
+      reason:
+        `local lane preference order selected "${picked}"` +
+        (g.warning ? ` — ${g.warning}` : ""),
       configuredInput: null,
       configuredSource: "none",
       isRouteChange: false,
+      warning: g.warning,
     },
   };
 }
