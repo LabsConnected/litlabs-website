@@ -107,7 +107,7 @@ export default function WorktabBar({
 
   return (
     <div
-      className="glass-shell flex h-9 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b px-2"
+      className="glass-shell flex h-9 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b px-1.5 lg:h-8"
       style={{
         backgroundColor: tokens.surface,
         borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)",
@@ -131,7 +131,7 @@ export default function WorktabBar({
             <button
               type="button"
               onClick={() => onSwitch(tab.id)}
-              className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
+              className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] lg:py-0.5"
               style={{ color: isActive ? "var(--text-main)" : "var(--text-dim)" }}
               aria-label={`Switch to ${tab.title}`}
               title={tab.title}
@@ -160,7 +160,7 @@ export default function WorktabBar({
       <button
         type="button"
         onClick={onNew}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[15px] font-bold transition-colors hover:bg-[rgba(127,127,127,0.12)]"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[15px] font-bold transition-colors hover:bg-[rgba(127,127,127,0.12)] lg:h-6 lg:w-6"
         style={{ color: "var(--text-dim)" }}
         aria-label="New worktab"
         title="New worktab"
@@ -173,7 +173,7 @@ export default function WorktabBar({
           <button
             type="button"
             onClick={() => setReopenOpen((v) => !v)}
-            className="grid h-7 w-7 place-items-center rounded-md text-[13px] transition-colors hover:bg-[rgba(127,127,127,0.12)]"
+            className="grid h-7 w-7 place-items-center rounded-md text-[13px] transition-colors hover:bg-[rgba(127,127,127,0.12)] lg:h-6 lg:w-6"
             style={{ color: "var(--text-dim)" }}
             aria-label={`Reopen closed worktab (${closedTabs.length} available)`}
             aria-expanded={reopenOpen}
