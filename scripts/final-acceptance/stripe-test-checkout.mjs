@@ -588,27 +588,98 @@ async function main() {
       await shot(page, "stripe-checkout-filled");
       throw new Error(`stripe_checkout_filled: required field(s) not filled: ${missingBilling.join(", ")}`);
     }
+    // ── Link save-info checkbox: VERIFY it is unchecked ──
+    // Run #27 root cause, proven by that run's own screenshots: every
+    // field filled correctly, but the "Save my information for faster
+    // checkout" (Link) checkbox was still CHECKED in
+    // stripe-checkout-filled.png, so the submit click diverted into the
+    // Link popup flow — stripe-checkout-submit-noop.png and
+    // failure-state.png show the page parked behind the Link modal
+    // ("Complete your payment in the open Link window, or close Link to
+    // continue paying another way."), where no payment_pages confirm
+    // request for the card can ever fire. The human-paced manual
+    // checkout that succeeded on 2026-11-13 had simply UNCHECKED that
+    // box first. The #959 handling this replaces clicked the box once,
+    // in the first context that showed it, with no read-back and no
+    // report — Stripe's hydration re-renders silently undid or
+    // out-raced it, and because the filled step never mentioned Link,
+    // runs #24–#27 all died at submit with the real blocker invisible.
+    // So handle it the way #956/#965 taught the fills: sweep every
+    // context (document + frames, same probe order), toggle if checked,
+    // READ THE STATE BACK, and keep retrying inside the same bounded
+    // poll the fills use — the box only counts as handled when a fresh
+    // probe reads it unchecked, and the outcome is reported in the
+    // filled step below.
+    const linkCheckboxCandidates = (ctx) => [
+      ctx.getByRole("checkbox", { name: /save my information|link/i }),
+      ctx.getByLabel(/save my information for faster checkout/i),
+    ];
+    const probeLinkCheckbox = async () => {
+      for (const ctx of orderedContexts()) {
+        for (const cand of linkCheckboxCandidates(ctx)) {
+          const el = cand.first();
+          if (!(await el.isVisible().catch(() => false))) continue;
+          const checked = await el.isChecked().catch(() => null);
+          if (checked === null) continue;
+          return { el, checked, where: ctx === page ? "document" : "frame" };
+        }
+      }
+      return null;
+    };
+    const toggleLinkCheckbox = async (hit) => {
+      // Prefer the checkable element itself; Stripe styles the native
+      // input down and the visible label carries the real click target,
+      // so fall back to clicking the label text.
+      if (await hit.el.uncheck({ timeout: 3_000 }).then(() => true).catch(() => false)) return;
+      await hit.el.click({ timeout: 3_000 }).catch(() => {});
+      for (const ctx of orderedContexts()) {
+        const labelText = ctx.getByText(/save my information for faster checkout/i).first();
+        if (await labelText.isVisible().catch(() => false)) {
+          await labelText.click({ timeout: 3_000 }).catch(() => {});
+          break;
+        }
+      }
+    };
+    let linkStatus = "absent"; // → "unchecked" | "absent" | "still-checked"
+    let linkWhere = null;
+    {
+      const linkDeadline = Date.now() + 20_000;
+      const absentGrace = Date.now() + 5_000;
+      let everSeen = false;
+      while (Date.now() < linkDeadline) {
+        const hit = await probeLinkCheckbox();
+        if (!hit) {
+          // Not mounted yet — allow a short grace, then conclude the
+          // box is not on this rendering. Once seen, a transient miss
+          // is a re-render replacing the node: keep polling and let
+          // the deadline decide (an unverifiable box is reported
+          // still-checked below rather than submitted into blind).
+          if (!everSeen && Date.now() >= absentGrace) break;
+          await page.waitForTimeout(500);
+          continue;
+        }
+        everSeen = true;
+        linkWhere = hit.where;
+        if (!hit.checked) { linkStatus = "unchecked"; break; }
+        linkStatus = "still-checked";
+        await toggleLinkCheckbox(hit);
+        await page.waitForTimeout(500); // settle; the loop re-probes fresh
+      }
+      if (!everSeen) linkStatus = "absent";
+    }
+    if (linkStatus === "still-checked") {
+      step("stripe_checkout_filled", false,
+        `Link save-info checkbox still checked — submit would divert into the Link flow (last seen in ${linkWhere ?? "unknown"} context; uncheck did not hold)`);
+      await shot(page, "stripe-checkout-filled");
+      throw new Error("stripe_checkout_filled: Link save-info checkbox still checked — submit would divert into the Link flow");
+    }
     step("stripe_checkout_filled", true,
-      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context; Email: ${emailHit.where}; name+ZIP filled (${filledBilling.map((h) => `${h.name}: ${h.where}`).join(", ")})`);
+      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context; Email: ${emailHit.where}; name+ZIP filled (${filledBilling.map((h) => `${h.name}: ${h.where}`).join(", ")}); Link: ${linkStatus === "unchecked" ? "unchecked (verified)" : "checkbox not present on this rendering"}`);
     await shot(page, "stripe-checkout-filled");
 
-    // Stripe's Link opt-in is checked by default and demands a phone number
-    // — its validation error silently blocks Subscribe. Uncheck it, and if
-    // a phone field is shown anyway, fill it. Run #25 diagnosis: both
-    // controls render inside the paymentForm iframe on the current layout,
-    // next to the card fields — the old page-only locators never saw them,
-    // so the uncheck silently no-opped and Link's phone validation was
-    // left armed. Sweep every context in orderedContexts() order (the same
-    // sweep the billing fill above uses); first visible hit wins.
-    for (const ctx of orderedContexts()) {
-      const linkBox = ctx.getByRole("checkbox", { name: /save my information|link/i }).first();
-      if (await linkBox.isVisible().catch(() => false)) {
-        if (await linkBox.isChecked().catch(() => false)) {
-          await linkBox.click().catch(() => {});
-        }
-        break;
-      }
-    }
+    // If a phone field is shown anyway, fill it (kept from #959: with
+    // Link verifiably unchecked the field normally disappears, but a
+    // layout that still shows one must not leave it empty).
     for (const ctx of orderedContexts()) {
       const phoneField = ctx.locator('input[type="tel"], input[name*="phone" i], #phoneNumber').first();
       if (await phoneField.isVisible().catch(() => false)) {
@@ -631,6 +702,26 @@ async function main() {
         step("stripe_checkout_filled", false,
           `pre-submit guard: ${hit.name} is empty at submit time — refusing to submit blind`);
         throw new Error(`stripe_checkout_filled: pre-submit guard found ${hit.name} empty`);
+      }
+    }
+    // Same guard, Link edition: the phone interaction above can
+    // re-render the form, and a re-render is exactly what silently
+    // re-armed the save-info checkbox in run #27's lineage. Re-probe
+    // the box at submit time — if it is checked NOW, clicking submit
+    // would divert into the Link popup flow and no card confirm could
+    // ever fire. Fail the filled step honestly instead of clicking
+    // submit into the Link modal.
+    {
+      const linkRecheckDeadline = Date.now() + 5_000;
+      let linkRecheck = await probeLinkCheckbox();
+      while (linkRecheck?.checked && Date.now() < linkRecheckDeadline) {
+        await page.waitForTimeout(500);
+        linkRecheck = await probeLinkCheckbox();
+      }
+      if (linkRecheck?.checked) {
+        step("stripe_checkout_filled", false,
+          "pre-submit guard: Link save-info checkbox still checked — submit would divert into the Link flow");
+        throw new Error("stripe_checkout_filled: pre-submit guard — Link save-info checkbox still checked — submit would divert into the Link flow");
       }
     }
 
@@ -722,8 +813,9 @@ async function main() {
     // validation block, or a click on a non-submitting look-alike) from
     // a slow redirect.
     let submitTransition = null;
+    let linkOverlaySeen = false;
     const transitionDeadline = Date.now() + 20_000;
-    while (Date.now() < transitionDeadline && !submitTransition) {
+    while (Date.now() < transitionDeadline && !submitTransition && !linkOverlaySeen) {
       if (confirmRequestSeen) {
         submitTransition = "payment_pages confirm request fired";
         break;
@@ -732,6 +824,18 @@ async function main() {
         submitTransition = `navigated to ${page.url()}`;
         break;
       }
+      // Defense in depth (run #27): if the submit diverted into the
+      // Link popup flow anyway, the page parks behind the Link waiting
+      // overlay and nothing else in this probe can ever fire. Detect
+      // the overlay and fail fast with the reason (below) instead of
+      // burning the full window on a generic no-op report.
+      for (const ctx of orderedContexts()) {
+        if (await ctx.getByText(/complete your payment in the open Link window/i).first().isVisible().catch(() => false)) {
+          linkOverlaySeen = true;
+          break;
+        }
+      }
+      if (linkOverlaySeen) break;
       for (const ctx of orderedContexts()) {
         if (await ctx.getByText(/processing|completing|confirming/i).first().isVisible().catch(() => false)) {
           submitTransition = "processing indicator visible";
@@ -739,6 +843,12 @@ async function main() {
         }
       }
       if (!submitTransition) await page.waitForTimeout(500);
+    }
+    if (linkOverlaySeen && !submitTransition && !confirmRequestSeen) {
+      step("stripe_checkout_submitted", false,
+        `submit clicked in ${submitClicked} context via candidate-${submitCandidate} (${submitCandidateNames[submitCandidate]}); Link waiting overlay detected during confirm watch: "Complete your payment in the open Link window, or close Link to continue paying another way." — the submit diverted into the Link flow, so no payment_pages confirm request can fire behind the Link modal`);
+      await shot(page, "stripe-checkout-submit-noop");
+      throw new Error('stripe_checkout_submitted: Link waiting overlay detected during confirm watch: "Complete your payment in the open Link window, or close Link to continue paying another way." — submit diverted into the Link flow');
     }
     // Diagnostics (run #24 Q3): when the probe expires with no
     // transition, sweep every context once for visible error/alert
