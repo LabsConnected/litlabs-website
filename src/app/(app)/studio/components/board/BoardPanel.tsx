@@ -59,7 +59,7 @@ export default function BoardPanel({
   const { tokens } = useTheme();
   const sessionRef = useRef<DragSession | null>(null);
 
-  const beginSession = (kind: DragSession["kind"]) => (event: ReactPointerEvent) => {
+  const beginSession = (kind: DragSession["kind"], event: ReactPointerEvent) => {
     if (maximized) return;
     sessionRef.current = {
       kind,
@@ -122,7 +122,7 @@ export default function BoardPanel({
         data-testid={`board-panel-header-${id}`}
         className="flex h-9 shrink-0 cursor-grab touch-none items-center gap-1 border-b px-2.5 active:cursor-grabbing"
         style={{ borderColor: tokens.border }}
-        onPointerDown={beginSession("move")}
+        onPointerDown={(event) => beginSession("move", event)}
         onDoubleClick={() => onToggleMaximize(id)}
       >
         <span className="min-w-0 flex-1 truncate text-xs font-semibold tracking-wide">
@@ -165,7 +165,7 @@ export default function BoardPanel({
           data-testid={`board-panel-resize-${id}`}
           aria-hidden
           className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize touch-none"
-          onPointerDown={beginSession("resize")}
+          onPointerDown={(event) => beginSession("resize", event)}
         />
       )}
     </section>
