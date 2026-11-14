@@ -259,7 +259,7 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path } }))}
           className="rounded-lg px-3 py-1.5 text-[10px] font-bold"
-          style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
+          style={{ backgroundColor: "var(--litt-primary)", color: "#fff" }}
         >
           Retry
         </button>
@@ -410,7 +410,7 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
         return (
           <div className="min-h-0 flex-1 overflow-auto p-6">
             <div
-              className="prose prose-invert max-w-none text-[12px] leading-relaxed"
+              className="prose max-w-none text-[12px] leading-relaxed"
               dangerouslySetInnerHTML={{ __html: html }}
               data-testid="file-preview-markdown"
             />
@@ -573,7 +573,7 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
                 href={rawUrl}
                 download={fileName}
                 className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold"
-                style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
+                style={{ backgroundColor: "var(--litt-primary)", color: "#fff" }}
               >
                 <Download size={12} /> Download
               </a>
