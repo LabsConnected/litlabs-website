@@ -47,6 +47,17 @@ import { assertNoPlatformSecrets, composeSandboxEnv } from "./env";
 /** Default E2B template: built and published from ../sandbox.Dockerfile. */
 export const DEFAULT_E2B_TEMPLATE_ID = "litt-sandbox-v1";
 
+/**
+ * Egress denied for every sandbox: the link-local block. Cloud metadata
+ * services live there (169.254.169.254, the ECS address 169.254.170.2),
+ * and nothing a workspace workload can legitimately need does — E2B
+ * points sandbox DNS at public resolvers and registries/git hosts are
+ * public. The canary's network-egress probe verifies this rule is
+ * actually enforced; without it E2B's default open egress lets the
+ * metadata address answer from inside the sandbox.
+ */
+export const SANDBOX_EGRESS_DENY_OUT: readonly string[] = ["169.254.0.0/16"];
+
 // ─── SDK adapter ────────────────────────────────────────────────────
 
 export interface E2bCommandResult {
@@ -82,6 +93,8 @@ export interface E2bCreateOptions {
   metadata: Record<string, string>;
   cpuCount: number;
   memoryMB: number;
+  /** Create-time egress policy, forwarded to the SDK verbatim. */
+  network: { denyOut: string[] };
 }
 
 /**
@@ -169,6 +182,7 @@ export function createDefaultE2bClient(apiKey: string): E2bClient {
         timeoutMs: opts.timeoutMs,
         envs: opts.envs,
         metadata: opts.metadata,
+        network: opts.network,
       });
       return wrapSdkSandbox(sbx as unknown as E2bSdkSandboxLike);
     },
@@ -280,6 +294,11 @@ export class E2bSandboxProvider implements SandboxProvider {
       },
       cpuCount: limits.cpuVcpus,
       memoryMB: limits.memoryMB,
+      // Every sandbox this provider creates — canary and real
+      // workspaces alike — gets the metadata egress deny rule. This
+      // create() is the single funnel, so the rule cannot drift
+      // between what the canary certifies and what workspaces run.
+      network: { denyOut: [...SANDBOX_EGRESS_DENY_OUT] },
     });
 
     const env = composeSandboxEnv({
