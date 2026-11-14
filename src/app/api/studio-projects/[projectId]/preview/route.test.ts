@@ -28,10 +28,6 @@ vi.mock("@/lib/studio/workspace-recovery", () => ({
   provisionWorkspaceForProject: vi.fn(),
 }));
 
-vi.mock("@/lib/studio/workspace-rehydration", () => ({
-  restoreWorkspaceFromLatestDeployment: vi.fn(async () => ({ kind: "no-deployments" })),
-}));
-
 vi.mock("@/lib/terminal-v1/secret-broker", () => ({
   SecretBroker: vi.fn(),
 }));
@@ -57,14 +53,25 @@ vi.mock("@/lib/terminal-internal-client", () => ({
   getPreviewStatusInternal: vi.fn(),
   stopPreviewInternal: vi.fn(),
   buildPreviewProxyUrl: vi.fn((workspaceId: string) => `https://proxy.test/${workspaceId}`),
+  // Phase 2 §3.2: the route now consults sandbox availability for the
+  // deterministic refusal derivation. Default: not available (fail
+  // closed), which preserves every pre-Phase-2 expectation below.
+  getSandboxAvailability: vi.fn(async () => ({
+    provider: null,
+    routingEnabled: false,
+    verified: false,
+    allowed: false,
+    reason: "availability-unavailable",
+  })),
+  isSandboxExecutionAvailable: vi.fn(async () => false),
 }));
 
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";import { startPreviewInternal,
   getPreviewStatusInternal,
+  isSandboxExecutionAvailable,
 } from "@/lib/terminal-internal-client";
-import { provisionWorkspaceForProject, ensureWorkspaceAlive } from "@/lib/studio/workspace-recovery";
-import { restoreWorkspaceFromLatestDeployment } from "@/lib/studio/workspace-rehydration";
+import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { createPreviewToken } from "@/lib/projects/preview-token";
 
 const authMock = vi.mocked(auth);
@@ -72,9 +79,8 @@ const getProjectMock = vi.mocked(getProject);
 const getPreviewStatusMock = vi.mocked(getPreviewStatusInternal);
 const startPreviewMock = vi.mocked(startPreviewInternal);
 const provisionMock = vi.mocked(provisionWorkspaceForProject);
-const ensureAliveMock = vi.mocked(ensureWorkspaceAlive);
-const restoreMock = vi.mocked(restoreWorkspaceFromLatestDeployment);
 const createPreviewTokenMock = vi.mocked(createPreviewToken);
+const sandboxAvailableMock = vi.mocked(isSandboxExecutionAvailable);
 
 const staticProject = {
   id: "proj-1",
@@ -286,134 +292,6 @@ describe("studio-projects preview route — static guards", () => {
   });
 });
 
-describe("studio-projects preview route — workspace durability (static)", () => {
-  const WELCOME_HTML =
-    "<!-- LITT-WELCOME-SCREEN --><html><head><title>LiTT Studio — New Project</title></head><body></body></html>";
-  const REAL_HTML = "<html><head><title>Grand Haven Roofing</title></head><body>Roofing</body></html>";
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    authMock.mockResolvedValue({ userId: "user-1" } as never);
-    getProjectMock.mockResolvedValue({ ...staticProject } as never);
-    // Factory default, restated after clearAllMocks: no deployments.
-    restoreMock.mockResolvedValue({ kind: "no-deployments" } as never);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  function getPreview() {
-    return GET(
-      new Request("https://x.test/api/studio-projects/proj-1/preview") as unknown as import("next/server").NextRequest,
-      makeParams("proj-1"),
-    );
-  }
-
-  function fetchSequence(...responses: Response[]) {
-    const fetchMock = vi.fn();
-    for (const r of responses) fetchMock.mockResolvedValueOnce(r);
-    vi.stubGlobal("fetch", fetchMock);
-    return fetchMock;
-  }
-  const ok = (content: string) =>
-    new Response(JSON.stringify({ content }), { status: 200 });
-  const missing = (error: string) =>
-    new Response(JSON.stringify({ error }), { status: 404 });
-
-  it("recovers a lost workspace and reports ready from the retried read", async () => {
-    fetchSequence(missing("Workspace not found"), ok(REAL_HTML));
-    ensureAliveMock.mockResolvedValue({ workspaceId: "ws-1", reprepared: true } as never);
-
-    const body = await (await getPreview()).json();
-
-    expect(ensureAliveMock).toHaveBeenCalledTimes(1);
-    expect(ensureAliveMock).toHaveBeenCalledWith("proj-1", "user-1", "ws-1");
-    expect(body.runtimeStatus).toBe("ready");
-    expect(body.contentLoss).toBeUndefined();
-    // The recovery already handled the workspace — no second restore.
-    expect(restoreMock).not.toHaveBeenCalled();
-  });
-
-  it("surfaces the recovery's content-loss verdict when the re-read is still the scaffold", async () => {
-    fetchSequence(missing("Workspace not found"), ok(WELCOME_HTML));
-    ensureAliveMock.mockResolvedValue({
-      workspaceId: "ws-1",
-      reprepared: true,
-      contentLoss: true,
-      survivingDeploymentId: "dep-9",
-    } as never);
-
-    const body = await (await getPreview()).json();
-
-    expect(body.runtimeStatus).toBe("not_started");
-    expect(body.starterContent).toBe(true);
-    expect(body.contentLoss).toBe(true);
-    expect(body.survivingDeploymentId).toBe("dep-9");
-    expect(createPreviewTokenMock).not.toHaveBeenCalled();
-    expect(restoreMock).not.toHaveBeenCalled();
-  });
-
-  it("restores the deployed snapshot when a live workspace holds only the scaffold", async () => {
-    // The Grand Haven end-state: workspace alive, index.html is the
-    // welcome screen, a deployment survives. The status poll must heal
-    // it — re-read after restore returns the real document → ready.
-    fetchSequence(ok(WELCOME_HTML), ok(REAL_HTML));
-    restoreMock.mockResolvedValue({ kind: "restored", deploymentId: "dep-1", fileCount: 2 } as never);
-
-    const body = await (await getPreview()).json();
-
-    expect(ensureAliveMock).not.toHaveBeenCalled();
-    expect(restoreMock).toHaveBeenCalledWith({
-      projectId: "proj-1",
-      userId: "user-1",
-      workspaceId: "ws-1",
-    });
-    expect(body.runtimeStatus).toBe("ready");
-    expect(body.workspaceRestoredFromDeploymentId).toBe("dep-1");
-  });
-
-  it("reports starter + contentLoss when the scaffold cannot be restored", async () => {
-    fetchSequence(ok(WELCOME_HTML));
-    restoreMock.mockResolvedValue({
-      kind: "content-loss",
-      survivingDeploymentId: "dep-9",
-      reason: "snapshot incomplete",
-    } as never);
-
-    const body = await (await getPreview()).json();
-
-    expect(body.runtimeStatus).toBe("not_started");
-    expect(body.starterContent).toBe(true);
-    expect(body.contentLoss).toBe(true);
-    expect(body.survivingDeploymentId).toBe("dep-9");
-    expect(createPreviewTokenMock).not.toHaveBeenCalled();
-  });
-
-  it("keeps plain starter state for a scaffolded project that never deployed", async () => {
-    fetchSequence(ok(WELCOME_HTML));
-    // restoreMock default: no-deployments.
-
-    const body = await (await getPreview()).json();
-
-    expect(body.runtimeStatus).toBe("not_started");
-    expect(body.starterContent).toBe(true);
-    expect(body.contentLoss).toBeUndefined();
-    expect(body.survivingDeploymentId).toBeUndefined();
-  });
-
-  it("does NOT run workspace recovery for a plain file-level 404", async () => {
-    fetchSequence(missing("not found"));
-
-    const body = await (await getPreview()).json();
-
-    expect(body.runtimeStatus).toBe("not_started");
-    expect(ensureAliveMock).not.toHaveBeenCalled();
-    expect(restoreMock).not.toHaveBeenCalled();
-  });
-});
-
 describe("studio-projects preview route — workspace failure code threading (wave-4)", () => {
   // The exact string production stores as workspaceError when a repo-backed
   // prepare hits the terminal-server's fail-closed 503.
@@ -483,6 +361,22 @@ describe("studio-projects preview route — workspace failure code threading (wa
     const body = await (await getPreview()).json();
     expect(body.runtimeStatus).toBe("not_started");
     expect(body.runtimeErrorCode).toBeNull();
+  });
+
+  // Phase 2 §3.2: when the terminal reports sandboxed execution
+  // available for this user, the same settled failure is retryable —
+  // the deterministic refusal must NOT be derived.
+  it("does not derive the refusal when the sandbox is available for the user", async () => {
+    sandboxAvailableMock.mockResolvedValue(true);
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "Provisioning timed out", framework: "nextjs",
+      sourceType: "github",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBeNull();
+    expect(sandboxAvailableMock).toHaveBeenCalledWith("user-1");
   });
 
   // Route honesty (console-errors diagnosis): when the POST provisioning

@@ -45,13 +45,28 @@ vi.mock("@/lib/terminal-url", () => ({
   getTerminalServerUrl: vi.fn(() => "http://terminal:1234"),
 }));
 
+vi.mock("@/lib/terminal-internal-client", () => ({
+  // Phase 2 §3.2: default not available (fail closed) — preserves the
+  // derivation expectations; the suppression test opts in.
+  isSandboxExecutionAvailable: vi.fn(async () => false),
+  getSandboxAvailability: vi.fn(async () => ({
+    provider: null,
+    routingEnabled: false,
+    verified: false,
+    allowed: false,
+    reason: "availability-unavailable",
+  })),
+}));
+
 import { GET } from "./route";
 import { verifyProjectWorkspace, getProject, ProjectVerificationError } from "@/lib/projects/project-repository";
 import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 
 const verifyMock = vi.mocked(verifyProjectWorkspace);
 const getProjectMock = vi.mocked(getProject);
 const terminalUrlMock = vi.mocked(getTerminalServerUrl);
+const sandboxAvailableMock = vi.mocked(isSandboxExecutionAvailable);
 
 function callRoute() {
   return GET(
@@ -116,6 +131,28 @@ describe("GET workspace-state — deterministic refusal derivation", () => {
     const body = await res.json();
     expect(body.code).toBe("WORKSPACE_NOT_READY");
     expect(body.workspaceErrorCode).toBeNull();
+  });
+
+  // Phase 2 §3.2: when the terminal reports sandboxed execution
+  // available for the user, the deterministic refusal is NOT derived —
+  // the settled failure is retryable through the sandbox. The verify
+  // outcome (WORKSPACE_NOT_READY) is unaffected.
+  it("verify NOT_READY + repo-backed failed project + sandbox available → no derived refusal", async () => {
+    sandboxAvailableMock.mockResolvedValue(true);
+    verifyMock.mockRejectedValue(
+      new ProjectVerificationError("Workspace not ready (current: failed)", "WORKSPACE_NOT_READY"),
+    );
+    getProjectMock.mockResolvedValue({
+      sourceType: "github",
+      workspaceStatus: "failed",
+      workspaceError: "Provisioning timed out",
+    } as never);
+    const res = await callRoute();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.code).toBe("WORKSPACE_NOT_READY");
+    expect(body.workspaceErrorCode).toBeNull();
+    expect(sandboxAvailableMock).toHaveBeenCalledWith("user-123");
   });
 
   it("unconfigured terminal + managed failed project → the explicit 503 stands", async () => {
