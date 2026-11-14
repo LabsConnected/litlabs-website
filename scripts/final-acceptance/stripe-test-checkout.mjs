@@ -195,6 +195,14 @@ async function main() {
   const context = await browser.newContext();
   const page = await context.newPage();
 
+  // Stripe Link opens its checkout in a real popup window
+  // (checkout.link.com) — a separate Page in this same context. Track every
+  // new page from the start so a Link diversion is never invisible; the
+  // submit/recovery logic below closes Link popups and resumes the card
+  // flow instead of parking behind the "open Link window" overlay.
+  const contextPages = [];
+  context.on("page", (p) => contextPages.push(p));
+
   page.on("console", (msg) => {
     if (msg.type() === "error") verdict.consoleErrors.push(msg.text().slice(0, 400));
   });
@@ -356,6 +364,11 @@ async function main() {
         ctx.getByRole("radio", { name: /card/i }),
         ctx.getByRole("option", { name: /card/i }),
         ctx.getByRole("button", { name: /^card$/i }),
+        // Current habanero rendering: the Card payment method is a
+        // div[role=button] whose text is "Card\nVisa\nMastercard…" —
+        // verified live 2026-11-14 (probe: card option expands the
+        // payment-numberInput/expiry/cvc fields on click).
+        ctx.locator('[role="button"]:has-text("Card")'),
         ctx.locator('[role="radio"]:has-text("Card")'),
         ctx.locator('[data-testid*="card"], [id*="card" i]'),
         ctx.getByText(/^\s*Card\s*$/),
@@ -562,7 +575,7 @@ async function main() {
             await el.fill(field.value).catch(() => {});
             const readBack = await el.inputValue().catch(() => "");
             if (readBack.trim()) {
-              hit = { name: field.name, where: ctx === page ? "document" : "frame", cand };
+              hit = { name: field.name, value: field.value, where: ctx === page ? "document" : "frame", cand };
               break;
             }
           }
@@ -752,104 +765,210 @@ async function main() {
     // it can live inside the payment form frame on some layouts, and
     // it stays disabled until the form validates. So — exactly like
     // the Step 5 interactions — search every context in
-    // orderedContexts() order, prefer role/text matches, and POLL for
-    // a visible AND enabled button instead of sampling once. The role
-    // name is anchored so express buttons ("Apple Pay", "Cash App
-    // Pay") can never be mistaken for the submit button.
-    // Run #25 diagnosis (§1b): the search above was CONTEXT-major — the
-    // top document was swept through all three candidates before any
-    // frame was tried, so the weakest candidate (anchored text, ANY
-    // element) clicked in the document first. The order summary leads
-    // with a "Subscribe to <product>" text node that matches the text
-    // regex, is visible from page load, passes isEnabled() trivially,
-    // and does nothing when clicked — while the real button stays
-    // disabled until Stripe's validation passes. Run #25's recorded
-    // click was exactly that: document context, candidate-2, no-op.
-    // The search below is therefore CANDIDATE-major: candidates 0 and 1
-    // (real buttons) are exhausted across ALL contexts before the text
-    // fallback is tried anywhere, and the fallback itself is scoped to
-    // actual button elements — never a bare text node.
+    // orderedContexts() order and POLL for a visible AND enabled
+    // button instead of sampling once.
+    // Run #25 diagnosis (§1b): the search is CANDIDATE-major — weaker
+    // candidates are only tried after stronger ones are exhausted
+    // across ALL contexts, and the text fallback is scoped to actual
+    // button elements — never a bare text node (the order summary's
+    // "Subscribe to <product>" text node was run #25's no-op click).
+    // Run #28 root cause (proven live against staging 2026-11-14): the
+    // payment-form frame renders a persistent "Pay securely with Link"
+    // promo <button type=button> (visible text "Pay with") whose
+    // accessible name starts with "Pay" — candidate-0's
+    // /^(subscribe|pay|complete)\b/i matched it BEFORE the real
+    // <button type=submit> in DOM order, so .first() clicked Link, a
+    // checkout.link.com popup opened, and the page parked behind
+    // "Complete your payment in the open Link window, or close Link to
+    // continue paying another way." Run #28's Link save-info checkbox
+    // was verifiably UNCHECKED — that box only controls Link
+    // enrollment, never which control receives the click. The search
+    // below therefore: (1) tries button[type="submit"] FIRST —
+    // verified live: "Subscribe" is type=submit while every Link
+    // control is type=button or div[role=button]; (2) excludes
+    // Link-named controls from the role/text fallbacks via a regex
+    // lookahead AND a pre-click aria-label/text inspection; (3)
+    // iterates up to 6 matches per candidate instead of .first(),
+    // skipping any Link control it encounters.
+    const isLinkControl = (el) => el.evaluate((e) => /link/i.test(
+      `${e.getAttribute("aria-label") || ""} ${e.getAttribute("title") || ""} ${e.innerText || ""} ${e.textContent || ""}`,
+    )).catch(() => false);
+
     const submitCandidates = (ctx) => [
-      ctx.getByRole("button", { name: /^(subscribe|pay|complete)\b/i }),
       ctx.locator('button[type="submit"], input[type="submit"]'),
+      ctx.getByRole("button", { name: /^(subscribe|pay|complete)\b(?!.*link)/i }),
       ctx.locator("button, [role=\"button\"]").filter({ hasText: /^\s*(subscribe|pay|complete)\b/i }),
     ];
+    const submitCandidateNames = ['button[type="submit"]', "role button (Link-excluded name)", "anchored text (button elements only)"];
     const urlBeforeSubmit = page.url();
-    let submitClicked = null;
-    // Which candidate clicked is recorded alongside the context (run
-    // #24 Q3): a click landing on a non-submitting look-alike element
-    // was indistinguishable from a real submit in the old detail.
-    const submitCandidateNames = ["role button", 'button[type="submit"]', "anchored text (button elements only)"];
-    let submitCandidate = null;
-    const submitDeadline = Date.now() + 45_000;
-    while (Date.now() < submitDeadline && !submitClicked) {
-      for (let ci = 0; ci < submitCandidateNames.length && !submitClicked; ci++) {
+
+    // Link diversion detection + bounded recovery (runs #27/#28): a
+    // diverted submit opens a checkout.link.com popup and parks the
+    // parent document behind the waiting overlay. Closing the popup
+    // clears the overlay and returns the SAME Checkout session to a
+    // usable card form — verified live 2026-11-14: every filled field
+    // survives the detour. We close the popup, re-verify the form,
+    // and resubmit — at most MAX_LINK_RECOVERIES times — never
+    // clicking "Cancel payment" (that abandons the session).
+    const openPopupPages = () => contextPages.filter((p) => p !== page && !p.isClosed());
+    const linkOverlayVisible = async () => {
+      for (const ctx of orderedContexts()) {
+        if (await ctx.getByText(/complete your payment in the open link window|close link to continue paying another way/i).first().isVisible().catch(() => false)) return true;
+      }
+      return false;
+    };
+    const reverifyFormAfterRecovery = async () => {
+      const problems = [];
+      // Stripe preserves field values across the Link detour, but
+      // hydration re-renders can still empty inputs — refill only
+      // what reads empty, through the same locators that filled it.
+      if (emailHit) {
+        const el = emailHit.cand.first();
+        if (!(await el.inputValue().catch(() => "")).trim()) {
+          await el.fill(CHECKOUT_EMAIL).catch(() => {});
+          problems.push("Email refilled");
+        }
+      }
+      for (const hit of filledBilling) {
+        const el = hit.cand.first();
+        if (!(await el.inputValue().catch(() => "")).trim()) {
+          await el.fill(hit.value).catch(() => {});
+          problems.push(`${hit.name} refilled`);
+        }
+      }
+      for (const [sel, val] of [[cardSel, "4242424242424242"], [expirySel, "1234"], [cvcSel, "123"]]) {
+        const c = await fieldCtx(sel);
+        const el = c.locator(sel).first();
+        if (await el.isVisible().catch(() => false)) {
+          const v = (await el.inputValue().catch(() => "")).replace(/\D/g, "");
+          if (!v) { await el.fill(val).catch(() => {}); problems.push("card field refilled"); }
+        }
+      }
+      // linkOptIn can silently re-check during the detour's re-renders —
+      // re-run the verified uncheck, bounded to ~6s.
+      {
+        const dl = Date.now() + 6_000;
+        while (Date.now() < dl) {
+          const hit = await probeLinkCheckbox();
+          if (!hit || !hit.checked) break;
+          await toggleLinkCheckbox(hit);
+          await page.waitForTimeout(500);
+        }
+        if ((await probeLinkCheckbox())?.checked) problems.push("linkOptIn still checked");
+      }
+      // Form-usability gate: if the card section collapsed during the
+      // detour, re-select Card once, then require the card number to be
+      // visible and non-empty — otherwise the next submit cannot work.
+      let cardCtx2 = await fieldCtx(cardSel);
+      let cardEl = cardCtx2.locator(cardSel).first();
+      if (!(await cardEl.isVisible().catch(() => false))) {
         for (const ctx of orderedContexts()) {
-          const el = submitCandidates(ctx)[ci].first();
-          const ready = await el.isVisible().catch(() => false)
-            && await el.isEnabled().catch(() => false);
-          if (!ready) continue;
-          const clicked = await el.click({ timeout: 10_000 }).then(() => true).catch(() => false);
-          if (clicked) {
-            submitClicked = ctx === page ? "document" : "frame";
-            submitCandidate = ci;
+          if (await clickCardIn(ctx)) break;
+        }
+        await page.waitForTimeout(2000);
+        cardCtx2 = await fieldCtx(cardSel);
+        cardEl = cardCtx2.locator(cardSel).first();
+      }
+      const usable = await cardEl.isVisible().catch(() => false)
+        && !!(await cardEl.inputValue().catch(() => "")).replace(/\D/g, "");
+      if (!usable) problems.push("card form not usable after recovery");
+      return problems;
+    };
+
+    let submitTransition = null;
+    let anySubmitClicked = false;
+    const submitHistory = [];
+    let linkDivertions = 0;
+    const MAX_LINK_RECOVERIES = 2;
+
+    const clickSubmitOnce = async () => {
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        for (let ci = 0; ci < submitCandidateNames.length; ci++) {
+          for (const ctx of orderedContexts()) {
+            const loc = submitCandidates(ctx)[ci];
+            const n = Math.min(await loc.count().catch(() => 0), 6);
+            for (let i = 0; i < n; i++) {
+              const el = loc.nth(i);
+              const ready = await el.isVisible().catch(() => false)
+                && await el.isEnabled().catch(() => false);
+              if (!ready || await isLinkControl(el)) continue;
+              const clicked = await el.click({ timeout: 10_000 }).then(() => true).catch(() => false);
+              if (clicked) return { where: ctx === page ? "document" : "frame", candidate: ci, index: i };
+            }
+          }
+        }
+        await page.waitForTimeout(500);
+      }
+      return null;
+    };
+
+    // Up to MAX_LINK_RECOVERIES + 1 submit attempts: each attempt clicks
+    // the (Link-excluded) submit control, then watches ~18s for the
+    // confirm request, a navigation, a processing state, or a Link
+    // diversion. A diversion is recovered (popup closed, overlay
+    // cleared, form re-verified) and retried; anything else ends the
+    // loop for the diagnostics below.
+    for (let attempt = 1; attempt <= MAX_LINK_RECOVERIES + 1 && !submitTransition; attempt++) {
+      const click = await clickSubmitOnce();
+      if (!click) {
+        submitHistory.push(`attempt ${attempt}: no enabled non-Link submit control found within 20s`);
+        break;
+      }
+      anySubmitClicked = true;
+      submitHistory.push(`attempt ${attempt}: clicked candidate-${click.candidate} (${submitCandidateNames[click.candidate]}) in ${click.where} context`);
+
+      let diverted = false;
+      const watchDeadline = Date.now() + 18_000;
+      while (Date.now() < watchDeadline && !submitTransition && !diverted) {
+        if (confirmRequestSeen) {
+          submitTransition = "payment_pages confirm request fired";
+          break;
+        }
+        const curUrl = page.url();
+        if (/link\.com|link\.app/i.test(curUrl)) { diverted = true; break; }
+        if (curUrl !== urlBeforeSubmit) {
+          submitTransition = `navigated to ${curUrl}`;
+          break;
+        }
+        if (openPopupPages().length || await linkOverlayVisible()) { diverted = true; break; }
+        for (const ctx of orderedContexts()) {
+          if (await ctx.getByText(/processing|completing|confirming/i).first().isVisible().catch(() => false)) {
+            submitTransition = "processing indicator visible";
             break;
           }
         }
+        if (!submitTransition && !diverted) await page.waitForTimeout(500);
       }
-      if (!submitClicked) await page.waitForTimeout(500);
-    }
-    if (!submitClicked) {
-      await shot(page, "stripe-checkout-no-submit");
-      throw new Error('checkout submit button not found or never enabled in page or any frame — probed role=button[name~/^(subscribe|pay|complete)/i], button[type="submit"], and button-scoped anchored subscribe/pay/complete text across all contexts');
+      if (!diverted) break;
+
+      linkDivertions++;
+      const popupUrls = openPopupPages().map((p) => p.url().slice(0, 80));
+      await shot(page, `stripe-checkout-link-divert-${linkDivertions}`);
+      verdict.notes.push(`submit attempt ${attempt} diverted into the Link flow (popups: ${popupUrls.join(", ") || "none yet"}) — closing Link popup(s) and retrying the card submit`);
+      if (linkDivertions > MAX_LINK_RECOVERIES) {
+        submitHistory.push(`attempt ${attempt}: Link diversion #${linkDivertions} — recovery cap (${MAX_LINK_RECOVERIES}) reached, not retrying`);
+        break;
+      }
+      for (const p of openPopupPages()) await p.close().catch(() => {});
+      // The waiting overlay clears as soon as the Link window closes
+      // (verified live); give Stripe's JS a bounded moment to settle.
+      let cleared = false;
+      const clearDeadline = Date.now() + 10_000;
+      while (Date.now() < clearDeadline) {
+        await page.waitForTimeout(500);
+        if (!openPopupPages().length && !(await linkOverlayVisible())) { cleared = true; break; }
+      }
+      if (!cleared) {
+        submitHistory.push(`attempt ${attempt}: Link popup(s) closed but the waiting overlay did not clear within 10s — form state uncertain, stopping`);
+        break;
+      }
+      const problems = await reverifyFormAfterRecovery();
+      submitHistory.push(`attempt ${attempt}: Link popup(s) closed, overlay cleared${problems.length ? ` — recovery issues: ${problems.join(", ")}` : " — card form re-verified usable"}`);
+      if (problems.includes("card form not usable after recovery") || problems.includes("linkOptIn still checked")) break;
+      await shot(page, `stripe-checkout-link-recovered-${linkDivertions}`);
     }
 
-    // Verify the click actually started the payment: within ~20s the
-    // page should navigate away from the checkout URL, show a
-    // processing state, or fire Stripe's payment_pages confirm request
-    // (watched above). Step 6's 90s redirect wait below remains the
-    // authoritative check for the redirect itself — this poll
-    // distinguishes "clicked but nothing happened" (e.g. a silent
-    // validation block, or a click on a non-submitting look-alike) from
-    // a slow redirect.
-    let submitTransition = null;
-    let linkOverlaySeen = false;
-    const transitionDeadline = Date.now() + 20_000;
-    while (Date.now() < transitionDeadline && !submitTransition && !linkOverlaySeen) {
-      if (confirmRequestSeen) {
-        submitTransition = "payment_pages confirm request fired";
-        break;
-      }
-      if (page.url() !== urlBeforeSubmit) {
-        submitTransition = `navigated to ${page.url()}`;
-        break;
-      }
-      // Defense in depth (run #27): if the submit diverted into the
-      // Link popup flow anyway, the page parks behind the Link waiting
-      // overlay and nothing else in this probe can ever fire. Detect
-      // the overlay and fail fast with the reason (below) instead of
-      // burning the full window on a generic no-op report.
-      for (const ctx of orderedContexts()) {
-        if (await ctx.getByText(/complete your payment in the open Link window/i).first().isVisible().catch(() => false)) {
-          linkOverlaySeen = true;
-          break;
-        }
-      }
-      if (linkOverlaySeen) break;
-      for (const ctx of orderedContexts()) {
-        if (await ctx.getByText(/processing|completing|confirming/i).first().isVisible().catch(() => false)) {
-          submitTransition = "processing indicator visible";
-          break;
-        }
-      }
-      if (!submitTransition) await page.waitForTimeout(500);
-    }
-    if (linkOverlaySeen && !submitTransition && !confirmRequestSeen) {
-      step("stripe_checkout_submitted", false,
-        `submit clicked in ${submitClicked} context via candidate-${submitCandidate} (${submitCandidateNames[submitCandidate]}); Link waiting overlay detected during confirm watch: "Complete your payment in the open Link window, or close Link to continue paying another way." — the submit diverted into the Link flow, so no payment_pages confirm request can fire behind the Link modal`);
-      await shot(page, "stripe-checkout-submit-noop");
-      throw new Error('stripe_checkout_submitted: Link waiting overlay detected during confirm watch: "Complete your payment in the open Link window, or close Link to continue paying another way." — submit diverted into the Link flow');
-    }
     // Diagnostics (run #24 Q3): when the probe expires with no
     // transition, sweep every context once for visible error/alert
     // text — a silent validation block or a rendered card error is
@@ -878,6 +997,7 @@ async function main() {
       }
       if (texts.size) errorSweep = `; error sweep: ${[...texts].slice(0, 3).join(" | ")}`;
     }
+    const historyText = submitHistory.join("; ");
     // Honest submit verification (run #25 diagnosis §3): a click that
     // produced NO confirmation traffic, NO navigation, and NO
     // processing state inside the probe window did not start a payment
@@ -886,12 +1006,12 @@ async function main() {
     // going to happen. Fail THIS step with the evidence instead.
     if (!submitTransition && !confirmRequestSeen) {
       step("stripe_checkout_submitted", false,
-        `submit clicked in ${submitClicked} context via candidate-${submitCandidate} (${submitCandidateNames[submitCandidate]}), but no payment_pages confirm request, no navigation, and no processing state within 20s — the click did not start a payment${errorSweep}`);
-      await shot(page, "stripe-checkout-submit-noop");
-      throw new Error("stripe_checkout_submitted: click produced no confirmation traffic, navigation, or processing state — refusing to record a no-op click as submitted");
+        `${historyText || "no submit attempt completed"}; no payment_pages confirm request, no navigation, and no processing state — the click(s) did not start a payment${linkDivertions ? ` (${linkDivertions} Link diversion(s))` : ""}${errorSweep}`);
+      await shot(page, anySubmitClicked ? "stripe-checkout-submit-noop" : "stripe-checkout-no-submit");
+      throw new Error(`stripe_checkout_submitted: ${historyText || "no submit attempt completed"} — no confirmation traffic, navigation, or processing state`);
     }
     step("stripe_checkout_submitted", true,
-      `submit clicked in ${submitClicked} context via candidate-${submitCandidate} (${submitCandidateNames[submitCandidate]}); transition: ${submitTransition ?? "not observed within 20s (Step 6 redirect wait still applies)"}${errorSweep}`);
+      `${historyText}; transition: ${submitTransition ?? "not observed within watch window (Step 6 redirect wait still applies)"}${errorSweep}`);
 
     // ── Step 6: success redirect back to staging ──
     let redirected = false;
