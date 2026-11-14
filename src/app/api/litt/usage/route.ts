@@ -97,10 +97,18 @@ export async function GET(request: NextRequest) {
   // created by the same messages route for every execution task. Counting
   // only agent_runs made "Agent runs" read 0 for users whose runs are all
   // Studio runs. Count both stores so the total reflects real run history.
+  //
+  // Identity differs per store: action_runs.user_id is TEXT holding the
+  // Clerk user id — the messages route passes auth()'s userId (=== the
+  // Clerk id) verbatim into action_runtime_create_run, and the column's
+  // RLS compares auth.uid()::text = user_id. The internal users.id uuid
+  // used for agent_runs / usage_events / credit_ledger above never
+  // appears in action_runs, so counting by user.id matched zero rows for
+  // every user. Key this count on the Clerk id (userId from auth()).
   const { count: actionRunCount } = await supabaseAdmin
     .from("action_runs")
     .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .gte("created_at", since);
 
   // credit_ledger records direction (credit|debit) + category — the
