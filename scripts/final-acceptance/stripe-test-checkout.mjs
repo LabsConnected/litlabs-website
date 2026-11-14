@@ -72,12 +72,18 @@ mkdirSync(SHOT_DIR, { recursive: true });
 // LITT_ACCEPTANCE_USER_ID (hard-required there). Locally, mint one inline —
 // the legacy QA fallback in resolveAcceptanceUserId is a PROD user that does
 // not exist on the Clerk TEST instance this script signs into.
+// The disposable user's email, when known: set from LITT_E2E_USER_EMAIL
+// (the workflow's create-fresh-user step minted the user and passes the
+// address it generated) or captured below when this script mints the
+// user itself. Stripe Checkout needs it — see CHECKOUT_EMAIL.
+let USER_EMAIL = process.env.LITT_E2E_USER_EMAIL || null;
 let USER_ID = process.env.LITT_ACCEPTANCE_USER_ID;
 if (!USER_ID && process.env.GITHUB_ACTIONS === "true") {
   USER_ID = resolveAcceptanceUserId({ isCI: true, envUserId: USER_ID });
 }
 if (!USER_ID) {
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  USER_EMAIL = `litt-acceptance-${stamp}@litlabs.net`;
   const resp = await fetch("https://api.clerk.com/v1/users", {
     method: "POST",
     headers: {
@@ -85,7 +91,7 @@ if (!USER_ID) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      email_address: [`litt-acceptance-${stamp}@litlabs.net`],
+      email_address: [USER_EMAIL],
       first_name: "LiTT",
       last_name: "Acceptance",
       public_metadata: { littAcceptance: true, createdAt: new Date().toISOString() },
@@ -98,6 +104,15 @@ if (!USER_ID) {
     throw new Error("fresh-user creation returned no valid user id");
   }
 }
+
+// Stripe-hosted Checkout opens with its email field EMPTY — the app's
+// checkout session creation passes no customer email, so the hosted page
+// never prefills it — and an empty email silently blocks submit (runs
+// #24–#26: the pay button was clicked, no payment_pages confirm request
+// ever fired, no navigation, no processing state). The Step 5 fill uses
+// the disposable user's own address; the STAMP-derived fallback only
+// covers a caller that minted a user without sharing the address.
+const CHECKOUT_EMAIL = USER_EMAIL || `litt-acceptance-${STAMP}@litlabs.net`;
 
 const WEBHOOK_POLL_MS = 150_000; // Stripe test-mode delivery is usually <30s; be generous.
 const RECHECK_DELAY_MS = 20_000; // second wallet read proves no double grant arrives late.
@@ -276,30 +291,50 @@ async function main() {
       ?? page.frames().find((f) => /elements-inner/.test(f.url()));
 
     // The email input lives in the paymentForm frame on the current
-    // rendering (Link authentication section). Wait for the first visible
-    // one across contexts, then fill in whichever context holds it —
-    // a page-only fill silently no-ops and burns the wait budget.
-    const emailSel = 'input[name="email"], #email';
-    let emailCtx = null;
+    // rendering (Link authentication section) — on the hosted page it
+    // sits in the main form area above the payment-method section.
+    // Manual proof (2026-11-13, human-paced staging checkout): the page
+    // opens with this field EMPTY and, once it is filled (and Link
+    // unchecked), the exact test-card payment this script attempts
+    // completes and redirects to the staging success URL. The fill this
+    // replaces never landed in runs #24–#26: it fired once on first
+    // visibility — racing Stripe's hydration re-renders — with a
+    // two-selector probe, swallowed every error, never read the value
+    // back, and was never reported in the filled step, so a wiped or
+    // failed fill was indistinguishable from success. It also filled a
+    // STAMP-derived address that was never the test user's email.
+    // Fill it the way #956 taught Name/ZIP: sweep every context with
+    // anchored label/placeholder locators (attribute selectors as
+    // fallback), poll, and read the value back — the field only counts
+    // as filled when the input actually holds the address. The hit is
+    // kept for the filled-step report and the pre-submit guard below.
+    const emailCandidates = (ctx) => [
+      ctx.getByLabel(/email/i),
+      ctx.getByPlaceholder(/you@example\.com|email/i),
+      ctx.locator('input[name="email"], #email, input[type="email"], input[autocomplete="email"]'),
+    ];
+    let emailHit = null; // { where, ctx, cand } — cand kept for the pre-submit guard
     const emailDeadline = Date.now() + 45_000;
-    while (Date.now() < emailDeadline && !emailCtx) {
+    while (Date.now() < emailDeadline && !emailHit) {
       for (const ctx of orderedContexts()) {
-        if (await ctx.locator(emailSel).first().isVisible().catch(() => false)) {
-          emailCtx = ctx;
-          break;
+        for (const cand of emailCandidates(ctx)) {
+          const el = cand.first();
+          if (!(await el.isVisible().catch(() => false))) continue;
+          await el.fill(CHECKOUT_EMAIL).catch(() => {});
+          const readBack = await el.inputValue().catch(() => "");
+          if (readBack.trim() === CHECKOUT_EMAIL) {
+            emailHit = { where: ctx === page ? "document" : "frame", ctx, cand };
+            break;
+          }
         }
+        if (emailHit) break;
       }
-      if (!emailCtx) await page.waitForTimeout(500);
-    }
-    if (emailCtx) {
-      await emailCtx.locator(emailSel).first()
-        .fill(`litt-acceptance-${STAMP}@litlabs.net`)
-        .catch(() => {});
+      if (!emailHit) await page.waitForTimeout(500);
     }
 
     // Some layouts gate the payment fields behind an email "Continue"
     // step — the button lives in the same context as the email field.
-    for (const ctx of emailCtx ? [emailCtx, page] : orderedContexts()) {
+    for (const ctx of emailHit ? [emailHit.ctx, page] : orderedContexts()) {
       const cont = ctx.getByRole("button", { name: /continue|next/i }).first();
       if (await cont.isVisible().catch(() => false)) {
         await cont.click().catch(() => {});
@@ -537,39 +572,60 @@ async function main() {
       }
       if (hit) filledBilling.push(hit);
     }
-    // Pre-submit guard (part 1): both billing fields must be filled —
-    // never submit blind. Fail the filled step honestly, naming what is
-    // missing, instead of discovering it as a silent redirect timeout.
-    const missingBilling = billingFields
-      .map((f) => f.name)
-      .filter((n) => !filledBilling.some((h) => h.name === n));
+    // Pre-submit guard (part 1): Email and both billing fields must be
+    // filled — never submit blind. Fail the filled step honestly, naming
+    // what is missing, instead of discovering it as a silent submit
+    // no-op (runs #24–#26 died exactly that death on the empty email).
+    const missingBilling = [
+      ...(emailHit ? [] : ["Email"]),
+      ...billingFields
+        .map((f) => f.name)
+        .filter((n) => !filledBilling.some((h) => h.name === n)),
+    ];
     if (missingBilling.length) {
       step("stripe_checkout_filled", false,
-        `could not fill required billing field(s): ${missingBilling.join(", ")} — refusing to submit blind`);
+        `could not fill required field(s): ${missingBilling.join(", ")} — refusing to submit blind`);
       await shot(page, "stripe-checkout-filled");
-      throw new Error(`stripe_checkout_filled: required billing field(s) not filled: ${missingBilling.join(", ")}`);
+      throw new Error(`stripe_checkout_filled: required field(s) not filled: ${missingBilling.join(", ")}`);
     }
     step("stripe_checkout_filled", true,
-      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context; name+ZIP filled (${filledBilling.map((h) => `${h.name}: ${h.where}`).join(", ")})`);
+      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context; Email: ${emailHit.where}; name+ZIP filled (${filledBilling.map((h) => `${h.name}: ${h.where}`).join(", ")})`);
     await shot(page, "stripe-checkout-filled");
 
     // Stripe's Link opt-in is checked by default and demands a phone number
-    // — its validation error silently blocks Subscribe. Uncheck it.
-    const linkBox = page.getByRole("checkbox", { name: /save my information|link/i }).first();
-    if (await linkBox.isChecked().catch(() => false)) {
-      await linkBox.click().catch(() => {});
+    // — its validation error silently blocks Subscribe. Uncheck it, and if
+    // a phone field is shown anyway, fill it. Run #25 diagnosis: both
+    // controls render inside the paymentForm iframe on the current layout,
+    // next to the card fields — the old page-only locators never saw them,
+    // so the uncheck silently no-opped and Link's phone validation was
+    // left armed. Sweep every context in orderedContexts() order (the same
+    // sweep the billing fill above uses); first visible hit wins.
+    for (const ctx of orderedContexts()) {
+      const linkBox = ctx.getByRole("checkbox", { name: /save my information|link/i }).first();
+      if (await linkBox.isVisible().catch(() => false)) {
+        if (await linkBox.isChecked().catch(() => false)) {
+          await linkBox.click().catch(() => {});
+        }
+        break;
+      }
     }
-    const phoneField = page.locator('input[type="tel"], input[name*="phone" i], #phoneNumber').first();
-    if (await phoneField.isVisible().catch(() => false)) {
-      await phoneField.fill("2015550123").catch(() => {});
+    for (const ctx of orderedContexts()) {
+      const phoneField = ctx.locator('input[type="tel"], input[name*="phone" i], #phoneNumber').first();
+      if (await phoneField.isVisible().catch(() => false)) {
+        await phoneField.fill("2015550123").catch(() => {});
+        break;
+      }
     }
 
     // Pre-submit guard (part 2): the Link/phone interactions above can
-    // re-render the form — re-read the billing inputs through the same
-    // locators that filled them and refuse to click submit if either
-    // was emptied, so a silent validation block can never be recorded
-    // as a "submitted" step.
-    for (const hit of filledBilling) {
+    // re-render the form — re-read the email and billing inputs through
+    // the same locators that filled them and refuse to click submit if
+    // any was emptied, so a silent validation block can never be
+    // recorded as a "submitted" step.
+    for (const hit of [
+      ...(emailHit ? [{ name: "Email", cand: emailHit.cand }] : []),
+      ...filledBilling,
+    ]) {
       const now = await hit.cand.first().inputValue().catch(() => "");
       if (!now.trim()) {
         step("stripe_checkout_filled", false,
@@ -579,6 +635,19 @@ async function main() {
     }
 
     // ── Submit the checkout ──
+    // Run #25 diagnosis (§1a): the verdict's networkSummary filter only
+    // records URLs containing "/api/", and Stripe's hosted-Checkout
+    // confirmation call (api.stripe.com/v1/payment_pages/<id>/confirm)
+    // contains no such substring — so whether a click ever started a
+    // payment was invisible to this script. Watch requests directly for
+    // the confirm call from here on; the submit verification below uses
+    // it as ground truth for "the click actually started the payment".
+    let confirmRequestSeen = false;
+    page.on("request", (req) => {
+      const u = req.url();
+      if (u.includes("payment_pages") && u.includes("/confirm")) confirmRequestSeen = true;
+    });
+
     // Run #23 failure mode: stripe_checkout_filled passed, then the old
     // code sampled a page-scoped role locator with ONE instantaneous
     // isVisible() check — the button was not visible in that instant
@@ -596,24 +665,36 @@ async function main() {
     // a visible AND enabled button instead of sampling once. The role
     // name is anchored so express buttons ("Apple Pay", "Cash App
     // Pay") can never be mistaken for the submit button.
+    // Run #25 diagnosis (§1b): the search above was CONTEXT-major — the
+    // top document was swept through all three candidates before any
+    // frame was tried, so the weakest candidate (anchored text, ANY
+    // element) clicked in the document first. The order summary leads
+    // with a "Subscribe to <product>" text node that matches the text
+    // regex, is visible from page load, passes isEnabled() trivially,
+    // and does nothing when clicked — while the real button stays
+    // disabled until Stripe's validation passes. Run #25's recorded
+    // click was exactly that: document context, candidate-2, no-op.
+    // The search below is therefore CANDIDATE-major: candidates 0 and 1
+    // (real buttons) are exhausted across ALL contexts before the text
+    // fallback is tried anywhere, and the fallback itself is scoped to
+    // actual button elements — never a bare text node.
     const submitCandidates = (ctx) => [
       ctx.getByRole("button", { name: /^(subscribe|pay|complete)\b/i }),
       ctx.locator('button[type="submit"], input[type="submit"]'),
-      ctx.getByText(/^\s*(subscribe|pay|complete)\b/i),
+      ctx.locator("button, [role=\"button\"]").filter({ hasText: /^\s*(subscribe|pay|complete)\b/i }),
     ];
     const urlBeforeSubmit = page.url();
     let submitClicked = null;
     // Which candidate clicked is recorded alongside the context (run
     // #24 Q3): a click landing on a non-submitting look-alike element
     // was indistinguishable from a real submit in the old detail.
-    const submitCandidateNames = ["role button", 'button[type="submit"]', "anchored text"];
+    const submitCandidateNames = ["role button", 'button[type="submit"]', "anchored text (button elements only)"];
     let submitCandidate = null;
     const submitDeadline = Date.now() + 45_000;
     while (Date.now() < submitDeadline && !submitClicked) {
-      for (const ctx of orderedContexts()) {
-        const cands = submitCandidates(ctx);
-        for (let ci = 0; ci < cands.length; ci++) {
-          const el = cands[ci].first();
+      for (let ci = 0; ci < submitCandidateNames.length && !submitClicked; ci++) {
+        for (const ctx of orderedContexts()) {
+          const el = submitCandidates(ctx)[ci].first();
           const ready = await el.isVisible().catch(() => false)
             && await el.isEnabled().catch(() => false);
           if (!ready) continue;
@@ -624,24 +705,29 @@ async function main() {
             break;
           }
         }
-        if (submitClicked) break;
       }
       if (!submitClicked) await page.waitForTimeout(500);
     }
     if (!submitClicked) {
       await shot(page, "stripe-checkout-no-submit");
-      throw new Error('checkout submit button not found or never enabled in page or any frame — probed role=button[name~/^(subscribe|pay|complete)/i], button[type="submit"], and anchored subscribe/pay/complete text across all contexts');
+      throw new Error('checkout submit button not found or never enabled in page or any frame — probed role=button[name~/^(subscribe|pay|complete)/i], button[type="submit"], and button-scoped anchored subscribe/pay/complete text across all contexts');
     }
 
     // Verify the click actually started the payment: within ~20s the
-    // page should navigate away from the checkout URL or show a
-    // processing state. Step 6's 90s redirect wait below remains the
-    // authoritative check — this poll only distinguishes "clicked but
-    // nothing happened" (e.g. a silent validation block) from a slow
-    // redirect in the verdict detail.
+    // page should navigate away from the checkout URL, show a
+    // processing state, or fire Stripe's payment_pages confirm request
+    // (watched above). Step 6's 90s redirect wait below remains the
+    // authoritative check for the redirect itself — this poll
+    // distinguishes "clicked but nothing happened" (e.g. a silent
+    // validation block, or a click on a non-submitting look-alike) from
+    // a slow redirect.
     let submitTransition = null;
     const transitionDeadline = Date.now() + 20_000;
     while (Date.now() < transitionDeadline && !submitTransition) {
+      if (confirmRequestSeen) {
+        submitTransition = "payment_pages confirm request fired";
+        break;
+      }
       if (page.url() !== urlBeforeSubmit) {
         submitTransition = `navigated to ${page.url()}`;
         break;
@@ -681,6 +767,18 @@ async function main() {
         for (const t of found) texts.add(t);
       }
       if (texts.size) errorSweep = `; error sweep: ${[...texts].slice(0, 3).join(" | ")}`;
+    }
+    // Honest submit verification (run #25 diagnosis §3): a click that
+    // produced NO confirmation traffic, NO navigation, and NO
+    // processing state inside the probe window did not start a payment
+    // — runs #24 and #25 both recorded such a click as "submitted" and
+    // let Step 6 burn its full wait on a page where nothing was ever
+    // going to happen. Fail THIS step with the evidence instead.
+    if (!submitTransition && !confirmRequestSeen) {
+      step("stripe_checkout_submitted", false,
+        `submit clicked in ${submitClicked} context via candidate-${submitCandidate} (${submitCandidateNames[submitCandidate]}), but no payment_pages confirm request, no navigation, and no processing state within 20s — the click did not start a payment${errorSweep}`);
+      await shot(page, "stripe-checkout-submit-noop");
+      throw new Error("stripe_checkout_submitted: click produced no confirmation traffic, navigation, or processing state — refusing to record a no-op click as submitted");
     }
     step("stripe_checkout_submitted", true,
       `submit clicked in ${submitClicked} context via candidate-${submitCandidate} (${submitCandidateNames[submitCandidate]}); transition: ${submitTransition ?? "not observed within 20s (Step 6 redirect wait still applies)"}${errorSweep}`);

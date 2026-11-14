@@ -18,6 +18,7 @@
 import { describe, it, expect } from "vitest";
 import {
   E2bSandboxProvider,
+  SANDBOX_EGRESS_DENY_OUT,
   type E2bClient,
   type E2bCreateOptions,
   type E2bSandboxHandle,
@@ -237,6 +238,53 @@ describe("E2bSandboxProvider — lifecycle", () => {
   it("satisfies the Phase 0 CanaryProvider subset structurally", () => {
     const provider: CanaryProvider = makeProvider(new FakeE2bClient());
     expect(provider.name).toBe("e2b");
+  });
+});
+
+describe("E2bSandboxProvider — egress policy", () => {
+  it("passes the metadata egress deny rule to the client on create", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+
+    expect(client.creates).toHaveLength(1);
+    // The whole link-local block: covers 169.254.169.254 (cloud
+    // metadata) and 169.254.170.2 (ECS metadata) alike.
+    expect(client.creates[0].network).toEqual({ denyOut: ["169.254.0.0/16"] });
+    expect(client.creates[0].network.denyOut).toEqual([...SANDBOX_EGRESS_DENY_OUT]);
+  });
+
+  it("applies the deny rule to EVERY create, with a fresh array each time", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    // Different tenants, different limits, one with project env — the
+    // rule rides along regardless, because provider.create() is the
+    // single funnel for canary and real workspace sandboxes alike.
+    await provider.create({ workspaceId: "ws-1", userId: "user-1", projectId: "proj-1" });
+    await provider.create({
+      workspaceId: "ws-2",
+      userId: "user-2",
+      projectId: "proj-2",
+      limits: { cpuVcpus: 2, memoryMB: 2048 },
+      env: { PROJECT_FLAG: "on" },
+    });
+
+    expect(client.creates).toHaveLength(2);
+    for (const createOpts of client.creates) {
+      expect(createOpts.network).toEqual({ denyOut: ["169.254.0.0/16"] });
+    }
+    // Each create gets its own copy: mutating one sandbox's rule can
+    // never widen or narrow another's.
+    expect(client.creates[0].network.denyOut).not.toBe(client.creates[1].network.denyOut);
+    client.creates[0].network.denyOut.push("203.0.113.0/24");
+    expect(client.creates[1].network.denyOut).toEqual(["169.254.0.0/16"]);
+    expect(SANDBOX_EGRESS_DENY_OUT).toEqual(["169.254.0.0/16"]);
   });
 });
 

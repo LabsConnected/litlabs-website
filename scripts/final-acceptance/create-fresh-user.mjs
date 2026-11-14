@@ -5,6 +5,8 @@
  * browser journey. No password, email delivery, or existing QA identity is
  * involved; the sign-in token endpoint authenticates this exact new user.
  */
+import { appendFileSync } from "node:fs";
+
 const secretKey = process.env.CLERK_SECRET_KEY;
 if (!secretKey) throw new Error("CLERK_SECRET_KEY is required");
 
@@ -34,6 +36,14 @@ if (!response.ok) {
 const user = await response.json();
 if (typeof user?.id !== "string" || !/^user_[A-Za-z0-9]+$/.test(user.id)) {
   throw new Error("Clerk fresh-user creation returned no valid user id");
+}
+
+// Also publish the generated address as a step output when running
+// under GitHub Actions, so the checkout script can fill Stripe's email
+// field with the SAME address this user was created with. stdout stays
+// the bare user id — the workflow's existing capture is unchanged.
+if (process.env.GITHUB_OUTPUT) {
+  appendFileSync(process.env.GITHUB_OUTPUT, `email=${email}\n`);
 }
 
 // stdout is consumed by the workflow output and contains no credentials.
