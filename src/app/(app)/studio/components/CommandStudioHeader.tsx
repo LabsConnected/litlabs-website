@@ -6,7 +6,6 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useWallet } from "@/context/WalletContext";
 import StudioProjectPicker from "./StudioProjectPicker";
-import GlobalLittStudioEntry from "@/components/global-litt/GlobalLittStudioEntry";
 import {
   useStudioModelStore,
   type ProviderHealth,
@@ -46,15 +45,17 @@ const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
   available: { color: "#177a36", label: "Available" },
   degraded: { color: "#e3b341", label: "Degraded" },
   unavailable: { color: "#ef4444", label: "Unavailable" },
-  locked: { color: "#63745f", label: "Not configured" },
+  locked: { color: "#52684f", label: "Not configured" },
   unknown: { color: "#8a8f98", label: "Checking" },
 };
 
 export type StudioTopBarMode = "plan" | "act" | "auto";
-export type StudioTopBarDockTab = "activity" | "files" | "terminal" | "inspector" | "media";
+// No "files": the dock's Files tab is retired (Larry, 2026-11-13) —
+// files open in the LiTT panel's top-row Files tab, not the dock.
+export type StudioTopBarDockTab = "activity" | "terminal" | "inspector" | "media";
 
 const MODE_META: { id: StudioTopBarMode; label: string; desc: string; color: string; tint: string; border: string }[] = [
-  { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "#63745f", tint: "#e4f2d6", border: "#a9c48f" },
+  { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "#52684f", tint: "#e4f2d6", border: "#6e9a57" },
   { id: "act", label: "ACT", desc: "Make changes; approvals may be required", color: "#177a36", tint: "rgba(23,122,54,0.10)", border: "rgba(23,122,54,0.35)" },
   { id: "auto", label: "AUTO", desc: "LiTT chooses when to plan and when to act", color: "var(--color-accent)", tint: "color-mix(in srgb, var(--color-accent) 10%, transparent)", border: "color-mix(in srgb, var(--color-accent) 32%, transparent)" },
 ];
@@ -93,7 +94,6 @@ export default function CommandStudioHeader({
   runtimeLoading,
   mutationActionsAllowed = false,
   capabilities,
-  viewedProjectId,
   busy = false,
   approvalPending = false,
   lastRunFailed = false,
@@ -101,7 +101,7 @@ export default function CommandStudioHeader({
   onExecutionModeChange,
 }: {
   onPreviewAction?: () => void;
-  /** Toggles the bottom dock (Activity/Files/Terminal/Inspector/Media). */
+  /** Toggles the bottom dock (Activity/Terminal/Inspector/Media). */
   onToggleDockAction?: () => void;
   /** Opens the dock on a specific tab (used by the status popover + overflow menu). */
   onOpenDockTabAction?: (tab: StudioTopBarDockTab) => void;
@@ -130,11 +130,6 @@ export default function CommandStudioHeader({
   runtimeLoading: boolean;
   mutationActionsAllowed?: boolean;
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
-  /** The project the user is viewing in Studio (URL ?project= wins, else the
-   *  resolved active project) — the same value the docked chat sends as its
-   *  viewed project. Forwarded to the Global LiTT overlay so its runs can
-   *  inherit this project's workspace through the canonical messages route. */
-  viewedProjectId?: string | null;
   /** True while an agent/conversation turn is in flight. */
   busy?: boolean;
   /** True while an approval gate is waiting on the user. */
@@ -271,7 +266,7 @@ export default function CommandStudioHeader({
 
   return (
     <header
-      className="no-scrollbar flex h-[var(--studio-header-h)] shrink-0 items-center gap-1.5 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b px-3 sm:gap-2 sm:px-4 sm:overflow-hidden"
+      className="no-scrollbar flex h-[var(--studio-header-h)] shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b px-2.5 sm:gap-1.5 sm:px-3 sm:overflow-hidden"
       style={{
         backgroundColor: "var(--studio-surface)",
         borderColor: "var(--studio-border)",
@@ -281,9 +276,11 @@ export default function CommandStudioHeader({
     >
       {/* Brand */}
       {/* No brand block in the project header (Larry's directive,
-          2026-11-10): the bar is his projects, Global LiTT, and the
-          repo workspace status — the app-level top bar above carries
-          the brand. */}
+          2026-11-10): the bar is his projects and the repo workspace
+          status — the app-level top bar above carries the brand.
+          The Global LiTT header entry was removed 2026-11-13 (Larry):
+          the persistent left chat already covers that role. The
+          Global LiTT backend, routes, and overlay are untouched. */}
       <StudioProjectPicker
         projectId={capabilities.projectId}
         projectName={capabilities.projectName}
@@ -293,19 +290,16 @@ export default function CommandStudioHeader({
         onProjectRenamed={(projectId, name) => onProjectRenamedAction?.(projectId, name)}
       />
 
-      {/* Global LiTT — persistent operator, separate from ordinary projects */}
-      <GlobalLittStudioEntry viewedProjectId={viewedProjectId ?? null} />
-
       {/* Agent-status pill — truthful: working / approval needed / ambient runtime.
           Clicking opens the full workspace-status popover. */}
       <button
         ref={statusTriggerRef}
         type="button"
         onClick={() => setStatusOpen((v) => !v)}
-        className="flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-all hover:bg-black/5 active:scale-95"
+        className="flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold transition-all hover:bg-black/5 active:scale-95 lg:min-h-6"
         style={{
-          borderColor: `${pill.color}45`,
-          backgroundColor: `${pill.color}0f`,
+          borderColor: `${pill.color}32`,
+          backgroundColor: `${pill.color}08`,
           color: pill.color,
         }}
         aria-label={pill.label}
@@ -316,7 +310,7 @@ export default function CommandStudioHeader({
         <span
           className={`h-1.5 w-1.5 rounded-full ${pill.pulse ? "animate-pulse" : ""}`}
           aria-hidden
-          style={{ backgroundColor: pill.color, boxShadow: `0 0 6px ${pill.color}` }}
+          style={{ backgroundColor: pill.color, boxShadow: `0 0 4px ${pill.color}` }}
         />
         <span className="hidden sm:inline">{pill.short}</span>
       </button>
@@ -347,7 +341,7 @@ export default function CommandStudioHeader({
         <button
           type="button"
           onClick={onPreviewAction}
-          className="hidden shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-[11px] font-bold text-on-accent shadow-accent-glow transition-all hover:bg-accent-strong active:scale-95 sm:flex"
+          className="hidden min-h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-[11px] font-bold text-on-accent shadow-accent-glow transition-all hover:bg-accent-strong active:scale-95 sm:flex lg:min-h-7"
           title="Open the live preview"
           aria-label="Preview"
           data-testid="preview-quick-action"
@@ -362,7 +356,7 @@ export default function CommandStudioHeader({
         type="button"
         onClick={onNewChatAction}
         disabled={busy}
-        className="flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1.5 text-[11px] font-bold text-accent transition-all hover:bg-accent/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1 text-[11px] font-bold text-accent transition-all hover:bg-accent/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 lg:min-h-8"
         aria-label="New chat"
         title="Start a new chat"
       >
@@ -389,17 +383,17 @@ export default function CommandStudioHeader({
         ) : null}
       </Link>
 
-      {/* Dock toggle — the single entry point to Activity/Files/Terminal/Inspector/Media */}
+      {/* Dock toggle — the single entry point to Activity/Terminal/Inspector/Media */}
       <button
         type="button"
         onClick={onToggleDockAction}
-        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-bold transition-all hover:bg-black/5 active:scale-95"
+        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[11px] font-bold transition-all hover:bg-black/5 active:scale-95 lg:min-h-8"
         style={{
           borderColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "var(--studio-border)",
           color: dockOpen ? "var(--color-accent)" : "var(--text-secondary)",
           backgroundColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent",
         }}
-        title="Toggle the dock — activity, files, terminal, inspector, media"
+        title="Toggle the dock — activity, terminal, inspector, media"
         aria-label={dockOpen ? "Close dock" : "Open dock"}
         aria-pressed={dockOpen}
         data-testid="studio-dock-toggle"
@@ -567,16 +561,16 @@ function WorkspaceStatusPopover({
         // Portaled to <body> — outside .studio-shell, so the light
         // palette is carried explicitly (surface + text tokens).
         backgroundColor: "#ffffff",
-        borderColor: "#cfdec4",
+        borderColor: "#86ac72",
         color: "#0e1510",
         ["--text-primary" as string]: "#0e1510",
-        ["--text-secondary" as string]: "#47614a",
-        ["--text-muted" as string]: "#63745f",
+        ["--text-secondary" as string]: "#3f5a42",
+        ["--text-muted" as string]: "#52684f",
       }}
     >
       <div
         className="flex items-center justify-between border-b px-3 py-2"
-        style={{ borderColor: "#cfdec4" }}
+        style={{ borderColor: "#86ac72" }}
       >
         <span className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-secondary)" }}>
           Workspace status
@@ -590,7 +584,7 @@ function WorkspaceStatusPopover({
           aria-hidden
         />
       </div>
-      <div className="max-h-[60dvh] overflow-y-auto divide-y" style={{ borderColor: "#cfdec4" }}>
+      <div className="max-h-[60dvh] overflow-y-auto divide-y" style={{ borderColor: "#86ac72" }}>
         <StatusRow
           label="AI Providers"
           value={
@@ -737,11 +731,11 @@ function OverflowMenu({
         // Portaled to <body> — outside .studio-shell, so the light
         // palette is carried explicitly (surface + text tokens).
         backgroundColor: "#ffffff",
-        borderColor: "#cfdec4",
+        borderColor: "#86ac72",
         color: "#0e1510",
         ["--text-primary" as string]: "#0e1510",
-        ["--text-secondary" as string]: "#47614a",
-        ["--text-muted" as string]: "#63745f",
+        ["--text-secondary" as string]: "#3f5a42",
+        ["--text-muted" as string]: "#52684f",
       }}
     >
       {/* Section: Conversation */}
@@ -777,7 +771,7 @@ function OverflowMenu({
         <Download size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Export
       </button>
-      <div className="h-px mx-3" style={{ backgroundColor: "#cfdec4" }} />
+      <div className="h-px mx-3" style={{ backgroundColor: "#86ac72" }} />
       <button
         type="button"
         disabled={disabled}
@@ -808,7 +802,7 @@ function OverflowMenu({
       </button>
 
       {/* Section: Workspace */}
-      <div className="h-px" style={{ backgroundColor: "#cfdec4" }} />
+      <div className="h-px" style={{ backgroundColor: "#86ac72" }} />
       <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
         Workspace
       </div>
@@ -863,7 +857,7 @@ function OverflowMenu({
       )}
       {onExecutionModeChange && (
         <>
-          <div className="h-px" style={{ backgroundColor: "#cfdec4" }} />
+          <div className="h-px" style={{ backgroundColor: "#86ac72" }} />
           <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
             Run mode
           </div>
@@ -892,7 +886,7 @@ function OverflowMenu({
           </div>
         </>
       )}
-      <div className="h-px" style={{ backgroundColor: "#cfdec4" }} />
+      <div className="h-px" style={{ backgroundColor: "#86ac72" }} />
       <Link
         href={settingsHref}
         onClick={onClose}

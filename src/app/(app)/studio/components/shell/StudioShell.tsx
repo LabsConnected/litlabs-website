@@ -303,7 +303,7 @@ export default function StudioShell({
       <div
         role="toolbar"
         aria-label="Workspace layout controls"
-        className="flex min-h-10 shrink-0 items-center gap-2 border-b px-3 py-1.5"
+        className="flex min-h-9 shrink-0 items-center gap-2 border-b px-3 py-1"
         style={{ borderColor: "var(--studio-border, rgba(255,255,255,0.08))" }}
       >
         <button
@@ -380,7 +380,7 @@ export default function StudioShell({
         </span>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 gap-2 overflow-hidden px-2 pb-2">
+      <div className="flex min-h-0 min-w-0 flex-1 gap-1.5 overflow-hidden px-1.5 pb-1.5">
         {hasLeft && (
           <div
             data-testid="studio-left-panel"
@@ -428,8 +428,8 @@ export default function StudioShell({
         )}
 
         <div
-          className="flex h-14 shrink-0 flex-col overflow-hidden"
-          style={{ minWidth: 56, width: 56, display: workspaceExpanded ? "none" : undefined }}
+          className="flex shrink-0 flex-col overflow-hidden"
+          style={{ minWidth: 48, width: 48, display: workspaceExpanded ? "none" : undefined }}
           data-testid="studio-rail-slot"
         >
           {rail}

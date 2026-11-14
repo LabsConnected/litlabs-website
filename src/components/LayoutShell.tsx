@@ -7,7 +7,6 @@ import CookieConsent from "@/components/CookieConsent";
 import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
-import { GlobalCompanion } from "@/components/companion/GlobalCompanion";
 import { YouTubePlayerShell } from "@/components/youtube/YouTubePlayerShell";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import MarketingHeader from "@/components/marketing/MarketingHeader";
@@ -80,7 +79,6 @@ export default function LayoutShell({
           {children}
         </main>
         <MarketingFooter />
-        <GlobalCompanion />
         <CookieConsent />
         <ServiceWorkerRegistration />
       </>
@@ -95,7 +93,6 @@ export default function LayoutShell({
         <main id="main-content" className="relative z-10 min-h-dvh">
           {children}
         </main>
-        <GlobalCompanion />
         <CookieConsent />
         <ServiceWorkerRegistration />
       </>
@@ -112,7 +109,8 @@ export default function LayoutShell({
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
         <AppShell>{children}</AppShell>
         {!ownChrome && !isStudio && <FooterWrapper />}
-        {!isStudio && <GlobalCompanion />}
+        {/* GlobalCompanion entry removed app-wide (Larry, 2026-11-13):
+            entry point only — provider, routes, and backend untouched. */}
         {!isStudio && <YouTubePlayerShell />}
         <CookieConsent />
         <ServiceWorkerRegistration />

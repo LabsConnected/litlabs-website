@@ -175,7 +175,7 @@ export default function StudioPublishControls({
           type="button"
           onClick={() => void handlePublish()}
           disabled={busy}
-          className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+          className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:opacity-40"
           style={{
             backgroundColor: state === "published" ? "rgba(114,242,56,0.12)" : "transparent",
             color: state === "published" ? "var(--litt-primary)" : "var(--text-muted)",
@@ -198,7 +198,7 @@ export default function StudioPublishControls({
             type="button"
             onClick={() => setState("confirm-unpublish")}
             disabled={busy}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:opacity-40"
             style={{ color: "var(--text-muted)" }}
             aria-label="Unpublish site"
             title="Unpublish site (removes public access)"
@@ -223,7 +223,7 @@ export default function StudioPublishControls({
             <button
               type="button"
               onClick={() => setState("published")}
-              className="grid h-7 w-7 place-items-center rounded-md transition hover:bg-white/8"
+              className="grid h-7 w-7 place-items-center rounded-md transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Cancel unpublish"
               data-testid="unpublish-confirm-no"
@@ -274,7 +274,7 @@ export default function StudioPublishControls({
             <button
               type="button"
               onClick={() => void handleCopyUrl()}
-              className="grid h-8 w-8 place-items-center rounded-lg transition hover:bg-white/8"
+              className="grid h-8 w-8 place-items-center rounded-lg transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Copy public URL"
               data-testid="publish-copy-url"
@@ -296,7 +296,7 @@ export default function StudioPublishControls({
                 <button
                   type="button"
                   onClick={() => setState("published")}
-                  className="rounded-lg px-2 py-1.5 text-[11px] transition hover:bg-white/8"
+                  className="rounded-lg px-2 py-1.5 text-[11px] transition hover:bg-black/5"
                   style={{ color: "var(--text-muted)" }}
                   data-testid="unpublish-confirm-no"
                 >
@@ -308,7 +308,7 @@ export default function StudioPublishControls({
                 type="button"
                 onClick={() => setState("confirm-unpublish")}
                 disabled={busy}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium transition hover:bg-white/8 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium transition hover:bg-black/5 disabled:opacity-40"
                 style={{ color: "var(--text-muted)" }}
                 data-testid="publish-unpublish"
               >
