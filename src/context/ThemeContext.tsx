@@ -245,18 +245,26 @@ const darkSkins: Record<SkinPreset, SkinColors> = {
     accentColor: "#f59e0b",
     boxBg: "#1a1510",
   },
-  // LiTT Signature is LIGHT-LOCKED by design: the approved homepage design
-  // is a true-white / deep-green light theme, so the "dark" entry carries
-  // the same light tokens as lightSkins.signature. A device or mode flip
-  // must never repaint it black/green (Larry's phone dark-mode incident).
+  // LiTT Signature — DARK variant (owner decision, 2026-11-14). This entry
+  // used to be LIGHT-LOCKED: it carried the same light tokens as
+  // lightSkins.signature so a mode flip could never repaint the approved
+  // true-white / deep-green design (Larry's phone dark-mode incident, later
+  // made the universal default by the 2026-11-13 all-light program). Larry
+  // superseded the lock for his own choice: Dark must actually switch in
+  // the Signature skin. The tokens below are the same design family after
+  // dark — deep green-ink surfaces (from the light ink #0E1510), pale
+  // green-white text, and the Signature greens (#177A36 / #0C5A26) lifted
+  // to dark-surface brightness. lightSkins.signature is untouched: Light
+  // remains the original design, byte for byte, and stays the default.
   signature: {
-    bgColor: "#FFFFFF",
-    textColor: "#0E1510",
-    linkColor: "#177A36",
-    headerColor: "#0C5A26",
-    borderColor: "#CFDEC4",
-    accentColor: "#177A36",
-    boxBg: "#FFFFFF",
+    bgColor: "#0A0F0B",
+    textColor: "#E9F4EA",
+    linkColor: "#5AD67E",
+    headerColor: "#8FE3A6",
+    borderColor: "#223D27",
+    accentColor: "#2FBF5A",
+    boxBg: "#131A14",
+    textMuted: "#A7BFA9",
   },
   // Neon Grove — the approved Projects mockup palette (futuristic dark,
   // neon green), kept as a selectable pack (2026-11-13). Values
@@ -436,7 +444,9 @@ const lightSkins: Record<SkinPreset, SkinColors> = {
   },
   // LiTT Signature — tokens lifted from the approved homepage mockup
   // (--bg #FFFFFF, --ink #0E1510, --accent #177A36, --accent-deep #0C5A26,
-  // --line #CFDEC4). Identical to darkSkins.signature on purpose (light-lock).
+  // --line #CFDEC4). This light table is the original Signature design and
+  // never changes; dark mode has its own authored variant in
+  // darkSkins.signature (owner decision, 2026-11-14).
   signature: {
     bgColor: "#FFFFFF",
     textColor: "#0E1510",
@@ -555,8 +565,9 @@ export const VISUAL_PACKS: VisualPack[] = [
     // PROVISIONAL NAME — "LiTT Signature" is a working name (Larry can
     // rename in this one entry). The approved homepage design as a theme:
     // true-white surfaces worked into deep green, lime accents, soft glow.
-    // themeMode "light" + light-locked "signature" skin tokens present the
-    // design as designed on every device.
+    // themeMode "light" + the "signature" skin's light tokens present the
+    // design as designed; the skin also has an authored dark variant for
+    // users who pick Dark themselves (owner decision, 2026-11-14).
     id: "litt-signature",
     name: "LiTT Signature",
     description:
@@ -828,42 +839,89 @@ function mixMuted(hex: string): string {
   return `#${to2(mix(r))}${to2(mix(g))}${to2(mix(b))}`;
 }
 
+/**
+ * The mode actually rendered. "system" follows the OS color scheme
+ * (prefers-color-scheme); the explicit modes render as stored. Before
+ * 2026-11-14 "system" was a label only — it silently behaved like dark.
+ */
+export function resolveEffectiveMode(
+  mode: ThemeMode,
+  systemPrefersDark: boolean,
+): "dark" | "light" {
+  if (mode === "system") return systemPrefersDark ? "dark" : "light";
+  return mode;
+}
+
+export function getResolvedColors(t: Theme, systemPrefersDark = false) {
+  // Get base skin based on the effective (rendered) mode
+  const effectiveMode = resolveEffectiveMode(t.mode, systemPrefersDark);
+  const baseSkins = effectiveMode === "light" ? lightSkins : darkSkins;
+  const skinColors = baseSkins[t.skin];
+
+  // Apply custom colors if set
+  const custom = t.customColors || {};
+
+  // Apply accent override if not custom. One identity exception: the
+  // Signature skin paired with its own signature-green accent is not a
+  // foreign override — the accent IS the skin's identity color, and the
+  // override table only carries the light-mode greens (#177A36/#0C5A26),
+  // which would stomp the authored dark tokens back to light values and
+  // leave headers unreadable on dark surfaces. In dark mode the skin's
+  // own dark link/header/accent tokens win for that pairing. (In light
+  // mode the override and the skin tokens are identical, so nothing
+  // changes there; every other skin/accent pairing is untouched.)
+  const signatureIdentityDark =
+    effectiveMode === "dark" &&
+    t.skin === "signature" &&
+    t.accent === "signature-green";
+  const accent =
+    custom.accentColor || signatureIdentityDark
+      ? null
+      : accentOverrides[t.accent];
+
+  return {
+    bgColor: custom.bgColor || skinColors.bgColor,
+    textColor: custom.textColor || skinColors.textColor,
+    // A skin may specify its exact muted tone (Neon Grove); the rest
+    // derive it from the text color as before.
+    textMuted:
+      skinColors.textMuted ??
+      mixMuted(custom.textColor || skinColors.textColor),
+    linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
+    headerColor:
+      accent?.headerColor || custom.headerColor || skinColors.headerColor,
+    borderColor: custom.borderColor || skinColors.borderColor,
+    accentColor:
+      accent?.accentColor || custom.accentColor || skinColors.accentColor,
+    boxBg: custom.boxBg || skinColors.boxBg,
+    success: "#25e08a",
+    warning: "#ffb020",
+  };
+}
+
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(defaultTheme);
-  const getResolvedColors = (t: Theme) => {
-    // Get base skin based on mode
-    const baseSkins = t.mode === "light" ? lightSkins : darkSkins;
-    const skinColors = baseSkins[t.skin];
 
-    // Apply custom colors if set
-    const custom = t.customColors || {};
+  // Live OS color-scheme for "system" mode: read prefers-color-scheme
+  // once, then follow it as the OS flips.
+  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    )
+      return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemPrefersDark(mq.matches);
+    const onChange = (e: MediaQueryListEvent) =>
+      setSystemPrefersDark(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
-    // Apply accent override if not custom
-    const accent = custom.accentColor ? null : accentOverrides[t.accent];
-
-    return {
-      bgColor: custom.bgColor || skinColors.bgColor,
-      textColor: custom.textColor || skinColors.textColor,
-      // A skin may specify its exact muted tone (Neon Grove); the rest
-      // derive it from the text color as before.
-      textMuted:
-        skinColors.textMuted ??
-        mixMuted(custom.textColor || skinColors.textColor),
-      linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
-      headerColor:
-        accent?.headerColor || custom.headerColor || skinColors.headerColor,
-      borderColor: custom.borderColor || skinColors.borderColor,
-      accentColor:
-        accent?.accentColor || custom.accentColor || skinColors.accentColor,
-      boxBg: custom.boxBg || skinColors.boxBg,
-      success: "#25e08a",
-      warning: "#ffb020",
-    };
-  };
-
-  const resolvedColors = getResolvedColors(theme);
+  const resolvedColors = getResolvedColors(theme, systemPrefersDark);
   const semanticTokens = {
     background: resolvedColors.bgColor,
     surface: resolvedColors.boxBg,
@@ -906,7 +964,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("litlabs-theme", JSON.stringify(theme));
       // Apply CSS variables
       const root = document.documentElement;
-      const colors = getResolvedColors(theme);
+      const colors = getResolvedColors(theme, systemPrefersDark);
       root.style.setProperty("--bg-color", colors.bgColor);
       root.style.setProperty("--text-color", colors.textColor);
       root.style.setProperty("--link-color", colors.linkColor);
@@ -919,7 +977,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       root.dataset.layoutStyle = theme.layoutStyle;
       root.dataset.backgroundMode = theme.backgroundMode;
     }
-  }, [theme, mounted]);
+  }, [theme, mounted, systemPrefersDark]);
 
   const setMode = (mode: ThemeMode) => {
     setTheme((prev) => ({ ...prev, mode }));
