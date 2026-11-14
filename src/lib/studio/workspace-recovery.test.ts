@@ -343,6 +343,88 @@ describe("workspace-recovery", () => {
       );
     });
 
+    it("keeps serving a GitHub mirror workspace when the liveness check fails twice", async () => {
+      // Regression (gate flip, 2026-11-14): one failed liveness lookup
+      // demoted a healthy "ready" mirror project to "not_prepared" and
+      // forced a full cold re-provision. Every Studio surface derives the
+      // repo-workspace gate from that one DB field, so a transient
+      // terminal blip (restart, canary-cycle gap) latched the whole
+      // project into the gate until a re-prepare happened to complete.
+      // The mirror branch must retry the check once and then keep serving
+      // the existing workspace without touching the status.
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({
+          sourceType: "github",
+          githubInstallationId: 123,
+          githubOwner: "LabsConnected",
+          githubRepo: "litlabs-website",
+          workspaceId: "ws-gh",
+          workspaceRoot: "/data/ws-gh",
+          workspaceStatus: "ready",
+        }),
+      );
+      // Both the first lookup and the retry miss the workspace.
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(null);
+
+      const result = await provisionWorkspaceForProject("proj-gh", "user-1");
+
+      expect(result).toBe("ws-gh");
+      // Exactly one retry — no lookup storm against the terminal.
+      expect(getWorkspaceInternal).toHaveBeenCalledTimes(2);
+      expect(getWorkspaceInternal).toHaveBeenCalledWith("ws-gh", "user-1");
+      // The status is NOT demoted and no cold re-provision is forced.
+      expect(updateProjectWorkspace).not.toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({ workspaceStatus: "not_prepared" }),
+      );
+      expect(updateProjectWorkspace).not.toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({ workspaceStatus: "failed" }),
+      );
+      expect(claimProvisioningLock).not.toHaveBeenCalled();
+      expect(prepareWorkspaceInternal).not.toHaveBeenCalled();
+    });
+
+    it("recovers a GitHub mirror workspace when the liveness retry succeeds", async () => {
+      // A single transient failure must not cost the mirror refresh: when
+      // the retry finds the workspace alive, the normal re-sync runs.
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({
+          sourceType: "github",
+          githubInstallationId: 123,
+          githubOwner: "LabsConnected",
+          githubRepo: "litlabs-website",
+          workspaceId: "ws-gh",
+          workspaceRoot: "/data/ws-gh",
+          workspaceStatus: "ready",
+        }),
+      );
+      // First lookup throws (terminal mid-restart, caught to null); the
+      // retry finds the workspace ready.
+      vi.mocked(getWorkspaceInternal)
+        .mockRejectedValueOnce(new Error("terminal restarting"))
+        .mockResolvedValue(
+          fakeWorkspace({ workspaceId: "ws-gh", root: "/data/ws-gh", ready: true } as unknown as WorkspaceGetResponse),
+        );
+      vi.mocked(getInstallationTokenForClone).mockResolvedValue("tok-123");
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-gh", root: "/data/ws-gh", branch: "main" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await provisionWorkspaceForProject("proj-gh", "user-1");
+
+      expect(result).toBe("ws-gh");
+      expect(getWorkspaceInternal).toHaveBeenCalledTimes(2);
+      // The retry success takes the normal mirror refresh path.
+      expect(prepareWorkspaceInternal).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceType: "github", existingWorkspaceId: "ws-gh" }),
+      );
+      expect(claimProvisioningLock).not.toHaveBeenCalled();
+    });
+
     it("re-provisions when DB says ready but terminal server lost the workspace", async () => {
       // First getProject: ready but stale
       vi.mocked(getProject)

@@ -2229,8 +2229,8 @@ server.listen(PORT, BIND.host, () => {
   // Phase 1: when a real provider is configured, start the canary so
   // the verification signal exists for the exec gate. The disabled
   // provider's canary can never pass, so this stays off there.
-  // Step 6: also refresh the canary periodically (every 4 minutes,
-  // inside the 5-minute freshness window). The boot run alone left the
+  // Step 6: also refresh the canary periodically (every 2 minutes,
+  // inside the 5-minute freshness window, leaving 3 minutes of slack). The boot run alone left the
   // signal verified for ~5 minutes after each restart, after which the
   // exec gate — and now the health sandbox dimension — closed until the
   // next restart.

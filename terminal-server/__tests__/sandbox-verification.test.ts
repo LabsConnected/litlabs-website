@@ -15,6 +15,8 @@ import { describe, it, expect } from "vitest";
 import {
   SandboxVerificationService,
   createDefaultSandboxVerificationService,
+  DEFAULT_VERIFICATION_MAX_AGE_MS,
+  DEFAULT_VERIFICATION_REFRESH_INTERVAL_MS,
 } from "../sandbox/verification";
 import type { CanaryProvider } from "../sandbox/provider";
 import { createCompliantFakeProvider } from "../sandbox/testing/fake-providers";
@@ -181,5 +183,26 @@ describe("SandboxVerificationService — compliant provider", () => {
     expect(report.passed).toBe(false);
     expect(service.getSignal().state).toBe("failed");
     expect(service.isVerified()).toBe(false);
+  });
+});
+
+describe("SandboxVerificationService — refresh timing defaults", () => {
+  it("refreshes every 2 minutes inside the 5-minute freshness window", () => {
+    // The refresh interval is the gate's slack: a refresh replaces the
+    // stored report only when its run completes, so the interval plus a
+    // slow run must fit inside the freshness window. At 4 minutes only
+    // 1 minute of slack remained and one slow or failed refresh closed
+    // the exec gate for a stretch every cycle; 2 minutes leaves 3.
+    expect(DEFAULT_VERIFICATION_MAX_AGE_MS).toBe(5 * 60_000);
+    expect(DEFAULT_VERIFICATION_REFRESH_INTERVAL_MS).toBe(2 * 60_000);
+    expect(DEFAULT_VERIFICATION_REFRESH_INTERVAL_MS).toBeLessThan(
+      DEFAULT_VERIFICATION_MAX_AGE_MS,
+    );
+    // Even if one refresh run fails outright, the next run (one full
+    // interval later) still completes before the last green report ages
+    // out: 2 intervals fit inside the window.
+    expect(DEFAULT_VERIFICATION_REFRESH_INTERVAL_MS * 2).toBeLessThan(
+      DEFAULT_VERIFICATION_MAX_AGE_MS,
+    );
   });
 });
