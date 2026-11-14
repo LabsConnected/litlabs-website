@@ -1,1 +1,50 @@
-LyoqCiAqIENyZWF0ZSBhIGRpc3Bvc2FibGUgQ2xlcmsgdXNlciBmb3IgYSBwcm9kdWN0aW9uIGFjY2VwdGFuY2UgcnVuLgogKgogKiBUaGUgdXNlciBpcyBpbnRlbnRpb25hbGx5IGNyZWF0ZWQgYnkgdGhlIENJIGpvYiBpbW1lZGlhdGVseSBiZWZvcmUgdGhlCiAqIGJyb3dzZXIgam91cm5leS4gTm8gcGFzc3dvcmQsIGVtYWlsIGRlbGl2ZXJ5LCBvciBleGlzdGluZyBRQSBpZGVudGl0eSBpcwogKiBpbnZvbHZlZDsgdGhlIHNpZ24taW4gdG9rZW4gZW5kcG9pbnQgYXV0aGVudGljYXRlcyB0aGlzIGV4YWN0IG5ldyB1c2VyLgogKi8KaW1wb3J0IHsgYXBwZW5kRmlsZVN5bmMgfSBmcm9tICJub2RlOmZzIjsKCmNvbnN0IHNlY3JldEtleSA9IHByb2Nlc3MuZW52LkNMRVJLX1NFQ1JFVF9LRVk7CmlmICghc2VjcmV0S2V5KSB0aHJvdyBuZXcgRXJyb3IoIkNMRVJLX1NFQ1JFVF9LRVkgaXMgcmVxdWlyZWQiKTsKCmNvbnN0IHN0YW1wID0gYCR7RGF0ZS5ub3coKX0tJHtNYXRoLnJhbmRvbSgpLnRvU3RyaW5nKDM2KS5zbGljZSgyLCAxMCl9YDsKY29uc3QgZW1haWwgPSBgbGl0dC1hY2NlcHRhbmNlLSR7c3RhbXB9QGxpdGxhYnMubmV0YDsKY29uc3QgcmVzcG9uc2UgPSBhd2FpdCBmZXRjaCgiaHR0cHM6Ly9hcGkuY2xlcmsuY29tL3YxL3VzZXJzIiwgewogIG1ldGhvZDogIlBPU1QiLAogIGhlYWRlcnM6IHsKICAgIEF1dGhvcml6YXRpb246IGBCZWFyZXIgJHtzZWNyZXRLZXl9YCwKICAgICJDb250ZW50LVR5cGUiOiAiYXBwbGljYXRpb24vanNvbiIsCiAgfSwKICBib2R5OiBKU09OLnN0cmluZ2lmeSh7CiAgICBlbWFpbF9hZGRyZXNzOiBbZW1haWxdLAogICAgZW1haWxfYWRkcmVzc19pZGVudGlmaWNhdGlvbl9zdGF0dXM6IFsicmVzZXJ2ZWQiXSwKICAgIGZpcnN0X25hbWU6ICJMaVRUIiwKICAgIGxhc3RfbmFtZTogIkFjY2VwdGFuY2UiLAogICAgcHVibGljX21ldGFkYXRhOiB7IGxpdHRBY2NlcHRhbmNlOiB0cnVlLCBjcmVhdGVkQXQ6IG5ldyBEYXRlKCkudG9JU09TdHJpbmcoKSB9LAogICAgc2tpcF9wYXNzd29yZF9yZXF1aXJlbWVudDogdHJ1ZSwKICB9KSwKfSk7CgppZiAoIXJlc3BvbnNlLm9rKSB7CiAgY29uc3QgYm9keSA9IGF3YWl0IHJlc3BvbnNlLnRleHQoKS5jYXRjaCgoKSA9PiAiIik7CiAgdGhyb3cgbmV3IEVycm9yKGBDbGVyayBmcmVzaC11c2VyIGNyZWF0aW9uIGZhaWxlZDogSFRUUCAke3Jlc3BvbnNlLnN0YXR1c30gJHtib2R5LnNsaWNlKDAsIDUwMCl9YCk7Cn0KCmNvbnN0IHVzZXIgPSBhd2FpdCByZXNwb25zZS5qc29uKCk7CmlmICh0eXBlb2YgdXNlcj8uaWQgIT09ICJzdHJpbmciIHx8ICEvXnVzZXJfW0EtWmEtejAtOV0rJC8udGVzdCh1c2VyLmlkKSkgewogIHRocm93IG5ldyBFcnJvcigiQ2xlcmsgZnJlc2gtdXNlciBjcmVhdGlvbiByZXR1cm5lZCBubyB2YWxpZCB1c2VyIGlkIik7Cn0KCi8vIEFsc28gcHVibGlzaCB0aGUgZ2VuZXJhdGVkIGFkZHJlc3MgYXMgYSBzdGVwIG91dHB1dCB3aGVuIHJ1bm5pbmcKLy8gdW5kZXIgR2l0SHViIEFjdGlvbnMsIHNvIHRoZSBjaGVja291dCBzY3JpcHQgY2FuIGZpbGwgU3RyaXBlJ3MgZW1haWwKLy8gZmllbGQgd2l0aCB0aGUgU0FNRSBhZGRyZXNzIHRoaXMgdXNlciB3YXMgY3JlYXRlZCB3aXRoLiBzdGRvdXQgc3RheXMKLy8gdGhlIGJhcmUgdXNlciBpZCDigJQgdGhlIHdvcmtmbG93J3MgZXhpc3RpbmcgY2FwdHVyZSBpcyB1bmNoYW5nZWQuCmlmIChwcm9jZXNzLmVudi5HSVRIVUJfT1VUUFVUKSB7CiAgYXBwZW5kRmlsZVN5bmMocHJvY2Vzcy5lbnYuR0lUSFVCX09VVFBVVCwgYGVtYWlsPSR7ZW1haWx9XG5gKTsKfQoKLy8gc3Rkb3V0IGlzIGNvbnN1bWVkIGJ5IHRoZSB3b3JrZmxvdyBvdXRwdXQgYW5kIGNvbnRhaW5zIG5vIGNyZWRlbnRpYWxzLgpwcm9jZXNzLnN0ZG91dC53cml0ZSh1c2VyLmlkKTsK
+/**
+ * Create a disposable Clerk user for a production acceptance run.
+ *
+ * The user is intentionally created by the CI job immediately before the
+ * browser journey. No password, email delivery, or existing QA identity is
+ * involved; the sign-in token endpoint authenticates this exact new user.
+ */
+import { appendFileSync } from "node:fs";
+
+const secretKey = process.env.CLERK_SECRET_KEY;
+if (!secretKey) throw new Error("CLERK_SECRET_KEY is required");
+
+const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+const email = `litt-acceptance-${stamp}@litlabs.net`;
+const response = await fetch("https://api.clerk.com/v1/users", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${secretKey}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    email_address: [email],
+    email_address_identification_status: ["reserved"],
+    first_name: "LiTT",
+    last_name: "Acceptance",
+    public_metadata: { littAcceptance: true, createdAt: new Date().toISOString() },
+    skip_password_requirement: true,
+  }),
+});
+
+if (!response.ok) {
+  const body = await response.text().catch(() => "");
+  throw new Error(`Clerk fresh-user creation failed: HTTP ${response.status} ${body.slice(0, 500)}`);
+}
+
+const user = await response.json();
+if (typeof user?.id !== "string" || !/^user_[A-Za-z0-9]+$/.test(user.id)) {
+  throw new Error("Clerk fresh-user creation returned no valid user id");
+}
+
+// Also publish the generated address as a step output when running
+// under GitHub Actions, so the checkout script can fill Stripe's email
+// field with the SAME address this user was created with. stdout stays
+// the bare user id — the workflow's existing capture is unchanged.
+if (process.env.GITHUB_OUTPUT) {
+  appendFileSync(process.env.GITHUB_OUTPUT, `email=${email}\n`);
+}
+
+// stdout is consumed by the workflow output and contains no credentials.
+process.stdout.write(user.id);
