@@ -506,6 +506,18 @@ export default function StudioProjectFiles({
     if (dirty && !window.confirm("Discard unsaved changes?")) return;
     setActivePath(entry.path);
     setActiveFile(entry.path); // Drive canonical StudioContext.activeFile
+    // Panel linking (board B3, also live in the stage layout): opening a
+    // file here surfaces it in the Code workspace as an editor tab, via
+    // the same studio:open-file event the ActionPanel uses. Tagged with
+    // this panel as the source so the listener below never re-enters
+    // openFile from its own dispatch.
+    if (projectId) {
+      window.dispatchEvent(
+        new CustomEvent(STUDIO_EVENT_OPEN_FILE, {
+          detail: { projectId, path: entry.path, source: "files-panel" },
+        }),
+      );
+    }
     setUnsupportedPath(null);
     setConflictNotice(null);
     setError(null);
@@ -542,6 +554,9 @@ export default function StudioProjectFiles({
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.projectId !== projectId) return;
+      // Own dispatch (panel linking from openFile above) — the file is
+      // already selected here; re-entering openFile would loop.
+      if (detail?.source === "files-panel") return;
       const rawPath = typeof detail?.path === "string" ? detail.path : "";
       let normalized: string;
       try {

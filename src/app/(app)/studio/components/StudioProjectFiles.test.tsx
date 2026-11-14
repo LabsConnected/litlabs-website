@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import StudioProjectFiles from "./StudioProjectFiles";
 import { clearHostExecSettled } from "@/lib/studio/host-exec-session";
+import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
 
 const { getToken } = vi.hoisted(() => ({ getToken: vi.fn().mockResolvedValue("test-token") }));
 
@@ -183,5 +184,50 @@ describe("StudioProjectFiles", () => {
     const editorAfter = await screen.findByRole("textbox", { name: "Edit App.tsx" });
     await waitFor(() => expect((editorAfter as HTMLTextAreaElement).value).toBe("v2 written by LiTT"));
     expect(screen.queryByText(/LiTT changed this file while you had unsaved edits/i)).toBeNull();
+  });
+
+  it("panel linking (B3): opening a file dispatches studio:open-file once, tagged files-panel, without looping", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ name: "README.md", type: "file", size: 10 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ content: "# hello" }), { status: 200 }));
+
+    const received: unknown[] = [];
+    const listener = (e: Event) => received.push((e as CustomEvent).detail);
+    window.addEventListener(STUDIO_EVENT_OPEN_FILE, listener);
+    try {
+      render(<StudioProjectFiles projectId="project-1" repositoryName="owner/repo" branch="main" workspaceStatus="ready" writeAccess />);
+
+      await screen.findByText("README.md");
+      fireEvent.click(screen.getByTitle("README.md"));
+
+      const editor = await screen.findByRole("textbox", { name: "Edit README.md" });
+      expect((editor as HTMLTextAreaElement).value).toBe("# hello");
+      // Exactly one linking dispatch for the open — the panel's own
+      // listener ignores its tagged dispatch, so there is no re-entry
+      // and the file content was read exactly once.
+      expect(received).toEqual([{ projectId: "project-1", path: "README.md", source: "files-panel" }]);
+      const readCalls = fetchMock.mock.calls.filter(([, init]) =>
+        typeof init?.body === "string" && init.body.includes('"action":"read"'),
+      );
+      expect(readCalls).toHaveLength(1);
+    } finally {
+      window.removeEventListener(STUDIO_EVENT_OPEN_FILE, listener);
+    }
+  });
+
+  it("panel linking (B3): an external studio:open-file event still selects the file", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ name: "README.md", type: "file", size: 10 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ content: "# from action" }), { status: 200 }));
+
+    render(<StudioProjectFiles projectId="project-1" repositoryName="owner/repo" branch="main" workspaceStatus="ready" writeAccess />);
+
+    await screen.findByText("README.md");
+    fireEvent(window, new CustomEvent(STUDIO_EVENT_OPEN_FILE, { detail: { projectId: "project-1", path: "README.md" } }));
+
+    const editor = await screen.findByRole("textbox", { name: "Edit README.md" });
+    expect((editor as HTMLTextAreaElement).value).toBe("# from action");
   });
 });

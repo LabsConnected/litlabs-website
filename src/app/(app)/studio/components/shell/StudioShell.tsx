@@ -25,6 +25,9 @@ export default function StudioShell({
   previewPanel,
   previewPanelOpen,
   onTogglePreviewPanel,
+  board,
+  boardActive,
+  onToggleBoard,
 }: {
   /** Durable worktabs — task identity, not layout. */
   taskbar: ReactNode;
@@ -57,6 +60,13 @@ export default function StudioShell({
   /** Controlled preview-panel visibility, owned by CommandStudio. */
   previewPanelOpen?: boolean;
   onTogglePreviewPanel?: () => void;
+  /** Board mode (plan §2 B2): the floating-panel board surface. Rendered
+      in place of `stage` only while `boardActive` — the per-user board
+      toggle defaults OFF, so without these props the shell is exactly
+      the fixed stage layout. */
+  board?: ReactNode;
+  boardActive?: boolean;
+  onToggleBoard?: () => void;
 }) {
   const [floating, setFloating] = useState<"inspector" | null>(() => {
     try {
@@ -272,6 +282,19 @@ export default function StudioShell({
             {previewPanelOpen ? "Hide preview" : "Preview panel"}
           </button>
         )}
+        {onToggleBoard && (
+          <button
+            type="button"
+            onClick={onToggleBoard}
+            aria-pressed={Boolean(boardActive)}
+            aria-label={boardActive ? "Switch back to the fixed stage layout" : "Open board mode"}
+            title={boardActive ? "Switch back to the fixed stage layout" : "Open board mode"}
+            className="min-h-8 rounded-md border px-3 text-xs font-medium hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" style={{ borderColor: "var(--studio-border)", color: "var(--text-main)" }}
+            data-testid="dock-board-toggle"
+          >
+            {boardActive ? "Stage layout" : "Board mode"}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setWorkspaceExpanded((v) => !v)}
@@ -329,7 +352,7 @@ export default function StudioShell({
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--studio-border)", background: "var(--studio-surface)" }} data-testid="studio-stage">
-          {stage}
+          {boardActive && board ? board : stage}
         </div>
 
         {showPreviewPanel && (

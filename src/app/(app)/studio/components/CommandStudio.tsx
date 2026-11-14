@@ -1,7 +1,7 @@
 "use client";
 
 import { terminalHealthOf } from "@/lib/studio/terminal-health";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { Image as ImageIcon } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
@@ -84,8 +84,13 @@ import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
 import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult } from "../lib/approval-polling";
 import { createApprovalOutcomeGuard } from "../lib/approval-outcome-guard";
-import { StudioActivityPanel, StudioInspector } from "./StudioWorkspaceFrame";
+import { StudioActivityPanel, StudioInspector, type StudioInspectorData } from "./StudioWorkspaceFrame";
 import StudioShell from "./shell/StudioShell";
+import StudioBoard from "./board/StudioBoard";
+import BoardPanelBindings from "./board/BoardPanelBindings";
+import { useBoardProjectType } from "./board/useBoardProjectType";
+import type { BoardPanelId } from "./board/board-types";
+import { useBoardEnabled, useBoardLayoutStore } from "../stores/useBoardLayoutStore";
 import WorkspaceRail from "./shell/WorkspaceRail";
 import ContextInspector from "./shell/ContextInspector";
 import ResizeHandle from "./shell/ResizeHandle";
@@ -551,6 +556,22 @@ function CommandStudioContent() {
     setPreviewDockMounted(true);
     setPreviewDockOpen((v) => !v);
   }, []);
+  // Board mode (plan §2 B2/B3): per-user toggle, default OFF. While off
+  // the shell renders the fixed stage layout exactly as before; while
+  // on, the board surface replaces the stage area (chat stays fixed on
+  // the left) and its panels bind the real systems (B3).
+  const boardProjectId = activeProjectId ?? capabilities.projectId;
+  const boardEnabled = useBoardEnabled(userId);
+  const setBoardEnabled = useBoardLayoutStore((s) => s.setBoardEnabled);
+  const boardActive = boardEnabled && Boolean(userId) && Boolean(boardProjectId);
+  const handleToggleBoard = useCallback(() => {
+    if (userId) setBoardEnabled(userId, !boardEnabled);
+  }, [userId, boardEnabled, setBoardEnabled]);
+  // B3: the board's default panel set follows the project's REAL type
+  // (game2d/game3d → the game set with World + Media), read from the
+  // project's stored workspaceType — not a hardcoded "website". Only
+  // fetched while the board toggle is on for this user.
+  const boardProjectType = useBoardProjectType(boardEnabled ? boardProjectId : null);
   // The shell's bottom panel (StudioDock) open state. Classic mode has
   // its own dockOpen state; the two layouts never render at once.
   const [shellDockOpen, setShellDockOpen] = useState(false);
@@ -834,6 +855,17 @@ function CommandStudioContent() {
   // Canonical LiTT active tab — single source of truth shared by the
   // desktop rail, the mobile sheet, and header/activity actions.
   const [littActiveTab, setLittActiveTab] = useState<LiTTTab>("chat");
+
+  // Board mode (B3): the single Files instance relocates onto the board,
+  // so the LiTT panel's Files/Components tab has no content while the
+  // board is active. If that tab is selected when the board takes over
+  // (or an open-files intent lands while it is active), fall back to
+  // Chat — the panel must never sit on a tab with no pane behind it.
+  useEffect(() => {
+    if (boardActive && (littActiveTab === "files" || littActiveTab === "components")) {
+      setLittActiveTab("chat");
+    }
+  }, [boardActive, littActiveTab]);
 
   // Viewport tier (declared above with the canvas state) drives
   // desktop-rail vs mobile-sheet LiTT presentation — null until first
@@ -1198,6 +1230,10 @@ function CommandStudioContent() {
     const openFile = (e: Event) => {
       const detail = (e as CustomEvent).detail as { projectId?: string; path?: string } | undefined;
       if (typeof detail?.path !== "string" || detail.path.length === 0) return;
+      // Board mode (B3): Files lives on the board — the board's Files
+      // panel and the Code panel answer this event themselves, and the
+      // LiTT panel has no Files tab to route to.
+      if (boardActive) return;
       handleOpenFilesPanel();
     };
     window.addEventListener(STUDIO_EVENT_OPEN_DOCK, openDock);
@@ -1208,7 +1244,7 @@ function CommandStudioContent() {
       window.removeEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
       window.removeEventListener(STUDIO_EVENT_OPEN_FILE, openFile);
     };
-  }, [handlePreselectDockTab, handleOpenFilesPanel]);
+  }, [handlePreselectDockTab, handleOpenFilesPanel, boardActive]);
 
   // Dock open helpers — both are OPEN actions (switch tab + ensure
   // open), never a toggle-closed. The dock's own close button and the
@@ -3337,6 +3373,81 @@ function CommandStudioContent() {
     </div>
   ) : null;
 
+  // The Inspector's data bag — ONE definition feeding both the shell
+  // ContextInspector's default content and the board Inspector panel
+  // (B3), so the two homes can never drift apart.
+  const studioInspectorData: StudioInspectorData = {
+    capabilities,
+    executionMode,
+    modelLabel,
+    modelHealth,
+    activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
+    destination,
+    surface: studioMode,
+    messages: conversation.messages,
+    busy: conversation.busy,
+    conversationId: conversation.selectedConversationId,
+    workspaceRevision,
+    healthRunTrigger,
+    onFilesSaved: handleWorkspaceRevision,
+    onWorkspacePrepared: handleWorkspacePrepared,
+  };
+
+  // "Ask LiTT to change this" for a live preview element — the exact
+  // handler the shell inspector's ElementInspectorPanel uses, shared
+  // with the board Inspector panel (B3) so both ask identically.
+  const handleAskAboutPreviewSelection = useCallback(() => {
+    const sel: StudioSelectionPayload | null = activeWorktab?.selection
+      ?? (previewSelection && capabilities.projectId
+        ? {
+            kind: "preview-element",
+            label: previewSelection.label,
+            selector: previewSelection.selector,
+            tagName: previewSelection.tagName,
+            sourceFile: previewSelection.attrs?.["data-source"],
+            projectId: capabilities.projectId,
+            timestamp: Date.now(),
+          }
+        : null);
+    if (sel) {
+      window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
+    } else {
+      setLittCollapsed(false);
+    }
+  }, [activeWorktab, previewSelection, capabilities.projectId]);
+
+  // B3 board bindings: StudioBoard's renderPanel hook. Every panel is
+  // the real system with the same props/handlers as its fixed-layout
+  // home (see BoardPanelBindings). Files passes the single
+  // projectFilesContent element — while the board is active the shell's
+  // LiTT panel does NOT receive it (see the leftPanel prop below), so
+  // exactly one StudioProjectFiles instance exists at any time.
+  const renderBoardPanel = (id: BoardPanelId): ReactNode => (
+    <BoardPanelBindings
+      id={id}
+      userId={userId ?? ""}
+      projectId={boardProjectId ?? ""}
+      capabilities={capabilities}
+      lastRunFailureNote={lastRunFailureNote}
+      onPreviewSelectionChange={setPreviewSelection}
+      filesContent={projectFilesContent}
+      workspaceRevision={workspaceRevision}
+      healthRunTrigger={healthRunTrigger}
+      previewSelection={previewSelection}
+      showElementInspector={Boolean(previewSelection) && !builderSelectedNodeId}
+      onAskAboutSelection={handleAskAboutPreviewSelection}
+      onClearSelection={handleClearWorktabSelection}
+      inspectorTab={inspectorTab}
+      onInspectorTabChange={setInspectorTab}
+      inspectorData={studioInspectorData}
+      onDeployRequest={(target) => {
+        window.dispatchEvent(
+          new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY, { detail: { target } }),
+        );
+      }}
+    />
+  );
+
   // A bottom-dock tab whose canonical home is another slot (the
   // Terminal station / the right Inspector). Honest jump panel — the
   // dock never starts a competing PTY or a second inspector.
@@ -3736,9 +3847,21 @@ function CommandStudioContent() {
               />
             }
             bottomPanel={shellBottomDock}
-            previewPanel={previewDockPanel ?? undefined}
-            previewPanelOpen={previewDockOpen}
-            onTogglePreviewPanel={handleTogglePreviewDock}
+            previewPanel={boardActive ? undefined : (previewDockPanel ?? undefined)}
+            previewPanelOpen={boardActive ? false : previewDockOpen}
+            onTogglePreviewPanel={boardActive ? undefined : handleTogglePreviewDock}
+            boardActive={boardActive}
+            onToggleBoard={userId ? handleToggleBoard : undefined}
+            board={
+              boardActive && userId && boardProjectId ? (
+                <StudioBoard
+                  userId={userId}
+                  projectId={boardProjectId}
+                  projectType={boardProjectType}
+                  renderPanel={renderBoardPanel}
+                />
+              ) : undefined
+            }
             stage={
               <>
                 {Array.from(
@@ -3764,7 +3887,7 @@ function CommandStudioContent() {
                 })}
               </>
             }
-            inspectorOpen={inspectorOpen}
+            inspectorOpen={boardActive ? false : inspectorOpen}
             onOpenInspector={() => setInspectorOpen(true)}
             inspector={
               <ContextInspector
@@ -3810,25 +3933,7 @@ function CommandStudioContent() {
                       selection={previewSelection}
                       projectId={capabilities.projectId}
                       route={null}
-                      onAskAboutSelection={() => {
-                        const sel: StudioSelectionPayload | null = activeWorktab?.selection
-                          ?? (capabilities.projectId
-                            ? {
-                                kind: "preview-element",
-                                label: previewSelection.label,
-                                selector: previewSelection.selector,
-                                tagName: previewSelection.tagName,
-                                sourceFile: previewSelection.attrs?.["data-source"],
-                                projectId: capabilities.projectId,
-                                timestamp: Date.now(),
-                              }
-                            : null);
-                        if (sel) {
-                          window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
-                        } else {
-                          setLittCollapsed(false);
-                        }
-                      }}
+                      onAskAboutSelection={handleAskAboutPreviewSelection}
                       onClearSelection={handleClearWorktabSelection}
                     />
                   ) : undefined
@@ -3841,22 +3946,7 @@ function CommandStudioContent() {
                     onToggle={() => setInspectorOpen(false)}
                     activeTab={inspectorTab}
                     onTabChange={setInspectorTab}
-                    data={{
-                      capabilities,
-                      executionMode,
-                      modelLabel,
-                      modelHealth,
-                      activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
-                      destination,
-                      surface: studioMode,
-                      messages: conversation.messages,
-                      busy: conversation.busy,
-                      conversationId: conversation.selectedConversationId,
-                      workspaceRevision,
-                      healthRunTrigger,
-                      onFilesSaved: handleWorkspaceRevision,
-                      onWorkspacePrepared: handleWorkspacePrepared,
-                    }}
+                    data={studioInspectorData}
                   />
                 }
               />
@@ -3878,7 +3968,7 @@ function CommandStudioContent() {
                 microphoneStatus={liveSession.indicators.microphone}
                 chatContent={littLeftPanelContent}
                 liveContent={littLiveContent}
-                filesContent={projectFilesContent}
+                filesContent={boardActive ? undefined : projectFilesContent}
                 expandedWidth={littDockResize.width}
                 expandedMaxWidth="500px"
               />
