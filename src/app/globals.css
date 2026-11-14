@@ -92,7 +92,7 @@
   --text-primary: #f5f1fa;
   --text-secondary: #a29aaf;
   --text-muted: #8a8299;
-  --studio-header-h: 48px;
+  --studio-header-h: 44px;
   --studio-mobile-bottom-h: 62px;
   --studio-nav-w: 56px;
   --studio-rail-w: 300px;
@@ -3008,31 +3008,34 @@ main {
    own !important surface treatments on top, as before.
    ============================================================ */
 .studio-shell {
-  /* Surfaces — white worked into green */
-  --studio-bg: #edf3e4;
+  /* Surfaces — white worked into green. Polish pass (2026-11-13):
+     the shell backdrop deepened one step and the border/text tokens
+     darkened so hairlines and muted labels stay legible on white —
+     same light design language, stronger definition. */
+  --studio-bg: #e3edd8;
   --studio-surface: #ffffff;
   --studio-elevated: #ffffff;
   --studio-card: #ffffff;
-  --studio-border: #cfdec4;
-  --studio-border-strong: #a9c48f;
-  --bg-main: #edf3e4;
+  --studio-border: #86ac72;
+  --studio-border-strong: #6e9a57;
+  --bg-main: #e3edd8;
   --bg-elevated: #ffffff;
   --bg-solid: rgba(255, 255, 255, 0.96);
   --bg-card: rgba(255, 255, 255, 0.92);
   --glass-1: rgba(255, 255, 255, 0.85);
   --glass-2: rgba(255, 255, 255, 0.9);
   --glass-3: rgba(244, 249, 238, 0.95);
-  --glass-border: #cfdec4;
-  --glass-border-highlight: #a9c48f;
-  --border-soft: rgba(14, 60, 26, 0.12);
-  --border-strong: rgba(14, 60, 26, 0.22);
+  --glass-border: #86ac72;
+  --glass-border-highlight: #6e9a57;
+  --border-soft: rgba(14, 60, 26, 0.18);
+  --border-strong: rgba(14, 60, 26, 0.32);
   --grid-line: rgba(23, 122, 54, 0.07);
 
   /* Text — ink on white */
   --text-main: #0e1510;
   --text-primary: #0e1510;
-  --text-secondary: #47614a;
-  --text-muted: #63745f;
+  --text-secondary: #3f5a42;
+  --text-muted: #52684f;
 
   /* Accent — deep green primary; lime survives as highlight
      (--mark / chartreuse usages outside these tokens unchanged).

@@ -188,22 +188,22 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 6,
-          padding: "6px 12px",
-          borderRadius: 8,
+          gap: isInline ? 5 : 6,
+          padding: isInline ? "4px 8px" : "6px 12px",
+          borderRadius: isInline ? 999 : 8,
           border: `1px solid ${badgeColor}40`,
           background: badgeBg,
           color: badgeColor,
-          fontSize: 12,
+          fontSize: isInline ? 11 : 12,
           fontWeight: 600,
           cursor: "pointer",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-          backdropFilter: "blur(8px)",
+          boxShadow: isInline ? "none" : "0 2px 8px rgba(0,0,0,0.2)",
+          backdropFilter: isInline ? "none" : "blur(8px)",
         }}
       >
-        <FlaskConical size={14} />
+        <FlaskConical size={isInline ? 13 : 14} />
         {isTestMode ? `TEST: ${activeSim.toUpperCase()}` : "OWNER"}
-        <ChevronDown size={12} style={{ opacity: 0.6 }} />
+        <ChevronDown size={isInline ? 11 : 12} style={{ opacity: 0.6 }} />
       </button>
 
       {/* Dropdown — opens downward from the trigger, right-aligned.

@@ -60,6 +60,7 @@ import StudioBrowserStatusChip from "./StudioBrowserStatusChip";
 import { ChatBrowserLiveView } from "./ChatBrowserLiveView";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
+import type { LiTTTab } from "./LiTTPanel";
 import ProjectDecisionPrompt from "./ProjectDecisionPrompt";
 import WorktabBar from "./WorktabBar";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
@@ -167,8 +168,11 @@ const LiveVoiceOverlay = dynamic(() => import("./LiveVoiceOverlay"), { ssr: fals
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
 /** Desktop shell: dock-tab actions map onto stage surfaces (or the
-    inspector). In mobile/classic they still drive the real bottom dock. */
-const DOCK_TAB_TO_SURFACE: Partial<Record<StudioDockTab, StudioStageSurface>> = {
+    inspector). In mobile/classic they still drive the real bottom dock.
+    The "files" key is a legacy drawer intent (deep links), NOT a dock
+    tab — the dock's Files tab is retired; it maps to the files stage
+    surface here and to the LiTT panel's Files tab for open actions. */
+const DOCK_TAB_TO_SURFACE: Partial<Record<StudioDockTab | "files", StudioStageSurface>> = {
   activity: "activity",
   files: "files",
   terminal: "terminal",
@@ -698,7 +702,7 @@ function CommandStudioContent() {
         // The station named in the URL is authoritative; legacy tool
         // values fall back to the old mode/drawer mapping.
         const legacySurface = mapped.openDrawer
-          ? (DOCK_TAB_TO_SURFACE[mapped.openDrawer as StudioDockTab] ?? null)
+          ? (DOCK_TAB_TO_SURFACE[mapped.openDrawer as StudioDockTab | "files"] ?? null)
           : modeToStageSurface(newMode);
         const named = toolParamToStation(fromUrl) ?? legacySurface;
         const surface = named ? centerStation(named) : null;
@@ -807,7 +811,7 @@ function CommandStudioContent() {
 
   // Canonical LiTT active tab — single source of truth shared by the
   // desktop rail, the mobile sheet, and header/activity actions.
-  const [littActiveTab, setLittActiveTab] = useState<"chat" | "live">("chat");
+  const [littActiveTab, setLittActiveTab] = useState<LiTTTab>("chat");
 
   // Viewport tier (declared above with the canvas state) drives
   // desktop-rail vs mobile-sheet LiTT presentation — null until first
@@ -1046,6 +1050,21 @@ function CommandStudioContent() {
     handleOpenDockTab("activity");
   }, [handleOpenDockTab]);
 
+  // Files is an OPEN action onto the LiTT panel's top-row Files tab
+  // (Larry, 2026-11-13): the bottom dock's Files tab and the mobile
+  // bottom-nav Files entry are retired, so header / MissionCards /
+  // ActionPanel open-files actions all land here — the panel (desktop)
+  // or the LiTT sheet (mobile) opens on its Files tab.
+  const handleOpenFilesPanel = useCallback(() => {
+    if (isMobileLitt) {
+      setMobileToolsOpen(false);
+      setMobileLittOpen(true);
+    } else {
+      setLittCollapsed(false);
+    }
+    setLittActiveTab("files");
+  }, [isMobileLitt]);
+
   // Listen for "Ask LiTT" events from Canvas and other surfaces.
   // Opens LiTT, switches to Chat, and optionally pre-fills the composer
   // with context from the requesting surface.
@@ -1117,8 +1136,14 @@ function CommandStudioContent() {
   // the deploy itself still goes through the ApprovalCard gate.
   useEffect(() => {
     const openDock = (e: Event) => {
-      const tab = (e as CustomEvent).detail?.tab as StudioDockTab | undefined;
-      if (tab === "activity" || tab === "files" || tab === "terminal" || tab === "inspector" || tab === "media") {
+      const tab = (e as CustomEvent).detail?.tab as StudioDockTab | "files" | undefined;
+      if (tab === "files") {
+        // The dock's Files tab is retired — open-files intents land on
+        // the LiTT panel's top-row Files tab instead.
+        handleOpenFilesPanel();
+        return;
+      }
+      if (tab === "activity" || tab === "terminal" || tab === "inspector" || tab === "media") {
         handleOpenDockTab(tab);
       }
     };
@@ -1138,13 +1163,14 @@ function CommandStudioContent() {
         }),
       );
     };
-    // Open a file from the ActionPanel's file tree: switch to the dock
-    // Files tab. The StudioProjectFiles instances listen for the same
-    // event and select the file themselves when the project matches.
+    // Open a file from the ActionPanel's file tree: switch to the LiTT
+    // panel's Files tab (the dock's Files tab is retired). The
+    // StudioProjectFiles instances listen for the same event and
+    // select the file themselves when the project matches.
     const openFile = (e: Event) => {
       const detail = (e as CustomEvent).detail as { projectId?: string; path?: string } | undefined;
       if (typeof detail?.path !== "string" || detail.path.length === 0) return;
-      handleOpenDockTab("files");
+      handleOpenFilesPanel();
     };
     window.addEventListener(STUDIO_EVENT_OPEN_DOCK, openDock);
     window.addEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
@@ -1154,16 +1180,17 @@ function CommandStudioContent() {
       window.removeEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
       window.removeEventListener(STUDIO_EVENT_OPEN_FILE, openFile);
     };
-  }, [handleOpenDockTab]);
+  }, [handleOpenDockTab, handleOpenFilesPanel]);
 
   // Dock open helpers — both are OPEN actions (switch tab + ensure
   // open), never a toggle-closed. The dock's own close button and the
-  // header dock toggle close it. Files, Inspector, and Terminal live in
-  // the dock; the permanent left ContextDrawer is gone on desktop.
-  // Opening/closing the dock must not change the active surface.
+  // header dock toggle close it. Inspector and Terminal live in the
+  // dock; Files lives in the LiTT panel's top row (the dock's Files
+  // tab is retired); the permanent left ContextDrawer is gone on
+  // desktop. Opening/closing the dock must not change the active surface.
   const handleOpenContextFiles = useCallback(() => {
-    handleOpenDockTab("files");
-  }, [handleOpenDockTab]);
+    handleOpenFilesPanel();
+  }, [handleOpenFilesPanel]);
   const handleOpenContextInspector = useCallback(() => {
     handleOpenDockTab("inspector");
   }, [handleOpenDockTab]);
@@ -1268,9 +1295,17 @@ function CommandStudioContent() {
       const terminalNeedsExplicitConnect =
         mapped.openDrawer === "terminal" && capabilities.terminalStatus !== "connected" && !command;
       if (!terminalNeedsExplicitConnect) {
-        // handleOpenDockTab routes to a stage surface while the shell
-        // owns the workspace; classic mode still opens the bottom dock.
-        handleOpenDockTab(mapped.openDrawer as StudioDockTab);
+        if ((mapped.openDrawer as string) === "files") {
+          // The dock's Files tab is retired — a files drawer intent
+          // (runtime payloads can carry "files" even though the typed
+          // DrawerTab union no longer does) opens the LiTT panel's
+          // top-row Files tab.
+          handleOpenFilesPanel();
+        } else {
+          // handleOpenDockTab routes to a stage surface while the shell
+          // owns the workspace; classic mode still opens the bottom dock.
+          handleOpenDockTab(mapped.openDrawer as StudioDockTab);
+        }
       }
     }
     if (mapped.openInspector) {
@@ -1283,7 +1318,7 @@ function CommandStudioContent() {
       if (surface) openStageSurface(surface);
     }
     setPendingCommand(command);
-  }, [capabilities.terminalStatus, handleOpenContextInspector, handleOpenDockTab, studioShellActive, openStageSurface]);
+  }, [capabilities.terminalStatus, handleOpenContextInspector, handleOpenDockTab, handleOpenFilesPanel, studioShellActive, openStageSurface]);
 
   // One-chat entry chips (Larry's directive, 2026-11-11;
   // ART-20261111-031): the creation-type hints in the chat's empty
@@ -2789,7 +2824,7 @@ function CommandStudioContent() {
     onOpenPreview: handlePreview,
     onOpenTerminal: handleOpenTerminal,
     onOpenActivity: () => handleOpenDockTab("activity"),
-    onOpenFiles: () => handleOpenDockTab("files"),
+    onOpenFiles: handleOpenFilesPanel,
     onRollback: handleRollback,
   };
 
@@ -3269,8 +3304,9 @@ function CommandStudioContent() {
   );
 
   // The shell's bottom panel (Phase 2): the existing StudioDock with
-  // Terminal/Output/Activity homes. Activity and Files carry their
-  // real content; Terminal and Inspector jump to their single homes.
+  // Terminal/Output/Activity homes. Activity carries its real content;
+  // Terminal and Inspector jump to their single homes. Files is not a
+  // dock tab anymore — it lives in the LiTT panel's top row.
   const shellBottomDock = (
     <StudioDock
       open={shellDockOpen}
@@ -3295,7 +3331,6 @@ function CommandStudioContent() {
           terminalStatus={terminalHealthOf(capabilities).label}
         />
       }
-      filesContent={projectFilesContent}
       terminalContent={dockJumpPanel(
         "Terminal",
         "The workspace terminal runs as its own station so its PTY session stays live and attached to this project.",
@@ -3529,7 +3564,6 @@ function CommandStudioContent() {
       >
         {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
         <CommandStudioHeader
-          viewedProjectId={activeProjectId ?? capabilities.projectId}
           onPreviewAction={handlePreview}
           onToggleDockAction={handleToggleDock}
           onOpenDockTabAction={handleOpenDockTab}
@@ -3787,6 +3821,7 @@ function CommandStudioContent() {
                 microphoneStatus={liveSession.indicators.microphone}
                 chatContent={littLeftPanelContent}
                 liveContent={littLiveContent}
+                filesContent={projectFilesContent}
                 expandedWidth={littDockResize.width}
                 expandedMaxWidth="500px"
               />
@@ -3838,6 +3873,7 @@ function CommandStudioContent() {
               microphoneStatus={liveSession.indicators.microphone}
               chatContent={littChatContent}
               liveContent={littLiveContent}
+              filesContent={projectFilesContent}
               expandedWidth={littResize.width}
             />
           )}
@@ -3864,9 +3900,8 @@ function CommandStudioContent() {
                 one mode at a time; the Preview tab is the live preview —
                 it always consumes the full workspace width. */}
             <div
-              className="glass-shell no-scrollbar flex shrink-0 items-center gap-0.5 overflow-x-auto border-b px-2"
+              className="glass-shell no-scrollbar flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-b px-1.5 lg:h-8"
               style={{
-                height: 36,
                 backgroundColor: "var(--studio-surface)",
                 borderColor: "var(--studio-border)",
               }}
@@ -3888,7 +3923,7 @@ function CommandStudioContent() {
                       // Any explicit stage selection exits the Builder surface.
                       setWorkSurface("conversation");
                     }}
-                    className={`relative shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
+                    className={`relative shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[12px] font-bold transition-all lg:py-0.5 ${isActive ? "glass-active" : ""}`}
                     style={{
                       color: isActive ? "var(--text-main)" : "var(--text-dim)",
                       backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -4040,13 +4075,12 @@ function CommandStudioContent() {
                       onOpenPreview={handlePreview}
                       onOpenTerminal={handleOpenTerminal}
                       onOpenActivity={() => handleOpenDockTab("activity")}
-                      onOpenFiles={() => handleOpenDockTab("files")}
+                      onOpenFiles={handleOpenFilesPanel}
                       onRollback={handleRollback}
                     />
                   }
                 />
               }
-              filesContent={projectFilesContent}
               terminalContent={
                 <StudioTerminalDrawer
                   projectId={capabilities.projectId}
@@ -4259,6 +4293,7 @@ function CommandStudioContent() {
               onClose={() => { setMobileLittOpen(false); setMobileBuildOpen(false); setMobileToolsOpen(false); }}
               chatContent={littChatContent}
               liveContent={littLiveContent}
+              filesContent={projectFilesContent}
               projectName={capabilities.projectName}
               branch={capabilities.activeBranch}
               onOpenTools={() => setMobileToolsOpen(true)}
@@ -4291,7 +4326,7 @@ function CommandStudioContent() {
               onOpenCode={openMobileTool(() => { setDestination("studio"); setStudioMode("code"); })}
               onOpenCanvas={openMobileTool(() => { setDestination("studio"); setStudioMode("files"); })}
               onOpenPreview={openMobileTool(handlePreview)}
-              onOpenFiles={openMobileTool(() => handleOpenDockTab("files"))}
+              onOpenFiles={handleOpenFilesPanel}
               onOpenTerminal={openMobileTool(handleOpenTerminal)}
               onOpenActivity={openMobileTool(() => handleOpenDockTab("activity"))}
               onOpenImage={openMobileTool(() => { setCreateMode("image"); setDestination("create"); })}
