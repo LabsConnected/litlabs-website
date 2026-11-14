@@ -20,6 +20,7 @@ import {
   Monitor,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
 import StudioPreviewPanel from "../StudioPreviewPanel";
 import { StudioFilePreview } from "../StudioFilePreview";
 
@@ -534,6 +535,30 @@ export function CodeWorkspace({
     window.addEventListener("studio:files-changed", handler);
     return () => window.removeEventListener("studio:files-changed", handler);
   }, [projectId, loadDirectory, reloadTabContent]);
+
+  // Panel linking (board B3, also live in the stage layout): a file
+  // opened in the Files panel — or via the studio.open_file action —
+  // surfaces here as an editor tab through the existing openFile path.
+  // Ignores events for other projects and malformed paths, exactly like
+  // the Files panel's own listener.
+  useEffect(() => {
+    if (!projectId) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.projectId !== projectId) return;
+      const rawPath = typeof detail?.path === "string" ? detail.path : "";
+      let normalized: string;
+      try {
+        normalized = normalizePath(rawPath);
+      } catch {
+        return;
+      }
+      if (normalized === ".") return;
+      void openFile(normalized);
+    };
+    window.addEventListener(STUDIO_EVENT_OPEN_FILE, handler);
+    return () => window.removeEventListener(STUDIO_EVENT_OPEN_FILE, handler);
+  }, [projectId, openFile]);
 
   const activeTabData = openTabs.find((t) => t.path === activeTab);
   const isDirty = activeTabData && activeTabData.content !== activeTabData.original;

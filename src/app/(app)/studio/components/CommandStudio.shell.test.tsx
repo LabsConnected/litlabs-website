@@ -408,6 +408,7 @@ if (!Element.prototype.scrollTo) {
 }
 
 import CommandStudio from "./CommandStudio";
+import { useBoardLayoutStore } from "../stores/useBoardLayoutStore";
 
 // ── Test viewport: 1600x900 desktop — the Studio destination renders the
 // operating shell (rail + stage + inspector + LiTT command layer), NOT the
@@ -1078,6 +1079,79 @@ describe("Phase 2 — Directive stages, Files single home, Preview dock, bottom 
     await waitFor(() => {
       expect(screen.getByTestId("dock-terminal-jump")).toBeTruthy();
     });
+  });
+});
+
+describe("Board mode (B3) — real panel bindings", () => {
+  beforeEach(() => {
+    sendMock.mockResolvedValue({ accepted: true });
+    capState.projectId = "project-1";
+    capState.projectName = "Test Project";
+    window.localStorage.removeItem("litt-studio-board-layout-v1");
+    // The per-user board toggle defaults OFF; this suite turns it on for
+    // the harness user (test-user-id) the way the shell toggle would.
+    useBoardLayoutStore.setState({
+      enabledByUser: { "test-user-id": true },
+      scopes: {},
+    });
+  });
+
+  afterEach(() => {
+    useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+    window.localStorage.removeItem("litt-studio-board-layout-v1");
+  });
+
+  it("replaces the stage with the board; default panels bind the real systems; chat stays fixed left", async () => {
+    await renderStudioShell();
+    await waitFor(() => expect(screen.getByTestId("studio-board")).toBeTruthy());
+    // The fixed stage area is gone while the board is active.
+    expect(screen.queryByTestId("stage-surface-preview")).toBeNull();
+    // Default website set: Preview + Code + Terminal, all really bound.
+    expect(screen.getByTestId("board-panel-preview")).toBeTruthy();
+    expect(screen.getByTestId("board-binding-preview")).toBeTruthy();
+    expect(await screen.findByTestId("studio-preview-panel")).toBeTruthy();
+    expect(screen.getByTestId("board-binding-code")).toBeTruthy();
+    expect(screen.getByTestId("board-binding-terminal")).toBeTruthy();
+    expect(screen.getByTestId("terminal-drawer")).toBeTruthy();
+    // Chat stays fixed on the left (standing layout rule), and the
+    // dockable preview chrome is retired while the board owns Preview.
+    expect(screen.getByTestId("litt-panel")).toBeTruthy();
+    expect(screen.queryByTestId("dock-preview-toggle")).toBeNull();
+    // Files has no chat-tab home while the board is active — the single
+    // instance relocates to the board (next test).
+    expect(screen.queryByTestId("litt-tab-files")).toBeNull();
+    expect(screen.queryByTestId("litt-files-panel")).toBeNull();
+  });
+
+  it("Files on the board is the ONLY StudioProjectFiles instance — the single-mount rule holds", async () => {
+    const { user } = await renderStudioShell();
+    await waitFor(() => expect(screen.getByTestId("studio-board")).toBeTruthy());
+    expect(screen.queryByTestId("studio-project-files")).toBeNull();
+
+    await user.click(screen.getByTestId("board-summon-files"));
+    await waitFor(() => expect(screen.getByTestId("board-panel-files")).toBeTruthy());
+
+    const instances = screen.getAllByTestId("studio-project-files");
+    expect(instances).toHaveLength(1);
+    expect(screen.getByTestId("board-panel-files").contains(instances[0])).toBe(true);
+    expect(screen.queryByTestId("litt-files-panel")).toBeNull();
+  });
+
+  it("Inspector and Health and Deploy summon as real bindings; the shell inspector stays closed", async () => {
+    const { user } = await renderStudioShell();
+    await waitFor(() => expect(screen.getByTestId("studio-board")).toBeTruthy());
+
+    await user.click(screen.getByTestId("board-summon-inspector"));
+    await waitFor(() => expect(screen.getByTestId("board-binding-inspector")).toBeTruthy());
+    // The board owns the inspector content in board mode — the shell's
+    // right-hand ContextInspector never opens alongside it.
+    expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
+
+    await user.click(screen.getByTestId("board-summon-health"));
+    await waitFor(() => expect(screen.getByTestId("board-binding-health")).toBeTruthy());
+
+    await user.click(screen.getByTestId("board-summon-deploy"));
+    await waitFor(() => expect(screen.getByTestId("board-binding-deploy")).toBeTruthy());
   });
 });
 
