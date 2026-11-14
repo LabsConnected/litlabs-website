@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -193,6 +193,25 @@ export default function StudioProjectFiles({
    */
   const [conflictNotice, setConflictNotice] = useState<string | null>(null);
 
+  // onWorkspacePrepared is invoked through a ref so loadDirectory never
+  // depends on the prop's identity: a parent passing an inline arrow can
+  // no longer recreate loadDirectory (and re-fire the panel-wiping load
+  // effect) on every render.
+  const onWorkspacePreparedRef = useRef(onWorkspacePrepared);
+  useEffect(() => {
+    onWorkspacePreparedRef.current = onWorkspacePrepared;
+  }, [onWorkspacePrepared]);
+
+  // Automatic prepare-recovery is bounded to ONE attempt per project
+  // per mount. host-exec-session only caches the coded
+  // HOST_EXECUTION_DISABLED verdict — any differently-shaped failure
+  // (non-coded 503, non-JSON error body, prepare "ready" but files
+  // still failing) previously cycled fetch → prepare → fetch forever,
+  // because `preparing` toggling recreated loadDirectory and re-fired
+  // the load effect. After the one attempt the load error stands and
+  // the manual Prepare button (prepareWorkspace) is the retry path.
+  const autoPrepareAttemptedRef = useRef<Set<string>>(new Set());
+
   const dirty = activePath !== null && content !== originalContent;
 
   const authHeaders = useCallback(async (json = false): Promise<HeadersInit> => {
@@ -317,6 +336,14 @@ export default function StudioProjectFiles({
           setError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
           return;
         }
+        // One automatic prepare attempt per project per mount (see
+        // autoPrepareAttemptedRef above). Beyond it, surface the load
+        // error and leave the manual Prepare button as the retry path.
+        if (autoPrepareAttemptedRef.current.has(projectId)) {
+          setError(msg);
+          return;
+        }
+        autoPrepareAttemptedRef.current.add(projectId);
         setPreparing(true);
         try {
           const outcome = await runPrepare();
@@ -330,7 +357,7 @@ export default function StudioProjectFiles({
             return;
           }
           const prepPayload = outcome.payload;
-          onWorkspacePrepared?.();
+          onWorkspacePreparedRef.current?.();
           window.dispatchEvent(new CustomEvent("studio:workspace-recovered", { detail: { projectId, workspaceId: prepPayload.workspaceId } }));
           await new Promise((resolve) => setTimeout(resolve, 600));
           const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
@@ -361,7 +388,7 @@ export default function StudioProjectFiles({
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [projectId, requestJson, runPrepare, preparing, onWorkspacePrepared, authHeaders]);
+  }, [projectId, requestJson, runPrepare, preparing, authHeaders]);
 
   useEffect(() => {
     setEntries({});
@@ -399,14 +426,14 @@ export default function StudioProjectFiles({
         return;
       }
       if (outcome.kind === "failed") throw new Error(outcome.message);
-      onWorkspacePrepared?.();
+      onWorkspacePreparedRef.current?.();
       await loadDirectory(".");
     } catch (prepareError) {
       setError(prepareError instanceof Error ? prepareError.message : "Workspace preparation failed");
     } finally {
       setPreparing(false);
     }
-  }, [loadDirectory, onWorkspacePrepared, preparing, projectId, runPrepare]);
+  }, [loadDirectory, preparing, projectId, runPrepare]);
 
   const refresh = useCallback(async () => {
     setEntries({});

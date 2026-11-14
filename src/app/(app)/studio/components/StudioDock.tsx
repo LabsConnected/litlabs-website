@@ -10,7 +10,7 @@
  *
  * Controlled by the parent: tab state, height, and open state all come in
  * as props; the dock owns only its view (collapsed/normal/maximized) and
- * syncs it with the `open` prop. All five tab content slots stay mounted
+ * syncs it with the `open` prop. All tab content slots stay mounted
  * always; inactive ones render with display:none so the terminal PTY and
  * other tab state survive tab switches.
  */
@@ -25,7 +25,6 @@ import {
 import {
   Activity,
   Clapperboard,
-  FolderOpen,
   Maximize2,
   Minimize2,
   PanelBottom,
@@ -36,9 +35,10 @@ import {
 import { useStudioContextOptional } from "../context/StudioContext";
 import { SelectionInspectorPanel } from "./StudioInspector";
 
+// Files is NOT a dock tab anymore (Larry, 2026-11-13): project files
+// live in the LiTT panel's top-row Files tab (desktop + mobile sheet).
 export type StudioDockTab =
   | "activity"
-  | "files"
   | "terminal"
   | "inspector"
   | "media";
@@ -53,7 +53,6 @@ export interface StudioDockProps {
   height?: number;
   onHeightChange: (h: number) => void;
   activityContent: ReactNode;
-  filesContent: ReactNode;
   /** Keep mounted always (PTY stays alive) — rendered with display:none when inactive */
   terminalContent: ReactNode;
   inspectorContent: ReactNode;
@@ -82,7 +81,6 @@ const DOCK_TABS: {
   icon: typeof Activity;
 }[] = [
   { id: "activity", label: "Activity", icon: Activity },
-  { id: "files", label: "Files", icon: FolderOpen },
   { id: "terminal", label: "Terminal", icon: SquareTerminal },
   { id: "inspector", label: "Inspector", icon: ScanSearch },
   { id: "media", label: "Media", icon: Clapperboard },
@@ -97,7 +95,6 @@ export default function StudioDock({
   height = DOCK_DEFAULT,
   onHeightChange,
   activityContent,
-  filesContent,
   terminalContent,
   inspectorContent,
   mediaContent,
@@ -244,7 +241,6 @@ export default function StudioDock({
 
   const contents: Record<StudioDockTab, ReactNode> = {
     activity: activityContent,
-    files: filesContent,
     terminal: terminalContent,
     // F1 slice C — the Inspector tab is contextual: the active Studio
     // selection (from StudioContext, any surface) renders above the

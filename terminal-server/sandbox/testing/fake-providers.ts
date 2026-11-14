@@ -13,6 +13,13 @@
  *   createHostExecFakeProvider()         exec secretly runs on the host
  *                                        (writes land in the real fs)
  *   createOpenEgressFakeProvider()       metadata endpoint is reachable
+ *   createProxyDeniedEgressFakeProvider() an intermediary answers the
+ *                                        metadata request with its own
+ *                                        error (403, no metadata header)
+ *                                        — a refusal: no metadata is
+ *                                        served, so the canary's
+ *                                        verdict rule counts the
+ *                                        target as blocked
  *   createNoLimitsFakeProvider()         requested limits ignored
  *   createUnhealthyFakeProvider()        health() reports unhealthy
  *
@@ -53,6 +60,14 @@ export interface FakeSandboxProviderOptions {
   executeOnHost?: boolean;
   /** Return true for egress targets the sandbox can reach. Default: none reachable. */
   egressOpen?: (url: string) => boolean;
+  /** HTTP status the egress probe "receives" for a reachable target. Default 200. */
+  egressOpenStatus?: number;
+  /**
+   * Whether a reachable target's response carries the
+   * `Metadata-Flavor: Google` header. Default true (the real metadata
+   * service answered); false models an intermediary answering instead.
+   */
+  egressOpenMetadataFlavor?: boolean;
   /** Ignore requested limits: instances echo defaults and nothing is enforced. */
   ignoreLimits?: boolean;
   /** Values the limits-visibility probe reports when ignoreLimits is set. */
@@ -209,7 +224,12 @@ export class FakeSandboxProvider implements SandboxProvider {
       const urlMatch = command.match(/https?:\/\/[^\s"\\]+/);
       const url = urlMatch?.[0] ?? "";
       const open = this.options.egressOpen?.(url) ?? false;
-      return result(0, open ? "EGRESS_OPEN 200" : "EGRESS_BLOCKED");
+      return result(
+        0,
+        open
+          ? `EGRESS_OPEN ${this.options.egressOpenStatus ?? 200} flavor=${this.options.egressOpenMetadataFlavor === false ? "absent" : "present"}`
+          : "EGRESS_BLOCKED",
+      );
     }
 
     // Limits visibility probe (LIMITS_PROBE token)
@@ -278,6 +298,14 @@ export function createHostExecFakeProvider(): FakeSandboxProvider {
 
 export function createOpenEgressFakeProvider(): FakeSandboxProvider {
   return new FakeSandboxProvider({ egressOpen: () => true });
+}
+
+export function createProxyDeniedEgressFakeProvider(): FakeSandboxProvider {
+  return new FakeSandboxProvider({
+    egressOpen: () => true,
+    egressOpenStatus: 403,
+    egressOpenMetadataFlavor: false,
+  });
 }
 
 export function createNoLimitsFakeProvider(): FakeSandboxProvider {

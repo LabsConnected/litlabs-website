@@ -23,11 +23,14 @@ import {
   type CanaryCheckId,
 } from "../sandbox/canary";
 import { DisabledSandboxProvider } from "../sandbox/disabled-provider";
+import { createSandboxExecStack } from "../sandbox/exec-router";
 import {
+  FakeSandboxProvider,
   createCompliantFakeProvider,
   createSharedFilesystemFakeProvider,
   createHostExecFakeProvider,
   createOpenEgressFakeProvider,
+  createProxyDeniedEgressFakeProvider,
   createNoLimitsFakeProvider,
   createUnhealthyFakeProvider,
 } from "../sandbox/testing/fake-providers";
@@ -138,6 +141,64 @@ describe("runSandboxCanary — failure classes", () => {
     expect(checkStatus(report, "tenant-isolation")).toBe("pass");
     expect(checkStatus(report, "filesystem-confinement")).toBe("pass");
     expect(checkStatus(report, "resource-limits")).toBe("pass");
+    // Observability: the detail records what answered — a 200 carrying
+    // the Google metadata signature (the real metadata service).
+    const egress = report.checks.find((c) => c.id === "network-egress");
+    expect(egress?.detail).toContain("REACHABLE (status=200 flavor=present)");
+  });
+
+  it("proxy-denied egress: an intermediary's refusal (403, no metadata signature) counts as blocked", async () => {
+    const report = await runSandboxCanary(createProxyDeniedEgressFakeProvider(), {
+      runId: "test-proxy-denied-egress",
+    });
+    // The verdict rule: a non-2xx answer WITHOUT the metadata
+    // signature is a refusal — the intermediary handed back an error
+    // and no metadata — so the target counts as blocked and the run
+    // passes. (Staging, 2026-11-13: the real metadata address
+    // answered exactly this way once denyOut was in place.)
+    expect(report.passed).toBe(true);
+    expect(checkStatus(report, "network-egress")).toBe("pass");
+    const egress = report.checks.find((c) => c.id === "network-egress");
+    expect(egress?.detail).toContain("REFUSED (status=403 flavor=absent)");
+  });
+
+  it("egress verdict rule: 401 without the metadata signature is a refusal and passes", async () => {
+    const provider = new FakeSandboxProvider({
+      egressOpen: () => true,
+      egressOpenStatus: 401,
+      egressOpenMetadataFlavor: false,
+    });
+    const report = await runSandboxCanary(provider, { runId: "test-egress-401-absent" });
+    expect(report.passed).toBe(true);
+    expect(checkStatus(report, "network-egress")).toBe("pass");
+    const egress = report.checks.find((c) => c.id === "network-egress");
+    expect(egress?.detail).toContain("REFUSED (status=401 flavor=absent)");
+  });
+
+  it("egress verdict rule: a 2xx answer fails even without the metadata signature", async () => {
+    const provider = new FakeSandboxProvider({
+      egressOpen: () => true,
+      egressOpenStatus: 200,
+      egressOpenMetadataFlavor: false,
+    });
+    const report = await runSandboxCanary(provider, { runId: "test-egress-200-absent" });
+    expect(report.passed).toBe(false);
+    expect(checkStatus(report, "network-egress")).toBe("fail");
+    const egress = report.checks.find((c) => c.id === "network-egress");
+    expect(egress?.detail).toContain("REACHABLE (status=200 flavor=absent)");
+  });
+
+  it("egress verdict rule: the metadata signature fails at any status, even a refusal status", async () => {
+    const provider = new FakeSandboxProvider({
+      egressOpen: () => true,
+      egressOpenStatus: 403,
+      egressOpenMetadataFlavor: true,
+    });
+    const report = await runSandboxCanary(provider, { runId: "test-egress-403-present" });
+    expect(report.passed).toBe(false);
+    expect(checkStatus(report, "network-egress")).toBe("fail");
+    const egress = report.checks.find((c) => c.id === "network-egress");
+    expect(egress?.detail).toContain("REACHABLE (status=403 flavor=present)");
   });
 
   it("ignored resource limits: only resource-limits fails", async () => {
@@ -177,5 +238,31 @@ describe("probe command builders", () => {
 
   it("egress probe embeds the target URL", () => {
     expect(buildEgressProbeCommand("http://example.invalid/")).toContain("http://example.invalid/");
+  });
+
+  it("egress probe captures the response status and the metadata signature", () => {
+    const cmd = buildEgressProbeCommand("http://169.254.169.254/");
+    expect(cmd).toContain("metadata-flavor");
+    expect(cmd).toContain("flavor=");
+    // The blocked paths are untouched: timeout and error still print
+    // the bare EGRESS_BLOCKED token.
+    expect(cmd).toContain('fin("EGRESS_BLOCKED")');
+  });
+});
+
+describe("boot canary log line (createSandboxExecStack onReport)", () => {
+  it("carries the network-egress detail; every other check stays bare id:status", async () => {
+    const lines: string[] = [];
+    const stack = createSandboxExecStack({}, { log: (m) => lines.push(m) });
+    await stack.verification.runNow();
+    const line = lines.find((l) => l.startsWith("[sandbox-canary]"));
+    expect(line).toBeDefined();
+    // Disabled provider: the egress probe never ran, so its detail is
+    // the failRemaining note — and it is on the boot line now.
+    expect(line).toContain("network-egress:fail[not attempted: provider health check failed]");
+    expect(line).toContain("provider-health:fail");
+    expect(line).not.toContain("provider-health:fail[");
+    expect(line).toContain("cleanup:pass");
+    expect(line).not.toContain("cleanup:pass[");
   });
 });

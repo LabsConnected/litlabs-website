@@ -225,7 +225,16 @@ export function createSandboxExecStack(
     onReport: (report) => {
       (deps.log ?? ((m: string) => console.info(m)))(
         `[sandbox-canary] provider=${report.provider} passed=${report.passed} checks=${report.checks
-          .map((c) => `${c.id}:${c.status}`)
+          .map((c) =>
+            // Observability: the network-egress check carries its
+            // probe detail on the boot line. When egress reads open,
+            // the status code and metadata-signature flag in that
+            // detail are the only evidence of WHAT answered the
+            // request (the real metadata service vs an intermediary
+            // answering for it). Every other check keeps the bare
+            // id:status form, byte-identical to before.
+            c.id === "network-egress" ? `${c.id}:${c.status}[${c.detail}]` : `${c.id}:${c.status}`,
+          )
           .join(",")}`,
       );
     },

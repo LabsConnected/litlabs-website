@@ -5,8 +5,9 @@ import "@testing-library/jest-dom";
 
 // ── Mocks ────────────────────────────────────────────────────────────
 // Regression coverage for the mobile work-surface dock. Chat, Preview,
-// Files, Activity, and More must switch the existing shared Studio surfaces
+// Activity, and More must switch the existing shared Studio surfaces
 // at a real mobile viewport (674x1536), without creating a second runtime.
+// (Files left the bottom nav for the LiTT sheet's top row, 2026-11-13.)
 // Legacy destination routing remains covered by CommandStudio.routing.test.tsx.
 //
 // Same mock harness as CommandStudio.preview-singleton.test.tsx: next/dynamic
@@ -453,9 +454,12 @@ describe("MobileCommandNav — shared work surfaces", () => {
   it("renders work surfaces instead of desktop destinations", async () => {
     await renderMobileCommandStudio();
     const nav = within(mobileNav());
-    for (const label of ["Chat", "Preview", "Files", "Activity", "More"]) {
+    for (const label of ["Chat", "Preview", "Activity", "More"]) {
       expect(nav.getByLabelText(label), `${label} surface should be present`).toBeTruthy();
     }
+    // Files is not a bottom-nav entry anymore — it lives in the LiTT
+    // sheet's top-row Files tab (Larry, 2026-11-13).
+    expect(nav.queryByLabelText("Files")).toBeNull();
     expect(nav.queryByLabelText("Agents")).toBeNull();
     expect(nav.queryByLabelText("Missions")).toBeNull();
   });

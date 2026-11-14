@@ -8,8 +8,13 @@
  * /studio (stations ride query params on /studio; Mission Control
  * is /studio/mission-control). LayoutShell must never mount the
  * GlobalCompanion there: Studio's own chat is the integrated
- * in-layout surface. On non-Studio app pages the companion remains
- * the site-wide assistant (control cases below pin that boundary).
+ * in-layout surface.
+ *
+ * Update (Larry, 2026-11-13): the Global LiTT entry points were
+ * removed app-wide — LayoutShell no longer mounts the companion on
+ * ANY page, Studio or otherwise. The provider, routes, and backend
+ * are untouched; only the entry points are gone. The control case
+ * below pins the new boundary.
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -63,8 +68,9 @@ describe("LayoutShell companion suppression on Studio surfaces", () => {
     expect(screen.queryByTestId("global-companion-mounted")).toBeNull();
   });
 
-  it("still mounts the companion on ordinary app pages (control)", async () => {
+  it("no longer mounts the companion on ordinary app pages either (app-wide entry removal, 2026-11-13)", async () => {
     await renderAt("/projects");
-    expect(screen.getByTestId("global-companion-mounted")).toBeTruthy();
+    expect(screen.getByTestId("page-content")).toBeTruthy();
+    expect(screen.queryByTestId("global-companion-mounted")).toBeNull();
   });
 });
