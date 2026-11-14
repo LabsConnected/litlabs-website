@@ -1,0 +1,410 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# litt-supervisor — lightweight supervised task queue for Android agent work.
+#
+#   litt-supervisor enqueue [--priority N] [--heavy] [--needs-approval]
+#                           [--worktree PATH] [--tag KEY] [--max-attempts N]
+#                           [--allow-canonical] -- <cmd> [args...]
+#   litt-supervisor run [--once]      scheduling pass / resident loop
+#   litt-supervisor status [--json]   queue health + memory + runner
+#   litt-supervisor list [state]      pending|running|awaiting|done|failed
+#   litt-supervisor approve <id>      release an awaiting task into the queue
+#   litt-supervisor cancel <id>       terminate a live task / drop a queued one
+#   litt-supervisor pause | resume    stop/start scheduling (running task
+#                                   is NOT killed — it finishes truthfully)
+#   litt-supervisor logs <id> [N]     tail a task's execution log
+#   litt-supervisor recover           requeue running tasks whose pid is dead
+#
+# Design contract (Android):
+#   - State is FILES, not memory. The supervisor can die between any two
+#     steps and `run` recovers: a claimed task whose recorded pid is dead
+#     is requeued (attempts+1, bounded) — never silently "finished".
+#   - Task argv is stored base64-of-NUL-joined and executed via execFile
+#     semantics (never through a shell). No eval, no string interp.
+#   - Heavy tasks (models, builds, test suites) run under litt-heavy:
+#     the device-wide workload mutex + MemAvailable/SwapFree preflight.
+#     A refused heavy task is requeued with backoff, not force-run.
+#   - One supervisor scheduler at a time (singleton flock).
+#   - Approval gates: tasks flagged needs-approval (explicitly, or
+#     auto-flagged by argv scanning for deploy/push/destructive words)
+#     sit in awaiting/ until `approve <id>`.
+#   - Duplicate prevention: --tag keys (default: hash of worktree+argv)
+#     refuse a second live task with the same key.
+#   - Worktree isolation: --worktree must be an existing git worktree.
+#     Tasks default to $HOME, never silently into canonical main;
+#     targeting the canonical checkout requires --allow-canonical.
+#   - Nothing here discards uncommitted git state, deletes user files,
+#     or retries forever. Dead-lettered tasks stay on disk for review.
+set -u
+
+if [ -d /data/data/com.termux/files/home ]; then
+  HOME_DIR=/data/data/com.termux/files/home
+else
+  HOME_DIR="$HOME"
+fi
+ROOT="${LITT_SUPERVISOR_DIR:-$HOME_DIR/.litt-supervisor}"
+CANON="$HOME_DIR/litt-canonical"
+HEAVY="$HOME_DIR/bin/litt-heavy"
+BIN="$HOME_DIR/bin"
+
+Q="$ROOT/queue"; A="$ROOT/awaiting"; R="$ROOT/running"
+D="$ROOT/done";  F="$ROOT/failed";  L="$ROOT/logs"
+K="$ROOT/locks"; S="$ROOT/state"
+JOURNAL="$S/supervisor.log"
+INTERVAL="${LITT_SUPERVISOR_INTERVAL:-5}"
+RUN_BACKOFF_S=60          # requeue delay after a dead/interrupted attempt
+MAX_JOURNAL=262144        # 256KB cap on the supervisor journal
+
+mkdir -p "$Q" "$A" "$R" "$D" "$F" "$L" "$K" "$S"
+
+now() { date +%s; }
+iso() { date -Is; }
+jid() { od -An -N4 -tx1 /dev/urandom | tr -d ' \n'; }   # 8-hex id
+
+journal() {
+  printf '%s %s\n' "$(iso)" "$*" >>"$JOURNAL"
+  [ "$(wc -c <"$JOURNAL" 2>/dev/null || echo 0)" -le "$MAX_JOURNAL" ] && return 0
+  local t="$JOURNAL.tmp.$$"
+  tail -n 2000 "$JOURNAL" >"$t" 2>/dev/null && mv "$t" "$JOURNAL"
+}
+
+# ── task field I/O (KEY=VALUE lines, no eval) ─────────────────────────
+tget() { # tget <file> <key> [default]
+  local line
+  line=$(grep -m1 "^$2=" "$1" 2>/dev/null || true)
+  printf '%s' "${line#*=}"
+  [ -n "$line" ] || printf '%s' "${3:-}"
+}
+tset() { # tset <file> <key> <value>  — replace or append one key line
+  local f=$1 k=$2 v=$3 tmp="$1.tmp.$$"
+  if grep -q "^$k=" "$f" 2>/dev/null; then
+    sed "s|^$k=.*|$k=$v|" "$f" >"$tmp" && mv "$tmp" "$f"
+  else
+    printf '%s=%s\n' "$k" "$v" >>"$f"
+  fi
+}
+
+argv_pack() { printf '%s\0' "$@" | base64 | tr -d '\n'; }
+argv_unpack() { # echoes argv words, NUL-separated → read -d ''
+  base64 -d <<<"$1" 2>/dev/null
+}
+
+# ── process identity (same rigor as dex-ctl) ──────────────────────────
+proc_alive() { # pid recorded at claim time still alive AND still the task shell
+  local p=$1
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null || return 1
+  # pid-reuse guard: the recorded start time must match /proc/pid/stat
+  local rf="${2:-}" st
+  [ -z "$rf" ] || [ ! -f "$rf" ] && return 0
+  st=$(awk '{print $22}' "/proc/$p/stat" 2>/dev/null || true)
+  [ -n "$st" ] && [ "$st" = "$(cat "$rf" 2>/dev/null)" ]
+}
+
+# ── enqueue ───────────────────────────────────────────────────────────
+DANGEROUS_RE='git[[:space:]]+push|rm[[:space:]]+[^ ]*-[a-zA-Z]*r|rm[[:space:]]+[^ ]*-[a-zA-Z]*f|deploy|publish|vercel|railway|npm[[:space:]]+publish|gh[[:space:]]+release|sudo|dd[[:space:]]+of=|mkfs|:(){:|:&};:|chmod[[:space:]]+-R[[:space:]]+777'
+
+cmd_enqueue() {
+  local pri=5 heavy=0 appr=0 wt="" tag="" max=3 allow_canon=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --priority) pri=$2; shift 2 ;;
+      --heavy) heavy=1; shift ;;
+      --needs-approval) appr=1; shift ;;
+      --worktree) wt=$2; shift 2 ;;
+      --tag) tag=$2; shift 2 ;;
+      --max-attempts) max=$2; shift 2 ;;
+      --allow-canonical) allow_canon=1; shift ;;
+      --) shift; break ;;
+      *) echo "enqueue: unknown flag $1"; exit 2 ;;
+    esac
+  done
+  [ $# -gt 0 ] || { echo "enqueue: no command after --"; exit 2; }
+
+  if [ -n "$wt" ]; then
+    [ -d "$wt" ] || { echo "enqueue: worktree $wt does not exist"; exit 2; }
+    git -C "$wt" rev-parse --git-dir >/dev/null 2>&1 || {
+      echo "enqueue: $wt is not a git worktree"; exit 2; }
+    if [ "$allow_canon" = 0 ]; then
+      local wtreal canonreal
+      wtreal=$(cd "$wt" && pwd -P); canonreal=$(cd "$CANON" 2>/dev/null && pwd -P || echo x)
+      [ "$wtreal" = "$canonreal" ] && {
+        echo "enqueue: refusing canonical main checkout as task worktree"
+        echo "  (pass --allow-canonical if this task is genuinely read-mostly)"; exit 2; }
+    fi
+  fi
+
+  # auto-approval gate on dangerous argv
+  local argstr; printf -v argstr ' %s' "$@"
+  case "$argstr" in
+    *git\ push*|*rm\ -r*|*rm\ -f*|*deploy*|*publish*|*railway*|*vercel*|*sudo*|*dd\ of=*)
+      if [ "$appr" = 0 ]; then
+        appr=1; echo "enqueue: argv looks dangerous — forced needs-approval"
+      fi ;;
+  esac
+
+  local id; id=$(jid)
+  [ -z "$tag" ] && tag=$(printf '%s|%s' "$wt" "$argstr" | sha256sum | cut -c1-16)
+  # duplicate prevention — refuse if a live task already holds this tag
+  for dir in "$Q" "$A" "$R"; do
+    for kf in "$dir"/*.task; do
+      [ -e "$kf" ] || continue
+      [ "$(tget "$kf" tag)" = "$tag" ] && {
+        echo "enqueue: duplicate — tag $tag already held by $(basename "$kf" .task) in $(basename "$dir")"
+        exit 3; }
+    done
+  done
+
+  local dest="$Q" st=pending
+  [ "$appr" = 1 ] && { dest="$A"; st=awaiting; }
+  # filename encodes scheduling order: priority desc, creation asc
+  local f="$dest/q$((9-pri))-$(now)-$id.task"
+  {
+    printf 'id=%s\n' "$id"
+    printf 'tag=%s\n' "$tag"
+    printf 'priority=%s\n' "$pri"
+    printf 'heavy=%s\n' "$heavy"
+    printf 'needs_approval=%s\n' "$appr"
+    printf 'worktree=%s\n' "$wt"
+    printf 'argv64=%s\n' "$(argv_pack "$@")"
+    printf 'cmdline=%s\n' "$*"
+    printf 'created=%s\n' "$(now)"
+    printf 'attempts=0\n'
+    printf 'max_attempts=%s\n' "$max"
+    printf 'status=%s\n' "$st"
+    printf 'not_before=0\n'
+    printf 'pid=\n'
+  } >"$f"
+  journal "enqueue $id ($st, pri=$pri, heavy=$heavy, wt=${wt:-none}) :: $*"
+  echo "$id  [$st] pri=$pri $*"
+}
+
+# ── scheduler ─────────────────────────────────────────────────────────
+memavail_kb() { awk '/^MemAvailable:/{a=$2}END{print a+0}' /proc/meminfo; }
+
+pick_next() { # echoes a queue file path for the highest-priority due task
+  local f nb best=""
+  for f in "$Q"/*.task; do
+    [ -e "$f" ] || continue
+    nb=$(tget "$f" not_before 0)
+    [ "$nb" -gt "$(now)" ] && continue
+    if [ -z "$best" ] || [ "$f" '<' "$best" ]; then best=$f; fi
+  done
+  printf '%s' "$best"
+}
+
+recover() { # requeue running tasks whose pid is dead (supervisor or LMK kill)
+  local f id p st
+  for f in "$R"/*.task; do
+    [ -e "$f" ] || continue
+    id=$(tget "$f" id); p=$(tget "$f" pid)
+    proc_alive "$p" "$R/$id.starttime" && continue
+    # dead or unverifiable → bounded requeue, never mark complete
+    local at; at=$(($(tget "$f" attempts 0) + 1))
+    tset "$f" attempts "$at"; tset "$f" pid ""
+    if [ "$at" -ge "$(tget "$f" max_attempts 3)" ]; then
+      tset "$f" status failed; tset "$f" failed_reason "interrupted; exceeded max attempts"
+      mv "$f" "$F/$(basename "$f")"; rm -f "$R/$id".{starttime,cancel}
+      journal "recover $id → FAILED (attempts exhausted after interruption, pid $p dead)"
+    else
+      tset "$f" status pending; tset "$f" not_before "$(($(now)+RUN_BACKOFF_S))"
+      mv "$f" "$Q/$(basename "$f")"; rm -f "$R/$id".{starttime,cancel}
+      journal "recover $id → requeued (attempt $at, pid $p dead/unverifiable)"
+    fi
+  done
+}
+
+finish_task() { # finish_task <file> <exitcode>
+  local f=$1 rc=$2 id; id=$(tget "$f" id)
+  if [ "$rc" = 0 ]; then
+    tset "$f" status done; tset "$f" exit_code "$rc"; tset "$f" finished "$(iso)"
+    mv "$f" "$D/$(basename "$f")"; journal "task $id DONE (rc=0)"
+  else
+    local at; at=$(($(tget "$f" attempts 0) + 1)); tset "$f" attempts "$at"
+    if [ "$at" -ge "$(tget "$f" max_attempts 3)" ]; then
+      tset "$f" status failed; tset "$f" exit_code "$rc"; tset "$f" finished "$(iso)"
+      mv "$f" "$F/$(basename "$f")"; journal "task $id FAILED rc=$rc (attempts exhausted)"
+    else
+      tset "$f" status pending; tset "$f" pid ""
+      tset "$f" not_before "$(($(now)+RUN_BACKOFF_S))"
+      mv "$f" "$Q/$(basename "$f")"; journal "task $id rc=$rc → requeued (attempt $at)"
+    fi
+  fi
+  rm -f "$R/$id".{starttime,cancel,pid}
+}
+
+run_one() { # claim + execute the next due task; echoes 0 ran / 1 none-due
+  local f; f=$(pick_next)
+  [ -z "$f" ] && return 1
+  local id heavy wt argv64
+  id=$(tget "$f" id); heavy=$(tget "$f" heavy 0)
+  wt=$(tget "$f" worktree); argv64=$(tget "$f" argv64)
+
+  # Heavy tasks must clear the device-wide mutex + memory preflight.
+  if [ "$heavy" = 1 ]; then
+    [ -x "$HEAVY" ] || { journal "task $id blocked: litt-heavy missing"; return 1; }
+    if ! "$HEAVY" check >/dev/null 2>&1; then
+      tset "$f" not_before "$(($(now)+RUN_BACKOFF_S))"
+      journal "task $id deferred: litt-heavy preflight refused (mem $(memavail_kb)kB)"
+      return 1
+    fi
+  fi
+
+  # Atomic claim
+  local rf="$R/$(basename "$f")"
+  mv "$f" "$rf" || return 1
+  tset "$rf" status running; tset "$rf" started "$(iso)"
+
+  local cwd="${wt:-$HOME_DIR}"
+  mkdir -p "$L"
+  journal "task $id RUN in $cwd :: $(tget "$rf" cmdline)"
+
+  # Spawn: argv restored without a shell; heavy tasks under litt-heavy.
+  (
+    cd "$cwd" || exit 97
+    mapfile -d '' -t ARGV < <(argv_unpack "$argv64")
+    [ "${#ARGV[@]}" -gt 0 ] || exit 96
+    if [ "$heavy" = 1 ]; then exec "$HEAVY" "${ARGV[@]}"; else exec "${ARGV[@]}"; fi
+  ) >>"$L/$id.log" 2>&1 &
+  local p=$!
+  echo "$p" >"$R/$id.pid"; awk '{print $22}' "/proc/$p/stat" 2>/dev/null >"$R/$id.starttime"
+  tset "$rf" pid "$p"
+
+  # Wait, honoring a cancel request; heartbeat while alive.
+  local rc=0
+  while kill -0 "$p" 2>/dev/null; do
+    tset "$rf" heartbeat "$(now)"
+    if [ -f "$R/$id.cancel" ]; then
+      kill -- "-$p" 2>/dev/null || kill "$p" 2>/dev/null
+      sleep 3; kill -9 -- "-$p" 2>/dev/null || kill -9 "$p" 2>/dev/null
+      wait "$p" 2>/dev/null
+      tset "$rf" status cancelled; tset "$rf" finished "$(iso)"
+      mv "$rf" "$D/$(basename "$rf")"; rm -f "$R/$id".{starttime,cancel,pid}
+      journal "task $id CANCELLED by user"
+      echo "task $id cancelled"
+      return 0
+    fi
+    sleep 2
+  done
+  wait "$p" || rc=$?
+  finish_task "$rf" "$rc"
+  local outcome=requeued
+  [ -f "$D/$(basename "$f")" ] && outcome=$(tget "$D/$(basename "$f")" status)
+  [ -f "$F/$(basename "$f")" ] && outcome=$(tget "$F/$(basename "$f")" status)
+  echo "task $id rc=$rc ($outcome)"
+}
+
+cmd_run() {
+  local once=0; [ "${1:-}" = "--once" ] && once=1
+  exec 9>"$S/supervisor.lock"
+  flock -n 9 || { echo "run: another supervisor holds the lock"; exit 3; }
+  echo $$ >"$S/supervisor.pid"
+  recover
+  if [ -f "$S/paused" ]; then echo "supervisor is PAUSED (resume to schedule)"; exit 0; fi
+  if [ "$once" = 1 ]; then
+    run_one || echo "no due tasks"
+    exit 0
+  fi
+  echo "litt-supervisor running (interval ${INTERVAL}s, root $ROOT)"
+  journal "supervisor started pid $$"
+  while :; do
+    [ -f "$S/paused" ] || { while run_one; do :; done; }
+    recover
+    sleep "$INTERVAL"
+  done
+}
+
+# ── inspection / control ──────────────────────────────────────────────
+count_tasks() { local n=0 t; for t in "$1"/*.task; do [ -e "$t" ] && n=$((n+1)); done; echo "$n"; }
+
+cmd_status() {
+  local p q a r d f
+  q=$(count_tasks "$Q"); a=$(count_tasks "$A")
+  r=$(count_tasks "$R"); d=$(count_tasks "$D")
+  f=$(count_tasks "$F")
+  if [ "${1:-}" = "--json" ]; then
+    printf '{"pending":%s,"awaiting":%s,"running":%s,"done":%s,"failed":%s,"paused":%s,"memAvailableKb":%s}\n' \
+      "$q" "$a" "$r" "$d" "$f" "$([ -f "$S/paused" ] && echo true || echo false)" "$(memavail_kb)"
+    return 0
+  fi
+  echo "=== litt-supervisor $(iso) ==="
+  echo "queue: $q pending · $a awaiting-approval · $r running · $d done · $f failed"
+  [ -f "$S/paused" ] && echo "state: PAUSED"
+  awk '/^MemAvailable:/{a=$2}/^SwapTotal:/{t=$2}/^SwapFree:/{sf=$2}
+       END{printf "mem:   %d kB avail · swap %d%% free\n", a, (t?sf*100/t:0)}' /proc/meminfo
+  for t in "$R"/*.task; do
+    [ -e "$t" ] || continue
+    local id p hb; id=$(tget "$t" id); p=$(tget "$t" pid); hb=$(tget "$t" heartbeat 0)
+    if proc_alive "$p" "$R/$id.starttime"; then
+      echo "running: $id (pid $p, heartbeat $(( $(now) - hb ))s ago) — $(tget "$t" cmdline | cut -c1-80)"
+    else
+      echo "running: $id (pid $p DEAD — will requeue on next run)"
+    fi
+  done
+}
+
+cmd_list() {
+  local dir; case "${1:-pending}" in
+    pending) dir=$Q ;; running) dir=$R ;; awaiting) dir=$A ;;
+    done) dir=$D ;; failed) dir=$F ;; *) echo "list: unknown state $1"; exit 2 ;;
+  esac
+  for t in "$dir"/*.task; do
+    [ -e "$t" ] || continue
+    printf '%s  [%s] pri=%s att=%s/%s heavy=%s :: %s\n' \
+      "$(tget "$t" id)" "$(tget "$t" status)" "$(tget "$t" priority)" \
+      "$(tget "$t" attempts 0)" "$(tget "$t" max_attempts 3)" \
+      "$(tget "$t" heavy 0)" "$(tget "$t" cmdline | cut -c1-70)"
+  done
+}
+
+cmd_approve() {
+  local id=$1 f
+  f=$(ls "$A"/*"-$id.task" 2>/dev/null | head -1)
+  [ -n "$f" ] || { echo "approve: no awaiting task $id"; exit 4; }
+  tset "$f" status pending; mv "$f" "$Q/$(basename "$f")"
+  journal "approved $id"; echo "approved $id → queued"
+}
+
+cmd_cancel() {
+  local id=$1 f
+  f=$(ls "$R"/*"-$id.task" 2>/dev/null | head -1)
+  if [ -n "$f" ]; then
+    : >"$R/$id.cancel"; echo "cancel requested for running task $id"
+    return 0
+  fi
+  for dir in "$Q" "$A"; do
+    f=$(ls "$dir"/*"-$id.task" 2>/dev/null | head -1)
+    [ -n "$f" ] || continue
+    tset "$f" status cancelled; tset "$f" finished "$(iso)"
+    mv "$f" "$D/$(basename "$f")"; journal "cancelled $id (was queued)"
+    echo "cancelled $id"; return 0
+  done
+  echo "cancel: no live task $id"; exit 4
+}
+
+cmd_logs() {
+  local id=$1 n="${2:-40}"
+  [ -f "$L/$id.log" ] || { echo "no log for $id"; exit 4; }
+  tail -n "$n" "$L/$id.log"
+}
+
+case "${1:-status}" in
+  enqueue) shift; cmd_enqueue "$@" ;;
+  run) shift; cmd_run "$@" ;;
+  recover) recover; echo "recovery pass done" ;;
+  status) shift; cmd_status "$@" ;;
+  list) shift; cmd_list "$@" ;;
+  approve) shift; cmd_approve "$@" ;;
+  cancel) shift; cmd_cancel "$@" ;;
+  pause) : >"$S/paused"; journal "paused"; echo "paused (running tasks finish, nothing new starts)" ;;
+  resume) rm -f "$S/paused"; journal "resumed"; echo "resumed" ;;
+  logs) shift; cmd_logs "$@" ;;
+  *) cat <<'EOF'
+litt-supervisor — supervised task queue for Android agent work
+  enqueue [--priority N] [--heavy] [--needs-approval] [--worktree P]
+          [--tag K] [--max-attempts N] [--allow-canonical] -- cmd args...
+  run [--once]      schedule due tasks (loop, or a single task with --once)
+  status [--json]   queue health · list [pending|running|awaiting|done|failed]
+  approve <id>      release a gated task · cancel <id> · pause · resume
+  logs <id> [N]     execution log tail · recover — requeue dead runners
+EOF
+      exit 2 ;;
+esac
