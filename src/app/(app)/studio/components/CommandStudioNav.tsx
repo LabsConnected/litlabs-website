@@ -296,7 +296,7 @@ export function MobileCommandNav({
             aria-label={item.label}
             aria-current={isActive ? "page" : undefined}
           >
-            {isActive && <span className="absolute top-0 h-0.5 w-8 rounded-b-full" style={{ backgroundColor: "var(--color-accent)", boxShadow: "0 0 8px var(--color-accent)" }} aria-hidden />}
+            {/* No active-tab highlight bar (Larry, 2026-11-13: the page must open clean — no bar over any nav button). Active state is carried by the accent color + aria-current. */}
             <Icon size={20} strokeWidth={isActive ? 2.3 : 1.8} className="pointer-events-none" />
             <span className="text-[10px] font-bold">{item.label}</span>
           </button>
@@ -308,7 +308,7 @@ export function MobileCommandNav({
             const isActive = active === item.id;
             return (
               <button key={item.id} type="button" onClick={() => onSelect(item.id)} className="relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors" style={{ color: isActive ? "var(--color-accent)" : "var(--text-muted)" }} aria-label={item.label} aria-current={isActive ? "page" : undefined}>
-                {isActive && <span className="absolute top-0 h-0.5 w-8 rounded-b-full" style={{ backgroundColor: "var(--color-accent)", boxShadow: "0 0 8px var(--color-accent)" }} aria-hidden />}
+                {/* No active-tab highlight bar (Larry, 2026-11-13: the page must open clean — no bar over any nav button). Active state is carried by the accent color + aria-current. */}
                 <Icon size={20} strokeWidth={isActive ? 2.3 : 1.8} className="pointer-events-none" />
                 <span className="text-[10px] font-bold">{item.label}</span>
               </button>

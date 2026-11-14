@@ -1295,9 +1295,11 @@ function CommandStudioContent() {
       const terminalNeedsExplicitConnect =
         mapped.openDrawer === "terminal" && capabilities.terminalStatus !== "connected" && !command;
       if (!terminalNeedsExplicitConnect) {
-        if (mapped.openDrawer === "files") {
+        if ((mapped.openDrawer as string) === "files") {
           // The dock's Files tab is retired — a files drawer intent
-          // opens the LiTT panel's top-row Files tab.
+          // (runtime payloads can carry "files" even though the typed
+          // DrawerTab union no longer does) opens the LiTT panel's
+          // top-row Files tab.
           handleOpenFilesPanel();
         } else {
           // handleOpenDockTab routes to a stage surface while the shell
