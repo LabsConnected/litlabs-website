@@ -137,14 +137,23 @@ export const CANARY_TOKENS = {
   memoryHog: "MEMORY_HOG",
 } as const;
 
-/** Node one-liner: prints EGRESS_OPEN <status> if any HTTP response arrives, else EGRESS_BLOCKED. */
+/**
+ * Node one-liner: prints `EGRESS_OPEN <status> flavor=<present|absent>`
+ * if any HTTP response arrives, else EGRESS_BLOCKED. `flavor` records
+ * whether the response carries the `Metadata-Flavor: Google` header —
+ * the signature of a real metadata service. Observability only: the
+ * canary's verdict treats ANY HTTP response as open egress regardless
+ * of status or flavor; the extra fields exist so logs can distinguish
+ * a genuine metadata answer from an intermediary (e.g. an egress
+ * proxy) answering on the destination's behalf.
+ */
 export function buildEgressProbeCommand(url: string): string {
   const script =
     `/*${CANARY_TOKENS.egressProbe}*/` +
     `const u=${JSON.stringify(url)};` +
     `const m=u.startsWith("https")?require("https"):require("http");` +
     `let done=false;const fin=(s)=>{if(!done){done=true;console.log(s);}};` +
-    `try{const req=m.get(u,{timeout:2500},(res)=>{fin("EGRESS_OPEN "+res.statusCode);res.resume();req.destroy();});` +
+    `try{const req=m.get(u,{timeout:2500},(res)=>{const fl=res.headers&&res.headers["metadata-flavor"]==="Google"?"present":"absent";fin("EGRESS_OPEN "+res.statusCode+" flavor="+fl);res.resume();req.destroy();});` +
     `req.on("timeout",()=>{req.destroy();fin("EGRESS_BLOCKED");});` +
     `req.on("error",()=>fin("EGRESS_BLOCKED"));}catch(e){fin("EGRESS_BLOCKED");}`;
   return `node -e '${script}'`;
@@ -435,9 +444,25 @@ export async function runSandboxCanary(
             const res = await exec(aId, buildEgressProbeCommand(url));
             const blocked = res.stdout.includes("EGRESS_BLOCKED") && !res.stdout.includes("EGRESS_OPEN");
             if (!blocked) allBlocked = false;
-            verdicts.push(
-              `${url} -> ${blocked ? "blocked" : res.stdout.includes("EGRESS_OPEN") ? "REACHABLE" : `no verdict (exit ${res.exitCode})`}`,
-            );
+            let verdict: string;
+            if (blocked) {
+              verdict = "blocked";
+            } else if (res.stdout.includes("EGRESS_OPEN")) {
+              // Observability only: record WHAT answered — the HTTP
+              // status code and whether the response carries the
+              // Google metadata signature — so an intermediary's own
+              // error response (e.g. an egress proxy denying the
+              // request) is distinguishable from the real metadata
+              // service answering. The verdict itself is unchanged:
+              // any HTTP response is REACHABLE and fails the check.
+              const open = res.stdout.match(/EGRESS_OPEN (\d+)(?: flavor=(present|absent))?/);
+              verdict = open
+                ? `REACHABLE (status=${open[1]} flavor=${open[2] ?? "unknown"})`
+                : "REACHABLE";
+            } else {
+              verdict = `no verdict (exit ${res.exitCode})`;
+            }
+            verdicts.push(`${url} -> ${verdict}`);
           }
           log.add(
             "network-egress",
