@@ -29,8 +29,13 @@ interface ModePattern {
    * answer, never a mutation. Recorded on the classification so the
    * quality gate and the launch flow can scope themselves by task
    * kind instead of re-deriving it from prose.
+   *
+   * "exec" is set only by the shell-command group below: the turn's
+   * completion is a command's output, never a file write, so the
+   * launch flow must not judge it by the build guard's file-writing
+   * criterion.
    */
-  taskKind?: "inspection";
+  taskKind?: "inspection" | "exec";
   domains?: string[];
 }
 
@@ -152,6 +157,39 @@ const MODE_PATTERNS: ModePattern[] = [
     requiresProject: true,
     requiresExecution: true,
     domains: ["devops"],
+  },
+
+  // ─── build (exec): explicit shell-command execution ─────────
+  // "run pwd && ls", "execute the command npm run build in the
+  // sandbox", "run git status" — the user asked for a COMMAND to run,
+  // not for files to be written. Without this group these turns fell
+  // into the build group below (via the loose run/execute + command
+  // pattern) with no taskKind, so the launch flow armed the build
+  // guard and the run was judged by the file-writing criterion: a
+  // successful `pwd && ls` ended with "The build produced no
+  // successful file-writing operation" and its output never reached
+  // the chat (Step 6 proof, 2026-11-14). Completion for this kind is
+  // the command's output — recorded as taskKind "exec" so the launch
+  // flow completes it like an inspection (tool-lane answer), never
+  // like a build. Placed BEFORE the build group (first-match wins);
+  // the patterns stay narrow so real builds are not stolen:
+  //  1. an exec verb tied to a command/shell/terminal noun,
+  //  2. an exec verb followed by shell chaining syntax (&& / ||) —
+  //     prose requests do not contain shell operators,
+  //  3. an exec verb tied to a bare well-known command token.
+  // "run the tests" / "run the build" match none of these (no noun,
+  // no operator, no command token) and stay in the build group.
+  {
+    mode: "build",
+    patterns: [
+      /\b(run|execute|exec)\b[^.!?]{0,40}\b(command|shell|terminal)\b/i,
+      /\b(run|execute|exec)\b[^.!?]{0,80}(&&|\|\|)/,
+      /\b(run|execute|exec)\b[^.!?]{0,60}\b(pwd|ls|cat|echo|whoami|uname|df|ps|env|printenv|node\s+--version|npm\s+--version|git\s+(status|log|diff|branch))\b/i,
+    ],
+    requiresProject: true,
+    requiresExecution: true,
+    taskKind: "exec",
+    domains: ["engineering"],
   },
 
   // ─── build: implementation, file edits, code ─────────────────

@@ -36,6 +36,7 @@
 
 import type { SandboxProvider } from "../sandbox/provider";
 import {
+  SANDBOX_HOME_DIR,
   SANDBOX_WORKSPACE_ROOT,
   type SandboxWorkspaceExecutor,
 } from "../sandbox/workspace-executor";
@@ -127,6 +128,16 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
       env: {
         NODE_ENV: "development",
         NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
+        // HOME pin, same as the executor's exec and prepare-install
+        // paths: this call goes through provider.execute directly,
+        // so without the pin the composed base env's Phase 1 default
+        // (HOME=/workspace) applies — and the pnpm corepack shim then
+        // tries to create /workspace/.cache/node/corepack, which the
+        // non-root command user cannot do in the root-owned,
+        // 755 workspace root (EACCES, live failure 2026-11-14).
+        // /home/litt is the template's writable home (chmod 777,
+        // outside the synced tree).
+        HOME: SANDBOX_HOME_DIR,
       },
     });
     if (install.exitCode !== 0) {
@@ -161,6 +172,12 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
     HOSTNAME: "0.0.0.0",
     NODE_ENV: "development",
     NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
+    // Same HOME pin as the install above: the detached dev server
+    // (and any package-manager shim it invokes) inherits this env,
+    // and its caches must land in the writable home, not /workspace.
+    // Set after travelingEnv so a project env can never re-point
+    // HOME at the root-owned workspace root.
+    HOME: SANDBOX_HOME_DIR,
   };
   const launch = await provider.execute(sandboxId, {
     command:

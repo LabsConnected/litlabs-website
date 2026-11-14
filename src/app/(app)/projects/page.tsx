@@ -82,6 +82,11 @@ export default function ProjectsPage() {
   const router = useRouter();
   const { getToken } = useClerkAuth();
   const [projects, setProjects] = useState<Project[]>([]);
+  // Sandbox availability truth from GET /api/studio-projects — the
+  // same probe Studio uses. When true, a card carrying a stored
+  // HOST_EXECUTION_DISABLED refusal reads as a retryable setup
+  // failure instead of "Repo workspace unavailable".
+  const [sandboxAvailable, setSandboxAvailable] = useState(false);
   const [installations, setInstallations] = useState<Installation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +121,7 @@ export default function ProjectsPage() {
       if (!res.ok) throw new Error(data?.error || "Projects are unavailable right now.");
       const canonical = Array.isArray(data.projects) ? data.projects : [];
       const legacy = Array.isArray(data.legacyOnly) ? data.legacyOnly : [];
+      setSandboxAvailable(data?.sandboxAvailable === true);
       setProjects(sortProjectsRecentFirst([...canonical, ...legacy]));
     } catch (err) {
       if ((err as { name?: string })?.name !== "AbortError") {
@@ -500,6 +506,7 @@ export default function ProjectsPage() {
                 <ProjectCard
                   key={project.id}
                   project={project}
+                  sandboxAvailable={sandboxAvailable}
                   colors={T}
                   selectMode={selectMode}
                   isSelected={selected.has(project.id)}

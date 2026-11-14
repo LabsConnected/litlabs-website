@@ -10,6 +10,8 @@ import {
   PROJECT_TEMPLATES,
 } from "@/lib/projects/project-repository";
 import { supabaseAdmin } from "@/lib/supabase";
+import { isHostExecutionPermitted } from "@/lib/host-execution-guard";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { getProject } from "@/lib/projects/project-repository";
 import type { ProjectTemplateId } from "@/lib/projects/types";
@@ -26,13 +28,41 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  let result;
   try {
-    const result = await listProjects(userId);
-    return NextResponse.json(result);
+    result = await listProjects(userId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
+
+  // Projects-card availability truth (stored-refusal fix,
+  // 2026-11-14): a repo-backed project whose prepare settled
+  // failed/error can still carry a stored HOST_EXECUTION_DISABLED
+  // refusal that Studio no longer shows — once the sandbox reports
+  // execution available, that verdict is stale and the card must
+  // read as a retryable setup failure, not "Repo workspace
+  // unavailable". Probe the SAME availability Studio's
+  // workspace-state route probes, once for the whole list, and only
+  // when some project matches the exact refusal shape (repo-backed +
+  // settled failure + host guard refusing). The probe fails closed,
+  // so an unreachable terminal keeps today's unavailable badge; a
+  // probe failure here must never fail the list itself.
+  let sandboxAvailable = false;
+  try {
+    const hasRefusalShape = result.projects.some(
+      (p) =>
+        p.sourceType === "github" &&
+        (p.workspaceStatus === "failed" || p.workspaceStatus === "error") &&
+        !isHostExecutionPermitted(),
+    );
+    sandboxAvailable = hasRefusalShape
+      ? await isSandboxExecutionAvailable(userId)
+      : false;
+  } catch {
+    sandboxAvailable = false;
+  }
+  return NextResponse.json({ ...result, sandboxAvailable });
 }
 
 /**

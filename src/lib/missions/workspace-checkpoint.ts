@@ -50,7 +50,16 @@ async function execInWorkspace(
         "X-Internal-Service-Key": internalServiceKey(),
       },
       body: JSON.stringify({ command, userId, stdin }),
-      signal: AbortSignal.timeout(30_000),
+      // The terminal server allows a sandbox exec 120s: a checkpoint on
+      // a cold sandbox first pays sandbox creation + volume mirror-in,
+      // the git commit itself, and a full sync-back of the tree
+      // (.git included) before the response returns. A 30s web-side
+      // abort killed exactly that first checkpoint, leaving the run
+      // with no baseline to diff against — every later verification
+      // could only report "unknown" even when the run's writes had
+      // demonstrably landed (Step 6 proof, 2026-11-14). Match the
+      // server's budget so the fetch is never the binding constraint.
+      signal: AbortSignal.timeout(120_000),
     },
   );
   if (!resp.ok) {
