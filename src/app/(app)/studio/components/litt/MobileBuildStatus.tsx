@@ -1,10 +1,17 @@
 "use client";
 
 /**
- * MobileBuildStatusBar — compact Build status bar for the mobile LiTT Studio chat.
+ * MobileBuildStatusBar — compact Build status control for the mobile LiTT
+ * Studio chat.
  *
  * Replaces the Mission / Checkpoints / Next Actions card stack with a single
  * ~36px button on mobile. Tapping it opens a bottom sheet with the full cards.
+ *
+ * Clean-open (Larry, 2026-11-13): this control used to be a dark bar pinned
+ * above the chat transcript, where it sat over the first message. It now
+ * lives in the LiTTMobileSheet header chrome as a light control on the
+ * standard studio surface token — in the sheet's own layout, never over
+ * chat content, no dark bar, no highlight bar.
  *
  * Reads the SAME zustand stores as MissionCards (useExecutionStore,
  * useStudioAgentStore) — no new state.
@@ -16,10 +23,12 @@ import { useExecutionStore } from "../../stores/useExecutionStore";
 import { approvalAwaitingDecision } from "../../lib/approval-awaiting";
 import { useStudioAgentStore, AGENT_META } from "../../stores/useStudioAgentStore";
 
-/* ── Design tokens (literals, matching MissionCards) ───────────── */
+/* ── Design tokens — the platform's standard light studio tokens
+      (same tokens MobileBottomSheet and the CommandComposer portaled
+      surfaces use; under .studio-shell these resolve light). ── */
 
-const CARD_SURFACE = "rgba(16,12,26,0.92)";
-const CARD_BORDER = "rgba(255,255,255,0.07)";
+const CARD_SURFACE = "var(--studio-surface)";
+const CARD_BORDER = "var(--studio-border)";
 const ACCENT = "var(--color-accent)";
 const AMBER = "#e3b341";
 

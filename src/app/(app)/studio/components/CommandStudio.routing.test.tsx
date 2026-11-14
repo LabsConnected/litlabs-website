@@ -1377,16 +1377,34 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("litt-mobile-sheet")).not.toBeVisible();
     });
 
-    it("mobile chat shows the compact Build status bar instead of the Mission card stack", async () => {
+    it("mobile chat shows the compact Build status control in the sheet chrome instead of the Mission card stack", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       const { user } = await renderCommandStudio();
       // The chat sheet is open on entry, already on the Chat tab.
       await user.click(screen.getByTestId("litt-mobile-tab-chat"));
 
-      // Mobile density redesign: one ~36px status bar, no card stack.
+      // Clean-open: one ~36px light status control in the sheet's header
+      // chrome (not a dark bar over the transcript), no card stack.
       expect(screen.getByTestId("mobile-build-status")).toBeVisible();
+      expect(screen.getByTestId("litt-mobile-build-status-slot")).toContainElement(
+        screen.getByTestId("mobile-build-status"),
+      );
       expect(screen.queryByTestId("mission-card-mission")).toBeNull();
       expect(screen.queryByTestId("mission-card-actions")).toBeNull();
+    });
+
+    it("mobile Build status control opens the Build sheet with the Mission cards", async () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("litt-mobile-tab-chat"));
+
+      await user.click(screen.getByTestId("mobile-build-status"));
+      const sheet = screen.getByTestId("mobile-build-sheet");
+      expect(sheet).toBeVisible();
+      // The MissionCards surface renders inside the sheet (with no active
+      // mission in this harness it shows its empty state — the individual
+      // cards are covered by MissionCards.test.tsx).
+      expect(sheet).toContainElement(screen.getByTestId("mission-cards"));
     });
 
     it("desktop keeps the MissionCards stack in the Activity dock tab, not the LiTT panel", async () => {
