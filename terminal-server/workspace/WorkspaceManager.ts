@@ -103,14 +103,16 @@ export const PACKAGE_SCRIPT_ENV_ALLOWLIST = [
 
 export function buildPackageScriptEnv(
   source: NodeJS.ProcessEnv = process.env,
-): Record<string, string> {
+): NodeJS.ProcessEnv {
   const env: Record<string, string> = {};
   for (const key of PACKAGE_SCRIPT_ENV_ALLOWLIST) {
     const value = source[key];
     if (value) env[key] = value;
   }
-  env.NODE_ENV = "development";
-  return env;
+  // Constructed as one literal: this repo augments NodeJS.ProcessEnv with
+  // NODE_ENV required and read-only, so the forced value must be present
+  // at construction rather than assigned afterward.
+  return { ...env, NODE_ENV: "development" };
 }
 
 const workspaces = new Map<string, WorkspaceDescriptor>();
