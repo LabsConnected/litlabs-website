@@ -1358,7 +1358,7 @@ export default function StudioPreviewPanel({
           Horizontally scrollable: on narrow phones the action buttons
           (refresh/restart/stop/copy/maximize) would otherwise be cut off
           with no way to reach them. */}
-      <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 py-1.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar">
+      <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 py-1" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar">
         {/* Runtime status dot */}
         <div
           className="h-2 w-2 shrink-0 rounded-full"
@@ -1378,7 +1378,7 @@ export default function StudioPreviewPanel({
               sitting above the source line cannot read as "no source".
             */}
             {framework && (
-              <span className="shrink-0 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ backgroundColor: "rgba(139,92,246,0.12)", color: "#9b4dff" }} title={`Runtime: ${framework}`} data-testid="preview-runtime-badge">
+              <span className="shrink-0 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ backgroundColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", color: "var(--color-accent-strong)" }} title={`Runtime: ${framework}`} data-testid="preview-runtime-badge">
                 {framework}
               </span>
             )}
@@ -1403,7 +1403,7 @@ export default function StudioPreviewPanel({
                 key={mode}
                 type="button"
                 onClick={() => setDeviceMode(mode)}
-                className="grid min-h-9 min-w-9 place-items-center rounded-md transition"
+                className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 place-items-center rounded-md transition"
                 style={{
                   backgroundColor: deviceMode === mode ? "rgba(114,242,56,0.12)" : "transparent",
                   color: deviceMode === mode ? "var(--litt-primary)" : "var(--text-muted)",
@@ -1421,6 +1421,12 @@ export default function StudioPreviewPanel({
         {isLive && !lockSelection && (
           <button
             type="button"
+            // Static previews cannot serve element selection (the
+            // attach path rejects them and shows the "unavailable"
+            // banner) — the toggle must not render ON/active there.
+            // Honest disabled state instead (Larry's polish pass,
+            // 2026-11-13).
+            disabled={isStaticProject}
             onClick={() => {
               const next = !selectionMode;
               setSelectionMode(next);
@@ -1431,14 +1437,14 @@ export default function StudioPreviewPanel({
                 attachSelection();
               }
             }}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             style={{
-              backgroundColor: selectionMode ? "rgba(155,77,255,0.14)" : "transparent",
-              color: selectionMode ? "#c4b5fd" : "var(--text-muted)",
+              backgroundColor: selectionMode && !isStaticProject ? "color-mix(in srgb, var(--color-accent) 12%, transparent)" : "transparent",
+              color: selectionMode && !isStaticProject ? "var(--color-accent-strong)" : "var(--text-muted)",
             }}
-            aria-label={selectionMode ? "Disable preview element selection" : "Select an element in the preview"}
-            aria-pressed={selectionMode}
-            title={selectionMode ? "Element selection on" : "Select an element in the preview"}
+            aria-label={isStaticProject ? "Element selection is unavailable for static previews" : selectionMode ? "Disable preview element selection" : "Select an element in the preview"}
+            aria-pressed={isStaticProject ? false : selectionMode}
+            title={isStaticProject ? "Element selection is unavailable for static previews" : selectionMode ? "Element selection on" : "Select an element in the preview"}
             data-testid="preview-select"
           >
             <MousePointer2 size={13} className="pointer-events-none" />
@@ -1449,7 +1455,7 @@ export default function StudioPreviewPanel({
           type="button"
           onClick={handleHardRefresh}
           disabled={state === "loading" || state === "starting" || state === "restarting"}
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:opacity-40"
           aria-label="Refresh preview"
           title="Refresh preview (Ctrl+R)"
           data-testid="preview-refresh"
@@ -1465,7 +1471,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => void preparePreview()}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
             aria-label="Restart preview"
             title="Restart preview runtime"
             data-testid="preview-restart"
@@ -1478,7 +1484,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => void stopPreview()}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
             aria-label="Stop preview"
             title="Stop preview runtime"
             data-testid="preview-stop"
@@ -1491,7 +1497,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => void handleCopyUrl()}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
             aria-label="Copy preview URL"
             title="Copy preview URL"
             data-testid="preview-copy-url"
@@ -1507,7 +1513,7 @@ export default function StudioPreviewPanel({
             type="button"
             onClick={() => void handleExport()}
             disabled={exporting}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:opacity-40"
             aria-label="Export project source as ZIP"
             title="Export project source (.zip)"
             data-testid="preview-export"
@@ -1525,7 +1531,7 @@ export default function StudioPreviewPanel({
           type="button"
           onClick={() => setSecretsOpen((v) => !v)}
           disabled={!projectId}
-          className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+          className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:opacity-40"
           style={{
             backgroundColor: secretsOpen ? "rgba(114,242,56,0.12)" : "transparent",
             color: secretsOpen ? "var(--litt-primary)" : "var(--text-muted)",
@@ -1543,7 +1549,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => setMaximized((v) => !v)}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
             aria-label={maximized ? "Exit fullscreen" : "Maximize preview"}
             title={maximized ? "Exit fullscreen" : "Maximize"}
             data-testid="preview-maximize"
@@ -1574,7 +1580,7 @@ export default function StudioPreviewPanel({
           style={{
             borderColor: exportNotice.kind === "err" ? "rgba(239,68,68,0.3)" : "var(--studio-border)",
             backgroundColor: exportNotice.kind === "err" ? "rgba(239,68,68,0.06)" : "rgba(114,242,56,0.05)",
-            color: exportNotice.kind === "err" ? "#fca5a5" : "var(--text-secondary)",
+            color: exportNotice.kind === "err" ? "#b91c1c" : "var(--text-secondary)",
           }}
           role="status"
           aria-live="polite"
@@ -1584,7 +1590,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => setExportNotice(null)}
-            className="shrink-0 rounded p-0.5 hover:bg-white/10"
+            className="shrink-0 rounded p-0.5 hover:bg-black/5"
             aria-label="Dismiss export notice"
           >
             <X size={10} />
@@ -1594,19 +1600,19 @@ export default function StudioPreviewPanel({
       {selectedElement && (
         <div
           className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[10px]"
-          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(155,77,255,0.06)" }}
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}
           role="status"
           aria-live="polite"
           data-testid="preview-selection"
         >
-          <MousePointer2 size={11} className="shrink-0" style={{ color: "#c4b5fd" }} aria-hidden="true" />
+          <MousePointer2 size={11} className="shrink-0" style={{ color: "var(--color-accent-strong)" }} aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-secondary)" }}>
-            Selected: <strong style={{ color: "#c4b5fd" }}>{selectedElement.label}</strong>
+            Selected: <strong style={{ color: "var(--color-accent-strong)" }}>{selectedElement.label}</strong>
           </span>
           <button
             type="button"
             onClick={() => clearSelection()}
-            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-white/8"
+            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-black/5"
             aria-label="Clear selected preview element"
             title="Clear selection"
           >
@@ -1615,16 +1621,18 @@ export default function StudioPreviewPanel({
         </div>
       )}
       {selectionError && selectionMode && (
-        <div className="shrink-0 border-b px-2.5 py-1 text-[9px]" style={{ borderColor: "rgba(227,179,65,0.2)", color: "#e3b341" }} role="status">
+        <div className="mx-2 mt-2 inline-flex max-w-full shrink-0 items-start gap-1.5 self-start rounded-md border px-2 py-1 text-[10px] font-semibold shadow-sm" style={{ borderColor: "rgba(180,120,20,0.45)", backgroundColor: "#fff7e0", color: "#6b4a00" }} role="status">
           {selectionError}
         </div>
       )}
 
-      {/* Preview surface */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
+      {/* Preview surface — sits on the shell backdrop inside a defined
+          white frame so a live, loading, or blank preview always reads
+          as a framed surface, never as an unbounded white void. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2" style={{ backgroundColor: "var(--studio-bg)" }}>
         {showStarterNotice && (
           <div
-            className="shrink-0 border-b px-3 py-1.5 text-[10px] font-bold"
+            className="mb-2 shrink-0 rounded-md border px-3 py-1.5 text-[10px] font-bold"
             style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)", color: "var(--text-secondary)" }}
             role="status"
             data-testid="preview-starter-notice"
@@ -1633,7 +1641,7 @@ export default function StudioPreviewPanel({
           </div>
         )}
         {isLive && displayUrl && !frameFailed ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-2">
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border bg-white shadow-sm" style={{ borderColor: "var(--studio-border-strong)" }}>
             <iframe
               key={frameKey}
               ref={iframeRef}
@@ -1644,8 +1652,8 @@ export default function StudioPreviewPanel({
                 width: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].w}px`,
                 height: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].h}px`,
                 maxWidth: "100%",
-                borderRadius: deviceMode === "desktop" ? "0" : "8px",
-                boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
+                borderRadius: "8px",
+                boxShadow: deviceMode === "desktop" ? "0 1px 3px rgba(14,60,26,0.12)" : "0 4px 24px rgba(0,0,0,0.4)",
               }}
               sandbox={isStaticProject 
                 ? "allow-scripts allow-forms allow-modals allow-popups" 
@@ -1659,9 +1667,10 @@ export default function StudioPreviewPanel({
         ) : (
           <div
             className={hostExecBlocked
-              ? "flex min-h-[280px] flex-1 flex-col px-5 py-5"
-              : "flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 px-6 text-center"}
+              ? "flex min-h-[280px] flex-1 flex-col rounded-lg border bg-white px-5 py-5 shadow-sm"
+              : "flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 rounded-lg border bg-white px-6 text-center shadow-sm"}
             style={{
+              borderColor: "var(--studio-border)",
               backgroundImage: "radial-gradient(ellipse 60% 50% at 50% 40%, rgba(168,255,47,0.04), transparent)",
             }}
           >
@@ -1775,7 +1784,7 @@ export default function StudioPreviewPanel({
                   <button
                     type="button"
                     onClick={() => setSecretsOpen(true)}
-                    className="flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold transition hover:bg-white/8"
+                    className="flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold transition hover:bg-black/5"
                     style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
                     data-testid="preview-add-keys"
                   >
@@ -1806,7 +1815,7 @@ export default function StudioPreviewPanel({
             <button
               type="button"
               onClick={() => setLogsOpen((v) => !v)}
-              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-white/8"
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-black/5"
               style={{ color: "var(--text-secondary)" }}
               aria-label="Toggle logs"
               data-testid="preview-logs-toggle"
@@ -1818,7 +1827,7 @@ export default function StudioPreviewPanel({
             <button
               type="button"
               onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
-              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-white/8"
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-black/5"
               style={{ color: "var(--text-secondary)" }}
               aria-label="Open preview in new tab"
               data-testid="preview-open-external"
@@ -1830,7 +1839,7 @@ export default function StudioPreviewPanel({
         </div>
       )}
       {logsOpen && logs.length > 0 && (
-        <div className="max-h-28 shrink-0 overflow-auto border-t px-2 py-1 font-mono text-[9px] leading-3" style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(0,0,0,0.15)", color: "var(--text-muted)" }} data-testid="preview-logs">
+        <div className="max-h-28 shrink-0 overflow-auto border-t px-2 py-1 font-mono text-[9px] leading-3" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-bg)", color: "var(--text-muted)" }} data-testid="preview-logs">
           {logs.slice(-50).map((line, i) => (
             <div key={i} className="truncate">{line}</div>
           ))}

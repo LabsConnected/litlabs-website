@@ -95,7 +95,7 @@ export default function WorkspaceRail({
         aria-pressed={isActive}
         title={meta.hint}
         data-testid={`workspace-rail-${id}`}
-        className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] ${
+        className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] lg:h-8 lg:w-8 ${
           isActive ? "" : "hover:bg-[rgba(127,127,127,0.12)]"
         }`}
         style={{
@@ -120,11 +120,15 @@ export default function WorkspaceRail({
   return (
     <nav
       aria-label="Workspace stages"
-      className="glass-shell flex w-12 shrink-0 flex-col items-center gap-1 border-r px-1 py-2"
+      className="glass-shell flex w-12 shrink-0 flex-col items-center gap-1 border-r px-1 py-1.5 lg:w-11"
       style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: tokens.surface }}
       data-testid="studio-workspace-rail"
     >
-      {DIRECTIVE_STAGE_ORDER.map(stageButton)}
+      {/* Larry (2026-11-13): the standalone Plan rail button is not
+          needed — remove the button only. Plan stage functionality is
+          untouched: the inspector's Plan tab and the station contract
+          (Plan homes the center on Preview) still work as before. */}
+      {DIRECTIVE_STAGE_ORDER.filter((stage) => stage !== "plan").map(stageButton)}
       <div
         aria-hidden
         className="my-1 h-px w-7 shrink-0"

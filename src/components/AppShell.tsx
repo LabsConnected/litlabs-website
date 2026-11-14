@@ -41,7 +41,6 @@ import {
   type NavMenuSection,
 } from "@/lib/navigation";
 import { BrandLogo } from "@/components/branding/BrandLogo";
-import GlobalLittEntry from "@/components/litt/GlobalLittEntry";
 
 type ResolvedColors = ReturnType<typeof useTheme>["resolvedColors"];
 
@@ -63,9 +62,9 @@ type ResolvedColors = ReturnType<typeof useTheme>["resolvedColors"];
 export const STUDIO_TOP_BAR_COLORS: Partial<ResolvedColors> = {
   bgColor: "#ffffff", // --studio-surface
   boxBg: "#ffffff", // --studio-elevated
-  borderColor: "#cfdec4", // --studio-border
+  borderColor: "#86ac72", // --studio-border
   textColor: "#0e1510", // --text-primary
-  textMuted: "#63745f", // --text-muted
+  textMuted: "#52684f", // --text-muted
   linkColor: "#177a36", // --color-accent
   headerColor: "#0e1510",
   accentColor: "#177a36", // --color-accent
@@ -487,9 +486,19 @@ function TopBar() {
         boxShadow: isStudio ? "0 4px 20px rgba(14,60,26,0.08)" : "0 8px 32px rgba(0,0,0,0.25)",
       }}
     >
-      {/* Main bar row */}
-      <div className="flex h-14 items-center gap-2 px-3 md:gap-3 md:px-4">
-        <BrandLogo href="/studio" size={30} showText={false} variant="full" />
+      {/* Main bar row — Studio routes run one step denser (h-12), and
+          the wide brand mark sits on a dark chip there: the asset is
+          white artwork on black, so on the light Studio bar it washed
+          out to a smudge at small sizes. The chip keeps the artwork on
+          its native background at a legible size. */}
+      <div className={`flex ${isStudio ? "h-12" : "h-14"} items-center gap-2 px-3 md:gap-3 md:px-4`}>
+        <BrandLogo
+          href="/studio"
+          size={isStudio ? 34 : 30}
+          showText={false}
+          variant="full"
+          className={isStudio ? "rounded-lg bg-[#050505] px-1.5 py-1 shadow-sm ring-1 ring-black/15" : ""}
+        />
 
         {/* Desktop nav — canonical main items + More overflow */}
         <nav className="ml-2 hidden items-center gap-0.5 md:flex" aria-label="Primary">
@@ -598,7 +607,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Suspense fallback={<div className="h-14 shrink-0" />}>
         <TopBar />
       </Suspense>
-      <Suspense fallback={null}><GlobalLittEntry /></Suspense>
+      {/* Global LiTT floating entry removed app-wide (Larry, 2026-11-13):
+          entry point only — the GlobalLittProvider, routes, and backend
+          are untouched; Studio chat is the operator surface now. */}
 
       {/* Main content */}
       <main

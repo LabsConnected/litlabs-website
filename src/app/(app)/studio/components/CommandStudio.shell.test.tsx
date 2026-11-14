@@ -873,12 +873,13 @@ describe("MissionCards — classic desktop dock", () => {
   });
 });
 
-describe("Phase 2 — five Directive stages, Files sidebar, Preview dock, bottom dock", () => {
-  it("rail presents exactly the five stages; secondary surfaces and the terminal stay reachable", async () => {
+describe("Phase 2 — Directive stages (Plan rail button removed), Files sidebar, Preview dock, bottom dock", () => {
+  it("rail presents the four non-Plan stages (standalone Plan rail button removed by Larry); secondary surfaces and the terminal stay reachable", async () => {
     await renderStudioShell();
-    for (const stage of ["plan", "canvas-design", "code", "preview", "media"]) {
+    for (const stage of ["canvas-design", "code", "preview", "media"]) {
       expect(screen.getByTestId(`workspace-stage-${stage}`)).toBeTruthy();
     }
+    expect(screen.queryByTestId("workspace-stage-plan")).toBeNull();
     expect(screen.getByTestId("workspace-rail-terminal")).toBeTruthy();
     expect(screen.getByTestId("workspace-rail-activity")).toBeTruthy();
     expect(screen.getByTestId("workspace-rail-files")).toBeTruthy();
@@ -925,13 +926,12 @@ describe("Phase 2 — five Directive stages, Files sidebar, Preview dock, bottom
     expect(screen.queryByTestId("design-canvas")).toBeNull();
   });
 
-  it("Plan stage opens the inspector on its Plan tab (the shell's station contract: Plan is not a center station)", async () => {
-    const { user } = await renderStudioShell();
-    await user.click(screen.getByTestId("workspace-stage-plan"));
-    await waitFor(() => {
-      expect(screen.getByTestId("studio-context-inspector")).toBeTruthy();
-    });
-    // The center homes on the shell's home surface.
+  it("no standalone Plan rail button — Plan lives in the inspector's Plan tab (Larry, 2026-11-13)", async () => {
+    await renderStudioShell();
+    // The button is gone; Plan stage functionality (the inspector's
+    // Plan tab and the station contract) is untouched.
+    expect(screen.queryByTestId("workspace-stage-plan")).toBeNull();
+    // The center still homes on the shell's home surface.
     expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
   });
 

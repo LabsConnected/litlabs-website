@@ -1024,8 +1024,8 @@ describe("CommandStudio — mission panels live in the Activity dock", () => {
     await user.click(screen.getByRole("button", { name: "Collapse Mission" }));
     expect(screen.queryByTestId("mission-card-body-mission")).toBeNull();
 
-    // Switch to Files and back — all dock tab content stays mounted.
-    await user.click(screen.getByTestId("dock-tab-files"));
+    // Switch to Media and back — all dock tab content stays mounted.
+    await user.click(screen.getByTestId("dock-tab-media"));
     await user.click(screen.getByTestId("dock-tab-activity"));
     expect(screen.queryByTestId("mission-card-body-mission")).toBeNull();
     expect(screen.getByRole("button", { name: "Expand Mission" })).toBeTruthy();

@@ -2,7 +2,8 @@
 
 /**
  * LiTT panel — left side of the Ultra Vision shell, desktop/laptop tier
- * (lg breakpoint and up). One agent, two views: Chat | Activity.
+ * (lg breakpoint and up). One agent, views: Chat | Activity | Files |
+ * Components (Files/Components tabs added 2026-11-13 per Larry).
  *
  * Chat: conversation transcript + composer
  * Activity: real-time execution telemetry (tool calls, diffs, checks, approvals)
@@ -32,18 +33,29 @@
  */
 
 import type { ReactNode } from "react";
-import { MessageSquare, Activity, PanelLeftClose, X } from "lucide-react";
+import { MessageSquare, Activity, FolderOpen, Component, PanelLeftClose, X } from "lucide-react";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 import LiTTAmbientHUD from "./litt/LiTTAmbientHUD";
 import type { DeviceStatus } from "@/lib/litt/live/types";
 
-export type LiTTTab = "chat" | "live";
+export type LiTTTab = "chat" | "live" | "files" | "components";
 
 interface LiTTPanelProps {
   /** Chat tab content — transcript + composer */
   chatContent: ReactNode;
   /** Live tab content — execution activity (LiTTLiveActivity) */
   liveContent: ReactNode;
+  /**
+   * Files / Components tab content — the StudioProjectFiles surface.
+   * When provided, the tab row gains Files and Components tabs beside
+   * Chat and Activity (Larry's placement decision, 2026-11-13: out of
+   * the bottom dock / context drawer, into this top row — desktop and
+   * mobile sheet alike). At this base Files and Components are one
+   * combined surface (the dock/drawer header literally reads
+   * "Files / Components"), so both tabs show this single slot — it is
+   * mounted exactly once here, never duplicated per tab.
+   */
+  filesContent?: ReactNode;
   /** Controlled active tab */
   activeTab: LiTTTab;
   onTabChange: (tab: LiTTTab) => void;
@@ -74,6 +86,7 @@ interface LiTTPanelProps {
 export default function LiTTPanel({
   chatContent,
   liveContent,
+  filesContent,
   activeTab,
   onTabChange,
   collapsed,
@@ -179,6 +192,38 @@ export default function LiTTPanel({
             <Activity size={12} className="pointer-events-none" />
             Activity
           </button>
+          {filesContent ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onTabChange("files")}
+                className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                style={{
+                  color: activeTab === "files" ? "var(--color-accent)" : "var(--text-muted)",
+                  backgroundColor: activeTab === "files" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+                }}
+                aria-pressed={activeTab === "files"}
+                data-testid="litt-tab-files"
+              >
+                <FolderOpen size={12} className="pointer-events-none" />
+                Files
+              </button>
+              <button
+                type="button"
+                onClick={() => onTabChange("components")}
+                className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                style={{
+                  color: activeTab === "components" ? "var(--color-accent)" : "var(--text-muted)",
+                  backgroundColor: activeTab === "components" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+                }}
+                aria-pressed={activeTab === "components"}
+                data-testid="litt-tab-components"
+              >
+                <Component size={12} className="pointer-events-none" />
+                Components
+              </button>
+            </>
+          ) : null}
           <div className="flex-1" />
           {overlay ? (
             <button
@@ -233,6 +278,19 @@ export default function LiTTPanel({
           >
             {liveContent}
           </div>
+          {filesContent ? (
+            <div
+              className="absolute inset-0 flex flex-col overflow-hidden"
+              style={{
+                visibility: activeTab === "files" || activeTab === "components" ? "visible" : "hidden",
+                pointerEvents: activeTab === "files" || activeTab === "components" ? "auto" : "none",
+              }}
+              data-active={activeTab === "files" || activeTab === "components"}
+              data-testid="litt-files-panel"
+            >
+              {filesContent}
+            </div>
+          ) : null}
         </div>
       </div>
     </aside>
