@@ -111,6 +111,10 @@ export async function GET(
 
   try {
     let verified;
+    // The last recovery this request performed, when any. Surfaced on
+    // the listing response (see below) so clients can tell a healed
+    // workspace — and a healed-but-EMPTY one — from a normal listing.
+    let lastRecovery: Awaited<ReturnType<typeof ensureWorkspaceAlive>> | null = null;
     try {
       verified = await verifyProjectWorkspace(projectId, userId);
     } catch (verifyErr) {
@@ -123,7 +127,7 @@ export async function GET(
           const project = await getProject(projectId, userId);
           if (project?.workspaceId) {
             // Workspace was provisioned but may be stale — verify and recover
-            await ensureWorkspaceAlive(projectId, userId, project.workspaceId);
+            lastRecovery = await ensureWorkspaceAlive(projectId, userId, project.workspaceId);
             verified = await verifyProjectWorkspace(projectId, userId);
           } else {
             // Workspace was never provisioned — provision it now.
@@ -164,6 +168,7 @@ export async function GET(
     if (resp.status === 404 && (await isWorkspaceMissingResponse(resp))) {
       try {
         const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
+        lastRecovery = recovered;
         if (recovered.reprepared) {
           const newToken = createTerminalToken(userId);
           resp = await upstreamTerminalFetch(upstreamUrl, {
@@ -203,7 +208,34 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(await resp.json(), { headers: { "x-correlation-id": correlationId } });
+    const listing: unknown = await resp.json();
+    // Honest recovery signal: when this request re-prepared a lost
+    // workspace, say so on the listing — including whether the deployed
+    // snapshot was restored over the re-seeded scaffold or the deployed
+    // content is lost (contentLoss + the surviving deployment id).
+    // Listings that needed no recovery are byte-identical to before.
+    if (
+      lastRecovery?.reprepared &&
+      listing !== null &&
+      typeof listing === "object" &&
+      !Array.isArray(listing)
+    ) {
+      const { restoredFromDeploymentId, contentLoss, survivingDeploymentId } = lastRecovery;
+      return NextResponse.json(
+        {
+          ...(listing as Record<string, unknown>),
+          workspaceRecovery: {
+            reprepared: true,
+            ...(restoredFromDeploymentId ? { restoredFromDeploymentId } : {}),
+            ...(contentLoss
+              ? { contentLoss: true, survivingDeploymentId: survivingDeploymentId ?? null }
+              : {}),
+          },
+        },
+        { headers: { "x-correlation-id": correlationId } },
+      );
+    }
+    return NextResponse.json(listing, { headers: { "x-correlation-id": correlationId } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to list files";
     const code = (err as { code?: string }).code ?? null;

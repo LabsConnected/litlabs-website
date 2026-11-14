@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProject, updateProjectRuntime } from "@/lib/projects/project-repository";
 import { ensureWorkspaceAlive, provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { restoreWorkspaceFromLatestDeployment } from "@/lib/studio/workspace-rehydration";
 import { SecretBroker } from "@/lib/terminal-v1/secret-broker";
 import { extractClerkEnvFromSecrets } from "@/lib/preview-clerk-env";
 import { createTerminalToken } from "@/lib/terminal-auth";
@@ -84,88 +85,215 @@ export async function GET(
   // only entry file is still the seeded welcome screen reports not_started
   // (never "ready" — the preview must not imply generated content exists).
   if (project.framework === "static") {
-    let terminalBase: string;
-    let terminalToken: string;
-    let entryHtml: string | null = null;
-    try {
-      terminalBase = requireTerminalBaseUrl();
-      const { token } = createTerminalToken(userId, {
-        workspaceId: project.workspaceId,
-        projectId,
+    const notStarted = (extra?: Record<string, unknown>) =>
+      NextResponse.json({
+        runtimeStatus: "not_started",
+        previewUrl: null,
+        runtimeError: null,
+        framework: "static",
+        developmentCommand: null,
+        packageManager: null,
+        logs: [],
+        ...extra,
       });
-      terminalToken = token;
-      const checkResp = await fetch(`${terminalBase}/ws-files/read`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-          "X-Workspace-Id": project.workspaceId,
-        },
-        body: JSON.stringify({ path: "index.html", encoding: "utf-8" }),
-        // 15s, matching the preview serving route's /ws-files/read budget
-        // (src/app/api/preview/[projectId]/[[...path]]/route.ts).
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!checkResp.ok) {
-        if (checkResp.status === 404) {
-          // The terminal authoritatively reports index.html missing —
-          // the workspace is empty and the preview was never started.
-          return NextResponse.json({
-            runtimeStatus: "not_started",
-            previewUrl: null,
-            runtimeError: null,
-            framework: "static",
-            developmentCommand: null,
-            packageManager: null,
-            logs: [],
-          });
-        }
-        // Any other error (5xx, auth, …) means the runtime CHECK failed —
-        // it says nothing about whether the preview was started. Report
-        // "unreachable", mirroring the dev-server branch below, so clients
-        // retry instead of concluding the preview doesn't exist.
-        return NextResponse.json({
-          runtimeStatus: "unreachable",
-          previewUrl: null,
-          runtimeError: `Terminal file read failed (HTTP ${checkResp.status})`,
-          runtimeErrorCode: workspaceFailureCode,
-          framework: "static",
-          developmentCommand: null,
-          packageManager: null,
-          logs: [],
-        });
-      }
-      const entry = (await checkResp.json().catch(() => null)) as { content?: unknown } | null;
-      if (typeof entry?.content === "string") {
-        entryHtml = entry.content;
-        if (entry.content.includes(WELCOME_SCREEN_MARKER)) {
-          return NextResponse.json({
-            runtimeStatus: "not_started",
-            previewUrl: null,
-            runtimeError: null,
-            starterContent: true,
-            framework: "static",
-            developmentCommand: null,
-            packageManager: null,
-            logs: [],
-          });
-        }
-      }
-    } catch (err) {
-      // The terminal is unreachable or too slow (fetch threw or timed
-      // out), or it isn't configured at all. That is a failed runtime
-      // CHECK, not evidence the preview was never started — report
-      // "unreachable", mirroring the dev-server branch below.
-      return NextResponse.json({
+    const unreachable = (runtimeError: string) =>
+      NextResponse.json({
         runtimeStatus: "unreachable",
         previewUrl: null,
-        runtimeError: err instanceof Error ? err.message : "Preview runtime unreachable",
+        runtimeError,
         runtimeErrorCode: workspaceFailureCode,
         framework: "static",
         developmentCommand: null,
         packageManager: null,
         logs: [],
       });
+
+    let terminalBase: string;
+    try {
+      terminalBase = requireTerminalBaseUrl();
+    } catch (err) {
+      // Terminal not configured at all: a failed runtime CHECK, not
+      // evidence the preview was never started.
+      return unreachable(err instanceof Error ? err.message : "Preview runtime unreachable");
+    }
+
+    // One entry-document read against a workspace. A 404 splits into
+    // workspaceMissing (the terminal lost the WHOLE workspace — the
+    // exact body the files routes recover from) vs a plain file-level
+    // miss (workspace exists, entry file does not).
+    const readEntry = async (
+      workspaceId: string,
+    ): Promise<
+      | { kind: "ok"; content: string | null }
+      | { kind: "missing"; workspaceMissing: boolean }
+      | { kind: "error"; status: number }
+      | { kind: "unreachable"; message: string }
+    > => {
+      try {
+        const { token } = createTerminalToken(userId, { workspaceId, projectId });
+        const resp = await fetch(`${terminalBase}/ws-files/read`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+            "X-Workspace-Id": workspaceId,
+          },
+          body: JSON.stringify({ path: "index.html", encoding: "utf-8" }),
+          // 15s, matching the preview serving route's /ws-files/read budget
+          // (src/app/api/preview/[projectId]/[[...path]]/route.ts).
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!resp.ok) {
+          if (resp.status === 404) {
+            const body = (await resp.json().catch(() => null)) as { error?: unknown } | null;
+            return { kind: "missing", workspaceMissing: body?.error === "Workspace not found" };
+          }
+          return { kind: "error", status: resp.status };
+        }
+        const entry = (await resp.json().catch(() => null)) as { content?: unknown } | null;
+        return { kind: "ok", content: typeof entry?.content === "string" ? entry.content : null };
+      } catch (err) {
+        return {
+          kind: "unreachable",
+          message: err instanceof Error ? err.message : "Preview runtime unreachable",
+        };
+      }
+    };
+
+    let effectiveWorkspaceId = project.workspaceId;
+    let restoredFromDeploymentId: string | undefined;
+    let recoveryFlags: Record<string, unknown> = {};
+
+    let read = await readEntry(effectiveWorkspaceId);
+
+    // Recovery parity with the files routes: a workspace-level 404
+    // means the terminal lost the workspace. Re-prepare — which for a
+    // static project also restores the deployed snapshot over the
+    // seeded template (ensureWorkspaceAlive) — and read once more,
+    // instead of reporting not_started for a workspace that can heal.
+    if (read.kind === "missing" && read.workspaceMissing) {
+      let recovered: Awaited<ReturnType<typeof ensureWorkspaceAlive>>;
+      try {
+        recovered = await ensureWorkspaceAlive(projectId, userId, project.workspaceId);
+      } catch (err) {
+        return unreachable(err instanceof Error ? err.message : "Workspace recovery failed");
+      }
+      effectiveWorkspaceId = recovered.workspaceId;
+      if (recovered.restoredFromDeploymentId) {
+        restoredFromDeploymentId = recovered.restoredFromDeploymentId;
+        recoveryFlags = { workspaceRestoredFromDeploymentId: recovered.restoredFromDeploymentId };
+      } else if (recovered.contentLoss) {
+        recoveryFlags = {
+          contentLoss: true,
+          survivingDeploymentId: recovered.survivingDeploymentId ?? null,
+        };
+      }
+      read = await readEntry(effectiveWorkspaceId);
+    }
+
+    if (read.kind === "missing") {
+      // The terminal authoritatively reports index.html missing —
+      // the workspace is empty and the preview was never started.
+      return notStarted(recoveryFlags);
+    }
+    if (read.kind === "error") {
+      // Any other error (5xx, auth, …) means the runtime CHECK failed —
+      // it says nothing about whether the preview was started. Report
+      // "unreachable", mirroring the dev-server branch below, so clients
+      // retry instead of concluding the preview doesn't exist.
+      return unreachable(`Terminal file read failed (HTTP ${read.status})`);
+    }
+    if (read.kind === "unreachable") {
+      // The terminal is unreachable or too slow (fetch threw or timed
+      // out). A failed runtime CHECK, not evidence the preview was
+      // never started.
+      return unreachable(read.message);
+    }
+
+    let entryHtml = read.content;
+
+    if (entryHtml !== null && entryHtml.includes(WELCOME_SCREEN_MARKER)) {
+      // The entry file is still the seeded welcome screen. For a
+      // project that has never deployed, that IS its correct state
+      // (brand-new — the starter response below is today's behavior).
+      // For a project WITH deployments, the scaffold is what a lost
+      // workspace was silently re-seeded with: restore the deployed
+      // snapshot over it before reporting starter state.
+      if (restoredFromDeploymentId || recoveryFlags.contentLoss) {
+        // Recovery already ran for THIS request (the workspace was
+        // missing and got re-prepared above): its verdict stands —
+        // either it restored and the entry STILL reads as scaffold, or
+        // it flagged the loss. Report starter state with that verdict
+        // attached; never restore twice in one request.
+        return NextResponse.json({
+          runtimeStatus: "not_started",
+          previewUrl: null,
+          runtimeError: null,
+          starterContent: true,
+          framework: "static",
+          developmentCommand: null,
+          packageManager: null,
+          logs: [],
+          ...recoveryFlags,
+        });
+      }
+      const outcome = await restoreWorkspaceFromLatestDeployment({
+        projectId,
+        userId,
+        workspaceId: effectiveWorkspaceId,
+      });
+      if (outcome.kind === "content-loss") {
+        return NextResponse.json({
+          runtimeStatus: "not_started",
+          previewUrl: null,
+          runtimeError: null,
+          starterContent: true,
+          contentLoss: true,
+          survivingDeploymentId: outcome.survivingDeploymentId,
+          framework: "static",
+          developmentCommand: null,
+          packageManager: null,
+          logs: [],
+        });
+      }
+      if (outcome.kind === "no-deployments") {
+        return NextResponse.json({
+          runtimeStatus: "not_started",
+          previewUrl: null,
+          runtimeError: null,
+          starterContent: true,
+          framework: "static",
+          developmentCommand: null,
+          packageManager: null,
+          logs: [],
+        });
+      }
+      // Restored: re-read the entry document and continue with the
+      // REAL content. If it still reads as starter content (or
+      // vanished), report starter honestly rather than "ready" over a
+      // document that is not the site.
+      restoredFromDeploymentId = outcome.deploymentId;
+      recoveryFlags = { workspaceRestoredFromDeploymentId: outcome.deploymentId };
+      const reread = await readEntry(effectiveWorkspaceId);
+      if (
+        reread.kind === "ok" &&
+        typeof reread.content === "string" &&
+        !reread.content.includes(WELCOME_SCREEN_MARKER)
+      ) {
+        entryHtml = reread.content;
+      } else {
+        return NextResponse.json({
+          runtimeStatus: "not_started",
+          previewUrl: null,
+          runtimeError: null,
+          starterContent: true,
+          framework: "static",
+          developmentCommand: null,
+          packageManager: null,
+          logs: [],
+          ...recoveryFlags,
+        });
+      }
     }
 
     // The capability token must authorize the REAL document's asset
@@ -173,10 +301,14 @@ export async function GET(
     // (images, fonts, media, css url() targets) the opaque-origin iframe
     // will request without a session cookie. Minting from a stub document
     // would sign an empty manifest and 403 every asset.
+    const { token: terminalToken } = createTerminalToken(userId, {
+      workspaceId: effectiveWorkspaceId,
+      projectId,
+    });
     const readWorkspaceText = async (path: string): Promise<string | null> => {
       const asset = await fetch(`${terminalBase}/ws-files/read`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${terminalToken}`, "X-Workspace-Id": project.workspaceId! },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${terminalToken}`, "X-Workspace-Id": effectiveWorkspaceId },
         body: JSON.stringify({ path, encoding: "utf-8" }),
         signal: AbortSignal.timeout(15000),
       });
@@ -203,7 +335,7 @@ export async function GET(
     }
     const token = createPreviewToken(userId, {
       projectId,
-      workspaceId: project.workspaceId,
+      workspaceId: effectiveWorkspaceId,
       assets: manifest.assets,
     });
     return NextResponse.json({
@@ -216,6 +348,9 @@ export async function GET(
       developmentCommand: null,
       packageManager: null,
       logs: [],
+      ...(restoredFromDeploymentId
+        ? { workspaceRestoredFromDeploymentId: restoredFromDeploymentId }
+        : {}),
     });
   }
 
