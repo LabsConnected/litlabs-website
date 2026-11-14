@@ -109,6 +109,35 @@ describe("BoardPanel chrome", () => {
     fireEvent.pointerUp(window, { pointerId: 9 });
   });
 
+  it("captures the pointer on drag start and releases it on pointer up (iframe-crossing fix)", () => {
+    const handlers = renderPanel();
+    const header = screen.getByTestId("board-panel-header-preview");
+    const setCapture = vi.fn();
+    const releaseCapture = vi.fn();
+    header.setPointerCapture = setCapture;
+    header.hasPointerCapture = () => true;
+    header.releasePointerCapture = releaseCapture;
+    fireEvent.pointerDown(header, { pointerId: 11, clientX: 150, clientY: 90 });
+    // Capture is what keeps pointermove flowing to this document when
+    // the drag crosses the Preview panel's cross-origin iframe.
+    expect(setCapture).toHaveBeenCalledWith(11);
+    fireEvent.pointerMove(window, { pointerId: 11, clientX: 190, clientY: 125 });
+    expect(handlers.onRectChange).toHaveBeenCalledTimes(1);
+    fireEvent.pointerUp(window, { pointerId: 11 });
+    expect(releaseCapture).toHaveBeenCalledWith(11);
+  });
+
+  it("pointercancel ends the drag session — no leaked drag on the next move", () => {
+    const handlers = renderPanel();
+    const header = screen.getByTestId("board-panel-header-preview");
+    fireEvent.pointerDown(header, { pointerId: 13, clientX: 150, clientY: 90 });
+    fireEvent.pointerMove(window, { pointerId: 13, clientX: 190, clientY: 125 });
+    expect(handlers.onRectChange).toHaveBeenCalledTimes(1);
+    fireEvent.pointerCancel(window, { pointerId: 13 });
+    fireEvent.pointerMove(window, { pointerId: 13, clientX: 400, clientY: 400 });
+    expect(handlers.onRectChange).toHaveBeenCalledTimes(1);
+  });
+
   it("minimize, maximize and close buttons fire their handlers (and do not start a drag)", () => {
     const handlers = renderPanel();
     fireEvent.click(screen.getByTestId("board-panel-minimize-preview"));

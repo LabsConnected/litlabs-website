@@ -93,6 +93,17 @@ export default function StudioBoard({
   const onBackgroundPointerDown = (event: ReactPointerEvent) => {
     const target = event.target as HTMLElement;
     if (target.closest("[data-panel-id]") || target.closest("[data-board-chrome]")) return;
+    // Pointer capture for the same reason as BoardPanel's drag sessions:
+    // a pan that crosses the Preview iframe otherwise stops receiving
+    // pointermove in this document and leaks its session on pointerup.
+    const captureTarget = event.currentTarget as HTMLElement;
+    if (typeof captureTarget.setPointerCapture === "function") {
+      try {
+        captureTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Non-active pointer / jsdom — window listeners still apply.
+      }
+    }
     panSession.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -109,14 +120,25 @@ export default function StudioBoard({
         panY: session.panY + (move.clientY - session.startY),
       });
     };
-    const onUp = (up: PointerEvent) => {
+    const onEnd = (up: PointerEvent) => {
       if (up.pointerId !== panSession.current?.pointerId) return;
       panSession.current = null;
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointerup", onEnd);
+      window.removeEventListener("pointercancel", onEnd);
+      if (typeof captureTarget.hasPointerCapture === "function") {
+        try {
+          if (captureTarget.hasPointerCapture(up.pointerId)) {
+            captureTarget.releasePointerCapture(up.pointerId);
+          }
+        } catch {
+          // Capture already gone (browser releases it on pointerup).
+        }
+      }
     };
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointerup", onEnd);
+    window.addEventListener("pointercancel", onEnd);
   };
 
   const summon = (id: BoardPanelId) => {

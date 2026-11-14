@@ -37,6 +37,64 @@ import {
 
 export const BOARD_LAYOUT_STORAGE_KEY = "litt-studio-board-layout-v1";
 
+/** The persisted (partialized) shape of this store. */
+export interface BoardLayoutPersistedState {
+  enabledByUser: Record<string, boolean>;
+  scopes: Record<string, BoardLayoutState>;
+}
+
+/**
+ * Panels whose website default changed in layout v2 (board slice 1,
+ * 2026-11-14 — Larry's rule: everything lives on the board, open by
+ * default). Changes and Browser ride along inside the Inspector panel;
+ * Checks' board home is the Health panel.
+ */
+const BOARD_LAYOUT_V2_WEBSITE_OPEN: BoardPanelId[] = ["files", "health", "inspector", "deploy"];
+
+/**
+ * zustand/persist migration for the board layout store.
+ *
+ * v1 → v2: v1 layouts recorded Files / Health / Inspector / Deploy as
+ * closed on website projects purely because the old defaults never
+ * opened them, so a saved layout cannot be told apart from a deliberate
+ * close. The new defaults must reach existing users, so website scopes
+ * re-open those four panels exactly once, here. Panel geometry,
+ * z-order, minimized/maximized state, presets, viewports and every
+ * other panel's open state carry over untouched — and a preset saved
+ * under v1 still restores exactly what it saved when applied.
+ * Anything unrecognized passes through unchanged.
+ */
+export function migrateBoardLayoutPersistedState(
+  persistedState: unknown,
+  version: number,
+): BoardLayoutPersistedState {
+  if (
+    version >= 2 ||
+    !persistedState ||
+    typeof persistedState !== "object" ||
+    !("scopes" in persistedState) ||
+    !persistedState.scopes ||
+    typeof persistedState.scopes !== "object"
+  ) {
+    return persistedState as BoardLayoutPersistedState;
+  }
+  const state = persistedState as BoardLayoutPersistedState;
+  const scopes: Record<string, BoardLayoutState> = {};
+  for (const [key, layout] of Object.entries(state.scopes)) {
+    if (!layout || layout.projectType !== "website" || !layout.panels) {
+      scopes[key] = layout;
+      continue;
+    }
+    const panels = { ...layout.panels };
+    for (const id of BOARD_LAYOUT_V2_WEBSITE_OPEN) {
+      const panel = panels[id];
+      if (panel && !panel.open) panels[id] = { ...panel, open: true };
+    }
+    scopes[key] = { ...layout, panels };
+  }
+  return { ...state, scopes };
+}
+
 interface BoardLayoutStore {
   /** Per-user board toggle. Absent/false = OFF (the B2 default). */
   enabledByUser: Record<string, boolean>;
@@ -270,7 +328,8 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
     }),
     {
       name: BOARD_LAYOUT_STORAGE_KEY,
-      version: 1,
+      version: 2,
+      migrate: migrateBoardLayoutPersistedState,
       partialize: (s) => ({ enabledByUser: s.enabledByUser, scopes: s.scopes }),
     },
   ),
