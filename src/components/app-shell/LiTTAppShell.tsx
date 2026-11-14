@@ -29,6 +29,10 @@
  * useTheme() resolvedColors unchanged, so the frame renders in the
  * user's normal theme — /projects included, since Larry's all-light
  * ruling (2026-11-13) removed the earlier Neon Grove pack scoping.
+ * A caller that renders the frame without resolved colors (a
+ * partial theme harness, an early paint) must not crash it: the
+ * palette falls back field-by-field to the platform default
+ * (FALLBACK_COLORS) and the caller's colors win wherever given.
  *
  * It does NOT special-case Studio (Studio keeps its own viewport-
  * locked StudioShell and LayoutShell already routes around it) and it
@@ -53,6 +57,24 @@ export interface AppShellColors {
   elevatedBg?: string;
 }
 
+/**
+ * Platform-default palette — field-for-field the LiTT Signature
+ * light skin (lightSkins.signature in src/context/ThemeContext.tsx,
+ * the defaultTheme's skin), with textMuted derived from textColor
+ * exactly as ThemeContext's getResolvedColors derives it. Used only
+ * as the fallback base when a caller passes no (or partial) colors;
+ * a real page's resolvedColors override every field they set.
+ */
+const FALLBACK_COLORS: AppShellColors = {
+  bgColor: "#FFFFFF",
+  textColor: "#0E1510",
+  textMuted: "#717573",
+  headerColor: "#0C5A26",
+  borderColor: "#CFDEC4",
+  accentColor: "#177A36",
+  boxBg: "#FFFFFF",
+};
+
 interface LiTTAppShellProps {
   colors: AppShellColors;
   /** Per-page sidebar content (categories / sections / feed nav). */
@@ -69,7 +91,7 @@ interface LiTTAppShellProps {
 }
 
 export default function LiTTAppShell({
-  colors,
+  colors: colorsProp,
   sidebar,
   sidebarLabel,
   header,
@@ -87,6 +109,11 @@ export default function LiTTAppShell({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
+
+  // The caller's colors win field-by-field; anything they did not
+  // pass (including the whole object, from a partial theme harness)
+  // falls back to the platform default palette instead of crashing.
+  const colors: AppShellColors = { ...FALLBACK_COLORS, ...colorsProp };
 
   const sidebarSurface = {
     backgroundColor: colors.sidebarBg ?? colors.boxBg,
