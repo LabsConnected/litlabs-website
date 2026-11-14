@@ -260,7 +260,9 @@ describe("Agent Loop", () => {
     const store = new RuntimeStore(() => {});
     const tools = createDefaultRegistry();
 
-    // Track model calls — the mock model repeats the same tool_call response
+    // Track model calls — the mock model emits a DISTINCT tool call each
+    // round (a verbatim repeat would trip the redundant-only-turn guard,
+    // which is a different contract tested separately below).
     let modelCallCount = 0;
     const model: ModelProvider = {
       async stream(
@@ -268,7 +270,9 @@ describe("Agent Loop", () => {
         emit: (event: ModelStreamEvent) => void,
       ): Promise<ModelResult> {
         modelCallCount++;
-        const response = '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```';
+        const response =
+          '```tool_call\n{ "tool": "project.list_files", "inputs": { "path": "nonexistent-' +
+          modelCallCount + '" } }\n```';
         emit({ type: "meta", provider: "mock", model: "mock-model", profile: "fast" });
         for (const word of response.split(" ")) {
           emit({ type: "delta", text: word + " " });
@@ -311,6 +315,60 @@ describe("Agent Loop", () => {
     // We verify this by checking that the event loop is idle — if
     // there were lingering handles, the test process would hang.
     // The fact that we reach this assertion proves clean exit.
+  });
+
+  it("verbatim repeat of an already-successful call ends truthfully before maxRounds", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = createDefaultRegistry();
+
+    // The mock model returns the SAME successful tool call every round —
+    // re-dispatching it can never produce new evidence. The loop nudges
+    // the model to synthesize at most MAX_REDUNDANT_ONLY_RETRIES (2)
+    // times, then ends the run as "error" rather than burning the rest
+    // of the round budget on dead repeats.
+    let modelCallCount = 0;
+    const model: ModelProvider = {
+      async stream(
+        _messages: ChatMessage[],
+        emit: (event: ModelStreamEvent) => void,
+      ): Promise<ModelResult> {
+        modelCallCount++;
+        const response = '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```';
+        emit({ type: "meta", provider: "mock", model: "mock-model", profile: "fast" });
+        for (const word of response.split(" ")) {
+          emit({ type: "delta", text: word + " " });
+        }
+        emit({
+          type: "done",
+          model: "mock-model",
+          usage: { total_tokens: 10 },
+          timing: { ttftMs: 1, generationMs: 1, totalMs: 2 },
+        });
+        return {
+          content: response,
+          model: "mock-model",
+          provider: "mock",
+          usage: { total_tokens: 10 },
+          timing: { ttftMs: 1, generationMs: 1, totalMs: 2 },
+          profile: "fast" as ModelProfile,
+        };
+      },
+      async health(): Promise<number> { return 100; },
+    };
+
+    const result = await runAgentLoop("Keep calling tools forever", {
+      model, tools, shell, store, cwd: process.cwd(), maxRounds: 5,
+    });
+
+    // Round 1 dispatches; rounds 2–3 get synthesis nudges; round 4 is
+    // refused — exactly 4 model calls, never 5, and the loop does NOT
+    // report max_rounds or a successful completion.
+    assert.equal(modelCallCount, 4, "verbatim repeats must stop at the bounded retry cap");
+    assert.equal(result.termination, "error");
+    assert.match(result.content, /repeated an already-successful tool call/);
+    assert.match(result.content, /NOT completed/);
+    assert.ok(result.toolCalls.length <= 5, `tool calls should be <= 5, got ${result.toolCalls.length}`);
   });
 
   it("emits agent_tool_call and agent_tool_result events", async () => {
