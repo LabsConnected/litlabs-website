@@ -12,16 +12,14 @@ import { brand } from "@/lib/design/litt-tokens";
 const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 import {
   LayoutGrid, User, Palette, Sparkles, Briefcase,
-  Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal,
-  Search, ChevronRight, Check, Loader2, X,
-  RotateCcw, ArrowLeft, Camera, Volume2,
+  Cpu, Mic, Plug, Zap, Coins, Shield, Gauge,
+  ChevronRight, Check, Loader2,
+  RotateCcw, Camera, Volume2,
   Monitor, Moon, Sun,
 } from "lucide-react";
 import {
   useSettingsStore,
   SETTINGS_SECTIONS,
-  SETTINGS_GROUPS,
-  type SettingsSection,
 } from "@/stores/useSettingsStore";
 import {
   accentLabel,
@@ -51,13 +49,8 @@ import { useStudioModelStore, MODELS as STUDIO_MODELS } from "@/app/(app)/studio
 import { useConnectionSummary } from "@/app/(app)/studio/hooks/useConnectionSummary";
 import { useLocalSettings } from "@/hooks/useLocalSettings";
 import { WhatLiTTKnowsSection } from "./litt-knows/WhatLiTTKnowsSection";
-
-/* ── Icon map ──────────────────────────────────────────────────────── */
-
-const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>> = {
-  LayoutGrid, User, Palette, Sparkles, Briefcase,
-  Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal,
-};
+import LiTTAppShell from "@/components/app-shell/LiTTAppShell";
+import SettingsSidebar from "./_components/SettingsSidebar";
 
 /* ── Main page ─────────────────────────────────────────────────────── */
 
@@ -68,19 +61,15 @@ export default function SettingsPage() {
     setActiveSection, setSearchQuery,
   } = useSettingsStore();
 
-  const [mobileSection, setMobileSection] = useState<string | null>(null);
-  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("returnTo") || "/studio";
 
   // Read ?section= from the URL on mount so deep links like
-  // /settings?section=connections&returnTo=/studio land on the right tab.
+  // /settings?section=connections&returnTo=/studio land on the right section.
   useEffect(() => {
     const section = searchParams.get("section");
     if (section && SETTINGS_SECTIONS.some((s) => s.id === section)) {
       setActiveSection(section);
-      setMobileSection(section);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
@@ -102,420 +91,46 @@ export default function SettingsPage() {
 
   const handleSectionClick = useCallback((sectionId: string) => {
     setActiveSection(sectionId);
-    setMobileSection(sectionId);
-    setMobileSettingsOpen(false);
-  }, [setActiveSection]);
-
-  const handleMobileBack = useCallback(() => {
-    setMobileSection(null);
-    setActiveSection("overview");
   }, [setActiveSection]);
 
   return (
-    <div
-      className="min-h-screen overflow-x-clip"
-      style={{ color: T.textColor }}
-    >
-      {/* Light veil for text contrast — lets the wallpaper show through */}
-      <div className="pointer-events-none absolute inset-0" style={{ backgroundColor: "rgba(5,6,10,0.45)" }} />
-
-      {/* ── Section tab strip — sticky under the AppShell top bar ────────
-          Replaces the old 260px desktop sidebar: section tabs and search
-          live here on every viewport. The strip sticks below the AppShell
-          header (56px bar + 48px mobile nav strip on small screens, 56px
-          bar alone on md+). */}
-      <div className="relative">
-        <SettingsTabStrip
+    <LiTTAppShell
+      colors={T}
+      sidebarLabel="Settings sections"
+      sidebar={
+        <SettingsSidebar
+          colors={T}
           sections={filteredSections}
-          allSections={SETTINGS_SECTIONS}
           activeSection={activeSection}
           onSectionClick={handleSectionClick}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          T={T}
           returnTo={returnTo}
-          mobileSettingsOpen={mobileSettingsOpen}
-          onOpenMobileSettings={() => setMobileSettingsOpen(true)}
-          mobileSearchOpen={mobileSearchOpen}
-          onToggleMobileSearch={() => setMobileSearchOpen((open) => !open)}
         />
-      </div>
-
-      {/* ── Content — full width below the tab strip ───────────────────── */}
-      <div className="relative mx-auto w-full max-w-375 overflow-x-clip">
-        {/* Mobile: one active category at a time. Category discovery lives in
-            the All settings sheet, so content starts immediately below the
-            compact toolbar instead of below a second navigation list. */}
-        <div className="min-w-0 px-3 py-4 pb-[calc(8rem+env(safe-area-inset-bottom))] sm:px-4 lg:hidden" data-testid="mobile-settings-content">
-          {mobileSection && (
-            <button
-              type="button"
-              onClick={() => { handleMobileBack(); setMobileSettingsOpen(true); }}
-              className="mb-3 inline-flex min-h-9 items-center gap-2 rounded-lg px-1 text-xs font-bold text-white/65 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-              aria-label="Back to all settings"
-            >
-              <ArrowLeft size={14} className="pointer-events-none" />
-              All settings
-            </button>
-          )}
-          {activeSectionMeta && (
-            <>
-              <SectionHeader
-                title={activeSectionMeta.label}
-                description={activeSectionMeta.description}
-              />
-              <SettingsContent section={activeSectionMeta.id} T={T} />
-            </>
-          )}
-        </div>
-
-        {/* Desktop: active section content */}
-        <div className="hidden min-w-0 px-6 py-8 pb-24 pr-16 lg:block lg:px-8 xl:px-10 xl:pr-20">
-          <div className="mb-6">
-            <SectionHeader
-              title={activeSectionMeta?.label ?? "Settings"}
-              description={activeSectionMeta?.description}
-            />
-          </div>
-          {activeSectionMeta && (
-            <SettingsContent section={activeSectionMeta.id} T={T} />
-          )}
-        </div>
-      </div>
-
-      {mobileSettingsOpen && (
-        <MobileSettingsSheet
-          sections={filteredSections}
-          allSections={SETTINGS_SECTIONS}
-          activeSection={activeSection}
-          searchQuery={searchQuery}
-          onSectionClick={handleSectionClick}
-          onClose={() => setMobileSettingsOpen(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-/* ── Settings section tabs (horizontal strip under the AppShell top bar) ──
- * Replaces the old 260px desktop sidebar. Sticky on every viewport:
- * sticks below the AppShell header — 56px bar + 48px mobile nav strip on
- * small screens (top-[104px]), 56px bar alone on md+ (md:top-14).
- * Tabs show icon + label; the active section is highlighted. Search
- * lives in the strip so it is always in reach. */
-
-function SettingsTabStrip({
-  sections,
-  allSections,
-  activeSection,
-  onSectionClick,
-  searchQuery,
-  onSearchChange,
-  T,
-  returnTo,
-  mobileSettingsOpen,
-  onOpenMobileSettings,
-  mobileSearchOpen,
-  onToggleMobileSearch,
-}: {
-  sections: SettingsSection[];
-  allSections: SettingsSection[];
-  activeSection: string;
-  onSectionClick: (id: string) => void;
-  searchQuery: string;
-  onSearchChange: (q: string) => void;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-  returnTo: string;
-  mobileSettingsOpen: boolean;
-  onOpenMobileSettings: () => void;
-  mobileSearchOpen: boolean;
-  onToggleMobileSearch: () => void;
-}) {
-  const hasSearch = searchQuery.trim().length > 0;
-  const displaySections = hasSearch ? sections : allSections;
-
-  return (
-    <div
-      className="sticky top-[104px] z-30 border-b md:top-14"
-      style={{
-        borderColor: "rgba(255,255,255,0.06)",
-        backgroundColor: "rgba(9,11,18,0.92)",
-        backdropFilter: "blur(20px)",
-      }}
-    >
-      {/* Desktop and mobile share this toolbar, while category discovery is
-          intentionally different: desktop keeps its established strip and
-          mobile uses the compact selector below. */}
-      <div className="flex items-center gap-2 px-3 py-2.5 md:gap-3 md:px-4">
-        <Link
-          href={returnTo}
-          className="grid h-[40px] w-[40px] shrink-0 place-items-center rounded-lg border transition-colors hover:bg-white/5"
-          style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)" }}
-          aria-label="Back to Studio"
-        >
-          <ArrowLeft size={16} className="pointer-events-none" />
-        </Link>
-        <span className="shrink-0 text-sm font-black" style={{ color: "rgba(255,255,255,0.9)" }}>
-          Settings
-        </span>
-        <div className="relative hidden min-w-0 flex-1 md:block md:max-w-64">
-          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
-          <input
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search settings…"
-            className="w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none transition-all focus:ring-2"
-            style={{
-              backgroundColor: "rgba(10,12,18,0.6)",
-              borderColor: "rgba(255,255,255,0.08)",
-              color: "rgba(255,255,255,0.88)",
-            }}
-            aria-label="Search settings"
-            data-testid="desktop-settings-search"
+      }
+      header={
+        <div className="mb-6">
+          <SectionHeader
+            title={activeSectionMeta?.label ?? "Settings"}
+            description={activeSectionMeta?.description}
           />
         </div>
-        <button
-          type="button"
-          onClick={onToggleMobileSearch}
-          className="grid h-[40px] w-[40px] shrink-0 place-items-center rounded-lg border border-white/10 text-white/70 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 md:hidden"
-          aria-label={mobileSearchOpen ? "Close settings search" : "Search settings"}
-          aria-expanded={mobileSearchOpen}
-        >
-          <Search size={15} className="pointer-events-none" />
-        </button>
-      </div>
-
-      <div className="px-3 pb-2.5 md:hidden">
-        <button
-          type="button"
-          onClick={onOpenMobileSettings}
-          className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-accent/20 bg-accent/[0.07] px-3 text-left transition hover:bg-accent/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-          aria-label="Open all settings"
-          aria-expanded={mobileSettingsOpen}
-          data-testid="mobile-settings-selector"
-        >
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
-            <LayoutGrid size={15} className="pointer-events-none" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-accent/75">All settings</span>
-            <span className="block truncate text-sm font-bold text-white">{SETTINGS_SECTIONS.find((s) => s.id === activeSection)?.label ?? "Overview"}</span>
-          </span>
-          <ChevronRight size={16} className="shrink-0 text-accent/80" />
-        </button>
-      </div>
-
-      {mobileSearchOpen && (
-        <div className="px-3 pb-2.5 md:hidden">
-          <div className="relative">
-            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/55" />
-            <input
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search settings…"
-              className="min-h-10 w-full rounded-xl border border-white/12 bg-black/40 py-2 pl-9 pr-3 text-sm text-white outline-none transition focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
-              aria-label="Search settings"
-              data-testid="mobile-settings-search"
-              autoFocus
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Desktop category tabs. Mobile uses the full-screen selector sheet.
-          When searching, show flat filtered results. Otherwise group by
-          App Settings / LiTT Capabilities / Advanced. */}
-      <nav
-        className="hidden items-center gap-1 overflow-x-auto px-3 py-2.5 md:px-4 lg:flex"
-        aria-label="Settings sections"
-        data-testid="desktop-settings-sections"
-        style={{ scrollbarWidth: "none" }}
+      }
+    >
+      {/* One content region at every width (Settings redesign Phase 2):
+          the shared frame owns the desktop sidebar and the below-lg
+          drawer, replacing the tab strip, the separate mobile sheet,
+          and the old duplicated mobile/desktop content mounts. Bottom
+          padding keeps content clear of the mobile bottom nav. */}
+      <div
+        className="min-w-0 pb-[calc(8rem+env(safe-area-inset-bottom))] lg:pb-24"
+        data-testid="settings-content"
       >
-        {hasSearch ? (
-          displaySections.map((section) => {
-            const Icon = ICONS[section.icon] ?? LayoutGrid;
-            const isActive = activeSection === section.id;
-            return (
-              <button
-                key={section.id}
-                type="button"
-                onClick={() => onSectionClick(section.id)}
-                className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all"
-                style={{
-                  backgroundColor: isActive ? `${T.accentColor}14` : "transparent",
-                  color: isActive ? T.accentColor : "rgba(255,255,255,0.55)",
-                  boxShadow: isActive ? `inset 0 -2px 0 ${T.accentColor}` : "none",
-                }}
-                aria-current={isActive ? "page" : undefined}
-                title={section.description}
-              >
-                <Icon size={14} className="pointer-events-none" />
-                <span className="whitespace-nowrap">{section.label}</span>
-              </button>
-            );
-          })
-        ) : (
-          SETTINGS_GROUPS.map((group) => {
-            const groupSections = allSections.filter((s) => s.group === group.id);
-            if (groupSections.length === 0) return null;
-            return (
-              <div key={group.id} className="flex items-center gap-1" data-testid={`desktop-settings-group-${group.id}`}>
-                <span className="shrink-0 px-2 text-[10px] font-black uppercase tracking-[0.14em] text-white/35">
-                  {group.label}
-                </span>
-                {groupSections.map((section) => {
-                  const Icon = ICONS[section.icon] ?? LayoutGrid;
-                  const isActive = activeSection === section.id;
-                  return (
-                    <button
-                      key={section.id}
-                      type="button"
-                      onClick={() => onSectionClick(section.id)}
-                      className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all"
-                      style={{
-                        backgroundColor: isActive ? `${T.accentColor}14` : "transparent",
-                        color: isActive ? T.accentColor : "rgba(255,255,255,0.55)",
-                        boxShadow: isActive ? `inset 0 -2px 0 ${T.accentColor}` : "none",
-                      }}
-                      aria-current={isActive ? "page" : undefined}
-                      title={section.description}
-                    >
-                      <Icon size={14} className="pointer-events-none" />
-                      <span className="whitespace-nowrap">{section.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })
+        {activeSectionMeta && (
+          <SettingsContent section={activeSectionMeta.id} T={T} />
         )}
-      </nav>
-    </div>
-  );
-}
-
-function MobileSettingsSheet({
-  sections,
-  allSections,
-  activeSection,
-  searchQuery,
-  onSectionClick,
-  onClose,
-}: {
-  sections: SettingsSection[];
-  allSections: SettingsSection[];
-  activeSection: string;
-  searchQuery: string;
-  onSectionClick: (id: string) => void;
-  onClose: () => void;
-}) {
-  const hasSearch = searchQuery.trim().length > 0;
-  const displaySections = hasSearch ? sections : allSections;
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-[100] lg:hidden" role="dialog" aria-modal="true" aria-label="All settings">
-      <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} aria-label="Close all settings" />
-      <section className="absolute inset-0 flex flex-col overflow-hidden border border-white/10 bg-[#090b12] pb-[env(safe-area-inset-bottom)] shadow-2xl">
-        <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 text-white/75 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-            aria-label="Close all settings"
-          >
-            <X size={17} className="pointer-events-none" />
-          </button>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-base font-black text-white">All settings</h2>
-            <p className="text-xs text-white/60">Choose a category</p>
-          </div>
-        </header>
-        <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 py-4" aria-label="Settings sections" data-testid="mobile-settings-sections">
-          {hasSearch ? (
-            displaySections.map((section) => {
-              const Icon = ICONS[section.icon] ?? LayoutGrid;
-              const isActive = activeSection === section.id;
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  onClick={() => {
-                    onSectionClick(section.id);
-                  }}
-                  className="flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-                  style={{
-                    borderColor: isActive ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.1)",
-                    backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.025)",
-                  }}
-                  aria-current={isActive ? "page" : undefined}
-                  aria-label={section.label}
-                >
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-accent/90">
-                    <Icon size={16} className="pointer-events-none" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-white/90"}`}>{section.label}</span>
-                    <span className="block truncate text-xs text-white/60">{section.description}</span>
-                  </span>
-                  {isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
-                </button>
-              );
-            })
-          ) : (
-            SETTINGS_GROUPS.map((group) => {
-              const groupSections = allSections.filter((s) => s.group === group.id);
-              if (groupSections.length === 0) return null;
-              return (
-                <div key={group.id} data-testid={`mobile-settings-group-${group.id}`}>
-                  <h3 className="px-1 pb-1 pt-3 text-[10px] font-black uppercase tracking-[0.16em] text-white/40">
-                    {group.label}
-                  </h3>
-                  <div className="space-y-2">
-                    {groupSections.map((section) => {
-                      const Icon = ICONS[section.icon] ?? LayoutGrid;
-                      const isActive = activeSection === section.id;
-                      return (
-                        <button
-                          key={section.id}
-                          type="button"
-                          onClick={() => {
-                            onSectionClick(section.id);
-                          }}
-                          className="flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-                          style={{
-                            borderColor: isActive ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.1)",
-                            backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.025)",
-                          }}
-                          aria-current={isActive ? "page" : undefined}
-                          aria-label={section.label}
-                        >
-                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-accent/90">
-                            <Icon size={16} className="pointer-events-none" />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-white/90"}`}>{section.label}</span>
-                            <span className="block truncate text-xs text-white/60">{section.description}</span>
-                          </span>
-                          {isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </nav>
-      </section>
-    </div>
+      </div>
+    </LiTTAppShell>
   );
 }
 
