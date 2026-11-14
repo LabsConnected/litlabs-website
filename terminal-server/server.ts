@@ -1046,6 +1046,30 @@ app.get("/internal/workspace/:workspaceId", requireInternalServiceAuth, (req: Au
 });
 
 /**
+ * GET /internal/sandbox/availability?userId=<clerkId>
+ * Service-to-service only. Reports — from the gate itself, never
+ * from a config claim — whether sandbox execution would route for
+ * this user RIGHT NOW (design note §4.6): provider configured,
+ * routing-enabled environment, owner allowlist, and a fresh green
+ * canary. The web app's repo gates consult this instead of answering
+ * from their own copy of the host policy. Response carries booleans
+ * and the provider name only — no sandbox ids, no secrets.
+ */
+app.get("/internal/sandbox/availability", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.query.userId || "");
+  const decision = userId
+    ? sandboxStack.gate.decide(userId)
+    : { allowed: false, reason: "not-owner" as const };
+  res.json({
+    provider: sandboxStack.config.providerName,
+    routingEnabled: sandboxStack.config.routingEnabled,
+    verified: sandboxStack.verification.isVerified(),
+    allowed: decision.allowed,
+    reason: decision.reason,
+  });
+});
+
+/**
  * POST /internal/workspace/:workspaceId/exec
  * Execute a command in the workspace. Service-to-service only.
  * Returns stdout, stderr, exit code, and duration.
@@ -1055,6 +1079,18 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   const userId = String(req.body?.userId || "");
   const command = String(req.body?.command || "");
   const stdinInput = typeof req.body?.stdin === "string" ? req.body.stdin : undefined;
+  // Optional per-command PROJECT env (Phase 2): a plain object of
+  // string values, size-capped here and value-guarded against the
+  // terminal's own platform secrets inside the provider (env.ts).
+  // Anything malformed is dropped, never partially applied. Absent
+  // env keeps the pre-Phase-2 behavior byte-identical.
+  let commandEnv: Record<string, string> | undefined;
+  if (req.body?.env && typeof req.body.env === "object" && !Array.isArray(req.body.env)) {
+    const entries = Object.entries(req.body.env as Record<string, unknown>)
+      .filter((e): e is [string, string] => typeof e[1] === "string")
+      .slice(0, 64);
+    if (entries.length > 0) commandEnv = Object.fromEntries(entries);
+  }
 
   if (!userId || !command) {
     res.status(400).json({ error: "Missing userId or command" });
@@ -1084,14 +1120,15 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
 
   auditCommand(userId, workspaceId, command, false);
 
-  // ─── Sandbox route (Phase 1) ─────────────────────────────────────
+  // ─── Sandbox route (Phase 1, production-enabled Phase 2) ─────────
   // Exactly one surface routes into a verified sandbox: this one, and
-  // only when the Phase 1 gate passes (E2B provider configured +
-  // staging + owner + fresh green canary — see sandbox/exec-router.ts).
-  // When the gate is closed the router returns null and the request
-  // continues down the pre-Phase-1 path below, untouched. A provider
-  // failure after the gate opened is surfaced as an execution failure;
-  // it never falls back to host execution here.
+  // only when the gate passes (E2B provider configured +
+  // routing-enabled environment + owner + fresh green canary — see
+  // sandbox/exec-router.ts). When the gate is closed the router
+  // returns null and the request continues down the pre-Phase-1 path
+  // below, untouched. A provider failure after the gate opened is
+  // surfaced as an execution failure; it never falls back to host
+  // execution here.
   const sandboxStartTime = Date.now();
   try {
     const sandboxOutcome = await sandboxStack.router.tryExecute({
@@ -1101,6 +1138,7 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
       command,
       stdin: stdinInput,
       timeoutMs: 120_000,
+      env: commandEnv,
     });
     if (sandboxOutcome) {
       res.json({
@@ -2087,7 +2125,7 @@ server.listen(PORT, BIND.host, () => {
   console.log(
     `   Sandbox provider: ${sandboxStack.config.providerName}` +
       (sandboxStack.config.providerName === "e2b"
-        ? ` (template ${sandboxStack.config.templateId}, staging=${sandboxStack.config.staging})`
+        ? ` (template ${sandboxStack.config.templateId}, staging=${sandboxStack.config.staging}, productionEnabled=${sandboxStack.config.productionEnabled}, routingEnabled=${sandboxStack.config.routingEnabled})`
         : ""),
   );
   warnIfOwnerAllowlistUnset();
