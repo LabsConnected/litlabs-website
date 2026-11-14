@@ -72,11 +72,28 @@ fi
 # --- cancel ----------------------------------------------------------------
 bash "$SUP" enqueue --tag longrun -- sleep 30 >/dev/null 2>&1
 for f in "$LITT_SUPERVISOR_DIR"/queue/*.task; do [ -e "$f" ] && sed -i 's/^not_before=.*/not_before=0/' "$f"; done
-( bash "$SUP" run --once >/dev/null 2>&1 & echo $! >"$ROOT_T/run.pid"; sleep 2 )
-LR_ID=$(find "$LITT_SUPERVISOR_DIR/running" -name '*.task' -exec grep -m1 '^id=' {} \; 2>/dev/null | cut -d= -f2 | head -1)
+( bash "$SUP" run --once >/dev/null 2>&1 & echo $! >"$ROOT_T/run.pid" )
+# Poll for the claim — on a loaded phone process spawn can exceed a
+# fixed sleep, and a missed window is a flake, not a product failure.
+LR_ID=""
+for _ in $(seq 1 30); do
+  LR_ID=$(find "$LITT_SUPERVISOR_DIR/running" -name '*.task' -exec grep -m1 '^id=' {} \; 2>/dev/null | cut -d= -f2 | head -1)
+  [ -n "$LR_ID" ] && break
+  sleep 1
+done
 if [ -n "$LR_ID" ]; then
-  bash "$SUP" cancel "$LR_ID" >/dev/null 2>&1; wait "$(cat "$ROOT_T/run.pid")" 2>/dev/null
-  s=$(field done '' status); check "cancelled task ends in done/cancelled" "cancelled\|done" "$s"
+  bash "$SUP" cancel "$LR_ID" >/dev/null 2>&1
+  # run --once is orphaned once its launching subshell exits, so `wait`
+  # cannot block on it — poll for the terminal record instead. The
+  # supervisor notices the cancel flag on its next heartbeat (≤2s),
+  # then spends ~3s reaping the process group.
+  s=""
+  for _ in $(seq 1 30); do
+    s=$(find "$LITT_SUPERVISOR_DIR/done" -name "*-$LR_ID.task" -exec sh -c 'grep -m1 "^status=" "$1" | cut -d= -f2' _ {} \; 2>/dev/null)
+    [ "$s" = "cancelled" ] && break
+    sleep 1
+  done
+  check "cancelled task records cancelled status" "^cancelled$" "$s"
 else
   bad "cancel: no running task found"
 fi
