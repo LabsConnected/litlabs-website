@@ -171,7 +171,10 @@ export interface ProbeOllamaRouteOptions {
   retriesPerCandidate?: number;
 }
 
-const DEFAULT_ROUTE_TIMEOUT_MS = 1_200;
+// 3_000ms — tailnet /api/tags latency on the reference phone↔PC link runs
+// 0.45–1.4s with spikes past 1.2s; a 1_200ms budget nondeterministically
+// skipped the preferred tier (dd7fa0db, 5bbd9523).
+const DEFAULT_ROUTE_TIMEOUT_MS = 3_000;
 
 /**
  * One extra attempt per candidate by default. Rationale: on Android the
