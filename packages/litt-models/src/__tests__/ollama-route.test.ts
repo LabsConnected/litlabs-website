@@ -235,8 +235,9 @@ describe("probeOllamaRoute — unreachable endpoints", () => {
     const result = await probeOllamaRoute({ candidates, fetchImpl });
     assert.equal(result.ok, false);
     assert.equal(result.attempts.length, 2);
-    assert.equal(result.attempts[0].error, "ECONNREFUSED");
-    assert.equal(result.attempts[1].error, "EHOSTUNREACH");
+    // Transport errors are retried (bounded) — the error records the count.
+    assert.equal(result.attempts[0].error, "ECONNREFUSED (after 2 attempts)");
+    assert.equal(result.attempts[1].error, "EHOSTUNREACH (after 2 attempts)");
   });
 
   it("treats a reachable daemon with zero installed models as a failed attempt", async () => {

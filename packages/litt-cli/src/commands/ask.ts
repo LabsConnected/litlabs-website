@@ -130,6 +130,13 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // use their results (observed: `Reply with exactly...` -> project.check).
   const directAnswerOnly = isExactAnswerPrompt(question);
   const tools = new ToolRegistry(undefined, { includeDefaults: !directAnswerOnly });
+  // A no-tools ask needs no agent contract either. The default compact
+  // system prompt runs ~450+ tokens of tool rules the model cannot use —
+  // on a phone-class CPU (≈23 tok/s prompt eval) that is ~20s of dead
+  // TTFT per ask. Direct-answer asks get a minimal prompt instead.
+  const systemPrompt = directAnswerOnly
+    ? "You are LiTT. Answer the user's request exactly as asked — no tools are available. Reply with the answer only."
+    : undefined;
   const gateway = new ExecutionGateway({
     tools,
     shell,
@@ -228,6 +235,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       // Non-interactive runs declare headless interaction so the gateway's
       // policy layer denies approval-required actions (fail closed).
       interaction: interactive ? "interactive" : "headless",
+      systemPrompt,
       maxRounds: 12,
       totalTimeoutMs: Number(process.env.LITT_ASK_TIMEOUT_MS) > 0
         ? Number(process.env.LITT_ASK_TIMEOUT_MS)

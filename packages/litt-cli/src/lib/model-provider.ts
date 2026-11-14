@@ -269,15 +269,36 @@ function resolveOllamaReasoningEffort(): string | undefined {
 }
 
 /**
- * keep_alive for local-daemon requests, when the operator configured one
- * (OLLAMA_KEEP_ALIVE — same var the web lane and the daemon itself read).
- * Returns undefined when unset so the request omits the field entirely
- * and the daemon's own default applies — preserving prior behavior where
- * the CLI sent no keep_alive at all.
+ * Default keep_alive for local-daemon requests when the operator has not
+ * configured one.
+ *
+ * Measured on Android/Termux: a cold `litt ask` spends ~120s loading the
+ * 1.7B model while the daemon's built-in 5m default means every ask more
+ * than ~5 minutes after the last one pays that load again. Keeping the
+ * model resident for 30m after each request (the same TTL the repo's own
+ * pc-perf preload uses) turns repeat asks into warm-path ~4-25s calls
+ * without changing any operator configuration. Residency still expires —
+ * nothing pins the model forever.
  */
-function resolveOllamaKeepAlive(): string | undefined {
-  const v = process.env.OLLAMA_KEEP_ALIVE?.trim();
-  return v || undefined;
+export const DEFAULT_OLLAMA_KEEP_ALIVE = "30m";
+
+/**
+ * keep_alive for local-daemon requests.
+ *
+ * Precedence:
+ *   1. LITT_OLLAMA_KEEP_ALIVE — CLI-scoped override.
+ *   2. OLLAMA_KEEP_ALIVE      — same var the web lane and the daemon read.
+ *   3. DEFAULT_OLLAMA_KEEP_ALIVE ("30m").
+ *
+ * Set the var to "0", "off", or "disabled" to omit keep_alive entirely
+ * and restore the pre-default behavior (daemon's own ~5m default).
+ */
+export function resolveOllamaKeepAlive(): string | undefined {
+  const v = (process.env.LITT_OLLAMA_KEEP_ALIVE ?? process.env.OLLAMA_KEEP_ALIVE)?.trim();
+  if (!v) return DEFAULT_OLLAMA_KEEP_ALIVE;
+  const lower = v.toLowerCase();
+  if (lower === "0" || lower === "off" || lower === "disabled") return undefined;
+  return v;
 }
 
 // ─── Max tokens policy ──────────────────────────────────────────────

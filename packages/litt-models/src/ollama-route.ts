@@ -161,9 +161,36 @@ export interface ProbeOllamaRouteOptions {
   timeoutMs?: number;
   /** Pre-built candidate list — skips resolveOllamaRouteCandidates. For tests. */
   candidates?: OllamaRouteCandidate[];
+  /**
+   * Extra attempts per candidate on TRANSPORT failure only (timeout,
+   * connection reset/refused, DNS). Deterministic answers — an HTTP
+   * status or an empty model list — are never retried. Defaults to
+   * DEFAULT_PROBE_RETRIES; LITT_OLLAMA_PROBE_RETRIES overrides
+   * (0 disables, hard-capped at MAX_PROBE_RETRIES).
+   */
+  retriesPerCandidate?: number;
 }
 
 const DEFAULT_ROUTE_TIMEOUT_MS = 1_200;
+
+/**
+ * One extra attempt per candidate by default. Rationale: on Android the
+ * first-tier (Tailscale) probe is the ONLY reachable route when the phone
+ * is off the home LAN and the local daemon is down — a single transient
+ * hiccup then reads as "every endpoint dead", which previously surfaced
+ * as a misleading auth wall. One retry absorbs that class without turning
+ * a genuinely-dead route into a long stall.
+ */
+export const DEFAULT_PROBE_RETRIES = 1;
+const MAX_PROBE_RETRIES = 3;
+
+function resolveProbeRetries(getEnv: EnvGetter): number {
+  const raw = getEnv("LITT_OLLAMA_PROBE_RETRIES")?.trim();
+  if (!raw) return DEFAULT_PROBE_RETRIES;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_PROBE_RETRIES;
+  return Math.min(Math.floor(n), MAX_PROBE_RETRIES);
+}
 
 /** Extract model tags from an Ollama /api/tags body. */
 function parseTagNames(body: unknown): string[] {
@@ -202,51 +229,70 @@ export async function probeOllamaRoute(
   const timeoutMs = options.timeoutMs ?? DEFAULT_ROUTE_TIMEOUT_MS;
 
   const attempts: OllamaRouteAttempt[] = [];
+  const triesPerCandidate =
+    1 + (options.retriesPerCandidate ?? resolveProbeRetries(getEnv));
 
   for (const candidate of candidates) {
-    // An explicit controller plus a ref'd timer, NOT AbortSignal.timeout():
-    // that helper's timer is unref'd, so when a probe is the only work left
-    // the event loop drains before the abort ever fires and this promise
-    // never settles. Real fetch hides it (an open socket refs the loop); an
-    // injected fetch does not, which is why it surfaces under the test runner.
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      controller.abort(
-        new DOMException(`The operation was aborted after ${timeoutMs}ms`, "TimeoutError"),
-      );
-    }, timeoutMs);
-    try {
-      const response = await doFetch(`${candidate.endpoint}/api/tags`, {
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        attempts.push({ ...candidate, ok: false, error: `HTTP ${response.status}` });
-        continue;
+    // Bounded per-candidate attempts: a transport failure (timeout abort,
+    // reset, DNS) gets up to `triesPerCandidate` tries; a deterministic
+    // response (HTTP status, empty tag list) is final on the first try.
+    // One attempt record per candidate — retry detail stays in `error`.
+    let outcome:
+      | { ok: true; error: null; models: string[] }
+      | { ok: false; error: string } | null = null;
+    let tries = 0;
+    while (tries < triesPerCandidate && !outcome?.ok) {
+      tries++;
+      // An explicit controller plus a ref'd timer, NOT AbortSignal.timeout():
+      // that helper's timer is unref'd, so when a probe is the only work left
+      // the event loop drains before the abort ever fires and this promise
+      // never settles. Real fetch hides it (an open socket refs the loop); an
+      // injected fetch does not, which is why it surfaces under the test runner.
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        controller.abort(
+          new DOMException(`The operation was aborted after ${timeoutMs}ms`, "TimeoutError"),
+        );
+      }, timeoutMs);
+      try {
+        const response = await doFetch(`${candidate.endpoint}/api/tags`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          outcome = { ok: false, error: `HTTP ${response.status}` };
+          break;
+        }
+        const body = (await response.json()) as unknown;
+        const models = parseTagNames(body);
+        if (models.length === 0) {
+          outcome = { ok: false, error: "reachable but no models installed" };
+          break;
+        }
+        outcome = { ok: true, error: null, models };
+      } catch (error) {
+        outcome = {
+          ok: false,
+          error:
+            (error instanceof Error ? error.message : String(error)) +
+            (tries > 1 && tries === triesPerCandidate ? ` (after ${tries} attempts)` : ""),
+        };
+      } finally {
+        clearTimeout(timer);
       }
-      const body = (await response.json()) as unknown;
-      const models = parseTagNames(body);
-      if (models.length === 0) {
-        attempts.push({ ...candidate, ok: false, error: "reachable but no models installed" });
-        continue;
-      }
-      attempts.push({ ...candidate, ok: true, error: null });
+    }
+    // The while loop always runs at least once — outcome is set.
+    const finalOutcome = outcome!;
+    attempts.push({ ...candidate, ok: finalOutcome.ok, error: finalOutcome.error });
+    if (finalOutcome.ok) {
       return {
         ok: true,
         tier: candidate.tier,
         label: candidate.label,
         endpoint: candidate.endpoint,
-        models,
+        models: finalOutcome.models,
         attempts,
         reason: null,
       };
-    } catch (error) {
-      attempts.push({
-        ...candidate,
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      clearTimeout(timer);
     }
   }
 
