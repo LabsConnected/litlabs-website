@@ -68,10 +68,28 @@ describe("auth gate: local diagnostics", () => {
     expect(requiresAuth("status", true, false, false, false)).toBe(false);
   });
 
+  it("diff and inspect are permitted signed-out in the LOCAL target", () => {
+    // Both are read-only local operations: `diff` is a git read through the
+    // session router, `inspect` is filesystem/package.json/git reads. Neither
+    // touches a provider, the network, or terminal-server in LOCAL mode.
+    for (const cmd of ["diff", "inspect"]) {
+      expect(requiresAuth(cmd, false, false, true, false)).toBe(false);
+      expect(requiresAuth(cmd, false, true, true, false)).toBe(false);
+    }
+  });
+
+  it("diff keeps the gate in the REMOTE target (remote dispatch)", () => {
+    // `litt diff` is REMOTEABLE — remote dispatch must stay auth-gated.
+    // `inspect` is not remoteable, but its bypass is still LOCAL-only.
+    for (const cmd of ["diff", "inspect"]) {
+      expect(requiresAuth(cmd, false, false, false, false)).toBe(true);
+    }
+  });
+
   it("write-capable commands stay gated signed-out even in LOCAL", () => {
     // NB: "repair" is LOGGED_OUT_ALLOWED by design (job-file safety rails);
     // "ask" is gated here only because no local provider was proven.
-    for (const cmd of ["check", "test", "build", "run", "diff", "inspect", "explain", "ask"]) {
+    for (const cmd of ["check", "test", "build", "run", "explain", "ask"]) {
       expect(requiresAuth(cmd, false, false, true, false)).toBe(true);
     }
   });

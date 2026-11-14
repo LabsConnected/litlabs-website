@@ -243,7 +243,7 @@ const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "d
  * execution target is LOCAL (the default). In the REMOTE target these
  * dispatch through terminal-server and stay auth-gated.
  */
-const LOCAL_DIAGNOSTIC_COMMANDS = new Set(["status"]);
+const LOCAL_DIAGNOSTIC_COMMANDS = new Set(["status", "diff", "inspect"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
