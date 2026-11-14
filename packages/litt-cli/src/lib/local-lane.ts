@@ -188,19 +188,58 @@ function singleCandidateReason(attempts: { endpoint: string; error: string | nul
 }
 
 /**
- * Pick the model to serve a local request, preferring LiTT's own coder
- * build, then a general local worker, then whatever is installed.
+ * Which kind of work a local request is for. "agent" is the default —
+ * tool-using mission/repair/cockpit runs, which need the strongest local
+ * build. "chat" is the lightweight one-shot question lane (`litt ask`),
+ * which should stay on the fast general-chat build instead of loading a
+ * heavyweight agent model for a five-word answer.
+ */
+export type LocalLanePurpose = "agent" | "chat";
+
+/**
+ * Pick the model to serve a local request.
+ *
+ * An explicit `preferred` tag wins exactly when installed. Otherwise the
+ * purpose's preference list applies — the agentic lane prefers the
+ * dedicated PC builds, the chat lane prefers the lightweight chat build —
+ * and only when NOTHING on the list is installed do we fall back to the
+ * daemon's first tag. That fallback exists for foreign daemons whose
+ * models LiTT does not know; it must never shadow a preference hit, or
+ * whichever model happens to sort first in /api/tags silently becomes
+ * the default (the cbx-hermes-fast regression).
  *
  * Returns null when nothing is installed.
  */
-export function selectLocalModel(models: string[], preferred?: string): string | null {
+export function selectLocalModel(
+  models: string[],
+  preferred?: string,
+  purpose: LocalLanePurpose = "agent",
+): string | null {
   if (preferred && models.includes(preferred)) return preferred;
-  for (const candidate of LOCAL_MODEL_PREFERENCE) {
+  const order = purpose === "chat" ? LOCAL_CHAT_MODEL_PREFERENCE : LOCAL_MODEL_PREFERENCE;
+  for (const candidate of order) {
     const hit = models.find((m) => m === candidate || m.startsWith(`${candidate}:`));
     if (hit) return hit;
   }
   return models[0] ?? null;
 }
+
+/**
+ * Preference order for the chat lane — one-shot questions (`litt ask`)
+ * where tool-calling muscle is wasted. litt-fast:2k is the tuned
+ * general-chat build and the documented default chat model; the bare
+ * "litt-fast" family prefix keeps the pick working if the exact tag
+ * changes. litt-hermes-fast is the next-best chat fallback (excluded
+ * from the tool lane because its thinking build emits a reasoning
+ * preamble, but fine for plain answers). litt-oc-phone keeps an on-device
+ * daemon serving chat when the PC is unreachable.
+ */
+const LOCAL_CHAT_MODEL_PREFERENCE = [
+  "litt-fast:2k",
+  "litt-fast",
+  "litt-hermes-fast",
+  "litt-oc-phone:1.7b-8k",
+];
 
 /**
  * Preference order for the local lane. litt-hermes first: it is the

@@ -188,9 +188,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     let routed;
     let routingMode: "auto" | "fixed";
     if (policy.kind === "local-required") {
-      // LOCAL mode: route through the local daemon.
+      // LOCAL mode: route through the local daemon. `litt ask` is the
+      // one-shot chat lane — it picks from the chat preference order
+      // (litt-fast first), not the agentic lane's hermes/coder order.
       const lane = await probeLocalLane();
-      routed = modelRuntime.routeLocal(lane, requestedLocalModel);
+      routed = modelRuntime.routeLocal(lane, requestedLocalModel, { purpose: "chat" });
       routingMode = "fixed";
     } else {
       // REMOTE/BYOK mode: route through the cloud catalog.

@@ -49,7 +49,7 @@ import {
   type LocalModelResolution,
 } from "./local-model-resolution.js";
 
-import type { LocalLaneStatus } from "./local-lane.js";
+import type { LocalLanePurpose, LocalLaneStatus } from "./local-lane.js";
 
 import type { RoutingMode } from "../ink/cockpit-store.js";
 
@@ -188,8 +188,12 @@ export class ModelRuntime {
    * footer, and Model Center render its real name rather than a raw
    * "ollama:…" id.
    */
-  routeLocal(lane: LocalLaneStatus, requested: string | null): RoutedModel {
-    const outcome = resolveLocalModel(lane, requested);
+  routeLocal(
+    lane: LocalLaneStatus,
+    requested: string | null,
+    options?: { purpose?: LocalLanePurpose },
+  ): RoutedModel {
+    const outcome = resolveLocalModel(lane, requested, options);
     if (!outcome.ok) throw new Error(outcome.error);
     this.registerLocalModel(outcome.resolution);
     return localRoutedModel(outcome.resolution);
