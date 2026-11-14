@@ -55,13 +55,20 @@ describe("GET /api/terminal/token", () => {
     expect(createTerminalToken).not.toHaveBeenCalled();
   });
 
-  it("blocks a non-owner before any workspace lookup or token minting", async () => {
+  it("refuses a non-owner before any workspace lookup or token minting, as a coded 200", async () => {
+    // The refusal itself is unchanged (gate first, no token minted) — but a
+    // standing policy verdict is an expected state, not a request failure,
+    // so it is answered with the fail-soft coded-200 shape (same pattern as
+    // the workspace-state route) instead of an error status the browser
+    // logs as a console error on every Studio load.
     vi.mocked(auth).mockResolvedValue({ userId: "user_public" } as never);
     const res = await GET(request("?projectId=p1"));
     const body = await res.json();
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
     expect(body.code).toBe("TERMINAL_DISABLED");
+    expect(body.terminalAvailable).toBe(false);
+    expect(body.token).toBeUndefined();
     expect(verifyProjectWorkspace).not.toHaveBeenCalled();
     expect(createTerminalToken).not.toHaveBeenCalled();
   });
