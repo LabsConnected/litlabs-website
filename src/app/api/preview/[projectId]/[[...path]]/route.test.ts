@@ -25,9 +25,19 @@ vi.mock("@/lib/terminal-config", () => ({
   requireTerminalBaseUrl: vi.fn(() => "https://terminal.test"),
 }));
 
+vi.mock("@/lib/studio/workspace-recovery", () => ({
+  ensureWorkspaceAlive: vi.fn(),
+}));
+
+vi.mock("@/lib/studio/workspace-rehydration", () => ({
+  restoreWorkspaceFromLatestDeployment: vi.fn(async () => ({ kind: "no-deployments" })),
+}));
+
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
 import { createPreviewToken, verifyPreviewToken } from "@/lib/projects/preview-token";
+import { ensureWorkspaceAlive } from "@/lib/studio/workspace-recovery";
+import { restoreWorkspaceFromLatestDeployment } from "@/lib/studio/workspace-rehydration";
 
 const authMock = vi.mocked(auth);
 const getProjectMock = vi.mocked(getProject);
@@ -553,5 +563,139 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
       );
       expect(res.status).toBe(404);
     });
+  });
+});
+
+describe("GET /api/preview/[projectId]/[[...path]] — workspace durability", () => {
+  const ensureMock = vi.mocked(ensureWorkspaceAlive);
+  const restoreMock = vi.mocked(restoreWorkspaceFromLatestDeployment);
+  const WELCOME_HTML =
+    "<!-- LITT-WELCOME-SCREEN --><html><head><title>LiTT Studio — New Project</title></head><body>Starter template</body></html>";
+  const REAL_HTML = "<html><head><title>Grand Haven Roofing</title></head><body>Roofing</body></html>";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("TERMINAL_AUTH_SECRET", "x".repeat(32));
+    authMock.mockResolvedValue({ userId: "user-1" } as never);
+    getProjectMock.mockResolvedValue({
+      id: "proj-1",
+      userId: "user-1",
+      workspaceId: "ws-1",
+    } as never);
+    ensureMock.mockResolvedValue({ workspaceId: "ws-1", reprepared: false } as never);
+    restoreMock.mockResolvedValue({ kind: "no-deployments" } as never);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  const ok = (content: string) =>
+    new Response(JSON.stringify({ content, size: content.length, encoding: "utf-8" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  const missing = (error: string) =>
+    new Response(JSON.stringify({ error }), { status: 404 });
+
+  function fetchSequence(...responses: Response[]) {
+    const fetchMock = vi.fn();
+    for (const r of responses) fetchMock.mockResolvedValueOnce(r);
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function sessionGet(path?: string[]) {
+    return GET(
+      new Request("https://x.test/api/preview/proj-1/index.html") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1", path),
+    );
+  }
+
+  it("recovers a lost workspace on a session request and serves the retried read", async () => {
+    fetchSequence(missing("Workspace not found"), ok("<h1>Recovered</h1>"));
+    ensureMock.mockResolvedValue({ workspaceId: "ws-1", reprepared: true } as never);
+
+    const res = await sessionGet(["index.html"]);
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Recovered");
+    expect(ensureMock).toHaveBeenCalledTimes(1);
+    expect(ensureMock).toHaveBeenCalledWith("proj-1", "user-1", "ws-1");
+  });
+
+  it("passes a file-level 404 through WITHOUT workspace recovery", async () => {
+    fetchSequence(missing("File not found"));
+
+    const res = await sessionGet(["missing.html"]);
+
+    expect(res.status).toBe(404);
+    expect(ensureMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT run recovery for token-mode requests (the session probe heals)", async () => {
+    // Token mode exists only WITHOUT a session — with a session the
+    // /t/<token>/ prefix is mere URL decoration and the request is a
+    // session request (recovery allowed). No session here:
+    authMock.mockResolvedValue({ userId: null } as never);
+    fetchSequence(missing("Workspace not found"));
+    const { token } = createPreviewToken("user-1", {
+      projectId: "proj-1",
+      workspaceId: "ws-1",
+      assets: ["index.html"],
+    });
+
+    const res = await GET(
+      new Request("https://x.test/api/preview/proj-1/t/x/index.html") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1", ["t", token, "index.html"]),
+    );
+
+    expect(res.status).toBe(404);
+    expect(ensureMock).not.toHaveBeenCalled();
+  });
+
+  it("serves the restored document when the workspace holds only the scaffold", async () => {
+    fetchSequence(ok(WELCOME_HTML), ok(REAL_HTML));
+    restoreMock.mockResolvedValue({ kind: "restored", deploymentId: "dep-1", fileCount: 2 } as never);
+
+    const res = await sessionGet(["index.html"]);
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Grand Haven Roofing");
+    expect(restoreMock).toHaveBeenCalledWith({
+      projectId: "proj-1",
+      userId: "user-1",
+      workspaceId: "ws-1",
+    });
+    expect(res.headers.get("x-litt-workspace-content-loss")).toBeNull();
+  });
+
+  it("serves the scaffold unchanged for a never-deployed project", async () => {
+    fetchSequence(ok(WELCOME_HTML));
+    // restoreMock default: no-deployments.
+
+    const res = await sessionGet(["index.html"]);
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("New Project");
+    expect(res.headers.get("x-litt-workspace-content-loss")).toBeNull();
+  });
+
+  it("flags content loss on the response when the scaffold cannot be restored", async () => {
+    fetchSequence(ok(WELCOME_HTML));
+    restoreMock.mockResolvedValue({
+      kind: "content-loss",
+      survivingDeploymentId: "dep-9",
+      reason: "snapshot incomplete",
+    } as never);
+
+    const res = await sessionGet(["index.html"]);
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("New Project");
+    expect(res.headers.get("x-litt-workspace-content-loss")).toBe("true");
+    expect(res.headers.get("x-litt-surviving-deployment-id")).toBe("dep-9");
   });
 });

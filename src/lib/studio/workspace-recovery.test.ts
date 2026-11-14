@@ -33,10 +33,15 @@ vi.mock("@/lib/github-app", () => ({
   getInstallationTokenForClone: vi.fn(),
 }));
 
+vi.mock("@/lib/studio/workspace-rehydration", () => ({
+  restoreWorkspaceFromLatestDeployment: vi.fn(),
+}));
+
 import { ensureWorkspaceAlive, normalizeFileError, provisionWorkspaceForProject, reprepareWorkspace, PROVISIONING_LOCK_DEAD_MS } from "@/lib/studio/workspace-recovery";
 import { getProject, updateProjectWorkspace, claimProvisioningLock, ensureCanonicalStudioProject, recoverStaleProvisioning, touchProvisioningHeartbeat } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal, prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
+import { restoreWorkspaceFromLatestDeployment } from "@/lib/studio/workspace-rehydration";
 import type { CanonicalProject } from "@/lib/projects/types";
 import type { WorkspaceGetResponse, WorkspacePrepareResponse } from "@/lib/terminal-internal-client";
 
@@ -112,6 +117,110 @@ describe("workspace-recovery", () => {
       const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
       expect(result.workspaceId).toBe("ws-recovered");
       expect(result.reprepared).toBe(true);
+    });
+  });
+
+  describe("ensureWorkspaceAlive — deployment restore on re-prepare", () => {
+    const restoreMock = vi.mocked(restoreWorkspaceFromLatestDeployment);
+
+    // Drive the same lost-workspace flow as the re-prepare test above:
+    // terminal check fails, the provisioner's re-check sees null, and
+    // every getProject read returns the given post-recovery project.
+    function setupLostWorkspace(project: Partial<CanonicalProject>) {
+      vi.mocked(getWorkspaceInternal).mockRejectedValueOnce(new Error("Workspace not found"));
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({ workspaceId: "ws-new", workspaceStatus: "ready", ...project }),
+      );
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
+      );
+    }
+
+    it("restores the deployed snapshot after re-preparing a static managed project", async () => {
+      setupLostWorkspace({ framework: "static", sourceType: "blank" });
+      restoreMock.mockResolvedValue({ kind: "restored", deploymentId: "dep-1", fileCount: 4 });
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
+
+      expect(result.reprepared).toBe(true);
+      expect(result.restoredFromDeploymentId).toBe("dep-1");
+      expect(result.contentLoss).toBeUndefined();
+      expect(restoreMock).toHaveBeenCalledWith({
+        projectId: "proj-1",
+        userId: "user-1",
+        workspaceId: "ws-new",
+      });
+    });
+
+    it("flags content loss when the snapshot cannot be restored", async () => {
+      setupLostWorkspace({ framework: "static", sourceType: "blank" });
+      restoreMock.mockResolvedValue({
+        kind: "content-loss",
+        survivingDeploymentId: "dep-9",
+        reason: "snapshot incomplete",
+      });
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
+
+      expect(result.reprepared).toBe(true);
+      expect(result.contentLoss).toBe(true);
+      expect(result.survivingDeploymentId).toBe("dep-9");
+      expect(result.restoredFromDeploymentId).toBeUndefined();
+    });
+
+    it("leaves a never-deployed static project flag-free (scaffold is correct)", async () => {
+      setupLostWorkspace({ framework: "static", sourceType: "blank" });
+      restoreMock.mockResolvedValue({ kind: "no-deployments" });
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
+
+      expect(result.reprepared).toBe(true);
+      expect(result.restoredFromDeploymentId).toBeUndefined();
+      expect(result.contentLoss).toBeUndefined();
+    });
+
+    it("never restores over a repo-backed project (the repo is the source of truth)", async () => {
+      // A bare sourceType:"github" cannot provision at all ("no valid
+      // source"), so this drives the real mirror path: full repo fields,
+      // the provisioner's mirror refresh re-syncs from the repo.
+      vi.mocked(getWorkspaceInternal).mockRejectedValueOnce(new Error("Workspace not found"));
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-new", root: "/data/ws-new", ready: true } as Partial<WorkspaceGetResponse>),
+      );
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({
+          framework: "static",
+          sourceType: "github",
+          githubInstallationId: "inst-1",
+          githubOwner: "owner",
+          githubRepo: "repo",
+          workspaceId: "ws-new",
+          workspaceRoot: "/data/ws-new",
+          workspaceStatus: "ready",
+        } as unknown as Partial<CanonicalProject>),
+      );
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
+
+      expect(result.reprepared).toBe(true);
+      expect(restoreMock).not.toHaveBeenCalled();
+    });
+
+    it("never restores for non-static projects", async () => {
+      setupLostWorkspace({ framework: "nextjs", sourceType: "blank" });
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
+
+      expect(result.reprepared).toBe(true);
+      expect(restoreMock).not.toHaveBeenCalled();
     });
   });
 

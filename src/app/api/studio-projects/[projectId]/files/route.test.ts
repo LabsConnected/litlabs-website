@@ -115,3 +115,83 @@ describe("studio-projects files route — 404 scoping", () => {
     expect(recoverMock).not.toHaveBeenCalled();
   });
 });
+
+describe("studio-projects files route — GET workspaceRecovery signal", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user-1" } as never);
+    verifyMock.mockResolvedValue({ workspaceId: "ws-1" } as never);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function getList() {
+    return GET(
+      new NextRequest("https://x.test/api/studio-projects/p1/files?path=."),
+      makeParams("p1"),
+    );
+  }
+
+  it("carries workspaceRecovery with the restored deployment id after a healed listing", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(upstream(404, { error: "Workspace not found" }))
+      .mockResolvedValueOnce(upstream(200, { files: [{ name: "index.html" }], path: "." }));
+    vi.stubGlobal("fetch", fetchMock);
+    recoverMock.mockResolvedValue({
+      reprepared: true,
+      workspaceId: "ws-1b",
+      restoredFromDeploymentId: "dep-1",
+    } as never);
+
+    const res = await getList();
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.files).toEqual([{ name: "index.html" }]);
+    expect(body.workspaceRecovery).toEqual({
+      reprepared: true,
+      restoredFromDeploymentId: "dep-1",
+    });
+  });
+
+  it("carries the content-loss verdict when recovery could not restore the snapshot", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(upstream(404, { error: "Workspace not found" }))
+      .mockResolvedValueOnce(upstream(200, { files: [{ name: "index.html" }], path: "." }));
+    vi.stubGlobal("fetch", fetchMock);
+    recoverMock.mockResolvedValue({
+      reprepared: true,
+      workspaceId: "ws-1b",
+      contentLoss: true,
+      survivingDeploymentId: "dep-9",
+    } as never);
+
+    const res = await getList();
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.workspaceRecovery).toEqual({
+      reprepared: true,
+      contentLoss: true,
+      survivingDeploymentId: "dep-9",
+    });
+  });
+
+  it("leaves a listing that needed no recovery byte-identical (no workspaceRecovery field)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(upstream(200, { files: [{ name: "index.html" }], path: "." }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await getList();
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ files: [{ name: "index.html" }], path: "." });
+    expect(recoverMock).not.toHaveBeenCalled();
+  });
+});
