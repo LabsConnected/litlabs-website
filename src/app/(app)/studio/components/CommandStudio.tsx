@@ -3259,9 +3259,15 @@ function CommandStudioContent() {
   );
 
   // The project-files composition (header + StudioProjectFiles) —
-  // ONE element definition reused by the shell's Files sidebar, the
-  // classic bottom dock, and the shell's bottom dock, so the file
-  // tree is the same component with the same wiring everywhere.
+  // ONE element definition mounted in exactly one home per layout:
+  // the LiTT panel's top-row Files tab (shell + classic), the mobile
+  // LiTT sheet's Files tab, and the mobile ContextDrawer's Files tab.
+  // The shell's standalone Files sidebar slot was retired 2026-11-14
+  // (Larry: Files already lives in the chat tab) — it mounted this
+  // same element a second time beside the chat, running two live
+  // StudioProjectFiles instances on one screen. The file tree is the
+  // same component with the same wiring everywhere it appears, and
+  // never twice at once.
   const projectFilesContent = (
     <div className="flex h-full flex-col overflow-hidden">
       <div
@@ -3710,7 +3716,6 @@ function CommandStudioContent() {
                 onSelectSurface={openStageSurface}
               />
             }
-            filesPanel={projectFilesContent}
             bottomPanel={shellBottomDock}
             previewPanel={previewDockPanel ?? undefined}
             previewPanelOpen={previewDockOpen}

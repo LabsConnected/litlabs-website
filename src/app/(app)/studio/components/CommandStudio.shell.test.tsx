@@ -952,7 +952,7 @@ describe("MissionCards — classic desktop dock", () => {
   });
 });
 
-describe("Phase 2 — Directive stages, Files sidebar, Preview dock, bottom dock", () => {
+describe("Phase 2 — Directive stages, Files single home, Preview dock, bottom dock", () => {
   it("rail presents all five Directive stages with Plan first; secondary surfaces and the terminal stay reachable", async () => {
     await renderStudioShell();
     for (const stage of ["plan", "canvas-design", "code", "preview", "media"]) {
@@ -972,16 +972,56 @@ describe("Phase 2 — Directive stages, Files sidebar, Preview dock, bottom dock
     expect(screen.getByTestId("workspace-rail-assets")).toBeTruthy();
   });
 
-  it("Files sidebar renders beside chat by default and collapses from the layout toolbar", async () => {
+  it("Files lives ONLY in the LiTT panel's Files tab — the standalone sidebar mount is retired, exactly one StudioProjectFiles instance", async () => {
     const { user } = await renderStudioShell();
-    expect(screen.getByTestId("studio-files-panel")).toBeTruthy();
-    // Chat stays mounted beside it (its expanded-on-open default is
-    // pinned by the first test in this file — #937 behavior).
+    // Larry, 2026-11-14: the standalone FILES / COMPONENTS panel beside
+    // the chat is gone — Files is already in the chat tab. The shell
+    // must not render the sidebar slot, its resize handle, or the
+    // Hide-files layout toggle (its aria-pressed mirrored only the
+    // sidebar slot, so it could never match the screen).
+    expect(screen.queryByTestId("studio-files-panel")).toBeNull();
+    expect(screen.queryByTestId("dock-resize-files")).toBeNull();
+    expect(screen.queryByTestId("dock-files-toggle")).toBeNull();
+    // Exactly ONE StudioProjectFiles instance mounts in the shell, and
+    // it lives inside the LiTT panel's Files pane (the panel's
+    // expanded-on-open default is pinned by the first test in this
+    // file — #937 behavior).
     expect(screen.getByTestId("litt-panel")).toBeTruthy();
-    await user.click(screen.getByTestId("dock-files-toggle"));
+    const instances = screen.getAllByTestId("studio-project-files");
+    expect(instances).toHaveLength(1);
+    expect(screen.getByTestId("litt-files-panel").contains(instances[0])).toBe(true);
+    // Selecting the panel's Files tab activates that same single
+    // instance — no second mount appears.
+    await user.click(screen.getByTestId("litt-tab-files"));
     await waitFor(() => {
-      expect(screen.queryByTestId("studio-files-panel")).toBeNull();
+      expect(screen.getByTestId("litt-tab-files")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("litt-files-panel")).toHaveAttribute("data-active", "true");
     });
+    expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
+  });
+
+  it("an open-files action lands on the LiTT panel's Files tab (the single Files home)", async () => {
+    await renderStudioShell();
+    // The ActionPanel's open-file intent is a real open-files entry
+    // point: STUDIO_EVENT_OPEN_FILE routes through
+    // handleOpenFilesPanel (the dock "files" intent and the URL
+    // drawer intent use the same handler), which selects the LiTT
+    // panel's top-row Files tab and expands the panel.
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("studio:open-file", {
+          detail: { projectId: "project-1", path: "index.html" },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("litt-tab-files")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("litt-files-panel")).toHaveAttribute("data-active", "true");
+    });
+    // Still exactly one instance, in the panel — the action did not
+    // resurrect a sidebar or a second mount.
+    expect(screen.queryByTestId("studio-files-panel")).toBeNull();
+    expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
   });
 
   it("Preview dock toggle mounts the live preview panel beside the stage", async () => {
