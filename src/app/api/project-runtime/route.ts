@@ -121,10 +121,19 @@ export async function GET(request: NextRequest) {
   // sandbox that is off (or unreachable) keeps today's behavior
   // exactly; an already-provisioned project is never re-locked either
   // way (its files stay browsable — reads were never gated here).
+  // Stored-refusal fix (2026-11-14): compute sandbox availability
+  // once and reuse it for both the repo gate and the stored-error
+  // reporting clause below — a stored HOST_EXECUTION_DISABLED from a
+  // pre-sandbox prepare must not keep reporting the gate after the
+  // sandbox opens. The probe runs only where the host guard would
+  // refuse, and fails closed.
+  const sandboxAvailable = !isHostExecutionPermitted()
+    ? await isSandboxExecutionAvailable(userId)
+    : false;
   const repoGate =
     source.kind === "github" &&
     !isHostExecutionPermitted() &&
-    !(await isSandboxExecutionAvailable(userId));
+    !sandboxAvailable;
 
   const updatedAtMs = Date.parse(project.updatedAt);
   const ageMs = Number.isNaN(updatedAtMs) ? Number.POSITIVE_INFINITY : Date.now() - updatedAtMs;
@@ -149,6 +158,7 @@ export async function GET(request: NextRequest) {
     workspaceStatus !== "ready" &&
     (repoGate ||
       ((workspaceStatus === "failed" || workspaceStatus === "error") &&
+        !sandboxAvailable &&
         extractEmbeddedErrorCode(project.workspaceError) === HOST_EXECUTION_DISABLED_CODE));
 
   if (!workspaceId) {

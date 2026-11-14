@@ -19,14 +19,29 @@
 
 import { HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
 
-const settledProjects = new Set<string>();
+/**
+ * Stored-refusal fix (2026-11-14): the verdict is no longer immutable
+ * within a session — a sandbox can come up (canary refresh, deploy)
+ * after the refusal was recorded. Settles now expire after this TTL,
+ * so a later prepare attempt re-probes the server for real instead of
+ * resolving "unavailable" from a stale session cache forever.
+ */
+export const HOST_EXEC_SETTLED_TTL_MS = 60_000;
+
+const settledProjects = new Map<string, number>();
 
 export function isHostExecSettled(projectId: string): boolean {
-  return settledProjects.has(projectId);
+  const settledAt = settledProjects.get(projectId);
+  if (settledAt === undefined) return false;
+  if (Date.now() - settledAt > HOST_EXEC_SETTLED_TTL_MS) {
+    settledProjects.delete(projectId);
+    return false;
+  }
+  return true;
 }
 
 export function markHostExecSettled(projectId: string): void {
-  settledProjects.add(projectId);
+  settledProjects.set(projectId, Date.now());
 }
 
 /** Test/reset hook — parity with clearTerminalTokenCache. */

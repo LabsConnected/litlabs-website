@@ -178,9 +178,20 @@ function deriveWorkspaceRefusalCode(
   // failure is retryable through the sandbox. An embedded code still
   // wins (it records what actually happened); this only suppresses the
   // derived fallback.
+  //
+  // Stored-refusal fix (2026-11-14): a stored HOST_EXECUTION_DISABLED
+  // code is the ONE exception. It records a prepare refused by the
+  // pre-sandbox host policy — a deploy-time state, not a fact about
+  // the project. When the sandbox now reports available for this
+  // user, that stored verdict is stale: returning it keeps every
+  // Studio surface banner-gated forever, because the only event that
+  // clears the stored error is a successful prepare, and surfaces
+  // reading this refusal never attempt one. Suppress it so the
+  // failure reads as retryable and prepare can actually run.
   sandboxAvailable = false,
 ): string | null {
   const embedded = extractEmbeddedErrorCode(project.workspaceError);
+  if (embedded === HOST_EXECUTION_DISABLED_CODE && sandboxAvailable) return null;
   if (embedded) return embedded;
   if (
     project.sourceType === "github" &&
@@ -213,14 +224,16 @@ export async function GET(
   } catch {
     project = null;
   }
-  // Phase 2 availability probe: only for the exact shape the derived
-  // refusal covers (repo-backed + settled failure + no embedded code +
-  // host guard refusing) — every other project derives exactly as
-  // before, with no terminal round-trip. The probe fails closed, so an
-  // unreachable terminal keeps today's coded refusal.
+  // Phase 2 availability probe: only for the exact shape the refusal
+  // derivation covers (repo-backed + settled failure + host guard
+  // refusing) — every other project derives exactly as before, with
+  // no terminal round-trip. The probe fails closed, so an unreachable
+  // terminal keeps today's coded refusal. Stored-refusal fix
+  // (2026-11-14): the probe also runs when the stored error embeds a
+  // code — a stored HOST_EXECUTION_DISABLED is exactly the verdict
+  // the probe can now retire (see deriveWorkspaceRefusalCode).
   const sandboxAvailable =
     project &&
-    !extractEmbeddedErrorCode(project.workspaceError) &&
     project.sourceType === "github" &&
     (project.workspaceStatus === "failed" || project.workspaceStatus === "error") &&
     !isHostExecutionPermitted()
