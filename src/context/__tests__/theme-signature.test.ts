@@ -6,9 +6,12 @@
  * Pins:
  *  - the pack exists in VISUAL_PACKS (what Appearance renders) with the
  *    approved design's settings,
- *  - the "signature" skin carries the mockup tokens in BOTH mode maps —
- *    the theme is light-locked, so a dark/system flip can never repaint
- *    it black/green (the phone dark-mode incident Larry hit),
+ *  - the "signature" skin carries the mockup tokens in the LIGHT map —
+ *    the theme was originally light-locked in both maps (the phone
+ *    dark-mode incident Larry hit), but the owner decision of 2026-11-14
+ *    superseded the lock: the dark map now carries an authored dark
+ *    variant (see theme-signature-dark.test.ts) while the light tokens
+ *    below stay exactly as approved,
  *  - selection coherence: the pack's fields are the exact combination
  *    VisualPackSettings uses to mark a pack Active, and applyVisualPack
  *    persists them through the standard litlabs-theme flow.
@@ -48,8 +51,9 @@ describe("LiTT Signature visual pack", () => {
     expect(lightSkins.signature.borderColor).toBe("#CFDEC4");
   });
 
-  it("is light-locked: dark map holds the same light tokens", () => {
-    expect(darkSkins.signature).toEqual(lightSkins.signature);
+  it("is no longer light-locked: dark map holds a real dark variant (2026-11-14)", () => {
+    expect(darkSkins.signature).not.toEqual(lightSkins.signature);
+    expect(darkSkins.signature.bgColor).not.toBe("#FFFFFF");
   });
 
   it("signature-green accent resolves to the mockup green family", () => {
