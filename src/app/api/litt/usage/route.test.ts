@@ -28,8 +28,13 @@ const { tablesQueried, fakeAdmin } = vi.hoisted(() => {
     ],
   };
 
+  // Head/count queries (the action_runs total) resolve a count, not rows.
+  const counts: Record<string, number> = {
+    action_runs: 3,
+  };
+
   function makeQuery(table: string) {
-    const result = { data: rows[table] ?? [] };
+    const result = { data: rows[table] ?? [], count: counts[table] ?? (rows[table] ?? []).length };
     const q: Record<string, unknown> = {};
     for (const m of ["select", "eq", "gte", "order", "limit"]) {
       q[m] = () => q;
@@ -79,10 +84,15 @@ describe("GET /api/litt/usage", () => {
     expect(byModel.get("gemini-x")).toMatchObject({ calls: 2, tokens: 430 });
     expect(byModel.get("gpt-y")).toMatchObject({ calls: 1, tokens: 15 });
 
-    // Ledger + runs summaries keep their established sources/semantics.
+    // Ledger summaries keep their established sources/semantics.
     expect(body.summary.totalCreditsUsed).toBe(150);
     expect(body.summary.totalCreditsRefunded).toBe(10);
-    expect(body.summary.totalRuns).toBe(2);
+    // "Agent runs" counts BOTH run stores: agent_runs (marketplace-agent
+    // reservations, 2 rows above) + action_runs (built-in Studio runs,
+    // count 3 above). Reading agent_runs alone made the Settings "Agent
+    // runs" row permanently 0 for Studio-only users.
+    expect(tablesQueried).toContain("action_runs");
+    expect(body.summary.totalRuns).toBe(5);
     expect(body.balance).toBe(2080);
   });
 });
