@@ -693,8 +693,9 @@ async function main(): Promise<number> {
   let session: RuntimeSession | undefined;
   if (SESSION_COMMANDS.has(command)) {
     const startCwd = resolveProjectCwd(dispatch.cwd);
-    let projectRoot = detectProject(startCwd).rootDir;
-    if (!detectProject(startCwd).hasPackageJson || detectProject(startCwd).isSelfInstall) {
+    const detected = detectProject(startCwd);
+    let projectRoot = detected.rootDir;
+    if (!detected.hasPackageJson || detected.isSelfInstall) {
       const resolved = await resolveActiveProject({ cwd: startCwd });
       if (resolved) {
         projectRoot = resolved.project.rootDir;

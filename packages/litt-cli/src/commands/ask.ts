@@ -41,6 +41,7 @@ import type { RuntimeSession } from "../lib/runtime-session.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
+import { PerfTrace } from "../lib/perf-trace.js";
 import * as readline from "node:readline/promises";
 
 const EXACT_ANSWER_RE = /^\s*(?:reply|respond|answer|say)\s+with\s+exactly\s*(?::\s*|["'])(.+?)["']?\s*$/i;
@@ -75,7 +76,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     return 1;
   }
 
+  const perf = PerfTrace.start(question.length > 48 ? question.slice(0, 48) : question);
+
   let project = detectProject();
+  perf.mark("project_detected");
 
   if (!project.hasPackageJson) {
     // Recover via the canonical resolution pipeline instead of dying.
@@ -85,6 +89,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       return 1;
     }
     project = resolved.project;
+    perf.mark("project_resolved");
   }
 
   header("LiTT Ask");
@@ -94,6 +99,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // local model are available.
   const providerConfigured = hasAnyProviderKey();
   const localLane = providerConfigured ? null : await probeLocalLane();
+  perf.mark("local_lane_probe");
   const persistedPrefs = loadModelPrefs(getDefaultPrefsPath());
   const selectedModel = process.env.LITT_MODEL?.trim()
     || process.env.OPENROUTER_MODEL?.trim()
@@ -159,6 +165,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     projectId: projectRoot,
     onApprovalRequired: (request, risk) => approvalBridge.request(request, risk),
   });
+  perf.mark("gateway_ready");
 
   let inFlightModel: { cancel?: () => void } | null = null;
   const askBody = async (): Promise<number> => {
@@ -169,6 +176,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     // reachable?" — it would guess or say "unable to determine."
     const authSession = getAuthSession();
     const authState = await authSession.getAuthState();
+    perf.mark("auth_state");
     const remoteUrl = getTerminalUrl();
 
     // Route through the same ModelRuntime as the TUI — picks the best
@@ -192,6 +200,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     const localOnly = resolveLocalOnly();
     const modelRuntime = new ModelRuntime(authState.signedIn && !hasLocalKey);
     await modelRuntime.refresh();
+    perf.mark("runtime_refresh");
 
     // Determine whether the local daemon must serve this request.
     // When executionTarget=local (LITT_LOCAL_MODE=1, --local, or default),
@@ -213,6 +222,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       // one-shot chat lane — it picks from the chat preference order
       // (litt-fast first), not the agentic lane's hermes/coder order.
       const lane = await probeLocalLane();
+      perf.mark("route_probe");
       routed = modelRuntime.routeLocal(lane, requestedLocalModel, { purpose: "chat" });
       routingMode = "fixed";
     } else {
@@ -231,12 +241,14 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       routingMode,
       idleStallMs: resolveIdleStallMs(),
     });
+    perf.mark("provider_ready");
     inFlightModel = model as { cancel?: () => void };
 
     console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
     console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
 
     const toolCallFilter = createToolCallStreamFilter();
+    perf.mark("agent_loop_start");
 
     const result = await runAgentLoop(question, {
       model,
@@ -269,7 +281,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
           // Suppress tool_call/json protocol markup — never dump model
           // protocol internals to the user-facing transcript.
           const visible = toolCallFilter.next(event.text);
-          if (visible) process.stdout.write(visible);
+          if (visible) {
+            perf.mark("first_token");
+            process.stdout.write(visible);
+          }
         }
       },
       onToolStream: (chunk: StreamChunk) => {
@@ -283,6 +298,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
         // Lifecycle events — could render in cockpit
         if (event.subtype === "agent_tool_call") {
           const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
+          perf.mark(`tool_start:${toolId}`);
           console.log(`\n${c.blue}○${c.reset} Tool call: ${c.bold}${toolId}${c.reset}`);
         } else if (event.subtype === "agent_tool_result") {
           const data = event.data as {
@@ -295,9 +311,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
           console.log(
             `${icon} ${data.toolId ?? "Tool"}: ${data.message ?? data.status ?? "No details"}`,
           );
+          perf.mark(`tool_end:${data.toolId ?? "unknown"}`);
         }
       },
       });
+    perf.mark("agent_loop_end");
     const streamTail = toolCallFilter.flush();
     if (streamTail) process.stdout.write(streamTail);
 
@@ -329,8 +347,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       console.log(`${c.dim}Reason: ${result.content}${c.reset}`);
     }
 
+    perf.end(result.termination === "complete" ? "chat" : "mission");
     return result.termination === "complete" ? 0 : 1;
   } catch (err) {
+    perf.end("mission");
     fail(`Agent error: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
   } finally {

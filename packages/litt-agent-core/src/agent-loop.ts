@@ -1549,6 +1549,17 @@ export async function runAgentLoop(
   const MAX_UNKNOWN_TOOL_RETRIES = 3;
   let unknownToolRetries = 0;
 
+  // ─── Redundant-only turn bounded retry ────────────────────────────
+  // Track turns whose ENTIRE model output is an exact repeat of an
+  // already-succeeded call (no prose, no novel call). Re-dispatching a
+  // deterministic repeat cannot yield new evidence, so the loop feeds
+  // back a synthesis nudge instead of executing — but a model that
+  // ignores the nudge would still burn every remaining round on model
+  // inference. After MAX_REDUNDANT_ONLY_RETRIES such turns the run ends
+  // truthfully rather than looping to maxRounds.
+  const MAX_REDUNDANT_ONLY_RETRIES = 2;
+  let redundantOnlyRetries = 0;
+
   // ─── Mutation completion tracking ────────────────────────────────
   // When the user explicitly requests an edit/mutation, the run cannot
   // report success unless observable mutation evidence exists. We track
@@ -1796,14 +1807,64 @@ export async function runAgentLoop(
     const rawToolCalls = parseToolCalls(modelContent);
     let allToolCalls = filterRedundantToolCalls(rawToolCalls, toolCalls);
     if (allToolCalls.length === 0 && rawToolCalls.length > 0 && !stripToolCallBlocks(modelContent).trim()) {
-      // Every call in this turn was a redundant repeat AND there is no
-      // prose to return as a final answer. Falling through to the
-      // "no tool call" branch here would terminate the loop as
-      // COMPLETE with EMPTY content — worse than the original
-      // behavior. Fall back to the unfiltered list so the redundant
-      // call is re-dispatched (still bounded by maxRounds) exactly as
-      // before the redundancy filter existed.
-      allToolCalls = rawToolCalls;
+      // Every call in this turn repeated an earlier success AND there is
+      // no prose to return as a final answer. Two sub-cases:
+      //
+      //   - A verbatim repeat of the MOST RECENT successful call can
+      //     never produce new evidence — nothing ran in between, so the
+      //     result would be byte-identical. Re-dispatching only burns a
+      //     tool call and a model round (observed on weak local models:
+      //     the same call re-issued verbatim until maxRounds). Instead,
+      //     feed back an explicit synthesis nudge — bounded by
+      //     MAX_REDUNDANT_ONLY_RETRIES so a model that never synthesizes
+      //     ends the run truthfully instead of looping on dead repeats.
+      //
+      //   - A repeat whose matching success is OLDER may legitimately
+      //     want fresh evidence — intervening calls (e.g. an edit) may
+      //     have changed project state. Dispatch those exactly as before
+      //     the redundancy filter existed (still bounded by maxRounds).
+      //
+      // Falling through to the "no tool call" branch is not an option in
+      // either case: it would terminate COMPLETE with EMPTY content.
+      const lastCall = toolCalls[toolCalls.length - 1];
+      const isRepeatOfLatest = (c: ParsedToolCall): boolean =>
+        !!lastCall &&
+        lastCall.result.success === true &&
+        lastCall.toolId === c.toolId &&
+        JSON.stringify(lastCall.inputs) === JSON.stringify(c.inputs);
+      const refreshable = rawToolCalls.filter((c) => !isRepeatOfLatest(c));
+      if (refreshable.length > 0) {
+        allToolCalls = refreshable;
+      } else {
+        redundantOnlyRetries++;
+        if (redundantOnlyRetries > MAX_REDUNDANT_ONLY_RETRIES) {
+          const repeated = rawToolCalls.map((c) => c.toolId).join(", ");
+          return {
+            content:
+              `Model repeated an already-successful tool call (${repeated}) ` +
+              `${redundantOnlyRetries}× without producing a final answer. ` +
+              `Re-issuing identical calls cannot produce new evidence. ` +
+              `The task was NOT completed. No success is being claimed.`,
+            toolCalls,
+            rounds,
+            durationMs: Date.now() - startTime,
+            usage: { total_tokens: totalTokens },
+            termination: "error",
+            escalations: escalationEvents.length ? escalationEvents : undefined,
+          };
+        }
+        messages.push({ role: "assistant", content: modelContent });
+        messages.push({
+          role: "user",
+          content:
+            `You already ran ${rawToolCalls.map((c) => c.toolId).join(", ")} ` +
+            `with those exact arguments and it succeeded — the result is already ` +
+            `in this conversation. Do NOT repeat it. Give your final answer now, ` +
+            `or call a DIFFERENT tool or different arguments if you genuinely ` +
+            `still need evidence.`,
+        });
+        continue;
+      }
     }
     const toolCall = allToolCalls[0] ?? null;
 

@@ -298,8 +298,15 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
        tryExecFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], rootDir) ??
        null)
     : null;
-  const gitStatus = hasGit ? tryExecFileSync("git", ["status", "--short"], rootDir) : null;
-  const gitRemote = hasGit ? tryExecFileSync("git", ["remote", "get-url", "origin"], rootDir) : null;
+  // Expensive fields are computed lazily on first read. `git status
+  // --short` scans the whole working tree (seconds on large repos or
+  // slow storage) and the lockfile-miss package-manager probe can spawn
+  // two subprocesses, yet most callers only read rootDir / packageJson /
+  // gitBranch. Getters keep the ProjectInfo shape identical — readers
+  // still get a real computed value.
+  let gitStatusValue: string | null | undefined;
+  let gitRemoteValue: string | null | undefined;
+  let packageManagerValue: string | null | undefined;
 
   const hasTsConfig = existsSync(join(rootDir, "tsconfig.json"));
 
@@ -317,26 +324,38 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
     else if (deps["vue"]) framework = "Vue";
   }
 
-  // Detect package manager — filesystem checks first (no subprocess),
-  // then try execFileSync (no shell overhead) as fallback.
-  let packageManager: string | null = null;
-  if (existsSync(join(rootDir, "pnpm-lock.yaml"))) packageManager = "pnpm";
-  else if (existsSync(join(rootDir, "yarn.lock"))) packageManager = "yarn";
-  else if (existsSync(join(rootDir, "package-lock.json"))) packageManager = "npm";
-  else if (tryExecFileSync("pnpm", ["--version"])) packageManager = "pnpm";
-  else if (tryExecFileSync("yarn", ["--version"])) packageManager = "yarn";
-  else packageManager = "npm";
-
   return {
     hasPackageJson,
     packageJson,
     hasGit,
     gitBranch,
-    gitStatus,
-    gitRemote,
+    get gitStatus() {
+      if (gitStatusValue === undefined) {
+        gitStatusValue = hasGit ? tryExecFileSync("git", ["status", "--short"], rootDir) : null;
+      }
+      return gitStatusValue;
+    },
+    get gitRemote() {
+      if (gitRemoteValue === undefined) {
+        gitRemoteValue = hasGit ? tryExecFileSync("git", ["remote", "get-url", "origin"], rootDir) : null;
+      }
+      return gitRemoteValue;
+    },
     hasTsConfig,
     framework,
-    packageManager,
+    get packageManager() {
+      if (packageManagerValue === undefined) {
+        // Filesystem checks first (no subprocess), then execFileSync
+        // (no shell overhead) as fallback.
+        if (existsSync(join(rootDir, "pnpm-lock.yaml"))) packageManagerValue = "pnpm";
+        else if (existsSync(join(rootDir, "yarn.lock"))) packageManagerValue = "yarn";
+        else if (existsSync(join(rootDir, "package-lock.json"))) packageManagerValue = "npm";
+        else if (tryExecFileSync("pnpm", ["--version"])) packageManagerValue = "pnpm";
+        else if (tryExecFileSync("yarn", ["--version"])) packageManagerValue = "yarn";
+        else packageManagerValue = "npm";
+      }
+      return packageManagerValue;
+    },
     rootDir,
     dirName: basename(rootDir),
     isSelfInstall,
