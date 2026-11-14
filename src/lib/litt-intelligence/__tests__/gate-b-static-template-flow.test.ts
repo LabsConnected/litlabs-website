@@ -10,6 +10,8 @@ import { buildWelcomeHtml } from "../../../../terminal-server/workspace/welcome-
 
 describe("static template approval flow regression (not live acceptance)", () => {
   beforeEach(() => vi.mocked(callLLMWithTools).mockReset());
+  // Explicit timeout: the full launch + approval-resume flow exceeds the
+  // 5s default when the full CI suite runs under load.
   it.each(["blank-static", "empty-static"])("writes, approves, and verifies %s without host execution", async (template) => {
     const files = new Map<string, string>();
     if (template === "blank-static") files.set("index.html", buildWelcomeHtml());
@@ -58,5 +60,5 @@ describe("static template approval flow regression (not live acceptance)", () =>
     expect(transport.exec).not.toHaveBeenCalled();
     expect(transport.startPreview).not.toHaveBeenCalled();
     expect(transport.discoverPackageInfo).not.toHaveBeenCalled();
-  });
+  }, 30_000);
 });

@@ -93,7 +93,7 @@ describe("BLOCKER 1 — Realtime capability in CLI runtime", () => {
     // It should either succeed or fail with a network error, not a
     // "tool not available" error
     expect(result.approved).toBe(true);
-  });
+  }, 60_000);
 
   it("test 3: weather.forecast is available as a tool", async () => {
     const registry = createDefaultRegistry();

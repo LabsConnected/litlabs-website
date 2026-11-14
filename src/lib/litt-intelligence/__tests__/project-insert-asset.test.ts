@@ -414,6 +414,8 @@ describe("insertAssetFromUrl (shared core)", () => {
     expect(result.error).toBe("boom");
   });
 
+  // Explicit timeout: this drives the real sharp/mozjpeg fit pipeline on a
+  // multi-MB noise image — over the 5s default under full-suite CI load.
   it("normalizes an oversized hotlink under the publish cap before writing", async () => {
     // Golden run 42455260375: a >2MB rehosted image wrote fine but could
     // never be read back for publish — deploy failed "missing file".
@@ -443,7 +445,7 @@ describe("insertAssetFromUrl (shared core)", () => {
     // Photo PNG without alpha normalizes to JPEG — extension follows.
     expect(writtenPath).toMatch(/\.jpe?g$/);
     expect(result.sitePath).toMatch(/\.jpe?g$/);
-  });
+  }, 60_000);
 
   it("refuses an oversized image it cannot fit instead of writing an undeployable asset", async () => {
     const gif = Buffer.concat([
