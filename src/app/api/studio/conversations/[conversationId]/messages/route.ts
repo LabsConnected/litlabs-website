@@ -813,6 +813,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // inspection even if the prose matched the read patterns.
   const inspectionTurn =
     built.kernelResult.decision.routing.taskKind === "inspection" && !detcodegenPinned;
+  // Exec-only turn (kernel taskKind "exec"): the user asked for a
+  // shell command to run, not for files to be written. The launch flow
+  // completes it on the command's output — no build guard, no
+  // zero-mutation reprompt, no mutation evidence demanded below. The
+  // deterministic-codegen pin is an explicit "answer by generating
+  // files" act, so it is never exec-only either.
+  const execTurn =
+    built.kernelResult.decision.routing.taskKind === "exec" && !detcodegenPinned;
 
   const useV2 = canonicalCtx.workspaceExecutionAvailable
     && !!runProjectId
@@ -906,7 +914,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           userRequest: resolvedMessage.slice(0, 2000),
           // Kernel-classified read-only turn: scope the gate to the
           // evidence a read produces (see quality-loop "inspection").
-          taskScope: inspectionTurn ? ("inspection" as const) : undefined,
+          // An exec-only turn is scoped the same way: its evidence is
+          // the tool lane's answer (the command ran), never a build.
+          taskScope: inspectionTurn || execTurn ? ("inspection" as const) : undefined,
         }
       : undefined,
     evalMetadata: {
@@ -1412,6 +1422,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // Never true on the V1→V2 reroute — a rerouted turn was
           // classified non-execution, so it cannot be inspection.
           readOnly: inspectionTurn,
+          // Kernel-classified exec-only turn: completion is the
+          // command's output, not a file write (launch-flow). Never
+          // true on the reroute for the same reason as readOnly.
+          execOnly: execTurn,
           // A production execution request is not complete until the
           // agent-created website entry file is physically present in the
           // verified workspace. This is enforced again after approval
@@ -1564,8 +1578,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         // and replace its answer with a failure notice. Its completion
         // evidence is the launch flow's read result (successful tool
         // calls + quality verdict), already reflected in
-        // launchFlowResult.success below.
-        const mutationRequired = effectiveRequiresExecution === true && !inspectionTurn;
+        // launchFlowResult.success below. An exec-only turn is the
+        // same: the command's output is the deliverable, so demanding
+        // mutation evidence would fail a command that ran exactly as
+        // asked.
+        const mutationRequired = effectiveRequiresExecution === true && !inspectionTurn && !execTurn;
         const v2ToolCalls = v2Result?.toolCalls ?? [];
         const completionRequirement = {
           mutation: mutationRequired,

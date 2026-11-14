@@ -1492,3 +1492,91 @@ describe("Launch Flow: read-only inspection runs", () => {
     expect(result.finalText).toContain("no available model produced a file-writing tool call");
   });
 });
+
+// ─── Tests: exec-only runs (Step 6 proof, 2026-11-14) ───────────
+//
+// Live defect: a kernel-classified command execution ("run
+// pwd && ls") was treated as a build — the guard armed, and the run
+// ended with "The build produced no successful file-writing
+// operation" while the command's output never reached the chat. An
+// exec-only run is complete when the command runs: no build guard,
+// no zero-mutation reprompt, no artifact/preview phases, and the
+// agent's text (which carries the output) is the result. Build runs
+// keep every existing guard.
+
+describe("Launch Flow: exec-only runs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  const EXEC_TEXT = "/workspace\nindex.html\npackage.json\nproof-marker.txt";
+
+  function execAgentResult(overrides: Partial<AgentLoopResult> = {}): AgentLoopResult {
+    return successAgentResult({
+      finalText: EXEC_TEXT,
+      stepsUsed: 2,
+      toolCalls: [{ toolId: "terminal.execute", success: true, summary: "pwd && ls", mutating: true }],
+      buildFixResult: undefined,
+      ...overrides,
+    });
+  }
+
+  it("completes an exec-only run in one pass and delivers the command output verbatim", async () => {
+    const transport = createMockTransport();
+    const runAgentLoop = vi.fn().mockResolvedValue(execAgentResult());
+    const options = makeOptions({
+      userMessage: "Run pwd && ls in the sandbox",
+      transport,
+      runAgentLoop,
+      requiresExecution: true,
+      execOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(runAgentLoop.mock.calls[0][2].buildCapabilityGuard).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe(EXEC_TEXT);
+    // No build machinery: no artifact/preview phase was entered.
+    expect(transport.startPreview).not.toHaveBeenCalled();
+  });
+
+  it("does not claim success when the command produced no successful tool call", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(execAgentResult({
+      finalText: "The command failed: the sandbox was unreachable.",
+      toolCalls: [{ toolId: "terminal.execute", success: false, summary: "exec failed", mutating: true }],
+    }));
+    const options = makeOptions({
+      userMessage: "Run pwd && ls in the sandbox",
+      runAgentLoop,
+      requiresExecution: true,
+      execOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("EXEC_NOT_COMPLETED");
+    expect(result.finalText).toContain("The command failed");
+  });
+
+  it("CONTROL: the identical agent result WITHOUT execOnly arms the build guard", async () => {
+    const transport = createMockTransport();
+    const runAgentLoop = vi.fn().mockResolvedValue(execAgentResult());
+    const options = makeOptions({
+      userMessage: "Run pwd && ls in the sandbox",
+      transport,
+      runAgentLoop,
+      requiresExecution: true,
+    });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop.mock.calls[0][2].buildCapabilityGuard).toEqual({ maxStepsWithoutFileWrite: 3 });
+  });
+});

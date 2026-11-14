@@ -587,6 +587,121 @@ describe("runAgentLoopV2 — patch rejection recovery forcing (acceptance run #3
   });
 });
 
+describe("runAgentLoopV2 — build guard verdict vs workspace evidence (Step 6 proof, 2026-11-14)", () => {
+  // Live proof on the repo-backed project: the marker file LANDED
+  // (the project file list gained proof-marker.txt with the exact
+  // content) yet the run still closed with "The build produced no
+  // successful file-writing operation, so it is not complete." — the
+  // write never appeared as a successful file-writing TOOL call, and
+  // the work log could only say "could not verify whether files
+  // changed". The checkpoint diff is the authority on what landed:
+  // when it reports changes, the no-write sentence must not fire.
+  // When it reports no changes, the honest failure stands.
+  //
+  // terminal.execute is only OFFERED to an authenticated terminal
+  // owner (tool health, Part F) — without a userId in the owner
+  // allowlist the loop drops the tool and the call never executes.
+  const originalOwners = process.env.TERMINAL_OWNER_CLERK_IDS;
+  beforeEach(() => {
+    process.env.TERMINAL_OWNER_CLERK_IDS = "u-test";
+  });
+  afterEach(() => {
+    if (originalOwners === undefined) delete process.env.TERMINAL_OWNER_CLERK_IDS;
+    else process.env.TERMINAL_OWNER_CLERK_IDS = originalOwners;
+  });
+
+  const GUARDED = {
+    model: "test-model",
+    systemPrompt: "You are LiTT.",
+    userId: "u-test",
+    executionMode: "auto",
+    enableBuildFix: false,
+    buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+  } as const;
+
+  const SHA = "a".repeat(40);
+
+  function shellTransport(changed: boolean) {
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      exec: vi.fn(async () => ({
+        exitCode: 0,
+        stdout: "/workspace\nindex.html\nproof-marker.txt\n",
+        stderr: "",
+        durationMs: 1,
+      })),
+      createCheckpointBeforeMutation: vi.fn(async (label: string) => ({
+        checkpointId: "cp-1",
+        label,
+        gitSha: SHA,
+      })),
+      gitStatus: vi.fn(async () => ({
+        branch: "main",
+        ahead: 0,
+        behind: 0,
+        staged: [],
+        modified: [],
+        untracked: changed ? ["proof-marker.txt"] : [],
+        clean: !changed,
+      })),
+      gitDiff: vi.fn(async (options?: { untracked?: boolean }) => ({
+        diff: !changed || options?.untracked
+          ? ""
+          : "diff --git a/proof-marker.txt b/proof-marker.txt\nnew file mode 100644\n--- /dev/null\n+++ b/proof-marker.txt\n@@ -0,0 +1 @@\n+proof\n",
+      })),
+    } as unknown as WorkspaceTransport;
+    return transport;
+  }
+
+  const execReply = {
+    text: "",
+    toolCalls: [{
+      toolCallId: "tc-exec",
+      toolId: "terminal.execute",
+      inputs: { projectId: "p-test", command: "pwd && ls" },
+    }],
+    finishReason: "tool_calls",
+    model: "test-model",
+  };
+  const silentReply = (text: string) => ({ text, toolCalls: [], finishReason: "stop", model: "test-model" });
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("a run whose writes landed (diff reports changed) is NOT failed with the no-write sentence", async () => {
+    const transport = shellTransport(true);
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(execReply)
+      .mockResolvedValueOnce(silentReply("Done — proof-marker.txt is in the workspace."));
+
+    const result = await runAgentLoopV2("create a marker file in the project", transport, { ...GUARDED });
+
+    expect(result.toolCalls.some((t) => t.toolId === "terminal.execute" && t.success)).toBe(true);
+    expect(result.toolCalls.some((t) => t.success && t.toolId === "files.write")).toBe(false);
+    expect(result.workspaceChange?.status).toBe("changed");
+    expect(result.workspaceChange?.files).toContain("proof-marker.txt");
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.finalText).toContain("proof-marker.txt is in the workspace");
+  });
+
+  it("a guarded run with a verified-unchanged workspace still fails honestly with the no-write sentence", async () => {
+    const transport = shellTransport(false);
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(execReply)
+      .mockResolvedValueOnce(silentReply("Done."));
+
+    const result = await runAgentLoopV2("create a marker file in the project", transport, { ...GUARDED });
+
+    expect(result.workspaceChange?.status).toBe("unchanged");
+    expect(result.failedHonestly).toBe("The build produced no successful file-writing operation, so it is not complete.");
+    expect(result.finalText).toBe("The build produced no successful file-writing operation, so it is not complete.");
+  });
+});
+
 describe("runAgentLoopV2 — files.write placeholder content never reaches the approval gate", () => {
   // Production defect: a full-file rewrite of index.html shipped
   // `<title>[PERSON_NAME] — Premium Coffee Roasters</title>` — the model

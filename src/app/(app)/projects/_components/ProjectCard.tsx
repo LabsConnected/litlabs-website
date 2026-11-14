@@ -16,8 +16,10 @@
  * selection instead), Retry setup renders ONLY when
  * describeProjectState says canRetry (so the "Repo workspace
  * unavailable" state shows its honest badge with NO retry —
- * Decision B), and the per-card Delete button keeps its exact
- * affordance and aria-label (test-pinned).
+ * Decision B — unless the sandbox probe reports execution available,
+ * in which case the stored refusal is stale and the card reads as a
+ * retryable setup failure, matching Studio), and the per-card Delete
+ * button keeps its exact affordance and aria-label (test-pinned).
  */
 
 import Link from "next/link";
@@ -52,6 +54,12 @@ export type ProjectCardData = {
 
 interface ProjectCardProps {
   project: ProjectCardData;
+  /**
+   * Sandbox availability truth for the list (GET /api/studio-projects
+   * probes it once, only when a card could carry the stored refusal).
+   * Threaded into describeProjectState so the card and Studio agree.
+   */
+  sandboxAvailable?: boolean;
   colors: AppShellColors;
   selectMode: boolean;
   isSelected: boolean;
@@ -77,6 +85,7 @@ function formatDate(value: string | null | undefined): string | null {
 
 export default function ProjectCard({
   project,
+  sandboxAvailable,
   colors: T,
   selectMode,
   isSelected,
@@ -87,7 +96,10 @@ export default function ProjectCard({
   onRetry,
   onDelete,
 }: ProjectCardProps) {
-  const state: ProjectStateDescription = describeProjectState(project);
+  const state: ProjectStateDescription = describeProjectState({
+    ...project,
+    sandboxAvailable,
+  });
   // workspaceBranch is authoritative over the GitHub branch fields
   // (types.ts) — prefer it, as the audit directs.
   const branch = project.workspaceBranch ?? project.githubBranch;

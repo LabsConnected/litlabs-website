@@ -156,10 +156,12 @@ export type LiTTControlDecision = {
     requiresExecution: boolean;
     /**
      * Execution task kind from intent classification: "inspection"
-     * when the turn is read-only workspace inspection. Optional — only
-     * set by the Kernel path, and only for inspection turns.
+     * when the turn is read-only workspace inspection, "exec" when
+     * the turn is a shell-command execution whose completion is the
+     * command's output. Optional — only set by the Kernel path, and
+     * only for inspection/exec turns.
      */
-    taskKind?: "inspection";
+    taskKind?: "inspection" | "exec";
     /**
      * Anaphoric follow-up marker from intent classification ("build it",
      * "do that again"). Optional — only set by the Kernel path.
@@ -328,7 +330,7 @@ export type IntentClassification = {
    * must use THIS signal rather than re-deriving read-only-ness from
    * the message text. Unset for every other turn kind.
    */
-  taskKind?: "inspection";
+  taskKind?: "inspection" | "exec";
   confidence: number;
   reasoning: string;
   /**

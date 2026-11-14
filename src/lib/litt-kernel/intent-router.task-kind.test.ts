@@ -87,3 +87,63 @@ describe("intent classification — inspection task kind", () => {
     expect(result.decision.routing.taskKind).toBeUndefined();
   });
 });
+
+/**
+ * Step 6 proof, 2026-11-14 — the classification must also RECORD
+ * that a turn is a shell-command execution. "run pwd && ls" carries
+ * no file-writing intent: judged as a build, a successful command
+ * run ended with the build guard's no-file-write verdict and its
+ * output never reached the chat. taskKind "exec" is the signal the
+ * launch flow uses to complete the run on the command's output.
+ */
+describe("intent classification — exec task kind", () => {
+  it("marks a bare shell command run as exec", () => {
+    const intent = classifyIntent("run pwd && ls", { hasProject: true });
+    expect(intent.mode).toBe("build");
+    expect(intent.requiresExecution).toBe(true);
+    expect(intent.taskKind).toBe("exec");
+  });
+
+  it("marks a command-noun execution request as exec", () => {
+    const intent = classifyIntent("Run this command in the sandbox: pwd && ls", { hasProject: true });
+    expect(intent.requiresExecution).toBe(true);
+    expect(intent.taskKind).toBe("exec");
+  });
+
+  it("marks an exec verb tied to a bare command token as exec", () => {
+    const intent = classifyIntent("execute ls -la in the project", { hasProject: true });
+    expect(intent.requiresExecution).toBe(true);
+    expect(intent.taskKind).toBe("exec");
+  });
+
+  it("does NOT mark 'run the tests' as exec — it stays a build", () => {
+    const intent = classifyIntent("run the tests and fix any failures", { hasProject: true });
+    expect(intent.requiresExecution).toBe(true);
+    expect(intent.taskKind).toBeUndefined();
+  });
+
+  it("does NOT mark 'run the build' as exec — it stays a build", () => {
+    const intent = classifyIntent("run the build", { hasProject: true });
+    expect(intent.requiresExecution).toBe(true);
+    expect(intent.taskKind).toBeUndefined();
+  });
+
+  it("does NOT mark a build request as exec", () => {
+    const intent = classifyIntent("Build me a landing page for my bakery", { hasProject: true });
+    expect(intent.taskKind).toBeUndefined();
+  });
+
+  it("kernel routing carries the exec task kind to consumers", () => {
+    const result = routeKernel({
+      message: "run pwd && ls",
+      userId: "user-1",
+      conversationId: "conv-1",
+      projectId: "proj-1",
+      missionId: null,
+      canvasId: null,
+      capabilities: [],
+    });
+    expect(result.decision.routing.requiresExecution).toBe(true);
+    expect(result.decision.routing.taskKind).toBe("exec");
+  });
+});
