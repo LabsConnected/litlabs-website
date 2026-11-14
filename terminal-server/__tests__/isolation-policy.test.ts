@@ -229,6 +229,134 @@ describe("evaluateTerminalIsolation", () => {
   });
 });
 
+describe("sandboxExecution dimension (Step 6, F1)", () => {
+  const CHECKED = "2026-11-14T13:45:00.000Z";
+  const FRESH = "2026-11-14T13:50:00.000Z";
+  const VERIFIED = {
+    provider: "e2b",
+    state: "verified" as const,
+    verified: true,
+    checkedAt: CHECKED,
+    freshUntil: FRESH,
+  };
+
+  it("reports sandbox execution enabled in production from a verified signal — host fields byte-identical", () => {
+    const v = evaluateTerminalIsolation({
+      env: PROD,
+      useDocker: false,
+      dockerAvailable: false,
+      sandbox: VERIFIED,
+    });
+    expect(v.sandboxExecution.execution).toBe("enabled");
+    expect(v.sandboxExecution.provider).toBe("e2b");
+    expect(v.sandboxExecution.state).toBe("verified");
+    expect(v.sandboxExecution.checkedAt).toBe(CHECKED);
+    expect(v.sandboxExecution.freshUntil).toBe(FRESH);
+    // Host verdict is exactly the pre-Step-6 production verdict.
+    expect(v.terminalExecution).toBe("disabled");
+    expect(v.mode).toBe("none");
+    expect(v.status).toBe("unsafe");
+    expect(v.productionLike).toBe(true);
+    expect(v.reason).toMatch(/Failing closed unconditionally/);
+  });
+
+  it("T2 pin: a verified sandbox never permits a host shell in production", () => {
+    const v = evaluateTerminalIsolation({
+      env: PROD,
+      useDocker: true,
+      dockerAvailable: true,
+      sandbox: VERIFIED,
+    });
+    expect(v.sandboxExecution.execution).toBe("enabled");
+    expect(v.terminalExecution).toBe("disabled");
+    // The spawn guard takes no sandbox input at all and still throws.
+    expect(() => assertHostShellPermitted(PROD, false)).toThrow(TerminalIsolationError);
+    expect(() => assertHostShellPermitted(PROD, true)).toThrow(TerminalIsolationError);
+    expect(() => assertHostShellPermitted({ RAILWAY_SERVICE_ID: "svc" }, false)).toThrow(
+      TerminalIsolationError,
+    );
+  });
+
+  it("reports sandbox disabled for failed, stale and never-run canaries", () => {
+    for (const state of ["failed", "stale", "never-run"] as const) {
+      const v = evaluateTerminalIsolation({
+        env: PROD,
+        useDocker: false,
+        dockerAvailable: false,
+        sandbox: { provider: "e2b", state, verified: false, checkedAt: CHECKED, freshUntil: FRESH },
+      });
+      expect(v.sandboxExecution.execution, state).toBe("disabled");
+      expect(v.sandboxExecution.state).toBe(state);
+      expect(v.sandboxExecution.provider).toBe("e2b");
+      expect(v.terminalExecution).toBe("disabled");
+    }
+  });
+
+  it("requires BOTH signal affirmations: state verified but verified=false stays disabled", () => {
+    const v = evaluateTerminalIsolation({
+      env: PROD,
+      useDocker: false,
+      dockerAvailable: false,
+      sandbox: { provider: "e2b", state: "verified", verified: false },
+    });
+    expect(v.sandboxExecution.execution).toBe("disabled");
+    const w = evaluateTerminalIsolation({
+      env: PROD,
+      useDocker: false,
+      dockerAvailable: false,
+      sandbox: { provider: "e2b", verified: true },
+    });
+    expect(w.sandboxExecution.execution).toBe("disabled");
+    expect(w.sandboxExecution.state).toBe("never-run");
+  });
+
+  it("reports not-configured when no sandbox input or a disabled provider is given", () => {
+    const noInput = evaluateTerminalIsolation({ env: PROD, useDocker: false, dockerAvailable: false });
+    expect(noInput.sandboxExecution.execution).toBe("disabled");
+    expect(noInput.sandboxExecution.state).toBe("not-configured");
+    expect(noInput.sandboxExecution.provider).toBe("disabled");
+    const disabled = evaluateTerminalIsolation({
+      env: PROD,
+      useDocker: false,
+      dockerAvailable: false,
+      sandbox: { provider: "disabled", state: "verified", verified: true },
+    });
+    expect(disabled.sandboxExecution.execution).toBe("disabled");
+    expect(disabled.sandboxExecution.state).toBe("not-configured");
+  });
+
+  it("T3 pin: no environment variable can light the sandbox dimension", () => {
+    const v = evaluateTerminalIsolation({
+      env: {
+        ...PROD,
+        LITT_ISOLATION_VERIFIED: "true",
+        LITT_LOCAL_EXECUTION_OPT_IN: "true",
+        SANDBOX_PRODUCTION_ENABLED: "true",
+        SANDBOX_PROVIDER: "e2b",
+        TERMINAL_VERIFIED_ISOLATION: "true",
+      },
+      useDocker: true,
+      dockerAvailable: true,
+    });
+    expect(v.sandboxExecution.execution).toBe("disabled");
+    expect(v.sandboxExecution.state).toBe("not-configured");
+    expect(v.terminalExecution).toBe("disabled");
+  });
+
+  it("leaves local-development host behavior unchanged and reports the sandbox dimension alongside", () => {
+    const v = evaluateTerminalIsolation({
+      env: DEV,
+      useDocker: false,
+      dockerAvailable: false,
+      sandbox: VERIFIED,
+    });
+    expect(v.terminalExecution).toBe("enabled");
+    expect(v.mode).toBe("host");
+    expect(v.status).toBe("dev_host_shell");
+    expect(v.sandboxExecution.execution).toBe("enabled");
+  });
+});
+
 describe("isUntrustedLocalRequest (loopback bind does not make a request trusted)", () => {
   it("accepts direct requests to a loopback Host", () => {
     for (const host of ["localhost:3001", "127.0.0.1:4000", "[::1]:4000"]) {
