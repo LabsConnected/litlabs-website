@@ -23,6 +23,11 @@
       width: 100% !important;
       height: 100% !important;
       display: block !important;
+      /* Keep the game's native aspect ratio inside the filled element:
+         without this the 4:3 picture is stretched to the 16:10 stage and
+         EmulatorJS's viewport math clips the edges. object-fit: contain
+         letterboxes the bitmap instead — full picture, centered. */
+      object-fit: contain !important;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
     }
