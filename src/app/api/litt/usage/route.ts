@@ -89,6 +89,20 @@ export async function GET(request: NextRequest) {
     .order("started_at", { ascending: false })
     .limit(20);
 
+  // Studio agent runs are NOT in agent_runs: that table only gets a row
+  // when a marketplace agent's credits are reserved (agent-billing.ts,
+  // called from the Studio messages route only when a marketplace agent
+  // instance is attached). Built-in Studio runs — the runs the Activity
+  // panel shows — are durable ActionRuns in action_runs (run-store.ts),
+  // created by the same messages route for every execution task. Counting
+  // only agent_runs made "Agent runs" read 0 for users whose runs are all
+  // Studio runs. Count both stores so the total reflects real run history.
+  const { count: actionRunCount } = await supabaseAdmin
+    .from("action_runs")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .gte("created_at", since);
+
   // credit_ledger records direction (credit|debit) + category — the
   // previous t.type filter matched no rows, so both totals were always 0.
   const totalCreditsUsed = (recentTransactions ?? [])
@@ -106,7 +120,7 @@ export async function GET(request: NextRequest) {
     summary: {
       totalCreditsUsed,
       totalCreditsRefunded,
-      totalRuns: recentRuns?.length ?? 0,
+      totalRuns: (recentRuns?.length ?? 0) + (actionRunCount ?? 0),
     },
     modelUsage: Array.from(byModel.entries()).map(([model, stats]) => ({
       model,

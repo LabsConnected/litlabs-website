@@ -45,6 +45,7 @@ import { VoicePreferencesCard } from "./VoicePreferencesCard";
 import { DEVICE_ID_STORAGE_KEY } from "@/features/voice/lib/mixer-settings";
 import { useIntegrationStatus } from "@/hooks/useIntegrationStatus";
 import type { LayoutStyle } from "@/context/ThemeContext";
+import { formatPriceMonthly } from "@/config/plans";
 import { useStudioModelStore, MODELS as STUDIO_MODELS } from "@/app/(app)/studio/stores/useStudioModelStore";
 import { useConnectionSummary } from "@/app/(app)/studio/hooks/useConnectionSummary";
 import { useLocalSettings } from "@/hooks/useLocalSettings";
@@ -516,7 +517,7 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
               {billingLoading ? "Loading…" : (billing?.plan?.name ?? "Starter")}
             </div>
             <div className="text-[10px] text-zinc-500">
-              {billing?.plan && billing.plan.monthlyPriceCents ? `$${(billing.plan.monthlyPriceCents / 100).toFixed(0)}/month` : "Free"}
+              {billingLoading ? "Loading…" : formatPriceMonthly(billing?.plan?.monthlyPriceCents ?? null)}
               {billing?.plan?.beta && " · Beta"}
             </div>
           </div>
@@ -1692,7 +1693,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
               <div>
                 <div className="text-sm font-black" style={{ color: T.accentColor }}>{planName}</div>
                 <div className="text-[10px] text-zinc-500">
-                  {isPaid ? `$${(planPrice / 100).toFixed(0)}/month` : "Free"}
+                  {formatPriceMonthly(planPrice)}
                   {data?.plan?.beta && " · Beta"}
                 </div>
                 {subStatus === "active" && periodEnd && (
