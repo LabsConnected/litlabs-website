@@ -18,6 +18,9 @@ export const runtime = "nodejs";
  * that the workspace still exists on the terminal server. If the terminal
  * server lost the workspace (restart, ephemeral storage), resets the
  * Supabase workspace status so the client can re-provision.
+ *
+ * When the terminal gate refuses (public access flag off, user not a
+ * terminal owner), the refusal is a coded 200 — see the gate below.
  */
 export async function GET(request: NextRequest) {
   const { userId } = await auth(request);
@@ -28,10 +31,23 @@ export async function GET(request: NextRequest) {
   // Public terminal access is off until container isolation is verified.
   // Checked before any workspace lookup or token minting. Terminal owners
   // bypass the flag (the terminal server still enforces isolation itself).
+  //
+  // The refusal is answered as a coded 200, not an error status: it is a
+  // standing policy verdict (the fail-soft shape the workspace-state route
+  // uses for expected unavailable states), and the browser logs EVERY
+  // error-status response as a console error — so a 403 here put a red
+  // "Failed to load resource" row in the console on every Studio load for
+  // a state that is neither transient nor a failure. The gate itself is
+  // unchanged: no token is minted, and the verdict is latched client-side
+  // for the session (terminal-client.ts), so this stays one quiet request.
   if (!isFeatureEnabled("terminalRuntime") && !isTerminalOwnerUser(userId)) {
     return NextResponse.json(
-      { code: "TERMINAL_DISABLED", error: "The terminal is not available yet." },
-      { status: 403, headers: { "Cache-Control": "no-store" } },
+      {
+        code: "TERMINAL_DISABLED",
+        error: "The terminal is not available yet.",
+        terminalAvailable: false,
+      },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
     );
   }
 
