@@ -238,6 +238,14 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
 const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "repair", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio", "pc", "pc-status", "pc-perf", "pc-tasks"]);
 
 /**
+ * Read-only diagnostics that are fully local — no provider, network, or
+ * remote dispatch in the LOCAL target. Permitted signed-out when the
+ * execution target is LOCAL (the default). In the REMOTE target these
+ * dispatch through terminal-server and stay auth-gated.
+ */
+const LOCAL_DIAGNOSTIC_COMMANDS = new Set(["status"]);
+
+/**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
  * without authentication. This is the explicit local-only opt-in:
  * the user gets local tool execution (machine lane, /local, slash
@@ -316,6 +324,12 @@ export function requiresAuth(
   // check isSignedIn at all.
   const cockpitLocalBypass = COCKPIT_COMMANDS.has(command) && (localOnly || localTarget);
 
+  // Read-only LOCAL diagnostics need no credential at all — `litt status`
+  // is a filesystem+git read with no provider, network, or remote call.
+  // The bypass applies only to the LOCAL target: `litt status --remote`
+  // dispatches through terminal-server and keeps its auth requirement.
+  const localDiagnosticBypass = LOCAL_DIAGNOSTIC_COMMANDS.has(command) && localTarget;
+
   // A verified local model is credentialless. Only ASK receives this bypass,
   // and only while targeting LOCAL. Merely selecting local mode is not enough:
   // main() must prove the daemon is reachable and has an installed model.
@@ -328,6 +342,7 @@ export function requiresAuth(
     !LOGGED_OUT_ALLOWED.has(command) &&
     !(BYOK_ALLOWED.has(command) && hasByokKey) &&
     !cockpitLocalBypass &&
+    !localDiagnosticBypass &&
     !localModelBypass &&
     !clerkToken
   );
@@ -458,6 +473,16 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // ─── Unknown command — fail fast BEFORE the auth gate ───────────
+  // A typo'd command (e.g. `litt menu`, `litt work`) must get
+  // "unknown command", not a misleading "Authentication required".
+  // Same lookup semantics as the handler resolution below.
+  if (COMMANDS[command] === undefined && !LAZY_COMMANDS.has(command)) {
+    console.error(`Unknown command: ${command}`);
+    console.error(`Run 'litt --help' for available commands.`);
+    return 1;
+  }
+
   // ─── Execution target override ──────────────────────────────────
   // --local / --remote flags set the initial execution target for the
   // cockpit. Promote to LITT_TARGET_OVERRIDE so resolveExecutionTarget()
@@ -480,10 +505,10 @@ async function main(): Promise<number> {
 
   // ─── Auth gate ──────────────────────────────────────────────────
   // Commands that require a valid user session are blocked when signed
-  // out. Only login, logout, whoami, doctor, version, and help work
-  // without authentication. The interactive cockpit (bare `litt`,
-  // `litt shell`, `litt cockpit`, `litt tui`) and all runtime/project
-  // commands require authentication.
+  // out. The signed-out allow-lists are LOGGED_OUT_ALLOWED (account and
+  // diagnostic commands), LOCAL_DIAGNOSTIC_COMMANDS (read-only local
+  // diagnostics, LOCAL target only), the cockpit LOCAL bypass, and the
+  // ask local-model bypass — see requiresAuth() for the full policy.
   //
   // EXCEPTION: LITT_LOCAL_MODE=1 allows the cockpit to launch without
   // auth — the user explicitly opts into local-only execution. They get
@@ -507,13 +532,16 @@ async function main(): Promise<number> {
 
   // ASK can operate completely credential-free when a real local model lane
   // exists. Probe only when needed; cockpit and remote commands do not pay
-  // for this localhost request.
-  const localProviderAvailable =
+  // for this localhost request. The probe result is kept so a signed-out
+  // local ask with a dead lane reports the LANE failure — signing in cannot
+  // help, since LOCAL execution never falls back to cloud providers.
+  const askLaneProbe =
     command === "ask" &&
     localTarget &&
     !byokKeyPresent
-      ? (await probeLocalLane()).available
-      : false;
+      ? await probeLocalLane()
+      : null;
+  const localProviderAvailable = askLaneProbe?.available === true;
 
   if (
     requiresAuth(
@@ -531,6 +559,20 @@ async function main(): Promise<number> {
     if (!signedIn) {
       // Non-interactive commands: print a clear message and exit
       if (command !== "cockpit" && command !== "shell" && command !== "tui") {
+        // A LOCAL-target ask whose lane is unreachable is not an auth
+        // problem — in LOCAL mode the model can never be remote, so
+        // "Run 'litt login'" would be wrong advice. Report the lane.
+        if (command === "ask" && askLaneProbe && !askLaneProbe.available) {
+          console.error(`${c.red}✗${c.reset} Local Ollama lane is unreachable — a local ask cannot run.`);
+          if (askLaneProbe.reason) {
+            console.error(`${c.dim}  ${askLaneProbe.reason}${c.reset}`);
+          }
+          console.error(
+            `${c.dim}  Check OLLAMA_TAILSCALE_URL / OLLAMA_LAN_URL / OLLAMA_LOCAL_URL, ` +
+            `or start the local daemon (dex-ctl start), then retry.${c.reset}`,
+          );
+          return 1;
+        }
         console.error(`${c.red}✗${c.reset} Authentication required.`);
         console.error(`${c.dim}  Run 'litt login' to sign in, then try again.${c.reset}`);
         return 1;
