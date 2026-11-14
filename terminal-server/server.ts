@@ -203,12 +203,38 @@ async function probeDockerAvailability(): Promise<{ value: boolean; reason: stri
  */
 async function getTerminalIsolationVerdict() {
   const probe = await probeDockerAvailability();
+  // The sandbox input is read synchronously from the verification
+  // service's in-memory canary report and feeds ONLY the verdict's
+  // separate sandboxExecution dimension (health reporting + the web
+  // capability layer). The session gate and PTY spawn below read only
+  // the host fields, which this signal can never change.
+  const signal = sandboxStack.verification.getSignal();
   return evaluateTerminalIsolation({
     env: process.env,
     useDocker: USE_DOCKER,
     dockerAvailable: probe.value,
     dockerReason: probe.reason,
+    sandbox: {
+      provider: signal.provider,
+      state: signal.state,
+      verified: signal.verified,
+      checkedAt: signal.checkedAt,
+      freshUntil: signal.freshUntil,
+    },
   });
+}
+
+/** The `terminal.sandbox` object published by /health and /health/ready. */
+function sandboxHealthSection(isolation: Awaited<ReturnType<typeof getTerminalIsolationVerdict>>) {
+  const sandbox = isolation.sandboxExecution;
+  return {
+    execution: sandbox.execution,
+    provider: sandbox.provider,
+    state: sandbox.state,
+    checkedAt: sandbox.checkedAt,
+    freshUntil: sandbox.freshUntil,
+    reason: sandbox.reason,
+  };
 }
 
 {
@@ -828,6 +854,10 @@ app.get("/health/ready", async (_req, res) => {
       isolation: isolation.status,
       mode: isolation.mode,
       reason: isolation.reason,
+      // Separate sandbox dimension (Step 6): execution inside the
+      // verified sandbox, reported alongside — never instead of — the
+      // host verdict above.
+      sandbox: sandboxHealthSection(isolation),
     },
     readiness: allReady ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
@@ -862,6 +892,10 @@ app.get("/health", async (_req, res) => {
       isolation: isolation.status,
       mode: isolation.mode,
       reason: isolation.reason,
+      // Separate sandbox dimension (Step 6): execution inside the
+      // verified sandbox, reported alongside — never instead of — the
+      // host verdict above.
+      sandbox: sandboxHealthSection(isolation),
     },
     status: allReady ? "ok" : "degraded",
     uptime: process.uptime(),
@@ -2195,8 +2229,14 @@ server.listen(PORT, BIND.host, () => {
   // Phase 1: when a real provider is configured, start the canary so
   // the verification signal exists for the exec gate. The disabled
   // provider's canary can never pass, so this stays off there.
+  // Step 6: also refresh the canary periodically (every 4 minutes,
+  // inside the 5-minute freshness window). The boot run alone left the
+  // signal verified for ~5 minutes after each restart, after which the
+  // exec gate — and now the health sandbox dimension — closed until the
+  // next restart.
   if (sandboxStack.config.providerName !== "disabled") {
     sandboxStack.verification.start();
+    sandboxStack.verification.startPeriodicRefresh();
   }
   // Phase 2 lifecycle: reconcile persisted sandbox bindings against
   // the provider (design note §2.4) — lost bindings are cleared,
@@ -2207,6 +2247,7 @@ server.listen(PORT, BIND.host, () => {
 // Graceful shutdown
 function shutdown(signal: string) {
   console.log(`[terminal-server] Received ${signal}, shutting down...`);
+  sandboxStack.verification.stopPeriodicRefresh();
   ptyManager.shutdown();
   io.close(() => {
     server.close(() => {
