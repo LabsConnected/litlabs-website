@@ -39,14 +39,20 @@ import type { CanaryProvider } from "./provider";
 export const DEFAULT_VERIFICATION_MAX_AGE_MS = 5 * 60_000;
 
 /**
- * Default canary refresh interval: four minutes. This MUST stay below
- * {@link DEFAULT_VERIFICATION_MAX_AGE_MS}: the boot canary alone leaves
- * the signal "verified" for only one freshness window, after which the
- * exec gate closes until the next restart. Refreshing inside the window
- * keeps a healthy provider continuously verified while still letting a
- * provider that stops passing go stale/failed honestly.
+ * Default canary refresh interval: two minutes. This MUST stay
+ * comfortably below {@link DEFAULT_VERIFICATION_MAX_AGE_MS}: the boot
+ * canary alone leaves the signal "verified" for only one freshness
+ * window, after which the exec gate closes until the next restart.
+ * Refreshing inside the window keeps a healthy provider continuously
+ * verified while still letting a provider that stops passing go
+ * stale/failed honestly. Two minutes against the five-minute window
+ * leaves three minutes of slack, so a refresh run that is slow (or one
+ * that fails, with the next run a full interval later) still lands
+ * inside the window — at four minutes only one minute of slack
+ * remained, and a single slow refresh closed the gate for a stretch
+ * every cycle.
  */
-export const DEFAULT_VERIFICATION_REFRESH_INTERVAL_MS = 4 * 60_000;
+export const DEFAULT_VERIFICATION_REFRESH_INTERVAL_MS = 2 * 60_000;
 
 export type SandboxVerificationState = "verified" | "failed" | "stale" | "never-run";
 

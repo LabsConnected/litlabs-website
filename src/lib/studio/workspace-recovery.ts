@@ -281,7 +281,14 @@ export async function provisionWorkspaceForProject(
   // pull fails (e.g. uncommitted agent work blocks it), keep serving the
   // existing workspace instead of breaking the preview.
   if (isGithubMirror && project.workspaceId && project.workspaceStatus === "ready") {
-    const ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+    // The liveness check is a single GET against the terminal. A terminal
+    // restart (registry reload, binding reconcile), a canary-cycle gap,
+    // or a transient probe failure can make it fail for a workspace that
+    // is actually fine — so retry once before drawing any conclusion.
+    let ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+    if (!ws || !ws.ready) {
+      ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+    }
     if (ws && ws.ready) {
       try {
         const githubToken = await getInstallationTokenForClone({
@@ -319,12 +326,21 @@ export async function provisionWorkspaceForProject(
         return project.workspaceId;
       }
     }
-    // Workspace lost on terminal-server — reset the status only and fall
-    // through to the full re-provision below.
-    await updateProjectWorkspace(projectId, userId, {
-      workspaceStatus: "not_prepared",
-      workspaceError: null,
-    });
+    // Liveness still failing after the retry. Give it the same best-effort
+    // posture as a failed mirror refresh above: keep serving the existing
+    // workspace and leave workspaceStatus untouched. Stamping
+    // "not_prepared" here forced a full cold re-provision (fresh sandbox
+    // plus whole-tree mirror) on the strength of one bad lookup, and
+    // every Studio surface derives the repo-workspace gate from that one
+    // DB field — so a transient terminal blip latched the whole project
+    // into the gate until a re-prepare happened to complete. A workspace
+    // that was never prepared never reaches this branch (no workspaceId,
+    // or its status is not "ready"), so first-time provisioning below is
+    // unchanged.
+    console.warn(
+      `[provisionWorkspaceForProject] GitHub workspace liveness check failed after retry for project ${projectId}; serving existing workspace without demoting status`,
+    );
+    return project.workspaceId;
   }
 
   // Recover dead provisioning locks before attempting a fresh claim.
