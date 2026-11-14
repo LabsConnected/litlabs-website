@@ -22,10 +22,13 @@ import type { Application, Response } from "express";
 import { checkPreviewToken } from "../preview-auth";
 import {
   getPreviewStatus as defaultGetPreviewStatus,
+  getPreviewUpstream as defaultGetPreviewUpstream,
+  extendSandboxUpstreamSession,
   decideProxiedEntryResponse,
   markPreviewRootRouteMissing,
   markPreviewBackendUnreachable,
   buildPreviewErrorPage,
+  type PreviewUpstream,
 } from "./PreviewManager";
 import {
   shouldInjectInspector,
@@ -33,7 +36,11 @@ import {
   INSPECTOR_DROPPED_HEADERS,
 } from "./inspector";
 import { rewritePreviewAssetUrls, rewritePreviewLocation, isRehomedAuthHandshake } from "./asset-urls";
-import { isPreviewScopedRedirect, stripPreviewAuthHeaders } from "./proxy-security";
+import {
+  buildSandboxUpstreamHeaders,
+  isPreviewScopedRedirect,
+  stripPreviewAuthHeaders,
+} from "./proxy-security";
 import type { AuthenticatedRequest } from "../internal-auth";
 
 type PreviewStatusSnapshot = ReturnType<typeof defaultGetPreviewStatus>;
@@ -41,9 +48,26 @@ type PreviewStatusSnapshot = ReturnType<typeof defaultGetPreviewStatus>;
 export interface PreviewProxyDeps {
   /** Injected for tests; defaults to the real PreviewManager runtime store. */
   getPreviewStatus?: (workspaceId: string) => PreviewStatusSnapshot;
+  /** Injected for tests; defaults to the real PreviewManager runtime store. */
+  getPreviewUpstream?: (workspaceId: string) => PreviewUpstream | undefined;
   markPreviewRootRouteMissing?: (workspaceId: string) => boolean;
   markPreviewBackendUnreachable?: (workspaceId: string) => boolean;
+  /**
+   * Injected for tests: extend a sandbox session while preview
+   * traffic flows (design note §3.3). Defaults to the registered
+   * sandbox preview support's provider via PreviewManager.
+   */
+  extendSandboxTimeout?: (
+    upstream: Extract<PreviewUpstream, { kind: "sandbox" }>,
+    timeoutMs: number,
+  ) => void;
 }
+
+/** Session extension granted to a sandbox while preview traffic flows. */
+const SANDBOX_TRAFFIC_EXTENSION_MS = 120 * 60_000;
+/** Minimum interval between extension calls per workspace. */
+const SANDBOX_EXTEND_THROTTLE_MS = 60_000;
+const lastSandboxExtend = new Map<string, number>();
 
 /**
  * Upper bound for any single upstream fetch to the workspace dev server.
@@ -53,6 +77,22 @@ export interface PreviewProxyDeps {
  * log line instead. Tunable via PREVIEW_UPSTREAM_TIMEOUT_MS
  * (milliseconds); defaults to 60s. Read per request so tests can stub it.
  */
+/**
+ * Remove the preview-scoped `token` query param from a mount-relative
+ * path before it is sent to a sandbox (provider) origin. Other params
+ * pass through untouched; the path is returned unchanged when there
+ * is no token param.
+ */
+function stripPreviewTokenParam(path: string): string {
+  const q = path.indexOf("?");
+  if (q === -1) return path;
+  const params = new URLSearchParams(path.slice(q + 1));
+  if (!params.has("token")) return path;
+  params.delete("token");
+  const rest = params.toString();
+  return rest ? `${path.slice(0, q)}?${rest}` : path.slice(0, q);
+}
+
 function upstreamTimeoutMs(): number {
   const raw = Number(process.env.PREVIEW_UPSTREAM_TIMEOUT_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : 60_000;
@@ -63,6 +103,8 @@ export function registerPreviewProxyRoute(
   deps: PreviewProxyDeps = {},
 ): void {
   const getStatus = deps.getPreviewStatus ?? defaultGetPreviewStatus;
+  const getUpstream = deps.getPreviewUpstream ?? defaultGetPreviewUpstream;
+  const extendSandbox = deps.extendSandboxTimeout ?? extendSandboxUpstreamSession;
   const markRootRouteMissing =
     deps.markPreviewRootRouteMissing ?? markPreviewRootRouteMissing;
   const markUnreachable =
@@ -95,6 +137,24 @@ export function registerPreviewProxyRoute(
     }
     const upstreamPort = status.port;
 
+    // Upstream switch (Phase 2 lifecycle, design note §3.2): a
+    // sandbox runtime's traffic goes to the provider origin with its
+    // traffic-token header; a host runtime's goes to 127.0.0.1:<port>
+    // exactly as before. The origin and token are terminal-internal:
+    // they never appear in a response header/body or a log line.
+    const upstream = getUpstream(workspaceId);
+    const sandboxUpstream =
+      upstream?.kind === "sandbox" ? upstream : undefined;
+    if (sandboxUpstream) {
+      // Preview traffic is flowing: keep the sandbox session alive,
+      // throttled per workspace (§3.3).
+      const now = Date.now();
+      if (now - (lastSandboxExtend.get(workspaceId) ?? 0) > SANDBOX_EXTEND_THROTTLE_MS) {
+        lastSandboxExtend.set(workspaceId, now);
+        extendSandbox(sandboxUpstream, SANDBOX_TRAFFIC_EXTENSION_MS);
+      }
+    }
+
     // The public origin the browser used, as the upstream app sees it via
     // forwarded headers. The app builds absolute URLs (and auth-handshake
     // redirect_url params) against this origin after the proxy strips the
@@ -113,11 +173,21 @@ export function registerPreviewProxyRoute(
       token: previewToken,
       upstreamPort,
       publicOrigin,
+      ...(sandboxUpstream ? { upstreamOrigin: sandboxUpstream.origin } : {}),
     };
 
-    // Proxy the request to localhost:<port>
+    // Proxy the request to the runtime's upstream: the sandbox
+    // origin, or localhost:<port> on the host path.
     const strippedPath = req.url.replace(/^\/preview\/[^/]+/, "");
-    const targetUrl = `http://127.0.0.1:${upstreamPort}${strippedPath}`;
+    // Sandbox upstreams authenticate with the traffic-access header
+    // alone: the preview-scoped `token` query param is stripped
+    // before the request leaves for the provider origin, so the
+    // preview credential never transits a third party. The host path
+    // forwards the query untouched, as before.
+    const sandboxPath = sandboxUpstream ? stripPreviewTokenParam(strippedPath) : strippedPath;
+    const targetUrl = sandboxUpstream
+      ? `${sandboxUpstream.origin}${sandboxPath}`
+      : `http://127.0.0.1:${upstreamPort}${strippedPath}`;
     // pathOnly is logged only — never includes the query string, so the
     // preview token stays out of the logs.
     const pathOnly = strippedPath.split("?")[0] || "/";
@@ -125,10 +195,15 @@ export function registerPreviewProxyRoute(
     try {
       const proxyResp = await fetch(targetUrl, {
         method: req.method,
-        headers: stripPreviewAuthHeaders(
-          new Headers(req.headers as Record<string, string>),
-          upstreamPort,
-        ),
+        headers: sandboxUpstream
+          ? buildSandboxUpstreamHeaders(
+              new Headers(req.headers as Record<string, string>),
+              sandboxUpstream,
+            )
+          : stripPreviewAuthHeaders(
+              new Headers(req.headers as Record<string, string>),
+              upstreamPort,
+            ),
         body: ["GET", "HEAD"].includes(req.method) ? undefined : (req as any),
         redirect: "manual",
         // Bound a hung upstream: AbortSignal.timeout rejects with a

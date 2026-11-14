@@ -36,6 +36,8 @@ import {
   type ExecuteCommandInput,
   type ExecuteCommandResult,
   type PreviewEndpoint,
+  type SandboxFileEntry,
+  type SandboxFileTransfer,
   type SandboxInstance,
   type SandboxProvider,
   type SandboxResourceLimits,
@@ -71,8 +73,26 @@ export interface E2bCommandResult {
   stderr: string;
 }
 
+/** One filesystem entry as the SDK's files API reports it. */
+export interface E2bFileEntry {
+  name: string;
+  /** Absolute path inside the sandbox. */
+  path: string;
+  type: "file" | "dir" | "symlink";
+  size: number;
+  mode: number;
+  mtimeMs: number;
+  linkTarget?: string;
+}
+
 export interface E2bSandboxHandle {
   readonly sandboxId: string;
+  /**
+   * Traffic access token for this sandbox's private URLs (present
+   * when the sandbox was created with public traffic off). Held in
+   * memory only; never persisted, never logged.
+   */
+  readonly trafficAccessToken?: string;
   runCommand(
     command: string,
     opts: {
@@ -89,6 +109,13 @@ export interface E2bSandboxHandle {
   pause(): Promise<boolean>;
   kill(): Promise<boolean>;
   isRunning(): Promise<boolean>;
+  // ─── Files API (Phase 2 lifecycle file transfer) ─────────────────
+  readFileBytes(path: string): Promise<Uint8Array>;
+  writeFileBytes(path: string, data: Uint8Array): Promise<void>;
+  listDir(path: string): Promise<E2bFileEntry[]>;
+  removePath(path: string): Promise<void>;
+  makeDir(path: string): Promise<void>;
+  renamePath(oldPath: string, newPath: string): Promise<void>;
 }
 
 export interface E2bCreateOptions {
@@ -98,8 +125,15 @@ export interface E2bCreateOptions {
   metadata: Record<string, string>;
   cpuCount: number;
   memoryMB: number;
-  /** Create-time egress policy, forwarded to the SDK verbatim. */
-  network: { denyOut: string[] };
+  /**
+   * Create-time network policy, forwarded to the SDK verbatim.
+   * `allowPublicTraffic: false` makes sandbox URLs private: requests
+   * without the sandbox's traffic access token are rejected by the
+   * provider (design note §3.2). On the pinned SDK (e2b@2.63) the
+   * option lives on the network object; the deprecated top-level
+   * `secure` flag is ignored by the SDK and is not used.
+   */
+  network: { denyOut: string[]; allowPublicTraffic?: boolean };
 }
 
 /**
@@ -114,13 +148,35 @@ export interface E2bClient {
   probe(): Promise<void>;
 }
 
+interface E2bSdkEntryLike {
+  name: string;
+  type?: string;
+  path: string;
+  size?: number | bigint;
+  mode?: number;
+  modifiedTime?: Date;
+  symlinkTarget?: string;
+}
+
 interface E2bSdkSandboxLike {
   sandboxId: string;
+  trafficAccessToken?: string;
   commands: {
     run(
       cmd: string,
       opts?: Record<string, unknown>,
     ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  };
+  files: {
+    read(
+      path: string,
+      opts: { format: "bytes" },
+    ): Promise<Uint8Array>;
+    write(path: string, data: Uint8Array): Promise<unknown>;
+    list(path: string): Promise<E2bSdkEntryLike[]>;
+    remove(path: string): Promise<void>;
+    makeDir(path: string): Promise<boolean>;
+    rename(oldPath: string, newPath: string): Promise<unknown>;
   };
   getHost(port: number): string;
   setTimeout(timeoutMs: number): Promise<void>;
@@ -129,9 +185,43 @@ interface E2bSdkSandboxLike {
   isRunning(): Promise<boolean>;
 }
 
+function mapSdkEntry(entry: E2bSdkEntryLike): E2bFileEntry {
+  const type =
+    entry.type === "dir" ? "dir" : entry.type === "symlink" ? "symlink" : "file";
+  return {
+    name: entry.name,
+    path: entry.path,
+    type,
+    size: typeof entry.size === "bigint" ? Number(entry.size) : (entry.size ?? 0),
+    mode: entry.mode ?? 0,
+    mtimeMs: entry.modifiedTime ? entry.modifiedTime.getTime() : 0,
+    ...(entry.symlinkTarget ? { linkTarget: entry.symlinkTarget } : {}),
+  };
+}
+
 function wrapSdkSandbox(sbx: E2bSdkSandboxLike): E2bSandboxHandle {
   return {
     sandboxId: sbx.sandboxId,
+    trafficAccessToken: sbx.trafficAccessToken,
+    async readFileBytes(path) {
+      return sbx.files.read(path, { format: "bytes" });
+    },
+    async writeFileBytes(path, data) {
+      await sbx.files.write(path, data);
+    },
+    async listDir(path) {
+      const entries = await sbx.files.list(path);
+      return entries.map(mapSdkEntry);
+    },
+    async removePath(path) {
+      await sbx.files.remove(path);
+    },
+    async makeDir(path) {
+      await sbx.files.makeDir(path);
+    },
+    async renamePath(oldPath, newPath) {
+      await sbx.files.rename(oldPath, newPath);
+    },
     async runCommand(command, opts) {
       try {
         const res = await sbx.commands.run(command, {
@@ -234,6 +324,25 @@ export class E2bTerminalUnsupportedError extends Error {
   }
 }
 
+/** Upper bound on one recursive tree listing (sync manifest source). */
+export const MAX_LIST_TREE_ENTRIES = 100_000;
+
+/** Map an absolute-path handle entry to a root-relative transfer entry. */
+function toTransferEntry(rootPath: string, entry: E2bFileEntry): SandboxFileEntry {
+  const root = rootPath.endsWith("/") ? rootPath.slice(0, -1) : rootPath;
+  const rel = entry.path.startsWith(`${root}/`)
+    ? entry.path.slice(root.length + 1)
+    : entry.name;
+  return {
+    path: rel,
+    type: entry.type,
+    size: entry.type === "file" ? entry.size : 0,
+    mtimeMs: entry.mtimeMs,
+    mode: entry.mode,
+    ...(entry.linkTarget ? { linkTarget: entry.linkTarget } : {}),
+  };
+}
+
 export class SandboxNotFoundError extends Error {
   readonly code = "SANDBOX_NOT_FOUND" as const;
   constructor(sandboxId: string) {
@@ -303,7 +412,10 @@ export class E2bSandboxProvider implements SandboxProvider {
       // workspaces alike — gets the metadata egress deny rule. This
       // create() is the single funnel, so the rule cannot drift
       // between what the canary certifies and what workspaces run.
-      network: { denyOut: [...SANDBOX_EGRESS_DENY_OUT] },
+      // Public traffic is OFF for the same reason (design note §3.2):
+      // a sandbox URL is worthless without its traffic access token,
+      // which never leaves the terminal process.
+      network: { denyOut: [...SANDBOX_EGRESS_DENY_OUT], allowPublicTraffic: false },
     });
 
     const env = composeSandboxEnv({
@@ -424,15 +536,79 @@ export class E2bSandboxProvider implements SandboxProvider {
       port,
       url: `https://${host}`,
       state: "private",
-      // Opaque token correlating this exposure in server-side logs.
-      // The authenticated preview proxy (Phase 2) is the only consumer
-      // of the raw URL; it is never rendered to a browser.
-      previewToken: randomBytes(16).toString("hex"),
+      // The sandbox's real traffic access token when the SDK reports
+      // one (private traffic, design note §3.2): the preview proxy
+      // sends it as the `e2b-traffic-access-token` header so a leaked
+      // provider hostname alone is useless. Handles that report no
+      // token (older templates) fall back to an opaque correlation
+      // token, exactly the Phase 1 behavior. The authenticated
+      // preview proxy is the only consumer of either value; neither
+      // is rendered to a browser or persisted anywhere.
+      previewToken: entry.handle.trafficAccessToken ?? randomBytes(16).toString("hex"),
       expiresAt: new Date(
         this.now() + entry.instance.limits.idleTimeoutMinutes * 60_000,
       ).toISOString(),
     };
   }
+
+  /** Extend a live sandbox's remaining lifetime (preview keepalive). */
+  async extendTimeout(sandboxId: string, timeoutMs: number): Promise<void> {
+    const entry = this.entry(sandboxId);
+    await entry.handle.setTimeout(timeoutMs);
+    entry.instance.lastActiveAt = this.isoNow();
+  }
+
+  /**
+   * File-transfer capability (design note §1.6) over the SDK files
+   * API. Listing is recursive with a hard entry cap so a pathological
+   * tree cannot wedge a sync; the cap surfaces as an error the caller
+   * reports, never a silent truncation.
+   */
+  readonly fileTransfer: SandboxFileTransfer = {
+    readFile: async (sandboxId, path) => {
+      const entry = this.entry(sandboxId);
+      return entry.handle.readFileBytes(path);
+    },
+    writeFile: async (sandboxId, path, data) => {
+      const entry = this.entry(sandboxId);
+      await entry.handle.writeFileBytes(path, data);
+    },
+    listDir: async (sandboxId, path) => {
+      const entry = this.entry(sandboxId);
+      const entries = await entry.handle.listDir(path);
+      return entries.map((e) => toTransferEntry(path, e));
+    },
+    listTree: async (sandboxId, path) => {
+      const entry = this.entry(sandboxId);
+      const out: SandboxFileEntry[] = [];
+      const walk = async (dir: string): Promise<void> => {
+        const entries = await entry.handle.listDir(dir);
+        for (const e of entries) {
+          out.push(toTransferEntry(path, e));
+          if (out.length > MAX_LIST_TREE_ENTRIES) {
+            throw new Error(
+              `Sandbox tree listing exceeded ${MAX_LIST_TREE_ENTRIES} entries at ${path}`,
+            );
+          }
+          if (e.type === "dir") await walk(e.path);
+        }
+      };
+      await walk(path);
+      return out;
+    },
+    removePath: async (sandboxId, path) => {
+      const entry = this.entry(sandboxId);
+      await entry.handle.removePath(path);
+    },
+    makeDir: async (sandboxId, path) => {
+      const entry = this.entry(sandboxId);
+      await entry.handle.makeDir(path);
+    },
+    renamePath: async (sandboxId, oldPath, newPath) => {
+      const entry = this.entry(sandboxId);
+      await entry.handle.renamePath(oldPath, newPath);
+    },
+  };
 
   async health(): Promise<{ healthy: boolean; details?: Record<string, unknown> }> {
     try {

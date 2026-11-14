@@ -152,6 +152,17 @@ export interface ExecuteCommandInput {
   stdin?: string;
   timeoutMs?: number;
   cwd?: string;
+  /**
+   * Per-command PROJECT env (Phase 2, design note §1.6): variables
+   * that apply to this one command only, layered over the sandbox's
+   * composed base env. Identity variables in it are ignored (identity
+   * always wins), and providers refuse any value equal to one of the
+   * platform's own secrets (env-allowlist.ts value-based check) — a
+   * project's own secrets under the same NAMES are fine. Mirrors the
+   * terminal-server contract (terminal-server/sandbox/provider.ts)
+   * per the seam rule; the two MUST stay in sync.
+   */
+  env?: Record<string, string>;
 }
 
 export interface ExecuteCommandResult {

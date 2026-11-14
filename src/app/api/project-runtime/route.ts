@@ -7,6 +7,7 @@ import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state
 import { describeProjectSource } from "@/lib/projects/project-source";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE, isHostExecutionPermitted } from "@/lib/host-execution-guard";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 
 const FAILED_RECOVERY_BACKOFF_MS = 30_000;
 const STALE_PROVISIONING_MS = 45_000;
@@ -113,7 +114,17 @@ export async function GET(request: NextRequest) {
   // (each attempt would only re-earn the same refusal and re-stamp the
   // project "failed"), and its runtime state reports the gate from the
   // first poll — no doomed prepare has to happen first.
-  const repoGate = source.kind === "github" && !isHostExecutionPermitted();
+  // Phase 2: the gate opens when the terminal server reports sandboxed
+  // execution CURRENTLY available for this user — recovery scheduling
+  // resumes and the runtime state stops reporting the gate. The probe
+  // runs only when the host guard would refuse, and fails closed, so a
+  // sandbox that is off (or unreachable) keeps today's behavior
+  // exactly; an already-provisioned project is never re-locked either
+  // way (its files stay browsable — reads were never gated here).
+  const repoGate =
+    source.kind === "github" &&
+    !isHostExecutionPermitted() &&
+    !(await isSandboxExecutionAvailable(userId));
 
   const updatedAtMs = Date.parse(project.updatedAt);
   const ageMs = Number.isNaN(updatedAtMs) ? Number.POSITIVE_INFINITY : Date.now() - updatedAtMs;

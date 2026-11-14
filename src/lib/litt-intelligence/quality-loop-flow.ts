@@ -750,7 +750,10 @@ export function noteToolResult(
       ((toolId === "preview.status" && payload?.status === "ready") ||
         (toolId === "preview.start" && payload?.success !== false));
     if (previewReady) {
-      const url = buildPreviewProxyUrl(workspaceId);
+      const url = buildPreviewProxyUrl(workspaceId, {
+        userId: session.state.userId,
+        projectId: session.state.projectId,
+      });
       notePreviewReady(session, url);
     }
   } catch {

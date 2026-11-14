@@ -134,6 +134,14 @@ export interface RewritePreviewLocationOptions {
   /** The upstream dev-server port the proxy forwards to. */
   upstreamPort: number;
   /**
+   * The sandbox upstream origin (Phase 2 lifecycle, design note
+   * §3.5), when the preview runs in a sandbox. Absolute redirects to
+   * this origin are self-redirects and are re-homed inside the mount
+   * like loopback ones — the origin itself is never emitted anywhere
+   * else; this comparison is the only use.
+   */
+  upstreamOrigin?: string;
+  /**
    * The proxy's own public origin as the browser sees it, e.g.
    * "https://terminal.litlabs.net" (built from x-forwarded-host/proto).
    * The upstream app builds absolute URLs against this origin from its
@@ -246,7 +254,11 @@ export function rewritePreviewLocation(
       // its forwarded headers (the proxy strips the mount prefix before
       // forwarding) — those are self-redirects, not external links.
       const isSelfOrigin = !!publicOrigin && u.origin === publicOrigin;
-      if (isLoopback || isSelfOrigin) {
+      // Sandbox upstream (Phase 2): the dev server inside the sandbox
+      // builds absolute URLs against its provider origin — also self.
+      const sandboxOrigin = opts.upstreamOrigin?.trim().replace(/\/+$/, "");
+      const isSandboxSelf = !!sandboxOrigin && u.origin === sandboxOrigin;
+      if (isLoopback || isSelfOrigin || isSandboxSelf) {
         rewritten = `${mount}${withPreviewToken(`${u.pathname}${u.search}`, opts.token)}${u.hash}`;
       }
     } catch {

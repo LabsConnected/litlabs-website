@@ -981,7 +981,7 @@ export async function POST(
         const qualitySession = restoreQualityLoopSession(qualityLoopState);
         const previewUrl = resumeConfig.isStaticWorkspace
           ? `/api/preview/${encodeURIComponent(resolved.projectId)}/`
-          : buildPreviewProxyUrl(transport.workspaceId);
+          : buildPreviewProxyUrl(transport.workspaceId, { userId, projectId: resolved.projectId });
         if (resumePreview?.ok) {
           noteBuildArtifacts(qualitySession, resumePreview.files);
           notePreviewReady(qualitySession, previewUrl);

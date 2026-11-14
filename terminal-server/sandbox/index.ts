@@ -18,3 +18,6 @@ export * from "./env";
 export * from "./e2b-provider";
 export * from "./config";
 export * from "./exec-router";
+export * from "./sync";
+export * from "./git-clone";
+export * from "./workspace-executor";

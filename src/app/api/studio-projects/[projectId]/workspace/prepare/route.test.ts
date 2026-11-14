@@ -21,13 +21,28 @@ vi.mock("@/lib/studio/workspace-recovery", () => ({
   provisionWorkspaceForProject: vi.fn(),
 }));
 
+vi.mock("@/lib/terminal-internal-client", () => ({
+  // Phase 2 §3.2: default not available (fail closed) — preserves the
+  // pre-Phase-2 gate expectations; the sandbox-open test opts in.
+  isSandboxExecutionAvailable: vi.fn(async () => false),
+  getSandboxAvailability: vi.fn(async () => ({
+    provider: null,
+    routingEnabled: false,
+    verified: false,
+    allowed: false,
+    reason: "availability-unavailable",
+  })),
+}));
+
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 
 const authMock = vi.mocked(auth);
 const getProjectMock = vi.mocked(getProject);
 const provisionMock = vi.mocked(provisionWorkspaceForProject);
+const sandboxAvailableMock = vi.mocked(isSandboxExecutionAvailable);
 
 const HOST_EXEC_STORED =
   'Workspace prepare failed (503): {"error":"Host execution is disabled in production (workspace.prepare(git,install)); a verified sandbox is required","code":"HOST_EXECUTION_DISABLED"}';
@@ -120,6 +135,17 @@ describe("POST /workspace/prepare — repo gate (B2)", () => {
     expect(res.status).toBe(503);
     expect((await res.json()).code).toBe("HOST_EXECUTION_DISABLED");
     expect(provisionMock).not.toHaveBeenCalled();
+  });
+
+  it("opens the gate when the terminal reports sandbox execution available for the user", async () => {
+    sandboxAvailableMock.mockResolvedValue(true);
+    getProjectMock.mockResolvedValue(githubProject());
+    provisionMock.mockResolvedValue("ws-1");
+    const res = await postPrepare();
+    expect(sandboxAvailableMock).toHaveBeenCalledWith("user-1");
+    expect(provisionMock).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
+    expect((await res.json()).workspaceStatus).toBe("ready");
   });
 
   it("lets a ready repo workspace fall through to provisioning (mirror refresh)", async () => {

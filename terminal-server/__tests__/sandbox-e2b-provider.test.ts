@@ -40,10 +40,55 @@ class FakeE2bHandle implements E2bSandboxHandle {
   paused = false;
   killed = false;
   timeoutExtensions: number[] = [];
+  /** In-memory files for the Phase 2 transfer surface. */
+  readonly files = new Map<string, Uint8Array>();
 
   constructor(sandboxId: string, envs: Record<string, string>) {
     this.sandboxId = sandboxId;
     this.createEnvs = envs;
+  }
+
+  async readFileBytes(path: string): Promise<Uint8Array> {
+    const data = this.files.get(path);
+    if (!data) throw new Error(`no such file: ${path}`);
+    return data;
+  }
+
+  async writeFileBytes(path: string, data: Uint8Array): Promise<void> {
+    this.files.set(path, data);
+  }
+
+  async listDir(path: string) {
+    const prefix = path.endsWith("/") ? path : `${path}/`;
+    const out = [];
+    for (const key of this.files.keys()) {
+      if (!key.startsWith(prefix)) continue;
+      const rest = key.slice(prefix.length);
+      if (rest.includes("/")) continue;
+      out.push({
+        name: rest,
+        path: key,
+        type: "file" as const,
+        size: this.files.get(key)!.length,
+        mode: 0o644,
+        mtimeMs: 0,
+      });
+    }
+    return out;
+  }
+
+  async removePath(path: string): Promise<void> {
+    this.files.delete(path);
+  }
+
+  async makeDir(_path: string): Promise<void> {}
+
+  async renamePath(oldPath: string, newPath: string): Promise<void> {
+    const data = this.files.get(oldPath);
+    if (data) {
+      this.files.set(newPath, data);
+      this.files.delete(oldPath);
+    }
   }
 
   async runCommand(
@@ -254,8 +299,14 @@ describe("E2bSandboxProvider — egress policy", () => {
 
     expect(client.creates).toHaveLength(1);
     // The whole link-local block: covers 169.254.169.254 (cloud
-    // metadata) and 169.254.170.2 (ECS metadata) alike.
-    expect(client.creates[0].network).toEqual({ denyOut: ["169.254.0.0/16"] });
+    // metadata) and 169.254.170.2 (ECS metadata) alike. Phase 2
+    // lifecycle adds allowPublicTraffic: false (design note §3.2) —
+    // sandbox URLs are private; the traffic token never leaves the
+    // terminal process.
+    expect(client.creates[0].network).toEqual({
+      denyOut: ["169.254.0.0/16"],
+      allowPublicTraffic: false,
+    });
     expect(client.creates[0].network.denyOut).toEqual([...SANDBOX_EGRESS_DENY_OUT]);
   });
 
@@ -277,7 +328,10 @@ describe("E2bSandboxProvider — egress policy", () => {
 
     expect(client.creates).toHaveLength(2);
     for (const createOpts of client.creates) {
-      expect(createOpts.network).toEqual({ denyOut: ["169.254.0.0/16"] });
+      expect(createOpts.network).toEqual({
+        denyOut: ["169.254.0.0/16"],
+        allowPublicTraffic: false,
+      });
     }
     // Each create gets its own copy: mutating one sandbox's rule can
     // never widen or narrow another's.

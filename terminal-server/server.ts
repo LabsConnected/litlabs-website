@@ -48,11 +48,16 @@ import {
   prepareStaticWorkspace,
   getWorkspace,
   listWorkspaces,
+  registerSandboxPrepareHandler,
   type WorkspaceDescriptor,
 } from "./workspace/WorkspaceManager";
 import { resolveWorkspacePath as resolveWorkspacePathSecure, validateWritePayload } from "./workspace/WorkspaceSecurity";
 import { deleteResolvedPath, mkdirResolvedPath } from "./workspace/FileService";
-import { replaceScaffoldingForWrite, SCAFFOLD_DIR_NAME } from "./workspace/scaffold";
+import { replaceScaffoldingForWrite, SCAFFOLD_DIR_NAME, SCAFFOLD_MANIFEST_NAME } from "./workspace/scaffold";
+import {
+  SandboxWorkspaceExecutor,
+  type ForwardFileChange,
+} from "./sandbox/workspace-executor";
 import { checkExpectedSha256 } from "./workspace/cas";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
@@ -64,6 +69,7 @@ import {
   getPreviewStatus,
   getPreviewLogs,
   verifyPreviewHealth,
+  registerSandboxPreviewSupport,
 } from "./preview/PreviewManager";
 
 /**
@@ -298,6 +304,41 @@ ptyManager.startSweeper();
 // the factory yields the disabled provider and the gate can never
 // open, so default deployments behave exactly as before Phase 1.
 const sandboxStack = createSandboxExecStack(process.env);
+
+// ─── Sandbox workspace lifecycle (Phase 2) ─────────────────────────
+// The executor makes repo workspaces live inside sandboxes end to
+// end: descriptor bindings, per-workspace locking, sync-back held
+// before exec responses, /ws-files forward-push, sandbox prepare,
+// and the sandbox preview branch. It consumes the SAME gate and
+// provider as the Phase 1 stack, so its availability decision is the
+// gate's — identical to what /internal/sandbox/availability reports.
+// With the gate closed (every pre-cutover deployment) every entry
+// point below declines and behavior is byte-identical to Phase 1.
+const sandboxExecutor = new SandboxWorkspaceExecutor({
+  provider: sandboxStack.provider,
+  gate: sandboxStack.gate,
+  templateId: sandboxStack.config.templateId,
+});
+registerSandboxPrepareHandler({
+  isAvailableFor: (userId) => sandboxExecutor.isAvailableFor(userId),
+  prepare: (input) => sandboxExecutor.prepareRepoWorkspace(input),
+});
+registerSandboxPreviewSupport({
+  executor: sandboxExecutor,
+  provider: sandboxStack.provider,
+});
+
+/**
+ * Forward a completed /ws-files volume mutation into the workspace's
+ * live sandbox (design note §1.3 rule 2). Fire-and-forget: the
+ * executor queues the push on the workspace lock chain and records
+ * failures as pending on the binding; the next exec or preview start
+ * flushes them loudly. No live sandbox = nothing to do.
+ */
+function forwardWsFileChange(workspaceId: string, change: ForwardFileChange): void {
+  const ws = getWorkspace(workspaceId);
+  if (ws) sandboxExecutor.forwardFileChange(ws, change);
+}
 
 /**
  * How long a PTY survives with no socket attached. Long enough to cover a
@@ -1124,17 +1165,18 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   // Exactly one surface routes into a verified sandbox: this one, and
   // only when the gate passes (E2B provider configured +
   // routing-enabled environment + owner + fresh green canary — see
-  // sandbox/exec-router.ts). When the gate is closed the router
-  // returns null and the request continues down the pre-Phase-1 path
-  // below, untouched. A provider failure after the gate opened is
-  // surfaced as an execution failure; it never falls back to host
-  // execution here.
+  // sandbox/exec-router.ts). Phase 2 lifecycle: the executor runs the
+  // command in the workspace's own sandbox (descriptor binding,
+  // content mirrored in, pending forward-pushes flushed first) and
+  // HOLDS this response until sync-back to the volume completes,
+  // because callers read files straight afterwards. When the gate is
+  // closed the executor returns null and the request continues down
+  // the pre-Phase-1 path below, untouched. A provider or sync failure
+  // after the gate opened is surfaced as an execution failure; it
+  // never falls back to host execution here.
   const sandboxStartTime = Date.now();
   try {
-    const sandboxOutcome = await sandboxStack.router.tryExecute({
-      userId,
-      projectId: ws.projectId,
-      workspaceId,
+    const sandboxOutcome = await sandboxExecutor.executeCommand(ws, {
       command,
       stdin: stdinInput,
       timeoutMs: 120_000,
@@ -1720,6 +1762,20 @@ app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
     } else {
       writeFileSync(target, content, "utf-8");
     }
+    // Forward into a live sandbox (Phase 2 lifecycle): the volume
+    // write succeeded, so the sandbox must learn about it — the
+    // scaffold removals first (they happened before this write),
+    // then the manifest that recorded them, then the file itself.
+    if (scaffold?.acted) {
+      for (const removed of scaffold.removedFiles) {
+        forwardWsFileChange(req.workspaceId!, { relPath: removed, kind: "delete" });
+      }
+      forwardWsFileChange(req.workspaceId!, {
+        relPath: `${SCAFFOLD_DIR_NAME}/${SCAFFOLD_MANIFEST_NAME}`,
+        kind: "write",
+      });
+    }
+    forwardWsFileChange(req.workspaceId!, { relPath: filePath, kind: "write" });
     res.json({
       saved: true,
       workspaceId: req.workspaceId,
@@ -1739,6 +1795,7 @@ app.post("/ws-files/delete", (req: AuthenticatedRequest, res) => {
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
     deleteResolvedPath(target);
+    forwardWsFileChange(req.workspaceId!, { relPath: filePath, kind: "delete" });
     res.json({ deleted: true, workspaceId: req.workspaceId });
   } catch (err) {
     const { status, error } = fileErrorResponse(err, "Failed to delete file");
@@ -1754,6 +1811,7 @@ app.post("/ws-files/mkdir", (req: AuthenticatedRequest, res) => {
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
     if (mkdirResolvedPath(target) === "exists") return res.status(409).json({ error: "Path already exists" });
+    forwardWsFileChange(req.workspaceId!, { relPath: filePath, kind: "mkdir" });
     res.json({ created: true, workspaceId: req.workspaceId });
   } catch (err) {
     const { status, error } = fileErrorResponse(err, "Failed to create folder");
@@ -1773,6 +1831,11 @@ app.post("/ws-files/rename", (req: AuthenticatedRequest, res) => {
     if (!existsSync(source)) return res.status(404).json({ error: "Source path not found" });
     if (existsSync(target)) return res.status(409).json({ error: "Destination path already exists" });
     renameSync(source, target);
+    forwardWsFileChange(req.workspaceId!, {
+      relPath: filePath,
+      kind: "rename",
+      newRelPath: newPath,
+    });
     res.json({ renamed: true, workspaceId: req.workspaceId });
   } catch (err) {
     const { status, error } = fileErrorResponse(err, "Failed to rename path");
@@ -2135,6 +2198,10 @@ server.listen(PORT, BIND.host, () => {
   if (sandboxStack.config.providerName !== "disabled") {
     sandboxStack.verification.start();
   }
+  // Phase 2 lifecycle: reconcile persisted sandbox bindings against
+  // the provider (design note §2.4) — lost bindings are cleared,
+  // paused sandboxes are left paused, nothing is woken at boot.
+  void sandboxExecutor.reconcileBindings();
 });
 
 // Graceful shutdown

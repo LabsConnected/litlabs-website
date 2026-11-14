@@ -36,7 +36,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     }
 
     // Redirect to the real Railway preview proxy
-    const realUrl = buildPreviewProxyUrl(project.workspaceId);
+    const realUrl = buildPreviewProxyUrl(project.workspaceId, { userId, projectId });
     return NextResponse.redirect(realUrl, { status: 302 });
   } catch (err) {
     return NextResponse.json({
