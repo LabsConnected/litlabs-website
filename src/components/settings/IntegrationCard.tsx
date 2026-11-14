@@ -79,7 +79,7 @@ export function IntegrationCard({
                 {label}
               </span>
               {integration.category === "optional" && (
-                <span className="text-[9px] text-white/30">· Optional</span>
+                <span className="text-[9px]" style={{ color: T.textMuted }}>· Optional</span>
               )}
             </div>
           </div>
@@ -128,7 +128,7 @@ export function IntegrationCard({
 
       {/* Details */}
       {integration.details && (
-        <p className="mt-2.5 text-[10px] leading-4 text-white/40">{integration.details}</p>
+        <p className="mt-2.5 text-[10px] leading-4" style={{ color: T.textMuted }}>{integration.details}</p>
       )}
 
       {/* Actions */}
@@ -175,15 +175,16 @@ function StatusRow({
   ok: boolean;
   color: string;
 }) {
+  const { resolvedColors: T } = useTheme();
   return (
     <div className="flex items-center justify-between text-[11px]">
-      <span className="text-white/40">{label}</span>
+      <span style={{ color: T.textMuted }}>{label}</span>
       <div className="flex items-center gap-1.5">
         <span
           className="h-1 w-1 rounded-full"
           style={{ backgroundColor: ok ? "#22c55e" : color }}
         />
-        <span style={{ color: ok ? "#22c55e" : "rgba(255,255,255,0.6)" }}>{value}</span>
+        <span style={{ color: ok ? "#16a34a" : T.textColor }}>{value}</span>
       </div>
     </div>
   );
@@ -206,11 +207,11 @@ export function IntegrationSummaryBar({
 
 function SummaryItem({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div className="rounded-lg border border-white/5 bg-black/20 px-3 py-2">
+    <div className="rounded-lg border border-black/[0.07] bg-black/[0.03] px-3 py-2">
       <div className="text-lg font-black" style={{ color }}>
         {value}
       </div>
-      <div className="text-[10px] text-white/40">{label}</div>
+      <div className="text-[10px] text-zinc-500">{label}</div>
     </div>
   );
 }
