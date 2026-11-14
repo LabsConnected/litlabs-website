@@ -34,8 +34,8 @@ export class TerminalDisabledError extends Error {
 
 let cached: CachedTerminalToken | null = null;
 let pending: Promise<TerminalTokenResult> | null = null;
-// A TERMINAL_DISABLED 403 is a deploy-time feature-flag verdict, not a
-// transient failure — retrying can never change it until the flag flips
+// A TERMINAL_DISABLED verdict is a deploy-time feature-flag verdict, not
+// a transient failure — retrying can never change it until the flag flips
 // (a redeploy + page reload). Cache it for the session so retries show the
 // truthful "not available" state without re-hammering the endpoint.
 let terminalDisabled = false;
@@ -87,11 +87,16 @@ export async function getTerminalTokenResult(
       const body = (await response.json().catch(() => ({}))) as Partial<
         CachedTerminalToken & { error: string; code?: string; detail?: string }
       >;
+      // TERMINAL_DISABLED is a standing policy verdict, not a failure: the
+      // token route answers it as a coded 200 with no token (a legacy 403
+      // shape is still honored for older deployments). Latch it for the
+      // session either way — there is no token to cache, and refetching
+      // can never change the verdict.
+      if (body.code === "TERMINAL_DISABLED") {
+        terminalDisabled = true;
+        throw new TerminalDisabledError(body.error || "The terminal is not available yet.");
+      }
       if (!response.ok || !body.token || !body.expiresAt) {
-        if (response.status === 403 && body.code === "TERMINAL_DISABLED") {
-          terminalDisabled = true;
-          throw new TerminalDisabledError(body.error || "The terminal is not available yet.");
-        }
         if (response.status === 409 && body.code === "WORKSPACE_NOT_READY") {
           throw new WorkspaceNotReadyError(body.error || "Workspace not ready", body.detail);
         }
