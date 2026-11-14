@@ -17,7 +17,12 @@
  *   - the responsive collapse: under the lg breakpoint the sidebar
  *     becomes a left drawer opened from a toolbar row;
  *   - a shared content region (max width + padding) with an optional
- *     per-page header slot.
+ *     per-page header slot;
+ *   - an optional right rail (Discover's Trending rail is the first
+ *     consumer), shown only at xl widths so narrower layouts keep the
+ *     single-column reading flow. Added in the Discover phase as a
+ *     minimal extension of the Projects-phase frame — same tokens,
+ *     same sticky-column treatment as the sidebar.
  *
  * Colors are passed in (structural subset of the theme's
  * resolvedColors) instead of read from context. Pages pass their
@@ -56,6 +61,10 @@ interface LiTTAppShellProps {
   sidebarLabel: string;
   /** Optional per-page hero/title band rendered above the content. */
   header?: ReactNode;
+  /** Optional right rail (e.g. Discover's Trending rail); xl+ only. */
+  rightRail?: ReactNode;
+  /** Accessible name for the right rail region. */
+  rightRailLabel?: string;
   children: ReactNode;
 }
 
@@ -64,6 +73,8 @@ export default function LiTTAppShell({
   sidebar,
   sidebarLabel,
   header,
+  rightRail,
+  rightRailLabel,
   children,
 }: LiTTAppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -128,6 +139,21 @@ export default function LiTTAppShell({
           {header}
           {children}
         </div>
+
+        {/* Right rail — xl widths only, mirrors the sidebar's sticky
+            column treatment on the opposite edge. */}
+        {rightRail && (
+          <aside
+            aria-label={rightRailLabel ?? "Sidebar"}
+            className="sticky top-0 hidden h-screen w-[320px] shrink-0 overflow-y-auto border-l px-4 py-6 xl:block"
+            style={{
+              backgroundColor: colors.elevatedBg ?? colors.boxBg,
+              borderColor: `${colors.borderColor}55`,
+            }}
+          >
+            {rightRail}
+          </aside>
+        )}
       </div>
 
       {/* Mobile/tablet drawer */}
