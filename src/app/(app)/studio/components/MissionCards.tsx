@@ -57,10 +57,12 @@ export interface MissionCardsProps {
 
 type IconType = ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: CSSProperties }>;
 
-/* ── Design tokens (literals) ──────────────────────────────────── */
+/* ── Design tokens — the platform's standard light studio tokens
+      (same conversion MobileBuildStatusBar already shipped with;
+      under .studio-shell these resolve light). ── */
 
-const CARD_SURFACE = "rgba(16,12,26,0.92)";
-const CARD_BORDER = "rgba(255,255,255,0.07)";
+const CARD_SURFACE = "var(--studio-surface)";
+const CARD_BORDER = "var(--studio-border)";
 const ACCENT = "var(--color-accent)";
 const AMBER = "#e3b341";
 
@@ -384,7 +386,7 @@ export default function MissionCards({
               <span style={{ fontSize: 11, color: "var(--error)" }}>-{changesSummary!.deleted} deleted</span>
             )}
             {changesSummary!.renamed > 0 && (
-              <span style={{ fontSize: 11, color: "#c4b5fd" }}>→{changesSummary!.renamed} renamed</span>
+              <span style={{ fontSize: 11, color: "#7c3aed" }}>→{changesSummary!.renamed} renamed</span>
             )}
           </div>
         )}

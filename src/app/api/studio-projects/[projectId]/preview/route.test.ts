@@ -53,11 +53,23 @@ vi.mock("@/lib/terminal-internal-client", () => ({
   getPreviewStatusInternal: vi.fn(),
   stopPreviewInternal: vi.fn(),
   buildPreviewProxyUrl: vi.fn((workspaceId: string) => `https://proxy.test/${workspaceId}`),
+  // Phase 2 §3.2: the route now consults sandbox availability for the
+  // deterministic refusal derivation. Default: not available (fail
+  // closed), which preserves every pre-Phase-2 expectation below.
+  getSandboxAvailability: vi.fn(async () => ({
+    provider: null,
+    routingEnabled: false,
+    verified: false,
+    allowed: false,
+    reason: "availability-unavailable",
+  })),
+  isSandboxExecutionAvailable: vi.fn(async () => false),
 }));
 
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";import { startPreviewInternal,
   getPreviewStatusInternal,
+  isSandboxExecutionAvailable,
 } from "@/lib/terminal-internal-client";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { createPreviewToken } from "@/lib/projects/preview-token";
@@ -68,6 +80,7 @@ const getPreviewStatusMock = vi.mocked(getPreviewStatusInternal);
 const startPreviewMock = vi.mocked(startPreviewInternal);
 const provisionMock = vi.mocked(provisionWorkspaceForProject);
 const createPreviewTokenMock = vi.mocked(createPreviewToken);
+const sandboxAvailableMock = vi.mocked(isSandboxExecutionAvailable);
 
 const staticProject = {
   id: "proj-1",
@@ -348,6 +361,22 @@ describe("studio-projects preview route — workspace failure code threading (wa
     const body = await (await getPreview()).json();
     expect(body.runtimeStatus).toBe("not_started");
     expect(body.runtimeErrorCode).toBeNull();
+  });
+
+  // Phase 2 §3.2: when the terminal reports sandboxed execution
+  // available for this user, the same settled failure is retryable —
+  // the deterministic refusal must NOT be derived.
+  it("does not derive the refusal when the sandbox is available for the user", async () => {
+    sandboxAvailableMock.mockResolvedValue(true);
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "Provisioning timed out", framework: "nextjs",
+      sourceType: "github",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBeNull();
+    expect(sandboxAvailableMock).toHaveBeenCalledWith("user-1");
   });
 
   // Route honesty (console-errors diagnosis): when the POST provisioning

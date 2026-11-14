@@ -278,12 +278,16 @@ const convState = vi.hoisted(() => ({
   selectedConversationId: null as string | null,
   loadMessages: vi.fn(async () => {}),
   reportSendError: vi.fn(),
+  // Phase 0 tests flip this to drive conversation.busy edges (run starts)
+  // through the mocked conversation hook. Defaults to false, which is what
+  // every pre-existing test in this file observed.
+  busy: false,
 }));
 
 vi.mock("../hooks/useCanonicalConversation", () => ({
   useCanonicalConversation: () => ({
     messages: [],
-    busy: false,
+    busy: convState.busy,
     send: sendMock,
     regenerate: vi.fn(),
     clear: vi.fn(),
@@ -326,7 +330,11 @@ vi.mock("../stores/useExecutionStore", () => {
     (selector: (s: Record<string, unknown>) => unknown) => selector(execState.state),
     { getState: () => execState.state },
   );
-  return { useExecutionStore };
+  // useWorktabBadges calls this once per worktab — with no server tasks
+  // it never runs, which is why the stub could be missing until a test
+  // served a real task. "idle" is the real function's answer for a tab
+  // with no live execution snapshot.
+  return { useExecutionStore, deriveWorktabBadge: () => "idle" as const };
 });
 
 vi.mock("../stores/useConversationStore", () => ({
@@ -810,6 +818,81 @@ describe("StudioShell — left chat dock", () => {
     });
   });
 
+  it("restoring a task's remembered non-Preview surface on entry does not collapse the panel", async () => {
+    // Regression (Larry's production walkthrough, 2026-11-14): on a
+    // fresh open, the task-binding sync restores the active task's
+    // lastOpenedSurface (here "design" — Larry's repo project). That
+    // restore is not a user stage selection, so the workspace-first
+    // auto-collapse must not fire on it: Studio opens with the left
+    // chat panel EXPANDED (Larry's always-show rule, 2026-11-12), and
+    // the collapse is never written to the session as if it were a
+    // deliberate choice.
+    const restoredTask = {
+      id: "task-open-state",
+      userId: "user-1",
+      projectId: "project-1",
+      title: "Roofing site",
+      taskType: "build",
+      status: "working",
+      conversationId: "conv-open-state",
+      activeActionRunId: null,
+      latestActionRunId: null,
+      browserSessionId: null,
+      previewWorkspaceId: null,
+      previewUrl: null,
+      selectedArtifact: null,
+      verificationState: {},
+      metadata: {},
+      lastOpenedSurface: "design",
+      lastOpenedAt: "2026-11-14T00:00:00Z",
+      archivedAt: null,
+      createdAt: "2026-11-14T00:00:00Z",
+      updatedAt: "2026-11-14T00:00:00Z",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/api/studio/tasks")) {
+          return {
+            ok: true,
+            json: async () => ({ tasks: [restoredTask], closedTasks: [] }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    // A bare /studio URL: the harness default (?tool=chat) is an
+    // explicit Preview deep link, which legitimately beats the
+    // remembered surface on first sync and would mask the restore.
+    stableSearchParams.delete("tool");
+    try {
+      await renderStudioShell();
+      // The restore lands: Canvas & Design becomes the active surface…
+      await waitFor(() => {
+        expect(screen.getByTestId("stage-surface-design")).toHaveAttribute(
+          "data-active",
+          "true",
+        );
+      });
+      // …and after the open has fully settled, the left chat panel is
+      // STILL expanded, with no phantom collapse persisted to the
+      // session. (The settle window matters: the defect's collapse
+      // lands one effect pass after the restore, so an instant
+      // assertion can race past it.)
+      await new Promise((r) => setTimeout(r, 500));
+      expect(screen.getByTestId("litt-panel")).toHaveAttribute(
+        "data-collapsed",
+        "false",
+      );
+      expect(
+        window.sessionStorage.getItem("littree:studio:litt-collapsed"),
+      ).not.toBe("true");
+    } finally {
+      vi.unstubAllGlobals();
+      stableSearchParams.set("tool", "chat");
+    }
+  });
+
   it("Ask LiTT expands a collapsed left dock panel", async () => {
     const { user } = await renderStudioShell();
     await user.click(screen.getByTestId("litt-panel-collapse"));
@@ -873,29 +956,76 @@ describe("MissionCards — classic desktop dock", () => {
   });
 });
 
-describe("Phase 2 — Directive stages (Plan rail button removed), Files sidebar, Preview dock, bottom dock", () => {
-  it("rail presents the four non-Plan stages (standalone Plan rail button removed by Larry); secondary surfaces and the terminal stay reachable", async () => {
+describe("Phase 2 — Directive stages, Files single home, Preview dock, bottom dock", () => {
+  it("rail presents all five Directive stages with Plan first; secondary surfaces and the terminal stay reachable", async () => {
     await renderStudioShell();
-    for (const stage of ["canvas-design", "code", "preview", "media"]) {
+    for (const stage of ["plan", "canvas-design", "code", "preview", "media"]) {
       expect(screen.getByTestId(`workspace-stage-${stage}`)).toBeTruthy();
     }
-    expect(screen.queryByTestId("workspace-stage-plan")).toBeNull();
+    // Plan is the FIRST stage in the rail (Master Build Directive §2
+    // order), ahead of Canvas & Design.
+    const planButton = screen.getByTestId("workspace-stage-plan");
+    const canvasButton = screen.getByTestId("workspace-stage-canvas-design");
+    expect(
+      planButton.compareDocumentPosition(canvasButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(screen.getByTestId("workspace-rail-terminal")).toBeTruthy();
     expect(screen.getByTestId("workspace-rail-activity")).toBeTruthy();
     expect(screen.getByTestId("workspace-rail-files")).toBeTruthy();
     expect(screen.getByTestId("workspace-rail-assets")).toBeTruthy();
   });
 
-  it("Files sidebar renders beside chat by default and collapses from the layout toolbar", async () => {
+  it("Files lives ONLY in the LiTT panel's Files tab — the standalone sidebar mount is retired, exactly one StudioProjectFiles instance", async () => {
     const { user } = await renderStudioShell();
-    expect(screen.getByTestId("studio-files-panel")).toBeTruthy();
-    // Chat stays mounted beside it (its expanded-on-open default is
-    // pinned by the first test in this file — #937 behavior).
+    // Larry, 2026-11-14: the standalone FILES / COMPONENTS panel beside
+    // the chat is gone — Files is already in the chat tab. The shell
+    // must not render the sidebar slot, its resize handle, or the
+    // Hide-files layout toggle (its aria-pressed mirrored only the
+    // sidebar slot, so it could never match the screen).
+    expect(screen.queryByTestId("studio-files-panel")).toBeNull();
+    expect(screen.queryByTestId("dock-resize-files")).toBeNull();
+    expect(screen.queryByTestId("dock-files-toggle")).toBeNull();
+    // Exactly ONE StudioProjectFiles instance mounts in the shell, and
+    // it lives inside the LiTT panel's Files pane (the panel's
+    // expanded-on-open default is pinned by the first test in this
+    // file — #937 behavior).
     expect(screen.getByTestId("litt-panel")).toBeTruthy();
-    await user.click(screen.getByTestId("dock-files-toggle"));
+    const instances = screen.getAllByTestId("studio-project-files");
+    expect(instances).toHaveLength(1);
+    expect(screen.getByTestId("litt-files-panel").contains(instances[0])).toBe(true);
+    // Selecting the panel's Files tab activates that same single
+    // instance — no second mount appears.
+    await user.click(screen.getByTestId("litt-tab-files"));
     await waitFor(() => {
-      expect(screen.queryByTestId("studio-files-panel")).toBeNull();
+      expect(screen.getByTestId("litt-tab-files")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("litt-files-panel")).toHaveAttribute("data-active", "true");
     });
+    expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
+  });
+
+  it("an open-files action lands on the LiTT panel's Files tab (the single Files home)", async () => {
+    await renderStudioShell();
+    // The ActionPanel's open-file intent is a real open-files entry
+    // point: STUDIO_EVENT_OPEN_FILE routes through
+    // handleOpenFilesPanel (the dock "files" intent and the URL
+    // drawer intent use the same handler), which selects the LiTT
+    // panel's top-row Files tab and expands the panel.
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("studio:open-file", {
+          detail: { projectId: "project-1", path: "index.html" },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("litt-tab-files")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("litt-files-panel")).toHaveAttribute("data-active", "true");
+    });
+    // Still exactly one instance, in the panel — the action did not
+    // resurrect a sidebar or a second mount.
+    expect(screen.queryByTestId("studio-files-panel")).toBeNull();
+    expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
   });
 
   it("Preview dock toggle mounts the live preview panel beside the stage", async () => {
@@ -926,12 +1056,18 @@ describe("Phase 2 — Directive stages (Plan rail button removed), Files sidebar
     expect(screen.queryByTestId("design-canvas")).toBeNull();
   });
 
-  it("no standalone Plan rail button — Plan lives in the inspector's Plan tab (Larry, 2026-11-13)", async () => {
-    await renderStudioShell();
-    // The button is gone; Plan stage functionality (the inspector's
-    // Plan tab and the station contract) is untouched.
-    expect(screen.queryByTestId("workspace-stage-plan")).toBeNull();
-    // The center still homes on the shell's home surface.
+  it("Plan stage button runs the station contract: center homes on Preview and the inspector opens on its Plan tab", async () => {
+    // The rail button was retired 2026-11-13 and restored 2026-11-14
+    // (Larry's walkthrough: no Plan stage in the nav). Plan is not a
+    // center station — selecting it homes the center on Preview and
+    // opens the inspector, whose default tab is Plan (Mission /
+    // Checkpoints / Next actions).
+    const { user } = await renderStudioShell();
+    expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
+    await user.click(screen.getByTestId("workspace-stage-plan"));
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-context-inspector")).toBeTruthy();
+    });
     expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
   });
 
@@ -960,5 +1096,144 @@ describe("Phase 2 — ?tool=design deep link", () => {
       expect(screen.getByTestId("canvas-design-mode-design")).toHaveAttribute("aria-selected", "true");
     });
     expect(screen.queryByTestId("design-canvas")).toBeNull();
+  });
+});
+
+// ── Phase 0 (chat-first redesign, Larry 2026-11-14): the bottom dock NEVER
+// auto-opens. A chat send / run start (the conversation.busy edge) and agent
+// STUDIO_EVENT_OPEN_DOCK intents must leave a closed dock closed in BOTH
+// layouts; agent intents only preselect the tab. The dock opens solely by
+// the user's hand (collapsed-strip toggle, header toggle, Cmd/Ctrl+J, Esc,
+// explicit drawer deep links).
+function dispatchAgentOpenDock(tab: string) {
+  act(() => {
+    window.dispatchEvent(new CustomEvent("studio:open-dock", { detail: { tab } }));
+  });
+}
+
+describe("Phase 0 — shell layout: the dock never auto-opens", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sendMock.mockResolvedValue({ accepted: true });
+    capState.projectId = "project-1";
+    capState.projectName = "Test Project";
+    convState.busy = false;
+    window.localStorage.removeItem("litt:studio:layout-mode");
+    window.localStorage.removeItem("litt-studio-layout");
+    window.sessionStorage.removeItem("studio-dock-open");
+    globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
+    window.innerWidth = DESKTOP_WIDTH;
+    window.innerHeight = DESKTOP_HEIGHT;
+  });
+  afterEach(() => {
+    convState.busy = false;
+    window.sessionStorage.removeItem("studio-dock-open");
+  });
+
+  it("a run start (busy edge) leaves a closed dock closed — twice", async () => {
+    const { rerender } = await renderStudioShell();
+    expect(screen.getByTestId("studio-dock")).toBeTruthy();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+
+    // First run starts: busy flips false → true, as every chat send does.
+    convState.busy = true;
+    rerender(<CommandStudio />);
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+
+    // The run ends and a second run starts — the dock still never opens.
+    convState.busy = false;
+    rerender(<CommandStudio />);
+    convState.busy = true;
+    rerender(<CommandStudio />);
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+  });
+
+  it("an agent open-dock event preselects the tab without opening; the user's strip toggle then reveals that tab", async () => {
+    const { user } = await renderStudioShell();
+    dispatchAgentOpenDock("media");
+    // Preselection only: the dock stayed collapsed — no tab content mounted.
+    expect(screen.queryByTestId("dock-content-media")).toBeNull();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
+    const media = await screen.findByTestId("dock-content-media");
+    expect(media.style.display).not.toBe("none");
+    expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("dock-tab-activity")).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByTestId("dock-content-activity").style.display).toBe("none");
+  });
+
+  it("an agent open-terminal event routes to the Terminal station and still does not open the dock", async () => {
+    await renderStudioShell();
+    dispatchAgentOpenDock("terminal");
+    await waitFor(() => {
+      expect(screen.getByTestId("stage-surface-terminal")).toHaveAttribute("data-active", "true");
+    });
+    expect(screen.queryByTestId("dock-content-terminal")).toBeNull();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+  });
+
+  it("the user's own strip toggle opens the dock and its close button closes it", async () => {
+    const { user } = await renderStudioShell();
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
+    expect(await screen.findByTestId("dock-content-activity")).toBeTruthy();
+    await user.click(screen.getByTestId("dock-close"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    });
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+  });
+});
+
+describe("Phase 0 — classic layout: the dock never auto-opens", () => {
+  beforeEach(() => {
+    // Force the classic layout (the mobile base body and the desktop
+    // escape hatch); the shell layout is covered above.
+    window.localStorage.setItem("litt:studio:layout-mode", "classic");
+    // Classic dockOpen restores sessionStorage "studio-dock-open" — start
+    // from the user-closed state so only this test's actions can open it.
+    window.sessionStorage.removeItem("studio-dock-open");
+    convState.busy = false;
+  });
+  afterEach(() => {
+    window.localStorage.removeItem("litt:studio:layout-mode");
+    window.sessionStorage.removeItem("studio-dock-open");
+    convState.busy = false;
+  });
+
+  async function renderClassicStudio() {
+    const user = userEvent.setup();
+    const view = render(<CommandStudio />);
+    await waitFor(() => {
+      if (!screen.queryByTestId("studio-dock")) {
+        throw new Error("StudioDock has not mounted");
+      }
+    });
+    return { user, ...view };
+  }
+
+  it("a run start (busy edge) leaves a closed dock closed", async () => {
+    const { rerender } = await renderClassicStudio();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+
+    convState.busy = true;
+    rerender(<CommandStudio />);
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+  });
+
+  it("an agent open-dock event preselects the tab without opening; the user's strip toggle then reveals that tab", async () => {
+    const { user } = await renderClassicStudio();
+    dispatchAgentOpenDock("media");
+    expect(screen.queryByTestId("dock-content-media")).toBeNull();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
+    const media = await screen.findByTestId("dock-content-media");
+    expect(media.style.display).not.toBe("none");
+    expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("dock-content-activity").style.display).toBe("none");
   });
 });

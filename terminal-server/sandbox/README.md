@@ -125,12 +125,22 @@ Phase 1 (branch `agent/studio-sandbox-phase1`) adds:
   ONE routed surface is `workspace.exec`
   (`POST /internal/workspace/:workspaceId/exec` in `../server.ts`),
   and it routes only when ALL hold: real provider configured,
-  staging process (`RAILWAY_ENVIRONMENT_NAME=staging` or
-  `SANDBOX_STAGING=true`), requester on the terminal owner allowlist,
-  and `SandboxVerificationService.isVerified()` true right now.
+  routing-enabled process (Phase 1: staging via
+  `RAILWAY_ENVIRONMENT_NAME=staging` or `SANDBOX_STAGING=true`;
+  Phase 2: production only with the explicit
+  `SANDBOX_PRODUCTION_ENABLED=true` switch), requester on the
+  terminal owner allowlist, and
+  `SandboxVerificationService.isVerified()` true right now.
   Otherwise the endpoint falls through to its pre-Phase-1 path,
   byte-identical. Bindings are per (userId, projectId, workspaceId);
-  routed executions are audit-logged with those identities.
+  routed executions are audit-logged with those identities. The gate
+  can be consulted without executing via
+  `GET /internal/sandbox/availability?userId=<clerkId>` in
+  `../server.ts` (service-auth; booleans + provider name only).
+  Exec requests may carry per-command PROJECT env (`env` in the
+  request body): providers guard it by VALUE against the terminal's
+  own platform secrets (`env.ts` `guardPerCommandProjectEnv`), so a
+  project's own keys are accepted while platform values never cross.
 
 Configuration reference:
 
@@ -140,6 +150,7 @@ Configuration reference:
 | `E2B_API_KEY` | E2B API key. Read only by `config.ts`; never logged, never placed in a sandbox. |
 | `E2B_TEMPLATE_ID` | Template to boot. Default `litt-sandbox-v1`: build & publish from `../sandbox.Dockerfile` (`e2b template build`) before the staging canary. Set to `base` only for a smoke run. |
 | `SANDBOX_STAGING` | `true` marks a non-Railway staging rig. Railway staging is detected via `RAILWAY_ENVIRONMENT_NAME=staging`. |
+| `SANDBOX_PRODUCTION_ENABLED` | Phase 2: `true` on the PRODUCTION service explicitly enables routing there (with provider + owner + fresh canary). Set it LAST in the production cutover — configuring the provider alone never opens production routing. |
 | `TERMINAL_OWNER_CLERK_IDS` | Existing owner allowlist; the gate reuses it. |
 
 Template sizing note: the current E2B SDK sets vCPU/memory at

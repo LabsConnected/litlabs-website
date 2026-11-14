@@ -9,6 +9,7 @@
  * operations. The browser calls Next.js, which calls terminal-server.
  */
 
+import { createPreviewToken } from "@/lib/projects/preview-token";
 import { resolveTerminalInternalUrl } from "@/lib/terminal-url";
 
 const INTERNAL_KEY = () => process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
@@ -67,6 +68,7 @@ export const TERMINAL_TIMEOUTS = {
   stopPreview: 20_000,
   getPreviewLogs: 20_000,
   runtimeSnapshot: 10_000,
+  sandboxAvailability: 5_000,
 } as const;
 
 /**
@@ -442,13 +444,39 @@ export async function getPreviewLogsInternal(
   return data.logs ?? [];
 }
 
+export interface PreviewProxyScope {
+  userId: string;
+  projectId: string;
+}
+
 /**
  * Build the public preview proxy URL for a workspace.
  * The browser uses this URL to access the running dev server.
+ *
+ * Phase 2 build-list fix #3: when the caller knows the owner and
+ * project, the URL carries a SIGNED preview token minted for exactly
+ * that (user, project, workspace) instead of the shared global
+ * PREVIEW_ACCESS_TOKEN — the global credential must never reach a
+ * browser. Signed tokens expire after 5 minutes, so a scoped URL is a
+ * short-lived capability, not a durable link (callers re-mint on
+ * read). When no scope is supplied — or minting is unavailable in this
+ * environment — the historical global-token behavior is preserved:
+ * the terminal accepts both channels during the transition.
  */
-export function buildPreviewProxyUrl(workspaceId: string): string {
+export function buildPreviewProxyUrl(workspaceId: string, scope?: PreviewProxyScope): string {
   const base = TERMINAL_BASE().replace(/\/+$/, "");
-  const token = process.env.PREVIEW_ACCESS_TOKEN ?? "";
+  let token = process.env.PREVIEW_ACCESS_TOKEN ?? "";
+  if (scope) {
+    try {
+      token = createPreviewToken(scope.userId, {
+        projectId: scope.projectId,
+        workspaceId,
+      }).token;
+    } catch {
+      // Minting unavailable (e.g. TERMINAL_AUTH_SECRET unset locally):
+      // fall back to the legacy channel rather than breaking preview.
+    }
+  }
   const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
 
   const candidate = `${base}/preview/${encodeURIComponent(workspaceId)}${tokenParam}`;
@@ -504,4 +532,82 @@ export async function getRuntimeSnapshotInternal(): Promise<unknown> {
   }
 
   return (await resp.json()) as unknown;
+}
+
+export interface SandboxAvailability {
+  provider: string | null;
+  routingEnabled: boolean;
+  verified: boolean;
+  allowed: boolean;
+  reason: string;
+}
+
+const SANDBOX_AVAILABILITY_UNAVAILABLE: SandboxAvailability = {
+  provider: null,
+  routingEnabled: false,
+  verified: false,
+  allowed: false,
+  reason: "availability-unavailable",
+};
+
+const SANDBOX_AVAILABILITY_CACHE_TTL_MS = 12_000;
+const sandboxAvailabilityCache = new Map<
+  string,
+  { value: SandboxAvailability; expiresAt: number }
+>();
+
+/**
+ * Ask the terminal server whether sandboxed execution is CURRENTLY
+ * available for a user (Phase 2 build-list §3.2). This is the web
+ * process's only window into the sandbox gate: the web process cannot
+ * observe the canary or runner state itself, and no web-side env flag
+ * may substitute for this answer.
+ *
+ * FAIL CLOSED: any error, timeout, non-OK status, or unparseable body
+ * yields { allowed: false }. Results are cached per user for ~12s so
+ * the Studio's polling routes do not hammer the terminal server; a
+ * stale "allowed" can only ever be seconds old, and the terminal
+ * re-checks its own gate on every routed call.
+ */
+export async function getSandboxAvailability(userId: string): Promise<SandboxAvailability> {
+  const cached = sandboxAvailabilityCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  let value: SandboxAvailability = SANDBOX_AVAILABILITY_UNAVAILABLE;
+  try {
+    const key = INTERNAL_KEY();
+    const base = TERMINAL_BASE();
+    if (key.length >= 32 && base) {
+      const url = `${base}/internal/sandbox/availability?userId=${encodeURIComponent(userId)}`;
+      const resp = await fetchWithTimeout(
+        url,
+        { method: "GET", headers: { "X-Internal-Service-Key": key } },
+        TERMINAL_TIMEOUTS.sandboxAvailability,
+        "GET /internal/sandbox/availability",
+      );
+      if (resp.ok) {
+        const body = (await resp.json()) as Partial<SandboxAvailability>;
+        value = {
+          provider: typeof body.provider === "string" ? body.provider : null,
+          routingEnabled: body.routingEnabled === true,
+          verified: body.verified === true,
+          allowed: body.allowed === true,
+          reason: typeof body.reason === "string" ? body.reason : "availability-unavailable",
+        };
+      }
+    }
+  } catch {
+    value = SANDBOX_AVAILABILITY_UNAVAILABLE;
+  }
+
+  sandboxAvailabilityCache.set(userId, {
+    value,
+    expiresAt: Date.now() + SANDBOX_AVAILABILITY_CACHE_TTL_MS,
+  });
+  return value;
+}
+
+/** Convenience for gate sites: true only on a fresh allowed:true. */
+export async function isSandboxExecutionAvailable(userId: string): Promise<boolean> {
+  return (await getSandboxAvailability(userId)).allowed;
 }

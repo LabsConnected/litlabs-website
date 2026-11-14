@@ -11,6 +11,7 @@ import {
   getPreviewStatusInternal,
   stopPreviewInternal,
   buildPreviewProxyUrl,
+  isSandboxExecutionAvailable,
 } from "@/lib/terminal-internal-client";
 import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
 import { createPreviewToken } from "@/lib/projects/preview-token";
@@ -54,10 +55,24 @@ export async function GET(
   // policy, without parsing free text. Managed projects are excluded: a
   // restart can genuinely succeed for them. (Same derivation the
   // workspace-state route performs for its channel.)
+  // Phase 2: the deterministic derivation below holds only while the
+  // sandbox is NOT available for this user — when the terminal reports
+  // sandboxed execution available, a settled failure is retryable, not
+  // a permanent refusal. The probe runs only for the exact derivation
+  // shape (settled failure, no embedded code, repo-backed, host guard
+  // refusing) and fails closed.
+  const sandboxAvailable =
+    (project.workspaceStatus === "failed" || project.workspaceStatus === "error") &&
+    project.sourceType === "github" &&
+    !isHostExecutionPermitted() &&
+    !extractEmbeddedErrorCode(project.workspaceError)
+      ? await isSandboxExecutionAvailable(userId)
+      : false;
+
   const workspaceFailureCode =
     project.workspaceStatus === "failed" || project.workspaceStatus === "error"
       ? extractEmbeddedErrorCode(project.workspaceError) ??
-        (project.sourceType === "github" && !isHostExecutionPermitted()
+        (project.sourceType === "github" && !isHostExecutionPermitted() && !sandboxAvailable
           ? HOST_EXECUTION_DISABLED_CODE
           : null)
       : null;
@@ -248,7 +263,7 @@ export async function GET(
     }
 
     const previewUrl = actuallyReady
-      ? buildPreviewProxyUrl(project.workspaceId)
+      ? buildPreviewProxyUrl(project.workspaceId, { userId, projectId })
       : null;
 
     return NextResponse.json({
@@ -366,7 +381,7 @@ export async function POST(
     });
 
     const previewUrl = result.status === "ready"
-      ? buildPreviewProxyUrl(workspaceId)
+      ? buildPreviewProxyUrl(workspaceId, { userId, projectId })
       : null;
 
     await updateProjectRuntime(projectId, userId, {

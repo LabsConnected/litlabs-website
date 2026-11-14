@@ -81,6 +81,16 @@ export interface ExecuteCommandInput {
   stdin?: string;
   timeoutMs?: number;
   cwd?: string;
+  /**
+   * Per-command PROJECT env (Phase 2, design note §1.6): variables
+   * that apply to this one command only, layered over the sandbox's
+   * composed base env. Identity variables in it are ignored (identity
+   * always wins), and providers refuse any value equal to one of the
+   * terminal's own platform secrets (env.ts value-based check) — a
+   * project's own secrets under the same NAMES are fine. Mirrored on
+   * the web-side contract (src/lib/terminal-v1) per the seam rule.
+   */
+  env?: Record<string, string>;
 }
 
 export interface ExecuteCommandResult {
@@ -112,6 +122,47 @@ export interface PreviewEndpoint {
   state: "closed" | "requesting" | "private" | "public" | "expired" | "revoked" | "failed";
   previewToken: string;
   expiresAt: string;
+}
+
+// ─── File transfer capability (Phase 2 lifecycle, design note §1.6) ──
+//
+// Moving bytes between the terminal's workspace volume and a sandbox
+// is a separate capability from command execution: sync-back must be
+// able to enumerate and copy a tree without running repo-influenced
+// commands to do it. Paths are ABSOLUTE sandbox paths (the sandbox
+// root for a workspace is "/workspace" — see workspace-executor.ts).
+// Listing paths are relative to the listed root and always use POSIX
+// separators, on every provider.
+
+export interface SandboxFileEntry {
+  /** Path relative to the listed root, POSIX separators ("" never occurs). */
+  path: string;
+  type: "file" | "dir" | "symlink";
+  /** Byte size for files; 0 for dirs and symlinks. */
+  size: number;
+  /** Modification time in epoch ms; 0 when the provider cannot report it. */
+  mtimeMs: number;
+  /** Unix permission bits (e.g. 0o644); 0 when the provider cannot report them. */
+  mode: number;
+  /** Symlink target exactly as stored; only for type "symlink". */
+  linkTarget?: string;
+}
+
+export interface SandboxFileTransfer {
+  /** Read a whole file. Throws when the path is absent or not a file. */
+  readFile(sandboxId: string, path: string): Promise<Uint8Array>;
+  /** Write a whole file, creating parent directories as needed. */
+  writeFile(sandboxId: string, path: string, data: Uint8Array): Promise<void>;
+  /** List one directory (non-recursive). Entry paths are root-relative. */
+  listDir(sandboxId: string, path: string): Promise<SandboxFileEntry[]>;
+  /** List a whole tree recursively. Entry paths are root-relative. */
+  listTree(sandboxId: string, path: string): Promise<SandboxFileEntry[]>;
+  /** Remove a file, symlink, or directory (recursively). Missing is a no-op. */
+  removePath(sandboxId: string, path: string): Promise<void>;
+  /** Create a directory and its parents. Existing is a no-op. */
+  makeDir(sandboxId: string, path: string): Promise<void>;
+  /** Rename/move a path within the sandbox. */
+  renamePath(sandboxId: string, oldPath: string, newPath: string): Promise<void>;
 }
 
 /**
@@ -157,6 +208,21 @@ export interface SandboxProvider {
 
   /** Check if the provider is healthy and ready. */
   health(): Promise<{ healthy: boolean; details?: Record<string, unknown> }>;
+
+  /**
+   * Optional file-transfer capability (Phase 2 lifecycle). Providers
+   * that can move bytes implement it; the workspace lifecycle refuses
+   * to sync through a provider that lacks it rather than improvising
+   * transfers through shell commands. Absent on the disabled provider.
+   */
+  readonly fileTransfer?: SandboxFileTransfer;
+
+  /**
+   * Optional: extend a live sandbox's remaining lifetime (the preview
+   * keepalive — design note §3.3). Providers without a session clock
+   * omit it.
+   */
+  extendTimeout?(sandboxId: string, timeoutMs: number): Promise<void>;
 }
 
 /**

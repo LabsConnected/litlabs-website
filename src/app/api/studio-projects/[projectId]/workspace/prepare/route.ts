@@ -8,6 +8,7 @@ import {
   hostExecutionDisabledResponse,
   isHostExecutionPermitted,
 } from "@/lib/host-execution-guard";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 
 /**
  * POST /api/studio-projects/[projectId]/workspace/prepare
@@ -38,10 +39,17 @@ export async function POST(
   // this exact body to the "not available yet" gate presentation.
   // A ready workspace falls through (GitHub mirror refresh still runs),
   // and trusted local environments are unaffected.
+  //
+  // Phase 2: the gate also opens when the terminal server reports
+  // sandboxed execution CURRENTLY available for this user (the web
+  // process cannot observe the canary itself, so it asks). The
+  // availability probe runs only when the host guard would refuse, and
+  // any probe failure keeps the gate closed — fail closed.
   if (
     project.workspaceStatus !== "ready" &&
     resolveSourceKind(project) === "github" &&
-    !isHostExecutionPermitted()
+    !isHostExecutionPermitted() &&
+    !(await isSandboxExecutionAvailable(userId))
   ) {
     return NextResponse.json(
       hostExecutionDisabledResponse("workspace.prepare"),

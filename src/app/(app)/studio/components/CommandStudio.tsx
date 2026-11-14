@@ -611,6 +611,28 @@ function CommandStudioContent() {
     setDockOpen(true);
   }, [studioShellActive, openStageSurface]);
 
+  // Agent-initiated dock intents (STUDIO_EVENT_OPEN_DOCK) are PRESELECTION
+  // ONLY (Phase 0, Larry 2026-11-14): they may record which dock tab would
+  // show, but they must never open the dock — in either layout. The shell
+  // has no dock terminal or dock inspector (the terminal lives in its
+  // Terminal station and the inspector in the right panel), so those two
+  // intents keep their existing non-dock routing there; in the classic
+  // layout, where every tab lives inside the dock, preselection (setting
+  // the tab without opening) is all that happens.
+  const handlePreselectDockTab = useCallback((tab: StudioDockTab) => {
+    if (studioShellActive) {
+      if (tab === "inspector") {
+        setInspectorOpen(true);
+        return;
+      }
+      if (tab === "terminal") {
+        openStageSurface("terminal");
+        return;
+      }
+    }
+    setDockTab(tab);
+  }, [studioShellActive, openStageSurface]);
+
   // The query string written by the state→URL effect on its last pass —
   // used by URL→state to recognize (and skip) our own echoes.
   const lastWrittenUrlRef = useRef<string | null>(null);
@@ -855,6 +877,10 @@ function CommandStudioContent() {
   // Workspace-first focus: selecting a real work surface collapses the large
   // welcome/chat panel to the compact rail. Chat stays mounted and one click
   // away through the rail, so this only changes emphasis, not availability.
+  // Only USER selections count: the task-binding sync below pre-seeds this
+  // tracker when it restores a task's remembered surface, so a restore on
+  // entry (or on a task switch) never collapses the panel — Larry's rule
+  // (2026-11-12): the panel always shows when Studio opens.
   const previousStageSurfaceRef = useRef<StudioStageSurface>(stageSurface);
   useEffect(() => {
     if (previousStageSurfaceRef.current === stageSurface) return;
@@ -1144,7 +1170,9 @@ function CommandStudioContent() {
         return;
       }
       if (tab === "activity" || tab === "terminal" || tab === "inspector" || tab === "media") {
-        handleOpenDockTab(tab);
+        // Agent intents preselect only — they never open the dock
+        // (Phase 0). The dock opens only by the user's hand.
+        handlePreselectDockTab(tab);
       }
     };
     const requestDeploy = (e: Event) => {
@@ -1180,7 +1208,7 @@ function CommandStudioContent() {
       window.removeEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
       window.removeEventListener(STUDIO_EVENT_OPEN_FILE, openFile);
     };
-  }, [handleOpenDockTab, handleOpenFilesPanel]);
+  }, [handlePreselectDockTab, handleOpenFilesPanel]);
 
   // Dock open helpers — both are OPEN actions (switch tab + ensure
   // open), never a toggle-closed. The dock's own close button and the
@@ -1640,17 +1668,12 @@ function CommandStudioContent() {
   // reopened dialog mints a fresh one.
   const createSubmissionRef = useRef<CreateSubmission | null>(null);
 
-  // Auto-reveal the dock Activity tab when LiTT starts executing,
-  // without stealing focus. This does NOT call .focus() on any
-  // element — the user's current focus (e.g., the composer) is preserved.
-  const prevBusyRef = useRef(false);
-  useEffect(() => {
-    const isBusy = conversation.busy || creatingProject;
-    if (isBusy && !prevBusyRef.current) {
-      handleOpenDockTab("activity");
-    }
-    prevBusyRef.current = isBusy;
-  }, [conversation.busy, creatingProject, handleOpenDockTab]);
+  // Phase 0 (chat-first redesign, Larry 2026-11-14): the bottom dock NEVER
+  // auto-opens. A chat send / run start must not change dock open state in
+  // either layout — the dock opens only by the user's hand (header toggle,
+  // the collapsed strip, Cmd/Ctrl+J, Esc, explicit drawer deep links). Run
+  // progress stays visible on the collapsed strip's activity pulse dot.
+  // (The busy-edge auto-reveal effect that used to live here is deleted.)
 
   // ── Auto-switch workspace to Media when LiTT generates an artifact ──
   // When a new assistant message contains an image/video/music artifact,
@@ -2576,6 +2599,18 @@ function CommandStudioContent() {
     // surface (acceptance: tool=preview rendered the stale "plan" surface).
     const urlStation = isFirstSync ? toolParamToStation(searchParams.get("tool")) : null;
     const mapped = urlStation ?? centerStation(resolveStageSurface(task?.lastOpenedSurface));
+    // A restored surface is not a user stage selection: seed the
+    // workspace-first tracker with the restored value BEFORE applying
+    // it, so the auto-collapse effect above does not read the restore
+    // as "user picked a work surface" and collapse the chat panel.
+    // Without this, any task whose remembered surface differs from the
+    // initial station (e.g. "design" vs the Preview default) opened
+    // Studio on the 64px rail — violating Larry's always-show rule
+    // (2026-11-12) — and the phantom collapse was then persisted to
+    // sessionStorage as if it were a deliberate choice. Explicit
+    // selections (rail, dock, deep links) do not pass through here and
+    // keep the workspace-first collapse.
+    previousStageSurfaceRef.current = mapped;
     setStageSurface((current) => (current === mapped ? current : mapped));
     setMountedSurfaces((prev) => (prev.has(mapped) ? prev : new Set(prev).add(mapped)));
     // searchParams is read only on the first sync — deliberately not a dep.
@@ -3014,12 +3049,12 @@ function CommandStudioContent() {
           cards: mission · checkpoints · next actions. All data comes from
           the same stores as the plan surface; no fabricated content.
           Mobile (<1024px): the card stack is replaced by the single
-          MobileBuildStatusBar; the full cards live in the Build sheet. */}
-      {isMobileLitt ? (
-        <div className="shrink-0 px-3 pt-2">
-          <MobileBuildStatusBar open={mobileBuildOpen} onOpen={() => setMobileBuildOpen(true)} />
-        </div>
-      ) : null}
+          MobileBuildStatusBar control; the full cards live in the Build
+          sheet. Clean-open (Larry, 2026-11-13): that control is NOT
+          rendered here anymore — the old dark bar pinned above the
+          transcript sat over the first message. It now renders in the
+          LiTTMobileSheet header chrome (buildStatusSlot below), light
+          and in the sheet's own layout flow. */}
       <StudioWorkSurface
         messages={conversation.messages}
         conversationId={conversation.selectedConversationId ?? null}
@@ -3243,9 +3278,15 @@ function CommandStudioContent() {
   );
 
   // The project-files composition (header + StudioProjectFiles) —
-  // ONE element definition reused by the shell's Files sidebar, the
-  // classic bottom dock, and the shell's bottom dock, so the file
-  // tree is the same component with the same wiring everywhere.
+  // ONE element definition mounted in exactly one home per layout:
+  // the LiTT panel's top-row Files tab (shell + classic), the mobile
+  // LiTT sheet's Files tab, and the mobile ContextDrawer's Files tab.
+  // The shell's standalone Files sidebar slot was retired 2026-11-14
+  // (Larry: Files already lives in the chat tab) — it mounted this
+  // same element a second time beside the chat, running two live
+  // StudioProjectFiles instances on one screen. The file tree is the
+  // same component with the same wiring everywhere it appears, and
+  // never twice at once.
   const projectFilesContent = (
     <div className="flex h-full flex-col overflow-hidden">
       <div
@@ -3694,7 +3735,6 @@ function CommandStudioContent() {
                 onSelectSurface={openStageSurface}
               />
             }
-            filesPanel={projectFilesContent}
             bottomPanel={shellBottomDock}
             previewPanel={previewDockPanel ?? undefined}
             previewPanelOpen={previewDockOpen}
@@ -4311,6 +4351,9 @@ function CommandStudioContent() {
               chatContent={littChatContent}
               liveContent={littLiveContent}
               filesContent={projectFilesContent}
+              buildStatusSlot={(
+                <MobileBuildStatusBar open={mobileBuildOpen} onOpen={() => setMobileBuildOpen(true)} />
+              )}
               projectName={capabilities.projectName}
               branch={capabilities.activeBranch}
               onOpenTools={() => setMobileToolsOpen(true)}

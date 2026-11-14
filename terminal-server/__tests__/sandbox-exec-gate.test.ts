@@ -4,7 +4,7 @@
  * The gate is the whole safety story of Phase 1, so every closure is
  * proven independently:
  *   1. provider not configured (disabled default) -> never routes
- *   2. not a staging process                      -> never routes
+ *   2. routing not enabled for this environment  -> never routes
  *   3. requester not the owner                    -> never routes
  *   4. canary red / never-run / STALE             -> never routes
  *   5. all four green                             -> routes, reuses
@@ -38,7 +38,7 @@ const OTHER = "user_someone_else";
 function gateWith(overrides: Partial<ConstructorParameters<typeof SandboxExecGate>[0]> = {}) {
   return new SandboxExecGate({
     providerEnabled: true,
-    staging: true,
+    routingEnabled: true,
     isOwner: (u) => u === OWNER,
     isVerified: () => true,
     ...overrides,
@@ -46,7 +46,7 @@ function gateWith(overrides: Partial<ConstructorParameters<typeof SandboxExecGat
 }
 
 describe("SandboxExecGate — each condition closes independently", () => {
-  it("opens only when provider + staging + owner + canary all pass", () => {
+  it("opens only when provider + routing-enabled + owner + canary all pass", () => {
     expect(gateWith().decide(OWNER)).toEqual({ allowed: true, reason: "ok" });
   });
 
@@ -57,10 +57,10 @@ describe("SandboxExecGate — each condition closes independently", () => {
     });
   });
 
-  it("closes outside staging", () => {
-    expect(gateWith({ staging: false }).decide(OWNER)).toEqual({
+  it("closes when routing is not enabled for this environment", () => {
+    expect(gateWith({ routingEnabled: false }).decide(OWNER)).toEqual({
       allowed: false,
-      reason: "not-staging",
+      reason: "routing-not-enabled",
     });
   });
 
@@ -86,7 +86,7 @@ describe("SandboxExecRouter", () => {
 
   it("returns null and never touches the provider when the gate is closed", async () => {
     const provider = new FakeSandboxProvider();
-    const router = new SandboxExecRouter(provider, gateWith({ staging: false }), {
+    const router = new SandboxExecRouter(provider, gateWith({ routingEnabled: false }), {
       log: () => {},
     });
     expect(await router.tryExecute(req)).toBeNull();
@@ -189,6 +189,43 @@ describe("sandbox config resolution", () => {
     expect(resolveSandboxRuntimeConfig({ SANDBOX_STAGING: "true" }).staging).toBe(true);
     expect(
       resolveSandboxRuntimeConfig({ RAILWAY_ENVIRONMENT_NAME: "production" }).staging,
+    ).toBe(false);
+  });
+
+  it("production routing requires the explicit SANDBOX_PRODUCTION_ENABLED switch (Phase 2)", () => {
+    // Production env alone: routing stays OFF (Phase 1 behavior).
+    const prodPlain = resolveSandboxRuntimeConfig({
+      RAILWAY_ENVIRONMENT_NAME: "production",
+      SANDBOX_PROVIDER: "e2b",
+      E2B_API_KEY: "k",
+    });
+    expect(prodPlain.productionEnabled).toBe(false);
+    expect(prodPlain.routingEnabled).toBe(false);
+
+    // The explicit switch turns routing on for production.
+    const prodEnabled = resolveSandboxRuntimeConfig({
+      RAILWAY_ENVIRONMENT_NAME: "production",
+      SANDBOX_PROVIDER: "e2b",
+      E2B_API_KEY: "k",
+      SANDBOX_PRODUCTION_ENABLED: "true",
+    });
+    expect(prodEnabled.productionEnabled).toBe(true);
+    expect(prodEnabled.routingEnabled).toBe(true);
+    expect(prodEnabled.staging).toBe(false);
+
+    // Staging routes without the production switch (Phase 1 parity).
+    expect(
+      resolveSandboxRuntimeConfig({ RAILWAY_ENVIRONMENT_NAME: "staging" }).routingEnabled,
+    ).toBe(true);
+
+    // The switch alone constructs nothing: without provider + key the
+    // factory still yields the disabled provider.
+    expect(
+      resolveSandboxRuntimeConfig({ SANDBOX_PRODUCTION_ENABLED: "true" }).providerName,
+    ).toBe("disabled");
+    // Only the exact string "true" counts.
+    expect(
+      resolveSandboxRuntimeConfig({ SANDBOX_PRODUCTION_ENABLED: "1" }).productionEnabled,
     ).toBe(false);
   });
 

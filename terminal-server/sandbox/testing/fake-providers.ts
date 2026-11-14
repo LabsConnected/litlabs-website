@@ -29,6 +29,16 @@
  * exits 127 — fail-closed, so a canary change that introduces a new
  * probe command fails loudly here until the fake learns it.
  *
+ * Phase 2 lifecycle additions (same fail-closed rule): the file
+ * transfer capability over the in-memory filesystem, port exposure
+ * with a deliberately unroutable host, timeout extension recording,
+ * and exec shapes for the lifecycle's own commands — a small git
+ * model (clone / remote set-url / config --get / rev-parse),
+ * package-manager install, `test -d/-f`, `ln -sfn`, the detached
+ * preview start template, and `kill <pid>`. start/stop now track the
+ * instance state the contract promises (the canary never calls them,
+ * so Phase 0/1 behavior is unchanged).
+ *
  * These fakes are how the contract is integration-tested in CI without
  * a vendor account. They are NOT a substitute for running the canary
  * against the real provider before the Phase 4 policy flip (see
@@ -44,6 +54,8 @@ import {
   type ExecuteCommandInput,
   type ExecuteCommandResult,
   type PreviewEndpoint,
+  type SandboxFileEntry,
+  type SandboxFileTransfer,
   type SandboxInstance,
   type SandboxProvider,
   type SandboxResourceLimits,
@@ -73,6 +85,25 @@ export interface FakeSandboxProviderOptions {
   /** Values the limits-visibility probe reports when ignoreLimits is set. */
   hostTotalmemBytes?: number;
   hostCpuCount?: number;
+  /**
+   * Phase 2 lifecycle: files a fake `git clone` materializes in the
+   * working tree (paths relative to the clone target). Defaults to a
+   * single README so sync-back has something real to carry.
+   */
+  cloneFiles?: Record<string, string>;
+  /**
+   * Phase 2 lifecycle NEGATIVE knob: when true, the fake clone writes
+   * the per-command token env value into .git/config (simulating a
+   * URL-embedded token), so the lifecycle's fatal verify step has a
+   * real leak to catch. Never set outside that one test class.
+   */
+  cloneLeaksTokenIntoConfig?: boolean;
+}
+
+interface FakeGitRepo {
+  config: string;
+  head: string;
+  branch: string;
 }
 
 interface FakeSandboxRecord {
@@ -80,6 +111,18 @@ interface FakeSandboxRecord {
   env: Record<string, string>;
   fs: Map<string, string>;
   hostFilesWritten: string[];
+  /** Phase 2: explicit directories (the fs map alone cannot see empty ones). */
+  dirs: Set<string>;
+  /** Phase 2: symlink path -> target as stored. */
+  links: Map<string, string>;
+  /** Phase 2: git repositories keyed by absolute repo directory. */
+  gitRepos: Map<string, FakeGitRepo>;
+  /** Phase 2: the detached preview process, once started. */
+  previewPid: number | null;
+  /** Phase 2: extendTimeout calls, in ms. */
+  timeoutExtensions: number[];
+  /** Phase 2: monotonic clock for file mtimes. */
+  clock: number;
 }
 
 function result(exitCode: number, stdout = "", stderr = ""): ExecuteCommandResult {
@@ -142,17 +185,40 @@ export class FakeSandboxProvider implements SandboxProvider {
       env: { ...(input.env ?? {}) },
       fs: this.options.shareFilesystem ? this.sharedFs : new Map<string, string>(),
       hostFilesWritten: [],
+      dirs: new Set(["/workspace"]),
+      links: new Map(),
+      gitRepos: new Map(),
+      previewPid: null,
+      timeoutExtensions: [],
+      clock: 0,
     });
     return instance;
   }
 
   async get(sandboxId: string): Promise<SandboxInstance | null> {
-    return this.sandboxes.get(sandboxId)?.instance ?? null;
+    const record = this.sandboxes.get(sandboxId);
+    return record ? { ...record.instance } : null;
   }
 
-  async start(_sandboxId: string): Promise<void> {}
+  async start(sandboxId: string): Promise<void> {
+    const record = this.sandboxes.get(sandboxId);
+    if (record) record.instance.state = "running";
+  }
 
-  async stop(_sandboxId: string): Promise<void> {}
+  async stop(sandboxId: string): Promise<void> {
+    const record = this.sandboxes.get(sandboxId);
+    if (record) record.instance.state = "stopped";
+  }
+
+  /** Timeout extensions recorded for a sandbox (preview keepalive tests). */
+  timeoutExtensionsFor(sandboxId: string): number[] {
+    return this.sandboxes.get(sandboxId)?.timeoutExtensions ?? [];
+  }
+
+  async extendTimeout(sandboxId: string, timeoutMs: number): Promise<void> {
+    const record = this.sandboxes.get(sandboxId);
+    if (record) record.timeoutExtensions.push(timeoutMs);
+  }
 
   async destroy(sandboxId: string): Promise<void> {
     this.calls.destroy += 1;
@@ -176,8 +242,151 @@ export class FakeSandboxProvider implements SandboxProvider {
     throw new Error("FakeSandboxProvider does not support terminal attach");
   }
 
-  async exposePort(_sandboxId: string, _port: number): Promise<PreviewEndpoint> {
-    throw new Error("FakeSandboxProvider does not support port exposure");
+  async exposePort(sandboxId: string, port: number): Promise<PreviewEndpoint> {
+    const record = this.sandboxes.get(sandboxId);
+    if (!record) throw new Error(`no such sandbox: ${sandboxId}`);
+    return {
+      port,
+      // Deliberately unroutable host: tests assert this string never
+      // reaches a browser-facing surface (design note §3.5).
+      url: `https://fake-preview-${sandboxId}-${port}.invalid`,
+      state: "private",
+      previewToken: `fake-traffic-${sandboxId}`,
+      expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+    };
+  }
+
+  /**
+   * Phase 2 file transfer over the in-memory filesystem. Paths are
+   * absolute sandbox paths; listing paths come back relative to the
+   * listed root, matching the real providers' contract.
+   */
+  readonly fileTransfer: SandboxFileTransfer = {
+    readFile: async (sandboxId, path) => {
+      const record = this.recordFor(sandboxId);
+      const content = this.readFile(record, path);
+      if (content === null) throw new Error(`no such file: ${path}`);
+      return new TextEncoder().encode(content);
+    },
+    writeFile: async (sandboxId, path, data) => {
+      const record = this.recordFor(sandboxId);
+      this.writeFile(record, path, new TextDecoder().decode(data));
+      this.registerParents(record, path);
+    },
+    listDir: async (sandboxId, path) => {
+      const record = this.recordFor(sandboxId);
+      return this.listEntries(record, path, false);
+    },
+    listTree: async (sandboxId, path) => {
+      const record = this.recordFor(sandboxId);
+      return this.listEntries(record, path, true);
+    },
+    removePath: async (sandboxId, path) => {
+      const record = this.recordFor(sandboxId);
+      this.removePath(record, path);
+    },
+    makeDir: async (sandboxId, path) => {
+      const record = this.recordFor(sandboxId);
+      record.dirs.add(path);
+      this.registerParents(record, path);
+    },
+    renamePath: async (sandboxId, oldPath, newPath) => {
+      const record = this.recordFor(sandboxId);
+      const content = this.readFile(record, oldPath);
+      if (content !== null) {
+        this.writeFile(record, newPath, content);
+        record.fs.delete(oldPath);
+        return;
+      }
+      if (record.links.has(oldPath)) {
+        record.links.set(newPath, record.links.get(oldPath) as string);
+        record.links.delete(oldPath);
+        return;
+      }
+      // Directory rename: move every key under the prefix.
+      const prefix = `${oldPath}/`;
+      for (const key of [...record.fs.keys()]) {
+        if (key.startsWith(prefix)) {
+          record.fs.set(`${newPath}${key.slice(oldPath.length)}`, record.fs.get(key) as string);
+          record.fs.delete(key);
+        }
+      }
+      record.dirs.delete(oldPath);
+      record.dirs.add(newPath);
+    },
+  };
+
+  private recordFor(sandboxId: string): FakeSandboxRecord {
+    const record = this.sandboxes.get(sandboxId);
+    if (!record) throw new Error(`no such sandbox: ${sandboxId}`);
+    return record;
+  }
+
+  private registerParents(record: FakeSandboxRecord, path: string): void {
+    const parts = path.split("/").filter(Boolean);
+    let current = "";
+    for (const part of parts.slice(0, -1)) {
+      current += `/${part}`;
+      record.dirs.add(current);
+    }
+  }
+
+  private removePath(record: FakeSandboxRecord, path: string): void {
+    record.fs.delete(path);
+    record.links.delete(path);
+    if (record.dirs.has(path)) {
+      record.dirs.delete(path);
+      const prefix = `${path}/`;
+      for (const key of [...record.fs.keys()]) {
+        if (key.startsWith(prefix)) record.fs.delete(key);
+      }
+      for (const key of [...record.links.keys()]) {
+        if (key.startsWith(prefix)) record.links.delete(key);
+      }
+      for (const dir of [...record.dirs]) {
+        if (dir.startsWith(prefix)) record.dirs.delete(dir);
+      }
+    }
+  }
+
+  private listEntries(
+    record: FakeSandboxRecord,
+    rootPath: string,
+    recursive: boolean,
+  ): SandboxFileEntry[] {
+    const root = rootPath.endsWith("/") ? rootPath.slice(0, -1) : rootPath;
+    const prefix = `${root}/`;
+    const out = new Map<string, SandboxFileEntry>();
+    const consider = (absPath: string, entry: SandboxFileEntry) => {
+      if (!absPath.startsWith(prefix)) return;
+      const rel = absPath.slice(prefix.length);
+      if (!rel) return;
+      if (!recursive && rel.includes("/")) return;
+      out.set(rel, { ...entry, path: rel });
+    };
+    for (const dir of record.dirs) {
+      consider(dir, { path: "", type: "dir", size: 0, mtimeMs: 0, mode: 0o755 });
+    }
+    for (const [absPath, content] of record.fs) {
+      consider(absPath, {
+        path: "",
+        type: "file",
+        size: new TextEncoder().encode(content).length,
+        mtimeMs: 0,
+        mode: 0o644,
+      });
+    }
+    for (const [absPath, target] of record.links) {
+      consider(absPath, {
+        path: "",
+        type: "symlink",
+        size: 0,
+        mtimeMs: 0,
+        mode: 0o777,
+        linkTarget: target,
+      });
+    }
+    return [...out.values()].sort((a, b) => a.path.localeCompare(b.path));
   }
 
   async execute(
@@ -212,10 +421,12 @@ export class FakeSandboxProvider implements SandboxProvider {
         : result(0, content);
     }
 
-    // printenv <NAME>
+    // printenv <NAME> — per-command env (input.env) layers over the
+    // sandbox's create-time env for this call only, like a real
+    // provider's envs-for-one-command semantics.
     m = command.match(/^printenv (\S+)$/);
     if (m) {
-      const value = record.env[m[1]];
+      const value = input.env?.[m[1]] ?? record.env[m[1]];
       return value === undefined ? result(1) : result(0, `${value}\n`);
     }
 
@@ -257,7 +468,163 @@ export class FakeSandboxProvider implements SandboxProvider {
       return result(0, `HOG_COMPLETED ${target}`);
     }
 
+    // ─── Phase 2 lifecycle shapes ─────────────────────────────────
+    // The lifecycle lane's own commands (git clone/verify, dependency
+    // install, detached preview start/stop, symlink creation, path
+    // probes). Tokenized with the same single/double-quote rules the
+    // executor's argv-safe builder emits.
+    const argv = splitShellArgs(command);
+    const cwd = input.cwd ?? "/workspace";
+
+    if (argv[0] === "git") {
+      return this.executeGit(record, argv.slice(1), cwd, input.env ?? {});
+    }
+
+    // <pm> install ... — materialize node_modules like a real install.
+    if (
+      (argv[0] === "pnpm" || argv[0] === "npm" || argv[0] === "yarn") &&
+      argv[1] === "install"
+    ) {
+      record.dirs.add(`${cwd}/node_modules`);
+      this.writeFile(record, `${cwd}/node_modules/.fake-installed`, "1");
+      return result(0);
+    }
+    if (
+      (argv[0] === "pnpm" || argv[0] === "npm" || argv[0] === "yarn") &&
+      argv[1] === "add"
+    ) {
+      return result(0);
+    }
+
+    // test -d <path> / test -f <path>
+    if (argv[0] === "test" && argv.length === 3) {
+      if (argv[1] === "-d") {
+        const exists =
+          record.dirs.has(argv[2]) ||
+          [...record.fs.keys()].some((k) => k.startsWith(`${argv[2]}/`));
+        return result(exists ? 0 : 1);
+      }
+      if (argv[1] === "-f") {
+        return result(record.fs.has(argv[2]) ? 0 : 1);
+      }
+    }
+
+    // ln -sfn <target> <path>
+    if (argv[0] === "ln" && argv[1] === "-sfn" && argv.length === 4) {
+      record.links.set(argv[3], argv[2]);
+      this.registerParents(record, argv[3]);
+      return result(0);
+    }
+
+    // Detached preview start (sandbox-runtime's fixed template):
+    // setsid nohup bash <script> >> <log> 2>&1 < /dev/null & echo $! > <pid>
+    const previewStart = command.match(
+      /^setsid nohup bash (\S+) >> (\S+) 2>&1 < \/dev\/null & echo \$! > (\S+)$/,
+    );
+    if (previewStart) {
+      this.sequence += 1;
+      const pid = 4200 + this.sequence;
+      record.previewPid = pid;
+      this.writeFile(record, previewStart[3], `${pid}\n`);
+      const prior = this.readFile(record, previewStart[2]) ?? "";
+      this.writeFile(record, previewStart[2], `${prior}[fake preview] dev server started\n`);
+      return result(0);
+    }
+
+    // kill [-TERM] <pid | -pgid> — the preview stop path (the pid is
+    // read from the pid file; the sandbox runtime kills the group).
+    if (argv[0] === "kill") {
+      const target = argv[argv.length - 1] ?? "";
+      const pid = Number(target.replace(/^-/, ""));
+      if (/^-?\d+$/.test(target) && Number.isFinite(pid)) {
+        if (record.previewPid === pid) {
+          record.previewPid = null;
+          return result(0);
+        }
+        return result(1, "", `kill: (${pid}) - No such process`);
+      }
+    }
+
     return result(127, "", `fake provider: unsupported command: ${command.slice(0, 80)}`);
+  }
+
+  /**
+   * The fake git model (Phase 2 lifecycle). Repos are keyed by
+   * absolute directory; clone materializes `.git/config` + HEAD + the
+   * configured working-tree files. The credential env is NEVER
+   * written into the config — exactly like real git with a credential
+   * helper — unless the cloneLeaksTokenIntoConfig negative knob is
+   * set, which exists so the verify step has a leak to catch.
+   */
+  private executeGit(
+    record: FakeSandboxRecord,
+    args: string[],
+    cwd: string,
+    env: Record<string, string>,
+  ): ExecuteCommandResult {
+    // Skip global options: -c <kv> pairs before the subcommand.
+    let i = 0;
+    while (args[i] === "-c" && i + 1 < args.length) i += 2;
+    const sub = args[i];
+    const rest = args.slice(i + 1);
+
+    if (sub === "clone") {
+      let branch = "main";
+      const positional: string[] = [];
+      for (let j = 0; j < rest.length; j += 1) {
+        if (rest[j] === "--depth") j += 1;
+        else if (rest[j] === "--branch") branch = rest[++j] ?? branch;
+        else positional.push(rest[j]);
+      }
+      const [url, target] = positional;
+      if (!url || !target) return result(129, "", "usage: git clone <repo> [<dir>]");
+      const repoDir = target === "."
+        ? cwd
+        : target.startsWith("/")
+          ? target
+          : `${cwd}/${target}`;
+      this.sequence += 1;
+      const head = `f00d${this.sequence}`.padStart(40, "0");
+      let config =
+        `[core]\n\trepositoryformatversion = 0\n` +
+        `[remote "origin"]\n\turl = ${url}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n`;
+      if (this.options.cloneLeaksTokenIntoConfig) {
+        const leaked = Object.values(env)[0] ?? "";
+        if (leaked) config += `\t; leaked credential: ${leaked}\n`;
+      }
+      record.gitRepos.set(repoDir, { config, head, branch });
+      record.dirs.add(repoDir);
+      record.dirs.add(`${repoDir}/.git`);
+      this.writeFile(record, `${repoDir}/.git/config`, config);
+      this.writeFile(record, `${repoDir}/.git/HEAD`, `ref: refs/heads/${branch}\n`);
+      const files = this.options.cloneFiles ?? { "README.md": "# fake clone\n" };
+      for (const [rel, content] of Object.entries(files)) {
+        this.writeFile(record, `${repoDir}/${rel}`, content);
+        this.registerParents(record, `${repoDir}/${rel}`);
+      }
+      return result(0, "", `Cloning into '${target}'...`);
+    }
+
+    const repo = record.gitRepos.get(cwd);
+    if (!repo) return result(128, "", "fatal: not a git repository");
+
+    if (sub === "remote" && rest[0] === "set-url" && rest[1] === "origin" && rest[2]) {
+      repo.config = repo.config.replace(/url = .*/, `url = ${rest[2]}`);
+      this.writeFile(record, `${cwd}/.git/config`, repo.config);
+      return result(0);
+    }
+    if (sub === "config" && rest[0] === "--get" && rest[1] === "remote.origin.url") {
+      const url = repo.config.match(/url = (.*)/)?.[1] ?? "";
+      return result(0, `${url}\n`);
+    }
+    if (sub === "config") {
+      // git config gc.auto 0 / user.* — accepted, kept in memory only.
+      return result(0);
+    }
+    if (sub === "rev-parse" && rest[0] === "HEAD") {
+      return result(0, `${repo.head}\n`);
+    }
+    return result(127, "", `fake provider: unsupported git command: ${sub ?? ""}`);
   }
 
   private writeFile(record: FakeSandboxRecord, path: string, content: string): void {
@@ -314,4 +681,66 @@ export function createNoLimitsFakeProvider(): FakeSandboxProvider {
 
 export function createUnhealthyFakeProvider(): FakeSandboxProvider {
   return new FakeSandboxProvider({ healthy: false });
+}
+
+/**
+ * Minimal shell tokenizer for the fake's Phase 2 command shapes:
+ * whitespace splits, single quotes are literal (with the standard
+ * '\'' escape), double quotes group, backslash escapes the next char.
+ * Understands exactly what the workspace executor's argv-safe command
+ * builder emits; it is not a shell.
+ */
+export function splitShellArgs(command: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let hasCurrent = false;
+  let i = 0;
+  while (i < command.length) {
+    const ch = command[i];
+    if (ch === "'") {
+      hasCurrent = true;
+      i += 1;
+      while (i < command.length && command[i] !== "'") {
+        current += command[i];
+        i += 1;
+      }
+      i += 1; // closing quote
+      continue;
+    }
+    if (ch === '"') {
+      hasCurrent = true;
+      i += 1;
+      while (i < command.length && command[i] !== '"') {
+        if (command[i] === "\\" && i + 1 < command.length) {
+          current += command[i + 1];
+          i += 2;
+        } else {
+          current += command[i];
+          i += 1;
+        }
+      }
+      i += 1;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < command.length) {
+      hasCurrent = true;
+      current += command[i + 1];
+      i += 2;
+      continue;
+    }
+    if (ch === " " || ch === "\t") {
+      if (hasCurrent) {
+        args.push(current);
+        current = "";
+        hasCurrent = false;
+      }
+      i += 1;
+      continue;
+    }
+    hasCurrent = true;
+    current += ch;
+    i += 1;
+  }
+  if (hasCurrent) args.push(current);
+  return args;
 }

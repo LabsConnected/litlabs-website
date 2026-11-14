@@ -29,6 +29,14 @@ import { parse as parseDotenv } from "dotenv";
 import { getWorkspace, type WorkspaceDescriptor } from "../workspace/WorkspaceManager";
 import { resolveBindHost } from "../network-bind";
 import { assertHostExecutionPermitted } from "../isolation-policy";
+import {
+  startSandboxPreview,
+  stopSandboxPreview,
+  verifySandboxPreviewHealth,
+  buildSandboxTravelingEnv,
+  SANDBOX_PREVIEW_PORT,
+  type SandboxPreviewSupport,
+} from "./sandbox-runtime";
 
 /**
  * Environment variables that may be inherited from the terminal server.
@@ -94,6 +102,23 @@ function previewBindHost(): string {
 
 export type PreviewStatus = "stopped" | "starting" | "ready" | "failed" | "restarting";
 
+/**
+ * Where the proxy sends preview traffic (Phase 2 lifecycle, design
+ * note §3.2). In-memory only: the sandbox variant carries the
+ * provider origin and traffic-token header, which must never be
+ * persisted, logged, or included in any response — getPreviewStatus
+ * keeps returning port + status only. Absent = host (pre-Phase-2
+ * runtimes constructed before this field existed).
+ */
+export type PreviewUpstream =
+  | { kind: "host"; port: number }
+  | {
+      kind: "sandbox";
+      sandboxId: string;
+      origin: string;
+      headers: Record<string, string>;
+    };
+
 export interface PreviewRuntime {
   workspaceId: string;
   userId: string;
@@ -120,6 +145,12 @@ export interface PreviewRuntime {
    * instead of silently dropping it.
    */
   clerkProjectEnv: Record<string, string> | null;
+  /**
+   * Proxy upstream (Phase 2 lifecycle). Host runtimes carry
+   * `{ kind: "host", port }`; sandbox runtimes carry the provider
+   * origin + traffic-token header. Never serialized into a response.
+   */
+  upstream?: PreviewUpstream;
 }
 
 interface PreviewStartInput {
@@ -995,6 +1026,49 @@ function pushLog(runtime: PreviewRuntime, line: string): void {
   }
 }
 
+/** pushLog for the sandbox preview branch (sandbox-runtime.ts). */
+export function pushPreviewLog(runtime: PreviewRuntime, line: string): void {
+  pushLog(runtime, line);
+}
+
+// ─── Sandbox preview support (Phase 2 lifecycle) ────────────────────
+//
+// Registered once at server boot with the workspace executor + the
+// sandbox provider. Null (the default, and every pre-Phase-2
+// deployment) means the sandbox branch can never be taken and every
+// preview behaves exactly as before.
+
+let sandboxPreviewSupport: SandboxPreviewSupport | null = null;
+
+export function registerSandboxPreviewSupport(
+  support: SandboxPreviewSupport | null,
+): void {
+  sandboxPreviewSupport = support;
+}
+
+/**
+ * The proxy's upstream for a workspace (internal, same-process only).
+ * The sandbox variant carries the provider origin + traffic token —
+ * this value must never be serialized into a response or a log.
+ */
+export function getPreviewUpstream(workspaceId: string): PreviewUpstream | undefined {
+  return runtimes.get(workspaceId)?.upstream;
+}
+
+/**
+ * Extend a sandbox preview's provider session (called by the proxy
+ * while traffic flows, throttled there). Fire-and-forget: a failed
+ * extension never fails a preview request.
+ */
+export function extendSandboxUpstreamSession(
+  upstream: Extract<PreviewUpstream, { kind: "sandbox" }>,
+  timeoutMs: number,
+): void {
+  const provider = sandboxPreviewSupport?.provider;
+  if (!provider?.extendTimeout) return;
+  void provider.extendTimeout(upstream.sandboxId, timeoutMs).catch(() => {});
+}
+
 /**
  * Format process output for a failure diagnostic without cutting an error
  * through the middle of a line. The runtime log is already a bounded ring;
@@ -1071,13 +1145,181 @@ export function getPreviewLogs(workspaceId: string, lines = 100): string[] {
   return rt.logs.slice(-lines);
 }
 
+/**
+ * The sandbox branch of startPreview (design note §3.3). Project
+ * facts come from the volume, exactly as the host path reads them;
+ * everything execution-shaped happens inside the sandbox via
+ * sandbox-runtime.ts. Error surfaces mirror the host path's typed
+ * PreviewErrors so callers cannot tell the branches apart except by
+ * behavior.
+ */
+async function startSandboxPreviewBranch(
+  support: SandboxPreviewSupport,
+  args: {
+    input: PreviewStartInput;
+    ws: WorkspaceDescriptor;
+    projectEnv: Record<string, string>;
+    newFingerprint: string;
+    storedClerkEnv: Record<string, string> | null;
+  },
+): Promise<PreviewRuntime> {
+  const { input, ws } = args;
+  const workspaceId = input.workspaceId;
+
+  // Reuse a healthy sandbox runtime whose resolved env is unchanged
+  // (the host path's shouldReuseRuntime keys on a live child process;
+  // a sandbox runtime's liveness is its ready status + upstream).
+  const existing = runtimes.get(workspaceId);
+  const preservedLogs = existing?.logs ?? [];
+  const configMatches =
+    !existing ||
+    ((input.framework === undefined || input.framework === existing.framework) &&
+      (input.command === undefined || input.command === existing.command));
+  if (
+    !input.forceRestart &&
+    existing &&
+    configMatches &&
+    existing.upstream?.kind === "sandbox" &&
+    (existing.status === "ready" || existing.status === "starting") &&
+    existing.clerkEnvFingerprint === args.newFingerprint
+  ) {
+    return existing;
+  }
+  if (existing) {
+    await stopPreviewAndWait(workspaceId);
+  }
+
+  const detected = input.framework && input.command
+    ? {
+        framework: input.framework,
+        command: input.command,
+        packageManager: input.packageManager ?? "pnpm",
+      }
+    : detectFramework(ws.root);
+
+  if (!detected.command) {
+    throw new PreviewError(
+      "preview_no_dev_command",
+      `Cannot determine dev command for framework: ${detected.framework}`,
+      { cwd: ws.root, packageManager: detected.packageManager },
+    );
+  }
+  const actualCommand = detected.command.replace("$PORT", String(SANDBOX_PREVIEW_PORT));
+
+  // Clerk validation over the fully resolved env, as on the host
+  // path — a broken project config surfaces truthfully here instead
+  // of as a 60-second sandbox probe timeout.
+  const validationEnv: Record<string, string> = {
+    ...buildPreviewEnv(args.projectEnv),
+    PORT: String(SANDBOX_PREVIEW_PORT),
+    HOSTNAME: "0.0.0.0",
+    NODE_ENV: "development",
+  };
+  if (
+    !validationEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY &&
+    validationEnv.CLERK_PUBLISHABLE_KEY
+  ) {
+    validationEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = cleanEnvValue(
+      validationEnv.CLERK_PUBLISHABLE_KEY,
+    );
+  }
+  const clerkValidation = validateClerkConfig(validationEnv, ws.root);
+  if (!clerkValidation.ok) {
+    const err = new PreviewError(
+      "preview_clerk_config_error",
+      clerkValidation.reason ?? "Clerk configuration is invalid",
+      {
+        cwd: ws.root,
+        suggestedRemediation:
+          "Provide both keys for this project — via its Studio project " +
+          "secrets, the workspace .env.local, or the terminal-server " +
+          "Railway env. Check that CLERK_SECRET_KEY starts with sk_test_ " +
+          "or sk_live_, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY starts with " +
+          "pk_test_ or pk_live_, both are from the same Clerk environment, " +
+          "and neither has whitespace or quotes.",
+      },
+    );
+    const failedRuntime: PreviewRuntime = {
+      workspaceId,
+      userId: input.userId,
+      projectId: ws.projectId,
+      process: null,
+      port: SANDBOX_PREVIEW_PORT,
+      framework: detected.framework,
+      command: actualCommand,
+      status: "failed",
+      startedAt: Date.now(),
+      lastHealthCheck: null,
+      clerkEnvFingerprint: args.newFingerprint,
+      clerkProjectEnv: args.storedClerkEnv,
+      error: err.message,
+      errorCode: err.code,
+      logs: [
+        ...preservedLogs,
+        `[preview] Clerk configuration error: ${err.message}`,
+      ],
+    };
+    runtimes.set(workspaceId, failedRuntime);
+    throw err;
+  }
+
+  const runtime: PreviewRuntime = {
+    workspaceId,
+    userId: input.userId,
+    projectId: ws.projectId,
+    process: null,
+    port: SANDBOX_PREVIEW_PORT,
+    framework: detected.framework,
+    command: actualCommand,
+    status: "starting",
+    startedAt: Date.now(),
+    lastHealthCheck: null,
+    clerkEnvFingerprint: args.newFingerprint,
+    clerkProjectEnv: args.storedClerkEnv,
+    error: null,
+    errorCode: null,
+    logs: [...preservedLogs],
+  };
+  runtimes.set(workspaceId, runtime);
+
+  try {
+    return await startSandboxPreview({
+      support,
+      runtime,
+      ws,
+      framework: detected.framework,
+      command: actualCommand,
+      packageManager: detected.packageManager,
+      travelingEnv: buildSandboxTravelingEnv(input.projectEnv),
+    });
+  } catch (err) {
+    if (runtime.status === "starting") {
+      runtime.status = "failed";
+      runtime.errorCode = "preview_dev_server_failed";
+      runtime.error = err instanceof Error ? err.message : String(err);
+    }
+    throw err;
+  }
+}
+
 export async function startPreview(input: PreviewStartInput): Promise<PreviewRuntime> {
   const { workspaceId, userId } = input;
+
+  // Sandbox dispatch (Phase 2 lifecycle, design note §3.3): when the
+  // workspace executor is available for this user, the dev server
+  // runs inside the workspace's sandbox — nothing executes on the
+  // host, so the host-execution guard below does not apply. The
+  // dispatch sits at the first of the three guard sites (start,
+  // install, spawn); the sandbox branch returns before the other two.
+  const support = sandboxPreviewSupport;
+  const sandboxAvailable = support?.executor.isAvailableFor(userId) ?? false;
 
   // Preview runs workspace-defined commands (`bash -c <command>`, package
   // lifecycle scripts) directly on the host. Closed in production until a
   // verified sandbox exists; checked before any state is touched.
-  assertHostExecutionPermitted("preview.start");
+  if (!sandboxAvailable) {
+    assertHostExecutionPermitted("preview.start");
+  }
 
   // Verify workspace ownership
   const ws = getWorkspace(workspaceId);
@@ -1099,6 +1341,16 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   const newFingerprint = fingerprintProjectEnv(projectEnv);
   const storedClerkEnv =
     Object.keys(clerkProjectEnv).length > 0 ? clerkProjectEnv : null;
+
+  if (sandboxAvailable && support) {
+    return startSandboxPreviewBranch(support, {
+      input,
+      ws,
+      projectEnv,
+      newFingerprint,
+      storedClerkEnv,
+    });
+  }
 
   // Stop existing runtime if any — wait for the process to exit so
   // the port is released before we try to rebind. A healthy runtime
@@ -1177,6 +1429,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
         lastHealthCheck: null,
         clerkEnvFingerprint: newFingerprint,
         clerkProjectEnv: storedClerkEnv,
+        upstream: { kind: "host", port },
         error: err.message,
         errorCode: err.code,
         logs: [
@@ -1295,6 +1548,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
       lastHealthCheck: null,
       clerkEnvFingerprint: newFingerprint,
       clerkProjectEnv: storedClerkEnv,
+      upstream: { kind: "host", port: failedPort },
       error: err.message,
       errorCode: err.code,
       logs: [
@@ -1322,6 +1576,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     lastHealthCheck: null,
     clerkEnvFingerprint: newFingerprint,
     clerkProjectEnv: storedClerkEnv,
+    upstream: { kind: "host", port },
     error: null,
     errorCode: null,
     logs: [...preservedLogs],
@@ -1473,6 +1728,15 @@ export function stopPreview(workspaceId: string): void {
   const rt = runtimes.get(workspaceId);
   if (!rt) return;
 
+  // Sandbox branch: no host process or port. The kill is async; the
+  // status flips now and the provider call completes in the
+  // background (this sync stopper is the cleanup path).
+  if (rt.upstream?.kind === "sandbox" && sandboxPreviewSupport) {
+    rt.status = "stopped";
+    void stopSandboxPreview(sandboxPreviewSupport, rt).catch(() => {});
+    return;
+  }
+
   rt.status = "stopped";
   if (rt.process) {
     const proc = rt.process;
@@ -1502,6 +1766,15 @@ export function stopPreview(workspaceId: string): void {
 export async function stopPreviewAndWait(workspaceId: string): Promise<void> {
   const rt = runtimes.get(workspaceId);
   if (!rt) return;
+
+  // Sandbox branch: kill the detached dev server in the sandbox.
+  // No host port exists, so the port-release wait below is skipped.
+  if (rt.upstream?.kind === "sandbox" && sandboxPreviewSupport) {
+    rt.status = "stopped";
+    await stopSandboxPreview(sandboxPreviewSupport, rt).catch(() => {});
+    pushLog(rt, "[preview] Stopped (sandbox)");
+    return;
+  }
 
   rt.status = "stopped";
   if (rt.process) {
@@ -1630,6 +1903,11 @@ export async function ensurePreviewEnv(
  */
 export async function verifyPreviewHealth(workspaceId: string): Promise<boolean> {
   const rt = runtimes.get(workspaceId);
+  // Sandbox branch: no host process exists; health is probed through
+  // the upstream instead of 127.0.0.1 (design note §3.3).
+  if (rt?.upstream?.kind === "sandbox" && sandboxPreviewSupport) {
+    return verifySandboxPreviewHealth(sandboxPreviewSupport, rt);
+  }
   if (!rt || !rt.process || rt.status !== "ready") return false;
 
   try {

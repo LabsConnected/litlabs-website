@@ -124,11 +124,15 @@ export default function WorkspaceRail({
       style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: tokens.surface }}
       data-testid="studio-workspace-rail"
     >
-      {/* Larry (2026-11-13): the standalone Plan rail button is not
-          needed — remove the button only. Plan stage functionality is
-          untouched: the inspector's Plan tab and the station contract
-          (Plan homes the center on Preview) still work as before. */}
-      {DIRECTIVE_STAGE_ORDER.filter((stage) => stage !== "plan").map(stageButton)}
+      {/* Plan is the FIRST stage (Master Build Directive §2 order).
+          Its rail button was retired on 2026-11-13 and restored on
+          2026-11-14 after Larry's production walkthrough found no Plan
+          stage anywhere in the nav. The button changes presentation
+          only: selection still runs the station contract — Plan homes
+          the center on Preview and opens the inspector's Plan tab
+          (Mission / Checkpoints / Next actions); it is not a center
+          station (see station-url.ts). */}
+      {DIRECTIVE_STAGE_ORDER.map(stageButton)}
       <div
         aria-hidden
         className="my-1 h-px w-7 shrink-0"

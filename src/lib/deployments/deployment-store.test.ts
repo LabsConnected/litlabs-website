@@ -86,6 +86,8 @@ import {
   supabaseDeploymentStore,
   readPublishedFile,
   findLatestDeploymentForProject,
+  findLatestReadyDeploymentForProject,
+  readDeploymentSnapshotFiles,
 } from "./deployment-store";
 
 const DEPLOYMENTS = "user_project_deployments";
@@ -439,5 +441,76 @@ describe("error propagation", () => {
     // Public reads surface store failures — a transient error must not be
     // reported to the public as a missing file.
     await expect(readPublishedFile("dep-1", "index.html")).rejects.toThrow();
+  });
+});
+
+describe("findLatestReadyDeploymentForProject + readDeploymentSnapshotFiles (workspace restore reads)", () => {
+  it("finds the latest deployment only when it filters on status=ready", async () => {
+    handler = (table, call) => {
+      if (table === DEPLOYMENTS && call.filters.some(([c, v]) => c === "status" && v === "ready")) {
+        return { data: readyRow, error: null };
+      }
+      return { data: null, error: null };
+    };
+
+    const record = await findLatestReadyDeploymentForProject("proj-A", "user-A");
+
+    expect(record?.id).toBe("dep-1");
+    expect(record?.status).toBe("ready");
+    expect(record?.fileCount).toBe(2);
+    expectOnlyV1Tables();
+  });
+
+  it("returns null when no ready deployment exists", async () => {
+    handler = () => ({ data: null, error: null });
+    expect(await findLatestReadyDeploymentForProject("proj-A", "user-A")).toBeNull();
+  });
+
+  it("reads every snapshot file of a ready deployment, mapped to camelCase", async () => {
+    handler = (table) => {
+      if (table === DEPLOYMENTS) return { data: { id: "dep-1", status: "ready" }, error: null };
+      if (table === FILES) {
+        return {
+          data: [
+            { path: "index.html", content: "<html/>", content_type: "text/html", encoding: "utf-8" },
+            { path: "assets/team.jpg", content: "aGk=", content_type: "image/jpeg", encoding: "base64" },
+          ],
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    };
+
+    const files = await readDeploymentSnapshotFiles("dep-1");
+
+    expect(files).toEqual([
+      { path: "index.html", content: "<html/>", contentType: "text/html", encoding: "utf-8" },
+      { path: "assets/team.jpg", content: "aGk=", contentType: "image/jpeg", encoding: "base64" },
+    ]);
+    // The files read must be scoped to the deployment.
+    const filesCall = calls.find((c) => c.table === FILES);
+    expect(filesCall?.filters).toContainEqual(["deployment_id", "dep-1"]);
+    expectOnlyV1Tables();
+  });
+
+  it("returns null for a non-ready deployment without reading its files", async () => {
+    handler = (table) => {
+      if (table === DEPLOYMENTS) return { data: { id: "dep-2", status: "building" }, error: null };
+      return { data: [], error: null };
+    };
+
+    expect(await readDeploymentSnapshotFiles("dep-2")).toBeNull();
+    expect(calls.some((c) => c.table === FILES)).toBe(false);
+  });
+
+  it("throws on a snapshot store error — an outage must not read as an empty snapshot", async () => {
+    handler = (table) => {
+      if (table === DEPLOYMENTS) return { data: { id: "dep-1", status: "ready" }, error: null };
+      return { data: null, error: { message: "postgrest down" } };
+    };
+
+    await expect(readDeploymentSnapshotFiles("dep-1")).rejects.toThrow(
+      "Deployment snapshot read failed",
+    );
   });
 });
