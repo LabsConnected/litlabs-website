@@ -72,12 +72,18 @@ mkdirSync(SHOT_DIR, { recursive: true });
 // LITT_ACCEPTANCE_USER_ID (hard-required there). Locally, mint one inline —
 // the legacy QA fallback in resolveAcceptanceUserId is a PROD user that does
 // not exist on the Clerk TEST instance this script signs into.
+// The disposable user's email, when known: set from LITT_E2E_USER_EMAIL
+// (the workflow's create-fresh-user step minted the user and passes the
+// address it generated) or captured below when this script mints the
+// user itself. Stripe Checkout needs it — see CHECKOUT_EMAIL.
+let USER_EMAIL = process.env.LITT_E2E_USER_EMAIL || null;
 let USER_ID = process.env.LITT_ACCEPTANCE_USER_ID;
 if (!USER_ID && process.env.GITHUB_ACTIONS === "true") {
   USER_ID = resolveAcceptanceUserId({ isCI: true, envUserId: USER_ID });
 }
 if (!USER_ID) {
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  USER_EMAIL = `litt-acceptance-${stamp}@litlabs.net`;
   const resp = await fetch("https://api.clerk.com/v1/users", {
     method: "POST",
     headers: {
@@ -85,7 +91,7 @@ if (!USER_ID) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      email_address: [`litt-acceptance-${stamp}@litlabs.net`],
+      email_address: [USER_EMAIL],
       first_name: "LiTT",
       last_name: "Acceptance",
       public_metadata: { littAcceptance: true, createdAt: new Date().toISOString() },
@@ -98,6 +104,15 @@ if (!USER_ID) {
     throw new Error("fresh-user creation returned no valid user id");
   }
 }
+
+// Stripe-hosted Checkout opens with its email field EMPTY — the app's
+// checkout session creation passes no customer email, so the hosted page
+// never prefills it — and an empty email silently blocks submit (runs
+// #24–#26: the pay button was clicked, no payment_pages confirm request
+// ever fired, no navigation, no processing state). The Step 5 fill uses
+// the disposable user's own address; the STAMP-derived fallback only
+// covers a caller that minted a user without sharing the address.
+const CHECKOUT_EMAIL = USER_EMAIL || `litt-acceptance-${STAMP}@litlabs.net`;
 
 const WEBHOOK_POLL_MS = 150_000; // Stripe test-mode delivery is usually <30s; be generous.
 const RECHECK_DELAY_MS = 20_000; // second wallet read proves no double grant arrives late.
@@ -276,30 +291,50 @@ async function main() {
       ?? page.frames().find((f) => /elements-inner/.test(f.url()));
 
     // The email input lives in the paymentForm frame on the current
-    // rendering (Link authentication section). Wait for the first visible
-    // one across contexts, then fill in whichever context holds it —
-    // a page-only fill silently no-ops and burns the wait budget.
-    const emailSel = 'input[name="email"], #email';
-    let emailCtx = null;
+    // rendering (Link authentication section) — on the hosted page it
+    // sits in the main form area above the payment-method section.
+    // Manual proof (2026-11-13, human-paced staging checkout): the page
+    // opens with this field EMPTY and, once it is filled (and Link
+    // unchecked), the exact test-card payment this script attempts
+    // completes and redirects to the staging success URL. The fill this
+    // replaces never landed in runs #24–#26: it fired once on first
+    // visibility — racing Stripe's hydration re-renders — with a
+    // two-selector probe, swallowed every error, never read the value
+    // back, and was never reported in the filled step, so a wiped or
+    // failed fill was indistinguishable from success. It also filled a
+    // STAMP-derived address that was never the test user's email.
+    // Fill it the way #956 taught Name/ZIP: sweep every context with
+    // anchored label/placeholder locators (attribute selectors as
+    // fallback), poll, and read the value back — the field only counts
+    // as filled when the input actually holds the address. The hit is
+    // kept for the filled-step report and the pre-submit guard below.
+    const emailCandidates = (ctx) => [
+      ctx.getByLabel(/email/i),
+      ctx.getByPlaceholder(/you@example\.com|email/i),
+      ctx.locator('input[name="email"], #email, input[type="email"], input[autocomplete="email"]'),
+    ];
+    let emailHit = null; // { where, ctx, cand } — cand kept for the pre-submit guard
     const emailDeadline = Date.now() + 45_000;
-    while (Date.now() < emailDeadline && !emailCtx) {
+    while (Date.now() < emailDeadline && !emailHit) {
       for (const ctx of orderedContexts()) {
-        if (await ctx.locator(emailSel).first().isVisible().catch(() => false)) {
-          emailCtx = ctx;
-          break;
+        for (const cand of emailCandidates(ctx)) {
+          const el = cand.first();
+          if (!(await el.isVisible().catch(() => false))) continue;
+          await el.fill(CHECKOUT_EMAIL).catch(() => {});
+          const readBack = await el.inputValue().catch(() => "");
+          if (readBack.trim() === CHECKOUT_EMAIL) {
+            emailHit = { where: ctx === page ? "document" : "frame", ctx, cand };
+            break;
+          }
         }
+        if (emailHit) break;
       }
-      if (!emailCtx) await page.waitForTimeout(500);
-    }
-    if (emailCtx) {
-      await emailCtx.locator(emailSel).first()
-        .fill(`litt-acceptance-${STAMP}@litlabs.net`)
-        .catch(() => {});
+      if (!emailHit) await page.waitForTimeout(500);
     }
 
     // Some layouts gate the payment fields behind an email "Continue"
     // step — the button lives in the same context as the email field.
-    for (const ctx of emailCtx ? [emailCtx, page] : orderedContexts()) {
+    for (const ctx of emailHit ? [emailHit.ctx, page] : orderedContexts()) {
       const cont = ctx.getByRole("button", { name: /continue|next/i }).first();
       if (await cont.isVisible().catch(() => false)) {
         await cont.click().catch(() => {});
@@ -537,20 +572,24 @@ async function main() {
       }
       if (hit) filledBilling.push(hit);
     }
-    // Pre-submit guard (part 1): both billing fields must be filled —
-    // never submit blind. Fail the filled step honestly, naming what is
-    // missing, instead of discovering it as a silent redirect timeout.
-    const missingBilling = billingFields
-      .map((f) => f.name)
-      .filter((n) => !filledBilling.some((h) => h.name === n));
+    // Pre-submit guard (part 1): Email and both billing fields must be
+    // filled — never submit blind. Fail the filled step honestly, naming
+    // what is missing, instead of discovering it as a silent submit
+    // no-op (runs #24–#26 died exactly that death on the empty email).
+    const missingBilling = [
+      ...(emailHit ? [] : ["Email"]),
+      ...billingFields
+        .map((f) => f.name)
+        .filter((n) => !filledBilling.some((h) => h.name === n)),
+    ];
     if (missingBilling.length) {
       step("stripe_checkout_filled", false,
-        `could not fill required billing field(s): ${missingBilling.join(", ")} — refusing to submit blind`);
+        `could not fill required field(s): ${missingBilling.join(", ")} — refusing to submit blind`);
       await shot(page, "stripe-checkout-filled");
-      throw new Error(`stripe_checkout_filled: required billing field(s) not filled: ${missingBilling.join(", ")}`);
+      throw new Error(`stripe_checkout_filled: required field(s) not filled: ${missingBilling.join(", ")}`);
     }
     step("stripe_checkout_filled", true,
-      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context; name+ZIP filled (${filledBilling.map((h) => `${h.name}: ${h.where}`).join(", ")})`);
+      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context; Email: ${emailHit.where}; name+ZIP filled (${filledBilling.map((h) => `${h.name}: ${h.where}`).join(", ")})`);
     await shot(page, "stripe-checkout-filled");
 
     // Stripe's Link opt-in is checked by default and demands a phone number
@@ -579,11 +618,14 @@ async function main() {
     }
 
     // Pre-submit guard (part 2): the Link/phone interactions above can
-    // re-render the form — re-read the billing inputs through the same
-    // locators that filled them and refuse to click submit if either
-    // was emptied, so a silent validation block can never be recorded
-    // as a "submitted" step.
-    for (const hit of filledBilling) {
+    // re-render the form — re-read the email and billing inputs through
+    // the same locators that filled them and refuse to click submit if
+    // any was emptied, so a silent validation block can never be
+    // recorded as a "submitted" step.
+    for (const hit of [
+      ...(emailHit ? [{ name: "Email", cand: emailHit.cand }] : []),
+      ...filledBilling,
+    ]) {
       const now = await hit.cand.first().inputValue().catch(() => "");
       if (!now.trim()) {
         step("stripe_checkout_filled", false,
