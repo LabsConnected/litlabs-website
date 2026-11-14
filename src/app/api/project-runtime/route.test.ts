@@ -13,6 +13,18 @@ vi.mock("@/lib/projects/project-source", () => ({
   })),
 }));
 vi.mock("@/lib/studio/workspace-recovery", () => ({ provisionWorkspaceForProject: vi.fn() }));
+vi.mock("@/lib/terminal-internal-client", () => ({
+  // Phase 2 §3.2: default not available (fail closed) — preserves the
+  // gate expectations; the sandbox-open test opts in.
+  isSandboxExecutionAvailable: vi.fn(async () => false),
+  getSandboxAvailability: vi.fn(async () => ({
+    provider: null,
+    routingEnabled: false,
+    verified: false,
+    allowed: false,
+    reason: "availability-unavailable",
+  })),
+}));
 vi.mock("next/server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/server")>()),
   after: (callback: () => unknown) => { afterCallbacks.push(callback); },
@@ -25,12 +37,14 @@ import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getProject } from "@/lib/projects/project-repository";
 import { describeProjectSource } from "@/lib/projects/project-source";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 
 const mockAuth = vi.mocked(auth);
 const mockResolve = vi.mocked(resolveCurrentProject);
 const mockGetProject = vi.mocked(getProject);
 const mockProvision = vi.mocked(provisionWorkspaceForProject);
 const mockDescribeSource = vi.mocked(describeProjectSource);
+const mockSandboxAvailable = vi.mocked(isSandboxExecutionAvailable);
 const project = (status: string, updatedAt = new Date().toISOString()) => ({
   id: "p1", userId: "u1", name: "Demo", sourceType: "blank", workspaceId: null,
   workspaceRoot: null, workspaceError: status === "failed" ? "terminal down" : null,
@@ -157,6 +171,17 @@ describe("project-runtime repo gate (B2)", () => {
     expect(afterCallbacks).toHaveLength(0);
     expect(body.error.code).toBe("HOST_EXECUTION_DISABLED");
     expect(body.sourceStatus).toBe("unavailable");
+  });
+
+  it("opens the gate when the terminal reports sandbox execution available — recovery resumes", async () => {
+    mockSandboxAvailable.mockResolvedValue(true);
+    mockDescribeSource.mockReturnValue(githubSource as never);
+    mockGetProject.mockResolvedValue(repoProject());
+    const body = await (await get()).json();
+    expect(mockSandboxAvailable).toHaveBeenCalledWith("u1");
+    expect(afterCallbacks).toHaveLength(1);
+    expect(body.error?.code).not.toBe("HOST_EXECUTION_DISABLED");
+    expect(body.sourceStatus).not.toBe("unavailable");
   });
 
   it("leaves a ready repo workspace fully ready (gate applies only when not ready)", async () => {

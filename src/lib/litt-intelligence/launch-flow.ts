@@ -587,7 +587,11 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
   const maxRuntimeRepairAttempts = options.maxRuntimeRepairAttempts ?? 2;
   const previewUrlForProject = () => options.isStaticWorkspace
     ? `/api/preview/${encodeURIComponent(options.projectId)}/`
-    : (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
+    : (options.buildPreviewUrl ??
+      ((workspaceId: string) =>
+        buildPreviewProxyUrl(workspaceId, { userId: options.userId, projectId: options.projectId })))(
+        transport.workspaceId,
+      );
   let staticPreviewError: string | undefined;
   const preparePreview = async (pollIntervalMs: number): Promise<"ready" | "failed" | "timeout"> => {
     if (!options.isStaticWorkspace) {
