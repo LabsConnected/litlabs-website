@@ -2990,7 +2990,33 @@ async function runAgentLoopV2Inner(
     });
   }
 
+  // The guard verdict below pronounces on file writing, but tool success
+  // flags cannot see every write: a file created through a shell command
+  // (terminal.execute), or written by a handler that reported failure
+  // after the bytes landed, leaves no successful file-writing call in
+  // the log — yet the workspace demonstrably changed (Step 6 proof,
+  // 2026-11-14: the marker file landed in the project while the run
+  // still failed with the no-write sentence, and the work log could
+  // only say "could not verify"). Before failing a run on that
+  // sentence, ask the workspace itself: a checkpoint diff reporting
+  // changes is proof a file-writing operation landed, and the sentence
+  // must not fire. The probe runs only when the flag check already
+  // failed, so verified builds pay nothing for it.
+  let guardWorkspaceEvidence: Awaited<ReturnType<typeof computeWorkspaceChange>> | undefined;
   if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
+      !hasSuccessfulFileWriteInHistory(cfg.initialMessages ?? [])) {
+    const guardAttemptedMutation = toolCallLog.some((call) => call.mutating);
+    if (baselineCheckpoint || checkpoint || guardAttemptedMutation) {
+      guardWorkspaceEvidence = await computeWorkspaceChange(
+        transport,
+        baselineCheckpoint ?? checkpoint ?? null,
+      );
+    }
+  }
+
+  if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      guardWorkspaceEvidence?.status !== "changed" &&
       !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
       !hasSuccessfulFileWriteInHistory(cfg.initialMessages ?? [])) {
     failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";
@@ -4571,7 +4597,25 @@ async function resumeAgentLoopV2Inner(
     if (!batchHasMutation) mutationBatchPending = false;
   }
 
+  // Same evidence rule as the initial loop's guard verdict: tool flags
+  // cannot see writes that landed through a shell command or a handler
+  // that failed after writing, so a checkpoint diff reporting changes
+  // vetoes the no-write sentence before it is pronounced.
+  let resumeGuardWorkspaceEvidence: Awaited<ReturnType<typeof computeWorkspaceChange>> | undefined;
   if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
+      !hasSuccessfulFileWriteInHistory(resume.pausedMessages)) {
+    const guardAttemptedMutation = toolCallLog.some((call) => call.mutating);
+    if (baselineCheckpoint || checkpoint || guardAttemptedMutation) {
+      resumeGuardWorkspaceEvidence = await computeWorkspaceChange(
+        transport,
+        baselineCheckpoint ?? checkpoint ?? null,
+      );
+    }
+  }
+
+  if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      resumeGuardWorkspaceEvidence?.status !== "changed" &&
       !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
       !hasSuccessfulFileWriteInHistory(resume.pausedMessages)) {
     failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";

@@ -7,7 +7,6 @@ export type StudioIntent =
   | "generate_video"
   | "generate_music"
   | "open_terminal"
-  | "run_command"
   | "connect_github"
   | "start_blank_project"
   | "open_files"
@@ -158,12 +157,16 @@ const INTENT_PATTERNS: IntentPattern[] = [
       /^(open|show|go to)\b.*\bsettings\b/i,
     ],
   },
-  {
-    intent: "run_command",
-    patterns: [
-      /^run\b\s+\S/i,
-    ],
-  },
+  // No run_command intent on purpose (Step 6 fix, 2026-11-14): the old
+  // /^run\b/ shortcut could only open the Terminal panel and print a
+  // canned line — it carried no command text, so it structurally could
+  // not execute anything, yet it swallowed every "Run …" request
+  // before the agent loop ever saw it and the turn closed with a
+  // synthesized "Done — No files changed" card. Shell-command requests
+  // now reach the agent, which runs them for real through
+  // terminal.execute (the kernel classifies them taskKind "exec").
+  // Same rule as deploy/publish: never short-circuit a request the
+  // shortcut cannot actually perform.
   {
     intent: "generate_video",
     tool: "video",
@@ -287,12 +290,6 @@ function buildIntentResult(
       };
     case "open_settings":
       return { intent, message: "Opening Settings." };
-    case "run_command":
-      return {
-        intent,
-        tool: "terminal",
-        message: "Opening Terminal to run that command.",
-      };
     case "generate_image":
       // P1-1: prefill the REAL surface with the cleaned-up prompt, not the
       // raw sentence — same as generate_video below.
@@ -404,9 +401,6 @@ export function buildIntentResponseMessage(
   }
   if (intent.intent === "start_blank_project") {
     return "Opening the new-project dialog.";
-  }
-  if (intent.intent === "run_command") {
-    return "Opening Terminal to run that command.";
   }
   if (intent.intent === "generate_image") {
     return "Opening the image generator.";

@@ -80,6 +80,20 @@ export interface LaunchFlowOptions {
    */
   readOnly?: boolean;
   /**
+   * Exec-only run (kernel-classified shell-command execution,
+   * taskKind "exec"): the user asked for a command to run, not for
+   * files to be written. Completion semantics mirror readOnly — the
+   * phase-1 result IS the outcome: no build-capability guard (its
+   * file-writing criterion can only misread a successful command as
+   * a failed build), no zero-mutation reprompt, and no
+   * artifact/preview phases. Unlike readOnly the run MAY mutate
+   * through the command itself; terminal.execute keeps its own
+   * per-command approval policy. Success requires at least one
+   * successful tool call and, when a quality session ran, its
+   * verdict.
+   */
+  execOnly?: boolean;
+  /**
    * Quality-loop opt-in, passed through to the main agent-loop phase.
    * When set, the build is gated by the UNDERSTAND→VERIFY evidence stages
    * plus the visual-quality judge. (Was silently dropped before AUTO-mode
@@ -672,9 +686,13 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           // registry build model — instead of burning the whole budget on
           // a model that can read but never writes. Never armed for a
           // read-only run: it never writes BY DESIGN, so the guard
-          // would only misread a correct read as incapability.
+          // would only misread a correct read as incapability. Never
+          // armed for an exec-only run either: its completion is the
+          // command's output, and the guard's end-of-loop verdict
+          // failed a successful `pwd && ls` with the build sentence
+          // (Step 6 proof, 2026-11-14).
           buildCapabilityGuard:
-            options.requiresExecution === true && options.readOnly !== true
+            options.requiresExecution === true && options.readOnly !== true && options.execOnly !== true
               ? { maxStepsWithoutFileWrite: 3 }
               : undefined,
           evalMetadata: options.evalMetadata,
@@ -859,6 +877,44 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
               ? "Inspection complete."
               : "The inspection could not be completed."),
           ...(readSuccess ? {} : { error: "INSPECTION_NOT_COMPLETED" }),
+          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
+
+      // Exec-only run: the phase-1 result IS the outcome, with the
+      // same completion shape as the read-only return above. Zero
+      // file writes is the CORRECT end state for a command the user
+      // asked to run — the zero-mutation reprompt below exists for
+      // builds whose model announced writes it never made; for an
+      // exec it would order the model to write files the user never
+      // asked for, and the artifact/preview phases do not apply to a
+      // command's output. Success = the quality verdict (when a
+      // session ran) AND at least one successful tool call; either
+      // way the agent's final text — which carries the command
+      // output — is delivered as the run's answer.
+      if (options.execOnly === true) {
+        const execAnswered = agentResult.toolCalls.some((c) => c.success);
+        const qualityOk = agentResult.qualityLoop
+          ? agentResult.qualityLoop.verdict.ok
+          : true;
+        const execSuccess = execAnswered && qualityOk;
+        emitStep(
+          progress,
+          steps,
+          execSuccess
+            ? "Command complete — the terminal answered the request."
+            : "Command did not complete — reporting what the run produced.",
+        );
+        return baseResult({
+          success: execSuccess,
+          status: execSuccess ? "completed" : "failed",
+          finalText:
+            agentResult.finalText ||
+            (execSuccess
+              ? "Command complete."
+              : "The command could not be completed."),
+          ...(execSuccess ? {} : { error: "EXEC_NOT_COMPLETED" }),
           repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
           runtimeRepairAttempts,
         });
