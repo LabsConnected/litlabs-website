@@ -27,6 +27,8 @@ const ENV_KEYS = [
   "OLLAMA_HOST_PC",
   "OLLAMA_HOST",
   "OLLAMA_BASE_URL",
+  "OLLAMA_ROUTE_ORDER",
+  "LITT_OLLAMA_PROBE_RETRIES",
 ] as const;
 
 let originals: Record<string, string | undefined>;
