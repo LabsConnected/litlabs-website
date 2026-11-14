@@ -114,8 +114,13 @@ describe("StudioProjectFiles", () => {
 
     render(<StudioProjectFiles projectId="project-repo" repositoryName="owner/repo" branch="main" workspaceStatus="failed" writeAccess />);
 
-    // The honest unavailable explanation appears (banner + error surface).
-    await screen.findAllByText(/secure sandbox/i);
+    // The honest unavailable explanation appears exactly ONCE. (This
+    // assertion previously used findAllByText and thereby pinned the
+    // duplication: the settled verdict set the same message as the load
+    // error, so the panel showed it in both the yellow gate banner and
+    // the red error banner.)
+    await screen.findByText(/secure sandbox/i);
+    expect(screen.getAllByText(/secure sandbox/i)).toHaveLength(1);
     expect(prepareCalls).toBe(1);
 
     // Give any retry loop ample opportunity to fire, then use the manual
@@ -127,6 +132,35 @@ describe("StudioProjectFiles", () => {
     expect(prepareCalls).toBe(1);
     expect(screen.queryByRole("button", { name: /^Prepare$/i })).toBeNull();
     expect(screen.queryByText(/could not be re-prepared automatically/i)).toBeNull();
+  });
+
+  it("keeps entry names laid out in narrow panels (container-scoped split, row actions out of flow)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ entries: [{ name: "assets", type: "folder" }, { name: "index.html", type: "file", size: 128 }] }), { status: 200 }),
+    );
+    render(<StudioProjectFiles projectId="project-1" repositoryName={null} branch="main" workspaceStatus="ready" writeAccess />);
+
+    expect(await screen.findByText("index.html")).toBeTruthy();
+    expect(screen.getByText("assets")).toBeTruthy();
+
+    // The list/editor split keys off the panel's OWN width through a
+    // container query. The old viewport `xl:` split also fired inside
+    // the ~286px Files sidebar and starved the tree to ~130px.
+    const layout = screen.getByTestId("studio-project-files-layout");
+    expect(layout.className).toContain("@min-[560px]:grid-cols-");
+    expect(layout.className).not.toContain("xl:grid-cols-");
+    expect(screen.getByTestId("studio-project-files").className).toContain("@container");
+
+    // Row actions are an absolute, pointer-events-none overlay: they no
+    // longer reserve 72px (file) to 148px (folder) of row layout width
+    // while invisible, which is what compressed the name span to zero
+    // width and rendered the tree visually blank in the sidebar.
+    const clusters = screen.getAllByTestId("file-row-actions");
+    expect(clusters).toHaveLength(2);
+    for (const cluster of clusters) {
+      expect(cluster.className).toContain("absolute");
+      expect(cluster.className).toContain("pointer-events-none");
+    }
   });
 
   it("reloads a clean open file silently when LiTT rewrites it", async () => {
