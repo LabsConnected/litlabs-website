@@ -12,12 +12,14 @@
  *      opt-in + loopback bind; NODE_ENV alone is never enough).
  *   2. In production — or on any Railway-hosted service — a host shell is
  *      NEVER permitted. There is deliberately no override variable.
- *   3. In production-like environments, terminal execution fails closed
- *      UNCONDITIONALLY. Docker mode does NOT enable execution: Docker
+ *   3. In production-like environments, HOST terminal execution fails
+ *      closed UNCONDITIONALLY. Docker mode does NOT enable it: Docker
  *      availability is a configuration claim, not proof of isolation, and
- *      no environment variable can override this. Verified sandbox
- *      isolation does not exist yet; when it does, this policy will be
- *      updated to check for it explicitly — not via an env var.
+ *      no environment variable can override this. Sandbox execution is a
+ *      SEPARATE dimension of the verdict (see sandboxExecution below): it
+ *      is enabled only by a fresh, green sandbox canary result passed in
+ *      programmatically by the caller — never via an env var — and it
+ *      NEVER re-enables host execution.
  *   4. In local development, Docker mode is permitted when the Docker
  *      daemon, image and network are present.
  *
@@ -37,6 +39,54 @@ export interface TerminalIsolationInput {
   dockerAvailable: boolean;
   /** Human-readable probe reason, surfaced in health output. */
   dockerReason?: string;
+  /**
+   * Optional sandbox verification signal (see
+   * {@link TerminalSandboxVerificationInput}). Feeds ONLY the separate
+   * sandboxExecution dimension of the verdict; it can never change the
+   * host fields above.
+   */
+  sandbox?: TerminalSandboxVerificationInput;
+}
+
+/** Canary states reported by the sandbox verification service. */
+export type SandboxVerificationState = "verified" | "failed" | "stale" | "never-run";
+
+/**
+ * The sandbox verification signal, passed in programmatically by the
+ * caller from the verification service's in-memory canary report. This
+ * is the "programmatic check" the header rules always pointed at: the
+ * canary result is the ONLY input. No environment variable is read here
+ * — in particular LITT_ISOLATION_VERIFIED and friends are local-trust
+ * attestations and are never accepted as sandbox proof.
+ */
+export interface TerminalSandboxVerificationInput {
+  /** Sandbox provider name ("e2b", ...); "disabled" or absent = none configured. */
+  provider?: string;
+  /** State of the latest canary report. */
+  state?: SandboxVerificationState;
+  /** Convenience mirror of the signal: true only when state is "verified". */
+  verified?: boolean;
+  /** ISO timestamp the latest canary finished at, or null. */
+  checkedAt?: string | null;
+  /** ISO timestamp after which a green report stops counting, or null. */
+  freshUntil?: string | null;
+}
+
+/**
+ * The sandbox dimension of the verdict. Deliberately separate from the
+ * host fields: `execution: "enabled"` here means commands may run inside
+ * the verified sandbox (the HTTP exec route's gate decides per call); it
+ * says nothing about host sessions, which stay governed by
+ * terminalExecution / mode / status.
+ */
+export interface TerminalSandboxExecutionVerdict {
+  execution: "enabled" | "disabled";
+  /** Provider the signal describes ("disabled" when none is configured). */
+  provider: string;
+  state: SandboxVerificationState | "not-configured";
+  checkedAt: string | null;
+  freshUntil: string | null;
+  reason: string;
 }
 
 export interface TerminalIsolationVerdict {
@@ -48,6 +98,59 @@ export interface TerminalIsolationVerdict {
   /** True when the environment is production or Railway-hosted. */
   productionLike: boolean;
   reason: string;
+  /**
+   * Sandbox execution dimension, computed solely from the optional
+   * sandbox input. Host consumers (session gate, PTY spawn) must never
+   * read this; it exists for health reporting and the web capability
+   * layer's sandbox-aware checks.
+   */
+  sandboxExecution: TerminalSandboxExecutionVerdict;
+}
+
+/**
+ * Compute the sandbox dimension from the verification signal. Enabled
+ * requires BOTH affirmations from the signal (state "verified" AND
+ * verified === true), so a caller cannot light this up with a partial
+ * or hand-assembled claim.
+ */
+export function evaluateSandboxExecution(
+  sandbox: TerminalSandboxVerificationInput | undefined,
+): TerminalSandboxExecutionVerdict {
+  const provider =
+    sandbox?.provider && sandbox.provider.length > 0 ? sandbox.provider : "disabled";
+  if (provider === "disabled") {
+    return {
+      execution: "disabled",
+      provider,
+      state: "not-configured",
+      checkedAt: null,
+      freshUntil: null,
+      reason: "No sandbox provider is configured; sandbox execution is unavailable.",
+    };
+  }
+  const state: SandboxVerificationState = sandbox?.state ?? "never-run";
+  const checkedAt = sandbox?.checkedAt ?? null;
+  const freshUntil = sandbox?.freshUntil ?? null;
+  if (state === "verified" && sandbox?.verified === true) {
+    return {
+      execution: "enabled",
+      provider,
+      state,
+      checkedAt,
+      freshUntil,
+      reason:
+        `Sandbox execution is verified for provider "${provider}" by a fresh, green canary. ` +
+        "Host execution is unaffected and stays governed by the host verdict.",
+    };
+  }
+  return {
+    execution: "disabled",
+    provider,
+    state,
+    checkedAt,
+    freshUntil,
+    reason: `Sandbox execution is not verified for provider "${provider}" (canary state: ${state}).`,
+  };
 }
 
 /**
@@ -153,11 +256,17 @@ export function isUntrustedLocalRequest(
 
 export function evaluateTerminalIsolation(input: TerminalIsolationInput): TerminalIsolationVerdict {
   const productionLike = isProductionLike(input.env);
+  // The sandbox dimension is computed from the canary signal alone and is
+  // attached to every verdict shape. It NEVER feeds back into the host
+  // fields below: a verified sandbox does not make host execution safe,
+  // and host state does not make a sandbox verified.
+  const sandboxExecution = evaluateSandboxExecution(input.sandbox);
 
   // Production-like environments fail closed UNCONDITIONALLY. Docker mode
   // does not enable execution: Docker availability is a configuration claim,
   // not proof of isolation, and no environment variable can override this.
-  // Verified sandbox isolation does not exist yet.
+  // This branch governs HOST execution only; the sandbox dimension above
+  // is reported separately and does not soften it.
   if (productionLike) {
     return {
       terminalExecution: "disabled",
@@ -169,6 +278,7 @@ export function evaluateTerminalIsolation(input: TerminalIsolationInput): Termin
         "(requires NODE_ENV=development|test, no hosted markers, " +
         `${LOCAL_EXECUTION_OPT_IN_VAR}=true, ${ISOLATION_VERIFIED_VAR}=true and a loopback bind) and no verified sandbox ` +
         "isolation exists. Failing closed unconditionally; no override is available.",
+      sandboxExecution,
     };
   }
 
@@ -180,6 +290,7 @@ export function evaluateTerminalIsolation(input: TerminalIsolationInput): Termin
         status: "docker_enforced",
         productionLike,
         reason: "Docker mode enforced; daemon, image and network are present",
+        sandboxExecution,
       };
     }
     return {
@@ -188,6 +299,7 @@ export function evaluateTerminalIsolation(input: TerminalIsolationInput): Termin
       status: "unsafe",
       productionLike,
       reason: `Docker mode requested but unavailable: ${input.dockerReason ?? "unknown"}`,
+      sandboxExecution,
     };
   }
 
@@ -197,6 +309,7 @@ export function evaluateTerminalIsolation(input: TerminalIsolationInput): Termin
     status: "dev_host_shell",
     productionLike,
     reason: "Trusted local development host shell (explicit opt-in, loopback bind); no isolation",
+    sandboxExecution,
   };
 }
 

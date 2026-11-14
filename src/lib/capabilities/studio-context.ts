@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { getProject } from "@/lib/projects/project-repository";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { translateCapabilities, type RawCapabilities } from "./translate";
+import { isSandboxExecutionEnabled } from "./terminal-execution";
 
 export interface StudioContext {
   terminalConnected: boolean;
@@ -33,12 +34,23 @@ async function checkTerminalServerHealth(): Promise<boolean> {
     if (!resp.ok) return false;
     const data = await resp.json();
     // /health reports status:"ok"/readiness:"ready" whenever the server
-    // process is up — INCLUDING when terminal execution is disabled by
-    // fail-closed isolation policy (production without verified sandbox).
-    // A reachable-but-execution-disabled server cannot run PTYs, so it is
-    // NOT a healthy terminal for capability purposes.
+    // process is up — INCLUDING when HOST terminal execution is disabled
+    // by fail-closed isolation policy. A server with no execution path at
+    // all is NOT a healthy terminal for capability purposes. But since
+    // Step 6 the payload separates the dimensions: host execution stays
+    // disabled in production while sandbox execution (terminal.sandbox)
+    // is enabled-and-fresh — and the capability surfaces this context
+    // feeds (agent exec, prepare, preview) run through the sandbox. So
+    // host-disabled only fails the check when the sandbox dimension is
+    // not enabled either. (The interactive PTY tab is unaffected: it has
+    // no sandbox backend and stays gated on the terminal side.)
     if (data?.status !== "ok" || data?.readiness !== "ready") return false;
-    if (data?.terminal?.execution === "disabled") return false;
+    if (
+      data?.terminal?.execution === "disabled" &&
+      !isSandboxExecutionEnabled(data)
+    ) {
+      return false;
+    }
     return true;
   } catch {
     return false;

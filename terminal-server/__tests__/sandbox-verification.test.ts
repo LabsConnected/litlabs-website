@@ -101,6 +101,66 @@ describe("SandboxVerificationService — compliant provider", () => {
     expect(provider.calls.create).toBe(2); // sandboxes A + B of one run
   });
 
+  it("periodic refresh re-runs the canary and keeps the signal verified past one freshness window", async () => {
+    const provider = createCompliantFakeProvider();
+    const service = new SandboxVerificationService(provider, {
+      // 60ms freshness window: without refresh the signal would go
+      // stale almost immediately; a 10ms refresh keeps re-verifying.
+      maxAgeMs: 60,
+      canary: { runId: "test-signal-refresh" },
+    });
+
+    await service.runNow();
+    expect(service.isVerified()).toBe(true);
+    const runsAtStart = provider.calls.health;
+
+    service.startPeriodicRefresh(10);
+    expect(service.periodicRefreshActive).toBe(true);
+    try {
+      // ~3 freshness windows pass; refresh must have re-run the canary
+      // several times and the signal must still read verified.
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      expect(provider.calls.health).toBeGreaterThan(runsAtStart + 2);
+      expect(service.getSignal().state).toBe("verified");
+      expect(service.isVerified()).toBe(true);
+    } finally {
+      service.stopPeriodicRefresh();
+    }
+    expect(service.periodicRefreshActive).toBe(false);
+
+    // After stop, no further canary runs are scheduled.
+    const runsAtStop = provider.calls.health;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(provider.calls.health).toBe(runsAtStop);
+  });
+
+  it("periodic refresh is idempotent — a second start does not double-schedule", async () => {
+    const service = new SandboxVerificationService(createCompliantFakeProvider(), {
+      canary: { runId: "test-signal-refresh-idempotent" },
+    });
+    service.startPeriodicRefresh(10);
+    service.startPeriodicRefresh(10);
+    expect(service.periodicRefreshActive).toBe(true);
+    service.stopPeriodicRefresh();
+    expect(service.periodicRefreshActive).toBe(false);
+    // Stopping twice is a no-op, not an error.
+    service.stopPeriodicRefresh();
+  });
+
+  it("a failing provider under periodic refresh stays failed and never throws", async () => {
+    const service = createDefaultSandboxVerificationService({
+      canary: { runId: "test-signal-refresh-failing" },
+    });
+    service.startPeriodicRefresh(10);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(service.getSignal().state).toBe("failed");
+      expect(service.isVerified()).toBe(false);
+    } finally {
+      service.stopPeriodicRefresh();
+    }
+  });
+
   it("a provider whose health() throws yields a failed report, not an exception", async () => {
     const exploding: CanaryProvider = {
       name: "exploding",
