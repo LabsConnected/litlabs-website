@@ -127,9 +127,33 @@ function loadPersisted(): void {
     if (!existsSync(PERSIST_PATH)) return;
     const data = JSON.parse(readFileSync(PERSIST_PATH, "utf-8")) as WorkspaceDescriptor[];
     for (const ws of data) {
-      if (ws.workspaceId && ws.root && existsSync(ws.root)) {
-        workspaces.set(ws.workspaceId, ws);
+      if (!ws.workspaceId || !ws.root) {
+        console.error(
+          "[WorkspaceManager] Dropping malformed persisted workspace entry " +
+            `(missing workspaceId/root): ${JSON.stringify(ws).slice(0, 200)}`,
+        );
+        continue;
       }
+      if (!existsSync(ws.root)) {
+        // The root is not visible at this instant (volume mount timing
+        // during a restart is the known cause). Do NOT silently delete
+        // the descriptor: the web DB still points at this workspaceId,
+        // and deleting it makes every registry lookup (preview start,
+        // files, exec) 404 "Workspace not found" while the Studio gate
+        // keeps reporting the project ready — with no code path able
+        // to re-register it. Keep the descriptor registered as
+        // ready=false instead: lookups then answer an honest "not
+        // ready" (preview start 409s), the descriptor survives the
+        // next persist, and a later prepare with the stored id can
+        // re-register the workspace in place.
+        console.error(
+          `[WorkspaceManager] Persisted workspace ${ws.workspaceId} root not visible at load (${ws.root}); ` +
+            "keeping descriptor registered as ready=false",
+        );
+        workspaces.set(ws.workspaceId, { ...ws, ready: false });
+        continue;
+      }
+      workspaces.set(ws.workspaceId, ws);
     }
   } catch {
     // Corrupt or missing file — start fresh
