@@ -17,13 +17,22 @@
  *   - the responsive collapse: under the lg breakpoint the sidebar
  *     becomes a left drawer opened from a toolbar row;
  *   - a shared content region (max width + padding) with an optional
- *     per-page header slot.
+ *     per-page header slot;
+ *   - an optional right rail (Discover's Trending rail is the first
+ *     consumer), shown only at xl widths so narrower layouts keep the
+ *     single-column reading flow. Added in the Discover phase as a
+ *     minimal extension of the Projects-phase frame — same tokens,
+ *     same sticky-column treatment as the sidebar.
  *
  * Colors are passed in (structural subset of the theme's
  * resolvedColors) instead of read from context. Pages pass their
  * useTheme() resolvedColors unchanged, so the frame renders in the
  * user's normal theme — /projects included, since Larry's all-light
  * ruling (2026-11-13) removed the earlier Neon Grove pack scoping.
+ * A caller that renders the frame without resolved colors (a
+ * partial theme harness, an early paint) must not crash it: the
+ * palette falls back field-by-field to the platform default
+ * (FALLBACK_COLORS) and the caller's colors win wherever given.
  *
  * It does NOT special-case Studio (Studio keeps its own viewport-
  * locked StudioShell and LayoutShell already routes around it) and it
@@ -48,6 +57,24 @@ export interface AppShellColors {
   elevatedBg?: string;
 }
 
+/**
+ * Platform-default palette — field-for-field the LiTT Signature
+ * light skin (lightSkins.signature in src/context/ThemeContext.tsx,
+ * the defaultTheme's skin), with textMuted derived from textColor
+ * exactly as ThemeContext's getResolvedColors derives it. Used only
+ * as the fallback base when a caller passes no (or partial) colors;
+ * a real page's resolvedColors override every field they set.
+ */
+const FALLBACK_COLORS: AppShellColors = {
+  bgColor: "#FFFFFF",
+  textColor: "#0E1510",
+  textMuted: "#717573",
+  headerColor: "#0C5A26",
+  borderColor: "#CFDEC4",
+  accentColor: "#177A36",
+  boxBg: "#FFFFFF",
+};
+
 interface LiTTAppShellProps {
   colors: AppShellColors;
   /** Per-page sidebar content (categories / sections / feed nav). */
@@ -56,14 +83,20 @@ interface LiTTAppShellProps {
   sidebarLabel: string;
   /** Optional per-page hero/title band rendered above the content. */
   header?: ReactNode;
+  /** Optional right rail (e.g. Discover's Trending rail); xl+ only. */
+  rightRail?: ReactNode;
+  /** Accessible name for the right rail region. */
+  rightRailLabel?: string;
   children: ReactNode;
 }
 
 export default function LiTTAppShell({
-  colors,
+  colors: colorsProp,
   sidebar,
   sidebarLabel,
   header,
+  rightRail,
+  rightRailLabel,
   children,
 }: LiTTAppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -76,6 +109,11 @@ export default function LiTTAppShell({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
+
+  // The caller's colors win field-by-field; anything they did not
+  // pass (including the whole object, from a partial theme harness)
+  // falls back to the platform default palette instead of crashing.
+  const colors: AppShellColors = { ...FALLBACK_COLORS, ...colorsProp };
 
   const sidebarSurface = {
     backgroundColor: colors.sidebarBg ?? colors.boxBg,
@@ -128,6 +166,21 @@ export default function LiTTAppShell({
           {header}
           {children}
         </div>
+
+        {/* Right rail — xl widths only, mirrors the sidebar's sticky
+            column treatment on the opposite edge. */}
+        {rightRail && (
+          <aside
+            aria-label={rightRailLabel ?? "Sidebar"}
+            className="sticky top-0 hidden h-screen w-[320px] shrink-0 overflow-y-auto border-l px-4 py-6 xl:block"
+            style={{
+              backgroundColor: colors.elevatedBg ?? colors.boxBg,
+              borderColor: `${colors.borderColor}55`,
+            }}
+          >
+            {rightRail}
+          </aside>
+        )}
       </div>
 
       {/* Mobile/tablet drawer */}
