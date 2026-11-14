@@ -636,7 +636,7 @@ export default function StudioProjectFiles({
       const isOpen = expanded.has(entry.path);
       return (
         <div key={entry.path}>
-          <div className="group flex min-w-0 items-center gap-1 rounded-lg hover:bg-white/5" style={{ paddingLeft: `${Math.min(depth, 5) * 10 + 2}px` }}>
+          <div className="group relative flex min-w-0 items-center gap-1 rounded-lg hover:bg-black/5" style={{ paddingLeft: `${Math.min(depth, 5) * 10 + 2}px` }}>
             <button
               type="button"
               onClick={() => entry.type === "folder" ? void toggleFolder(entry) : void openFile(entry)}
@@ -648,18 +648,30 @@ export default function StudioProjectFiles({
               {entry.type === "folder" ? <Folder size={13} /> : <FileText size={13} />}
               <span className="min-w-0 flex-1 truncate">{entry.name}</span>
               {entry.gitStatus && <GitBadge status={entry.gitStatus} />}
-              {entry.type === "file" && <span className="hidden shrink-0 text-[8px] text-white/30 xl:inline">{formatSize(entry.size)}</span>}
+              {entry.type === "file" && <span className="hidden shrink-0 text-[8px] @min-[560px]:inline" style={{ color: "var(--text-muted)" }}>{formatSize(entry.size)}</span>}
             </button>
-            {entry.type === "folder" && <>
-              <button type="button" onClick={() => setDialog({ kind: "file", directory: entry.path, value: "" })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md opacity-0 transition hover:bg-white/10 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Create file in ${entry.name}`} title={`Create file in ${entry.name}`}><Plus size={11} /></button>
-              <button type="button" onClick={() => setDialog({ kind: "folder", directory: entry.path, value: "" })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md opacity-0 transition hover:bg-white/10 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Create folder in ${entry.name}`} title={`Create folder in ${entry.name}`}><FolderPlus size={11} /></button>
-            </>}
-            <button type="button" onClick={() => setDialog({ kind: "rename", sourcePath: entry.path, value: entry.name })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md opacity-0 transition hover:bg-white/10 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Rename ${entry.name}`} title="Rename">
-              <Pencil size={11} />
-            </button>
-            <button type="button" onClick={() => void deleteEntry(entry)} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md opacity-0 transition hover:bg-red-500/10 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Delete ${entry.name}`} title="Delete">
-              <Trash2 size={11} />
-            </button>
+            {/* Row actions live OUT of the layout flow: as in-flow flex
+                children they reserved 72px (file) to 148px (folder) of
+                row width while invisible (opacity-0), which — in the
+                narrow Files sidebar — compressed the name span to zero
+                width and rendered the tree visually blank. As an
+                absolute overlay they cost no layout width until shown. */}
+            <div
+              data-testid="file-row-actions"
+              className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 rounded-lg pl-2 opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+              style={{ backgroundColor: "var(--studio-card)" }}
+            >
+              {entry.type === "folder" && <>
+                <button type="button" onClick={() => setDialog({ kind: "file", directory: entry.path, value: "" })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Create file in ${entry.name}`} title={`Create file in ${entry.name}`}><Plus size={11} /></button>
+                <button type="button" onClick={() => setDialog({ kind: "folder", directory: entry.path, value: "" })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Create folder in ${entry.name}`} title={`Create folder in ${entry.name}`}><FolderPlus size={11} /></button>
+              </>}
+              <button type="button" onClick={() => setDialog({ kind: "rename", sourcePath: entry.path, value: entry.name })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Rename ${entry.name}`} title="Rename">
+                <Pencil size={11} />
+              </button>
+              <button type="button" onClick={() => void deleteEntry(entry)} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Delete ${entry.name}`} title="Delete">
+                <Trash2 size={11} />
+              </button>
+            </div>
           </div>
           {entry.type === "folder" && isOpen && renderEntries(entry.path, depth + 1)}
         </div>
@@ -671,8 +683,21 @@ export default function StudioProjectFiles({
     return <div className="flex h-full min-h-40 items-center justify-center px-4 text-center text-[10px]" style={{ color: "var(--text-muted)" }}>Select a project to browse files.</div>;
   }
 
+  // The gate banner below already explains a not-ready workspace. When
+  // the load error carries the exact same text (the settled host-exec
+  // verdict sets HOST_EXECUTION_UNAVAILABLE_MESSAGE as both), rendering
+  // the red error banner too showed the same message twice in one panel
+  // (yellow gate banner + red error banner). Suppress only the exact
+  // duplicate — distinct load errors still surface.
+  const gateBannerText = workspaceStatus !== "ready"
+    ? hostExecUnavailable
+      ? HOST_EXECUTION_UNAVAILABLE_MESSAGE
+      : `Workspace is ${workspaceStatus ?? "not prepared"}. Prepare it before browsing project files.`
+    : null;
+  const errorDuplicatesGate = gateBannerText !== null && error === gateBannerText;
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2" data-testid="studio-project-files">
+    <div className="flex h-full min-h-0 flex-col gap-2 @container" data-testid="studio-project-files">
       <div className="flex shrink-0 items-start gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
         <Folder size={14} className="mt-0.5 shrink-0" style={{ color: "var(--litt-primary)" }} />
         <div className="min-w-0 flex-1">
@@ -686,7 +711,7 @@ export default function StudioProjectFiles({
 
       {workspaceStatus !== "ready" && (hostExecUnavailable ? <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}><span className="min-w-0 flex-1">{HOST_EXECUTION_UNAVAILABLE_MESSAGE}</span></div> : <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}><span className="min-w-0 flex-1">Workspace is {workspaceStatus ?? "not prepared"}. Prepare it before browsing project files.</span><button type="button" onClick={() => void prepareWorkspace()} disabled={preparing || workspaceStatus === "provisioning" || workspaceStatus === "preparing"} className="flex min-h-10 shrink-0 items-center gap-1 rounded-md px-2 font-bold disabled:opacity-40" style={{ backgroundColor: "#e3b341", color: "#000" }}>{preparing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Prepare</button></div>)}
       {workspaceStatus === "ready" && !writeAccess && <div className="rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}>Editing is unavailable because this workspace is read-only. The server will continue to enforce project ownership and mutation permissions.</div>}
-      {error && <div className="flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.06)", color: "#fca5a5" }}><span className="min-w-0 flex-1">{error}</span><button type="button" onClick={() => setError(null)} aria-label="Dismiss file error"><X size={12} /></button></div>}
+      {error && !errorDuplicatesGate && <div className="flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.06)", color: "#fca5a5" }}><span className="min-w-0 flex-1">{error}</span><button type="button" onClick={() => setError(null)} aria-label="Dismiss file error"><X size={12} /></button></div>}
 
       {dialog && (
         <form onSubmit={submitDialog} className="flex shrink-0 items-center gap-1.5 rounded-lg border p-1.5" style={{ borderColor: "var(--studio-border)" }}>
@@ -704,8 +729,14 @@ export default function StudioProjectFiles({
         <span className="ml-auto shrink-0 px-1 text-[9px]" style={{ color: "var(--text-muted)" }}>{loading ? "Loading…" : `${Object.values(entries).flat().length} loaded`}</span>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 xl:grid-cols-[minmax(130px,0.8fr)_minmax(0,1.7fr)]">
-        <div className="min-h-28 overflow-y-auto rounded-xl border p-1.5 xl:min-h-0" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
+      {/* Split by the component's OWN width, not the viewport's: this
+          panel is mounted both as the wide Files stage and inside the
+          ~286px Files sidebar, and the old viewport-xl split left the
+          tree only ~130px in the sidebar (see the row-actions note in
+          renderEntries). Below 560px of panel width the editor stacks
+          under the tree instead of starving it. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 @min-[560px]:grid-cols-[minmax(130px,0.8fr)_minmax(0,1.7fr)]" data-testid="studio-project-files-layout">
+        <div className="min-h-28 overflow-y-auto rounded-xl border p-1.5 @min-[560px]:min-h-0" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
           {loading && !entries["."] ? <div className="flex items-center gap-2 px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={12} className="animate-spin" /> Loading files…</div> : entries["."]?.length ? renderEntries(".") : <div className="px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}>No files found.</div>}
         </div>
 
