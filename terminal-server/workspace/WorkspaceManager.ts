@@ -71,8 +71,8 @@ export const PACKAGE_SCRIPT_ENV_ALLOWLIST = [
 
 export function buildPackageScriptEnv(
   source: NodeJS.ProcessEnv = process.env,
-): Record<string, string> {
-  const env: Record<string, string> = {};
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
   for (const key of PACKAGE_SCRIPT_ENV_ALLOWLIST) {
     const value = source[key];
     if (value) env[key] = value;
