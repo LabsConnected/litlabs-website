@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockGetToken = vi.hoisted(() => vi.fn().mockResolvedValue("fresh-clerk-jwt"));
@@ -22,7 +22,10 @@ vi.mock("@/hooks/useClerkAuth", () => ({
 }));
 
 import { io as mockIo } from "socket.io-client";
-import { useLiTTRuntime } from "./useLiTTRuntime";
+import {
+  computeRelayBackoffDelayMs,
+  useLiTTRuntime,
+} from "./useLiTTRuntime";
 
 function freshSnapshot() {
   return {
@@ -121,6 +124,144 @@ describe("useLiTTRuntime relay transport (default)", () => {
     );
     expect(result.current.connected).toBe(false);
     expect(result.current.freshness).toBe("unreachable");
+    unmount();
+  });
+});
+
+describe("computeRelayBackoffDelayMs", () => {
+  it("keeps the base interval below the failure threshold", () => {
+    expect(computeRelayBackoffDelayMs(5000, 0)).toBe(5000);
+    expect(computeRelayBackoffDelayMs(5000, 1)).toBe(5000);
+    expect(computeRelayBackoffDelayMs(5000, 2)).toBe(5000);
+  });
+
+  it("stretches 5s -> 30s -> 60s cap after consecutive failures", () => {
+    expect(computeRelayBackoffDelayMs(5000, 3)).toBe(30_000);
+    expect(computeRelayBackoffDelayMs(5000, 4)).toBe(60_000);
+    expect(computeRelayBackoffDelayMs(5000, 25)).toBe(60_000);
+  });
+});
+
+describe("useLiTTRuntime relay backoff", () => {
+  const fetchMock = vi.fn();
+  let hidden = false;
+  let hiddenSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    hidden = false;
+    hiddenSpy = vi
+      .spyOn(document, "hidden", "get")
+      .mockImplementation(() => hidden);
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+    vi.mocked(mockIo).mockClear();
+  });
+
+  afterEach(() => {
+    hiddenSpy?.mockRestore();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  it("stretches the poll interval after consecutive failures", async () => {
+    fetchMock.mockRejectedValue(new Error("network down"));
+
+    const { result, unmount } = renderHook(() =>
+      useLiTTRuntime({ pollIntervalMs: 50 }),
+    );
+
+    // Immediate poll on subscribe: failure #1, next tick stays at base 50ms.
+    await advance(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.error).toMatch(/network down/);
+    expect(result.current.freshness).toBe("unreachable");
+
+    await advance(50); // failure #2, still base
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await advance(50); // failure #3, backoff engages: next delay 6x = 300ms
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // A tick at the old base interval must NOT fire a request anymore.
+    await advance(50);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    await advance(250); // 300ms after failure #3: failure #4 fires
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    // Beyond the threshold the delay is 12x = 600ms.
+    await advance(300);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    await advance(300);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    unmount();
+  });
+
+  it("resets to the base interval on the first success", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ snapshot: freshSnapshot() }),
+      });
+
+    const { result, unmount } = renderHook(() =>
+      useLiTTRuntime({ pollIntervalMs: 50 }),
+    );
+
+    await advance(0); // failure #1
+    await advance(50); // failure #2
+    await advance(50); // failure #3 -> backed off to 300ms
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    await advance(50);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    await advance(250); // backed-off tick: success, backoff resets
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.current.connected).toBe(true);
+    expect(result.current.error).toBeNull();
+
+    // Next poll is back on the base 50ms interval, not the backed-off one.
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ snapshot: freshSnapshot() }),
+    });
+    await advance(50);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    unmount();
+  });
+
+  it("skips poll ticks while the tab is hidden and resumes when visible", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ snapshot: freshSnapshot() }),
+    });
+
+    const { unmount } = renderHook(() =>
+      useLiTTRuntime({ pollIntervalMs: 50 }),
+    );
+
+    await advance(0); // immediate poll
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    hidden = true;
+    await advance(50); // tick fires but is skipped: no request
+    await advance(50); // still hidden: still no request
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    hidden = false;
+    await advance(50); // visible again: polling resumes
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     unmount();
   });
 });
