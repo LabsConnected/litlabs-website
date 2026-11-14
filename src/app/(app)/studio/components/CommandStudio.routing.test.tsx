@@ -879,21 +879,21 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(codeBtn.className).toContain("glass-active");
     });
 
-    it("opening and closing the Files dock tab does not leave Builder", async () => {
+    it("opening and closing Files (LiTT panel tab) does not leave Builder", async () => {
       setUrl("tool=build");
       const view = await renderCommandStudio();
       expectBuilderSurfaceActive();
       const user = userEvent.setup();
-      // Files is a dock tab — opening it must not change the
-      // active Builder surface or the canonical URL.
-      await user.click(screen.getByTestId("dock-collapsed-toggle"));
-      await user.click(screen.getByTestId("dock-tab-files"));
-      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
+      // Files lives in the LiTT panel's top row now (the dock's Files
+      // tab is retired) — opening it must not change the active
+      // Builder surface or the canonical URL.
+      await user.click(screen.getByTestId("litt-tab-files"));
+      expect(screen.getByTestId("litt-files-panel")).toHaveAttribute("data-active", "true");
       act(() => view.rerender(<CommandStudio />));
       expectBuilderSurfaceActive();
       expect(currentTool()).toBe("build");
-      // Close the dock
-      await user.click(screen.getByTestId("dock-close"));
+      // Back to Chat — still on Builder.
+      await user.click(screen.getByTestId("litt-tab-chat"));
       act(() => view.rerender(<CommandStudio />));
       expectBuilderSurfaceActive();
       expect(currentTool()).toBe("build");
@@ -1232,7 +1232,8 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("unified dock replaces the desktop Context Drawer", async () => {
       await renderCommandStudio();
       // The old desktop Context Drawer is gone from the desktop topology;
-      // Activity/Files/Terminal/Inspector/Media live in the bottom dock.
+      // Activity/Terminal/Inspector/Media live in the bottom dock;
+      // Files lives in the LiTT panel's top row.
       expect(screen.queryByTestId("context-drawer")).toBeNull();
     });
 
@@ -1244,13 +1245,14 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("dock-content-activity")).toBeTruthy();
     });
 
-    it("clicking the dock Files tab activates the Files panel", async () => {
+    it("the LiTT panel Files tab activates the Files panel; the dock has no Files tab", async () => {
       const { user } = await renderCommandStudio();
       await user.click(screen.getByTestId("studio-dock-toggle"));
-      await user.click(screen.getByTestId("dock-tab-files"));
-      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
-      expect(screen.getByTestId("dock-tab-activity")).toHaveAttribute("aria-selected", "false");
-      expect(screen.getByTestId("dock-content-files")).toBeTruthy();
+      expect(screen.queryByTestId("dock-tab-files")).toBeNull();
+      await user.click(screen.getByTestId("litt-tab-files"));
+      expect(screen.getByTestId("litt-tab-files")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("litt-tab-chat")).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByTestId("litt-files-panel")).toHaveAttribute("data-active", "true");
     });
 
     it("Ctrl+Shift+A opens the dock on the Activity tab", async () => {
@@ -1272,13 +1274,13 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("switching dock tabs reflects the active tab truthfully", async () => {
       const { user } = await renderCommandStudio();
       await user.click(screen.getByTestId("studio-dock-toggle"));
-      // Open on Files
-      await user.click(screen.getByTestId("dock-tab-files"));
-      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
+      // Open on Media
+      await user.click(screen.getByTestId("dock-tab-media"));
+      expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "true");
       // Switch to Inspector inside the dock
       await user.click(screen.getByTestId("dock-tab-inspector"));
       expect(screen.getByTestId("dock-tab-inspector")).toHaveAttribute("aria-selected", "true");
-      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "false");
+      expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "false");
       expect(screen.getByTestId("dock-content-inspector")).toBeTruthy();
     });
 
@@ -1288,9 +1290,9 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       // The collapsed drawer has one entry point; contextual tabs appear
       // after opening it.
       await user.click(screen.getByTestId("dock-collapsed-toggle"));
-      await user.click(screen.getByTestId("dock-tab-files"));
+      await user.click(screen.getByTestId("dock-tab-media"));
       expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
-      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "true");
     });
 
     it("dock close button closes the dock", async () => {

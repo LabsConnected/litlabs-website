@@ -38,9 +38,9 @@ describe("topBarColorsFor", () => {
     const T = topBarColorsFor(DARK_THEME, true);
     expect(T.bgColor).toBe("#ffffff");
     expect(T.textColor).toBe("#0e1510");
-    expect(T.textMuted).toBe("#63745f");
+    expect(T.textMuted).toBe("#52684f");
     expect(T.accentColor).toBe("#177a36");
-    expect(T.borderColor).toBe("#cfdec4");
+    expect(T.borderColor).toBe("#86ac72");
     expect(T.boxBg).toBe("#ffffff");
   });
 

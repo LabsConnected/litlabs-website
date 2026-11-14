@@ -100,7 +100,7 @@ export default function CommandStudioNav({
                 }
                 onSelect(item.id);
               }}
-              className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-black/5"
+              className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-black/5 lg:h-8 lg:w-8"
               style={{
                 color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
                 backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -145,7 +145,7 @@ export default function CommandStudioNav({
         {/* LiTTBits balance footer — shows AI credits count */}
         <Link
           href="/wallet"
-          className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-black/5"
+          className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-black/5 lg:h-8 lg:w-8"
           style={{ color: "var(--text-muted)" }}
           title={`LiTTBits: ${balance.toLocaleString()}`}
           aria-label="View wallet"
@@ -260,10 +260,12 @@ export function MobileCommandNav({
   surface?: MobileStudioSurface | null;
   onSelectSurface?: (surface: MobileStudioSurface) => void;
 }) {
+  // Files is NOT a bottom-nav entry anymore (Larry, 2026-11-13):
+  // project files live in the mobile LiTT sheet's top-row Files tab.
+  // The "files" surface itself still exists for other routes.
   const surfaceItems: { id: MobileStudioSurface; label: string; icon: typeof MessageSquare }[] = [
     { id: "chat", label: "Chat", icon: MessageSquare },
     { id: "preview", label: "Preview", icon: Eye },
-    { id: "files", label: "Files", icon: FolderOpen },
     { id: "activity", label: "Activity", icon: Activity },
     { id: "more", label: "More", icon: MoreHorizontal },
   ];
