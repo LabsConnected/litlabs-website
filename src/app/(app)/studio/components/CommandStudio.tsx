@@ -1228,6 +1228,23 @@ function CommandStudioContent() {
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  // Stable callback identities for StudioProjectFiles / StudioInspector.
+  // Inline arrows at those mount points previously recreated
+  // StudioProjectFiles' loadDirectory on every CommandStudio render,
+  // re-firing its panel-wiping load effect — the Files panel reloaded
+  // on every 15 s capabilities/runtime poll. refreshCapabilities itself
+  // changes identity whenever runtime state changes, so it is routed
+  // through a ref to keep handleWorkspacePrepared stable.
+  const refreshCapabilitiesRef = useRef(refreshCapabilities);
+  useEffect(() => {
+    refreshCapabilitiesRef.current = refreshCapabilities;
+  }, [refreshCapabilities]);
+  const handleWorkspaceRevision = useCallback(() => {
+    setWorkspaceRevision((value) => value + 1);
+  }, []);
+  const handleWorkspacePrepared = useCallback(() => {
+    void refreshCapabilitiesRef.current();
+  }, []);
   const [healthRunTrigger, setHealthRunTrigger] = useState(0);
   // viewportTier/layout state declared with the shell block above.
 
@@ -3249,9 +3266,9 @@ function CommandStudioContent() {
           branch={capabilities.activeBranch ?? capabilities.defaultBranch}
           workspaceStatus={capabilities.workspaceStatus}
           writeAccess={capabilities.writeAccess}
-          onSaved={() => setWorkspaceRevision((value) => value + 1)}
-          onMutation={() => setWorkspaceRevision((value) => value + 1)}
-          onWorkspacePrepared={() => { void refreshCapabilities(); }}
+          onSaved={handleWorkspaceRevision}
+          onMutation={handleWorkspaceRevision}
+          onWorkspacePrepared={handleWorkspacePrepared}
         />
       </div>
     </div>
@@ -3409,9 +3426,9 @@ function CommandStudioContent() {
             branch={capabilities.activeBranch ?? capabilities.defaultBranch}
             workspaceStatus={capabilities.workspaceStatus}
             writeAccess={capabilities.writeAccess}
-            onSaved={() => setWorkspaceRevision((value) => value + 1)}
-            onMutation={() => setWorkspaceRevision((value) => value + 1)}
-            onWorkspacePrepared={() => { void refreshCapabilities(); }}
+            onSaved={handleWorkspaceRevision}
+            onMutation={handleWorkspaceRevision}
+            onWorkspacePrepared={handleWorkspacePrepared}
           />
         );
       case "images":
@@ -3797,8 +3814,8 @@ function CommandStudioContent() {
                       conversationId: conversation.selectedConversationId,
                       workspaceRevision,
                       healthRunTrigger,
-                      onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
-                      onWorkspacePrepared: () => { void refreshCapabilities(); },
+                      onFilesSaved: handleWorkspaceRevision,
+                      onWorkspacePrepared: handleWorkspacePrepared,
                     }}
                   />
                 }
@@ -4109,8 +4126,8 @@ function CommandStudioContent() {
                     conversationId: conversation.selectedConversationId,
                     workspaceRevision,
                     healthRunTrigger,
-                    onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
-                    onWorkspacePrepared: () => { void refreshCapabilities(); },
+                    onFilesSaved: handleWorkspaceRevision,
+                    onWorkspacePrepared: handleWorkspacePrepared,
                   }}
                 />
               }
@@ -4154,8 +4171,8 @@ function CommandStudioContent() {
                     conversationId: conversation.selectedConversationId,
                     workspaceRevision,
                     healthRunTrigger,
-                    onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
-                    onWorkspacePrepared: () => { void refreshCapabilities(); },
+                    onFilesSaved: handleWorkspaceRevision,
+                    onWorkspacePrepared: handleWorkspacePrepared,
                   }}
                 />
               }
