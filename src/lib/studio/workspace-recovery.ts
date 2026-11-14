@@ -15,6 +15,7 @@ import { getInstallationTokenForClone } from "@/lib/github-app";
 import { extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
 import { isManagedSourceType, isStaticTemplateId } from "@/lib/projects/project-source";
 import type { CanonicalProject } from "@/lib/projects/types";
+import { restoreWorkspaceFromLatestDeployment } from "./workspace-rehydration";
 
 /**
  * Shared workspace recovery logic.
@@ -31,6 +32,21 @@ import type { CanonicalProject } from "@/lib/projects/types";
 export interface RecoveredWorkspace {
   workspaceId: string;
   reprepared: boolean;
+  /**
+   * Set when a re-prepare landed on an empty root and the workspace was
+   * rehydrated from this deployment's snapshot (static managed projects
+   * only). The deployed content won over the seeded welcome scaffold.
+   */
+  restoredFromDeploymentId?: string;
+  /**
+   * True when a re-prepare landed on an empty root for a project that
+   * HAS deployments, but no complete snapshot could be restored — the
+   * workspace holds only the scaffold while deployed content exists
+   * elsewhere. Surfaces must report this, never a silent "ready".
+   */
+  contentLoss?: boolean;
+  /** The newest deployment that survives for the project, when contentLoss is set. */
+  survivingDeploymentId?: string | null;
 }
 
 const PROVISIONING_POLL_MS = 500;
@@ -172,7 +188,29 @@ export async function ensureWorkspaceAlive(
   if (!project?.workspaceId) {
     throw new Error("Workspace recovery failed: no workspace ID after re-preparation");
   }
-  return { workspaceId: project.workspaceId, reprepared: true };
+  const recovered: RecoveredWorkspace = { workspaceId: project.workspaceId, reprepared: true };
+
+  // A re-prepare onto an empty root seeds only the blank welcome
+  // scaffold. For a static, LiTT-managed project that has deployments,
+  // the deployed snapshot is the real content and must win over the
+  // scaffold: restore it as part of recovery. Repo-backed projects are
+  // excluded — their repository is the source of truth and the prepare
+  // path already mirrors it. The restore helper never throws; an
+  // unrestorable loss is reported on the result, not hidden.
+  if (project.framework === "static" && isManagedSourceType(project.sourceType)) {
+    const outcome = await restoreWorkspaceFromLatestDeployment({
+      projectId,
+      userId,
+      workspaceId: project.workspaceId,
+    });
+    if (outcome.kind === "restored") {
+      recovered.restoredFromDeploymentId = outcome.deploymentId;
+    } else if (outcome.kind === "content-loss") {
+      recovered.contentLoss = true;
+      recovered.survivingDeploymentId = outcome.survivingDeploymentId;
+    }
+  }
+  return recovered;
 }
 
 /**
