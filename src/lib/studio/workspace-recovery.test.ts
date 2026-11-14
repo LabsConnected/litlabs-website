@@ -201,7 +201,7 @@ describe("workspace-recovery", () => {
           workspaceId: "ws-new",
           workspaceRoot: "/data/ws-new",
           workspaceStatus: "ready",
-        } as Partial<CanonicalProject>),
+        } as unknown as Partial<CanonicalProject>),
       );
       vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
       vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
