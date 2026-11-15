@@ -147,9 +147,12 @@ describe("LiTEmptyState truthful launchpad", () => {
       if (testCase.expected) {
         expect(primaryActions[0]).toHaveTextContent(testCase.expected);
       } else if ("ready" in testCase && testCase.ready) {
-        // Ready = silent: no notice, no action, straight into chat.
+        // Ready = silent: no notice, no action, no chips — straight into
+        // the conversation (board-only rebuild, Larry 2026-11-14: the
+        // prompt-starter chips do not carry over).
         expect(screen.queryByTestId("first-mission-notice")).not.toBeInTheDocument();
-        expect(screen.getByTestId("first-mission-starter-chips")).toBeInTheDocument();
+        expect(screen.queryByTestId("first-mission-starter-chips")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("entry-create-type-chips")).not.toBeInTheDocument();
       } else {
         expect(screen.getAllByText(/still getting set up/i).length).toBeGreaterThan(0);
       }
@@ -231,26 +234,27 @@ describe("LiTEmptyState direct conversation open (no welcome screen)", () => {
     );
   }
 
-  it("opens direct when ready: no headline, no notice — chips and composer only", () => {
+  it("opens direct when ready: no headline, no notice, no chips — composer only", () => {
     renderReady();
     expect(screen.queryByRole("heading")).not.toBeInTheDocument();
     expect(screen.queryByTestId("first-mission-notice")).not.toBeInTheDocument();
     expect(screen.queryByTestId("first-mission-status")).not.toBeInTheDocument();
-    expect(screen.getByTestId("first-mission-starter-chips")).toBeInTheDocument();
-  });
-
-  it("renders all five starter chips", () => {
-    renderReady();
-    const group = screen.getByTestId("first-mission-starter-chips");
-    expect(group).toBeInTheDocument();
+    // Board-only rebuild (Larry 2026-11-14): the prompt-starter chips and
+    // the creation-type chips do NOT carry over — the conversation opens
+    // clean and the composer is the entry.
+    expect(screen.queryByTestId("first-mission-starter-chips")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("entry-create-type-chips")).not.toBeInTheDocument();
     for (const label of [
       "Build my business website",
-      "Fix something broken",
-      "Make my site look better",
-      "Create something new",
-      "Surprise me",
+      "Website",
+      "Image",
+      "Video",
+      "Music",
+      "Code",
+      "Design",
+      "Game",
     ]) {
-      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
     }
   });
 
@@ -288,33 +292,7 @@ describe("LiTEmptyState direct conversation open (no welcome screen)", () => {
     expect(screen.getByTestId("first-mission-status")).toHaveTextContent(/getting things ready/i);
   });
 
-  it("primes the composer through studio:ask-litt without submitting", () => {
-    const onPrimaryAction = vi.fn();
-    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
-    render(
-      <LiTEmptyState
-        launchpadState={state({
-          runtime: readyRuntime,
-          runtimeLoading: false,
-          providerHealth: "available",
-        })}
-        onPrimaryAction={onPrimaryAction}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Surprise me" }));
-
-    expect(onPrimaryAction).not.toHaveBeenCalled();
-    expect(dispatchSpy).toHaveBeenCalledOnce();
-    const event = dispatchSpy.mock.calls[0][0] as CustomEvent;
-    expect(event.type).toBe("studio:ask-litt");
-    expect(event.detail.prompt).toBe("Surprise me — build something cool");
-    dispatchSpy.mockRestore();
-  });
-
   it("does not gate the chat behind the describe-your-business funnel", () => {
-    // The describe-once box was part of the removed welcome screen;
-    // describing happens in the composer itself now.
     renderReady();
     expect(screen.queryByTestId("first-mission-describe-box")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Describe your business")).not.toBeInTheDocument();
@@ -324,12 +302,11 @@ describe("LiTEmptyState direct conversation open (no welcome screen)", () => {
     renderReady();
     const root = screen.getByTestId("empty-state");
     expect(root.textContent).not.toMatch(/AI provider/i);
-    // "Terminal"/"Deployment"/"Workspace" only live behind the collapsed checks.
     expect(screen.queryByText("Terminal")).not.toBeInTheDocument();
     expect(screen.queryByText("Deployment")).not.toBeInTheDocument();
   });
 
-  it("hides starter chips and shows the blocker message when blocked", () => {
+  it("shows the blocker message when blocked — and still no chips", () => {
     render(
       <LiTEmptyState
         launchpadState={state({
@@ -342,89 +319,15 @@ describe("LiTEmptyState direct conversation open (no welcome screen)", () => {
       />,
     );
     expect(screen.queryByTestId("first-mission-starter-chips")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("entry-create-type-chips")).not.toBeInTheDocument();
     expect(screen.queryByTestId("first-mission-describe-box")).not.toBeInTheDocument();
     expect(screen.getByTestId("first-mission-notice")).toBeInTheDocument();
     expect(screen.getByText("Something needs attention")).toBeInTheDocument();
   });
 
-  it("tells the truth that choosing only fills the chat box", () => {
+  it("never renders the resume-a-conversation list (board-only rebuild)", () => {
     renderReady();
-    expect(
-      screen.getByText(/choosing one fills in the chat box — nothing runs until you send it/i),
-    ).toBeInTheDocument();
-  });
-});
-
-describe("LiTEmptyState creation-type entry chips (one-chat entry)", () => {
-  // One-chat entry (Larry's directive, 2026-11-11; ART-20261111-031):
-  // the seven creation types are entry hints INSIDE the one chat —
-  // the same types the retired hub page offered, but selecting one
-  // sets the chat's creation context / opens the matching pane in
-  // place. It never navigates to a separate hub or destination page
-  // and never opens a second prompt.
-  const readyInput = {
-    runtime: readyRuntime,
-    runtimeLoading: false,
-    providerHealth: "available" as const,
-  };
-
-  it("renders all seven creation-type chips when a handler is provided", () => {
-    render(
-      <LiTEmptyState
-        launchpadState={state(readyInput)}
-        onPrimaryAction={vi.fn()}
-        onCreateType={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId("entry-create-type-chips")).toBeInTheDocument();
-    for (const label of ["Website", "Image", "Video", "Music", "Code", "Design", "Game"]) {
-      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
-    }
-  });
-
-  it("reports the chosen type to the handler — in place, no navigation", () => {
-    const onCreateType = vi.fn();
-    render(
-      <LiTEmptyState
-        launchpadState={state(readyInput)}
-        onPrimaryAction={vi.fn()}
-        onCreateType={onCreateType}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Image" }));
-    expect(onCreateType).toHaveBeenCalledWith("image");
-    fireEvent.click(screen.getByRole("button", { name: "Website" }));
-    expect(onCreateType).toHaveBeenCalledWith("website");
-    fireEvent.click(screen.getByRole("button", { name: "Game" }));
-    expect(onCreateType).toHaveBeenCalledWith("game");
-    fireEvent.click(screen.getByRole("button", { name: "Code" }));
-    expect(onCreateType).toHaveBeenCalledWith("code");
-    expect(onCreateType).toHaveBeenCalledTimes(4);
-  });
-
-  it("renders no creation-type chips without a handler (other surfaces unaffected)", () => {
-    render(
-      <LiTEmptyState
-        launchpadState={state(readyInput)}
-        onPrimaryAction={vi.fn()}
-      />,
-    );
-    expect(screen.queryByTestId("entry-create-type-chips")).not.toBeInTheDocument();
-  });
-
-  it("hides the creation-type chips while the launchpad is blocked (starter-chip parity)", () => {
-    render(
-      <LiTEmptyState
-        launchpadState={state({
-          runtime: runtime({ phase: "idle" }),
-          runtimeLoading: false,
-          runtimeError: "boom",
-          providerHealth: "available",
-        })}
-        onPrimaryAction={vi.fn()}
-        onCreateType={vi.fn()}
-      />,
-    );
-    expect(screen.queryByTestId("entry-create-type-chips")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("recent-conversations")).not.toBeInTheDocument();
+    expect(screen.queryByText(/or resume a real conversation/i)).not.toBeInTheDocument();
   });
 });

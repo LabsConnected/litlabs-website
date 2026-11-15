@@ -34,7 +34,9 @@ vi.mock("@/components/litt/GlobalLittEntry", () => ({
 
 vi.mock("@/context/ThemeContext", () => ({
   useTheme: () => ({
-    theme: "dark",
+    // The real useTheme returns the Theme object; AppShell reads
+    // theme.mode to compute the effective mode for the top bar.
+    theme: { mode: "dark" },
     resolvedColors: {
       bgColor: "#0a0a12",
       boxBg: "#14141f",
@@ -44,6 +46,10 @@ vi.mock("@/context/ThemeContext", () => ({
       accentColor: "#72f238",
     },
   }),
+  // Faithful copy of the real export's semantics (ThemeContext.tsx):
+  // "system" follows the OS preference; explicit modes render as stored.
+  resolveEffectiveMode: (mode: string, systemPrefersDark: boolean) =>
+    mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode,
 }));
 
 vi.mock("@/context/WalletContext", () => ({
@@ -117,9 +123,15 @@ describe("AppShell top bar", () => {
     // are internal Studio surfaces now, reached from inside Studio, not
     // the global nav. There is still no Home pill: Studio is the prime
     // landing surface.
-    for (const label of ["Studio", "Discover", "Projects", "Settings"]) {
+    for (const label of ["Studio", "Discover", "Projects"]) {
       expect(scope.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
+    // Settings is NOT an inline pill anymore (Studio Finish Spec, Larry
+    // 2026-11-14): it moved out of the top navigation into the account
+    // menu (and the phone More menu), so it must not render in the bar
+    // while the account menu is closed. Its account-menu home is covered
+    // by tests/app-shell-navigation.test.ts.
+    expect(scope.queryByText("Settings")).toBeNull();
     expect(scope.getAllByTestId("nav-more").length).toBeGreaterThanOrEqual(1);
   });
 
@@ -131,8 +143,9 @@ describe("AppShell top bar", () => {
     );
     const header = getHeader();
     // Secondary routes are not inline — they live in the More dropdown.
-    // Projects/Settings are now Main pills (issue #627), so they're
-    // deliberately not in this not-inline list anymore.
+    // Projects is a Main pill (issue #627), so it is deliberately not in
+    // this not-inline list anymore. (Settings left the top nav entirely
+    // under the Finish Spec — see the test above.)
     for (const secondary of ["Games", "Marketplace", "Wallet", "Showcase", "Music"]) {
       expect(within(header).queryByText(secondary)).toBeNull();
     }

@@ -61,7 +61,9 @@ describe("withActiveProjectContext — Studio nav keeps the active project", () 
     // Non-Studio Main items are untouched
     expect(byLabel.get("Discover")).toBe("/discover");
     expect(byLabel.get("Projects")).toBe("/projects");
-    expect(byLabel.get("Settings")).toBe("/settings");
+    // Settings is not a Main item anymore (Finish Spec 2026-11-14) —
+    // it lives in the account menu, so it is absent here.
+    expect(byLabel.get("Settings")).toBeUndefined();
   });
 
   it("leaves non-Studio hrefs untouched", async () => {
@@ -94,7 +96,6 @@ describe("withActiveProjectContext — Studio nav keeps the active project", () 
       "/studio",
       "/discover",
       "/projects",
-      "/settings",
     ]);
   });
 });

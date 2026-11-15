@@ -95,12 +95,19 @@ describe("describeProjectState", () => {
     expect(s.detail).toBeNull();
   });
 
-  it("reports a prepared-but-idle workspace as 'Ready'", () => {
+  it("reports a prepared-but-idle workspace as 'Saved'", () => {
+    // Studio Finish Spec (Larry, 2026-11-14): vague "Ready" was
+    // replaced with specific states. A prepared workspace whose
+    // preview has not started is "Saved" — the files are saved, and
+    // the label must not imply a running preview.
     const s = describeProjectState(
       { ...base, runtimeStatus: "stopped" },
       NOW,
     );
-    expect(s.label).toBe("Ready");
+    expect(s.label).toBe("Saved");
+    expect(s.detail).toBe(
+      "Workspace files are saved. The preview has not started yet.",
+    );
   });
 
   it("reports an untouched project as 'Setup needed'", () => {

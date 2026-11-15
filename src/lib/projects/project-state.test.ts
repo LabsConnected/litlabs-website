@@ -38,12 +38,12 @@ describe("describeProjectState — reference derivation (used by /projects)", ()
     expect(s.label).toBe("Preview ready");
   });
 
-  it("workspace ready alone reads as Ready", () => {
+  it("workspace ready alone reads as Saved (specific state, not a vague Ready)", () => {
     const s = describeProjectState(
       { workspaceStatus: "ready", runtimeStatus: "stopped", updatedAt: iso(1000) },
       NOW,
     );
-    expect(s.label).toBe("Ready");
+    expect(s.label).toBe("Saved");
   });
 
   it("failed workspace carrying HOST_EXECUTION_DISABLED reads as unavailable with NO retry", () => {

@@ -12,6 +12,10 @@ import { syncCanvasSiteFromFile } from "./canvas/builder/canvas-site-export";
  *
  * States:
  *   idle        — not published, or status unknown (shows Publish)
+ *   reviewing   — the deliberate review step before any publish
+ *                 (Studio Finish Spec, Larry 2026-11-14): Publish never
+ *                 fires on the first click — the user reviews what is
+ *                 about to go public and confirms, or cancels.
  *   publishing  — publish/unpublish request in flight (spinner, disabled)
  *   published   — live deployment exists (shows URL + Republish + Unpublish)
  *   error       — last action failed (shows message, Publish still available)
@@ -22,7 +26,7 @@ import { syncCanvasSiteFromFile } from "./canvas/builder/canvas-site-export";
  * never sees another user's data.
  */
 
-type PublishState = "idle" | "loading" | "publishing" | "unpublishing" | "published" | "error" | "confirm-unpublish";
+type PublishState = "idle" | "loading" | "publishing" | "unpublishing" | "published" | "error" | "confirm-unpublish" | "confirm-publish";
 
 interface DeploymentInfo {
   id: string;
@@ -125,6 +129,17 @@ export default function StudioPublishControls({
     }
   }, [projectId, state]);
 
+  /** Step 1 of publishing: open the review. Nothing is sent anywhere
+   *  until the user confirms inside the review (Finish Spec). */
+  const requestPublish = useCallback(() => {
+    setError(null);
+    setState("confirm-publish");
+  }, []);
+
+  const cancelPublishReview = useCallback(() => {
+    setState(deployment?.publicUrl ? "published" : "idle");
+  }, [deployment?.publicUrl]);
+
   const handleUnpublish = useCallback(async () => {
     if (!projectId || !deployment || state === "unpublishing") return;
     setState("unpublishing");
@@ -165,15 +180,16 @@ export default function StudioPublishControls({
   const isPublishing = state === "publishing";
   const isUnpublishing = state === "unpublishing";
   const isConfirming = state === "confirm-unpublish";
+  const isReviewing = state === "confirm-publish";
 
   // ── Compact toolbar mode: icon buttons ──────────────────────────
   if (compact) {
     return (
       <>
-        {/* Publish / Republish */}
+        {/* Publish / Republish — opens the review step first. */}
         <button
           type="button"
-          onClick={() => void handlePublish()}
+          onClick={requestPublish}
           disabled={busy}
           className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:opacity-40"
           style={{
@@ -206,6 +222,34 @@ export default function StudioPublishControls({
           >
             <Trash2 size={12} className="pointer-events-none" />
           </button>
+        )}
+        {/* Inline publish review (compact mode): confirm or cancel —
+            the publish request only fires on Confirm. */}
+        {isReviewing && (
+          <span className="flex shrink-0 items-center gap-1" data-testid="publish-review">
+            <span className="text-[10px] font-bold" style={{ color: "var(--text-secondary)" }}>
+              Make it public?
+            </span>
+            <button
+              type="button"
+              onClick={() => void handlePublish()}
+              className="rounded-md px-2 py-1 text-[10px] font-bold transition"
+              style={{ backgroundColor: "var(--litt-primary)", color: "#0a0a0a" }}
+              data-testid="publish-confirm-yes"
+            >
+              Publish
+            </button>
+            <button
+              type="button"
+              onClick={cancelPublishReview}
+              className="grid h-7 w-7 place-items-center rounded-md transition hover:bg-black/5"
+              style={{ color: "var(--text-muted)" }}
+              aria-label="Cancel publish"
+              data-testid="publish-confirm-no"
+            >
+              <X size={11} className="pointer-events-none" />
+            </button>
+          </span>
         )}
         {/* Inline unpublish confirmation */}
         {state === "confirm-unpublish" && (
@@ -260,17 +304,43 @@ export default function StudioPublishControls({
             <span className="truncate">{deployment.publicUrl}</span>
           </a>
           <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => void handlePublish()}
-              disabled={busy}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition disabled:opacity-40"
-              style={{ backgroundColor: "rgba(114,242,56,0.12)", color: "var(--litt-primary)" }}
-              data-testid="publish-republish"
-            >
-              {isPublishing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
-              {isPublishing ? "Republishing…" : "Republish"}
-            </button>
+            {isReviewing ? (
+              <span className="flex items-center gap-1" data-testid="publish-review">
+                <span className="text-[11px] font-bold" style={{ color: "var(--text-secondary)" }}>
+                  Republish the current saved version publicly?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handlePublish()}
+                  className="rounded-lg px-3 py-1.5 text-[11px] font-bold transition"
+                  style={{ backgroundColor: "var(--litt-primary)", color: "#0a0a0a" }}
+                  data-testid="publish-confirm-yes"
+                >
+                  {isPublishing ? "Publishing…" : "Publish now"}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelPublishReview}
+                  className="rounded-lg px-2 py-1.5 text-[11px] transition hover:bg-black/5"
+                  style={{ color: "var(--text-muted)" }}
+                  data-testid="publish-confirm-no"
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={requestPublish}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition disabled:opacity-40"
+                style={{ backgroundColor: "rgba(114,242,56,0.12)", color: "var(--litt-primary)" }}
+                data-testid="publish-republish"
+              >
+                {isPublishing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+                {isPublishing ? "Republishing…" : "Republish"}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void handleCopyUrl()}
@@ -318,10 +388,49 @@ export default function StudioPublishControls({
             )}
           </div>
         </>
+      ) : isReviewing ? (
+        <div
+          className="flex flex-col gap-2 rounded-xl border px-3 py-2.5"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}
+          data-testid="publish-review"
+          role="group"
+          aria-label="Review before publishing"
+        >
+          <p className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>
+            Review before publishing
+          </p>
+          <p className="text-[11px] leading-4" style={{ color: "var(--text-secondary)" }}>
+            This makes the current saved version of this project public at a
+            live URL. Anyone with the link can view it. The publish pipeline
+            snapshots your workspace files exactly as they are saved now —
+            unsaved edits are not included.
+          </p>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => void handlePublish()}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition"
+              style={{ backgroundColor: "var(--litt-primary)", color: "#0a0a0a" }}
+              data-testid="publish-confirm-yes"
+            >
+              <Globe size={11} />
+              Publish now
+            </button>
+            <button
+              type="button"
+              onClick={cancelPublishReview}
+              className="rounded-lg px-2 py-1.5 text-[11px] transition hover:bg-black/5"
+              style={{ color: "var(--text-muted)" }}
+              data-testid="publish-confirm-no"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       ) : (
         <button
           type="button"
-          onClick={() => void handlePublish()}
+          onClick={requestPublish}
           disabled={busy || !projectId}
           className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-bold transition disabled:opacity-40"
           style={{ backgroundColor: "var(--litt-primary)", color: "#0a0a0a" }}

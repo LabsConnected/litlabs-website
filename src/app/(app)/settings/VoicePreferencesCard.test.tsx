@@ -2,6 +2,17 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { VoicePreferencesCard } from "./VoicePreferencesCard";
+import { ThemeProvider } from "@/context/ThemeContext";
+
+// The card's SettingsPrimitives bind to the applied theme (useTheme),
+// like every production render under the app root — wrap accordingly.
+function renderCard() {
+  return render(
+    <ThemeProvider>
+      <VoicePreferencesCard />
+    </ThemeProvider>,
+  );
+}
 
 // Regression tests for the Settings → Voice card being a façade: its
 // state used to live in a bare useState inside the settings page, so
@@ -21,7 +32,7 @@ describe("VoicePreferencesCard — persistence wiring", () => {
   });
 
   it("renders only controls backed by a real preference (no dead controls)", () => {
-    render(<VoicePreferencesCard />);
+    renderCard();
     expect(screen.getByText("Auto-send")).toBeInTheDocument();
     expect(screen.getByText("Spoken replies")).toBeInTheDocument();
     // Removed — no consumer exists anywhere for these:
@@ -32,7 +43,7 @@ describe("VoicePreferencesCard — persistence wiring", () => {
   });
 
   it("auto-send starts on by default (nothing stored) and writes the real key on toggle", () => {
-    render(<VoicePreferencesCard />);
+    renderCard();
     const toggle = toggleFor("Auto-send");
     expect(toggle).toHaveAttribute("aria-checked", "true");
 
@@ -46,31 +57,31 @@ describe("VoicePreferencesCard — persistence wiring", () => {
   });
 
   it("remount reads back the persisted auto-send value", () => {
-    const first = render(<VoicePreferencesCard />);
+    const first = renderCard();
     fireEvent.click(toggleFor("Auto-send"));
     expect(window.localStorage.getItem("litt:voice:autoSendEnabled")).toBe("0");
     first.unmount();
 
-    render(<VoicePreferencesCard />);
+    renderCard();
     expect(toggleFor("Auto-send")).toHaveAttribute("aria-checked", "false");
   });
 
   it("honours an explicit off previously written by the Studio session", () => {
     // A stored "0" is an explicit user choice — it beats the new default-on.
     window.localStorage.setItem("litt:voice:autoSendEnabled", "0");
-    render(<VoicePreferencesCard />);
+    renderCard();
     expect(toggleFor("Auto-send")).toHaveAttribute("aria-checked", "false");
   });
 
   it("honours a value previously written by the Studio session", () => {
     // The composer popover writes the same key via VoiceSessionContext.
     window.localStorage.setItem("litt:voice:autoSendEnabled", "1");
-    render(<VoicePreferencesCard />);
+    renderCard();
     expect(toggleFor("Auto-send")).toHaveAttribute("aria-checked", "true");
   });
 
   it("spoken replies defaults on, persists off, and reads back on remount", () => {
-    const first = render(<VoicePreferencesCard />);
+    const first = renderCard();
     const toggle = toggleFor("Spoken replies");
     expect(toggle).toHaveAttribute("aria-checked", "true");
 
@@ -79,7 +90,7 @@ describe("VoicePreferencesCard — persistence wiring", () => {
     expect(window.localStorage.getItem("litt:voice:ttsEnabled")).toBe("0");
     first.unmount();
 
-    render(<VoicePreferencesCard />);
+    renderCard();
     expect(toggleFor("Spoken replies")).toHaveAttribute("aria-checked", "false");
   });
 });

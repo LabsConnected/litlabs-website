@@ -10,7 +10,6 @@ import {
   MoreHorizontal,
   MessageSquare,
   Eye,
-  Activity,
   Puzzle,
   Network,
   Terminal,
@@ -255,13 +254,15 @@ export function MobileCommandNav({
   surface?: MobileStudioSurface | null;
   onSelectSurface?: (surface: MobileStudioSurface) => void;
 }) {
-  // Files is NOT a bottom-nav entry anymore (Larry, 2026-11-13):
-  // project files live in the mobile LiTT sheet's top-row Files tab.
-  // The "files" surface itself still exists for other routes.
+  // Phone bottom navigation (Studio Finish Spec, Larry 2026-11-14 —
+  // supersedes the 2026-11-13 removal): exactly Chat · Preview ·
+  // Files · More. Activity lives inside More (the Tools sheet) and in
+  // its own board panel; Settings lives inside More too. Every target
+  // is at least 44×44 CSS px.
   const surfaceItems: { id: MobileStudioSurface; label: string; icon: typeof MessageSquare }[] = [
     { id: "chat", label: "Chat", icon: MessageSquare },
     { id: "preview", label: "Preview", icon: Eye },
-    { id: "activity", label: "Activity", icon: Activity },
+    { id: "files", label: "Files", icon: FolderOpen },
     { id: "more", label: "More", icon: MoreHorizontal },
   ];
 
@@ -272,7 +273,9 @@ export function MobileCommandNav({
       style={{
         height: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom))",
         paddingBottom: "env(safe-area-inset-bottom)",
-        backgroundColor: "rgba(255,255,255,0.88)",
+        // Theme-bound surface (charcoal in dark, light in light) — a
+        // hard-coded white bar stayed white over the dark Studio.
+        backgroundColor: "color-mix(in srgb, var(--studio-surface) 92%, transparent)",
         borderTop: "1px solid var(--studio-border)",
         backdropFilter: "blur(20px)",
         WebkitBackdropFilter: "blur(20px)",
@@ -286,7 +289,7 @@ export function MobileCommandNav({
             key={item.id}
             type="button"
             onClick={() => onSelectSurface(item.id)}
-            className="relative flex min-h-10 flex-1 flex-col items-center justify-center gap-1 transition-colors"
+            className="relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 transition-colors"
             style={{ color: isActive ? "var(--color-accent)" : "var(--text-muted)" }}
             aria-label={item.label}
             aria-current={isActive ? "page" : undefined}
@@ -302,7 +305,7 @@ export function MobileCommandNav({
             const Icon = item.icon;
             const isActive = active === item.id;
             return (
-              <button key={item.id} type="button" onClick={() => onSelect(item.id)} className="relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors" style={{ color: isActive ? "var(--color-accent)" : "var(--text-muted)" }} aria-label={item.label} aria-current={isActive ? "page" : undefined}>
+              <button key={item.id} type="button" onClick={() => onSelect(item.id)} className="relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 transition-colors" style={{ color: isActive ? "var(--color-accent)" : "var(--text-muted)" }} aria-label={item.label} aria-current={isActive ? "page" : undefined}>
                 {/* No active-tab highlight bar (Larry, 2026-11-13: the page must open clean — no bar over any nav button). Active state is carried by the accent color + aria-current. */}
                 <Icon size={20} strokeWidth={isActive ? 2.3 : 1.8} className="pointer-events-none" />
                 <span className="text-[10px] font-bold">{item.label}</span>

@@ -99,7 +99,9 @@ describe("panel window actions", () => {
     store.getState().setPanelRect(SCOPE, "code", { x: 5, y: 5, width: 10, height: 10 });
     expect(layout().panels.code.maximized).toBe(false);
     expect(layout().panels.code.rect.width).toBe(240);
-    expect(layout().panels.code.rect.height).toBe(160);
+    // Board-only rebuild: the minimum panel height dropped to 120 so
+    // panels resize freely from the bottom edge (checklist item 6).
+    expect(layout().panels.code.rect.height).toBe(120);
   });
 });
 
@@ -168,52 +170,76 @@ describe("persistence", () => {
   });
 });
 
-describe("persist migration v1 → v2 (board slice 1 defaults)", () => {
-  /** A v1-shaped save: the four newly-default panels recorded closed
-   *  (the v1 defaults never opened them), a user-moved Files rect, a
-   *  deliberate Terminal close, and a saved preset. */
-  function v1State(): BoardLayoutPersistedState {
+describe("persist migration → v3 (board-only rebuild defaults)", () => {
+  /** A pre-v3 save: old-default panels, a user-moved Files rect, a
+   *  deliberate Terminal close, and a saved preset. The board-only
+   *  rebuild changed the panel inventory and the default arrangement
+   *  (Larry's Command Center mockup v2), so migration re-seeds every
+   *  scope's panels from the NEW defaults exactly once — presets, the
+   *  active preset name, viewports and the per-user toggle carry over. */
+  function oldState(): BoardLayoutPersistedState {
     const website = defaultBoardLayout("website");
-    for (const id of ["files", "health", "inspector", "deploy"] as const) {
-      website.panels[id].open = false;
-    }
     website.panels.files.rect = { x: 300, y: 260, width: 420, height: 300 };
     website.panels.terminal.open = false;
     website.presets.Keep = { name: "Keep", savedAt: 1, panels: structuredClone(website.panels) };
     const game = defaultBoardLayout("game");
-    game.panels.files.open = false;
+    game.panels.media.open = false;
     return {
       enabledByUser: { [USER]: true },
       scopes: { [SCOPE]: website, "user_1::game_1": game },
     };
   }
 
-  it("re-opens Files, Health, Inspector and Deploy for website scopes only", () => {
-    const migrated = migrateBoardLayoutPersistedState(v1State(), 1);
+  it("re-seeds every scope's panels from the new mockup defaults", () => {
+    const migrated = migrateBoardLayoutPersistedState(oldState(), 1);
     const website = migrated.scopes[SCOPE];
-    expect(website.panels.files.open).toBe(true);
-    expect(website.panels.health.open).toBe(true);
-    expect(website.panels.inspector.open).toBe(true);
-    expect(website.panels.deploy.open).toBe(true);
-    // Game scopes keep their recorded state — v2 defaults are website-only.
-    expect(migrated.scopes["user_1::game_1"].panels.files.open).toBe(false);
+    // The v2 mockup arrangement: chat, preview, files, media (the
+    // Terminal joins them only when the user asks — Finish Spec).
+    for (const id of ["chat", "preview", "files", "media"] as const) {
+      expect(website.panels[id].open).toBe(true);
+    }
+    for (const id of ["code", "health", "inspector", "deploy", "browser"] as const) {
+      expect(website.panels[id].open).toBe(false);
+    }
+    // Old geometry is gone — panels carry the new default rects.
+    expect(website.panels.files.rect).toEqual(defaultBoardLayout("website").panels.files.rect);
+    // The re-seed lands on the current defaults: Terminal closed until
+    // requested (Studio Finish Spec, 2026-11-14).
+    expect(website.panels.terminal.open).toBe(false);
+    // Game scopes re-seed from the game defaults too (media back open).
+    expect(migrated.scopes["user_1::game_1"].panels.media.open).toBe(true);
+    expect(migrated.scopes["user_1::game_1"].panels.world.open).toBe(true);
     expect(migrated.enabledByUser[USER]).toBe(true);
   });
 
-  it("preserves geometry, deliberate closes outside the v2 set, and presets", () => {
-    const migrated = migrateBoardLayoutPersistedState(v1State(), 1);
+  it("preserves presets untouched (applyPreset backfills missing panels)", () => {
+    const migrated = migrateBoardLayoutPersistedState(oldState(), 2);
     const website = migrated.scopes[SCOPE];
-    expect(website.panels.files.rect).toEqual({ x: 300, y: 260, width: 420, height: 300 });
-    expect(website.panels.terminal.open).toBe(false);
     expect(website.presets.Keep).toBeDefined();
-    // A v1 preset still restores exactly what it saved.
-    expect(website.presets.Keep.panels.files.open).toBe(false);
+    expect(website.presets.Keep.panels.files.rect).toEqual({ x: 300, y: 260, width: 420, height: 300 });
   });
 
-  it("leaves v2 state and unrecognized input untouched", () => {
-    const v2 = v1State();
-    expect(migrateBoardLayoutPersistedState(v2, 2)).toBe(v2);
+  it("leaves v4 state and unrecognized input untouched", () => {
+    const v4 = oldState();
+    expect(migrateBoardLayoutPersistedState(v4, 4)).toBe(v4);
     expect(migrateBoardLayoutPersistedState(null, 1)).toBeNull();
     expect(migrateBoardLayoutPersistedState("junk", 1)).toBe("junk");
+  });
+
+  it("v3 → v4 closes an untouched default Terminal but keeps a user-arranged one", () => {
+    const state = oldState();
+    // oldState's website scope closed its terminal deliberately; open
+    // it at the exact default rect to model the old default layout.
+    state.scopes[SCOPE].panels.terminal.open = true;
+    const migrated = migrateBoardLayoutPersistedState(state, 3);
+    expect(migrated.scopes[SCOPE].panels.terminal.open).toBe(false);
+    // Other panels are not touched by the v4 step.
+    expect(migrated.scopes[SCOPE].panels.files.open).toBe(true);
+
+    const arranged = oldState();
+    arranged.scopes[SCOPE].panels.terminal.open = true;
+    arranged.scopes[SCOPE].panels.terminal.rect = { x: 40, y: 40, width: 500, height: 200 };
+    const kept = migrateBoardLayoutPersistedState(arranged, 3);
+    expect(kept.scopes[SCOPE].panels.terminal.open).toBe(true);
   });
 });

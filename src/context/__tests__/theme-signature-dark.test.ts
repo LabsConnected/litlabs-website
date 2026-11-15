@@ -43,15 +43,21 @@ const LIGHT_SIGNATURE = {
   boxBg: "#FFFFFF",
 };
 
+// Charcoal retokenize (owner decision, 2026-11-14, later the same day):
+// Larry rejected the first authored dark variant's near-black green
+// surfaces ("the color with black throws off the color of everything")
+// and picked neutral charcoal from a visual comparison. Green survives
+// only as the voice — the Signature accent and the lifted link green,
+// both unchanged from the first variant.
 const DARK_SIGNATURE = {
-  bgColor: "#0A0F0B",
-  textColor: "#E9F4EA",
+  bgColor: "#15171B",
+  textColor: "#F2F4F3",
   linkColor: "#5AD67E",
-  headerColor: "#8FE3A6",
-  borderColor: "#223D27",
+  headerColor: "#D7DBDE",
+  borderColor: "#2E3238",
   accentColor: "#2FBF5A",
-  boxBg: "#131A14",
-  textMuted: "#A7BFA9",
+  boxBg: "#1F2228",
+  textMuted: "#A8ADB5",
 };
 
 const theme = (over: Partial<Theme>): Theme => ({

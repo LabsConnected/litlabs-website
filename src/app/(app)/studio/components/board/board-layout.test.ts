@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampPanelsToArea,
   clampRect,
   defaultBoardLayout,
   overviewViewport,
@@ -15,17 +16,36 @@ describe("defaultBoardLayout", () => {
     expect(Object.keys(layout.panels).sort()).toEqual([...BOARD_PANEL_IDS].sort());
   });
 
-  it("website default opens Preview, Code, Terminal, Files, Health (Checks), Inspector (Changes/Browser) and Deploy — chat is never a panel", () => {
+  it("website default opens the mockup arrangement: Chat, Preview, Files and Media — Terminal stays closed until requested", () => {
     const layout = defaultBoardLayout("website");
+    expect(layout.panels.chat.open).toBe(true);
     expect(layout.panels.preview.open).toBe(true);
-    expect(layout.panels.code.open).toBe(true);
-    expect(layout.panels.terminal.open).toBe(true);
+    expect(layout.panels.terminal.open).toBe(false);
     expect(layout.panels.files.open).toBe(true);
-    expect(layout.panels.health.open).toBe(true);
-    expect(layout.panels.inspector.open).toBe(true);
-    expect(layout.panels.deploy.open).toBe(true);
+    expect(layout.panels.media.open).toBe(true);
+    expect(layout.panels.code.open).toBe(false);
+    expect(layout.panels.health.open).toBe(false);
+    expect(layout.panels.inspector.open).toBe(false);
+    expect(layout.panels.deploy.open).toBe(false);
+    expect(layout.panels.browser.open).toBe(false);
     expect(layout.panels.world.open).toBe(false);
-    expect(layout.panels.media.open).toBe(false);
+  });
+
+  it("every default rect fits inside the design space — no panel peeks in from off-canvas (right-edge strip defect)", () => {
+    for (const type of ["website", "game"] as const) {
+      const layout = defaultBoardLayout(type);
+      for (const panel of Object.values(layout.panels)) {
+        expect(panel.rect.x).toBeGreaterThanOrEqual(0);
+        expect(panel.rect.y).toBeGreaterThanOrEqual(0);
+        expect(panel.rect.x + panel.rect.width).toBeLessThanOrEqual(1640);
+        expect(panel.rect.y + panel.rect.height).toBeLessThanOrEqual(800);
+      }
+    }
+  });
+
+  it("the Preview default sits lower on the board so its drag handle and close button clear the floating toolbar", () => {
+    const layout = defaultBoardLayout("website");
+    expect(layout.panels.preview.rect.y).toBeGreaterThanOrEqual(64);
   });
 
   it("game default opens the World panel and Media (project-type panel sets)", () => {
@@ -49,7 +69,7 @@ describe("clampRect", () => {
       x: 10,
       y: 0,
       width: 240,
-      height: 160,
+      height: 120,
     });
   });
 });
@@ -80,15 +100,15 @@ describe("tidyPanels", () => {
 
   it("leaves closed and minimized panels untouched and does not mutate input", () => {
     const layout = defaultBoardLayout("website");
-    // Media is closed in the website default; Health is open, so mark it
+    // Code is closed in the website default; Files is open, so mark it
     // minimized to cover the minimized case.
-    layout.panels.health = { ...layout.panels.health, minimized: true };
-    const mediaBefore = layout.panels.media;
-    const healthBefore = layout.panels.health;
+    layout.panels.files = { ...layout.panels.files, minimized: true };
+    const codeBefore = layout.panels.code;
+    const filesBefore = layout.panels.files;
     const tidied = tidyPanels(layout.panels, { width: 1200, height: 800 });
-    expect(tidied.media).toBe(mediaBefore);
-    expect(tidied.health).toBe(healthBefore);
-    expect(layout.panels.preview.rect).toEqual({ x: 24, y: 24, width: 760, height: 520 });
+    expect(tidied.code).toBe(codeBefore);
+    expect(tidied.files).toBe(filesBefore);
+    expect(layout.panels.preview.rect).toEqual({ x: 436, y: 72, width: 700, height: 532 });
   });
 
   it("un-maximizes a maximized panel into its grid cell", () => {
@@ -103,6 +123,35 @@ describe("tidyPanels", () => {
     expect(tidied.preview.maximized).toBe(false);
     expect(tidied.preview.restoreRect).toBeNull();
     expect(tidied.preview.rect.width).toBeLessThan(1200);
+  });
+});
+
+describe("clampPanelsToArea", () => {
+  it("pulls a stranded panel back within reach of a shrunken area", () => {
+    const layout = defaultBoardLayout("website");
+    layout.panels.files = {
+      ...layout.panels.files,
+      rect: { x: 1500, y: 700, width: 436, height: 296 },
+    };
+    const clamped = clampPanelsToArea(layout.panels, { width: 900, height: 600 });
+    expect(clamped.files.rect.x).toBeLessThanOrEqual(900 - 160);
+    expect(clamped.files.rect.y).toBeLessThanOrEqual(600 - 48);
+    expect(clamped.files.rect.x).toBeGreaterThanOrEqual(0);
+    expect(clamped.files.rect.y).toBeGreaterThanOrEqual(0);
+  });
+
+  it("shrinks a panel larger than the area down to the area", () => {
+    const layout = defaultBoardLayout("website");
+    const clamped = clampPanelsToArea(layout.panels, { width: 500, height: 400 });
+    expect(clamped.preview.rect.width).toBeLessThanOrEqual(500);
+    expect(clamped.preview.rect.height).toBeLessThanOrEqual(400);
+  });
+
+  it("leaves a reachable panel exactly where it is", () => {
+    const layout = defaultBoardLayout("website");
+    const clamped = clampPanelsToArea(layout.panels, { width: 1640, height: 800 });
+    expect(clamped.preview.rect).toEqual(layout.panels.preview.rect);
+    expect(clamped.chat.rect).toEqual(layout.panels.chat.rect);
   });
 });
 

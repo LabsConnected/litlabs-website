@@ -8,6 +8,7 @@
 import {
   BOARD_MIN_PANEL_HEIGHT,
   BOARD_MIN_PANEL_WIDTH,
+  BOARD_PANEL_IDS,
   BOARD_PANEL_INVENTORY,
   type BoardLayoutState,
   type BoardPanelId,
@@ -52,6 +53,42 @@ export function defaultBoardLayout(projectType: BoardProjectType): BoardLayoutSt
     viewport: { ...DEFAULT_BOARD_VIEWPORT },
     overviewReturnViewport: null,
   };
+}
+
+/**
+ * Clamp every panel so it stays REACHABLE inside a visible area
+ * (board-only acceptance rule: on window shrink, panels clamp back
+ * inside the viewport instead of stranding off-canvas — the right-edge
+ * strip defect's replacement behavior). A panel keeps at least its
+ * header band plus a grabbable slice on screen; width/height shrink to
+ * the area when the area itself is smaller than the panel. Pure.
+ */
+export function clampPanelsToArea(
+  panels: Record<BoardPanelId, BoardPanelState>,
+  area: { width: number; height: number },
+): Record<BoardPanelId, BoardPanelState> {
+  const REACHABLE_X = 160; // at least this much of the panel stays visible
+  const REACHABLE_Y = 48; // header band height — the drag handle stays grabbable
+  const next = {} as Record<BoardPanelId, BoardPanelState>;
+  for (const id of BOARD_PANEL_IDS) {
+    const panel = panels[id];
+    const maxWidth = Math.max(area.width, BOARD_MIN_PANEL_WIDTH);
+    const maxHeight = Math.max(area.height, BOARD_MIN_PANEL_HEIGHT);
+    const width = Math.min(Math.max(panel.rect.width, BOARD_MIN_PANEL_WIDTH), maxWidth);
+    const height = Math.min(Math.max(panel.rect.height, BOARD_MIN_PANEL_HEIGHT), maxHeight);
+    const maxX = Math.max(0, area.width - REACHABLE_X);
+    const maxY = Math.max(0, area.height - REACHABLE_Y);
+    next[id] = {
+      ...panel,
+      rect: {
+        x: Math.min(Math.max(0, panel.rect.x), maxX),
+        y: Math.min(Math.max(0, panel.rect.y), maxY),
+        width,
+        height,
+      },
+    };
+  }
+  return next;
 }
 
 export function visiblePanels(layout: BoardLayoutState): BoardPanelState[] {

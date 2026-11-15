@@ -116,7 +116,14 @@ export function mapCanonicalProjectToDashboard(
           ? "building"
           : state.label === "Preview ready"
             ? "preview"
-            : state.label === "Ready"
+            : // "Saved" is describeProjectState's specific-state label
+              // for a prepared-but-idle workspace (Studio Finish Spec,
+              // Larry 2026-11-14 — it replaced the vague "Ready" this
+              // branch used to translate). It is the same healthy,
+              // prepared state /projects shows, so it maps to the
+              // dashboard's "ready" — never to "draft", which is the
+              // not-prepared state.
+              state.label === "Saved"
               ? "ready"
               : "draft";
 

@@ -190,13 +190,16 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
 
   if (!projectId) return null;
 
+  // Specific states only — no vague "Ready" (Studio Finish Spec,
+  // Larry 2026-11-14): Saving / Saved / Building / Build failed /
+  // Published name the actual step the project is in.
   const statusLabel =
     loading && !deployment ? "Checking…" :
-    !deployment ? "Not deployed yet" :
-    deployment.status === "ready" ? (deployment.urlVerified ? "Live" : "Ready — verifying") :
-    deployment.status === "failed" ? "Failed" :
-    deployment.status === "building" ? "Building…" :
-    deployment.status === "deploying" ? "Deploying…" :
+    !deployment ? "Not published yet" :
+    deployment.status === "ready" ? (deployment.urlVerified ? "Published" : "Publishing — verifying the live URL") :
+    deployment.status === "failed" ? "Publish failed" :
+    deployment.status === "building" ? "Building" :
+    deployment.status === "deploying" ? "Publishing" :
     deployment.status;
   const tone = deployment?.status === "ready" && deployment.urlVerified ? "ok"
     : deployment?.status === "failed" ? "warn" : "muted";
@@ -218,7 +221,7 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
     : null;
   const previewTone = !preview
     ? "muted"
-    : preview.label === "Preview ready" || preview.label === "Ready"
+    : preview.label === "Preview ready" || preview.label === "Saved"
       ? "ok"
       : preview.label === "Setup failed" || preview.label === "Preview failed"
         ? "warn"
@@ -429,7 +432,7 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
         <InspectorRow label="Project" value={capabilities.projectName ?? "No project selected"} tone={capabilities.projectId ? "ok" : "warn"} />
         <InspectorRow label="Agent" value={data.activeAgentName} />
         <InspectorRow label="Model" value={data.modelLabel} tone={data.modelHealth === "available" ? "ok" : data.modelHealth ? "warn" : "muted"} />
-        <InspectorRow label="Status" value={data.busy ? "Agent working" : messages.length ? "Ready" : "Awaiting prompt"} tone={data.busy ? "ok" : "muted"} />
+        <InspectorRow label="Status" value={data.busy ? "Building" : messages.length ? "Saved" : "Awaiting prompt"} tone={data.busy ? "ok" : "muted"} />
       </InspectorSection>
       <InspectorSection title="Project context">
         <InspectorRow label="Source" value={describeSourceRows(capabilities).source} />
@@ -454,6 +457,7 @@ export function StudioInspector({
   children,
   data,
   embedded = false,
+  excludeTabs,
 }: {
   open: boolean;
   onToggle: () => void;
@@ -461,6 +465,13 @@ export function StudioInspector({
   onTabChange: (t: InspectorTab) => void;
   children?: React.ReactNode;
   data?: StudioInspectorData;
+  /**
+   * Tabs to leave out of the strip (board-only rebuild: on the board,
+   * Checks / Files / Preview have their own panels, so the board's
+   * Inspector excludes those duplicate tabs). Callers are responsible
+   * for not passing an excluded tab as activeTab.
+   */
+  excludeTabs?: InspectorTab[];
   /**
    * When true, skip this component's own collapse handle, mobile
    * backdrop, and mobile "Workspace inspector" header — the parent
@@ -482,7 +493,7 @@ export function StudioInspector({
         className="flex shrink-0 items-center gap-0.5 border-b px-1.5"
         style={{ borderColor: "var(--studio-border)" }}
       >
-        {INSPECTOR_TABS.map((t) => {
+        {INSPECTOR_TABS.filter((t) => !excludeTabs?.includes(t.id)).map((t) => {
           const Icon = t.icon;
           const isActive = activeTab === t.id;
           return (

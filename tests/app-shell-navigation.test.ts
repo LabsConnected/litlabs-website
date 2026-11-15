@@ -4,8 +4,10 @@
  * Verifies the ONE canonical authenticated global nav (issue #627 —
  * Studio Merge, 2026-11-12, superseding the prior Assets/Agents/Missions
  * pill layout this file used to encode):
- *   Main: Studio · Discover · Projects · Settings
+ *   Main: Studio · Discover · Projects
  *   More: Marketplace · Showcase · Games · CLI · Deployments · Docs
+ *   Settings moved out of Main into the account menu + phone More menu
+ *   (Studio Finish Spec, Larry 2026-11-14).
  *
  * Studio is the prime signed-in surface — there is no Home item and no
  * /dashboard destination (the route only redirects into Studio).
@@ -33,7 +35,6 @@ describe("AppShell Navigation", () => {
         "Studio",
         "Discover",
         "Projects",
-        "Settings",
       ]);
     });
 
@@ -43,7 +44,6 @@ describe("AppShell Navigation", () => {
         "/studio",
         "/discover",
         "/projects",
-        "/settings",
       ]);
     });
 
@@ -70,7 +70,7 @@ describe("AppShell Navigation", () => {
 
     it("no competing legacy nav bars remain (single flat main list)", () => {
       // One source of truth — no sectioned groups duplicating the bar.
-      expect(APP_NAV_MAIN.length).toBe(4);
+      expect(APP_NAV_MAIN.length).toBe(3);
       expect(getVisibleMainNav()).toEqual(APP_NAV_MAIN);
     });
   });
@@ -78,9 +78,9 @@ describe("AppShell Navigation", () => {
   describe("More menu", () => {
     it("carries every secondary destination", () => {
       const labels = APP_NAV_MORE.map((i) => i.label);
+      // "Showcase" removed from More (Larry's header cleanup, 2026-11-14).
       expect(labels).toEqual([
         "Marketplace",
-        "Showcase",
         "Games",
         "CLI",
         "Deployments",
@@ -164,7 +164,7 @@ describe("AppShell Navigation", () => {
       expect(isAppNavActive("/create", search, "/studio")).toBe(false);
     });
 
-    it("Settings is active on /settings and /settings/*", () => {
+    it("the Settings route still resolves active state for its account-menu link", () => {
       expect(isAppNavActive("/settings", search, "/settings")).toBe(true);
       expect(isAppNavActive("/settings/connections", search, "/settings")).toBe(true);
     });

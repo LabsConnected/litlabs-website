@@ -56,6 +56,12 @@ describe("StudioPublishControls", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("publish-button"));
     });
+    // Deliberate review step (Finish Spec): nothing publishes until
+    // the review is confirmed.
+    expect(screen.getByTestId("publish-review")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("publish-confirm-yes"));
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId("publish-live-url")).toBeInTheDocument();
@@ -79,11 +85,36 @@ describe("StudioPublishControls", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("publish-button"));
     });
+    // Deliberate review step (Finish Spec): nothing publishes until
+    // the review is confirmed.
+    expect(screen.getByTestId("publish-review")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("publish-confirm-yes"));
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId("publish-error")).toBeInTheDocument();
     });
     expect(screen.getByTestId("publish-error")).toHaveTextContent("Hosting not configured.");
+  });
+
+  it("cancelling the publish review sends nothing (deliberate publishing, Finish Spec)", async () => {
+    const methods: string[] = [];
+    fetchHandler = async (_url, init) => {
+      methods.push(init?.method ?? "GET");
+      return jsonResponse({ published: false, deployment: null });
+    };
+    render(<StudioPublishControls projectId="proj-1" />);
+    await waitFor(() => expect(screen.getByTestId("publish-button")).toBeInTheDocument());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("publish-button"));
+    });
+    expect(screen.getByTestId("publish-review")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("publish-confirm-no"));
+    });
+    expect(screen.queryByTestId("publish-review")).toBeNull();
+    expect(methods).not.toContain("POST");
   });
 
   it("requires confirmation before unpublishing", async () => {
@@ -239,6 +270,12 @@ describe("StudioPublishControls — canvas compile before publish (P0-1)", () =>
     await act(async () => {
       fireEvent.click(screen.getByTestId("publish-button"));
     });
+    // Deliberate review step (Finish Spec): nothing publishes until
+    // the review is confirmed.
+    expect(screen.getByTestId("publish-review")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("publish-confirm-yes"));
+    });
     await waitFor(() => expect(screen.getByTestId("publish-live-url")).toBeInTheDocument());
     expect(state.siteWrites.some((c) => c.includes("Canvas headline"))).toBe(true);
     expect(state.publishPosts).toBe(1);
@@ -251,6 +288,12 @@ describe("StudioPublishControls — canvas compile before publish (P0-1)", () =>
     await waitFor(() => expect(screen.getByTestId("publish-button")).toBeInTheDocument());
     await act(async () => {
       fireEvent.click(screen.getByTestId("publish-button"));
+    });
+    // Deliberate review step (Finish Spec): nothing publishes until
+    // the review is confirmed.
+    expect(screen.getByTestId("publish-review")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("publish-confirm-yes"));
     });
     await waitFor(() => expect(screen.getByTestId("publish-error")).toBeInTheDocument());
     expect(screen.getByTestId("publish-error")).toHaveTextContent(/canvas/i);

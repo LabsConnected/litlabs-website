@@ -20,13 +20,15 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  Bell,
   LogOut,
+  Settings as SettingsIcon,
   UserCircle,
   Wallet as WalletIcon,
-  Settings as SettingsIcon,
   ChevronDown,
 } from "lucide-react";
-import { useTheme } from "@/context/ThemeContext";
+import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
+import { useTheme, resolveEffectiveMode } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { useLittHealth } from "@/hooks/useLittHealth";
@@ -48,16 +50,19 @@ type ResolvedColors = ReturnType<typeof useTheme>["resolvedColors"];
  * Studio design palette for the top bar — the `.studio-shell` token
  * values from globals.css, carried explicitly.
  *
- * The Studio page is light-locked BY DESIGN (globals.css `.studio-shell`
- * scope: "the Studio frame no longer flips dark with the OS or the
- * visual pack"). This bar renders OUTSIDE that scope, so under a dark
- * account theme it painted black over the light Studio (wave-3 Finding
- * 1, Larry's screenshot 2026-11-10). Portaled Studio menus solve the
- * identical problem the identical way — the light palette is carried
- * explicitly (surface + text tokens). Only Studio routes take this
- * palette; every other route keeps following the active theme, and the
- * values are pinned to the CSS tokens by AppShell.topbar.test.ts so
- * the two can never drift apart silently.
+ * The Studio page's default presentation is the approved light design
+ * (globals.css `.studio-shell` scope). This bar renders OUTSIDE that
+ * scope, so under a dark account theme it painted black over the light
+ * Studio (wave-3 Finding 1, Larry's screenshot 2026-11-10). Portaled
+ * Studio menus solve the identical problem the identical way — the
+ * light palette is carried explicitly (surface + text tokens). Only
+ * Studio routes take this palette, and only while the effective theme
+ * mode is LIGHT: since 2026-11-14 the Studio itself follows the
+ * theme in Dark mode (the globals.css STUDIO DARK RE-SCOPE), so in
+ * Dark the bar follows the active theme like every other route —
+ * carrying the light palette there repainted the white-bar patchwork
+ * Larry reported. The values are pinned to the CSS tokens by
+ * AppShell.topbar.test.ts so the two can never drift apart silently.
  */
 export const STUDIO_TOP_BAR_COLORS: Partial<ResolvedColors> = {
   bgColor: "#ffffff", // --studio-surface
@@ -73,8 +78,26 @@ export const STUDIO_TOP_BAR_COLORS: Partial<ResolvedColors> = {
 export function topBarColorsFor(
   resolvedColors: ResolvedColors,
   isStudio: boolean,
+  effectiveDark = false,
 ): ResolvedColors {
-  return isStudio ? { ...resolvedColors, ...STUDIO_TOP_BAR_COLORS } : resolvedColors;
+  return isStudio && !effectiveDark
+    ? { ...resolvedColors, ...STUDIO_TOP_BAR_COLORS }
+    : resolvedColors;
+}
+
+/** Live OS color-scheme, mirroring ThemeProvider's own listener, so
+ *  "system" mode resolves the same way here as in the theme. */
+function useSystemPrefersDark(): boolean {
+  const [prefersDark, setPrefersDark] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setPrefersDark(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setPrefersDark(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return prefersDark;
 }
 
 /* ─── Identity Dock ────────────────────────────────────────────────── */
@@ -158,6 +181,10 @@ function IdentityDock({ T: TProp }: { T?: ResolvedColors }) {
     role === "Owner" ? T.accentColor : role === "Free" ? T.textMuted : "#a78bfa";
   const avatarUrl = user.imageUrl;
 
+  // Settings lives HERE, in the account menu (Studio Finish Spec,
+  // Larry 2026-11-14 — supersedes the same-day board-only cleanup that
+  // kept it in the primary nav): it is out of the top navigation and
+  // reached from this menu on desktop and the More menu on the phone.
   const menuItems = [
     { label: "Profile", href: "/profile", icon: UserCircle },
     { label: "Wallet", href: "/wallet", icon: WalletIcon },
@@ -442,21 +469,72 @@ function MoreNavMenu({
   );
 }
 
+/* ─── Notifications bell ─────────────────────────────────────────────
+ * Lives in the TOP ROW beside the LiTT status (Larry, board-only
+ * cleanup 2026-11-14) — it moved up from the Studio header, which no
+ * longer carries its own bell or Owner badge. Polls the same
+ * /api/notifications/count endpoint the header used (truthful; falls
+ * back to no badge on error). */
+function NotificationsBell({ T }: { T: ResolvedColors }) {
+  const [notifCount, setNotifCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchNotifs = async () => {
+      try {
+        const res = await fetch("/api/notifications/count", { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setNotifCount(typeof data.count === "number" ? data.count : null);
+      } catch {
+        if (!cancelled) setNotifCount(null);
+      }
+    };
+    void fetchNotifs();
+    const id = window.setInterval(fetchNotifs, 45_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  return (
+    <Link
+      href="/studio"
+      className="relative hidden min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-all hover:bg-black/5 sm:grid"
+      style={{ color: T.textMuted }}
+      aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}
+      title="Notifications"
+      data-testid="topbar-notifications-bell"
+    >
+      <Bell size={15} />
+      {notifCount ? (
+        <span
+          className="absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full px-1 text-[8px] font-black"
+          style={{ backgroundColor: "#ef4444", color: "#fff" }}
+        >
+          {notifCount > 99 ? "99+" : notifCount}
+        </span>
+      ) : null}
+    </Link>
+  );
+}
+
 function TopBar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { resolvedColors } = useTheme();
+  const { resolvedColors, theme } = useTheme();
   const { isSignedIn } = useClerkAuth();
   const { balance, displayBalance, isLoading: walletLoading, isError: walletError } = useWallet();
   const littHealth = useLittHealth();
+  const systemPrefersDark = useSystemPrefersDark();
 
   // Studio manages its own mobile chrome (header, bottom nav, composer),
   // so the scrollable nav strip is skipped there — the single-row bar
   // (logo + status + account) still renders.
   const isStudio = pathname?.startsWith("/studio") ?? false;
   // On Studio routes the bar wears the Studio design (see
-  // STUDIO_TOP_BAR_COLORS); everywhere else it follows the active theme.
-  const T = topBarColorsFor(resolvedColors, isStudio);
+  // STUDIO_TOP_BAR_COLORS) while the effective mode is light; in Dark
+  // the Studio follows the theme, so the bar does too.
+  const effectiveDark = resolveEffectiveMode(theme.mode, systemPrefersDark) === "dark";
+  const T = topBarColorsFor(resolvedColors, isStudio, effectiveDark);
 
   const checkActive = (href?: string) => isAppNavActive(pathname, searchParams, href);
   // Studio destinations in the top bar carry the active project
@@ -561,6 +639,12 @@ function TopBar() {
             )}
           </span>
         )}
+
+        {/* Notifications + Owner — the top-row cluster beside LiTT
+            status (moved up from the Studio header, 2026-11-14). The
+            Owner indicator self-hides for non-owners. */}
+        <NotificationsBell T={T} />
+        <OwnerTestModeIndicator placement="inline" />
 
         {/* Identity dock — avatar + account menu */}
         <IdentityDock T={T} />

@@ -1463,18 +1463,21 @@ function UnifiedSelectorPopover({
         }
         style={{
           ...placementStyle,
-          // Portaled to <body> — outside .studio-shell, so the light
-          // palette is carried explicitly (surface + text tokens).
-          backgroundColor: "#ffffff",
-          borderColor: "#a9c48f",
-          color: "#0e1510",
-          ["--text-primary" as string]: "#0e1510",
-          ["--text-secondary" as string]: "#47614a",
-          ["--text-muted" as string]: "#63745f",
-          ["--studio-elevated" as string]: "#ffffff",
-          ["--studio-border" as string]: "#cfdec4",
-          ["--studio-border-strong" as string]: "#a9c48f",
-          ["--color-accent" as string]: "#177a36",
+          // Portaled to <body> — outside .studio-shell, so the palette
+          // is carried explicitly from the theme's published root
+          // variables (ThemeProvider sets them from the resolved skin),
+          // which follow the effective mode: the light Signature whites
+          // in Light, Larry's charcoal in Dark.
+          backgroundColor: "var(--box-bg)",
+          borderColor: "var(--border-color)",
+          color: "var(--text-color)",
+          ["--text-primary" as string]: "var(--text-color)",
+          ["--text-secondary" as string]: "color-mix(in srgb, var(--text-color) 76%, var(--bg-color))",
+          ["--text-muted" as string]: "color-mix(in srgb, var(--text-color) 58%, var(--bg-color))",
+          ["--studio-elevated" as string]: "var(--box-bg)",
+          ["--studio-border" as string]: "var(--border-color)",
+          ["--studio-border-strong" as string]: "color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%)",
+          ["--color-accent" as string]: "var(--accent-color)",
         }}
       >
         {/* ── Header: current selection + sections + search.
