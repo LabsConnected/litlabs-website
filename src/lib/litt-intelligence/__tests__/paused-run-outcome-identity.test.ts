@@ -20,6 +20,57 @@ describe("approval outcome identity", () => {
     const result = await getRunOutcomeForPausedRun({ id: "gate-1", actionRunId: "run" } as PausedRunRecord, "owner");
     expect(result.runResult?.pendingApproval?.pausedRunId).toBe("gate-2");
   });
+  it("a terminal-failed claim with a non-terminal action_run reports failed, never processing forever", async () => {
+    // Production hang (2026-11-14): the executor died / its canonical
+    // settle failed, the claim was retired as failed (reaper or claim
+    // release), but the action_run never reached a terminal status and
+    // carries no outcome event. Deriving "processing" from the
+    // action_run alone wedged the gate: pollers polled a dead run,
+    // repeat approvals returned 202-processing, and the controlled
+    // retry (which requires a failed outcome) was unreachable. A failed
+    // claim is fenced — no executor can write again — so the row's
+    // recorded failure is the gate's only outcome.
+    vi.mocked(getActionRun).mockResolvedValue({
+      status: "working",
+      startedAt: "2026-11-14T20:00:00.000Z",
+      completedAt: null,
+      failureMessage: null,
+    } as never);
+    vi.mocked(listActionEvents).mockResolvedValue([] as never);
+    const result = await getRunOutcomeForPausedRun(
+      {
+        id: "gate-1",
+        actionRunId: "run",
+        runStatus: "failed",
+        runError: "Execution lost (worker may have restarted)",
+        runCompletedAt: "2026-11-14T20:02:00.000Z",
+      } as PausedRunRecord,
+      "owner",
+    );
+    expect(result.runStatus).toBe("failed");
+    expect(result.runError).toContain("Execution lost");
+    expect(studioLog).toHaveBeenCalledWith(
+      "paused_run:outcome_claim_divergence",
+      expect.objectContaining({ gateId: "gate-1", actionRunStatus: "working" }),
+    );
+  });
+
+  it("a live processing claim with a non-terminal action_run still reports processing", async () => {
+    vi.mocked(getActionRun).mockResolvedValue({
+      status: "working",
+      startedAt: "2026-11-14T20:00:00.000Z",
+      completedAt: null,
+      failureMessage: null,
+    } as never);
+    vi.mocked(listActionEvents).mockResolvedValue([] as never);
+    const result = await getRunOutcomeForPausedRun(
+      { id: "gate-1", actionRunId: "run", runStatus: "processing", runError: null } as PausedRunRecord,
+      "owner",
+    );
+    expect(result.runStatus).toBe("processing");
+    expect(result.runError).toBeNull();
+  });
+
   it("does not attribute a later gate's terminal result to a still-processing gate", async () => {
     vi.mocked(getActionRun).mockResolvedValue({ status: "working" } as never);
     vi.mocked(listActionEvents).mockResolvedValue([{ type: "run.completed", payload: { pausedRunId: "another", result: { finalText: "different operation" } } }] as never);

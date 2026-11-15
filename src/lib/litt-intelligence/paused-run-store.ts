@@ -917,6 +917,37 @@ export async function getRunOutcomeForPausedRun(
         runCompletedAt: run.completedAt,
       };
     }
+    // Claim/outcome divergence: the gate row's claim lifecycle reached
+    // terminal-failed (the executor released its claim as failed after
+    // its canonical settle failed, or the stale-run reaper retired a
+    // dead executor whose action_run settle attempt also failed), but
+    // the action_run itself never reached a terminal status and carries
+    // no outcome event for this gate. A failed claim is fenced —
+    // verifyRunClaim requires run_status='processing', so no executor
+    // can ever write this run's outcome again. Deriving "processing"
+    // here wedged the gate permanently: pollers polled a dead run,
+    // repeat approvals returned 202-processing forever, and the
+    // controlled-retry path (which requires a failed outcome) was
+    // unreachable (production hang, 2026-11-14: approvals recorded,
+    // run never resumed, nothing errored). The row's recorded failure
+    // is the only outcome this gate will ever have — report it.
+    if (record.runStatus === "failed") {
+      studioLog("paused_run:outcome_claim_divergence", {
+        userId,
+        actionRunId: record.actionRunId,
+        pausedRunId: record.id,
+        gateId: record.id,
+        actionRunStatus: run.status,
+        claimError: record.runError ?? undefined,
+      });
+      return {
+        runStatus: "failed",
+        runResult: null,
+        runError: record.runError ?? run.failureMessage,
+        runStartedAt: run.startedAt,
+        runCompletedAt: record.runCompletedAt ?? run.completedAt,
+      };
+    }
     return { ...EMPTY_OUTCOME, runStatus: "processing", runStartedAt: run.startedAt };
   } catch {
     return { ...EMPTY_OUTCOME, runStatus: record.runStatus };

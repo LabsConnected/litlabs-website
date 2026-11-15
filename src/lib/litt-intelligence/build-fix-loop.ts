@@ -46,7 +46,20 @@ export async function runBuildFixLoop(
   },
 ): Promise<BuildFixLoopResult> {
   const requestedChecks = options?.checks ?? ["typecheck", "lint", "test", "build"];
-  const packageInfo = await transport.discoverPackageInfo();
+  // Discovery is a transport call (reads package.json over HTTP) and can
+  // fail the same way a check can — workspace unreachable, terminal 5xx.
+  // That is "checks could not run", not a reason to throw out of the
+  // caller: an unwrapped throw here killed resumed approval runs AFTER
+  // the approved mutation had already landed (production, 2026-11-14:
+  // "The resumed run failed: exec failed (500): Sandbox execution
+  // failed"). Report an honest failed result with no executed checks —
+  // noteBuildFix already has the "No checks were executed" vocabulary.
+  let packageInfo: ProjectPackageInfo;
+  try {
+    packageInfo = await transport.discoverPackageInfo();
+  } catch {
+    return { allPassed: false, results: [], repairAttempts: 0, finalState: "failed" };
+  }
 
   const results: CheckResult[] = [];
 
@@ -99,8 +112,15 @@ export async function runBuildFixLoop(
       .map((r) => `--- ${r.check} (exit ${r.exitCode}) ---\n${r.stderr || r.stdout}`)
       .join("\n\n");
 
-    // Call repair callback — returns true if it made changes
-    const repaired = await options.onRepair(repairAttempts, errorOutput);
+    // Call repair callback — returns true if it made changes. A repair
+    // attempt that throws (its own sub-loop hit a transport/provider
+    // failure) is a failed repair attempt, not a fatal run error.
+    let repaired = false;
+    try {
+      repaired = await options.onRepair(repairAttempts, errorOutput);
+    } catch {
+      repaired = false;
+    }
     if (!repaired) break;
 
     // Re-run failed checks only
@@ -151,7 +171,25 @@ async function runSingleCheck(
   checkId: "build" | "typecheck" | "lint" | "test",
   packageInfo: ProjectPackageInfo,
 ): Promise<CheckResult> {
-  const result = await transport.runCheck(checkId, packageInfo);
+  // A check whose execution channel fails (terminal exec 5xx, timeout)
+  // is a FAILED check carrying the transport error as its output — the
+  // repair loop and the model can react to it. Letting the throw escape
+  // turned one broken check into a dead run (see runBuildFixLoop note).
+  let result: Awaited<ReturnType<WorkspaceTransport["runCheck"]>>;
+  try {
+    result = await transport.runCheck(checkId, packageInfo);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      check: checkId,
+      passed: false,
+      exitCode: 1,
+      stdout: "",
+      stderr: message,
+      errorCount: 1,
+      diagnostics: [],
+    };
+  }
   const output = `${result.stderr}\n${result.stdout}`.trim();
   const diagnostics = parseDiagnostics(output, checkId);
 
