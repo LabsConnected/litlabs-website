@@ -88,8 +88,11 @@ Rules:
 export function parseJarvisActions(answer: string): JarvisAction[] {
   const actions: JarvisAction[] = [];
 
-  // Extract bash commands from the first code block and offer to insert/run
-  const codeBlockMatch = answer.match(/```(?:bash|sh|shell)?\n([\s\S]*?)```/);
+  // Extract bash commands from the first shell-tagged code block and
+  // offer to insert/run. An explicit shell language tag is required:
+  // untagged or prose blocks (e.g. a quoted image prompt) are not
+  // commands and must not sprout terminal actions.
+  const codeBlockMatch = answer.match(/```(?:bash|sh|shell|zsh)\n([\s\S]*?)```/);
   if (codeBlockMatch) {
     const command = codeBlockMatch[1].trim();
     if (command) {
