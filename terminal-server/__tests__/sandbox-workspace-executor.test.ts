@@ -31,6 +31,10 @@ import {
   prepareWorkspace,
   type WorkspaceDescriptor,
 } from "../workspace/WorkspaceManager";
+import {
+  readVolumeInstallStamp,
+  sandboxInstallIsFresh,
+} from "../sandbox/install-stamp";
 const OWNER = "user_owner_executor";
 const OTHER = "user_someone_else";
 const TOKEN = ["test", "scoped", "token", "0002"].join("-");
@@ -244,6 +248,75 @@ describe("prepare (sandbox clone path)", () => {
     expect(ws?.sandbox).toBeUndefined();
     // Nothing cloned ever reached the volume.
     expect(ws && existsSync(join(ws.root, ".git"))).toBe(false);
+  });
+});
+
+describe("background install (the lock is not held across the install exec)", () => {
+  it("lets another workspace operation complete while the prepare install is still running, then stamps freshness", async () => {
+    const provider = new FakeSandboxProvider({
+      cloneFiles: {
+        "package.json": JSON.stringify({ name: "app", packageManager: "pnpm@9.15.0" }),
+        "server.js": "console.log('app');\n",
+      },
+    });
+    const executor = executorFor(provider);
+
+    // Hold the install exec open until the test releases it.
+    let releaseInstall!: () => void;
+    const installGate = new Promise<void>((resolve) => { releaseInstall = resolve; });
+    let installEntered = false;
+    const original = provider.execute.bind(provider);
+    provider.execute = async (id, input) => {
+      if (input.command.includes("install")) {
+        installEntered = true;
+        await installGate;
+      }
+      return original(id, input);
+    };
+
+    const ws = await executor.prepareRepoWorkspace({
+      userId: OWNER,
+      projectId: "proj-install-lock",
+      installationId: 42,
+      owner: "acme",
+      repo: "site",
+      branch: "main",
+      workspaceRoot: volumeParent,
+      githubToken: TOKEN,
+    });
+    const sandboxId = ws.sandbox!.sandboxId;
+
+    // The background install (prepare step 9) reaches its exec.
+    const enteredDeadline = Date.now() + 15_000;
+    while (!installEntered && Date.now() < enteredDeadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(installEntered).toBe(true);
+
+    // While the install exec is still blocked, an exec for the same
+    // workspace must complete. Before the fix, installInSandbox held
+    // the per-workspace lock across the whole install (300s budget),
+    // and this call queued behind it — the preview-start timeout of
+    // 2026-11-15.
+    const outcome = await Promise.race([
+      executor.executeCommand(ws, { command: "pwd" }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
+    ]);
+    expect(outcome).not.toBeNull();
+    expect(outcome!.sandboxId).toBe(sandboxId);
+
+    // Release the install: the stamp + sync-back bookkeeping runs
+    // under the lock afterwards, and the sandbox reads fresh.
+    releaseInstall();
+    const stamp = readVolumeInstallStamp(ws.root);
+    expect(stamp).not.toBeNull();
+    const freshDeadline = Date.now() + 15_000;
+    let fresh = false;
+    while (!fresh && Date.now() < freshDeadline) {
+      fresh = await sandboxInstallIsFresh(provider, sandboxId, stamp);
+      if (!fresh) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(fresh).toBe(true);
   });
 });
 
