@@ -15,6 +15,7 @@ import {
   cloneInSandbox,
   cleanCloneUrl,
   redactToken,
+  sanitizeRemote,
   validateCloneTarget,
   SandboxCloneError,
   SandboxCloneVerificationError,
@@ -125,6 +126,60 @@ describe("cloneInSandbox", () => {
       expect((err as Error).message).toContain("***");
       return true;
     });
+  });
+});
+
+describe("sanitizeRemote", () => {
+  it("registers safe.directory for the sandbox root before any repo-touching git command", async () => {
+    await cloneInSandbox(provider, sandboxId, {
+      sandboxRoot: ROOT,
+      owner: "acme", repo: "site", branch: "main", githubToken: TOKEN,
+    });
+    const safeIdx = executed.findIndex((e) => e.command.includes("safe.directory"));
+    const setUrlIdx = executed.findIndex((e) => e.command.includes("set-url"));
+    expect(safeIdx).toBeGreaterThanOrEqual(0);
+    expect(executed[safeIdx].command).toContain("--global");
+    expect(executed[safeIdx].command).toContain(ROOT);
+    expect(setUrlIdx).toBeGreaterThan(safeIdx);
+  });
+
+  it("throws SandboxCloneError when the safe.directory step fails", async () => {
+    const original = provider.execute.bind(provider);
+    provider.execute = async (id, input) => {
+      if (input.command.includes("safe.directory")) {
+        return {
+          exitCode: 128,
+          stdout: "",
+          stderr: "fatal: detected dubious ownership in repository at '/workspace'",
+          durationMs: 1,
+        };
+      }
+      return original(id, input);
+    };
+    await expect(
+      sanitizeRemote(provider, sandboxId, {
+        owner: "acme", repo: "site", branch: "main", sandboxRoot: ROOT,
+      }),
+    ).rejects.toBeInstanceOf(SandboxCloneError);
+  });
+
+  it("throws SandboxCloneError when a later step fails — exit codes are checked, not ignored", async () => {
+    await cloneInSandbox(provider, sandboxId, {
+      sandboxRoot: ROOT,
+      owner: "acme", repo: "site", branch: "main", githubToken: TOKEN,
+    });
+    const original = provider.execute.bind(provider);
+    provider.execute = async (id, input) => {
+      if (input.command.includes("gc.auto")) {
+        return { exitCode: 128, stdout: "", stderr: "fatal: not in a git directory", durationMs: 1 };
+      }
+      return original(id, input);
+    };
+    await expect(
+      sanitizeRemote(provider, sandboxId, {
+        owner: "acme", repo: "site", branch: "main", sandboxRoot: ROOT,
+      }),
+    ).rejects.toBeInstanceOf(SandboxCloneError);
   });
 });
 
