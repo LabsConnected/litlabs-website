@@ -31,16 +31,23 @@ describe("StudioBoard surface (B2 scaffold)", () => {
     expect(screen.getByTestId("board-panel-preview")).toBeInTheDocument();
     expect(screen.getByTestId("board-panel-code")).toBeInTheDocument();
     expect(screen.getByTestId("board-panel-terminal")).toBeInTheDocument();
-    expect(screen.queryByTestId("board-panel-files")).toBeNull();
+    // Slice 1 (2026-11-14): Files, Health (Checks), Inspector (Changes /
+    // Browser) and Deploy join the website default layout.
+    expect(screen.getByTestId("board-panel-files")).toBeInTheDocument();
+    expect(screen.getByTestId("board-panel-health")).toBeInTheDocument();
+    expect(screen.getByTestId("board-panel-inspector")).toBeInTheDocument();
+    expect(screen.getByTestId("board-panel-deploy")).toBeInTheDocument();
+    expect(screen.queryByTestId("board-panel-media")).toBeNull();
+    expect(screen.queryByTestId("board-panel-world")).toBeNull();
     // Slots state what binds in B3 — no fake system is rendered.
     expect(screen.getByTestId("board-panel-slot-preview")).toHaveTextContent("StudioPreviewPanel");
   });
 
   it("the toolbar summons a closed panel — user action only", () => {
     renderBoard();
-    fireEvent.click(screen.getByTestId("board-summon-files"));
-    expect(screen.getByTestId("board-panel-files")).toBeInTheDocument();
-    expect(store.getState().scopes[SCOPE].panels.files.open).toBe(true);
+    fireEvent.click(screen.getByTestId("board-summon-media"));
+    expect(screen.getByTestId("board-panel-media")).toBeInTheDocument();
+    expect(store.getState().scopes[SCOPE].panels.media.open).toBe(true);
   });
 
   it("closing a panel removes it; minimizing parks it in the tray and restore returns it", () => {

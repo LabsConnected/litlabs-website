@@ -1106,7 +1106,9 @@ describe("Board mode (B3) — real panel bindings", () => {
     await waitFor(() => expect(screen.getByTestId("studio-board")).toBeTruthy());
     // The fixed stage area is gone while the board is active.
     expect(screen.queryByTestId("stage-surface-preview")).toBeNull();
-    // Default website set: Preview + Code + Terminal, all really bound.
+    // Default website set: Preview + Code + Terminal (slice 1 added
+    // Files, Health, Inspector and Deploy to the defaults — the Files
+    // and Inspector bindings are asserted in the next two tests).
     expect(screen.getByTestId("board-panel-preview")).toBeTruthy();
     expect(screen.getByTestId("board-binding-preview")).toBeTruthy();
     expect(await screen.findByTestId("studio-preview-panel")).toBeTruthy();
@@ -1126,15 +1128,20 @@ describe("Board mode (B3) — real panel bindings", () => {
   it("Files on the board is the ONLY StudioProjectFiles instance — the single-mount rule holds", async () => {
     const { user } = await renderStudioShell();
     await waitFor(() => expect(screen.getByTestId("studio-board")).toBeTruthy());
-    expect(screen.queryByTestId("studio-project-files")).toBeNull();
-
-    await user.click(screen.getByTestId("board-summon-files"));
+    // Slice 1 (2026-11-14): Files is part of the website default layout,
+    // so the board mounts it with no summon at all — and it is still
+    // exactly one instance, relocated from the chat panel.
     await waitFor(() => expect(screen.getByTestId("board-panel-files")).toBeTruthy());
-
-    const instances = screen.getAllByTestId("studio-project-files");
-    expect(instances).toHaveLength(1);
-    expect(screen.getByTestId("board-panel-files").contains(instances[0])).toBe(true);
+    await waitFor(() => expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1));
+    expect(
+      screen.getByTestId("board-panel-files").contains(screen.getAllByTestId("studio-project-files")[0]),
+    ).toBe(true);
     expect(screen.queryByTestId("litt-files-panel")).toBeNull();
+
+    // Summoning the already-open panel brings it to front — it must not
+    // mount a second instance either.
+    await user.click(screen.getByTestId("board-summon-files"));
+    expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
   });
 
   it("Inspector and Health and Deploy summon as real bindings; the shell inspector stays closed", async () => {
