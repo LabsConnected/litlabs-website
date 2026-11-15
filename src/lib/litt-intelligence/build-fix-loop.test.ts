@@ -82,7 +82,7 @@ describe("runBuildFixLoop transport failure containment", () => {
         throw new Error("exec failed (500): Sandbox execution failed");
       }),
     });
-    const onRepair = vi.fn(async () => false);
+    const onRepair = vi.fn(async (_attempt: number, _errors: string) => false);
 
     const result = await runBuildFixLoop(transport, undefined, { onRepair });
 
