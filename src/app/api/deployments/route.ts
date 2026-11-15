@@ -40,9 +40,32 @@ async function getPublishedSites(userId: string) {
       .eq("user_id", userId)
       .eq("is_system", false)
       .in("id", projectIds);
-    const names = new Map(
-      ((projects ?? []) as Array<{ id: string; name: string }>).map((p) => [p.id, p.name]),
-    );
+    const names = new Map<string, string>();
+    for (const p of (projects ?? []) as Array<{ id: string; name: string | null }>) {
+      if (p.name && p.name.trim()) names.set(p.id, p.name);
+    }
+    // Deployments can also reference legacy `projects` rows: project
+    // identity resolves across both tables everywhere else (getProject,
+    // resolveCurrentProject), so this name join must too, or every
+    // legacy-backed deployment falls back to "Untitled project". The
+    // legacy table has no `name` column — its display name is the
+    // repository full name (same derivation as project-repository).
+    const unresolvedIds = projectIds.filter((id) => !names.has(id));
+    if (unresolvedIds.length > 0) {
+      const { data: legacyProjects } = await supabaseAdmin
+        .from("projects")
+        .select("id,repository_full_name,repository")
+        .eq("user_id", userId)
+        .in("id", unresolvedIds);
+      for (const p of (legacyProjects ?? []) as Array<{
+        id: string;
+        repository_full_name: string | null;
+        repository: string | null;
+      }>) {
+        const legacyName = p.repository_full_name || p.repository;
+        if (legacyName && legacyName.trim()) names.set(p.id, legacyName);
+      }
+    }
     const systemIds = await getSystemProjectIds(userId, projectIds);
     return latest.filter((d) => !systemIds.has(d.projectId)).map((d) => ({
       id: d.id,
