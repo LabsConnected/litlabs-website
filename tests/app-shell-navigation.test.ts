@@ -78,9 +78,9 @@ describe("AppShell Navigation", () => {
   describe("More menu", () => {
     it("carries every secondary destination", () => {
       const labels = APP_NAV_MORE.map((i) => i.label);
+      // "Showcase" removed from More (Larry's header cleanup, 2026-11-14).
       expect(labels).toEqual([
         "Marketplace",
-        "Showcase",
         "Games",
         "CLI",
         "Deployments",

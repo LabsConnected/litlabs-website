@@ -24,7 +24,21 @@
  *               the StudioInspector tab set (Plan/Changes/Checks/…)
  *   deploy    → StudioDeploySurface (the real deploy request path)
  *
- *   media / world → honest slots. Later slices — no fake systems.
+ * Board-only rebuild additions (2026-11-14):
+ *   chat      → BoardChatPanel (Command Center chrome around the real
+ *               transcript + composer, built by CommandStudio)
+ *   plan      → StudioPlanSurface, its Open-* actions rewired to board
+ *               panel summons (there is no stage to jump to anymore)
+ *   canvas    → the unified Canvas & Design stage element, built by
+ *               CommandStudio (renderCanvasDesignStage)
+ *   activity  → StudioActivityPanel + MissionCards — Activity's own
+ *               board panel, never a chat tab
+ *   media     → BoardMediaPanel (Asset Lake: images / video / music)
+ *   browser   → BoardBrowserPanel (embedded web view)
+ *   inspector → same tab set, minus the tabs that duplicate board
+ *               panels (Checks / Files / Preview have their own homes)
+ *
+ *   world → honest slot. Later slice — no fake system.
  */
 
 import dynamic from "next/dynamic";
@@ -37,14 +51,21 @@ import { useBoardLayoutStore } from "../../stores/useBoardLayoutStore";
 import type { PreviewSelection } from "../StudioPreviewPanel";
 import type { StudioSelectionPayload } from "../studioSelectionPayload";
 import StudioHealthPanel from "../StudioHealthPanel";
-import { StudioInspector, type StudioInspectorData } from "../StudioWorkspaceFrame";
+import { StudioActivityPanel, StudioInspector, type StudioInspectorData } from "../StudioWorkspaceFrame";
 import StudioDeploySurface from "../shell/StudioDeploySurface";
 import ElementInspectorPanel from "../shell/ElementInspectorPanel";
+import MissionCards from "../MissionCards";
+import BoardMediaPanel from "./BoardMediaPanel";
+import BoardBrowserPanel from "./BoardBrowserPanel";
 import { boardDefinition, boardScopeKey, type BoardPanelId } from "./board-types";
 
 const StudioPreviewPanel = dynamic(() => import("../StudioPreviewPanel"), { ssr: false });
 const CodeWorkspace = dynamic(() => import("../code/CodeWorkspace").then((m) => m.CodeWorkspace), { ssr: false });
 const StudioTerminalDrawer = dynamic(() => import("../StudioTerminalDrawer"), { ssr: false });
+const StudioPlanSurface = dynamic(() => import("../StudioPlanSurface"), { ssr: false });
+
+/** Inspector tabs that duplicate dedicated board panels. */
+const BOARD_INSPECTOR_EXCLUDED_TABS: InspectorTab[] = ["checks", "files", "preview"];
 
 export interface BoardPanelBindingsProps {
   id: BoardPanelId;
@@ -73,6 +94,20 @@ export interface BoardPanelBindingsProps {
   inspectorData: StudioInspectorData;
   /** The canonical deploy request path (ask-litt + approval gate). */
   onDeployRequest: (target: DeployTargetChoice) => void;
+  /** The BoardChatPanel element (Command Center), built by CommandStudio. */
+  chatContent: ReactNode;
+  /** The Canvas & Design stage element, built by CommandStudio. */
+  canvasContent: ReactNode;
+  /** Summon (open / restore / focus) a board panel — the board-only
+   *  replacement for stage jumps in Plan / MissionCards actions. */
+  summonPanel: (id: BoardPanelId) => void;
+  /** Activity panel data (mirrors the stage Activity surface's props). */
+  activityRunId: string | null;
+  activityBusy: boolean;
+  activityModelLabel: string;
+  activityTerminalStatus: string;
+  /** Real rollback (restore_checkpoint), shared with Plan/MissionCards. */
+  onRollback: () => void;
 }
 
 export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
@@ -80,7 +115,75 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
   const { id, capabilities } = props;
   const projectId = capabilities.projectId;
 
+  const summon = props.summonPanel;
+  const missionCards = (
+    <MissionCards
+      capabilities={capabilities}
+      modelLabel={props.activityModelLabel}
+      onOpenCode={() => summon("code")}
+      onOpenCanvas={() => summon("canvas")}
+      onOpenPreview={() => summon("preview")}
+      onOpenTerminal={() => summon("terminal")}
+      onOpenActivity={() => summon("activity")}
+      onOpenFiles={() => summon("files")}
+      onRollback={props.onRollback}
+    />
+  );
+
   switch (id) {
+    case "chat":
+      return (
+        <div className="h-full min-h-0" data-testid="board-binding-chat">
+          {props.chatContent}
+        </div>
+      );
+    case "plan":
+      return (
+        <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-plan">
+          <StudioPlanSurface
+            capabilities={capabilities}
+            modelLabel={props.activityModelLabel}
+            onOpenCode={() => summon("code")}
+            onOpenCanvas={() => summon("canvas")}
+            onOpenPreview={() => summon("preview")}
+            onOpenTerminal={() => summon("terminal")}
+            onOpenActivity={() => summon("activity")}
+            onOpenFiles={() => summon("files")}
+            onRollback={props.onRollback}
+          />
+        </div>
+      );
+    case "canvas":
+      return (
+        <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-canvas">
+          {props.canvasContent}
+        </div>
+      );
+    case "activity":
+      return (
+        <div className="h-full min-h-0 overflow-y-auto" data-testid="board-binding-activity">
+          <StudioActivityPanel
+            runId={props.activityRunId}
+            busy={props.activityBusy}
+            modelLabel={props.activityModelLabel}
+            projectName={capabilities.projectName}
+            terminalStatus={props.activityTerminalStatus}
+            missionContent={missionCards}
+          />
+        </div>
+      );
+    case "media":
+      return (
+        <div className="h-full min-h-0" data-testid="board-binding-media">
+          <BoardMediaPanel projectId={projectId} />
+        </div>
+      );
+    case "browser":
+      return (
+        <div className="h-full min-h-0" data-testid="board-binding-browser">
+          <BoardBrowserPanel />
+        </div>
+      );
     case "preview":
       // The SAME StudioPreviewPanel + props as the Preview stage and the
       // dockable preview panel — no second preview implementation.
@@ -167,9 +270,14 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
                 .getState()
                 .closePanel(boardScopeKey(props.userId, props.projectId), "inspector")
             }
-            activeTab={props.inspectorTab}
+            activeTab={
+              BOARD_INSPECTOR_EXCLUDED_TABS.includes(props.inspectorTab)
+                ? "plan"
+                : props.inspectorTab
+            }
             onTabChange={props.onInspectorTabChange}
             data={props.inspectorData}
+            excludeTabs={BOARD_INSPECTOR_EXCLUDED_TABS}
           />
         </div>
       );
@@ -179,10 +287,9 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
           <StudioDeploySurface projectId={projectId} onDeployRequest={props.onDeployRequest} />
         </div>
       );
-    case "media":
     case "world":
-      // Later slices (Media panel build / World panel v1) — honest slot,
-      // identical to the unbound B2 slot. No fake system is rendered.
+      // Later slice (World panel v1) — honest slot, identical to the
+      // unbound B2 slot. No fake system is rendered.
       return (
         <div
           data-testid={`board-panel-slot-${id}`}

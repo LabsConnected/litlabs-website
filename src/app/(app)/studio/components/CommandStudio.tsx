@@ -85,13 +85,12 @@ import { useExecutionStore, type MutationSummary } from "../stores/useExecutionS
 import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult } from "../lib/approval-polling";
 import { createApprovalOutcomeGuard } from "../lib/approval-outcome-guard";
 import { StudioActivityPanel, StudioInspector, type StudioInspectorData } from "./StudioWorkspaceFrame";
-import StudioShell from "./shell/StudioShell";
 import StudioBoard from "./board/StudioBoard";
 import BoardPanelBindings from "./board/BoardPanelBindings";
+import BoardChatPanel from "./board/BoardChatPanel";
 import { useBoardProjectType } from "./board/useBoardProjectType";
-import type { BoardPanelId } from "./board/board-types";
-import { useBoardEnabled, useBoardLayoutStore } from "../stores/useBoardLayoutStore";
-import WorkspaceRail from "./shell/WorkspaceRail";
+import { boardScopeKey, type BoardPanelId } from "./board/board-types";
+import { useBoardLayoutStore } from "../stores/useBoardLayoutStore";
 import ContextInspector from "./shell/ContextInspector";
 import ResizeHandle from "./shell/ResizeHandle";
 import StudioDeploySurface from "./shell/StudioDeploySurface";
@@ -114,14 +113,12 @@ import {
   destinationToLegacyTool,
   modeToDirectiveStage,
   resolveCreatorDestination,
-  resolveEntryCreateType,
   workspaceStageToMode,
   type CanvasDesignMode,
   type DirectiveStage,
   type StudioDestination,
   type StudioMode,
   type CreateMode,
-  type StudioEntryCreateType,
   type MoreMode,
   type MissionMode,
   type InspectorTab,
@@ -556,22 +553,64 @@ function CommandStudioContent() {
     setPreviewDockMounted(true);
     setPreviewDockOpen((v) => !v);
   }, []);
-  // Board mode (plan §2 B2/B3): per-user toggle, default OFF. While off
-  // the shell renders the fixed stage layout exactly as before; while
-  // on, the board surface replaces the stage area (chat stays fixed on
-  // the left) and its panels bind the real systems (B3).
+  // Board-only Studio (rebuild 2026-11-14, BOARD-BLUEPRINT.md): the
+  // board is not a mode anymore — it is what Studio opens on, every
+  // time. The per-user board toggle and the stage layout are retired:
+  // whenever a user and a project are in scope, the shell branch renders
+  // the full-window board and every surface lives on it as a panel.
   const boardProjectId = activeProjectId ?? capabilities.projectId;
-  const boardEnabled = useBoardEnabled(userId);
-  const setBoardEnabled = useBoardLayoutStore((s) => s.setBoardEnabled);
-  const boardActive = boardEnabled && Boolean(userId) && Boolean(boardProjectId);
-  const handleToggleBoard = useCallback(() => {
-    if (userId) setBoardEnabled(userId, !boardEnabled);
-  }, [userId, boardEnabled, setBoardEnabled]);
-  // B3: the board's default panel set follows the project's REAL type
+  const boardActive = Boolean(userId) && Boolean(boardProjectId);
+  // The board's default panel set follows the project's REAL type
   // (game2d/game3d → the game set with World + Media), read from the
-  // project's stored workspaceType — not a hardcoded "website". Only
-  // fetched while the board toggle is on for this user.
-  const boardProjectType = useBoardProjectType(boardEnabled ? boardProjectId : null);
+  // project's stored workspaceType — not a hardcoded "website".
+  const boardProjectType = useBoardProjectType(boardProjectId);
+  // Summon = open / restore / focus a board panel. The board-only
+  // replacement for stage jumps and dock opens: Plan, MissionCards, the
+  // operator bar and the chat result card all land here. Movement rule
+  // holds — this only runs from a user gesture (or LiTT's approved
+  // in-chat panel control).
+  const summonBoardPanel = useCallback(
+    (id: BoardPanelId) => {
+      if (!userId || !boardProjectId) return;
+      const scope = boardScopeKey(userId, boardProjectId);
+      const state = useBoardLayoutStore.getState();
+      state.ensureScope(userId, boardProjectId, boardProjectType);
+      const panel = useBoardLayoutStore.getState().scopes[scope]?.panels[id];
+      if (!panel || !panel.open) state.openPanel(scope, id);
+      else if (panel.minimized) state.restorePanel(scope, id);
+      else state.bringToFront(scope, id);
+    },
+    [userId, boardProjectId, boardProjectType],
+  );
+  // Deep links (?tool=…) summon the matching board panel — the
+  // board-only successor to landing on a stage surface. Runs once per
+  // project + tool pair; following the link is the user's gesture.
+  const handledToolLinkRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!studioShellActive || !userId || !boardProjectId) return;
+    const tool = searchParams.get("tool");
+    if (!tool) return;
+    const surface = toolParamToStation(tool);
+    if (!surface) return;
+    const key = `${boardProjectId}::${tool}`;
+    if (handledToolLinkRef.current === key) return;
+    handledToolLinkRef.current = key;
+    const panelBySurface: Record<StudioStageSurface, BoardPanelId> = {
+      plan: "plan",
+      design: "canvas",
+      preview: "preview",
+      browser: "browser",
+      code: "code",
+      files: "files",
+      images: "media",
+      assets: "media",
+      deploy: "deploy",
+      activity: "activity",
+      terminal: "terminal",
+    };
+    summonBoardPanel(panelBySurface[surface]);
+  }, [studioShellActive, userId, boardProjectId, searchParams, summonBoardPanel]);
+
   // The shell's bottom panel (StudioDock) open state. Classic mode has
   // its own dockOpen state; the two layouts never render at once.
   const [shellDockOpen, setShellDockOpen] = useState(false);
@@ -612,25 +651,19 @@ function CommandStudioContent() {
   }, [studioShellActive]);
   const handleOpenDockTab = useCallback((tab: StudioDockTab) => {
     if (studioShellActive) {
-      if (tab === "inspector") {
-        setInspectorOpen(true);
-        return;
-      }
-      // Phase 2: dock tabs open the shell's bottom panel on that tab.
-      // The terminal tab is the one exception — the PTY lives in the
-      // Terminal station (a second drawer would start a competing
-      // session), so it still routes to the station.
-      if (tab === "terminal") {
-        openStageSurface("terminal");
-        return;
-      }
-      setDockTab(tab);
-      setShellDockOpen(true);
+      // Board-only: dock tabs are board panels now — summon the panel.
+      const panelByTab: Record<StudioDockTab, BoardPanelId> = {
+        activity: "activity",
+        terminal: "terminal",
+        inspector: "inspector",
+        media: "media",
+      };
+      summonBoardPanel(panelByTab[tab]);
       return;
     }
     setDockTab(tab);
     setDockOpen(true);
-  }, [studioShellActive, openStageSurface]);
+  }, [studioShellActive, summonBoardPanel]);
 
   // Agent-initiated dock intents (STUDIO_EVENT_OPEN_DOCK) are PRESELECTION
   // ONLY (Phase 0, Larry 2026-11-14): they may record which dock tab would
@@ -642,17 +675,13 @@ function CommandStudioContent() {
   // the tab without opening) is all that happens.
   const handlePreselectDockTab = useCallback((tab: StudioDockTab) => {
     if (studioShellActive) {
-      if (tab === "inspector") {
-        setInspectorOpen(true);
-        return;
-      }
-      if (tab === "terminal") {
-        openStageSurface("terminal");
-        return;
-      }
+      // Board-only: there is no dock to preselect and agent intents
+      // never open board panels (Phase 0 movement rule) — a genuine
+      // no-op. Only the user's hand summons panels.
+      return;
     }
     setDockTab(tab);
-  }, [studioShellActive, openStageSurface]);
+  }, [studioShellActive]);
 
   // The query string written by the state→URL effect on its last pass —
   // used by URL→state to recognize (and skip) our own echoes.
@@ -1401,34 +1430,11 @@ function CommandStudioContent() {
     setPendingCommand(command);
   }, [capabilities.terminalStatus, handleOpenContextInspector, handleOpenDockTab, handleOpenFilesPanel, studioShellActive, openStageSurface]);
 
-  // One-chat entry chips (Larry's directive, 2026-11-11;
-  // ART-20261111-031): the creation-type hints in the chat's empty
-  // state execute their plan IN PLACE — the user never leaves the
-  // one chat, and no second prompt ever opens. Creator plans land in
-  // the exact state the retired hub's ?creator= deep links resolved
-  // to; tool plans route through handleRouteTool like every other
-  // in-Studio route. Website is the one exception: blank-project
-  // creation (mint/reuse + pin) is owned by the page-level website
-  // start, so the chip routes through the same ?creator=website URL
-  // the hub's Website chip used — StudioHub above us performs the
-  // create and pins the project, and this surface remounts bound to
-  // it, exactly as a deep link does.
-  const handleEntryCreateType = useCallback(
-    (type: StudioEntryCreateType) => {
-      const plan = resolveEntryCreateType(type);
-      if (plan.kind === "website-start") {
-        router.replace("/studio?creator=website");
-        return;
-      }
-      if (plan.kind === "creator") {
-        setCreateMode(plan.mode);
-        setDestination("create");
-        return;
-      }
-      handleRouteTool(plan.tool);
-    },
-    [router, handleRouteTool],
-  );
+  // One-chat entry chips retired (board-only cleanup, 2026-11-14):
+  // the creation-type chips no longer render in the empty state, so
+  // their in-place routing went with them. The content types live on
+  // the board (Media / Code / Preview / Canvas & Design panels) and
+  // ?creator= deep links still resolve at the page level.
 
   // P1-1: the chat image intent ("generate an image of X") opens the REAL
   // Image Studio — the create destination's ImageTool — with the user's
@@ -2263,12 +2269,13 @@ function CommandStudioContent() {
   // Header actions — truthful.
   const handlePreview = useCallback(() => {
     if (studioShellActive) {
-      openStageSurface("preview");
+      // Board-only: Preview is a board panel — summon it.
+      summonBoardPanel("preview");
       return;
     }
     setDestination("studio");
     setStudioMode("preview");
-  }, [studioShellActive, openStageSurface]);
+  }, [studioShellActive, summonBoardPanel]);
   // Real deploy runs through LiTT in chat (project.deploy tool with
   // approval). This prefills the composer with a deploy request and opens
   // the chat surface — one tap, no developer tooling.
@@ -3100,10 +3107,8 @@ function CommandStudioContent() {
         fallbackNotice={conversation.fallbackNotice}
         onRouteToolAction={handleRouteTool}
         onRegenerateAction={conversation.regenerate}
-        onSelectConversation={handleSelectConversation}
         launchpadState={launchpadState}
         onFirstMissionAction={handleFirstMissionAction}
-        onCreateTypeAction={handleEntryCreateType}
         completion={completion}
         onDismissCompletion={() => setCompletion(null)}
         onUndoCompletion={handleUndoCompletion}
@@ -3213,8 +3218,12 @@ function CommandStudioContent() {
   // behavior is owned by the separate approval-fix lane.
   const operatorBar = (
     <StudioOperatorBar
-      onOpenTerminal={() => openStageSurface("terminal")}
-      onOpenActivity={() => openStageSurface("activity")}
+      onOpenTerminal={() =>
+        studioShellActive ? summonBoardPanel("terminal") : openStageSurface("terminal")
+      }
+      onOpenActivity={() =>
+        studioShellActive ? summonBoardPanel("activity") : openStageSurface("activity")
+      }
       onRollback={handleRollback}
       onStop={() => {
         conversation.cancel();
@@ -3248,6 +3257,32 @@ function CommandStudioContent() {
         {littComposer}
       </div>
     </>
+  );
+
+  // The Command Center chat panel's content (board-only rebuild): the
+  // SAME transcript + composer elements the left dock carried, now
+  // inside the movable board chat panel. New Chat lives in this panel
+  // only (header/menu entries were removed with the header cleanup).
+  const boardChatContent = (
+    <BoardChatPanel
+      projectName={capabilities.projectName}
+      transcript={littTranscript}
+      composer={
+        <div
+          className="shrink-0 border-t px-1 pb-1 pt-1"
+          style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)" }}
+          data-testid="litt-dock-composer"
+        >
+          {littComposer}
+        </div>
+      }
+      operatorBar={operatorBar}
+      onNewChat={() => {
+        void conversation.createConversation();
+      }}
+      onOpenPreview={() => summonBoardPanel("preview")}
+      onOpenFiles={() => summonBoardPanel("files")}
+    />
   );
 
   // ── Phase 2 shared compositions ─────────────────────────────────
@@ -3445,6 +3480,14 @@ function CommandStudioContent() {
           new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY, { detail: { target } }),
         );
       }}
+      chatContent={boardChatContent}
+      canvasContent={renderCanvasDesignStage()}
+      summonPanel={summonBoardPanel}
+      activityRunId={activityRunId}
+      activityBusy={conversation.busy}
+      activityModelLabel={modelLabel}
+      activityTerminalStatus={terminalHealthOf(capabilities).label}
+      onRollback={handleRollback}
     />
   );
 
@@ -3734,7 +3777,7 @@ function CommandStudioContent() {
         {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
         <CommandStudioHeader
           onPreviewAction={handlePreview}
-          onToggleDockAction={handleToggleDock}
+          onToggleDockAction={studioShellActive ? undefined : handleToggleDock}
           onOpenDockTabAction={handleOpenDockTab}
           dockOpen={dockOpen}
           onProjectSelectAction={handleSelectProject}
@@ -3747,7 +3790,7 @@ function CommandStudioContent() {
           }}
           onDeployAction={handleDeployRequest}
           onClearChatAction={conversation.clear}
-          onNewChatAction={() => { void conversation.createConversation(); }}
+          onNewChatAction={studioShellActive ? undefined : () => { void conversation.createConversation(); }}
           onDeleteChatAction={() => { void conversation.deleteConversation(); }}
           onRenameChatAction={() => {
             const title = window.prompt("Rename conversation:", conversation.conversations.find((c) => c.id === conversation.selectedConversationId)?.title ?? "");
@@ -3821,171 +3864,38 @@ function CommandStudioContent() {
             overlay, LiTTPanel is a mobile sheet, Preview is a workspace tab. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-studio-body>
         {studioShellActive ? (
-          <StudioShell
-            taskbar={
-              /* Durable worktabs — task identity, never layout. */
-              <WorktabBar
-                tabs={worktabTabs}
-                activeId={activeWorktabId}
-                badges={worktabBadges}
-                onSwitch={handleSwitchWorktab}
-                onClose={(id) => { void handleCloseWorktab(id); }}
-                onNew={() => { void handleNewWorktab(); }}
-                closedTabs={studioTasks.closedTasks.map((t) => ({
-                  id: t.id,
-                  title: displayWorktabTitle(t.title, projectDisplayName),
-                }))}
-                onReopen={(id) => { void handleReopenWorktab(id); }}
+          // Board-only shell (rebuild 2026-11-14): no stage rail, no
+          // second nav rail, no bottom Developer bar, no rounded pale
+          // container, no expansion step — the board fills ALL the
+          // space under the header, edge to edge, and every surface
+          // (chat included) is a movable panel on it. The retired
+          // StudioShell composition stays in the tree for reference
+          // only; nothing renders it.
+          <div
+            className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+            data-testid="studio-board-shell"
+          >
+            {userId && boardProjectId ? (
+              <StudioBoard
+                userId={userId}
+                projectId={boardProjectId}
+                projectType={boardProjectType}
+                renderPanel={renderBoardPanel}
               />
-            }
-            rail={
-              <WorkspaceRail
-                activeStage={surfaceToDirectiveStage(stageSurface)}
-                activeSurface={stageSurface}
-                onSelectStage={openDirectiveStage}
-                onSelectSurface={openStageSurface}
-              />
-            }
-            bottomPanel={shellBottomDock}
-            previewPanel={boardActive ? undefined : (previewDockPanel ?? undefined)}
-            previewPanelOpen={boardActive ? false : previewDockOpen}
-            onTogglePreviewPanel={boardActive ? undefined : handleTogglePreviewDock}
-            boardActive={boardActive}
-            onToggleBoard={userId ? handleToggleBoard : undefined}
-            board={
-              boardActive && userId && boardProjectId ? (
-                <StudioBoard
-                  userId={userId}
-                  projectId={boardProjectId}
-                  projectType={boardProjectType}
-                  renderPanel={renderBoardPanel}
-                />
-              ) : undefined
-            }
-            stage={
-              <>
-                {Array.from(
-                  mountedSurfaces.has(stageSurface)
-                    ? mountedSurfaces
-                    : new Set([...mountedSurfaces, stageSurface]),
-                ).map((surface) => {
-                  const active = surface === stageSurface;
-                  return (
-                    <div
-                      key={surface}
-                      // `hidden` attribute would lose to Tailwind's `flex`
-                      // display utility — toggle the class instead.
-                      className={active
-                        ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-                        : "hidden"}
-                      data-testid={`stage-surface-${surface}`}
-                      data-active={active ? "true" : "false"}
-                    >
-                      {renderStageSurface(surface, active)}
-                    </div>
-                  );
-                })}
-              </>
-            }
-            inspectorOpen={boardActive ? false : inspectorOpen}
-            onOpenInspector={() => setInspectorOpen(true)}
-            inspector={
-              <ContextInspector
-                open={inspectorOpen}
-                onToggle={() => setInspectorOpen((v) => !v)}
-                selection={
-                  activeWorktab?.selection
-                    ? {
-                        label: activeWorktab.selection.label,
-                        tagName: activeWorktab.selection.tagName,
-                        sourceFile: activeWorktab.selection.sourceFile,
-                        route: activeWorktab.selection.route,
-                      }
-                    : previewSelection
-                      ? { label: previewSelection.label, tagName: previewSelection.tagName }
-                      : null
-                }
-                onAskAboutSelection={() => {
-                  const sel: StudioSelectionPayload | null = activeWorktab?.selection
-                    ?? (previewSelection && capabilities.projectId
-                      ? {
-                          kind: "preview-element",
-                          label: previewSelection.label,
-                          selector: previewSelection.selector,
-                          tagName: previewSelection.tagName,
-                          projectId: capabilities.projectId,
-                          timestamp: Date.now(),
-                        }
-                      : null);
-                  if (sel) {
-                    window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
-                  } else {
-                    setLittCollapsed(false);
-                  }
-                }}
-                onClearSelection={handleClearWorktabSelection}
-                editor={
-                  // The real element-edit path — only when a live preview
-                  // element is selected (builder nodes use
-                  // propertiesContent below).
-                  previewSelection && !builderSelectedNodeId ? (
-                    <ElementInspectorPanel
-                      selection={previewSelection}
-                      projectId={capabilities.projectId}
-                      route={null}
-                      onAskAboutSelection={handleAskAboutPreviewSelection}
-                      onClearSelection={handleClearWorktabSelection}
-                    />
-                  ) : undefined
-                }
-                propertiesContent={builderSelectedNodeId ? <BuilderPropertiesPanel /> : null}
-                defaultContent={
-                  <StudioInspector
-                    embedded
-                    open
-                    onToggle={() => setInspectorOpen(false)}
-                    activeTab={inspectorTab}
-                    onTabChange={setInspectorTab}
-                    data={studioInspectorData}
-                  />
-                }
-              />
-            }
-            leftWidth={littCollapsed ? 64 : littDockResize.width}
-            onResetLeftWidth={() => {
-              littDockResize.reset();
-              setLittCollapsed(false);
-            }}
-            leftPanel={
-              <LiTTPanel
-                overlay={false}
-                collapsed={littCollapsed}
-                onCollapse={() => setLittCollapsed(true)}
-                onExpand={() => setLittCollapsed(false)}
-                activeTab={littActiveTab}
-                onTabChange={setLittActiveTab}
-                voiceConnected={liveSession.isLive}
-                microphoneStatus={liveSession.indicators.microphone}
-                chatContent={littLeftPanelContent}
-                liveContent={littLiveContent}
-                filesContent={boardActive ? undefined : projectFilesContent}
-                expandedWidth={littDockResize.width}
-                expandedMaxWidth="500px"
-              />
-            }
-            dockHandle={
-              !littCollapsed ? (
-                <ResizeHandle
-                  onDragStart={littDockResize.onDragStart}
-                  onReset={littDockResize.reset}
-                  isDragging={littDockResize.isDragging}
-                  direction="left"
-                  ariaLabel="Resize LiTT chat panel"
-                  testId="litt-dock-resize"
-                />
-              ) : null
-            }
-          />
+            ) : (
+              // No project in scope yet: the conversation is the landing
+              // surface (its empty state carries the honest status
+              // notice and the primary action). Once a project binds,
+              // the board takes over with this same chat as a panel.
+              <div
+                className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col border-x"
+                style={{ borderColor: "var(--studio-border)" }}
+                data-testid="studio-board-shell-noproject"
+              >
+                {boardChatContent}
+              </div>
+            )}
+          </div>
         ) : (
           <>
             {/* Desktop ContextDrawer removed (P2): Files, Inspector, Activity,
@@ -4703,10 +4613,8 @@ function StudioWorkSurface({
   fallbackNotice,
   onRouteToolAction,
   onRegenerateAction,
-  onSelectConversation,
   launchpadState,
   onFirstMissionAction,
-  onCreateTypeAction,
   completion,
   onDismissCompletion,
   onUndoCompletion,
@@ -4723,11 +4631,8 @@ function StudioWorkSurface({
   fallbackNotice: string | null;
   onRouteToolAction: (tool: StudioTool, command?: string) => void;
   onRegenerateAction: (assistantMessageId?: string) => void;
-  onSelectConversation?: (conversationId: string) => void;
   launchpadState: FirstMissionLaunchpadState;
   onFirstMissionAction: (action: FirstMissionActionId) => void;
-  /** One-chat entry chips: creation-type hints act in place. */
-  onCreateTypeAction?: (type: StudioEntryCreateType) => void;
   completion?: { changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null;
   onDismissCompletion?: () => void;
   onUndoCompletion?: () => void;
@@ -4766,8 +4671,6 @@ function StudioWorkSurface({
           <LiTEmptyState
             launchpadState={launchpadState}
             onPrimaryAction={onFirstMissionAction}
-            onSelectConversation={onSelectConversation}
-            onCreateType={onCreateTypeAction}
           />
         </div>
       ) : loading && messages.length === 0 ? (

@@ -3,7 +3,6 @@
 import { HEALTH_LEVEL_COLOR, terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import Link from "next/link";
 import { useWallet } from "@/context/WalletContext";
 import StudioProjectPicker from "./StudioProjectPicker";
 import {
@@ -21,7 +20,6 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDot,
-  Bell,
   PanelBottom,
   MoreHorizontal,
   Plus,
@@ -30,9 +28,7 @@ import {
   Edit2,
   Download,
   Eraser,
-  Settings,
 } from "lucide-react";
-import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
 import {
   runtimePhaseLabel,
   HOST_EXECUTION_UNAVAILABLE_LABEL,
@@ -151,7 +147,6 @@ export default function CommandStudioHeader({
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
-  const [notifCount, setNotifCount] = useState<number | null>(null);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   const overflowTriggerRef = useRef<HTMLButtonElement>(null);
   const [statusRect, setStatusRect] = useState<DOMRect | null>(null);
@@ -164,24 +159,6 @@ export default function CommandStudioHeader({
     if (overflowTriggerRef.current) {
       setOverflowRect(overflowTriggerRef.current.getBoundingClientRect());
     }
-  }, []);
-
-  // Poll unread notification count (truthful; falls back to null on error).
-  useEffect(() => {
-    let cancelled = false;
-    const fetchNotifs = async () => {
-      try {
-        const res = await fetch("/api/notifications/count", { credentials: "include" });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setNotifCount(typeof data.count === "number" ? data.count : null);
-      } catch {
-        if (!cancelled) setNotifCount(null);
-      }
-    };
-    void fetchNotifs();
-    const id = window.setInterval(fetchNotifs, 45_000);
-    return () => { cancelled = true; window.clearInterval(id); };
   }, []);
 
   useEffect(() => {
@@ -351,39 +328,31 @@ export default function CommandStudioHeader({
         </button>
       )}
 
-      {/* New chat */}
-      <button
-        type="button"
-        onClick={onNewChatAction}
-        disabled={busy}
-        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1 text-[11px] font-bold text-accent transition-all hover:bg-accent/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 lg:min-h-8"
-        aria-label="New chat"
-        title="Start a new chat"
-      >
-        <Plus size={13} aria-hidden />
-        <span className="hidden lg:inline">New Chat</span>
-      </button>
+      {/* New chat — only where a chat panel does not own it. In the
+          board-only Studio, New Chat lives inside the board's chat
+          panel and CommandStudio passes no onNewChatAction, so this
+          button (and the overflow menu's item) simply do not render. */}
+      {onNewChatAction && (
+        <button
+          type="button"
+          onClick={onNewChatAction}
+          disabled={busy}
+          className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1 text-[11px] font-bold text-accent transition-all hover:bg-accent/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 lg:min-h-8"
+          aria-label="New chat"
+          title="Start a new chat"
+        >
+          <Plus size={13} aria-hidden />
+          <span className="hidden lg:inline">New Chat</span>
+        </button>
+      )}
 
-      {/* Notifications — wired to /api/notifications/count */}
-      <Link
-        href="/studio"
-        className="relative hidden min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-all hover:bg-black/5 sm:grid"
-        style={{ color: "var(--text-secondary)" }}
-        aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}
-        title="Notifications"
-      >
-        <Bell size={14} />
-        {notifCount ? (
-          <span
-            className="absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full px-1 text-[8px] font-black"
-            style={{ backgroundColor: "#ef4444", color: "#fff" }}
-          >
-            {notifCount > 99 ? "99+" : notifCount}
-          </span>
-        ) : null}
-      </Link>
+      {/* Notifications bell + Owner badge moved UP to the app top bar
+          (beside the LiTT status) in the board-only cleanup — they are
+          no longer duplicated in this header. */}
 
-      {/* Dock toggle — the single entry point to Activity/Terminal/Inspector/Media */}
+      {/* Dock toggle — classic layouts only; the board has no dock, so
+          CommandStudio passes no onToggleDockAction there. */}
+      {onToggleDockAction && (
       <button
         type="button"
         onClick={onToggleDockAction}
@@ -401,8 +370,9 @@ export default function CommandStudioHeader({
         <PanelBottom size={14} className="pointer-events-none" />
         <span className="hidden lg:inline">Dock</span>
       </button>
+      )}
 
-      {/* Overflow — conversation actions, deploy, terminal, settings */}
+      {/* Overflow — conversation actions, deploy, terminal, run mode */}
       <button
         ref={overflowTriggerRef}
         type="button"
@@ -435,14 +405,9 @@ export default function CommandStudioHeader({
             hasConversation={Boolean(hasConversation)}
             previewDisabled={!runtimeReady}
             busy={busy}
-            settingsHref={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
           />,
           document.body,
         )}
-
-      {/* Owner / test-role selector — inline in the header action cluster.
-          Self-hides for non-owners, so it adds zero clutter for regular users. */}
-      <OwnerTestModeIndicator placement="inline" />
     </header>
   );
 }
@@ -558,19 +523,22 @@ function WorkspaceStatusPopover({
       style={{
         left,
         top,
-        // Portaled to <body> — outside .studio-shell, so the light
-        // palette is carried explicitly (surface + text tokens).
-        backgroundColor: "#ffffff",
-        borderColor: "#86ac72",
-        color: "#0e1510",
-        ["--text-primary" as string]: "#0e1510",
-        ["--text-secondary" as string]: "#3f5a42",
-        ["--text-muted" as string]: "#52684f",
+        // Portaled to <body> — outside .studio-shell, so the palette
+        // is carried explicitly from the theme's published root
+        // variables (ThemeProvider sets them from the resolved skin),
+        // which follow the effective mode: the light Signature whites
+        // in Light, Larry's charcoal in Dark.
+        backgroundColor: "var(--box-bg)",
+        borderColor: "var(--border-color)",
+        color: "var(--text-color)",
+        ["--text-primary" as string]: "var(--text-color)",
+        ["--text-secondary" as string]: "color-mix(in srgb, var(--text-color) 76%, var(--bg-color))",
+        ["--text-muted" as string]: "color-mix(in srgb, var(--text-color) 58%, var(--bg-color))",
       }}
     >
       <div
         className="flex items-center justify-between border-b px-3 py-2"
-        style={{ borderColor: "#86ac72" }}
+        style={{ borderColor: "var(--border-color)" }}
       >
         <span className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-secondary)" }}>
           Workspace status
@@ -584,7 +552,7 @@ function WorkspaceStatusPopover({
           aria-hidden
         />
       </div>
-      <div className="max-h-[60dvh] overflow-y-auto divide-y" style={{ borderColor: "#86ac72" }}>
+      <div className="max-h-[60dvh] overflow-y-auto divide-y" style={{ borderColor: "var(--border-color)" }}>
         <StatusRow
           label="AI Providers"
           value={
@@ -680,7 +648,6 @@ function OverflowMenu({
   hasConversation,
   previewDisabled,
   busy,
-  settingsHref,
 }: {
   rect: DOMRect;
   onClose: () => void;
@@ -699,7 +666,6 @@ function OverflowMenu({
   hasConversation: boolean;
   previewDisabled: boolean;
   busy: boolean;
-  settingsHref: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -728,29 +694,36 @@ function OverflowMenu({
       style={{
         top,
         right,
-        // Portaled to <body> — outside .studio-shell, so the light
-        // palette is carried explicitly (surface + text tokens).
-        backgroundColor: "#ffffff",
-        borderColor: "#86ac72",
-        color: "#0e1510",
-        ["--text-primary" as string]: "#0e1510",
-        ["--text-secondary" as string]: "#3f5a42",
-        ["--text-muted" as string]: "#52684f",
+        // Portaled to <body> — outside .studio-shell, so the palette
+        // is carried explicitly from the theme's published root
+        // variables (ThemeProvider sets them from the resolved skin),
+        // which follow the effective mode: the light Signature whites
+        // in Light, Larry's charcoal in Dark.
+        backgroundColor: "var(--box-bg)",
+        borderColor: "var(--border-color)",
+        color: "var(--text-color)",
+        ["--text-primary" as string]: "var(--text-color)",
+        ["--text-secondary" as string]: "color-mix(in srgb, var(--text-color) 76%, var(--bg-color))",
+        ["--text-muted" as string]: "color-mix(in srgb, var(--text-color) 58%, var(--bg-color))",
       }}
     >
       {/* Section: Conversation */}
       <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
         Conversation
       </div>
-      <button
-        type="button"
-        onClick={() => { onClose(); onNewChatAction?.(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5"
-        style={{ color: "var(--text-primary)" }}
-      >
-        <Plus size={13} className="pointer-events-none text-accent" />
-        New Chat
-      </button>
+      {/* New Chat renders only where the chat panel does not own it
+          (board-only Studio: it lives in the board chat panel). */}
+      {onNewChatAction && (
+        <button
+          type="button"
+          onClick={() => { onClose(); onNewChatAction(); }}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5"
+          style={{ color: "var(--text-primary)" }}
+        >
+          <Plus size={13} className="pointer-events-none text-accent" />
+          New Chat
+        </button>
+      )}
       <button
         type="button"
         disabled={disabled}
@@ -771,7 +744,7 @@ function OverflowMenu({
         <Download size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Export
       </button>
-      <div className="h-px mx-3" style={{ backgroundColor: "#86ac72" }} />
+      <div className="h-px mx-3" style={{ backgroundColor: "var(--border-color)" }} />
       <button
         type="button"
         disabled={disabled}
@@ -802,7 +775,7 @@ function OverflowMenu({
       </button>
 
       {/* Section: Workspace */}
-      <div className="h-px" style={{ backgroundColor: "#86ac72" }} />
+      <div className="h-px" style={{ backgroundColor: "var(--border-color)" }} />
       <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
         Workspace
       </div>
@@ -857,7 +830,7 @@ function OverflowMenu({
       )}
       {onExecutionModeChange && (
         <>
-          <div className="h-px" style={{ backgroundColor: "#86ac72" }} />
+          <div className="h-px" style={{ backgroundColor: "var(--border-color)" }} />
           <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
             Run mode
           </div>
@@ -886,16 +859,8 @@ function OverflowMenu({
           </div>
         </>
       )}
-      <div className="h-px" style={{ backgroundColor: "#86ac72" }} />
-      <Link
-        href={settingsHref}
-        onClick={onClose}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5"
-        style={{ color: "var(--text-primary)" }}
-      >
-        <Settings size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
-        Settings
-      </Link>
+      {/* No Settings item here (Larry, board-only cleanup 2026-11-14):
+          Settings is a primary-nav destination, not a menu duplicate. */}
     </div>
   );
 }

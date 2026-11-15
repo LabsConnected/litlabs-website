@@ -3,26 +3,55 @@
 /**
  * BoardPanel — the floating window chrome for one board panel (plan §2 B1).
  *
- * Drag by the header (pointer events), resize from the bottom-right
- * corner, maximize/restore, minimize (to the board tray), close, and
- * click-to-front z-order. The component is controlled: geometry lives in
- * useBoardLayoutStore, this only renders it and reports gestures back.
+ * Drag by the header (pointer events), resize from ANY edge or corner —
+ * including the bottom edge to any height (board-only rebuild rule: no
+ * locked heights) — maximize/restore, minimize (to the board tray),
+ * close, and click-to-front z-order. The component is controlled:
+ * geometry lives in useBoardLayoutStore, this only renders it and
+ * reports gestures back.
  *
- * Styling follows the applied shell theme tokens (all-light under the
- * standard look — no hard-coded dark surfaces, per the chrome rule).
+ * Styling binds to the ThemeContext skin tokens (the Discover pattern)
+ * so light and dark presentations both come from the active skin — no
+ * hard-coded surface colors.
  */
 
 import { useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Maximize2, Minimize2, Minus, X } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
-import type { BoardPanelId, BoardRect } from "./board-types";
+import {
+  BOARD_MIN_PANEL_HEIGHT,
+  BOARD_MIN_PANEL_WIDTH,
+  type BoardPanelId,
+  type BoardRect,
+} from "./board-types";
+
+type ResizeEdge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
 interface DragSession {
   kind: "move" | "resize";
+  edge: ResizeEdge | null;
   pointerId: number;
   startClientX: number;
   startClientY: number;
   startRect: BoardRect;
+}
+
+/** Resize math for one edge/corner drag: the dragged edge follows the
+ *  pointer, the opposite edge stays fixed, sizes floor at the panel
+ *  minimums. Pure so the gesture handler stays a thin shell. */
+export function resizedRect(start: BoardRect, edge: ResizeEdge, dx: number, dy: number): BoardRect {
+  let { x, y, width, height } = start;
+  if (edge.includes("e")) width = Math.max(BOARD_MIN_PANEL_WIDTH, start.width + dx);
+  if (edge.includes("s")) height = Math.max(BOARD_MIN_PANEL_HEIGHT, start.height + dy);
+  if (edge.includes("w")) {
+    width = Math.max(BOARD_MIN_PANEL_WIDTH, start.width - dx);
+    x = start.x + (start.width - width);
+  }
+  if (edge.includes("n")) {
+    height = Math.max(BOARD_MIN_PANEL_HEIGHT, start.height - dy);
+    y = Math.max(0, start.y + (start.height - height));
+  }
+  return { x, y, width, height };
 }
 
 export interface BoardPanelProps {
@@ -59,7 +88,11 @@ export default function BoardPanel({
   const { tokens } = useTheme();
   const sessionRef = useRef<DragSession | null>(null);
 
-  const beginSession = (kind: DragSession["kind"], event: ReactPointerEvent) => {
+  const beginSession = (
+    kind: DragSession["kind"],
+    event: ReactPointerEvent,
+    edge: ResizeEdge | null = null,
+  ) => {
     if (maximized) return;
     // Pointer capture is load-bearing, not decoration (drag-sticking
     // defect, Larry 2026-11-14): without it, a drag that crosses the
@@ -81,6 +114,7 @@ export default function BoardPanel({
     }
     sessionRef.current = {
       kind,
+      edge,
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
@@ -97,12 +131,8 @@ export default function BoardPanel({
           x: session.startRect.x + dx,
           y: Math.max(0, session.startRect.y + dy),
         });
-      } else {
-        onRectChange(id, {
-          ...session.startRect,
-          width: session.startRect.width + dx,
-          height: session.startRect.height + dy,
-        });
+      } else if (session.edge) {
+        onRectChange(id, resizedRect(session.startRect, session.edge, dx, dy));
       }
     };
     const onEnd = (up: PointerEvent) => {
@@ -192,14 +222,30 @@ export default function BoardPanel({
         </button>
       </header>
       <div className="relative min-h-0 flex-1 overflow-hidden">{children}</div>
-      {!maximized && (
-        <div
-          data-testid={`board-panel-resize-${id}`}
-          aria-hidden
-          className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize touch-none"
-          onPointerDown={(event) => beginSession("resize", event)}
-        />
-      )}
+      {!maximized &&
+        (
+          [
+            ["n", "absolute left-3 right-3 top-0 h-1.5 cursor-ns-resize"],
+            ["s", "absolute bottom-0 left-3 right-3 h-1.5 cursor-ns-resize"],
+            ["e", "absolute bottom-3 right-0 top-3 w-1.5 cursor-ew-resize"],
+            ["w", "absolute bottom-3 left-0 top-3 w-1.5 cursor-ew-resize"],
+            ["ne", "absolute right-0 top-0 h-3 w-3 cursor-nesw-resize"],
+            ["nw", "absolute left-0 top-0 h-3 w-3 cursor-nwse-resize"],
+            ["se", "absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"],
+            ["sw", "absolute bottom-0 left-0 h-3 w-3 cursor-nesw-resize"],
+          ] as [ResizeEdge, string][]
+        ).map(([edge, className]) => (
+          <div
+            key={edge}
+            data-testid={
+              edge === "se" ? `board-panel-resize-${id}` : `board-panel-resize-${edge}-${id}`
+            }
+            data-resize-edge={edge}
+            aria-hidden
+            className={`${className} touch-none`}
+            onPointerDown={(event) => beginSession("resize", event, edge)}
+          />
+        ))}
     </section>
   );
 }

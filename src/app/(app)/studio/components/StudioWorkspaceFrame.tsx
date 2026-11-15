@@ -454,6 +454,7 @@ export function StudioInspector({
   children,
   data,
   embedded = false,
+  excludeTabs,
 }: {
   open: boolean;
   onToggle: () => void;
@@ -461,6 +462,13 @@ export function StudioInspector({
   onTabChange: (t: InspectorTab) => void;
   children?: React.ReactNode;
   data?: StudioInspectorData;
+  /**
+   * Tabs to leave out of the strip (board-only rebuild: on the board,
+   * Checks / Files / Preview have their own panels, so the board's
+   * Inspector excludes those duplicate tabs). Callers are responsible
+   * for not passing an excluded tab as activeTab.
+   */
+  excludeTabs?: InspectorTab[];
   /**
    * When true, skip this component's own collapse handle, mobile
    * backdrop, and mobile "Workspace inspector" header — the parent
@@ -482,7 +490,7 @@ export function StudioInspector({
         className="flex shrink-0 items-center gap-0.5 border-b px-1.5"
         style={{ borderColor: "var(--studio-border)" }}
       >
-        {INSPECTOR_TABS.map((t) => {
+        {INSPECTOR_TABS.filter((t) => !excludeTabs?.includes(t.id)).map((t) => {
           const Icon = t.icon;
           const isActive = activeTab === t.id;
           return (

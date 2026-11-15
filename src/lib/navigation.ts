@@ -36,7 +36,8 @@ export type NavSection = {
 /* ─── Canonical App Shell navigation ───────────────────────────────────
  * ONE canonical authenticated global nav (issue #627 — Studio Merge):
  *   Main: Studio · Discover · Projects · Settings
- *   More: Marketplace · Showcase · Games · CLI · Deployments · Docs
+ *   More: Marketplace · Games · CLI · Deployments · Docs
+ *   (Showcase was removed from More by Larry, 2026-11-14.)
  *
  * Studio is the one primary work surface and the prime signed-in
  * landing — there is still no separate Home item and no /dashboard
@@ -68,7 +69,6 @@ export const APP_NAV_MAIN: NavItem[] = [
 /* Secondary destinations behind the More menu — real routes only. */
 export const APP_NAV_MORE: NavItem[] = [
   { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
-  { label: "Showcase", href: "/showcase", icon: Star },
   { label: "Games", href: "/games", icon: GamesIcon },
   { label: "CLI", href: "/cli", icon: Terminal },
   { label: "Deployments", href: "/deployments", icon: BarChart3 },
@@ -83,7 +83,7 @@ export interface NavMenuSection {
 
 export const APP_NAV_MORE_SECTIONS: NavMenuSection[] = [
   { id: "build", label: "Build", items: APP_NAV_MORE.filter((item) => ["CLI", "Deployments"].includes(item.label)) },
-  { id: "explore", label: "Explore", items: APP_NAV_MORE.filter((item) => ["Marketplace", "Showcase", "Games"].includes(item.label)) },
+  { id: "explore", label: "Explore", items: APP_NAV_MORE.filter((item) => ["Marketplace", "Games"].includes(item.label)) },
   { id: "learn", label: "Learn", items: APP_NAV_MORE.filter((item) => item.label === "Docs") },
 ];
 

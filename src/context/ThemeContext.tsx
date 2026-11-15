@@ -245,26 +245,28 @@ const darkSkins: Record<SkinPreset, SkinColors> = {
     accentColor: "#f59e0b",
     boxBg: "#1a1510",
   },
-  // LiTT Signature — DARK variant (owner decision, 2026-11-14). This entry
+  // LiTT Signature — DARK variant (owner decisions, 2026-11-14). This entry
   // used to be LIGHT-LOCKED: it carried the same light tokens as
   // lightSkins.signature so a mode flip could never repaint the approved
   // true-white / deep-green design (Larry's phone dark-mode incident, later
   // made the universal default by the 2026-11-13 all-light program). Larry
   // superseded the lock for his own choice: Dark must actually switch in
-  // the Signature skin. The tokens below are the same design family after
-  // dark — deep green-ink surfaces (from the light ink #0E1510), pale
-  // green-white text, and the Signature greens (#177A36 / #0C5A26) lifted
-  // to dark-surface brightness. lightSkins.signature is untouched: Light
-  // remains the original design, byte for byte, and stays the default.
+  // the Signature skin. The first authored dark variant used near-black
+  // green-ink surfaces; Larry rejected those the same day ("the color with
+  // black throws off the color of everything") and picked CHARCOAL —
+  // neutral dark gray surfaces — from a visual comparison. Green survives
+  // only as the voice: his Signature green accent (#2FBF5A) and the lifted
+  // link green (#5AD67E). lightSkins.signature is untouched: Light remains
+  // the original design, byte for byte, and stays the default.
   signature: {
-    bgColor: "#0A0F0B",
-    textColor: "#E9F4EA",
+    bgColor: "#15171B",
+    textColor: "#F2F4F3",
     linkColor: "#5AD67E",
-    headerColor: "#8FE3A6",
-    borderColor: "#223D27",
+    headerColor: "#D7DBDE",
+    borderColor: "#2E3238",
     accentColor: "#2FBF5A",
-    boxBg: "#131A14",
-    textMuted: "#A7BFA9",
+    boxBg: "#1F2228",
+    textMuted: "#A8ADB5",
   },
   // Neon Grove — the approved Projects mockup palette (futuristic dark,
   // neon green), kept as a selectable pack (2026-11-13). Values

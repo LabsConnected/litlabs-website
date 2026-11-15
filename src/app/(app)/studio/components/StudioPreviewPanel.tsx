@@ -1627,8 +1627,9 @@ export default function StudioPreviewPanel({
       )}
 
       {/* Preview surface — sits on the shell backdrop inside a defined
-          white frame so a live, loading, or blank preview always reads
-          as a framed surface, never as an unbounded white void. */}
+          surface frame (var(--studio-surface), theme-driven) so a live,
+          loading, or blank preview always reads as a framed surface,
+          never as an unbounded void. */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2" style={{ backgroundColor: "var(--studio-bg)" }}>
         {showStarterNotice && (
           <div
@@ -1641,14 +1642,15 @@ export default function StudioPreviewPanel({
           </div>
         )}
         {isLive && displayUrl && !frameFailed ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border bg-white shadow-sm" style={{ borderColor: "var(--studio-border-strong)" }}>
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border shadow-sm" style={{ borderColor: "var(--studio-border-strong)", backgroundColor: "var(--studio-surface)" }}>
             <iframe
               key={frameKey}
               ref={iframeRef}
               title={`${projectName ?? "Project"} preview`}
               src={displayUrl}
-              className="border-0 bg-white transition-all duration-200"
+              className="border-0 transition-all duration-200"
               style={{
+                backgroundColor: "var(--studio-surface)",
                 width: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].w}px`,
                 height: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].h}px`,
                 maxWidth: "100%",
@@ -1667,10 +1669,11 @@ export default function StudioPreviewPanel({
         ) : (
           <div
             className={hostExecBlocked
-              ? "flex min-h-[280px] flex-1 flex-col rounded-lg border bg-white px-5 py-5 shadow-sm"
-              : "flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 rounded-lg border bg-white px-6 text-center shadow-sm"}
+              ? "flex min-h-[280px] flex-1 flex-col rounded-lg border px-5 py-5 shadow-sm"
+              : "flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 rounded-lg border px-6 text-center shadow-sm"}
             style={{
               borderColor: "var(--studio-border)",
+              backgroundColor: "var(--studio-surface)",
               backgroundImage: "radial-gradient(ellipse 60% 50% at 50% 40%, rgba(168,255,47,0.04), transparent)",
             }}
           >

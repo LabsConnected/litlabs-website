@@ -1,15 +1,19 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useTheme } from "@/context/ThemeContext";
 
 /**
  * Settings primitives — shared building blocks for every /settings
- * section. Colors follow the platform's all-light standard (the same
- * light look as the LiTTAppShell frame the sections render inside):
- * white cards, dark zinc text, black-alpha borders and washes. These
- * components used to carry dark-theme-era colors (bg-black/30 cards,
- * text-white headings), which rendered white-on-white inside the
- * light shell — the headings and card text were invisible.
+ * section. Colors bind to the applied theme's tokens (the same
+ * useTheme pattern Discover and the Studio shell chrome use): card
+ * surfaces follow tokens.surface, hairlines tokens.border, headings
+ * tokens.text, secondary copy tokens.textMuted. In the default
+ * light LiTT Signature theme those tokens resolve to the approved
+ * light look (white cards, deep-green ink) the sections render
+ * inside LiTTAppShell; in Dark mode the same components paint the
+ * skin's dark surfaces (Signature: Larry's charcoal) instead of
+ * staying hard-coded white — the patchwork defect of 2026-11-14.
  */
 export function SettingsCard({
   title,
@@ -22,13 +26,17 @@ export function SettingsCard({
   icon?: ReactNode;
   children: ReactNode;
 }) {
+  const { tokens } = useTheme();
   return (
-    <div className="rounded-2xl border border-black/10 bg-white p-5">
+    <div
+      className="rounded-2xl border p-5"
+      style={{ backgroundColor: tokens.surface, borderColor: tokens.border }}
+    >
       <div className="mb-3 flex items-center gap-2">
         {icon && <span className="text-accent">{icon}</span>}
         <div>
-          <h3 className="text-sm font-bold text-zinc-900">{title}</h3>
-          {description && <p className="mt-0.5 text-xs text-zinc-500">{description}</p>}
+          <h3 className="text-sm font-bold" style={{ color: tokens.text }}>{title}</h3>
+          {description && <p className="mt-0.5 text-xs" style={{ color: tokens.textMuted }}>{description}</p>}
         </div>
       </div>
       {children}
@@ -37,10 +45,11 @@ export function SettingsCard({
 }
 
 export function SectionHeader({ title, description }: { title: string; description?: string }) {
+  const { tokens } = useTheme();
   return (
     <div className="mb-4">
-      <h1 className="text-2xl font-black tracking-tight text-zinc-900">{title}</h1>
-      {description && <p className="mt-1 text-[13px] text-zinc-500">{description}</p>}
+      <h1 className="text-2xl font-black tracking-tight" style={{ color: tokens.text }}>{title}</h1>
+      {description && <p className="mt-1 text-[13px]" style={{ color: tokens.textMuted }}>{description}</p>}
     </div>
   );
 }
@@ -62,13 +71,17 @@ export function ToggleRow({
   onConfigure?: () => void;
   configureLabel?: string;
 }) {
+  const { tokens } = useTheme();
   return (
-    <label className="flex items-center justify-between gap-3 rounded-lg border border-black/[0.07] bg-black/[0.02] px-3 py-2.5 cursor-pointer">
+    <label
+      className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 cursor-pointer"
+      style={{ borderColor: tokens.border, backgroundColor: `${tokens.text}0A` }}
+    >
       <div className="flex items-center gap-2 min-w-0">
-        {icon && <span className="text-zinc-400 shrink-0">{icon}</span>}
+        {icon && <span className="shrink-0" style={{ color: tokens.textMuted }}>{icon}</span>}
         <div className="min-w-0">
-          <p className="text-xs font-bold text-zinc-900 truncate">{title}</p>
-          {description && <p className="text-[9px] text-zinc-500 truncate">{description}</p>}
+          <p className="text-xs font-bold truncate" style={{ color: tokens.text }}>{title}</p>
+          {description && <p className="text-[9px] truncate" style={{ color: tokens.textMuted }}>{description}</p>}
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
@@ -110,15 +123,17 @@ export function SettingsInput({
   placeholder?: string;
   type?: string;
 }) {
+  const { tokens } = useTheme();
   return (
     <label className="block">
-      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">{label}</span>
+      <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: tokens.textMuted }}>{label}</span>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-xs text-zinc-900 outline-none focus:border-accent/40"
+        className="mt-1 w-full rounded-lg border px-3 py-2 text-xs outline-none focus:border-accent/40"
+        style={{ backgroundColor: tokens.surface, borderColor: tokens.border, color: tokens.text }}
       />
     </label>
   );

@@ -16,15 +16,14 @@
  *    exists (prepare/retry workspace, configure provider, connect
  *    terminal…), and the expandable setup facts behind the status
  *    line. Ready states render NO notice — silence means ready.
- *  - The starter chips (hidden while blocked): entry hints that
- *    prime the composer via `studio:ask-litt`; nothing runs until
- *    the user sends.
- *  - The creation-type chips (hidden while blocked, only when the
- *    host passes `onCreateType`): the seven creation types as entry
- *    hints into this same conversation — the retired hub page's
- *    chips, relocated into the chat by the one-chat entry directive
- *    (2026-11-11; ART-20261111-031).
- *  - Recent conversations, when a selector was provided.
+ *
+ * Board-only cleanup (2026-11-14, Larry): the creation-type chips
+ * (Website / Image / Video / Music / Code / Design / Game), the
+ * prompt-starter chips and the "Or resume a real conversation" list
+ * do NOT carry over — the chat lands straight in the conversation.
+ * The content types themselves live on the board (Media covers
+ * Image / Video / Music; Code, Preview and Canvas & Design cover the
+ * rest), and conversations are managed from the chat panel itself.
  */
 
 import { useState } from "react";
@@ -34,26 +33,13 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDashed,
-  Code2,
-  Gamepad2,
-  Globe,
-  Image as ImageIcon,
-  Layout,
   Loader2,
-  Music,
-  Palette,
-  Play,
-  Plus,
-  Wand2,
-  Wrench,
 } from "lucide-react";
-import RecentConversations from "./RecentConversations";
 import type {
   FirstMissionActionId,
   FirstMissionFact,
   FirstMissionLaunchpadState,
 } from "../lib/first-mission-launchpad";
-import type { StudioEntryCreateType } from "../lib/studio-destinations";
 
 const FACT_META: Record<
   FirstMissionFact["status"],
@@ -64,46 +50,6 @@ const FACT_META: Record<
   unavailable: { label: "Unavailable", color: "#fca5a5", icon: AlertCircle },
   not_started: { label: "Not checked", color: "var(--text-muted)", icon: CircleDashed },
 };
-
-/**
- * Starter intents. Tapping one primes the composer via the canonical
- * `studio:ask-litt` event (the same pattern StudioPreviewPanel and
- * the canvas toolbar use): the prompt lands in the chat box and
- * nothing runs until the user sends it.
- */
-const STARTER_CHIPS: { label: string; prompt: string; icon: typeof Globe }[] = [
-  { label: "Build my business website", prompt: "Build a website for my business", icon: Globe },
-  { label: "Fix something broken", prompt: "Something on my site is broken — help me find and fix it", icon: Wrench },
-  { label: "Make my site look better", prompt: "Make my site look better", icon: Palette },
-  { label: "Create something new", prompt: "I want to create something new", icon: Plus },
-  { label: "Surprise me", prompt: "Surprise me — build something cool", icon: Wand2 },
-];
-
-/**
- * Creation-type entry hints (one-chat entry, Larry's directive
- * 2026-11-11; ART-20261111-031). The seven types the retired hub
- * page offered as navigation now live here, inside the one chat:
- * selecting one sets the chat's creation context / opens the
- * matching pane in place via `onCreateType` (the routing plan is
- * resolved by resolveEntryCreateType in studio-destinations).
- * Labels match the hub's chips verbatim so the entry vocabulary
- * users learned does not change.
- */
-const CREATE_TYPE_CHIPS: { type: StudioEntryCreateType; label: string; icon: typeof Globe }[] = [
-  { type: "website", label: "Website", icon: Layout },
-  { type: "image", label: "Image", icon: ImageIcon },
-  { type: "video", label: "Video", icon: Play },
-  { type: "music", label: "Music", icon: Music },
-  { type: "code", label: "Code", icon: Code2 },
-  { type: "design", label: "Design", icon: Palette },
-  { type: "game", label: "Game", icon: Gamepad2 },
-];
-
-function primeComposer(prompt: string) {
-  window.dispatchEvent(
-    new CustomEvent("studio:ask-litt", { detail: { prompt } }),
-  );
-}
 
 function statusFor(key: FirstMissionLaunchpadState["key"]): {
   tone: "busy" | "ready" | "attention";
@@ -121,23 +67,12 @@ function statusFor(key: FirstMissionLaunchpadState["key"]): {
 export default function LiTEmptyState({
   launchpadState,
   onPrimaryAction,
-  onSelectConversation,
-  onCreateType,
 }: {
   launchpadState: FirstMissionLaunchpadState;
   onPrimaryAction: (action: FirstMissionActionId) => void;
-  onSelectConversation?: (conversationId: string) => void;
-  /**
-   * Creation-type entry hints. Provided by CommandStudio (the one
-   * chat) so the seven creation types render as in-chat chips; other
-   * surfaces that render the empty state without entry routing omit
-   * it and no chips render.
-   */
-  onCreateType?: (type: StudioEntryCreateType) => void;
 }) {
   const [showChecks, setShowChecks] = useState(false);
   const action = launchpadState.primaryAction;
-  const isBlocked = launchpadState.key === "blocked";
   const isReady =
     launchpadState.key === "verified" || launchpadState.key === "inspection_proven";
   const status = statusFor(launchpadState.key);
@@ -298,80 +233,6 @@ export default function LiTEmptyState({
           </section>
         )}
 
-        {!isBlocked && onCreateType && (
-          <div>
-            <div
-              className="flex w-full flex-wrap items-center gap-2"
-              role="group"
-              aria-label="Start with a type"
-              data-testid="entry-create-type-chips"
-            >
-              {CREATE_TYPE_CHIPS.map((chip) => {
-                const Icon = chip.icon;
-                return (
-                  <button
-                    key={chip.type}
-                    type="button"
-                    onClick={() => onCreateType(chip.type)}
-                    className="flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[12px] font-bold transition-all hover:-translate-y-0.5 active:scale-[0.99]"
-                    style={{
-                      borderColor: "var(--studio-border-strong)",
-                      backgroundColor: "rgba(255,255,255,0.03)",
-                      color: "var(--text-primary)",
-                    }}
-                  >
-                    <Icon size={13} style={{ color: "var(--litt-primary)" }} aria-hidden />
-                    {chip.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
-              Pick a type and its workspace opens right here in this chat.
-            </p>
-          </div>
-        )}
-
-        {!isBlocked && (
-          <div>
-            <div
-              className="flex w-full flex-wrap items-center gap-2"
-              role="group"
-              aria-label="Starter ideas"
-              data-testid="first-mission-starter-chips"
-            >
-              {STARTER_CHIPS.map((chip) => {
-                const Icon = chip.icon;
-                return (
-                  <button
-                    key={chip.label}
-                    type="button"
-                    onClick={() => primeComposer(chip.prompt)}
-                    className="flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[12px] font-bold transition-all hover:-translate-y-0.5 active:scale-[0.99]"
-                    style={{
-                      borderColor: "var(--studio-border-strong)",
-                      backgroundColor: "rgba(255,255,255,0.03)",
-                      color: "var(--text-primary)",
-                    }}
-                  >
-                    <Icon size={13} style={{ color: "var(--litt-primary)" }} aria-hidden />
-                    {chip.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
-              Choosing one fills in the chat box — nothing runs until you send it.
-            </p>
-          </div>
-        )}
-
-        {onSelectConversation && (
-          <section className="glass-panel w-full p-4" aria-label="Recent conversations">
-            <div className="glass-section-header mb-3">Or resume a real conversation</div>
-            <RecentConversations onSelect={onSelectConversation} />
-          </section>
-        )}
       </div>
     </div>
   );

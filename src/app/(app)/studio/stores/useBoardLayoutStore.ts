@@ -19,6 +19,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
+  clampPanelsToArea,
   clampRect,
   defaultBoardLayout,
   overviewViewport,
@@ -63,13 +64,22 @@ const BOARD_LAYOUT_V2_WEBSITE_OPEN: BoardPanelId[] = ["files", "health", "inspec
  * other panel's open state carry over untouched — and a preset saved
  * under v1 still restores exactly what it saved when applied.
  * Anything unrecognized passes through unchanged.
+ *
+ * v2 → v3 (board-only rebuild, 2026-11-14): the board is now the whole
+ * Studio and the panel inventory grew (chat, plan, canvas, activity,
+ * browser) with a new default arrangement from Larry's Command Center
+ * mockup. Old panel records cannot describe the new panels at all, and
+ * old geometry referenced the retired right-dock area, so every scope's
+ * panels re-seed from the new defaults exactly once, here. Presets,
+ * the active preset name and viewports carry over untouched — and
+ * applyPreset backfills any panel a v2-era preset does not know.
  */
 export function migrateBoardLayoutPersistedState(
   persistedState: unknown,
   version: number,
 ): BoardLayoutPersistedState {
   if (
-    version >= 2 ||
+    version >= 3 ||
     !persistedState ||
     typeof persistedState !== "object" ||
     !("scopes" in persistedState) ||
@@ -81,16 +91,22 @@ export function migrateBoardLayoutPersistedState(
   const state = persistedState as BoardLayoutPersistedState;
   const scopes: Record<string, BoardLayoutState> = {};
   for (const [key, layout] of Object.entries(state.scopes)) {
-    if (!layout || layout.projectType !== "website" || !layout.panels) {
+    if (!layout || !layout.panels) {
       scopes[key] = layout;
       continue;
     }
-    const panels = { ...layout.panels };
-    for (const id of BOARD_LAYOUT_V2_WEBSITE_OPEN) {
-      const panel = panels[id];
-      if (panel && !panel.open) panels[id] = { ...panel, open: true };
+    let panels = layout.panels;
+    if (version < 2 && layout.projectType === "website") {
+      panels = { ...panels };
+      for (const id of BOARD_LAYOUT_V2_WEBSITE_OPEN) {
+        const panel = panels[id];
+        if (panel && !panel.open) panels[id] = { ...panel, open: true };
+      }
     }
-    scopes[key] = { ...layout, panels };
+    scopes[key] = {
+      ...layout,
+      panels: defaultBoardLayout(layout.projectType ?? "website").panels,
+    };
   }
   return { ...state, scopes };
 }
@@ -115,6 +131,10 @@ interface BoardLayoutStore {
   setPanelRect: (scope: string, id: BoardPanelId, rect: BoardRect) => void;
   setViewport: (scope: string, viewport: BoardViewport) => void;
 
+  /** Reachability guard: pull panels stranded outside a shrunken board
+   *  area back inside it. Never opens, closes or rearranges a panel that
+   *  is already reachable — it only rescues off-canvas ones. */
+  clampPanels: (scope: string, area: { width: number; height: number }) => void;
   /** Tidy addition: snap open panels into a clean grid (user-invoked). */
   tidy: (scope: string, area: { width: number; height: number }) => void;
   /** Zoom-out overview addition: frame all open panels; toggling again
@@ -241,6 +261,14 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
       setViewport: (scope, viewport) =>
         set((s) => withScope(s, scope, (layout) => ({ ...layout, viewport }))),
 
+      clampPanels: (scope, area) =>
+        set((s) =>
+          withScope(s, scope, (layout) => ({
+            ...layout,
+            panels: clampPanelsToArea(layout.panels, area),
+          })),
+        ),
+
       tidy: (scope, area) =>
         set((s) =>
           withScope(s, scope, (layout) => ({
@@ -295,7 +323,13 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
             if (!preset) return layout;
             return {
               ...layout,
-              panels: structuredClone(preset.panels),
+              // Backfill panels the preset predates (v2-era presets do
+              // not know chat / plan / canvas / activity / browser) so
+              // the record is always complete.
+              panels: {
+                ...defaultBoardLayout(layout.projectType).panels,
+                ...structuredClone(preset.panels),
+              },
               activePresetName: name,
               overviewReturnViewport: null,
             };
@@ -328,14 +362,19 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
     }),
     {
       name: BOARD_LAYOUT_STORAGE_KEY,
-      version: 2,
+      version: 3,
       migrate: migrateBoardLayoutPersistedState,
       partialize: (s) => ({ enabledByUser: s.enabledByUser, scopes: s.scopes }),
     },
   ),
 );
 
-/** Board toggle for a user — defaults OFF (B2 transition rule). */
+/**
+ * Legacy per-user board toggle (B2 transition rule). The board-only
+ * shell no longer reads it — the board is simply what Studio is — but
+ * the persisted field and this hook stay for compatibility with any
+ * surface that still references them.
+ */
 export function useBoardEnabled(userId: string | null | undefined): boolean {
   return useBoardLayoutStore((s) => (userId ? s.enabledByUser[userId] === true : false));
 }
