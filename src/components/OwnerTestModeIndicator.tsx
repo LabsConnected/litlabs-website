@@ -222,13 +222,13 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
             maxHeight: "min(70vh, 560px)",
             overflowY: "auto",
             borderRadius: 12,
-            border: "1px solid var(--studio-border, #cfdec4)",
-            background: "var(--studio-bg, #edf3e4)",
+            border: "1px solid var(--studio-border, var(--border-color, #cfdec4))",
+            background: "var(--studio-bg, var(--box-bg, #edf3e4))",
             // Same-scope text color: set explicitly on the container so
             // the inherited `color: "inherit"` on the option buttons can
             // never pair the light shell background with an ink from a
             // different scope again.
-            color: "var(--text-primary, #0e1510)",
+            color: "var(--text-primary, var(--text-color, #0e1510))",
             boxShadow: "0 8px 32px rgba(14,60,26,0.28)",
             padding: 8,
             backdropFilter: "blur(12px)",
@@ -309,7 +309,7 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
               marginTop: 4,
               fontSize: 11,
               color: "var(--text-muted, #63745f)",
-              borderTop: "1px solid var(--studio-border, #cfdec4)",
+              borderTop: "1px solid var(--studio-border, var(--border-color, #cfdec4))",
             }}
           >
             Simulation never modifies Stripe. Reload to apply.

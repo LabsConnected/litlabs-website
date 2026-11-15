@@ -101,7 +101,7 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
 
   if (busy) {
     return (
-      <div className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white/40">
+      <div className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">
         <Loader2 size={14} className="animate-spin" /> Working...
       </div>
     );
@@ -119,13 +119,13 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
             Unlock {name}
           </button>
         ) : (
-          <div className="w-full rounded-xl border border-white/10 py-3 text-center text-sm font-bold text-white/50">
+          <div className="w-full rounded-xl border border-[color-mix(in_srgb,var(--text-color)_10%,transparent)] py-3 text-center text-sm font-bold text-[color-mix(in_srgb,var(--text-color)_50%,transparent)]">
             Included with Creator &amp; Pro plans
           </div>
         )
       )}
       {state === "processing" && (
-        <div className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white/40">
+        <div className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">
           <Clock size={14} /> Processing payment...
         </div>
       )}
@@ -139,7 +139,7 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
             Add {name}
           </button>
         ) : (
-          <div className="w-full rounded-xl border border-white/10 py-3 text-center text-sm font-bold text-white/50">
+          <div className="w-full rounded-xl border border-[color-mix(in_srgb,var(--text-color)_10%,transparent)] py-3 text-center text-sm font-bold text-[color-mix(in_srgb,var(--text-color)_50%,transparent)]">
             Included with Creator &amp; Pro plans
           </div>
         )
@@ -156,7 +156,7 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
           <div className="flex gap-2">
             <button
               onClick={handleToggle}
-              className="flex-1 rounded-xl border border-white/10 py-2.5 text-xs font-bold text-white/50 transition hover:bg-white/5"
+              className="flex-1 rounded-xl border border-[color-mix(in_srgb,var(--text-color)_10%,transparent)] py-2.5 text-xs font-bold text-[color-mix(in_srgb,var(--text-color)_50%,transparent)] transition hover:bg-[color-mix(in_srgb,var(--text-color)_5%,transparent)]"
             >
               Pause
             </button>
@@ -192,12 +192,12 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
         </div>
       )}
       {state === "unavailable" && (
-        <div className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white/40">
+        <div className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">
           Unavailable
         </div>
       )}
       {state === "loading" && (
-        <div className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white/40">
+        <div className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">
           <Loader2 size={14} className="animate-spin" /> Loading...
         </div>
       )}
