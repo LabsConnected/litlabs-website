@@ -449,4 +449,20 @@ describe("sandbox env allowlist (env.ts)", () => {
     expect(env.LITTREE_USER_ID).toBe("real-user");
     expect(env.MY_PROJECT_VAR).toBe("1");
   });
+
+  // Regression (2026-11-14 preview failure): the template prepares pnpm
+  // into /usr/local/share/corepack, but command processes only see this
+  // composed env — when COREPACK_HOME was missing here, Corepack looked
+  // under $HOME, found no prepared pnpm, and the preview dependency
+  // install died downloading pnpm from the registry (exit 243).
+  it("composeSandboxEnv: carries COREPACK_HOME pointing at the template's prepared cache, not overridable by project env", () => {
+    const env = composeSandboxEnv({
+      userId: "u",
+      projectId: "p",
+      workspaceId: "w",
+      sandboxId: "s",
+      projectEnv: { COREPACK_HOME: "/tmp/elsewhere" },
+    });
+    expect(env.COREPACK_HOME).toBe("/usr/local/share/corepack");
+  });
 });
