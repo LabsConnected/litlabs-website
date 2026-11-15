@@ -72,6 +72,24 @@ describe("planCapabilities", () => {
     const plan = planCapabilities("Build a roofing site for Grand Haven");
     expect(plan.usefulCapabilities).toContain("web_search");
   });
+
+  it("media-generation phrasings mark image generation useful", () => {
+    // The phrasings the kernel classifier now routes to the tool lane
+    // (intent-router media-generation group) must also name
+    // image_generation in the operator prompt — including the
+    // picture/photo nouns and desire-verb forms, not just
+    // "generate/create an image".
+    for (const goal of [
+      "Need a picture of a lion",
+      "I want a photo of a red barn",
+      "make me a picture of a sunset over the lake",
+      "generate a picture of a lighthouse",
+      "create a poster for the show",
+    ]) {
+      const plan = planCapabilities(goal);
+      expect(plan.usefulCapabilities).toContain("image_generation");
+    }
+  });
 });
 
 describe("buildCapabilityPlanPrompt", () => {
