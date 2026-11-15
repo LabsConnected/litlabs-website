@@ -30,6 +30,9 @@ export interface LogContext {
   alreadyTerminal?: boolean;
   /** Approval-gate forensics: which durable event produced a handoff. */
   gateId?: string;
+  /** Paused-run outcome forensics: the action run's recorded status and the claim row's error when they diverge. */
+  actionRunStatus?: string;
+  claimError?: string;
   nestedPausedRunId?: string;
   eventId?: string;
   eventSequence?: string;
