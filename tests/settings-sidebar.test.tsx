@@ -44,6 +44,29 @@ vi.mock("@/context/ThemeContext", () => ({
       textColor: "#142114",
       accentColor: "#2f9e44",
     },
+    // The real ThemeProvider ALWAYS returns a tokens object — it is
+    // built unconditionally as { ...resolvedColors, ...semanticTokens }
+    // (ThemeContext.tsx), so components reading tokens.* can never see
+    // undefined in the app. This mock predates the settings primitives
+    // binding to tokens (dark-surface work, 2026-11-14) and omitted the
+    // field, which is the only way SectionHeader could crash on
+    // tokens.text. Values mirror the provider's derivation from the
+    // palette above (surface = boxBg, text = textColor, ...).
+    tokens: {
+      background: "#f6f8f3",
+      surface: "#ffffff",
+      surfaceElevated: "#ffffff",
+      border: "#445544",
+      text: "#142114",
+      textMuted: "#5c6b5c",
+      textInverse: "#f6f8f3",
+      primary: "#2f9e44",
+      secondary: "#177a36",
+      success: "#16a34a",
+      warning: "#d97706",
+      danger: "#ef4444",
+      focus: "#2f9e44",
+    },
   }),
 }));
 
