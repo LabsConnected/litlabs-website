@@ -309,6 +309,11 @@ export function useCanonicalConversation({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isSyncingFromUrl = useRef(false);
+  // The URL conversation id the sync-from-URL effect last applied. The
+  // effect applies a URL conversation only when this value changes —
+  // see the effect itself for why re-applying an unchanged (stale) URL
+  // id silently undid "+ New Chat" (live proof 2026-11-15).
+  const lastUrlConversationIdRef = useRef<string | null | undefined>(undefined);
   const activeAgentIdRef = useRef(activeAgentId);
   useEffect(() => { activeAgentIdRef.current = activeAgentId; }, [activeAgentId]);
   const previewSelectionRef = useRef(previewSelection);
@@ -737,22 +742,37 @@ export function useCanonicalConversation({
       const conversations = (data.conversations || []) as Conversation[];
       s.setConversations(conversations);
 
-      const { conversationId, agentSlug } = parseConversationFromUrl(searchParamsRef.current);
-      const agentInstanceFromUrl = searchParamsRef.current?.get("agentInstance") ?? null;
-      if (conversationId && conversations.some((c) => c.id === conversationId)) {
-        s.selectConversation(conversationId);
-        if (agentInstanceFromUrl) {
-          useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
-        } else if (agentSlug) {
-          s.setActiveAgent(agentSlug);
-          setActiveAgentId(agentSlug);
+      // A re-run of this loader must not clobber a live selection. The
+      // loader's identity follows authHeaders → getToken, so Clerk
+      // identity churn re-runs it — and right after "+ New Chat" the
+      // freshly created conversation is selected while the URL still
+      // names the previous one (router.replace commits async), so
+      // re-applying the URL/first-conversation selection here silently
+      // undid the click (live proof 2026-11-15). Initial selection
+      // applies only when there is no live selection to keep: first
+      // mount, a project switch (which resets the store first), or the
+      // selected conversation no longer exists.
+      const liveSelection = s.selectedConversationId;
+      const keepSelection =
+        liveSelection !== null && conversations.some((c) => c.id === liveSelection);
+      if (!keepSelection) {
+        const { conversationId, agentSlug } = parseConversationFromUrl(searchParamsRef.current);
+        const agentInstanceFromUrl = searchParamsRef.current?.get("agentInstance") ?? null;
+        if (conversationId && conversations.some((c) => c.id === conversationId)) {
+          s.selectConversation(conversationId);
+          if (agentInstanceFromUrl) {
+            useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
+          } else if (agentSlug) {
+            s.setActiveAgent(agentSlug);
+            setActiveAgentId(agentSlug);
+          }
+          await loadMessages(conversationId);
+          await recoverInterruptedRuns(conversationId);
+        } else if (conversations.length > 0) {
+          s.selectConversation(conversations[0].id);
+          await loadMessages(conversations[0].id);
+          await recoverInterruptedRuns(conversations[0].id);
         }
-        await loadMessages(conversationId);
-        await recoverInterruptedRuns(conversationId);
-      } else if (conversations.length > 0) {
-        s.selectConversation(conversations[0].id);
-        await loadMessages(conversations[0].id);
-        await recoverInterruptedRuns(conversations[0].id);
       }
       conversationsHydratedRef.current = true;
     } catch {
@@ -764,7 +784,7 @@ export function useCanonicalConversation({
 
   // Create a new conversation
   const createConversation = useCallback(async (
-    options?: { optimisticConversationId?: string },
+    options?: { optimisticConversationId?: string; forceNew?: boolean },
   ): Promise<Conversation | null> => {
     let projectId = getActiveProjectId(serverProjectId, userId);
 
@@ -776,6 +796,12 @@ export function useCanonicalConversation({
         body: JSON.stringify({
           projectId: projectId || undefined,
           activeAgentSlug: activeAgentId,
+          // Explicit New Chat only: the server must mint a fresh
+          // conversation instead of reusing an existing empty one —
+          // the reusable one can be the conversation already on
+          // screen, which made the button read as dead (live proof
+          // 2026-11-15). Implicit creation (first send) keeps reuse.
+          forceNew: options?.forceNew ? true : undefined,
         }),
       });
       if (!res.ok) {
@@ -851,16 +877,29 @@ export function useCanonicalConversation({
     }
     const { conversationId, agentSlug } = parseConversationFromUrl(searchParams);
     const agentInstanceFromUrl = searchParams.get("agentInstance") ?? null;
-    if (conversationId !== s.selectedConversationId) {
-      if (conversationId && s.conversations.some((c) => c.id === conversationId)) {
-        s.selectConversation(conversationId);
-        // Recovering interrupted runs is required here, not just on initial
-        // load — navigating to a conversation with an in-flight run (sidebar
-        // click, back button) must re-bind Stop and reconcile the bubble,
-        // not show a permanently-streaming orphan.
-        void loadMessages(conversationId).then(() => recoverInterruptedRuns(conversationId));
-      } else if (!conversationId && s.selectedConversationId) {
-        s.selectConversation(null);
+    // Apply the URL's conversation only when it actually CHANGED since
+    // this effect last applied one (a real navigation: deep link, back /
+    // forward, or the replace committed after a local selection). This
+    // effect also re-runs when its callback dependencies change identity
+    // (authHeaders → getToken churn), and on those re-runs the committed
+    // URL can still name the conversation the user just left via
+    // "+ New Chat" — router.replace commits async — so re-applying it
+    // silently undid the click and, with selection back at the URL id,
+    // syncUrl never wrote the new one (dead button, live proof
+    // 2026-11-15).
+    if (conversationId !== lastUrlConversationIdRef.current) {
+      lastUrlConversationIdRef.current = conversationId;
+      if (conversationId !== s.selectedConversationId) {
+        if (conversationId && s.conversations.some((c) => c.id === conversationId)) {
+          s.selectConversation(conversationId);
+          // Recovering interrupted runs is required here, not just on initial
+          // load — navigating to a conversation with an in-flight run (sidebar
+          // click, back button) must re-bind Stop and reconcile the bubble,
+          // not show a permanently-streaming orphan.
+          void loadMessages(conversationId).then(() => recoverInterruptedRuns(conversationId));
+        } else if (!conversationId && s.selectedConversationId) {
+          s.selectConversation(null);
+        }
       }
     }
     if (agentInstanceFromUrl) {
@@ -943,7 +982,7 @@ export function useCanonicalConversation({
             addLocalMessage("Screen cleared. Previous messages are still saved on the server and will reappear on refresh.");
             return { accepted: true, persisted: true };
           case "new":
-            void createConversation();
+            void createConversation({ forceNew: true });
             return { accepted: true, persisted: true };
           case "terminal":
             onRouteToolAction?.("terminal");
