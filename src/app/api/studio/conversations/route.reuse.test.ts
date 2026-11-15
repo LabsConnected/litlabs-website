@@ -195,4 +195,38 @@ describe("POST /api/studio/conversations — reuse", () => {
     expect(res.status).toBe(201);
     expect(tables.studio_conversations).toHaveLength(2);
   });
+
+  it("forceNew (explicit New Chat click) mints a fresh conversation instead of reusing the empty one", async () => {
+    const existing = seedConversation();
+
+    const res = await POST(
+      postRequest({ projectId: "proj-1", forceNew: true }) as never,
+    );
+    const body = (await res.json()) as {
+      conversation: { id: string };
+      reused?: boolean;
+    };
+
+    expect(res.status).toBe(201);
+    expect(body.reused).toBeUndefined();
+    expect(body.conversation.id).not.toBe(existing.id);
+    expect(tables.studio_conversations).toHaveLength(2);
+  });
+
+  it("forceNew: false still reuses the empty conversation (implicit creation)", async () => {
+    const existing = seedConversation();
+
+    const res = await POST(
+      postRequest({ projectId: "proj-1", forceNew: false }) as never,
+    );
+    const body = (await res.json()) as {
+      conversation: { id: string };
+      reused?: boolean;
+    };
+
+    expect(res.status).toBe(200);
+    expect(body.reused).toBe(true);
+    expect(body.conversation.id).toBe(existing.id);
+    expect(tables.studio_conversations).toHaveLength(1);
+  });
 });
