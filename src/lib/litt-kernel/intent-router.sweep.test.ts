@@ -123,10 +123,15 @@ describe("intent-router sweep — build phrasings misrouted to chat", () => {
 
   // ─── Must-not-break negatives ───
   describe("negatives (must not disturb)", () => {
-    it("'can u make me a logo' stays create (media, no project target)", () => {
+    it("'can u make me a logo' stays create (media, no project target) — now WITH execution", () => {
+      // Behavior changed 2026-11-15 (image-gen refusal diagnosis): a
+      // bare media ask in the text-only lane could only be declined in
+      // prose, so media generation now carries requiresExecution=true
+      // and reaches the V2 tool lane. Mode stays create — it must not
+      // become build and needs no project target.
       const r = classifyIntent("can u make me a logo");
       expect(r.mode).toBe("create");
-      expect(r.requiresExecution).toBe(false);
+      expect(r.requiresExecution).toBe(true);
     });
 
     it("'i need sumthin for my biz' stays think (genuinely ambiguous)", () => {

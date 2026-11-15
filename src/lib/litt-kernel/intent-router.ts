@@ -351,6 +351,35 @@ const MODE_PATTERNS: ModePattern[] = [
     domains: ["commerce", "current_events"],
   },
 
+  // ─── create (media generation): bare media asks ─────────────
+  // "generate an image of a lion", "make me a logo", "need a
+  // picture of a lion" — a deliverable media file, not site work
+  // and not chat. image.generate lives in the V2 tool lane; without
+  // requiresExecution these fell to the V1 text-only lane, whose
+  // model has no tools and could only decline in prose (production
+  // refusal, 2026-11-15). Placed after the build groups — media
+  // added to a site ("add images to my project", line ~243 above)
+  // keeps its build routing — and before the generic create group,
+  // whose bare-verb/noun patterns carry no execution requirement.
+  // The noun list mirrors the build group's excluded media nouns;
+  // website/code artifacts are deliberately absent so build/create
+  // requests for sites are never swallowed. The trailing lookahead
+  // keeps support phrasings out: "I need to fix the image upload
+  // bug" names a defect, not a deliverable (the fix+bug build
+  // pattern claims it first anyway; this guards the bare forms).
+  {
+    mode: "create",
+    patterns: [
+      /\b(generate|create|make|produce|draw|render|design|paint|sketch)\b[^.!?]{0,40}\b(images?|pictures?|photos?|photographs?|drawings?|illustrations?|graphics?|banners?|thumbnails?|icons?|artwork|posters?|logos?)\b(?!\s+(?:uploads?|bugs?|errors?|files?|formats?|sizes?|resolutions?)\b)/i,
+      /\b(need|want|would like|get me|give me|gimme)\b[^.!?]{0,30}\b(images?|pictures?|photos?|photographs?|drawings?|illustrations?|graphics?|banners?|thumbnails?|icons?|artwork|posters?|logos?)\b(?!\s+(?:uploads?|bugs?|errors?|files?|formats?|sizes?|resolutions?)\b)/i,
+      // "draw a dragon" names the subject, not a media noun — the
+      // verb itself is the artifact signal. Idiom objects excluded.
+      /\b(draw|sketch|paint)\b[^.!?]{0,40}\b(?:a|an)\b(?!\s+(?:conclusion|breath|attention|bath)\b)/i,
+    ],
+    requiresExecution: true,
+    domains: ["design", "creative"],
+  },
+
   // ─── create: design, generate, produce ───────────────────────
   {
     mode: "create",
