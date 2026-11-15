@@ -61,6 +61,24 @@ export default function BoardPanel({
 
   const beginSession = (kind: DragSession["kind"], event: ReactPointerEvent) => {
     if (maximized) return;
+    // Pointer capture is load-bearing, not decoration (drag-sticking
+    // defect, Larry 2026-11-14): without it, a drag that crosses the
+    // Preview panel's cross-origin iframe delivers pointermove to the
+    // iframe's document instead of this one — the panel freezes
+    // mid-drag ("stuck"), and a pointerup inside the iframe never
+    // reaches the window listener, so the session leaks and the panel
+    // later jumps. Capturing retargets every event for this pointer to
+    // the drag handle for the whole gesture, so the window listeners
+    // below keep firing. Same pattern as StudioDock / ImageStudio.
+    const captureTarget = event.currentTarget as HTMLElement;
+    if (typeof captureTarget.setPointerCapture === "function") {
+      try {
+        captureTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Non-active pointer / jsdom — capture is an enhancement; the
+        // window listeners still cover same-document drags.
+      }
+    }
     sessionRef.current = {
       kind,
       pointerId: event.pointerId,
@@ -87,14 +105,28 @@ export default function BoardPanel({
         });
       }
     };
-    const onUp = (up: PointerEvent) => {
+    const onEnd = (up: PointerEvent) => {
       if (up.pointerId !== sessionRef.current?.pointerId) return;
       sessionRef.current = null;
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointerup", onEnd);
+      window.removeEventListener("pointercancel", onEnd);
+      if (typeof captureTarget.hasPointerCapture === "function") {
+        try {
+          if (captureTarget.hasPointerCapture(up.pointerId)) {
+            captureTarget.releasePointerCapture(up.pointerId);
+          }
+        } catch {
+          // Capture already gone (browser releases it on pointerup).
+        }
+      }
     };
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointerup", onEnd);
+    // An interrupted gesture (touch scroll takeover, OS gesture) fires
+    // pointercancel instead of pointerup — without this the session
+    // would leak and the next plain pointermove would drag the panel.
+    window.addEventListener("pointercancel", onEnd);
   };
 
   const headerButton =

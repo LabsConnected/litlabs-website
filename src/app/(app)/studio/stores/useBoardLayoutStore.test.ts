@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   BOARD_LAYOUT_STORAGE_KEY,
+  migrateBoardLayoutPersistedState,
   useBoardLayoutStore,
+  type BoardLayoutPersistedState,
 } from "./useBoardLayoutStore";
+import { defaultBoardLayout } from "../components/board/board-layout";
 import { boardScopeKey } from "../components/board/board-types";
 
 const USER = "user_1";
@@ -162,5 +165,55 @@ describe("persistence", () => {
     const parsed = JSON.parse(raw!);
     expect(parsed.state.enabledByUser[USER]).toBe(true);
     expect(parsed.state.scopes[SCOPE].panels.media.open).toBe(true);
+  });
+});
+
+describe("persist migration v1 → v2 (board slice 1 defaults)", () => {
+  /** A v1-shaped save: the four newly-default panels recorded closed
+   *  (the v1 defaults never opened them), a user-moved Files rect, a
+   *  deliberate Terminal close, and a saved preset. */
+  function v1State(): BoardLayoutPersistedState {
+    const website = defaultBoardLayout("website");
+    for (const id of ["files", "health", "inspector", "deploy"] as const) {
+      website.panels[id].open = false;
+    }
+    website.panels.files.rect = { x: 300, y: 260, width: 420, height: 300 };
+    website.panels.terminal.open = false;
+    website.presets.Keep = { name: "Keep", savedAt: 1, panels: structuredClone(website.panels) };
+    const game = defaultBoardLayout("game");
+    game.panels.files.open = false;
+    return {
+      enabledByUser: { [USER]: true },
+      scopes: { [SCOPE]: website, "user_1::game_1": game },
+    };
+  }
+
+  it("re-opens Files, Health, Inspector and Deploy for website scopes only", () => {
+    const migrated = migrateBoardLayoutPersistedState(v1State(), 1);
+    const website = migrated.scopes[SCOPE];
+    expect(website.panels.files.open).toBe(true);
+    expect(website.panels.health.open).toBe(true);
+    expect(website.panels.inspector.open).toBe(true);
+    expect(website.panels.deploy.open).toBe(true);
+    // Game scopes keep their recorded state — v2 defaults are website-only.
+    expect(migrated.scopes["user_1::game_1"].panels.files.open).toBe(false);
+    expect(migrated.enabledByUser[USER]).toBe(true);
+  });
+
+  it("preserves geometry, deliberate closes outside the v2 set, and presets", () => {
+    const migrated = migrateBoardLayoutPersistedState(v1State(), 1);
+    const website = migrated.scopes[SCOPE];
+    expect(website.panels.files.rect).toEqual({ x: 300, y: 260, width: 420, height: 300 });
+    expect(website.panels.terminal.open).toBe(false);
+    expect(website.presets.Keep).toBeDefined();
+    // A v1 preset still restores exactly what it saved.
+    expect(website.presets.Keep.panels.files.open).toBe(false);
+  });
+
+  it("leaves v2 state and unrecognized input untouched", () => {
+    const v2 = v1State();
+    expect(migrateBoardLayoutPersistedState(v2, 2)).toBe(v2);
+    expect(migrateBoardLayoutPersistedState(null, 1)).toBeNull();
+    expect(migrateBoardLayoutPersistedState("junk", 1)).toBe("junk");
   });
 });
