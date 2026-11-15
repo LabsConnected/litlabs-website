@@ -21,7 +21,11 @@ import { tmpdir } from "os";
 import { FakeSandboxProvider } from "../sandbox/testing/fake-providers";
 import { SandboxExecGate } from "../sandbox/exec-router";
 import { SandboxWorkspaceExecutor } from "../sandbox/workspace-executor";
-import { SANDBOX_PREVIEW_PORT, SANDBOX_TRAFFIC_TOKEN_HEADER } from "../preview/sandbox-runtime";
+import {
+  HEALTH_PROBE_TIMEOUT_MS,
+  SANDBOX_PREVIEW_PORT,
+  SANDBOX_TRAFFIC_TOKEN_HEADER,
+} from "../preview/sandbox-runtime";
 import {
   startPreview,
   stopPreviewAndWait,
@@ -165,6 +169,48 @@ describe("sandbox preview branch", () => {
     await waitForStatus("ready");
     await stopPreviewAndWait(workspaceId);
     expect(getPreviewStatus(workspaceId)?.status).toBe("stopped");
+  });
+
+  it("reuses a young `starting` runtime but restarts a wedged one older than the probe window", async () => {
+    // The probe never succeeds, so the runtime stays `starting`
+    // after startPreview returns — the shape of a start whose
+    // convergence is still pending (or wedged).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("down", { status: 500 })),
+    );
+    // No explicit framework/command: the branch detects them from
+    // the project, as the real route does — an explicit command
+    // would be compared against the runtime's $PORT-substituted
+    // command and never match (configMatches), bypassing the reuse
+    // guard this test exercises.
+    const startInput = () => ({
+      workspaceId,
+      userId: OWNER,
+    });
+    const first = await startPreview(startInput());
+    expect(first.status).toBe("starting");
+
+    // Young `starting`: handed back verbatim — the first start may
+    // still legitimately be converging.
+    const second = await startPreview(startInput());
+    expect(second).toBe(first);
+
+    // Aged past the health-probe window: wedged. Its probe launches
+    // only after the blocked first start returns, so it can never
+    // resolve itself; the next start must tear it down and start
+    // fresh instead of returning the corpse (live failure
+    // 2026-11-15, attempt 2 produced zero sandbox activity).
+    first.startedAt = Date.now() - HEALTH_PROBE_TIMEOUT_MS - 1_000;
+    const third = await startPreview(startInput());
+    expect(third).not.toBe(first);
+    expect(first.status).toBe("stopped");
+    expect(third.status).toBe("starting");
+
+    // Drain both background probes: a healthy response ends the
+    // loops, and the stopped runtime's probe leaves it alone.
+    stubFetchOk();
+    await waitForStatus("ready");
   });
 
   it("a user outside the gate falls through to the host path (no sandbox upstream)", async () => {

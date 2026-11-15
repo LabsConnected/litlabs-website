@@ -35,6 +35,7 @@ import {
   verifySandboxPreviewHealth,
   buildSandboxTravelingEnv,
   SANDBOX_PREVIEW_PORT,
+  HEALTH_PROBE_TIMEOUT_MS as SANDBOX_HEALTH_PROBE_TIMEOUT_MS,
   type SandboxPreviewSupport,
 } from "./sandbox-runtime";
 
@@ -1175,12 +1176,26 @@ async function startSandboxPreviewBranch(
     !existing ||
     ((input.framework === undefined || input.framework === existing.framework) &&
       (input.command === undefined || input.command === existing.command));
+  // A `starting` runtime is reusable only while its start could
+  // still legitimately be in flight: younger than the sandbox
+  // health-probe window. An older `starting` runtime is wedged —
+  // the probe that could resolve its state launches only after the
+  // blocked first start returns, so it can never leave `starting`
+  // on its own — and returning it verbatim poisons every later
+  // start for the workspace (live failure 2026-11-15: the retry
+  // produced zero sandbox activity because it was handed the first
+  // attempt's stuck runtime). Fall through instead: the teardown
+  // below stops it and a fresh runtime starts.
+  const startingIsFresh =
+    existing?.status === "starting" &&
+    existing.startedAt !== null &&
+    Date.now() - existing.startedAt < SANDBOX_HEALTH_PROBE_TIMEOUT_MS;
   if (
     !input.forceRestart &&
     existing &&
     configMatches &&
     existing.upstream?.kind === "sandbox" &&
-    (existing.status === "ready" || existing.status === "starting") &&
+    (existing.status === "ready" || startingIsFresh) &&
     existing.clerkEnvFingerprint === args.newFingerprint
   ) {
     return existing;
