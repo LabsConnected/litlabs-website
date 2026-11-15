@@ -12,7 +12,15 @@ import {
   type Wallpaper,
 } from "@/lib/wallpapers";
 import { Check, Upload, X, Sparkles, ChevronRight } from "lucide-react";
-import Link from "next/link";
+
+/** Built-in wallpaper prompt options (Larry's direction, 2026-11-14:
+ * "Generate with LiTT" comes with built-in prompts/options). */
+const WALLPAPER_GENERATE_PRESETS: { label: string; prompt: string }[] = [
+  { label: "Forest dawn", prompt: "Calm forest canopy at dawn, soft green light through mist" },
+  { label: "Nebula", prompt: "Deep-space nebula in violet and teal over a dark starfield" },
+  { label: "Mountains", prompt: "Minimal mountain silhouettes at dusk, layered ridges, calm sky" },
+  { label: "Waves", prompt: "Abstract flowing waves in emerald and charcoal, smooth and calm" },
+];
 
 const EFFECTS: { id: WallpaperEffect; label: string }[] = [
   { id: "none", label: "None" },
@@ -31,6 +39,42 @@ export function WallpaperSection() {
   const effect = profile.wallpaperEffect ?? "none";
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [wallpaperPrompt, setWallpaperPrompt] = useState(WALLPAPER_GENERATE_PRESETS[0].prompt);
+  const [generatingWallpaper, setGeneratingWallpaper] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [generateDone, setGenerateDone] = useState(false);
+
+  const handleGenerateWallpaper = useCallback(async () => {
+    const prompt = wallpaperPrompt.trim();
+    if (!prompt || generatingWallpaper) return;
+    setGeneratingWallpaper(true);
+    setGenerateError(null);
+    setGenerateDone(false);
+    try {
+      const res = await fetch("/api/media/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: `Desktop wallpaper, wide scenic background: ${prompt}`,
+          generationMode: "auto-free",
+          aspectRatio: "16:9",
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { success?: boolean; downloadUrl?: string; error?: string }
+        | null;
+      if (!res.ok || !data?.success || !data.downloadUrl) {
+        setGenerateError(data?.error ?? "Generation failed — please try again.");
+        return;
+      }
+      updateProfile({ wallpaper: "custom", customWallpaperUrl: data.downloadUrl });
+      setGenerateDone(true);
+    } catch {
+      setGenerateError("Generation failed — check your connection and try again.");
+    } finally {
+      setGeneratingWallpaper(false);
+    }
+  }, [wallpaperPrompt, generatingWallpaper, updateProfile]);
   const [failedPreviews, setFailedPreviews] = useState<Set<string>>(new Set());
   const [ambientOpen, setAmbientOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -204,13 +248,59 @@ export function WallpaperSection() {
       </div>
 
       {/* ── Generate with LiTT ───────────────────────────────────────── */}
-      <Link
-        href="/studio?tool=image&intent=wallpaper"
-        className="flex items-center justify-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-xs font-bold text-amber-700 transition-all hover:bg-amber-400/10"
-      >
-        <Sparkles size={14} className="pointer-events-none" />
-        Generate wallpaper with LiTT
-      </Link>
+      {/* Board-only rebuild (Larry 2026-11-14): this used to be a bare
+          link to /studio?tool=image&intent=wallpaper — the intent was read
+          by no code, so nothing ever generated. It now generates for real
+          via /api/media/generate and sets the result as the wallpaper
+          through the same updateProfile write path as uploads. Built-in
+          prompt options are offered so nobody has to guess a prompt. */}
+      <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {WALLPAPER_GENERATE_PRESETS.map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              data-testid="wallpaper-generate-preset"
+              disabled={generatingWallpaper}
+              onClick={() => setWallpaperPrompt(preset.prompt)}
+              className="rounded-full border border-amber-400/30 px-2.5 py-1 text-[11px] font-bold text-amber-800 transition-all hover:bg-amber-400/10 disabled:opacity-50"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-2.5 flex items-center gap-2">
+          <input
+            type="text"
+            data-testid="wallpaper-generate-prompt"
+            value={wallpaperPrompt}
+            onChange={(e) => setWallpaperPrompt(e.target.value)}
+            placeholder="Describe your wallpaper…"
+            disabled={generatingWallpaper}
+            className="min-w-0 flex-1 rounded-lg border border-black/10 bg-white/70 px-3 py-2 text-xs text-zinc-800 outline-none disabled:opacity-50"
+          />
+          <button
+            type="button"
+            data-testid="wallpaper-generate"
+            disabled={generatingWallpaper || !wallpaperPrompt.trim()}
+            onClick={() => void handleGenerateWallpaper()}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-white transition-all hover:bg-amber-600 disabled:opacity-50"
+          >
+            <Sparkles size={14} className="pointer-events-none" />
+            {generatingWallpaper ? "Generating…" : "Generate wallpaper with LiTT"}
+          </button>
+        </div>
+        {generateError && (
+          <p data-testid="wallpaper-generate-error" className="mt-2 text-[11px] font-semibold text-red-600">
+            {generateError}
+          </p>
+        )}
+        {generateDone && !generateError && (
+          <p data-testid="wallpaper-generate-done" className="mt-2 text-[11px] font-semibold text-emerald-700">
+            Wallpaper generated and set.
+          </p>
+        )}
+      </div>
 
       {/* ── Ambient & Minimal — collapsed by default ─────────────────── */}
       <details

@@ -1326,7 +1326,8 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
                     else localStorage.setItem(DEVICE_ID_STORAGE_KEY, next);
                   } catch { /* non-fatal — selection still applies to this view */ }
                 }}
-                className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-xs text-zinc-900 outline-none"
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-xs outline-none"
+                style={{ backgroundColor: T.boxBg, borderColor: T.borderColor, color: T.textColor }}
               >
                 {micDevices.map((d) => (
                   <option key={d.deviceId} value={d.deviceId}>{d.label || `Device ${d.deviceId.slice(0, 8)}`}</option>

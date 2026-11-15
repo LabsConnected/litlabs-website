@@ -1107,9 +1107,15 @@ export function useCanonicalConversation({
         }
       }
 
-      // 2. Deterministic product intents before any LLM call
+      // 2. Deterministic product intents before any LLM call.
+      // generate_image is deliberately NOT short-circuited (board-only
+      // rebuild, Larry 2026-11-14): an image request must reach the agent
+      // run, whose image.generate tool generates INSIDE this chat, renders
+      // the result inline, and persists it to the Asset Lake (where the
+      // board Media panel lists it). The old short-circuit bounced the
+      // user out to the Image Studio tool page instead.
       const intent = detectIntent(text);
-      if (intent && intent.intent !== "generate_code" && intent.intent !== "chat" && intent.intent !== "unknown") {
+      if (intent && intent.intent !== "generate_image" && intent.intent !== "generate_code" && intent.intent !== "chat" && intent.intent !== "unknown") {
         const intentMessage = buildIntentResponseMessage(intent, {
           terminalConnected: runtimeContext.terminalStatus === "connected",
         });
@@ -1155,13 +1161,13 @@ export function useCanonicalConversation({
           accepted: true,
           persisted: true,
           reply: intentMessage,
-          // P1-1: the image intent opens the Image Studio surface — it is
-          // not an agent run, so the "Done · No files changed" completion
-          // card must not render (it would fake a generation success).
-          // generate_music opens the Music Studio the same way, so it
-          // suppresses for the same reason (ART-20261111-035).
-          suppressCompletion:
-            intent.intent === "generate_image" || intent.intent === "generate_music",
+          // P1-1: an intent that opens a tool surface is not an agent run,
+          // so the "Done · No files changed" completion card must not
+          // render (it would fake a generation success). generate_music
+          // opens the Music Studio that way (ART-20261111-035).
+          // generate_image no longer reaches this branch — it falls
+          // through to the real agent run above.
+          suppressCompletion: intent.intent === "generate_music",
         };
       }
 

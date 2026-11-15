@@ -14,6 +14,10 @@ import { STUDIO_TOP_BAR_COLORS, topBarColorsFor } from "./AppShell";
  * On Studio routes the bar must carry the Studio palette explicitly —
  * the same pattern the portaled Studio menus already use — while every
  * other route keeps following the active theme untouched.
+ *
+ * 2026-11-14: the Studio now follows the theme in Dark mode (globals.css
+ * STUDIO DARK RE-SCOPE), so the Studio palette is carried only while
+ * the effective mode is light; in Dark the bar follows the theme.
  */
 
 const DARK_THEME = {
@@ -44,6 +48,14 @@ describe("topBarColorsFor", () => {
     expect(T.boxBg).toBe("#ffffff");
   });
 
+  it("in Dark the Studio route follows the active theme, untouched (same object)", () => {
+    // Since 2026-11-14 the Studio follows the theme in Dark mode (the
+    // globals.css STUDIO DARK RE-SCOPE), so the bar must not carry the
+    // light Studio palette over it — that was Larry's white-bar
+    // patchwork. The light palette applies only in effective Light.
+    expect(topBarColorsFor(DARK_THEME, true, true)).toBe(DARK_THEME);
+  });
+
   it("preserves theme keys the Studio palette does not define", () => {
     const T = topBarColorsFor(DARK_THEME, true);
     expect(T.success).toBe(DARK_THEME.success);
@@ -72,7 +84,7 @@ describe("Studio top-bar palette stays in lockstep with the design tokens", () =
 
   it("the TopBar actually resolves its colors through topBarColorsFor", () => {
     const source = readFileSync(join(__dirname, "AppShell.tsx"), "utf8");
-    expect(source).toContain("topBarColorsFor(resolvedColors, isStudio)");
+    expect(source).toContain("topBarColorsFor(resolvedColors, isStudio, effectiveDark)");
     // The identity dock must receive the same effective colors, or the
     // account menu would keep painting the account theme over Studio.
     expect(source).toContain("<IdentityDock T={T} />");

@@ -115,12 +115,41 @@ vi.mock("../shell/ElementInspectorPanel", () => ({
 }));
 
 vi.mock("../StudioWorkspaceFrame", () => ({
-  StudioInspector: (props: { activeTab: string; data?: unknown }) => (
+  StudioInspector: (props: { activeTab: string; data?: unknown; excludeTabs?: string[] }) => (
     <div
       data-testid="studio-inspector"
       data-tab={props.activeTab}
       data-has-data={props.data ? "yes" : "no"}
+      data-exclude-tabs={(props.excludeTabs ?? []).join(",")}
     />
+  ),
+  StudioActivityPanel: (props: { runId: string | null; missionContent?: ReactNode }) => (
+    <div data-testid="studio-activity-panel" data-run-id={props.runId ?? ""}>
+      {props.missionContent}
+    </div>
+  ),
+}));
+
+vi.mock("../StudioPlanSurface", () => ({
+  default: (props: { onOpenPreview?: () => void; onOpenFiles?: () => void }) => (
+    <div data-testid="studio-plan-surface">
+      <button type="button" data-testid="plan-stub-open-preview" onClick={() => props.onOpenPreview?.()}>
+        open preview
+      </button>
+      <button type="button" data-testid="plan-stub-open-files" onClick={() => props.onOpenFiles?.()}>
+        open files
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock("../MissionCards", () => ({
+  default: (props: { onOpenCode?: () => void }) => (
+    <div data-testid="mission-cards">
+      <button type="button" data-testid="mission-stub-open-code" onClick={() => props.onOpenCode?.()}>
+        open code
+      </button>
+    </div>
   ),
 }));
 
@@ -160,6 +189,14 @@ function baseProps(overrides: Partial<BoardPanelBindingsProps> = {}): BoardPanel
     onInspectorTabChange: vi.fn(),
     inspectorData,
     onDeployRequest: vi.fn(),
+    chatContent: <div data-testid="board-chat-content" />,
+    canvasContent: <div data-testid="board-canvas-content" />,
+    summonPanel: vi.fn(),
+    activityRunId: "run-1",
+    activityBusy: false,
+    activityModelLabel: "Test Model",
+    activityTerminalStatus: "Connected",
+    onRollback: vi.fn(),
     ...overrides,
   };
 }
@@ -235,14 +272,66 @@ describe("BoardPanelBindings (B3)", () => {
     expect(onDeployRequest).toHaveBeenCalledWith("netlify");
   });
 
-  it("media and world stay honest slots — no fake system is rendered", () => {
-    for (const id of ["media", "world"] as const) {
-      const { unmount } = renderBinding(id);
-      const slot = screen.getByTestId(`board-panel-slot-${id}`);
-      expect(slot).toBeInTheDocument();
-      expect(slot.textContent?.length).toBeGreaterThan(0);
-      unmount();
-    }
+  it("world stays an honest slot — no fake system is rendered", () => {
+    renderBinding("world");
+    const slot = screen.getByTestId("board-panel-slot-world");
+    expect(slot).toBeInTheDocument();
+    expect(slot.textContent?.length).toBeGreaterThan(0);
+  });
+
+  it("chat binds the Command Center chat content built by CommandStudio", () => {
+    renderBinding("chat");
+    expect(screen.getByTestId("board-binding-chat")).toBeInTheDocument();
+    expect(screen.getByTestId("board-chat-content")).toBeInTheDocument();
+  });
+
+  it("canvas binds the Canvas & Design stage content built by CommandStudio", () => {
+    renderBinding("canvas");
+    expect(screen.getByTestId("board-binding-canvas")).toBeInTheDocument();
+    expect(screen.getByTestId("board-canvas-content")).toBeInTheDocument();
+  });
+
+  it("media binds the real BoardMediaPanel (Asset Lake tabs)", () => {
+    renderBinding("media");
+    expect(screen.getByTestId("board-binding-media")).toBeInTheDocument();
+    expect(screen.getByTestId("board-media-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("board-media-tab-images")).toBeInTheDocument();
+    expect(screen.getByTestId("board-media-tab-video")).toBeInTheDocument();
+    expect(screen.getByTestId("board-media-tab-music")).toBeInTheDocument();
+  });
+
+  it("browser binds the real BoardBrowserPanel", () => {
+    renderBinding("browser");
+    expect(screen.getByTestId("board-binding-browser")).toBeInTheDocument();
+    expect(screen.getByTestId("board-browser-panel")).toBeInTheDocument();
+  });
+
+  it("plan binds StudioPlanSurface with its Open actions rewired to board summons", async () => {
+    const summonPanel = vi.fn();
+    renderBinding("plan", { summonPanel });
+    expect(await screen.findByTestId("studio-plan-surface")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("plan-stub-open-preview"));
+    expect(summonPanel).toHaveBeenCalledWith("preview");
+    fireEvent.click(screen.getByTestId("plan-stub-open-files"));
+    expect(summonPanel).toHaveBeenCalledWith("files");
+  });
+
+  it("activity binds StudioActivityPanel with MissionCards, actions rewired to summons", () => {
+    const summonPanel = vi.fn();
+    renderBinding("activity", { summonPanel });
+    const panel = screen.getByTestId("studio-activity-panel");
+    expect(panel).toHaveAttribute("data-run-id", "run-1");
+    fireEvent.click(screen.getByTestId("mission-stub-open-code"));
+    expect(summonPanel).toHaveBeenCalledWith("code");
+  });
+
+  it("the board Inspector excludes the tabs that duplicate board panels and never activates one", () => {
+    renderBinding("inspector", { inspectorTab: "checks" });
+    const inspector = screen.getByTestId("studio-inspector");
+    expect(inspector).toHaveAttribute("data-exclude-tabs", "checks,files,preview");
+    // An excluded active tab falls back to Plan instead of rendering a
+    // duplicate Checks home.
+    expect(inspector).toHaveAttribute("data-tab", "plan");
   });
 
   it("Preview→Inspector link: a selection made in the Preview binding surfaces in the Inspector binding", async () => {

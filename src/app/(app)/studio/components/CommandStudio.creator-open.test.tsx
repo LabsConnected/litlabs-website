@@ -8,17 +8,12 @@ import "@testing-library/jest-dom";
 // file was branched from): next/dynamic resolves via React.lazy +
 // Suspense so the real mounted-component graph is observable.
 //
-// Regression suite for the creator two-click defect: in the desktop
-// shell, clicking "Generate image" in the Images station only wrote
-// ?creator=image to the URL and the creator pane did NOT open until a
-// second click. Root cause: the URL→state sync effect re-runs when
-// `studioShellActive` flips (destination studio→create flips it off),
-// and on that re-run it re-applied the STALE pre-navigation URL
-// (?tool=images → destination "studio"), bouncing the state-driven
-// creator open back before the state→URL effect's ?creator= write ever
-// landed in searchParams. The harness's stable searchParams reproduce
-// the trigger exactly: the effect re-runs on the shell flip while the
-// params still carry no creator.
+// History: this file pinned the creator two-click defect (the Images
+// station's "Generate image" click bounced off the URL→state sync).
+// The board-only rebuild (2026-11-14) retired the Images station and
+// the bounce with it: ?tool=images now summons the board's Media panel
+// and generation lives inside Studio (chat + the Media panel's own
+// composer), so the suite below pins THAT contract instead.
 
 const stableSearchParams = new URLSearchParams("tool=images");
 
@@ -471,14 +466,14 @@ async function settle() {
 }
 
 
-describe("CommandStudio — creator opens on the FIRST click (no URL→state bounce)", () => {
+describe("CommandStudio — ?tool=images lands on the board's Media panel (board-only)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sendMock.mockResolvedValue({ accepted: true });
+    capState.projectId = "project-1";
+    capState.projectName = "Test Project";
     window.innerHeight = 844;
     try { localStorage.clear(); } catch { /* jsdom without storage */ }
-    // Shell layout (NOT classic): the defect only exists where
-    // studioShellActive flips on a destination change.
     Object.defineProperty(window, "visualViewport", {
       value: {
         width: 1440,
@@ -493,40 +488,29 @@ describe("CommandStudio — creator opens on the FIRST click (no URL→state bou
     });
   });
 
-  it("opens the Image creator on the first Generate-image click from the Images station", async () => {
-    const { user } = await renderCommandStudio();
+  it("opens the board with the Media panel — the Images station and its stage are retired", async () => {
+    await renderCommandStudio();
     await settle();
 
-    // We start on the Images station (deep-linked ?tool=images): the
-    // station surface with the Generate affordance is what renders.
-    expect(screen.getByTestId("stage-surface-images")).toBeTruthy();
-    expect(screen.getByTestId("image-studio-stub")).toBeTruthy();
-    expect(screen.queryByTestId("image-tool")).toBeNull();
-
-    // ONE click — the creator pane must open immediately. (findBy:
-    // the tool sits behind a lazy boundary, so poll for the mount
-    // instead of assuming a fixed settle window.)
-    await user.click(screen.getByRole("button", { name: "Generate image" }));
-
-    expect(await screen.findByTestId("image-tool", {}, { timeout: 5000 })).toBeTruthy();
-    // The shell (and with it the Images station) is gone — the creator
-    // destination owns the center now. Pre-fix, the URL→state effect
-    // bounced destination back to "studio" on the shell flip, so the
-    // station stayed mounted and the creator never appeared.
+    // The board is the Studio; ?tool=images summons the Media panel
+    // (the one home for images now). No stage surface exists to bounce.
+    expect(screen.getByTestId("studio-board")).toBeTruthy();
+    expect(await screen.findByTestId("board-media-panel")).toBeTruthy();
     expect(screen.queryByTestId("stage-surface-images")).toBeNull();
     expect(screen.queryByTestId("image-studio-stub")).toBeNull();
+    // Generation lives inside Studio: the Media panel's own asset
+    // composer is right there — no bounce to a creator destination.
+    expect(screen.getByTestId("board-media-composer-input")).toBeTruthy();
+    expect(screen.queryByTestId("image-tool")).toBeNull();
   });
 
-  it("keeps the creator open — no late bounce back to the station", async () => {
-    const { user } = await renderCommandStudio();
-    await settle();
-
-    await user.click(screen.getByRole("button", { name: "Generate image" }));
-    expect(await screen.findByTestId("image-tool", {}, { timeout: 5000 })).toBeTruthy();
+  it("the Media panel stays the image home — no late bounce back to a station", async () => {
+    await renderCommandStudio();
     await settle();
     await settle();
 
-    expect(screen.getByTestId("image-tool")).toBeTruthy();
+    expect(screen.getByTestId("board-media-panel")).toBeTruthy();
     expect(screen.queryByTestId("stage-surface-images")).toBeNull();
+    expect(screen.queryByTestId("image-studio-stub")).toBeNull();
   });
 });

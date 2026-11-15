@@ -143,7 +143,15 @@ export function describeProjectState(
   }
 
   if (ws === "ready") {
-    return { label: "Ready", color: LIME, detail: null, canRetry: false };
+    // Specific state, not a vague "Ready" (Studio Finish Spec, Larry
+    // 2026-11-14): the workspace files are saved; the preview runtime
+    // has not started yet, and the label must not imply it has.
+    return {
+      label: "Saved",
+      color: LIME,
+      detail: "Workspace files are saved. The preview has not started yet.",
+      canRetry: false,
+    };
   }
 
   return { label: "Setup needed", color: GRAY, detail: null, canRetry: false };

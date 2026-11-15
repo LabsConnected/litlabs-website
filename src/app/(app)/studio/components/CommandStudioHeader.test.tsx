@@ -345,6 +345,26 @@ describe("CommandStudioHeader — mobile scroll affordance (Phase 1 #1)", () => 
   });
 
   it("keeps the dock toggle and overflow menu mounted in the header", () => {
+    // Board-only rebuild: the dock toggle renders only when a dock handler
+    // is provided (the board shell passes none — the Developer dock is
+    // retired there); the classic layout still passes one.
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onToggleDockAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    expect(screen.getByTestId("studio-dock-toggle")).toBeTruthy();
+    expect(screen.getByLabelText("More actions")).toBeTruthy();
+  });
+
+  it("board shell header chrome: no dock toggle, no New Chat, no bell, no Owner badge", () => {
+    // Larry's cleanup (2026-11-14): the bell + Owner badge live in the app
+    // top bar beside "LiTT READY"; New Chat lives inside the board chat
+    // panel only; the Studio header keeps neither.
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
@@ -353,8 +373,10 @@ describe("CommandStudioHeader — mobile scroll affordance (Phase 1 #1)", () => 
         capabilities={mockCapabilities}
       />,
     );
-    expect(screen.getByTestId("studio-dock-toggle")).toBeTruthy();
-    expect(screen.getByLabelText("More actions")).toBeTruthy();
+    expect(screen.queryByTestId("studio-dock-toggle")).toBeNull();
+    expect(screen.queryByRole("button", { name: /new chat/i })).toBeNull();
+    expect(screen.queryByLabelText(/notifications/i)).toBeNull();
+    expect(screen.queryByTestId("owner-test-mode-indicator")).toBeNull();
   });
 
   it("workspace status popover reports real per-provider health, not subsystem capabilities", () => {
@@ -440,7 +462,7 @@ describe("CommandStudioHeader — failed run must not sit under a green Ready pi
     mockProviderHealth = { auto: "available" };
   });
 
-  it("shows the Ready pill when the runtime is verified and no run failed", () => {
+  it("shows the Verified pill when the runtime is verified and no run failed", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
@@ -450,7 +472,7 @@ describe("CommandStudioHeader — failed run must not sit under a green Ready pi
       />,
     );
     expect(screen.getByLabelText("Runtime verified")).toBeTruthy();
-    expect(screen.getByTestId("agent-status-pill").textContent).toContain("Ready");
+    expect(screen.getByTestId("agent-status-pill").textContent).toContain("Verified");
   });
 
   it("replaces the Ready pill with Last run failed after a failed run", () => {

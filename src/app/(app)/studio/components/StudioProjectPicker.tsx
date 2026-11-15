@@ -304,18 +304,21 @@ function ProjectPickerMenu({
       style={{
         left,
         top,
-        // Portaled to <body> — outside .studio-shell, so the light
-        // palette is carried explicitly (surface + text tokens).
-        borderColor: "#a9c48f",
-        backgroundColor: "#ffffff",
-        color: "#0e1510",
-        ["--text-primary" as string]: "#0e1510",
-        ["--text-secondary" as string]: "#47614a",
-        ["--text-muted" as string]: "#63745f",
-        ["--studio-elevated" as string]: "#ffffff",
-        ["--studio-border" as string]: "#cfdec4",
-        ["--studio-border-strong" as string]: "#a9c48f",
-        ["--litt-primary" as string]: "#177a36",
+        // Portaled to <body> — outside .studio-shell, so the palette
+        // is carried explicitly from the theme's published root
+        // variables (ThemeProvider sets them from the resolved skin),
+        // which follow the effective mode: the light Signature whites
+        // in Light, Larry's charcoal in Dark.
+        borderColor: "var(--border-color)",
+        backgroundColor: "var(--box-bg)",
+        color: "var(--text-color)",
+        ["--text-primary" as string]: "var(--text-color)",
+        ["--text-secondary" as string]: "color-mix(in srgb, var(--text-color) 76%, var(--bg-color))",
+        ["--text-muted" as string]: "color-mix(in srgb, var(--text-color) 58%, var(--bg-color))",
+        ["--studio-elevated" as string]: "var(--box-bg)",
+        ["--studio-border" as string]: "var(--border-color)",
+        ["--studio-border-strong" as string]: "color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%)",
+        ["--litt-primary" as string]: "var(--accent-color)",
       }}
       role="listbox"
       aria-label="Projects"
@@ -329,7 +332,7 @@ function ProjectPickerMenu({
           placeholder="Search projects…"
           aria-label="Search projects"
           className="h-8 w-full rounded-md border px-2 text-[12px] outline-none"
-          style={{ borderColor: "var(--studio-border)", backgroundColor: "#ffffff", color: "var(--text-primary)" }}
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--box-bg)", color: "var(--text-primary)" }}
         />
       </div>
       {loading ? (

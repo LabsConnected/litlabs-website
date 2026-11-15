@@ -179,6 +179,9 @@ export default function StudioProjectFiles({
   const [exporting, setExporting] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Specific save states (Studio Finish Spec): the button reads
+  // Saving… while the write runs, then Saved until the next edit.
+  const [justSaved, setJustSaved] = useState(false);
   const [preparing, setPreparing] = useState(false);
   // True once this project returned the HOST_EXECUTION_DISABLED prepare
   // verdict (this session): the panel settles into the honest unavailable
@@ -589,6 +592,7 @@ export default function StudioProjectFiles({
     try {
       await mutate("write", { path: normalizePath(activePath), content });
       setOriginalContent(content);
+      setJustSaved(true);
       setConflictNotice(null);
       await loadDirectory(parentPath(activePath), true);
       onSaved?.();
@@ -762,7 +766,7 @@ export default function StudioProjectFiles({
                 <FileText size={12} style={{ color: "var(--litt-primary)" }} />
                 <span className="min-w-0 flex-1 truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{activePath}</span>
                 {dirty && <span className="shrink-0 text-[9px] font-bold" style={{ color: "#e3b341" }}>Unsaved</span>}
-                <button type="button" onClick={() => void saveFile()} disabled={!dirty || saving || !writeAccess || Boolean(unsupportedPath) || Boolean(conflictNotice)} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-35" style={{ backgroundColor: dirty && writeAccess && !conflictNotice ? "var(--litt-primary)" : "var(--studio-surface)", color: dirty && writeAccess && !conflictNotice ? "#000" : "var(--text-muted)" }} title={conflictNotice ? "LiTT changed this file — reload first" : undefined}><Save size={11} /> {saving ? "Saving" : "Save"}</button>
+                <button type="button" onClick={() => void saveFile()} disabled={!dirty || saving || !writeAccess || Boolean(unsupportedPath) || Boolean(conflictNotice)} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-35" style={{ backgroundColor: dirty && writeAccess && !conflictNotice ? "var(--litt-primary)" : "var(--studio-surface)", color: dirty && writeAccess && !conflictNotice ? "#000" : "var(--text-muted)" }} title={conflictNotice ? "LiTT changed this file — reload first" : undefined}><Save size={11} /> {saving ? "Saving…" : justSaved && !dirty ? "Saved" : "Save"}</button>
               </div>
               {conflictNotice && (
                 <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[9px]" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)", color: "#fca5a5" }}>

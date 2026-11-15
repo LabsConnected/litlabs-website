@@ -1121,3 +1121,116 @@ describe("send() project guard — stop-and-ask prompt + confirmed resubmit", ()
     expect(postBodies[1].expectedRevision).toBe(2);
   });
 });
+
+// ── generate_image falls through to the agent run (board-only rebuild) ──
+// Larry's decision (2026-11-14): "Generate with LiTT" generates INSIDE the
+// Studio chat. The deterministic intent short-circuit used to intercept
+// generate_image, post a canned reply, and bounce the user to the Image
+// Studio via onOpenImageStudio. Now the message must reach the real agent
+// run (whose image.generate tool renders inline + persists to the Asset
+// Lake for the Media panel) — onOpenImageStudio must never fire.
+describe("send() generate_image — no Image Studio bounce", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const makeMsg = (overrides: Partial<ConversationMessage>): ConversationMessage => ({
+    id: "msg-x",
+    conversationId: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    role: "assistant",
+    agentSlug: "litt",
+    agentMode: "standard",
+    agentInstanceId: null,
+    content: "",
+    status: "completed",
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    clientRequestId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const onOpenImageStudio = vi.fn();
+  let capturedClientRequestId: string | null = null;
+
+  beforeEach(() => {
+    onOpenImageStudio.mockClear();
+    capturedClientRequestId = null;
+    useConversationStore.getState().resetForProject();
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      // The agent-run POST is accepted, then the transport dies — the
+      // reconciled snapshot proves the turn ran server-side (the agent
+      // path), not the canned intent path.
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        capturedClientRequestId = (JSON.parse(String(init?.body)) as { clientRequestId: string }).clientRequestId;
+        throw new TypeError("fetch failed");
+      }
+      if (method === "GET" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return jsonResponse({
+          messages: capturedClientRequestId
+            ? [
+                makeMsg({ id: "user-1", role: "user", clientRequestId: capturedClientRequestId, content: "generate an image of a sunset" }),
+                makeMsg({ id: "asst-1", role: "assistant", parentMessageId: "user-1", status: "completed", content: "Here is your sunset — saved to the project media." }),
+              ]
+            : [],
+          revision: 2,
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useConversationStore.getState().resetForProject();
+  });
+
+  it("routes an image request to the agent run, never to the Image Studio", async () => {
+    const { result } = renderHook(() =>
+      useCanonicalConversation({ serverProjectId: "proj-1", onOpenImageStudio }),
+    );
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+    });
+
+    let sendResult: SendResult | undefined;
+    await act(async () => {
+      sendResult = await result.current.send("generate an image of a sunset");
+    });
+
+    expect(onOpenImageStudio).not.toHaveBeenCalled();
+    expect(sendResult?.accepted).toBe(true);
+    // The reply is the agent run's reconciled answer — NOT the canned
+    // intent message ("Opening the Image Studio…").
+    expect(sendResult?.reply).toBe("Here is your sunset — saved to the project media.");
+    expect(sendResult?.suppressCompletion).toBeFalsy();
+  });
+});

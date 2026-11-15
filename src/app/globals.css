@@ -2998,7 +2998,11 @@ main {
    accent, lime kept as highlight only, one soft green shadow,
    light-locked presentation (the Studio frame no longer flips
    dark with the OS or the visual pack — same lesson as the
-   homepage mockup's removed dark palette).
+   homepage mockup's removed dark palette). The lock governs
+   the default presentation only: when the user picks Dark (or
+   System under a dark OS), the STUDIO DARK RE-SCOPE directly
+   below re-points these tokens at the theme's skin tokens
+   (owner decision, 2026-11-14).
 
    This is a token re-scope, NOT a new theme or visual pack:
    registration stays with the ThemeContext / visual-pack
@@ -3057,6 +3061,113 @@ main {
   --studio-glow-green-soft: 0 0 12px rgba(23, 122, 54, 0.18);
   --studio-glow-purple: 0 0 16px rgba(23, 122, 54, 0.16);
   --studio-glow-purple-soft: 0 0 20px rgba(23, 122, 54, 0.1);
+}
+
+/* ============================================================
+   STUDIO DARK RE-SCOPE — owner decision, 2026-11-14
+   ------------------------------------------------------------
+   The scope above light-locks the Studio token system to the
+   approved light design. That lock predates the owner's
+   decision that Dark mode must actually work in the Signature
+   skin (the same decision that authored darkSkins.signature).
+   When the EFFECTIVE theme mode is dark, the Studio tokens
+   re-point at the theme's own published root variables
+   (--bg-color / --box-bg / --border-color / --text-color /
+   --accent-color — set on <html> by ThemeProvider from the
+   resolved skin). No new palette is authored here: the Studio
+   consumes the same skin tokens Discover consumes. For the
+   Signature skin those are Larry's charcoal values (bg
+   #15171B, surface #1F2228, border #2E3238, text #F2F4F3)
+   with his Signature green as the accent voice. Light mode —
+   including "system" under a light OS — keeps the scope above
+   untouched, byte for byte. The two rules below carry the
+   same assignments: one for an explicit Dark choice, one for
+   "system" under a dark OS (mirroring resolveEffectiveMode).
+   ============================================================ */
+html[data-theme-mode="dark"] .studio-shell {
+  --studio-bg: var(--bg-color);
+  --studio-surface: var(--box-bg);
+  --studio-elevated: var(--box-bg);
+  --studio-card: var(--box-bg);
+  --studio-border: var(--border-color);
+  --studio-border-strong: color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%);
+  --bg-main: var(--bg-color);
+  --bg-elevated: var(--box-bg);
+  --bg-solid: var(--box-bg);
+  --bg-card: var(--box-bg);
+  --glass-1: var(--box-bg);
+  --glass-2: var(--box-bg);
+  --glass-3: var(--box-bg);
+  --glass-border: var(--border-color);
+  --glass-border-highlight: color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%);
+  --border-soft: color-mix(in srgb, var(--text-color) 14%, transparent);
+  --border-strong: color-mix(in srgb, var(--text-color) 28%, transparent);
+  --grid-line: color-mix(in srgb, var(--accent-color) 7%, transparent);
+
+  --text-main: var(--text-color);
+  --text-primary: var(--text-color);
+  --text-secondary: color-mix(in srgb, var(--text-color) 76%, var(--bg-color));
+  --text-muted: color-mix(in srgb, var(--text-color) 58%, var(--bg-color));
+
+  --color-accent: var(--accent-color);
+  --color-accent-strong: color-mix(in srgb, var(--accent-color) 76%, black);
+  --color-accent-deep: color-mix(in srgb, var(--accent-color) 76%, black);
+  --color-on-accent: var(--bg-color);
+  --litt-primary: var(--accent-color);
+  --litt-primary-strong: color-mix(in srgb, var(--accent-color) 76%, black);
+  --shadow-accent-glow: 0 0 24px color-mix(in srgb, var(--accent-color) 28%, transparent);
+  --shadow-accent-glow-strong: 0 0 40px color-mix(in srgb, var(--accent-color) 40%, transparent);
+
+  --shadow-card: 0 20px 54px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 40px color-mix(in srgb, var(--accent-color) 10%, transparent);
+  --studio-glow-green: 0 0 8px color-mix(in srgb, var(--accent-color) 35%, transparent);
+  --studio-glow-green-soft: 0 0 12px color-mix(in srgb, var(--accent-color) 18%, transparent);
+  --studio-glow-purple: 0 0 16px color-mix(in srgb, var(--accent-color) 16%, transparent);
+  --studio-glow-purple-soft: 0 0 20px color-mix(in srgb, var(--accent-color) 10%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-theme-mode="system"] .studio-shell {
+    --studio-bg: var(--bg-color);
+    --studio-surface: var(--box-bg);
+    --studio-elevated: var(--box-bg);
+    --studio-card: var(--box-bg);
+    --studio-border: var(--border-color);
+    --studio-border-strong: color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%);
+    --bg-main: var(--bg-color);
+    --bg-elevated: var(--box-bg);
+    --bg-solid: var(--box-bg);
+    --bg-card: var(--box-bg);
+    --glass-1: var(--box-bg);
+    --glass-2: var(--box-bg);
+    --glass-3: var(--box-bg);
+    --glass-border: var(--border-color);
+    --glass-border-highlight: color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%);
+    --border-soft: color-mix(in srgb, var(--text-color) 14%, transparent);
+    --border-strong: color-mix(in srgb, var(--text-color) 28%, transparent);
+    --grid-line: color-mix(in srgb, var(--accent-color) 7%, transparent);
+
+    --text-main: var(--text-color);
+    --text-primary: var(--text-color);
+    --text-secondary: color-mix(in srgb, var(--text-color) 76%, var(--bg-color));
+    --text-muted: color-mix(in srgb, var(--text-color) 58%, var(--bg-color));
+
+    --color-accent: var(--accent-color);
+    --color-accent-strong: color-mix(in srgb, var(--accent-color) 76%, black);
+    --color-accent-deep: color-mix(in srgb, var(--accent-color) 76%, black);
+    --color-on-accent: var(--bg-color);
+    --litt-primary: var(--accent-color);
+    --litt-primary-strong: color-mix(in srgb, var(--accent-color) 76%, black);
+    --shadow-accent-glow: 0 0 24px color-mix(in srgb, var(--accent-color) 28%, transparent);
+    --shadow-accent-glow-strong: 0 0 40px color-mix(in srgb, var(--accent-color) 40%, transparent);
+
+    --shadow-card: 0 20px 54px rgba(0, 0, 0, 0.45);
+    --shadow-glow: 0 0 40px color-mix(in srgb, var(--accent-color) 10%, transparent);
+    --studio-glow-green: 0 0 8px color-mix(in srgb, var(--accent-color) 35%, transparent);
+    --studio-glow-green-soft: 0 0 12px color-mix(in srgb, var(--accent-color) 18%, transparent);
+    --studio-glow-purple: 0 0 16px color-mix(in srgb, var(--accent-color) 16%, transparent);
+    --studio-glow-purple-soft: 0 0 20px color-mix(in srgb, var(--accent-color) 10%, transparent);
+  }
 }
 
 /* Map visual pack font variables to theme tokens */
