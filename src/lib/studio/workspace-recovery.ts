@@ -33,6 +33,16 @@ export interface RecoveredWorkspace {
   workspaceId: string;
   reprepared: boolean;
   /**
+   * True when a re-prepare ran during this call but the resulting
+   * workspace STILL does not resolve on the terminal server — the heal
+   * was attempted and failed (e.g. the GitHub-mirror branch served the
+   * existing workspace after its best-effort heal failed). Distinct
+   * from a plain reprepared:false, which also covers "the workspace
+   * was simply alive, nothing ran". Callers use this to escalate to a
+   * full prepare instead of retrying the dead workspace ID.
+   */
+  healFailed?: boolean;
+  /**
    * Set when a re-prepare landed on an empty root and the workspace was
    * rehydrated from this deployment's snapshot (static managed projects
    * only). The deployed content won over the seeded welcome scaffold.
@@ -170,6 +180,15 @@ async function waitForProvisioning(
  * Check whether a workspace still exists on the terminal server.
  * If it doesn't, re-provision it automatically.
  * Returns the (possibly new) workspaceId.
+ *
+ * The reprepared flag is truthful: it is set only when the workspace
+ * that the re-prepare produced actually resolves on the terminal
+ * server afterwards. A re-prepare that merely "served the existing
+ * workspace" (the GitHub-mirror branch after a failed heal) leaves the
+ * descriptor unregistered — reporting reprepared there made callers
+ * retry a dead workspace ID and surface the terminal's 404. That case
+ * returns reprepared: false with healFailed: true instead, so callers
+ * can escalate to a full prepare.
  */
 export async function ensureWorkspaceAlive(
   projectId: string,
@@ -187,6 +206,13 @@ export async function ensureWorkspaceAlive(
   const project = await getProject(projectId, userId);
   if (!project?.workspaceId) {
     throw new Error("Workspace recovery failed: no workspace ID after re-preparation");
+  }
+
+  // Verify the re-prepare actually restored a live workspace before
+  // claiming it did (see the contract note above).
+  const verified = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+  if (!verified) {
+    return { workspaceId: project.workspaceId, reprepared: false, healFailed: true };
   }
   const recovered: RecoveredWorkspace = { workspaceId: project.workspaceId, reprepared: true };
 
