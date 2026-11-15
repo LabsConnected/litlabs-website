@@ -60,11 +60,14 @@ async function postHandler(req: NextRequest) {
   const rawAgentSlug = body.activeAgentSlug;
   const activeAgentSlug: AgentSlug = isValidAgentSlug(rawAgentSlug as string) ? rawAgentSlug as AgentSlug : "litt";
 
-  // Empty-conversation hygiene: a bare "New Chat" (no explicit title)
-  // focuses an existing empty, untitled conversation in this project
-  // instead of minting another record. Explicitly titled creations
-  // always create.
-  if (title === null) {
+  // Empty-conversation hygiene: an implicit creation (no explicit
+  // title) focuses an existing empty, untitled conversation in this
+  // project instead of minting another record. Explicitly titled
+  // creations always create — and so does an explicit New Chat click
+  // (forceNew): reuse there can hand back the conversation already on
+  // screen, which reads as a dead button (live proof 2026-11-15).
+  const forceNew = body.forceNew === true;
+  if (title === null && !forceNew) {
     const reusable = await findReusableEmptyConversation(userId, projectId, { activeAgentSlug });
     if (reusable) {
       studioLog("conversation:reused", {

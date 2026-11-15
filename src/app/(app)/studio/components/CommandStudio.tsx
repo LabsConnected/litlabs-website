@@ -3282,7 +3282,7 @@ function CommandStudioContent() {
       }
       operatorBar={operatorBar}
       onNewChat={() => {
-        void conversation.createConversation();
+        void conversation.createConversation({ forceNew: true });
       }}
       onOpenPreview={() => summonBoardPanel("preview")}
       onOpenFiles={() => summonBoardPanel("files")}
@@ -3799,7 +3799,7 @@ function CommandStudioContent() {
           }}
           onDeployAction={handleDeployRequest}
           onClearChatAction={conversation.clear}
-          onNewChatAction={studioShellActive ? undefined : () => { void conversation.createConversation(); }}
+          onNewChatAction={studioShellActive ? undefined : () => { void conversation.createConversation({ forceNew: true }); }}
           onDeleteChatAction={() => { void conversation.deleteConversation(); }}
           onRenameChatAction={() => {
             const title = window.prompt("Rename conversation:", conversation.conversations.find((c) => c.id === conversation.selectedConversationId)?.title ?? "");
