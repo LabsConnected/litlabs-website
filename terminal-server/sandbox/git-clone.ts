@@ -170,6 +170,13 @@ export async function cloneInSandbox(
  * Point `origin` at the clean URL and set `gc.auto 0` in the sandbox
  * repo. Used after a fresh clone and after a volume mirror (where
  * the .git snapshot may carry an older remote form).
+ *
+ * Every step's exit code is checked and a failure throws
+ * SandboxCloneError: a sanitize that silently did not happen leaves
+ * the repo in exactly the state §4.3 verification exists to catch —
+ * or worse, one it cannot see (gc.auto). Callers treat
+ * SandboxCloneError as fail-closed (prepare destroys the sandbox),
+ * which is the right posture for a repo whose hygiene is unproven.
  */
 export async function sanitizeRemote(
   provider: SandboxProvider,
@@ -177,16 +184,61 @@ export async function sanitizeRemote(
   input: CloneTarget & { sandboxRoot: string },
 ): Promise<void> {
   const url = cleanCloneUrl(input.owner, input.repo);
-  await provider.execute(sandboxId, {
+  const cwd = input.sandboxRoot;
+
+  // FIRST, before any repo-touching git command: register the
+  // sandbox root as a safe directory in the command user's global
+  // config. The mirror path writes the tree (including .git) into
+  // the sandbox through the provider's privileged files API, so the
+  // files land owned by a different user than the one git commands
+  // run as — and git >= 2.35.2 refuses such a repo outright
+  // ("detected dubious ownership", exit 128) for every command,
+  // including the two below and the §4.3 verification read. The
+  // registration lives in the command user's global config (HOME is
+  // pinned to the sandbox home, outside the synced tree), never in
+  // .git/config, so the verification posture is unchanged. A fresh
+  // clone is owned by the command user already; the registration is
+  // harmless there and keeps both paths identical.
+  const safeDirectory = await provider.execute(sandboxId, {
+    command: buildShellCommand([
+      "git", "config", "--global", "--add", "safe.directory", cwd,
+    ]),
+    cwd,
+    timeoutMs: 30_000,
+  });
+  if (safeDirectory.exitCode !== 0) {
+    throw new SandboxCloneError(
+      `Failed to register safe.directory for ${input.owner}/${input.repo} ` +
+        `(exit ${safeDirectory.exitCode}): ` +
+        (safeDirectory.stderr || safeDirectory.stdout).trim(),
+    );
+  }
+
+  const setUrl = await provider.execute(sandboxId, {
     command: buildShellCommand(["git", "remote", "set-url", "origin", url]),
-    cwd: input.sandboxRoot,
+    cwd,
     timeoutMs: 30_000,
   });
-  await provider.execute(sandboxId, {
+  if (setUrl.exitCode !== 0) {
+    throw new SandboxCloneError(
+      `Failed to point origin at the clean URL for ${input.owner}/${input.repo} ` +
+        `(exit ${setUrl.exitCode}): ` +
+        (setUrl.stderr || setUrl.stdout).trim(),
+    );
+  }
+
+  const gcAuto = await provider.execute(sandboxId, {
     command: buildShellCommand(["git", "config", "gc.auto", "0"]),
-    cwd: input.sandboxRoot,
+    cwd,
     timeoutMs: 30_000,
   });
+  if (gcAuto.exitCode !== 0) {
+    throw new SandboxCloneError(
+      `Failed to set gc.auto 0 for ${input.owner}/${input.repo} ` +
+        `(exit ${gcAuto.exitCode}): ` +
+        (gcAuto.stderr || gcAuto.stdout).trim(),
+    );
+  }
 }
 
 /**
