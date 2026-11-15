@@ -41,6 +41,11 @@ import {
   type SandboxWorkspaceExecutor,
 } from "../sandbox/workspace-executor";
 import { buildShellCommand, requireFileTransfer } from "../sandbox/sync";
+import {
+  readVolumeInstallStamp,
+  sandboxInstallIsFresh,
+  writeSandboxInstallStamp,
+} from "../sandbox/install-stamp";
 import type { WorkspaceDescriptor } from "../workspace/WorkspaceManager";
 import {
   PreviewError,
@@ -61,7 +66,18 @@ const LOG_PATH = `${PREVIEW_TMP_DIR}/preview.log`;
 const PID_PATH = `${PREVIEW_TMP_DIR}/preview.pid`;
 
 const HEALTH_PROBE_INTERVAL_MS = 1000;
-const HEALTH_PROBE_TIMEOUT_MS = 60_000;
+/**
+ * Readiness window for a cold sandbox dev server. Was 60s; the
+ * production preview failures of 2026-11-14 showed the system's own
+ * budgets are the binding constraint — the web grants a preview
+ * start 120s (TERMINAL_TIMEOUTS.startPreview) and the sandbox runs
+ * at 1 vCPU / 1024 MB (DEFAULT_SANDBOX_LIMITS), where a Next.js dev
+ * server's cold boot plus first-route compilation has to fit. The
+ * probe runs in the background after the start response, so a wider
+ * window costs the user nothing but truth: a slow-but-alive server
+ * now reaches "ready" instead of a false "did not become healthy".
+ */
+const HEALTH_PROBE_TIMEOUT_MS = 120_000;
 /** Session extension granted while a sandbox preview is in use. */
 const PREVIEW_SESSION_EXTENSION_MS = 120 * 60_000;
 
@@ -115,11 +131,25 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
   const sandboxId = ensured.sandboxId;
   const transfer = requireFileTransfer(provider);
 
-  // Install inside the sandbox when node_modules is absent THERE
-  // (the volume's copy, if any, is sandbox-only and never synced).
+  // Install inside the sandbox when its dependencies are not FRESH
+  // there: node_modules absent, or present but installed against a
+  // different lockfile than the tree now carries (install-stamp.ts).
+  // The volume's own node_modules, if any, is sandbox-only and never
+  // synced, so it proves nothing either way. A fresh stamp skips the
+  // install outright; a stale one re-runs it — pnpm's incremental
+  // machinery (existing node_modules + store) keeps that cheap. When
+  // no stamp can be computed (no package.json on the volume), fall
+  // back to the pre-stamp rule: node_modules presence decides.
   const rootEntries = await transfer.listDir(sandboxId, SANDBOX_WORKSPACE_ROOT);
   const hasNodeModules = rootEntries.some((e) => e.path === "node_modules" && e.type === "dir");
-  if (!hasNodeModules && args.packageManager !== "npx") {
+  const installStamp = readVolumeInstallStamp(ws.root);
+  const depsFresh =
+    hasNodeModules &&
+    (installStamp === null || (await sandboxInstallIsFresh(provider, sandboxId, installStamp)));
+  if (depsFresh) {
+    pushPreviewLog(runtime, `[preview] Dependencies in sandbox are fresh — skipping install`);
+  }
+  if (!depsFresh && args.packageManager !== "npx") {
     pushPreviewLog(runtime, `[preview] Installing dependencies in sandbox (${args.packageManager})`);
     const install = await provider.execute(sandboxId, {
       command: buildShellCommand([args.packageManager, "install", "--prefer-offline"]),
@@ -153,6 +183,10 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
         exitCode: install.exitCode,
       });
     }
+    // Record what this install resolved, so the next start can skip
+    // straight past it while the lockfile is unchanged (best effort —
+    // a failed write only costs a redundant re-check next time).
+    await writeSandboxInstallStamp(provider, sandboxId, installStamp);
   }
 
   // The run script carries the command ONLY — no env, no secrets.
