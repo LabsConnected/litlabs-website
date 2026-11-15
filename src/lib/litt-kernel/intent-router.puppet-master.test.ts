@@ -47,16 +47,21 @@ describe("puppet-master prompt — AUTO classifier routing", () => {
     expect(result.requiresExecution).toBe(true);
   });
 
-  // ── Media/design requests must stay in `create` (not execution) ──
+  // ── Media/design requests stay in `create` (never build) ──
+  // Behavior changed 2026-11-15 (image-gen refusal diagnosis): bare
+  // media asks previously took the text-only lane, whose model has no
+  // tools and declined generation requests in prose. They now carry
+  // requiresExecution=true so the turn reaches the V2 tool lane where
+  // image.generate lives. Mode stays create.
   it.each([
     "I want an image of a happy dog",
     "I want a logo",
     "generate an image",
     "design a poster",
-  ])("keeps %j in 'create' mode without execution", (msg) => {
+  ])("keeps %j in 'create' mode with execution (media generation)", (msg) => {
     const result = classifyIntent(msg);
     expect(result.mode).toBe("create");
-    expect(result.requiresExecution).toBe(false);
+    expect(result.requiresExecution).toBe(true);
   });
 
   // ── No false positives on lookalike phrasings ──

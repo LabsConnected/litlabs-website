@@ -1021,9 +1021,16 @@ export default function StudioPreviewPanel({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-        // Starting a dev server can take a while (workspace provisioning);
-        // 2 minutes is generous, but it must still terminate.
-        signal: AbortSignal.timeout(120000),
+        // Starting a dev server can take a while: the web route behind
+        // this POST can legitimately spend 180s provisioning plus 120s
+        // starting (TERMINAL_TIMEOUTS) back-to-back — a 300s worst
+        // case. The panel budget must outlast that: at 120s the
+        // browser aborted starts the terminal was still completing,
+        // and the rejection surfaced verbatim as "signal timed out"
+        // (live failure 2026-11-15). 330s covers the route's budgets
+        // plus its own non-fetch work (auth, DB writes, secrets) and
+        // still terminates a start the route itself has given up on.
+        signal: AbortSignal.timeout(330000),
       });
       const payload = await response.json().catch(() => null) as PreviewPayload | null;
       if (!isCurrent()) return;

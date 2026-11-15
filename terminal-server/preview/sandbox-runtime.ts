@@ -78,7 +78,7 @@ const HEALTH_PROBE_INTERVAL_MS = 1000;
  * window costs the user nothing but truth: a slow-but-alive server
  * now reaches "ready" instead of a false "did not become healthy".
  */
-const HEALTH_PROBE_TIMEOUT_MS = 120_000;
+export const HEALTH_PROBE_TIMEOUT_MS = 120_000;
 /** Session extension granted while a sandbox preview is in use. */
 const PREVIEW_SESSION_EXTENSION_MS = 120 * 60_000;
 

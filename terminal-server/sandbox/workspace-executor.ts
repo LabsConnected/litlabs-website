@@ -636,12 +636,16 @@ export class SandboxWorkspaceExecutor {
    * reading package.json from the volume.
    */
   private async installInSandbox(descriptor: WorkspaceDescriptor): Promise<void> {
-    await this.withLock(descriptor.workspaceId, async () => {
+    // Phase 1 (locked): resolve the binding and decide whether an
+    // install is needed at all. The lock is held only for this
+    // bookkeeping — deliberately NOT across the install exec in
+    // phase 2 (see there).
+    const plan = await this.withLock(descriptor.workspaceId, async () => {
       const ws = this.fresh(descriptor);
       const binding = ws.sandbox;
-      if (!binding?.sandboxId) return;
+      if (!binding?.sandboxId) return null;
       const sandboxId = binding.sandboxId;
-      if (!existsSync(join(ws.root, "package.json"))) return;
+      if (!existsSync(join(ws.root, "package.json"))) return null;
 
       // Skip when the sandbox's dependencies are FRESH for the
       // volume's current lockfile (install-stamp.ts). The stamp
@@ -652,63 +656,90 @@ export class SandboxWorkspaceExecutor {
       // dependencies, and one whose earlier install silently failed
       // (no stamp was written) retries here instead of looking done.
       const installStamp = readVolumeInstallStamp(ws.root);
-      if (await sandboxInstallIsFresh(this.provider, sandboxId, installStamp)) return;
+      if (await sandboxInstallIsFresh(this.provider, sandboxId, installStamp)) return null;
+      return { sandboxId, root: ws.root, installStamp };
+    });
+    if (!plan) return;
+    const { sandboxId, root, installStamp } = plan;
 
-      // The install writes into the tree (pnpm's store probe file,
-      // node_modules, the lockfile) as the non-root command user —
-      // make sure the tree lets it (see the helper for the EACCES
-      // this prevents).
-      await ensureSandboxWorkspaceWritable(this.provider, sandboxId);
+    // Phase 2 (UNLOCKED): the long sandbox work — the writable-tree
+    // chmod, the install exec (300s budget), and the TypeScript
+    // pre-install. This used to run inside the per-workspace lock,
+    // so a background install queued every other operation for the
+    // workspace (preview start, the exec route, forward pushes)
+    // behind up to 300s+ of install — the preview-start timeout of
+    // 2026-11-15 (PREVIEW-TIMEOUT-DIAGNOSIS-2026-11-15.md, fix #1).
+    // Running it unlocked is safe: preview start's own freshness
+    // check tolerates a concurrent or missing install (it installs
+    // inline if not fresh), and the stamp comparison makes a
+    // duplicate install benign. The binding is re-validated under
+    // the lock in phase 3 before anything is stamped or synced back.
 
-      const pkg = JSON.parse(readFileSync(join(ws.root, "package.json"), "utf-8")) as {
-        packageManager?: string;
-        devDependencies?: Record<string, string>;
-      };
-      const pm = pkg.packageManager?.startsWith("pnpm") ? "pnpm"
-        : pkg.packageManager?.startsWith("yarn") ? "yarn"
-        : existsSync(join(ws.root, "pnpm-lock.yaml")) ? "pnpm"
-        : existsSync(join(ws.root, "yarn.lock")) ? "yarn"
-        : "npm";
+    // The install writes into the tree (pnpm's store probe file,
+    // node_modules, the lockfile) as the non-root command user —
+    // make sure the tree lets it (see the helper for the EACCES
+    // this prevents).
+    await ensureSandboxWorkspaceWritable(this.provider, sandboxId);
 
-      const env = {
-        NODE_ENV: "development",
-        NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
-        HOME: SANDBOX_HOME_DIR,
-      };
-      let installExitCode: number | null = null;
-      try {
-        const installResult = await this.provider.execute(sandboxId, {
-          command: buildShellCommand([pm, "install", "--prefer-offline"]),
-          cwd: SANDBOX_WORKSPACE_ROOT,
-          timeoutMs: 300_000,
-          env,
-        });
-        installExitCode = installResult.exitCode;
-      } catch {
-        // Non-fatal — preview start retries the install (§4.1 step 9).
-        return;
-      }
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8")) as {
+      packageManager?: string;
+      devDependencies?: Record<string, string>;
+    };
+    const pm = pkg.packageManager?.startsWith("pnpm") ? "pnpm"
+      : pkg.packageManager?.startsWith("yarn") ? "yarn"
+      : existsSync(join(root, "pnpm-lock.yaml")) ? "pnpm"
+      : existsSync(join(root, "yarn.lock")) ? "yarn"
+      : "npm";
+
+    const env = {
+      NODE_ENV: "development",
+      NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
+      HOME: SANDBOX_HOME_DIR,
+    };
+    let installExitCode: number | null = null;
+    try {
+      const installResult = await this.provider.execute(sandboxId, {
+        command: buildShellCommand([pm, "install", "--prefer-offline"]),
+        cwd: SANDBOX_WORKSPACE_ROOT,
+        timeoutMs: 300_000,
+        env,
+      });
+      installExitCode = installResult.exitCode;
+    } catch {
+      // Non-fatal — preview start retries the install (§4.1 step 9).
+      return;
+    }
+
+    if (existsSync(join(root, "tsconfig.json")) && pkg.devDependencies?.typescript == null) {
+      const addArgs = pm === "pnpm"
+        ? ["add", "--save-dev", "--save-exact", "--ignore-workspace-root-check",
+           "typescript", "@types/react", "@types/node"]
+        : ["add", "--save-dev", "--save-exact",
+           "typescript", "@types/react", "@types/node"];
+      await this.provider.execute(sandboxId, {
+        command: buildShellCommand([pm, ...addArgs]),
+        cwd: SANDBOX_WORKSPACE_ROOT,
+        timeoutMs: 120_000,
+        env,
+      }).catch(() => {
+        // Non-fatal — the dev server attempts its own auto-install.
+      });
+    }
+
+    // Phase 3 (locked): the bookkeeping the lock exists for — the
+    // freshness stamp and the sync-back — against the CURRENT
+    // binding. If the binding moved while the install ran unlocked
+    // (the sandbox was destroyed and recreated, e.g. by a failed
+    // prepare), the install landed in a dead sandbox: stamp and
+    // sync nothing.
+    await this.withLock(descriptor.workspaceId, async () => {
+      const ws = this.fresh(descriptor);
+      if (!ws.sandbox || ws.sandbox.sandboxId !== sandboxId) return;
       // Only a clean install earns the freshness stamp; a failed one
       // leaves the sandbox unstamped so preview start retries it and
       // surfaces the failure, exactly as before.
       if (installExitCode === 0) {
         await writeSandboxInstallStamp(this.provider, sandboxId, installStamp);
-      }
-
-      if (existsSync(join(ws.root, "tsconfig.json")) && pkg.devDependencies?.typescript == null) {
-        const addArgs = pm === "pnpm"
-          ? ["add", "--save-dev", "--save-exact", "--ignore-workspace-root-check",
-             "typescript", "@types/react", "@types/node"]
-          : ["add", "--save-dev", "--save-exact",
-             "typescript", "@types/react", "@types/node"];
-        await this.provider.execute(sandboxId, {
-          command: buildShellCommand([pm, ...addArgs]),
-          cwd: SANDBOX_WORKSPACE_ROOT,
-          timeoutMs: 120_000,
-          env,
-        }).catch(() => {
-          // Non-fatal — the dev server attempts its own auto-install.
-        });
       }
       // The install changed the sandbox tree (package.json/lockfile
       // may have moved): sync back so the volume stays the record.
