@@ -14,6 +14,7 @@ export const SANDBOX_ENV_ALLOWLIST = [
   "TERM",
   "LANG",
   "SHELL",
+  "COREPACK_HOME",
   "LITTREE_USER_ID",
   "LITTREE_PROJECT_ID",
   "LITTREE_WORKSPACE_ID",
@@ -38,6 +39,7 @@ export function buildSandboxEnv(input: {
   shell?: string;
   term?: string;
   lang?: string;
+  corepackHome?: string;
 }): Record<string, string> {
   const env: Record<string, string> = {};
 
@@ -46,6 +48,16 @@ export function buildSandboxEnv(input: {
   env.LITTREE_PROJECT_ID = input.projectId;
   env.LITTREE_WORKSPACE_ID = input.workspaceId;
   env.LITTREE_SANDBOX_ID = input.sandboxId;
+
+  // The sandbox template prepares pnpm into a shared Corepack home
+  // (/usr/local/share/corepack, terminal-server/sandbox.Dockerfile).
+  // Command processes only see the environment composed here — the
+  // Dockerfile's ENV line does not reach them — so without this entry
+  // Corepack resolves its cache under $HOME, finds nothing, and
+  // downloads pnpm from the registry at runtime (the 2026-11-14
+  // preview install failure, exit 243). Mirror of the terminal-side
+  // copy in terminal-server/sandbox/env.ts; keep the two in sync.
+  env.COREPACK_HOME = input.corepackHome ?? "/usr/local/share/corepack";
 
   // Standard variables with safe defaults
   env.HOME = input.home ?? "/workspace";
