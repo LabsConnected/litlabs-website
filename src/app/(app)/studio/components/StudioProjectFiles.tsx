@@ -213,6 +213,11 @@ export default function StudioProjectFiles({
   // because `preparing` toggling recreated loadDirectory and re-fired
   // the load effect. After the one attempt the load error stands and
   // the manual Prepare button (prepareWorkspace) is the retry path.
+  // The budget bounds AUTOMATIC recovery only: an explicit user retry
+  // (Refresh, or the load after Prepare) deletes the project's entry
+  // first, so a manual retry is a real retry — before that, a failure
+  // that consumed the budget during an outage left Refresh standing
+  // on the same error and only a full remount ever retried.
   const autoPrepareAttemptedRef = useRef<Set<string>>(new Set());
 
   const dirty = activePath !== null && content !== originalContent;
@@ -430,6 +435,11 @@ export default function StudioProjectFiles({
       }
       if (outcome.kind === "failed") throw new Error(outcome.message);
       onWorkspacePreparedRef.current?.();
+      // User-initiated retry: reset the automatic prepare budget so
+      // the load below, if it still fails recoverably (registry still
+      // settling), gets one genuine automatic attempt instead of
+      // standing on a budget an earlier failure already consumed.
+      autoPrepareAttemptedRef.current.delete(projectId);
       await loadDirectory(".");
     } catch (prepareError) {
       setError(prepareError instanceof Error ? prepareError.message : "Workspace preparation failed");
@@ -439,10 +449,17 @@ export default function StudioProjectFiles({
   }, [loadDirectory, preparing, projectId, runPrepare]);
 
   const refresh = useCallback(async () => {
+    // Explicit Refresh is a user retry: hand back this project's
+    // one-shot automatic prepare budget before loading, so a load
+    // that fails recoverably runs a real recovery attempt instead of
+    // re-surfacing the error a previous attempt already consumed.
+    // The attempt the budget enables re-consumes it, so automatic
+    // loop protection is unchanged.
+    if (projectId) autoPrepareAttemptedRef.current.delete(projectId);
     setEntries({});
     setExpanded(new Set());
     await loadDirectory(".");
-  }, [loadDirectory]);
+  }, [loadDirectory, projectId]);
 
   // Re-read a file's content from disk without the dirty-confirm gate.
   // Used when an external change (agent/canvas) lands on the open file.

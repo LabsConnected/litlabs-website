@@ -135,6 +135,42 @@ describe("StudioProjectFiles", () => {
     expect(screen.queryByText(/could not be re-prepared automatically/i)).toBeNull();
   });
 
+  it("Refresh resets the one-shot auto-prepare budget so a manual retry genuinely re-prepares", async () => {
+    let prepareCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/workspace/prepare")) {
+        prepareCalls += 1;
+        return new Response(JSON.stringify({ workspaceStatus: "ready", workspaceId: "ws-1" }), { status: 200 });
+      }
+      // The outage window, keyed on prepares rather than fetch counts
+      // (the mount effect can re-fire loads as `preparing` toggles):
+      // every listing fails recoverably until the SECOND prepare has
+      // run — the first (automatic) prepare does not heal the outage,
+      // the Refresh-triggered one does.
+      if (prepareCalls < 2) {
+        return new Response(JSON.stringify({ error: "Workspace not found" }), { status: 503 });
+      }
+      return new Response(JSON.stringify({ entries: [{ name: "index.html", type: "file", size: 42 }] }), { status: 200 });
+    });
+
+    render(<StudioProjectFiles projectId="project-1" repositoryName="owner/repo" branch="main" workspaceStatus="ready" writeAccess />);
+
+    // Mount load fails → ONE automatic prepare → retry still fails →
+    // the error stands and the per-mount budget is spent.
+    await screen.findByText(/could not be re-prepared automatically/i, undefined, { timeout: 5000 });
+    expect(prepareCalls).toBe(1);
+
+    // Without a budget reset, Refresh would re-surface the same error
+    // with no new prepare (the live-proof defect: only a fresh Studio
+    // load ever retried). With the reset, the failing load runs a
+    // SECOND prepare and the panel heals.
+    fireEvent.click(screen.getByRole("button", { name: /refresh project files/i }));
+
+    await screen.findByText("index.html", undefined, { timeout: 5000 });
+    expect(prepareCalls).toBe(2);
+  });
+
   it("keeps entry names laid out in narrow panels (container-scoped split, row actions out of flow)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ entries: [{ name: "assets", type: "folder" }, { name: "index.html", type: "file", size: 128 }] }), { status: 200 }),

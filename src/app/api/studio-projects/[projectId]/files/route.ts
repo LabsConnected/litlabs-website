@@ -177,6 +177,21 @@ export async function GET(
               "X-Workspace-Id": recovered.workspaceId,
             },
           });
+        } else if (recovered.healFailed) {
+          // The bounded heal ran but did not restore a live workspace
+          // (ensureWorkspaceAlive reports that truthfully now — the
+          // mirror heal failed and merely served the existing, dead
+          // ID). Escalate ONCE to a full prepare instead of passing
+          // the terminal's 404 through to the user.
+          const escalatedId = await reprepareWorkspace(projectId, userId);
+          lastRecovery = { workspaceId: escalatedId, reprepared: true };
+          const newToken = createTerminalToken(userId);
+          resp = await upstreamTerminalFetch(upstreamUrl, {
+            headers: {
+              Authorization: `Bearer ${newToken.token}`,
+              "X-Workspace-Id": escalatedId,
+            },
+          });
         }
       } catch (recoveryErr) {
         const msg = recoveryErr instanceof Error ? recoveryErr.message : "Workspace recovery failed";
@@ -359,6 +374,21 @@ export async function POST(
         const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
         if (recovered.reprepared) {
           workspaceId = recovered.workspaceId;
+          token = createTerminalToken(userId);
+          resp = await upstreamTerminalFetch(upstreamUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token.token}`,
+              "X-Workspace-Id": workspaceId,
+            },
+            body: forwardBody,
+          });
+        } else if (recovered.healFailed) {
+          // Same escalation as the GET path: the bounded heal ran but
+          // restored nothing live, so run one full prepare and retry
+          // against its workspace instead of surfacing the 404.
+          workspaceId = await reprepareWorkspace(projectId, userId);
           token = createTerminalToken(userId);
           resp = await upstreamTerminalFetch(upstreamUrl, {
             method: "POST",

@@ -35,11 +35,12 @@ vi.mock("@/lib/terminal-config", () => ({
 
 import { auth } from "@/lib/auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
-import { ensureWorkspaceAlive } from "@/lib/studio/workspace-recovery";
+import { ensureWorkspaceAlive, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
 
 const authMock = vi.mocked(auth);
 const verifyMock = vi.mocked(verifyProjectWorkspace);
 const recoverMock = vi.mocked(ensureWorkspaceAlive);
+const reprepareMock = vi.mocked(reprepareWorkspace);
 
 function makeParams(projectId: string) {
   return { params: Promise.resolve({ projectId }) };
@@ -179,6 +180,69 @@ describe("studio-projects files route — GET workspaceRecovery signal", () => {
       contentLoss: true,
       survivingDeploymentId: "dep-9",
     });
+  });
+
+  it("escalates ONCE to a full prepare when the heal ran but restored nothing live", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(upstream(404, { error: "Workspace not found" }))
+      .mockResolvedValueOnce(upstream(200, { files: [{ name: "index.html" }], path: "." }));
+    vi.stubGlobal("fetch", fetchMock);
+    // The bounded heal attempted a re-prepare but the descriptor still
+    // does not resolve (mirror heal failed, dead ID served). The route
+    // must NOT retry the dead ID and pass the 404 through — it
+    // escalates to one full prepare and retries against its result.
+    recoverMock.mockResolvedValue({ reprepared: false, healFailed: true, workspaceId: "ws-1" } as never);
+    reprepareMock.mockResolvedValue("ws-2" as never);
+
+    const res = await getList();
+
+    expect(res.status).toBe(200);
+    expect(reprepareMock).toHaveBeenCalledTimes(1);
+    expect(reprepareMock).toHaveBeenCalledWith("p1", "user-1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const retryHeaders = (fetchMock.mock.calls[1][1] as { headers: Record<string, string> }).headers;
+    expect(retryHeaders["X-Workspace-Id"]).toBe("ws-2");
+    const body = await res.json();
+    expect(body.files).toEqual([{ name: "index.html" }]);
+    expect(body.workspaceRecovery).toEqual({ reprepared: true });
+  });
+
+  it("does NOT escalate when no heal ran (workspace alive per the internal check)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(upstream(404, { error: "Workspace not found" }));
+    vi.stubGlobal("fetch", fetchMock);
+    recoverMock.mockResolvedValue({ reprepared: false, workspaceId: "ws-1" } as never);
+
+    const res = await getList();
+
+    expect(res.status).toBe(404);
+    expect(reprepareMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("POST read: escalates to a full prepare on a failed heal, same as GET", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(upstream(404, { error: "Workspace not found" }))
+      .mockResolvedValueOnce(upstream(200, { content: "<html/>" }));
+    vi.stubGlobal("fetch", fetchMock);
+    recoverMock.mockResolvedValue({ reprepared: false, healFailed: true, workspaceId: "ws-1" } as never);
+    reprepareMock.mockResolvedValue("ws-2" as never);
+
+    const res = await POST(
+      new Request("https://x.test/api/studio-projects/p1/files", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "read", path: "index.html" }),
+      }) as unknown as import("next/server").NextRequest,
+      makeParams("p1"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(reprepareMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("leaves a listing that needed no recovery byte-identical (no workspaceRecovery field)", async () => {
