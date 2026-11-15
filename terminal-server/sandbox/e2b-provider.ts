@@ -100,6 +100,7 @@ export interface E2bSandboxHandle {
       timeoutMs?: number;
       stdin?: string;
       envs?: Record<string, string>;
+      user?: string;
     },
   ): Promise<E2bCommandResult>;
   /** Host (no scheme) for an exposed port, per the SDK's getHost(). */
@@ -229,6 +230,7 @@ function wrapSdkSandbox(sbx: E2bSdkSandboxLike): E2bSandboxHandle {
           timeoutMs: opts.timeoutMs,
           stdin: opts.stdin,
           envs: opts.envs,
+          user: opts.user,
         });
         return { exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr };
       } catch (err) {
@@ -519,6 +521,7 @@ export class E2bSandboxProvider implements SandboxProvider {
       timeoutMs: input.timeoutMs ?? 60_000,
       stdin: input.stdin,
       envs,
+      user: input.user,
     });
     entry.instance.lastActiveAt = this.isoNow();
     return {

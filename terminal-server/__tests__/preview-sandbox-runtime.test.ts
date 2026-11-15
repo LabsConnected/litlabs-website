@@ -37,6 +37,7 @@ interface CapturedExecute {
   command: string;
   cwd?: string;
   env?: Record<string, string>;
+  user?: string;
 }
 
 function makeRuntime(): PreviewRuntime {
@@ -81,7 +82,12 @@ function makeSupport(installExitCode = 0): {
     execute: vi.fn(
       async (
         _sandboxId: string,
-        input: { command: string; cwd?: string; env?: Record<string, string> },
+        input: {
+          command: string;
+          cwd?: string;
+          env?: Record<string, string>;
+          user?: string;
+        },
       ) => {
         executions.push(input);
         const isInstall = input.command.includes("install");
@@ -201,6 +207,39 @@ describe("startSandboxPreview — HOME pin", () => {
     expect(install!.env?.HOME).toBe(SANDBOX_HOME_DIR);
     // No launch is attempted after a failed install.
     expect(executions.some((e) => e.command.includes("setsid nohup"))).toBe(false);
+  });
+
+  // Regression (live failure 2026-11-15): with the HOME pin in place
+  // the install got further and died at pnpm's FIRST write into the
+  // project root — its store-location probe file
+  // `/workspace/_tmp_<pid>_<hash>` — because /workspace is root-owned
+  // 755 in the template and the install runs as the non-root command
+  // user (EACCES, exit 243). The runtime must open the tree up as
+  // root BEFORE the install runs, and the install itself must keep
+  // running as the default user.
+  it("makes the workspace tree writable as root BEFORE the install execute", async () => {
+    const { support, executions } = makeSupport();
+    const runtime = makeRuntime();
+
+    await startSandboxPreview({
+      support,
+      runtime,
+      ws: WS,
+      framework: "custom",
+      command: "node server.js --port 3000",
+      packageManager: "pnpm",
+      travelingEnv: {},
+      probe: healthyProbe,
+    });
+
+    const chmodIdx = executions.findIndex((e) => e.command.includes("chmod"));
+    const installIdx = executions.findIndex((e) => e.command.includes("install"));
+    expect(chmodIdx, "a chmod execute call").toBeGreaterThanOrEqual(0);
+    expect(installIdx, "an install execute call").toBeGreaterThanOrEqual(0);
+    expect(chmodIdx).toBeLessThan(installIdx);
+    expect(executions[chmodIdx].command).toContain("chmod -R a+rwX /workspace");
+    expect(executions[chmodIdx].user).toBe("root");
+    expect(executions[installIdx].user).toBeUndefined();
   });
 });
 

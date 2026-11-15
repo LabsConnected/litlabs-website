@@ -91,6 +91,17 @@ export interface ExecuteCommandInput {
    * the web-side contract (src/lib/terminal-v1) per the seam rule.
    */
   env?: Record<string, string>;
+  /**
+   * Run this command as the named sandbox user instead of the
+   * provider's default (non-root) command user. Reserved for
+   * lifecycle repairs that must act on the workspace tree itself —
+   * see ensureSandboxWorkspaceWritable: the template creates
+   * /workspace root-owned 755 and the mirrored tree's ownership is
+   * the transfer layer's, so only root can guarantee the tree is
+   * writable by the command user whose installs and dev servers
+   * must write into it. Ordinary command execution never sets this.
+   */
+  user?: string;
 }
 
 export interface ExecuteCommandResult {

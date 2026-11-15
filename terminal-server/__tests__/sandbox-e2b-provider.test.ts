@@ -91,10 +91,19 @@ class FakeE2bHandle implements E2bSandboxHandle {
     }
   }
 
+  readonly runCommandUsers: Array<string | undefined> = [];
+
   async runCommand(
     command: string,
-    opts: { cwd?: string; timeoutMs?: number; stdin?: string; envs?: Record<string, string> },
+    opts: {
+      cwd?: string;
+      timeoutMs?: number;
+      stdin?: string;
+      envs?: Record<string, string>;
+      user?: string;
+    },
   ) {
+    this.runCommandUsers.push(opts.user);
     const env = { ...this.createEnvs, ...(opts.envs ?? {}) };
     const printenv = command.match(/^printenv (\S+)$/);
     if (printenv) {
@@ -222,6 +231,19 @@ describe("E2bSandboxProvider — lifecycle", () => {
     expect(echo.exitCode).toBe(0);
     expect(echo.stdout).toBe("hello\n");
     expect(echo.durationMs).toBeGreaterThanOrEqual(0);
+
+    // Per-command user threading (preview EACCES fix): the lifecycle
+    // writability repair runs as root; ordinary commands must keep
+    // arriving with NO user so the SDK's default (non-root) user
+    // still applies to them.
+    const handle = client.handles.get(instance.sandboxId)!;
+    await provider.execute(instance.sandboxId, {
+      command: "chmod -R a+rwX /workspace",
+      user: "root",
+    });
+    expect(handle.runCommandUsers.at(-1)).toBe("root");
+    await provider.execute(instance.sandboxId, { command: "echo plain" });
+    expect(handle.runCommandUsers.at(-1)).toBeUndefined();
 
     const fail = await provider.execute(instance.sandboxId, { command: "false" });
     expect(fail.exitCode).toBe(1);
