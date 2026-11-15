@@ -54,6 +54,37 @@ export function resizedRect(start: BoardRect, edge: ResizeEdge, dx: number, dy: 
   return { x, y, width, height };
 }
 
+/** One resize handle (edge or corner strip). Its pointer handler is a
+ *  named function in this child's body: an inline arrow inside the
+ *  parent's render-time .map() trips react-hooks/refs, because the lint
+ *  rule cannot prove the closure only runs on pointer-down, while a
+ *  named handler in a component body is recognized event-handler scope.
+ *  Behavior is unchanged — the grab is forwarded with the handle's edge. */
+function ResizeHandle({
+  edge,
+  className,
+  testId,
+  onGrab,
+}: {
+  edge: ResizeEdge;
+  className: string;
+  testId: string;
+  onGrab: (edge: ResizeEdge, event: ReactPointerEvent) => void;
+}) {
+  const handlePointerDown = (event: ReactPointerEvent) => {
+    onGrab(edge, event);
+  };
+  return (
+    <div
+      data-testid={testId}
+      data-resize-edge={edge}
+      aria-hidden
+      className={`${className} touch-none`}
+      onPointerDown={handlePointerDown}
+    />
+  );
+}
+
 export interface BoardPanelProps {
   id: BoardPanelId;
   title: string;
@@ -165,6 +196,10 @@ export default function BoardPanel({
     window.addEventListener("pointercancel", onEnd);
   };
 
+  const handleResizeGrab = (edge: ResizeEdge, event: ReactPointerEvent) => {
+    beginSession("resize", event, edge);
+  };
+
   // Touch targets are at least 44×44 on phone-sized layouts (Finish
   // Spec): the header grows to 44px and its window buttons fill it.
   // Desktop keeps the compact 36px header / 24px buttons.
@@ -258,15 +293,14 @@ export default function BoardPanel({
             ["sw", "absolute bottom-0 left-0 h-3 w-3 cursor-nesw-resize"],
           ] as [ResizeEdge, string][]
         ).map(([edge, className]) => (
-          <div
+          <ResizeHandle
             key={edge}
-            data-testid={
+            edge={edge}
+            className={className}
+            testId={
               edge === "se" ? `board-panel-resize-${id}` : `board-panel-resize-${edge}-${id}`
             }
-            data-resize-edge={edge}
-            aria-hidden
-            className={`${className} touch-none`}
-            onPointerDown={(event) => beginSession("resize", event, edge)}
+            onGrab={handleResizeGrab}
           />
         ))}
     </section>
