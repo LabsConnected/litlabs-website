@@ -317,6 +317,7 @@ describe("workspace-recovery", () => {
       // working on the existing workspace — stale beats broken.
       vi.mocked(getProject).mockResolvedValue(
         fakeProject({
+          id: "proj-gh",
           sourceType: "github",
           githubInstallationId: 123,
           githubOwner: "LabsConnected",
@@ -350,10 +351,13 @@ describe("workspace-recovery", () => {
       // repo-workspace gate from that one DB field, so a transient
       // terminal blip (restart, canary-cycle gap) latched the whole
       // project into the gate until a re-prepare happened to complete.
-      // The mirror branch must retry the check once and then keep serving
-      // the existing workspace without touching the status.
+      // The mirror branch must retry the check once, make ONE best-effort
+      // heal attempt (preview-404 fix, 2026-11-14), and — when the heal
+      // also fails — keep serving the existing workspace without touching
+      // the status, exactly as #989 established.
       vi.mocked(getProject).mockResolvedValue(
         fakeProject({
+          id: "proj-gh",
           sourceType: "github",
           githubInstallationId: 123,
           githubOwner: "LabsConnected",
@@ -365,6 +369,9 @@ describe("workspace-recovery", () => {
       );
       // Both the first lookup and the retry miss the workspace.
       vi.mocked(getWorkspaceInternal).mockResolvedValue(null);
+      // The single heal attempt fails too (terminal still unavailable).
+      vi.mocked(getInstallationTokenForClone).mockResolvedValue("tok-123");
+      vi.mocked(prepareWorkspaceInternal).mockRejectedValue(new Error("terminal unavailable"));
 
       const result = await provisionWorkspaceForProject("proj-gh", "user-1");
 
@@ -384,7 +391,81 @@ describe("workspace-recovery", () => {
         expect.objectContaining({ workspaceStatus: "failed" }),
       );
       expect(claimProvisioningLock).not.toHaveBeenCalled();
-      expect(prepareWorkspaceInternal).not.toHaveBeenCalled();
+      // Exactly ONE heal attempt, carrying the stored adoption hints so
+      // the terminal re-registers the same workspace instead of cloning
+      // a second one.
+      expect(prepareWorkspaceInternal).toHaveBeenCalledTimes(1);
+      expect(prepareWorkspaceInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceType: "github",
+          projectId: "proj-gh",
+          existingWorkspaceId: "ws-gh",
+          existingRoot: "/data/ws-gh",
+        }),
+      );
+    });
+
+    it("heals a GitHub mirror workspace by re-preparing when its descriptor is lost", async () => {
+      // Preview-404 fix (2026-11-14): the terminal's boot reload can drop
+      // a workspace descriptor whose root is not visible at the load
+      // instant; the DB still says "ready", so the gate stays green while
+      // preview start 404s forever. When both liveness lookups miss, the
+      // mirror branch makes one re-prepare attempt with the stored
+      // adoption hints; on success the fresh id/root are persisted and
+      // returned, and the status is never demoted on the way.
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({
+          id: "proj-gh",
+          sourceType: "github",
+          githubInstallationId: 123,
+          githubOwner: "LabsConnected",
+          githubRepo: "litlabs-website",
+          workspaceId: "ws-gh",
+          workspaceRoot: "/data/ws-gh",
+          workspaceStatus: "ready",
+        }),
+      );
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(null);
+      vi.mocked(getInstallationTokenForClone).mockResolvedValue("tok-123");
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-healed", root: "/data/ws-healed", branch: "main" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await provisionWorkspaceForProject("proj-gh", "user-1");
+
+      expect(result).toBe("ws-healed");
+      expect(prepareWorkspaceInternal).toHaveBeenCalledTimes(1);
+      expect(prepareWorkspaceInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceType: "github",
+          projectId: "proj-gh",
+          existingWorkspaceId: "ws-gh",
+          existingRoot: "/data/ws-gh",
+          githubToken: "tok-123",
+        }),
+      );
+      // The healed workspace is persisted in the mirror-refresh shape.
+      expect(updateProjectWorkspace).toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({
+          workspaceId: "ws-healed",
+          workspaceStatus: "ready",
+          workspaceRoot: "/data/ws-healed",
+          workspaceError: null,
+        }),
+      );
+      expect(updateProjectWorkspace).not.toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({ workspaceStatus: "not_prepared" }),
+      );
+      expect(updateProjectWorkspace).not.toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({ workspaceStatus: "failed" }),
+      );
+      expect(claimProvisioningLock).not.toHaveBeenCalled();
     });
 
     it("recovers a GitHub mirror workspace when the liveness retry succeeds", async () => {
@@ -392,6 +473,7 @@ describe("workspace-recovery", () => {
       // the retry finds the workspace alive, the normal re-sync runs.
       vi.mocked(getProject).mockResolvedValue(
         fakeProject({
+          id: "proj-gh",
           sourceType: "github",
           githubInstallationId: 123,
           githubOwner: "LabsConnected",

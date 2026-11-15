@@ -15,13 +15,17 @@ describe("defaultBoardLayout", () => {
     expect(Object.keys(layout.panels).sort()).toEqual([...BOARD_PANEL_IDS].sort());
   });
 
-  it("website default opens Preview, Code and Terminal — chat is never a panel", () => {
+  it("website default opens Preview, Code, Terminal, Files, Health (Checks), Inspector (Changes/Browser) and Deploy — chat is never a panel", () => {
     const layout = defaultBoardLayout("website");
     expect(layout.panels.preview.open).toBe(true);
     expect(layout.panels.code.open).toBe(true);
     expect(layout.panels.terminal.open).toBe(true);
+    expect(layout.panels.files.open).toBe(true);
+    expect(layout.panels.health.open).toBe(true);
+    expect(layout.panels.inspector.open).toBe(true);
+    expect(layout.panels.deploy.open).toBe(true);
     expect(layout.panels.world.open).toBe(false);
-    expect(layout.panels.files.open).toBe(false);
+    expect(layout.panels.media.open).toBe(false);
   });
 
   it("game default opens the World panel and Media (project-type panel sets)", () => {
@@ -55,7 +59,7 @@ describe("tidyPanels", () => {
     const layout = defaultBoardLayout("website");
     const tidied = tidyPanels(layout.panels, { width: 1200, height: 800 });
     const visible = visiblePanels({ ...layout, panels: tidied });
-    expect(visible.length).toBe(3);
+    expect(visible.length).toBe(Object.values(layout.panels).filter((p) => p.open).length);
     for (const panel of visible) {
       expect(panel.rect.x).toBeGreaterThanOrEqual(0);
       expect(panel.rect.y).toBeGreaterThanOrEqual(0);
@@ -76,9 +80,14 @@ describe("tidyPanels", () => {
 
   it("leaves closed and minimized panels untouched and does not mutate input", () => {
     const layout = defaultBoardLayout("website");
-    const filesBefore = layout.panels.files;
+    // Media is closed in the website default; Health is open, so mark it
+    // minimized to cover the minimized case.
+    layout.panels.health = { ...layout.panels.health, minimized: true };
+    const mediaBefore = layout.panels.media;
+    const healthBefore = layout.panels.health;
     const tidied = tidyPanels(layout.panels, { width: 1200, height: 800 });
-    expect(tidied.files).toBe(filesBefore);
+    expect(tidied.media).toBe(mediaBefore);
+    expect(tidied.health).toBe(healthBefore);
     expect(layout.panels.preview.rect).toEqual({ x: 24, y: 24, width: 760, height: 520 });
   });
 
