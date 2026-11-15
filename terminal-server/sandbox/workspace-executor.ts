@@ -65,6 +65,11 @@ import {
   SandboxCloneVerificationError,
 } from "./git-clone";
 import {
+  readVolumeInstallStamp,
+  sandboxInstallIsFresh,
+  writeSandboxInstallStamp,
+} from "./install-stamp";
+import {
   getWorkspace,
   listAllWorkspaceDescriptors,
   managedWorkspaceId,
@@ -592,13 +597,16 @@ export class SandboxWorkspaceExecutor {
       const sandboxId = binding.sandboxId;
       if (!existsSync(join(ws.root, "package.json"))) return;
 
-      // Skip when the sandbox already has dependencies.
-      const probe = await this.provider.execute(sandboxId, {
-        command: "test -d node_modules",
-        cwd: SANDBOX_WORKSPACE_ROOT,
-        timeoutMs: 15_000,
-      }).catch(() => ({ exitCode: 1 }));
-      if (probe.exitCode === 0) return;
+      // Skip when the sandbox's dependencies are FRESH for the
+      // volume's current lockfile (install-stamp.ts). The stamp
+      // lives inside node_modules, so this also covers the old
+      // "node_modules exists" probe — and improves on it: a sandbox
+      // whose tree picked up a new lockfile since its install
+      // re-installs incrementally instead of running stale
+      // dependencies, and one whose earlier install silently failed
+      // (no stamp was written) retries here instead of looking done.
+      const installStamp = readVolumeInstallStamp(ws.root);
+      if (await sandboxInstallIsFresh(this.provider, sandboxId, installStamp)) return;
 
       const pkg = JSON.parse(readFileSync(join(ws.root, "package.json"), "utf-8")) as {
         packageManager?: string;
@@ -615,16 +623,24 @@ export class SandboxWorkspaceExecutor {
         NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
         HOME: SANDBOX_HOME_DIR,
       };
+      let installExitCode: number | null = null;
       try {
-        await this.provider.execute(sandboxId, {
+        const installResult = await this.provider.execute(sandboxId, {
           command: buildShellCommand([pm, "install", "--prefer-offline"]),
           cwd: SANDBOX_WORKSPACE_ROOT,
           timeoutMs: 300_000,
           env,
         });
+        installExitCode = installResult.exitCode;
       } catch {
         // Non-fatal — preview start retries the install (§4.1 step 9).
         return;
+      }
+      // Only a clean install earns the freshness stamp; a failed one
+      // leaves the sandbox unstamped so preview start retries it and
+      // surfaces the failure, exactly as before.
+      if (installExitCode === 0) {
+        await writeSandboxInstallStamp(this.provider, sandboxId, installStamp);
       }
 
       if (existsSync(join(ws.root, "tsconfig.json")) && pkg.devDependencies?.typescript == null) {

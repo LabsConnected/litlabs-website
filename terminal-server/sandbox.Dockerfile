@@ -34,7 +34,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
 # ─── pnpm ────────────────────────────────────────────────────────
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+# Corepack keeps its prepared package managers under COREPACK_HOME
+# (default: $HOME/.cache/node/corepack). This build runs as root, but
+# sandbox commands run as a non-root user with HOME pinned to
+# /home/litt — a cache prepared under the build user's $HOME is
+# invisible at runtime, so Corepack tried to DOWNLOAD pnpm from
+# registry.npmjs.org on every fresh sandbox, and the preview
+# dependency install died on that download (live failure 2026-11-14:
+# "Dependency install failed in sandbox (exit 243): ! Corepack is
+# about to download https://registry.npmjs.org/pnpm/-/pnpm-9.15.0.tgz").
+# Pin COREPACK_HOME to a shared, world-readable location (the ENV
+# persists into the running sandbox, where no composed or per-command
+# env overrides it) and prepare BOTH pnpm versions workspace trees
+# pin: 9.15.0 (older volume trees) and 10.33.4 (the "packageManager"
+# field at repo head — keep these in sync with it). With the pinned
+# version prepared, Corepack never downloads at runtime.
+ENV COREPACK_HOME=/usr/local/share/corepack
+RUN corepack enable \
+    && corepack prepare pnpm@9.15.0 \
+    && corepack prepare pnpm@10.33.4 --activate \
+    && chmod -R a+rX /usr/local/share/corepack
 
 # ─── GitHub CLI ──────────────────────────────────────────────────
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
