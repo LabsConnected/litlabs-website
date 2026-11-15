@@ -36,6 +36,7 @@
 
 import type { SandboxProvider } from "../sandbox/provider";
 import {
+  ensureSandboxWorkspaceWritable,
   SANDBOX_HOME_DIR,
   SANDBOX_WORKSPACE_ROOT,
   type SandboxWorkspaceExecutor,
@@ -151,6 +152,13 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
   }
   if (!depsFresh && args.packageManager !== "npx") {
     pushPreviewLog(runtime, `[preview] Installing dependencies in sandbox (${args.packageManager})`);
+    // The install runs as the non-root command user but must write
+    // into the tree (pnpm's `_tmp_<pid>_<hash>` store probe in the
+    // project root, node_modules, the lockfile) — and /workspace is
+    // root-owned 755 in the template. Open the tree up first, or the
+    // install dies EACCES before it starts (live failure 2026-11-15;
+    // see ensureSandboxWorkspaceWritable).
+    await ensureSandboxWorkspaceWritable(provider, sandboxId);
     const install = await provider.execute(sandboxId, {
       command: buildShellCommand([args.packageManager, "install", "--prefer-offline"]),
       cwd: SANDBOX_WORKSPACE_ROOT,

@@ -19,7 +19,11 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { FakeSandboxProvider } from "../sandbox/testing/fake-providers";
 import { SandboxExecGate } from "../sandbox/exec-router";
-import { SandboxWorkspaceExecutor } from "../sandbox/workspace-executor";
+import {
+  ensureSandboxWorkspaceWritable,
+  SandboxWorkspaceExecutor,
+} from "../sandbox/workspace-executor";
+import type { SandboxProvider } from "../sandbox/provider";
 import {
   getWorkspace,
   upsertWorkspaceDescriptor,
@@ -327,5 +331,46 @@ describe("forward push", () => {
     expect(getWorkspace(ws.workspaceId)?.sandbox?.pendingForward).toEqual([]);
     const late = await t.readFile(getWorkspace(ws.workspaceId)!.sandbox!.sandboxId, "/workspace/late.txt");
     expect(new TextDecoder().decode(late)).toBe("late-content");
+  });
+});
+
+/**
+ * Workspace writability repair (preview EACCES fix, 2026-11-15):
+ * /workspace is root-owned 755 in the template while installs run
+ * as the non-root command user, so pnpm's first write into the
+ * project root (its `_tmp_<pid>_<hash>` store probe) died EACCES.
+ * The helper must issue exactly one root chmod over the tree, and
+ * must never throw — the install's own result stays authoritative.
+ */
+describe("ensureSandboxWorkspaceWritable", () => {
+  it("runs chmod -R a+rwX on /workspace as root", async () => {
+    const calls: Array<{ sandboxId: string; input: unknown }> = [];
+    const provider = {
+      execute: async (sandboxId: string, input: unknown) => {
+        calls.push({ sandboxId, input });
+        return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+      },
+    } as unknown as SandboxProvider;
+
+    await ensureSandboxWorkspaceWritable(provider, "sbx-9");
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sandboxId).toBe("sbx-9");
+    expect(calls[0].input).toMatchObject({
+      command: "chmod -R a+rwX /workspace",
+      user: "root",
+    });
+  });
+
+  it("swallows provider failures so the install's error stays authoritative", async () => {
+    const provider = {
+      execute: async () => {
+        throw new Error("provider down");
+      },
+    } as unknown as SandboxProvider;
+
+    await expect(
+      ensureSandboxWorkspaceWritable(provider, "sbx-9"),
+    ).resolves.toBeUndefined();
   });
 });

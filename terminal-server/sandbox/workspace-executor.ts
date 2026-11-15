@@ -86,6 +86,52 @@ export const SANDBOX_WORKSPACE_ROOT = "/workspace";
 /** HOME inside the sandbox — outside the synced tree (Dockerfile). */
 export const SANDBOX_HOME_DIR = "/home/litt";
 
+/**
+ * Make the sandbox workspace tree writable by the (non-root) command
+ * user before anything tries to write into it.
+ *
+ * Why this exists (live failure 2026-11-15): the template creates
+ * /workspace root-owned with mode 755 (sandbox.Dockerfile) and
+ * nothing ever chowns it; the tree mirrored into it lands with the
+ * file-transfer layer's ownership. Sandbox commands run as the
+ * provider's default non-root user, so the FIRST write an install
+ * attempts inside the project root dies EACCES — for pnpm that is
+ * its store-location probe, which creates `_tmp_<pid>_<hash>`
+ * directly in the project root (@pnpm/store-connection-manager's
+ * storePathRelativeToHome, via the path-temp package) to hardlink-
+ * test the store location. node_modules creation and the lockfile
+ * rewrite would hit the same wall, as would the dev server's .next
+ * directory. Redirecting caches (the HOME pin) fixed the cache
+ * variant of this defect; the tree itself was still read-only to
+ * the command user.
+ *
+ * The repair runs as root (the one execute caller allowed to) and
+ * opens the tree up inside the sandbox only: a sandbox is a
+ * single-tenant isolation boundary with no platform secrets inside,
+ * so world-writable within it is the same posture the template
+ * already takes for the sandbox home (chmod 777 /home/litt). Sync
+ * manifests compare type/size/mtime, never modes (sync.ts
+ * sameEntry), so this cannot cause re-mirror churn.
+ *
+ * Best effort by design: if the repair itself cannot run, the
+ * install that follows fails with its own, clearer error — this
+ * helper never masks that failure with its own.
+ */
+export async function ensureSandboxWorkspaceWritable(
+  provider: SandboxProvider,
+  sandboxId: string,
+): Promise<void> {
+  try {
+    await provider.execute(sandboxId, {
+      command: buildShellCommand(["chmod", "-R", "a+rwX", SANDBOX_WORKSPACE_ROOT]),
+      user: "root",
+      timeoutMs: 120_000,
+    });
+  } catch {
+    // See above — the install's result is authoritative.
+  }
+}
+
 export interface SandboxWorkspaceExecutorDeps {
   provider: SandboxProvider;
   gate: SandboxExecGate;
@@ -607,6 +653,12 @@ export class SandboxWorkspaceExecutor {
       // (no stamp was written) retries here instead of looking done.
       const installStamp = readVolumeInstallStamp(ws.root);
       if (await sandboxInstallIsFresh(this.provider, sandboxId, installStamp)) return;
+
+      // The install writes into the tree (pnpm's store probe file,
+      // node_modules, the lockfile) as the non-root command user —
+      // make sure the tree lets it (see the helper for the EACCES
+      // this prevents).
+      await ensureSandboxWorkspaceWritable(this.provider, sandboxId);
 
       const pkg = JSON.parse(readFileSync(join(ws.root, "package.json"), "utf-8")) as {
         packageManager?: string;
