@@ -98,6 +98,76 @@ describe("loadPersisted registry reload", () => {
   });
 });
 
+describe("loadPersisted observability + listen-time retry (round 9 fix C)", () => {
+  it("logs the successful load with the descriptor count and ids", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    // The beforeEach import already ran loadPersisted against the
+    // fixture file — re-import fresh so a load runs under the spy.
+    vi.resetModules();
+    const fresh = await import("../workspace/WorkspaceManager");
+    expect(fresh.listAllWorkspaceDescriptors()).toHaveLength(2);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Loaded 2 persisted workspace(s)"),
+    );
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ws-visible"));
+    logSpy.mockRestore();
+  });
+
+  it("logs inside the catch when the registry file is corrupt, instead of swallowing it", async () => {
+    const corruptRoot = mkdtempSync(join(tmpdir(), "litt-registry-corrupt-"));
+    try {
+      writeFileSync(join(corruptRoot, ".workspaces.json"), "{ not json !");
+      vi.stubEnv("TERMINAL_WORKSPACE_ROOT", corruptRoot);
+      vi.resetModules();
+      const fresh = await import("../workspace/WorkspaceManager");
+      expect(fresh.listAllWorkspaceDescriptors()).toEqual([]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("FAILED to load persisted workspace registry"),
+      );
+    } finally {
+      try {
+        rmSync(corruptRoot, { recursive: true, force: true });
+      } catch {
+        // Temp dir is disposable.
+      }
+    }
+  });
+
+  it("retryRegistryLoadOnceAtListen recovers a registry that appeared after the import-time load", async () => {
+    // Import-time load sees NO file (volume mount not yet visible).
+    const lateRoot = mkdtempSync(join(tmpdir(), "litt-registry-late-"));
+    try {
+      vi.stubEnv("TERMINAL_WORKSPACE_ROOT", lateRoot);
+      vi.resetModules();
+      const fresh = await import("../workspace/WorkspaceManager");
+      expect(fresh.listAllWorkspaceDescriptors()).toEqual([]);
+
+      // The mount settles and the registry file becomes visible,
+      // with a descriptor whose root exists.
+      const wsRoot = join(lateRoot, "late-ws");
+      mkdirSync(wsRoot, { recursive: true });
+      writeFileSync(
+        join(lateRoot, ".workspaces.json"),
+        JSON.stringify([descriptor({ workspaceId: "ws-late", root: wsRoot })]),
+      );
+
+      const count = fresh.retryRegistryLoadOnceAtListen();
+      expect(count).toBe(1);
+      expect(fresh.getWorkspace("ws-late")).toBeDefined();
+      expect(fresh.getWorkspace("ws-late")?.ready).toBe(true);
+
+      // A second retry is a no-op over a non-empty registry.
+      expect(fresh.retryRegistryLoadOnceAtListen()).toBe(1);
+    } finally {
+      try {
+        rmSync(lateRoot, { recursive: true, force: true });
+      } catch {
+        // Temp dir is disposable.
+      }
+    }
+  });
+});
+
 describe("loadPersisted with the registry file itself missing (round 5)", () => {
   it("starts empty AND logs that no registry file was found at load", async () => {
     // Separate fixture root with NO .workspaces.json: the whole-file

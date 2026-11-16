@@ -129,6 +129,64 @@ describe("workspace-recovery", () => {
     });
   });
 
+  describe("ensureWorkspaceAlive — registered-but-not-ready (round 9 fix B)", () => {
+    it("treats a descriptor that resolves with ready=false as lost and re-prepares", async () => {
+      // The descriptor is REGISTERED (loadPersisted kept it after a
+      // boot-time root miss) but reports ready=false. Before fix B,
+      // ensureWorkspaceAlive returned reprepared:false for it —
+      // "alive" — and callers stranded on the terminal's 409
+      // "Workspace not ready" forever.
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(
+        fakeWorkspace({ workspaceId: "ws-123", root: "/data/ws-123", ready: false } as Partial<WorkspaceGetResponse>),
+      );
+      // The shared provisioner checks the stale workspace again before
+      // re-adopting its durable root.
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
+      // Post-recovery verification: the re-prepared descriptor
+      // resolves, ready this time.
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-new", root: "/data/ws-new", ready: true } as Partial<WorkspaceGetResponse>),
+      );
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: "ws-new", workspaceStatus: "ready" }));
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-123");
+
+      expect(prepareWorkspaceInternal).toHaveBeenCalled();
+      expect(result.workspaceId).toBe("ws-new");
+      expect(result.reprepared).toBe(true);
+    });
+
+    it("reports healFailed when the re-prepared descriptor still resolves not-ready", async () => {
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(
+        fakeWorkspace({ workspaceId: "ws-123", root: "/data/ws-123", ready: false } as Partial<WorkspaceGetResponse>),
+      );
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
+      // Post-recovery verification: still registered, still not ready.
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-new", root: "/data/ws-new", ready: false } as Partial<WorkspaceGetResponse>),
+      );
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: "ws-new", workspaceStatus: "ready" }));
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-123");
+
+      expect(result.workspaceId).toBe("ws-new");
+      expect(result.reprepared).toBe(false);
+      expect(result.healFailed).toBe(true);
+    });
+  });
+
   describe("ensureWorkspaceAlive — deployment restore on re-prepare", () => {
     const restoreMock = vi.mocked(restoreWorkspaceFromLatestDeployment);
 

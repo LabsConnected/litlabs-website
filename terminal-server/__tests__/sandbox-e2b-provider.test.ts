@@ -17,6 +17,8 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  clampSandboxTimeoutMs,
+  E2B_MAX_TIMEOUT_MS,
   E2bSandboxProvider,
   SANDBOX_EGRESS_DENY_OUT,
   type E2bClient,
@@ -331,7 +333,7 @@ describe("E2bSandboxProvider — lifetime and liveness (round 8)", () => {
     });
 
     expect(client.creates).toHaveLength(1);
-    expect(client.creates[0].timeoutMs).toBe(120 * 60_000);
+    expect(client.creates[0].timeoutMs).toBe(60 * 60_000);
     expect(client.creates[0].timeoutMs).not.toBe(15 * 60_000);
   });
 
@@ -349,7 +351,54 @@ describe("E2bSandboxProvider — lifetime and liveness (round 8)", () => {
     await provider.execute(instance.sandboxId, { command: "echo one" });
     await provider.execute(instance.sandboxId, { command: "echo two" });
 
-    expect(handle.timeoutExtensions).toEqual([120 * 60_000, 120 * 60_000]);
+    expect(handle.timeoutExtensions).toEqual([60 * 60_000, 60 * 60_000]);
+  });
+
+  /**
+   * Round 9: the production E2B account is Hobby, whose sandbox
+   * lifetime cap is 1 hour. A caller asking for more (the round-8
+   * session limit was 120 minutes) must be CLAMPED at the provider
+   * boundary, never passed through for E2B to reject.
+   */
+  it("clamps an over-cap create lifetime to the plan cap instead of requesting it", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+      limits: { maxSessionMinutes: 180 },
+    });
+
+    expect(client.creates).toHaveLength(1);
+    expect(client.creates[0].timeoutMs).toBe(E2B_MAX_TIMEOUT_MS);
+    expect(client.creates[0].timeoutMs).toBe(60 * 60_000);
+  });
+
+  it("clamps extendTimeout (preview keepalive) to the plan cap", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    const handle = client.handles.get(instance.sandboxId)!;
+
+    await provider.extendTimeout(instance.sandboxId, 120 * 60_000);
+
+    expect(handle.timeoutExtensions).toEqual([60 * 60_000]);
+  });
+
+  it("clampSandboxTimeoutMs passes under-cap values through and logs over-cap ones", () => {
+    const logs: string[] = [];
+    const log = (m: string) => logs.push(m);
+    expect(clampSandboxTimeoutMs(30 * 60_000, log)).toBe(30 * 60_000);
+    expect(logs).toEqual([]);
+    expect(clampSandboxTimeoutMs(120 * 60_000, log)).toBe(E2B_MAX_TIMEOUT_MS);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain("Clamping sandbox timeout");
   });
 
   it("get() returns null once E2B has killed the sandbox out-of-band, and forgets it", async () => {

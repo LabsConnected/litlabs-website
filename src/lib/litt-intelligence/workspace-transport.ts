@@ -370,6 +370,81 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     };
   }
 
+  private wsFileHeadersFor(workspaceId: string): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${createTerminalToken(this.userId, {
+        workspaceId,
+        projectId: this.projectId,
+      }).token}`,
+      "X-Workspace-Id": workspaceId,
+    };
+  }
+
+  /**
+   * Heal-on-404 for the write path (round 9 fix E). The files and
+   * preview routes have healed a workspace-level 404 via
+   * ensureWorkspaceAlive since #1012, but this transport — the agent's
+   * own write path, the one that saves generated images — never did:
+   * a lost terminal workspace made every write fail with the raw 404
+   * ("Image generated but project save failed") even while the heal
+   * machinery sat one module away. On a workspace-level 404, run the
+   * heal ONCE and return the workspaceId to retry against (the
+   * transport's own id, or the re-registered one the heal produced).
+   * Returns null when the heal did not restore a live workspace —
+   * the caller then surfaces the original 404. Never throws: a heal
+   * failure must not mask the write's own error.
+   */
+  private async healWorkspaceAfterNotFound(): Promise<string | null> {
+    try {
+      const { ensureWorkspaceAlive } = await import("@/lib/studio/workspace-recovery");
+      const recovered = await ensureWorkspaceAlive(this.projectId, this.userId, this.workspaceId);
+      if (recovered.healFailed) return null;
+      return recovered.workspaceId;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * POST /ws-files/write with one heal-and-retry on a workspace-level
+   * 404 (see healWorkspaceAfterNotFound). A file-level failure (any
+   * other status, or a 404 whose body is not the workspace error) is
+   * surfaced immediately, exactly as before.
+   */
+  private async postWsFileWrite(
+    body: Record<string, unknown>,
+    timeoutMs: number,
+    opName: "writeFile" | "writeBinaryFile",
+  ): Promise<{ saved: boolean }> {
+    const attempt = (workspaceId: string) =>
+      fetch(`${terminalBase()}/ws-files/write`, {
+        method: "POST",
+        headers: this.wsFileHeadersFor(workspaceId),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    let resp = await attempt(this.workspaceId);
+    if (resp.status === 404) {
+      const errText = await resp.text().catch(() => "");
+      if (errText.includes("Workspace not found")) {
+        const healedId = await this.healWorkspaceAfterNotFound();
+        if (healedId) {
+          resp = await attempt(healedId);
+          if (resp.ok) return resp.json();
+          const retryErr = await resp.text().catch(() => "");
+          throw new Error(`${opName} failed (${resp.status}): ${retryErr}`);
+        }
+      }
+      throw new Error(`${opName} failed (404): ${errText}`);
+    }
+    if (!resp.ok) {
+      const err = await resp.text().catch(() => "");
+      throw new Error(`${opName} failed (${resp.status}): ${err}`);
+    }
+    return resp.json();
+  }
+
   // ── File operations ──
 
   async listFiles(path: string): Promise<{ entries: Array<{ name: string; type: string }> }> {
@@ -422,31 +497,15 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
   }
 
   async writeFile(path: string, content: string): Promise<{ saved: boolean }> {
-    const resp = await fetch(`${terminalBase()}/ws-files/write`, {
-      method: "POST",
-      headers: this.wsFileHeaders,
-      body: JSON.stringify({ path, content }),
-      signal: AbortSignal.timeout(FILE_OP_TIMEOUT_MS),
-    });
-    if (!resp.ok) {
-      const err = await resp.text().catch(() => "");
-      throw new Error(`writeFile failed (${resp.status}): ${err}`);
-    }
-    return resp.json();
+    return this.postWsFileWrite({ path, content }, FILE_OP_TIMEOUT_MS, "writeFile");
   }
 
   async writeBinaryFile(path: string, base64Content: string): Promise<{ saved: boolean }> {
-    const resp = await fetch(`${terminalBase()}/ws-files/write`, {
-      method: "POST",
-      headers: this.wsFileHeaders,
-      body: JSON.stringify({ path, content: base64Content, encoding: "base64" }),
-      signal: AbortSignal.timeout(BINARY_WRITE_TIMEOUT_MS),
-    });
-    if (!resp.ok) {
-      const err = await resp.text().catch(() => "");
-      throw new Error(`writeBinaryFile failed (${resp.status}): ${err}`);
-    }
-    return resp.json();
+    return this.postWsFileWrite(
+      { path, content: base64Content, encoding: "base64" },
+      BINARY_WRITE_TIMEOUT_MS,
+      "writeBinaryFile",
+    );
   }
 
   async deleteFile(path: string): Promise<{ deleted: boolean }> {
