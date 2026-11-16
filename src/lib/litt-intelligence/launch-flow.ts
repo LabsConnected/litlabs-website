@@ -352,6 +352,13 @@ const WEBSITE_ENTRY_FILES = new Set([
   "app/page.ts",
   "app/page.jsx",
   "app/page.js",
+  // Next.js App Router under a src/ directory — the standard layout for
+  // repo-backed projects (litlabs-website itself lives here). Without
+  // these, the artifact gate could never pass for a src-dir project.
+  "src/app/page.tsx",
+  "src/app/page.ts",
+  "src/app/page.jsx",
+  "src/app/page.js",
   "pages/index.tsx",
   "pages/index.ts",
   "pages/index.jsx",
@@ -384,7 +391,20 @@ function normalizeEntryPath(p: string): string {
 
 /** True when a workspace-relative path is a runnable website entry file. */
 export function isRunnableEntryPath(path: string): boolean {
-  return WEBSITE_ENTRY_FILES.has(normalizeEntryPath(path));
+  const normalized = normalizeEntryPath(path);
+  if (WEBSITE_ENTRY_FILES.has(normalized)) return true;
+  // Next.js route groups — path segments wrapped in parentheses —
+  // organize routes WITHOUT changing the URL they serve:
+  // src/app/(marketing)/page.tsx IS the site's root page, and
+  // app/(shop)/page.tsx is app/page.tsx. Compare with group segments
+  // removed so grouped App Router projects are recognized. Only group
+  // segments are dropped — a real subdirectory (about/, assets/) still
+  // keeps the path out of the entry set.
+  const withoutGroups = normalized
+    .split("/")
+    .filter((segment) => !/^\(.*\)$/.test(segment))
+    .join("/");
+  return withoutGroups !== normalized && WEBSITE_ENTRY_FILES.has(withoutGroups);
 }
 
 /**
@@ -438,18 +458,36 @@ export async function verifyProjectArtifacts(
       visited.add(current.path);
 
       const { entries } = await transport.listFiles(current.path);
+      const childDirs: Array<{ path: string; depth: number }> = [];
       for (const entry of entries) {
         const name = String(entry.name || "").replace(/\\/g, "/");
         if (!name || name === "." || name === ".." || name.includes("/")) continue;
         const relative = current.path === "." ? name : `${current.path}/${name}`;
         if (entry.type === "folder" || entry.type === "directory") {
-          if (current.depth < 4 && !name.startsWith(".")) {
-            queue.push({ path: relative, depth: current.depth + 1 });
+          // node_modules can never hold the project's own entry file at
+          // an entry-set path, and descending into it burns the walk's
+          // file budget on dependency trees (host-installed workspaces).
+          if (current.depth < 4 && !name.startsWith(".") && name !== "node_modules") {
+            childDirs.push({ path: relative, depth: current.depth + 1 });
           }
         } else {
           files.push(relative);
         }
       }
+      // List entry-bearing directories first: the walk stops at 500
+      // files, and on a large repo an unordered breadth-first walk can
+      // exhaust that budget on bulk directories (packages/, docs/,
+      // public/) before ever listing src/app — making the entry check
+      // below a coin flip on directory order.
+      const ENTRY_DIR_PRIORITY = ["src", "app", "pages", "public"];
+      childDirs.sort((a, b) => {
+        const rank = (p: string) => {
+          const idx = ENTRY_DIR_PRIORITY.indexOf(p.split("/").pop() ?? "");
+          return idx === -1 ? ENTRY_DIR_PRIORITY.length : idx;
+        };
+        return rank(a.path) - rank(b.path);
+      });
+      queue.push(...childDirs);
     }
   } catch (error) {
     return {
@@ -459,9 +497,7 @@ export async function verifyProjectArtifacts(
     };
   }
 
-  const entryFiles = [...WEBSITE_ENTRY_FILES]
-    .map((entry) => files.find((file) => file.toLowerCase() === entry))
-    .filter((file): file is string => file !== undefined);
+  const entryFiles = files.filter((file) => isRunnableEntryPath(file));
   if (entryFiles.length === 0) {
     return {
       ok: false,

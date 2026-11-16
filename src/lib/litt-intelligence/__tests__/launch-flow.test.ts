@@ -1094,6 +1094,106 @@ describe("Launch Flow: artifact gate honors workspace-change evidence (#551)", (
   });
 });
 
+describe("Launch Flow: artifact gate recognizes src-dir App Router repos (round 6)", () => {
+  // The litlabs-website repo's own layout — the shape that failed the
+  // production approved-write proof on 2026-11-15: a Next.js App Router
+  // project under src/, whose root page lives inside a route group
+  // (src/app/(marketing)/page.tsx serves "/"). Before the fix the entry
+  // set held no src/app/page.* at all and exact-path matching could not
+  // see through the route group, so the gate reported "No runnable
+  // website entry file" for a workspace that plainly has one — and the
+  // approvals route failed the whole resumed run over it, even for an
+  // unrelated root .md write.
+  function treeTransport(
+    tree: Record<string, Array<{ name: string; type: string }>>,
+    contents: Record<string, string> = {},
+  ): WorkspaceTransport {
+    return createMockTransport({
+      listFiles: vi.fn().mockImplementation(async (path: string) => ({
+        entries: tree[path] ?? [],
+      })),
+      readFile: vi.fn().mockImplementation(async (path: string) => {
+        const content = contents[path];
+        if (content === undefined) throw new Error(`no such file: ${path}`);
+        return { content, size: content.length };
+      }),
+    });
+  }
+
+  const REPO_TREE: Record<string, Array<{ name: string; type: string }>> = {
+    ".": [
+      { name: "PROOF-2026-11-15.md", type: "file" },
+      { name: "PRODUCTION_READY_CHECKLIST.md", type: "file" },
+      { name: "package.json", type: "file" },
+      { name: "src", type: "folder" },
+    ],
+    src: [
+      { name: "app", type: "folder" },
+      { name: "lib", type: "folder" },
+    ],
+    "src/app": [
+      { name: "(marketing)", type: "folder" },
+      { name: "layout.tsx", type: "file" },
+    ],
+    "src/app/(marketing)": [{ name: "page.tsx", type: "file" }],
+    "src/lib": [{ name: "utils.ts", type: "file" }],
+  };
+
+  it("passes for a src/app project whose root page sits in a route group", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = treeTransport(REPO_TREE, {
+      "src/app/(marketing)/page.tsx": "export default function Home() { return <main>LiTT</main>; }",
+    });
+    const check = await verifyProjectArtifacts(transport);
+    expect(check.ok).toBe(true);
+    expect(check.files).toContain("PROOF-2026-11-15.md");
+  });
+
+  it("passes for a plain src/app/page.tsx project (no route group)", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = treeTransport(
+      {
+        ".": [{ name: "src", type: "folder" }],
+        src: [{ name: "app", type: "folder" }],
+        "src/app": [{ name: "page.tsx", type: "file" }],
+      },
+      { "src/app/page.tsx": "export default function Home() { return null; }" },
+    );
+    const check = await verifyProjectArtifacts(transport);
+    expect(check.ok).toBe(true);
+  });
+
+  it("still fails when the only grouped page is a subroute, not the root page", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = treeTransport(
+      {
+        ".": [
+          { name: "notes.md", type: "file" },
+          { name: "src", type: "folder" },
+        ],
+        src: [{ name: "app", type: "folder" }],
+        "src/app": [{ name: "(app)", type: "folder" }],
+        "src/app/(app)": [{ name: "about", type: "folder" }],
+        "src/app/(app)/about": [{ name: "page.tsx", type: "file" }],
+      },
+      { "src/app/(app)/about/page.tsx": "export default function About() { return null; }" },
+    );
+    const check = await verifyProjectArtifacts(transport);
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("No runnable website entry file");
+  });
+
+  it("isRunnableEntryPath: grouped root pages match, subroutes and nested index files do not", async () => {
+    const { isRunnableEntryPath } = await import("@/lib/litt-intelligence/launch-flow");
+    expect(isRunnableEntryPath("src/app/(marketing)/page.tsx")).toBe(true);
+    expect(isRunnableEntryPath("app/(shop)/page.tsx")).toBe(true);
+    expect(isRunnableEntryPath("src/app/page.tsx")).toBe(true);
+    expect(isRunnableEntryPath("src/app/(app)/about/page.tsx")).toBe(false);
+    expect(isRunnableEntryPath("assets/index.html")).toBe(false);
+    expect(isRunnableEntryPath("PROOF-2026-11-15.md")).toBe(false);
+  });
+});
+
 // ─── Tests: honest loop failure propagation ─────────────────────────
 
 describe("Launch Flow: honest loop failure", () => {
