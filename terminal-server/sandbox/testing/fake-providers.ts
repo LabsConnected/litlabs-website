@@ -605,6 +605,14 @@ export class FakeSandboxProvider implements SandboxProvider {
       return result(0, "", `Cloning into '${target}'...`);
     }
 
+    if (sub === "config" && rest[0] === "--global") {
+      // Global config is repo-independent in real git: it reads and
+      // writes $HOME/.gitconfig from any cwd, repo or not. Model
+      // that faithfully — the safe.directory registration relies on
+      // it in sandboxes whose workspace is not (yet) a git repo.
+      return result(0);
+    }
+
     const repo = record.gitRepos.get(cwd);
     if (!repo) return result(128, "", "fatal: not a git repository");
 
