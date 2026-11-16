@@ -25,6 +25,7 @@ prod-only.json
 .kilocode/
 .quadcodeai/
 .litt/
+.superpowers/
 
 # Screenshot artifacts (generated during dev/testing)
 studio-after.png
