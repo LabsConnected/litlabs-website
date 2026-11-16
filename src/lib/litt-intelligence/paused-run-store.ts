@@ -48,6 +48,7 @@ import {
 import type { LLMMessage } from "./llm-tool-calling";
 import type { DeferredToolCall } from "./agent-loop-v2";
 import type { QualityFinale, QualityLoopSnapshot } from "./quality-loop-flow";
+import type { RunFailureContributor } from "./run-settlement";
 
 /**
  * How long a human has to decide on an approval gate.
@@ -121,6 +122,14 @@ export interface RunResult {
     pausedRunId?: string;
     reason: string;
   };
+  /**
+   * Round 11: every failure observed during the run (failed tool calls,
+   * unknown workspace verification, honest failure, model/route
+   * failure), recorded whether or not it decided the outcome — a
+   * capacity failure must not mask a tool defect in the record.
+   * Optional for backwards compatibility.
+   */
+  failureContributors?: RunFailureContributor[];
   /**
    * Quality-loop finale for ACT-mode runs that opted into the gated loop.
    * Durably persists the machine-readable answer to "is this actually good

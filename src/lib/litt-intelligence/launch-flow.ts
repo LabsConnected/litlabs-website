@@ -835,7 +835,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         });
       }
 
-      if (r.modelFailed) {
+      if (r.modelFailed && !r.completedWithWarning) {
         return baseResult({
           success: false,
           status: "failed",
@@ -849,6 +849,10 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           runtimeRepairAttempts,
         });
       }
+      // Round 11: a completedWithWarning result falls through — the
+      // loop already settled it completed (deliverable landed, gate
+      // passed) with the warning as its final text; the route failure
+      // is recorded in r.failureContributors, not the verdict.
 
       if (r.buildFixResult && !r.buildFixResult.allPassed) {
         return baseResult({

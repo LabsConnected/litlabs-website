@@ -19,7 +19,7 @@ import { createHash, randomUUID } from "crypto";
 import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
 import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
-import type { WorkspaceTransport } from "./workspace-transport";
+import type { CheckpointInfo, WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallRequest, type ToolCallResult, type LLMMessage, type RoutePlanSummary } from "./llm-tool-calling";
@@ -28,7 +28,8 @@ export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
-import { computeWorkspaceChange } from "./workspace-change-producer";
+import { computeWorkspaceChange, workspaceChangeFromVolumeListing } from "./workspace-change-producer";
+import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
 import {
@@ -393,6 +394,21 @@ export interface AgentLoopResult {
    * `modelFailed` (provider outage).
    */
   failedHonestly?: string;
+  /**
+   * Round 11: set when the run settled COMPLETED despite a model/route
+   * failure — the deliverable had already landed (successful mutation +
+   * quality gate passed) and only the closing summary call failed.
+   * Carries the honest user-facing warning text. Consumers must check
+   * this before treating `modelFailed` as the run's verdict.
+   */
+  completedWithWarning?: string;
+  /**
+   * Round 11: every failure observed during the run (failed tool calls,
+   * unknown workspace verification, honest failure, model/route
+   * failure), recorded whether or not it decided the outcome — a
+   * capacity failure must not mask a tool defect in the record.
+   */
+  failureContributors?: RunFailureContributor[];
   /** Set when the loop paused because ACT mode requires approval for a mutation */
   pendingApproval?: PendingApproval;
   /**
@@ -1164,6 +1180,40 @@ async function pauseReasonFor(
  * to remember to create one. Never throws; a failure just means no
  * after-checkpoint (the pre-run baseline still exists for Revert).
  */
+/**
+ * Round 11: settlement workspace evidence. The git/checkpoint probe
+ * runs first, carrying the recorded checkpoint-failure reason when
+ * checkpoint creation failed (Q2a). When the probe still cannot
+ * answer, the volume-listing fallback verifies the paths the run's
+ * own successful mutations declared through the Files panel's read
+ * path (Q2b) — real file state instead of an unexplained "unknown".
+ */
+async function settleWorkspaceChangeEvidence(
+  transport: WorkspaceTransport,
+  checkpoint: CheckpointInfo | null | undefined,
+  toolCallLog: ReadonlyArray<{ success: boolean; mutating?: boolean; paths?: string[] }>,
+): Promise<WorkspaceChangeEvidence> {
+  const primary = await computeWorkspaceChange(transport, checkpoint ?? null, {
+    checkpointError: transport.lastCheckpointError ?? undefined,
+  });
+  if (primary.status !== "unknown") return primary;
+  const candidatePaths = [
+    ...new Set(
+      toolCallLog
+        .filter((c) => c.success && c.mutating)
+        .flatMap((c) => c.paths ?? []),
+    ),
+  ];
+  if (candidatePaths.length === 0) return primary;
+  return workspaceChangeFromVolumeListing(primary, {
+    candidatePaths,
+    listDir: async (dir) => {
+      const listing = await transport.listFiles(dir);
+      return listing.entries.map((e) => ({ name: e.name, type: e.type }));
+    },
+  });
+}
+
 async function createAfterRunCheckpoint(
   transport: WorkspaceTransport,
   workspaceChange: WorkspaceChangeEvidence | undefined,
@@ -3102,12 +3152,34 @@ async function runAgentLoopV2Inner(
   // mutation — including work a later checkpoint already committed.
   const attemptedMutation = toolCallLog.some((call) => call.mutating);
   const workspaceChange = baselineCheckpoint || checkpoint || attemptedMutation
-    ? await computeWorkspaceChange(transport, baselineCheckpoint ?? checkpoint ?? null)
+    ? await settleWorkspaceChangeEvidence(transport, baselineCheckpoint ?? checkpoint ?? null, toolCallLog)
     : undefined;
 
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
+  // Round 11: settle from the run's evidence (run-settlement.ts). A
+  // wrap-up route failure after the deliverable landed settles
+  // completed-with-warning instead of failing work that succeeded;
+  // every failure contributor is recorded either way.
+  const settlement = settleRunOutcome({
+    cancelled,
+    modelFailed,
+    failedHonestly,
+    toolCalls: toolCallLog,
+    qualityVerdictOk: qualityFinale ? qualityFinale.verdict.ok : null,
+    workspaceChange,
+  });
+  if (settlement.completedWithWarning) {
+    localProgress.emit({ type: "status", summary: settlement.completedWithWarning });
+  }
+  // A completed deployment already produced its own honest closing
+  // text (live URL + what failed after it) — keep it over the generic
+  // warning.
+  const settledFinalText =
+    settlement.completedWithWarning && !completedDeployment
+      ? settlement.completedWithWarning
+      : gatedFinalText;
   const afterCheckpoint = await createAfterRunCheckpoint(transport, workspaceChange, userMessage, localProgress);
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
@@ -3116,12 +3188,19 @@ async function runAgentLoopV2Inner(
       : {
           totalSteps: stepsUsed,
           totalDurationMs: Date.now() - startTime,
-          success: qualityFinale ? qualityFinale.verdict.ok : true,
+          // Reconciled with the persisted outcome below: "finished"
+          // success means the run settled completed AND the quality
+          // gate passed. The two channels used to be computed from
+          // different inputs and could silently disagree (gate passed
+          // + outcome failed in the round-11 proof).
+          success:
+            settlement.outcome === "completed" &&
+            (qualityFinale ? qualityFinale.verdict.ok : true),
         }),
   } as ProgressEvent);
 
   return {
-    finalText: gatedFinalText,
+    finalText: settledFinalText,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -3135,6 +3214,8 @@ async function runAgentLoopV2Inner(
     modelFailed,
     modelFailureText,
     failedHonestly,
+    completedWithWarning: settlement.completedWithWarning,
+    failureContributors: settlement.failureContributors,
     baselineCheckpoint,
     qualityLoop: qualityFinale
       ? {
@@ -3146,10 +3227,7 @@ async function runAgentLoopV2Inner(
     qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
     finalMessages: [...llmMessages],
     // Observability (Part J): the complete run record.
-    runObservability: finishRunObservability(
-      runObs,
-      cancelled ? "cancelled" : modelFailed || failedHonestly ? "failed" : "completed",
-    ),
+    runObservability: finishRunObservability(runObs, settlement.outcome),
   };
 }
 
@@ -4737,12 +4815,35 @@ async function resumeAgentLoopV2Inner(
   // rather than being silently omitted.
   const attemptedMutation = toolCallLog.some((call) => call.mutating);
   const workspaceChange = baselineCheckpoint || checkpoint || attemptedMutation
-    ? await computeWorkspaceChange(transport, baselineCheckpoint ?? checkpoint ?? null)
+    ? await settleWorkspaceChangeEvidence(transport, baselineCheckpoint ?? checkpoint ?? null, toolCallLog)
     : undefined;
 
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
+  // Round 11: settle from the run's evidence (run-settlement.ts) —
+  // identical rule to the initial loop. The lion proof's failed run was
+  // a resume: the deliverable (an approved, saved image generation)
+  // landed and the gate passed, then the wrap-up model call exhausted
+  // its routes and the old outcome expression failed the whole run.
+  const settlement = settleRunOutcome({
+    cancelled,
+    modelFailed,
+    failedHonestly,
+    toolCalls: toolCallLog,
+    qualityVerdictOk: qualityFinale ? qualityFinale.verdict.ok : null,
+    workspaceChange,
+  });
+  if (settlement.completedWithWarning) {
+    localProgress.emit({ type: "status", summary: settlement.completedWithWarning });
+  }
+  // A completed deployment already produced its own honest closing
+  // text (live URL + what failed after it) — keep it over the generic
+  // warning.
+  const settledFinalText =
+    settlement.completedWithWarning && !completedDeployment
+      ? settlement.completedWithWarning
+      : gatedFinalText;
   const afterCheckpoint = await createAfterRunCheckpoint(
     transport,
     workspaceChange,
@@ -4756,12 +4857,18 @@ async function resumeAgentLoopV2Inner(
       : {
           totalSteps: stepsUsed,
           totalDurationMs: Date.now() - startTime,
-          success: qualityFinale ? qualityFinale.verdict.ok : true,
+          // Reconciled with the persisted outcome below: "finished"
+          // success means the run settled completed AND the quality
+          // gate passed — the two channels can no longer disagree
+          // silently (round-11 diagnosis Q3).
+          success:
+            settlement.outcome === "completed" &&
+            (qualityFinale ? qualityFinale.verdict.ok : true),
         }),
   } as ProgressEvent);
 
   return {
-    finalText: gatedFinalText,
+    finalText: settledFinalText,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -4775,6 +4882,8 @@ async function resumeAgentLoopV2Inner(
     modelFailed,
     modelFailureText,
     failedHonestly,
+    completedWithWarning: settlement.completedWithWarning,
+    failureContributors: settlement.failureContributors,
     baselineCheckpoint,
     qualityLoop: qualityFinale
       ? {
@@ -4786,10 +4895,7 @@ async function resumeAgentLoopV2Inner(
     qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
     finalMessages: [...llmMessages],
     // Observability (Part J): the resumed segment's run record.
-    runObservability: finishRunObservability(
-      resumeRunObs,
-      cancelled ? "cancelled" : modelFailed || failedHonestly ? "failed" : "completed",
-    ),
+    runObservability: finishRunObservability(resumeRunObs, settlement.outcome),
   };
 }
 
