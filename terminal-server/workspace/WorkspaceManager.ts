@@ -124,7 +124,23 @@ const PERSIST_PATH = resolve(
 
 function loadPersisted(): void {
   try {
-    if (!existsSync(PERSIST_PATH)) return;
+    if (!existsSync(PERSIST_PATH)) {
+      // Distinguishable in the boot log from "the file existed and its
+      // entries were kept": a registry file that is not visible at the
+      // load instant (volume mount timing) starts the process with an
+      // EMPTY registry while the web DB still points at the lost ids —
+      // every lookup then 404s "Workspace not found" until a heal
+      // re-registers, and the next persist seals the loss by
+      // overwriting the file with only the current map (round 5,
+      // 2026-11-15). First-ever boot also lands here; the line is the
+      // evidence that tells the two apart (deploy history + whether
+      // workspaces existed before the restart).
+      console.error(
+        `[WorkspaceManager] No persisted workspace registry found at ${PERSIST_PATH} — ` +
+          "starting with an empty registry",
+      );
+      return;
+    }
     const data = JSON.parse(readFileSync(PERSIST_PATH, "utf-8")) as WorkspaceDescriptor[];
     for (const ws of data) {
       if (!ws.workspaceId || !ws.root) {

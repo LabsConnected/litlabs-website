@@ -58,11 +58,24 @@ export interface WorkspaceGetResponse {
  * Budgets: prepare can clone a repo and copy a template (generous);
  * preview start/restart can npm-install and boot a dev server; everything
  * else is a quick status check.
+ *
+ * Start/restart get 330s, matching the Studio preview panel's start-POST
+ * budget (StudioPreviewPanel.tsx, raised there by PR #1007). The 120s
+ * these used to carry was the binding constraint of the 2026-11-15
+ * round-5 failure: the terminal's start handler legitimately blocks
+ * longer than 120s — it queues on the per-workspace lock behind a
+ * prepare's sandbox create + whole-tree mirror, and can install inline
+ * (300s exec budget) before booting the dev server — so the web route
+ * aborted healthy starts at 120s and reported "Terminal server timed
+ * out after 120s: POST /internal/workspace/{id}/preview/start" while
+ * the terminal kept working. The panel aborting its own POST first is
+ * safe (it polls status instead); this client giving up first was not,
+ * because it converted a live start into a hard failure.
  */
 export const TERMINAL_TIMEOUTS = {
   prepareWorkspace: 180_000,
-  startPreview: 120_000,
-  restartPreview: 120_000,
+  startPreview: 330_000,
+  restartPreview: 330_000,
   getWorkspace: 20_000,
   getPreviewStatus: 20_000,
   stopPreview: 20_000,

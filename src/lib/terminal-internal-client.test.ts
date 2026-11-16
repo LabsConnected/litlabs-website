@@ -145,6 +145,17 @@ describe("TERMINAL_TIMEOUTS", () => {
     }
   });
 
+  it("aligns start/restart with the Studio panel's 330s start budget (round 5)", () => {
+    // PR #1007 raised the panel's start-POST budget to 330s, but this
+    // client kept aborting the web→terminal start at 120s — inside the
+    // terminal handler's legitimate lock-queue + install window — which
+    // produced the live "Terminal server timed out after 120s:
+    // POST /internal/workspace/{id}/preview/start" failure. The budgets
+    // must not drift apart again.
+    expect(TERMINAL_TIMEOUTS.startPreview).toBe(330_000);
+    expect(TERMINAL_TIMEOUTS.restartPreview).toBe(330_000);
+  });
+
   it("gives slow operations (prepare/start) larger budgets than status checks", () => {
     expect(TERMINAL_TIMEOUTS.prepareWorkspace).toBeGreaterThan(
       TERMINAL_TIMEOUTS.getPreviewStatus,
