@@ -39,10 +39,12 @@ export function useLiveLookup() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: trimmed }),
       });
-      const data = (await resp.json()) as LookupApiResponse;
+      // Parse defensively: a non-JSON error response (e.g. a 502 HTML
+      // page) must not leak a raw parser error into the UI.
+      const data = (await resp.json().catch(() => null)) as LookupApiResponse | null;
 
-      if (!resp.ok || !data.success) {
-        setError(data.error ?? "That lookup failed.");
+      if (!resp.ok || !data || !data.success) {
+        setError(data?.error ?? "That lookup failed.");
         return;
       }
 

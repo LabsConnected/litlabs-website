@@ -63,6 +63,19 @@ describe("useLiveLookup", () => {
     expect(result.current.error).toContain("couldn't find a match");
   });
 
+  it("shows the honest fallback, not a raw parser error, for a non-JSON error body", async () => {
+    fetchSpy.mockResolvedValue(new Response("<html>502 Bad Gateway</html>", { status: 502 }));
+
+    const { result } = renderHook(() => useLiveLookup());
+    await act(async () => {
+      await result.current.search("best buy hours");
+    });
+
+    expect(result.current.result).toBeNull();
+    expect(result.current.error).toBe("That lookup failed.");
+    expect(result.current.loading).toBe(false);
+  });
+
   it("does nothing for a blank query", async () => {
     const { result } = renderHook(() => useLiveLookup());
     await act(async () => {
