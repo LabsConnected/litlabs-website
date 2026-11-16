@@ -842,17 +842,40 @@ async function handleRecraftImage(prompt: string): Promise<MediaResult> {
 
 
 /**
- * Automatic routing starts with OpenAI GPT Image when configured. Pollinations
- * is never included in automatic routing.
+ * Automatic routing starts with OpenAI GPT Image when configured, then the
+ * other key-configured free/cheap providers. Pollinations is the TERMINAL
+ * entry: it needs no key, so it is always "configured", and it is only
+ * reached after every configured provider ahead of it has failed. It must
+ * stay last — it is the last resort that makes the auto-free chain
+ * always servable, which is exactly what capabilities.ts advertises
+ * (image_generation is offered because a no-key free provider exists).
+ *
+ * Production proof 2026-11-15 (build 4bd24248): without a terminal
+ * no-key entry, the chain in production was exactly ["openai"] — the
+ * Cloudflare and Alibaba keys are not set there — and the production
+ * OPENAI_API_KEY was dead ("Incorrect API key provided"). A present-
+ * but-dead key passes isProviderConfigured, so the sole chain member
+ * failed and the approved image.generate died with the raw OpenAI
+ * error even though a wired no-key provider existed. A dead key must
+ * never be the terminal answer while any provider can still serve.
  */
-const AUTO_FREE_ORDER: MediaProviderId[] = ["openai", "cloudflare", "alibaba"];
+const AUTO_FREE_ORDER: MediaProviderId[] = [
+  "openai",
+  "cloudflare",
+  "alibaba",
+  "pollinations",
+];
 
 /**
  * Auto-quality provider order: OpenAI → FAL → Recraft → Gemini
  * FAL is the most reliable quality provider (fast, good output).
  * Recraft is preferred for vector/logo prompts.
- * Gemini is tried after the configured primary providers. There is no silent
- * Pollinations fallback when all configured providers fail.
+ * Gemini is tried after the configured primary providers. Auto-quality
+ * itself never substitutes Pollinations — quality mode fails honestly
+ * when its configured providers fail. (The manual-pin fallthrough in
+ * generateImage is a different path: a pinned provider that cannot
+ * serve at all — dead key / quota — ends at Pollinations as the final
+ * resort rather than failing the approved operation outright.)
  */
 const AUTO_QUALITY_ORDER: MediaProviderId[] = ["openai", "fal", "recraft", "gemini"];
 
@@ -865,7 +888,7 @@ function isProviderConfigured(providerId: MediaProviderId): boolean {
     case "together": return !!TOGETHER_API_KEY;
     case "openai": return !!OPENAI_API_KEY;
     case "recraft": return !!RECRAFT_API_KEY;
-    case "pollinations": return true; // explicit experimental manual use only
+    case "pollinations": return true; // no key — always available as the terminal auto-chain fallback
     case "huggingface": return !!HF_API_KEY;
     default: return false;
   }
@@ -1467,8 +1490,18 @@ export async function generateImage(
       // Other failures keep the pin's semantics: they are the pinned
       // provider's real answer and stay terminal.
       if (isProviderConfigError(lastError) || isProviderQuotaError(lastError)) {
-        const fallthrough = getAutoOrder("auto-quality", prompt).filter(
-          (candidateId) => candidateId !== providerId,
+        // The configured auto-quality chain first, then Pollinations as
+        // the terminal resort: it needs no key, so a deployment whose
+        // configured providers are ALL dead-keyed or unconfigured still
+        // serves the approved operation instead of failing it (the
+        // 2026-11-15 production proof: sole configured provider OpenAI
+        // had a dead key and no other chain member was configured).
+        const fallthrough = [
+          ...getAutoOrder("auto-quality", prompt),
+          "pollinations" as MediaProviderId,
+        ].filter(
+          (candidateId, index, all) =>
+            candidateId !== providerId && all.indexOf(candidateId) === index,
         );
         for (const candidateId of fallthrough) {
           if (!getProvider(candidateId)) continue;
