@@ -238,7 +238,8 @@ export interface AgentLoopConfig {
     userRequest?: string;
     /**
      * System-determined task scope from the kernel's classification
-     * (taskKind "inspection" → "inspection"). Forwarded to the quality
+     * (taskKind "inspection" → "inspection", taskKind "media" →
+     * "media"). Forwarded to the quality
      * session at creation; a resume ignores it (the snapshot's scope
      * governs). Unset = the session derives scope from the request
      * text, exactly as before.

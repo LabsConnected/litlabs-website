@@ -58,6 +58,22 @@ describe("intent-router media generation — bare media asks execute", () => {
   });
 });
 
+describe("intent-router media generation — taskKind signal (LION-RUN-DIAGNOSIS-2026-11-16 F1a)", () => {
+  // The quality gate scopes a run from this signal: without it a pure
+  // media ask fell back to the prose classifier's "standard" build
+  // scope and a successful generation failed its gate.
+  it("bare media asks carry taskKind 'media'", () => {
+    expect(classifyIntent("Need a picture of a lion").taskKind).toBe("media");
+    expect(classifyIntent("generate an image of a lion").taskKind).toBe("media");
+    expect(classifyIntent("draw a dragon").taskKind).toBe("media");
+  });
+
+  it("build asks do not carry the media kind", () => {
+    expect(classifyIntent("build me a website").taskKind).not.toBe("media");
+    expect(classifyIntent("generate an image for my landing page").taskKind).not.toBe("media");
+  });
+});
+
 describe("intent-router media generation — build routing unchanged", () => {
   it("website/build asks still route to build", () => {
     buildCase("build me a website");

@@ -138,7 +138,8 @@ export function startQualityLoopSession(opts: {
   isStaticWorkspace?: boolean;
   /**
    * System-determined scope override from the kernel's classification
-   * (taskKind "inspection" → "inspection"). When set it replaces the
+   * (taskKind "inspection" → "inspection", taskKind "media" →
+   * "media"). When set it replaces the
    * prose-derived classifyTaskScope result — the kernel already
    * classified the turn, and re-deriving a scope from the same text is
    * what gated read-only runs on build/test evidence. Only the kernel
@@ -1411,6 +1412,15 @@ const TASK_SCOPE_PROMPT: Record<QualityTaskScope, string[]> = {
     "tools (files.list / files.read / search). Do NOT write, modify, or delete any file,",
     "and do not start previews or run checks. Only the understand and plan stages apply;",
     "the read results are the evidence for your answer.",
+  ],
+  media: [
+    "",
+    "Task scope for this run: MEDIA (determined by the system from the request).",
+    "This is a media generation: produce the requested media with the generation tools.",
+    "Only the understand and plan stages apply; the generated media result is the",
+    "evidence for your answer. Do not build or edit site files, start previews, or run",
+    "build/test checks for a media-only request, and do not emit QUALITY markers for",
+    "stages that do not apply.",
   ],
 };
 

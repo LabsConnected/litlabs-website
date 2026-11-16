@@ -34,8 +34,13 @@ interface ModePattern {
    * completion is a command's output, never a file write, so the
    * launch flow must not judge it by the build guard's file-writing
    * criterion.
+   *
+   * "media" is set only by the media-generation group below: the
+   * turn's completion is the generated media result, never a site
+   * build, so the quality gate must not judge it by the build
+   * pipeline's evidence (LION-RUN-DIAGNOSIS-2026-11-16 Q1).
    */
-  taskKind?: "inspection" | "exec";
+  taskKind?: "inspection" | "exec" | "media";
   domains?: string[];
 }
 
@@ -377,6 +382,13 @@ const MODE_PATTERNS: ModePattern[] = [
       /\b(draw|sketch|paint)\b[^.!?]{0,40}\b(?:a|an)\b(?!\s+(?:conclusion|breath|attention|bath)\b)/i,
     ],
     requiresExecution: true,
+    // A bare media ask is a deliverable media file, not site work:
+    // record the kind so the quality gate scopes the run to the
+    // evidence a generation produces instead of falling back to the
+    // prose classifier's "standard" build scope (which demanded
+    // build/test evidence and failed a successful lion generation,
+    // LION-RUN-DIAGNOSIS-2026-11-16 Q1).
+    taskKind: "media",
     domains: ["design", "creative"],
   },
 

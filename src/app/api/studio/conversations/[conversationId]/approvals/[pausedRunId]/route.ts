@@ -907,7 +907,16 @@ export async function POST(
             ? ` (${failedCall.toolId}: ${failedCall.summary || "failed"})`
             : "";
           resumeFailure = `The approved workspace operation failed${detail}, so the project was not completed.`;
-        } else if (successfulMutation) {
+        } else if (successfulSiteFileMutation) {
+          // The artifact/preview gate runs only for a SITE-FILE
+          // mutation. The broader successfulMutation also fires for
+          // asset-only mutations (an approved image.generate, an
+          // image.stock fetch): those deliver a media file, not a
+          // site, and subjecting them to the website artifact gate
+          // failed a successful generation deterministically and
+          // replaced its reply with the gate's error
+          // (LION-RUN-DIAGNOSIS-2026-11-16 Q1/F1b). An asset-only
+          // resumed run settles on its own tool result below.
           // Scope the artifact gate with the resumed run's own workspace
           // evidence: a "changed" diff proves the approved mutation landed,
           // so the welcome-screen marker check (which only detects stalled
@@ -927,10 +936,12 @@ export async function POST(
             resumeFailure = resumePreview.error ?? "The project files were not runnable after approval.";
           }
         }
-      } else if (result.pendingApproval && successfulMutation) {
+      } else if (result.pendingApproval && successfulSiteFileMutation) {
         // A nested approval is allowed to continue, but preview can already
         // be useful once the first file mutation has landed. Do not fail the
         // nested gate merely because a later file has not been written yet.
+        // Site-file mutations only, for the same reason as the settled
+        // branch above: an asset-only mutation has no site to preview.
         resumePreview = await ensureProjectPreviewReady(
           transport,
           { hadSuccessfulMutation: successfulSiteFileMutation, entryFileMutated: successfulEntryFileMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },

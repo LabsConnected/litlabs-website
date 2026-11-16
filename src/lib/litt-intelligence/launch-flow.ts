@@ -94,6 +94,22 @@ export interface LaunchFlowOptions {
    */
   execOnly?: boolean;
   /**
+   * Media-generation run (kernel-classified media generation,
+   * taskKind "media"): the user asked for a media file to be
+   * generated, not for a site to be built. Completion semantics
+   * mirror readOnly/execOnly — the phase-1 result IS the outcome:
+   * no build-capability guard (its file-writing criterion can only
+   * misread a successful generation as a failed build), no
+   * zero-mutation reprompt (which would order the model to write
+   * site files the user never asked for), and no artifact/preview
+   * phases. Unlike readOnly the run DOES mutate through the
+   * generation tools themselves (image.generate is a workspace-write
+   * tool); the generation tools keep their own approval policy.
+   * Success requires at least one successful tool call and, when a
+   * quality session ran, its verdict.
+   */
+  mediaOnly?: boolean;
+  /**
    * Quality-loop opt-in, passed through to the main agent-loop phase.
    * When set, the build is gated by the UNDERSTAND→VERIFY evidence stages
    * plus the visual-quality judge. (Was silently dropped before AUTO-mode
@@ -692,7 +708,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           // failed a successful `pwd && ls` with the build sentence
           // (Step 6 proof, 2026-11-14).
           buildCapabilityGuard:
-            options.requiresExecution === true && options.readOnly !== true && options.execOnly !== true
+            options.requiresExecution === true && options.readOnly !== true && options.execOnly !== true && options.mediaOnly !== true
               ? { maxStepsWithoutFileWrite: 3 }
               : undefined,
           evalMetadata: options.evalMetadata,
@@ -915,6 +931,46 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
               ? "Command complete."
               : "The command could not be completed."),
           ...(execSuccess ? {} : { error: "EXEC_NOT_COMPLETED" }),
+          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
+
+      // Media-generation run: the phase-1 result IS the outcome, with
+      // the same completion shape as the read-only/exec returns above.
+      // The generation tool's own workspace write (the auto-inserted
+      // asset file) is the deliverable — the zero-mutation reprompt
+      // below exists for builds whose model announced site writes it
+      // never made; for a media ask it would order the model to write
+      // site files the user never asked for, and the artifact/preview
+      // phases would then fail the run on a website entry file that
+      // was never part of the request (the live lion defect,
+      // LION-RUN-DIAGNOSIS-2026-11-16 Q1). Success = the quality
+      // verdict (when a session ran) AND at least one successful tool
+      // call; either way the agent's final text — which carries the
+      // generated media result — is delivered as the run's answer.
+      if (options.mediaOnly === true) {
+        const mediaAnswered = agentResult.toolCalls.some((c) => c.success);
+        const qualityOk = agentResult.qualityLoop
+          ? agentResult.qualityLoop.verdict.ok
+          : true;
+        const mediaSuccess = mediaAnswered && qualityOk;
+        emitStep(
+          progress,
+          steps,
+          mediaSuccess
+            ? "Media complete — the generation tools produced the requested media."
+            : "Media generation did not complete — reporting what the run produced.",
+        );
+        return baseResult({
+          success: mediaSuccess,
+          status: mediaSuccess ? "completed" : "failed",
+          finalText:
+            agentResult.finalText ||
+            (mediaSuccess
+              ? "Media generation complete."
+              : "The media generation could not be completed."),
+          ...(mediaSuccess ? {} : { error: "MEDIA_NOT_COMPLETED" }),
           repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
           runtimeRepairAttempts,
         });
