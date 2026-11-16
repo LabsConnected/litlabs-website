@@ -254,19 +254,31 @@ export function extractSearchQuery(message: string): string {
 
 /** Nouns that indicate a Studio UI/navigation request, not a places lookup. */
 const PLACES_EXCLUDE_NOUNS =
-  /\b(file|files|terminal|approval|approvals|settings|panel|project|repo|repository|branch|deploy|deployment|editor|code|component|task|pr|pull request|screenshot|screen shot)\b/i;
+  /\b(file|files|terminal|approval|approvals|settings|panel|project|repo|repository|branch|deploy|deployment|editor|code|component|task|pr|pull request|screenshot|screen shot|section|footer|header|website|page)\b/i;
 
-const PLACES_PATTERNS = [
+const PLACES_INHERENT_PATTERNS = [
   /\b(?:what time does|what time is|when does|when is)\b[^.!?]{0,60}\b(?:open|close|closes|opens|closed)\b/i,
   /\bis\b[^.!?]{0,40}\bopen\b[^.!?]{0,20}\b(?:now|today|right now|still)\b/i,
-  // Deliberately requires a two-word phrase, not bare "hours" — a bare
-  // "\bhours\b" matched inside unrelated URLs/content (e.g. a fetch
-  // request for ".../hours", or a web search for "office hours") and
-  // hijacked web_fetch/web_search routing.
+];
+
+// These patterns can appear inside ordinary (non-question) sentences —
+// e.g. site-editing content like "Add a section with our store hours"
+// or "Update the footer to say we open at 9am" — so they only count
+// when the message is actually phrased as a question. Without this
+// gate they hijacked normal Studio build/edit requests into a places
+// lookup, dropping the user's real request before it ever reached the
+// agent loop.
+const PLACES_CONTEXT_PATTERNS = [
   /\b(?:opening hours|business hours|store hours)\b/i,
   /\bcloses?\s+at\b/i,
   /\bopens?\s+at\b/i,
 ];
+
+const PLACES_QUESTION_FORM = /^\s*(?:what|when|is|are|does|how late)\b/i;
+
+function looksLikeQuestion(message: string): boolean {
+  return PLACES_QUESTION_FORM.test(message) || /\?\s*$/.test(message.trim());
+}
 
 /**
  * Detects whether a user message asks about a business/place's hours,
@@ -278,7 +290,8 @@ export function detectPlacesIntent(message: string): boolean {
   const lower = message.toLowerCase();
   if (PLACES_EXCLUDE_NOUNS.test(lower)) return false;
   if (WEATHER_KEYWORDS.some((kw) => lower.includes(kw))) return false;
-  return PLACES_PATTERNS.some((p) => p.test(message));
+  if (PLACES_INHERENT_PATTERNS.some((p) => p.test(message))) return true;
+  return looksLikeQuestion(message) && PLACES_CONTEXT_PATTERNS.some((p) => p.test(message));
 }
 
 /**

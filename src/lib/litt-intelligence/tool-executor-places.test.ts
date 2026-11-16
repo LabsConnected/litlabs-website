@@ -47,6 +47,18 @@ describe("detectPlacesIntent", () => {
   it("does not match a screenshot request that happens to say 'store hours'", () => {
     expect(detectPlacesIntent("take a screenshot of the store hours page")).toBe(false);
   });
+
+  it("does not hijack a site-editing request mentioning 'store hours'", () => {
+    expect(detectPlacesIntent("Add a section with our store hours")).toBe(false);
+  });
+
+  it("does not hijack a site-editing request mentioning 'open at'", () => {
+    expect(detectPlacesIntent("Update the footer to say we open at 9am")).toBe(false);
+  });
+
+  it("does not hijack a description mentioning 'opens at' that isn't a question", () => {
+    expect(detectPlacesIntent("the modal opens at the top of the page")).toBe(false);
+  });
 });
 
 describe("extractPlaceQuery", () => {
