@@ -145,7 +145,7 @@ export default function BoardBrowserPanel() {
           data-testid="board-browser-lookup-input"
           value={lookupInput}
           onChange={(e) => setLookupInput(e.target.value)}
-          placeholder="Ask LiTT to look something up — e.g. “Best Buy hours”"
+          placeholder="Ask LiTT to look something up — e.g. “What time does Best Buy open?”"
           className="min-w-0 flex-1 rounded-full border bg-transparent px-3 py-1 text-xs outline-none"
           style={{ borderColor: tokens.border, color: tokens.text }}
         />
