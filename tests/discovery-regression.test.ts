@@ -293,13 +293,13 @@ describe("Discovery regression — JSON-LD structured data", () => {
 describe("Discovery regression — About page", () => {
   it("page file exists", () => {
     expect(
-      existsSync(path.resolve(__dirname, "../src/app/(app)/about/page.tsx"))
+      existsSync(path.resolve(__dirname, "../src/app/(marketing)/about/page.tsx"))
     ).toBe(true);
   });
 
   it("exports metadata with buildMetadata", () => {
     const src = readFileSync(
-      path.resolve(__dirname, "../src/app/(app)/about/page.tsx"),
+      path.resolve(__dirname, "../src/app/(marketing)/about/page.tsx"),
       "utf-8"
     );
     expect(src).toContain("buildMetadata");
@@ -472,7 +472,7 @@ describe("Discovery regression — Round 2 QA fixes", () => {
 
   it("privacy page keeps a space after every bold label (JSX eats trailing spaces)", () => {
     const src = readFileSync(
-      path.resolve(__dirname, "../src/app/(app)/privacy/page.tsx"),
+      path.resolve(__dirname, "../src/app/(marketing)/privacy/page.tsx"),
       "utf-8"
     );
     expect(src).not.toMatch(/<\/strong> [A-Za-z]/);
@@ -482,7 +482,7 @@ describe("Discovery regression — Round 2 QA fixes", () => {
 
   it("terms 'Last updated' keeps a space before the date", () => {
     const src = readFileSync(
-      path.resolve(__dirname, "../src/app/(app)/terms/page.tsx"),
+      path.resolve(__dirname, "../src/app/(marketing)/terms/page.tsx"),
       "utf-8"
     );
     expect(src).toContain('Last updated:{" "}{UPDATED}');

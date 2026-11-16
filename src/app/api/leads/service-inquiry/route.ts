@@ -28,7 +28,6 @@ import {
 // ─── Zod schema ───────────────────────────────────────────────────────
 
 const VALID_SERVICE_IDS = Object.keys(SERVICE_OFFERS) as ServiceOfferId[];
-const VALID_SOURCES = ["hire_page", "hire_inquiry_form", "supabase-manual-test"] as const;
 
 const metadataSchema = z
   .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
@@ -128,8 +127,10 @@ export async function POST(req: NextRequest) {
     const admin = getSupabaseAdmin();
     if (!admin) {
       console.error("Service inquiry: Supabase admin client not configured");
-      // Don't leak infrastructure details to client
-      return NextResponse.json({ success: true });
+      return NextResponse.json(
+        { error: "We could not save your inquiry. Please try again in a moment." },
+        { status: 503 },
+      );
     }
 
     const { data: insertedRow, error } = await admin
@@ -140,9 +141,12 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error("Service inquiry insert failed:", error.message);
-      // Don't leak DB errors to the client — return success to avoid
-      // revealing table structure or column names
-      return NextResponse.json({ success: true });
+      // Don't leak DB errors to the client — return a generic failure so the
+      // form can show an honest error state instead of a fake success.
+      return NextResponse.json(
+        { error: "We could not save your inquiry. Please try again in a moment." },
+        { status: 500 },
+      );
     }
 
     // Fire-and-forget GHL sync — never blocks the response.
@@ -167,8 +171,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("Service inquiry unexpected error:", err);
-    // Never expose internal errors to the client
-    return NextResponse.json({ success: true });
+    // Never expose internal errors to the client, but do not fake success.
+    return NextResponse.json(
+      { error: "We could not save your inquiry. Please try again in a moment." },
+      { status: 500 },
+    );
   }
 }
 

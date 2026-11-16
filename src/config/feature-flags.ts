@@ -92,11 +92,11 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   hireServices: {
     flag: "hireServices",
     description:
-      "Productized agency services on /hire (Launch Sprint, Automation " +
+      "Productized agency services catalog (Launch Sprint, Automation " +
       "Setup, Brand Pack). Not the V1 self-serve product: the offers carry " +
       "fixed prices, delivery timelines and revision promises that LiTT " +
-      "cannot fulfil automatically. While disabled /hire redirects to " +
-      "/studio; the implementation and the lead-capture API are retained.",
+      "cannot fulfil automatically. /hire is now a scoped inquiry page; " +
+      "this flag stays off so the fixed-price offer catalog is not shown.",
     enabled: false,
     hideFromNav: true,
   },

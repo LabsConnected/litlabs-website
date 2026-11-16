@@ -24,7 +24,7 @@ describe("public pages wear the light-locked design", () => {
 
   it("legal pages opt into the .litt-legal light scope", () => {
     for (const page of ["privacy", "cookies"]) {
-      const src = read(`src/app/(app)/${page}/page.tsx`);
+      const src = read(`src/app/(marketing)/${page}/page.tsx`);
       expect(src).toContain("litt-legal");
       expect(src).toContain("public-pages-tlc.css");
     }
@@ -37,8 +37,8 @@ describe("public pages wear the light-locked design", () => {
 
   it("Tailwind-chromed public pages no longer paint the old near-black background", () => {
     const pages = [
-      "src/app/(app)/terms/page.tsx",
-      "src/app/(app)/about/page.tsx",
+      "src/app/(marketing)/terms/page.tsx",
+      "src/app/(marketing)/about/page.tsx",
       "src/app/(marketing)/agents/AgentsCatalog.tsx",
       "src/app/(marketing)/capabilities/page.tsx",
       "src/app/(marketing)/cli/CliPageClient.tsx",
@@ -50,7 +50,7 @@ describe("public pages wear the light-locked design", () => {
 
   it("hire and showcase public pages wear the light-locked scope", () => {
     const pages = [
-      "src/app/(app)/hire/HireClient.tsx",
+      "src/app/(marketing)/hire/HireClient.tsx",
       "src/app/(app)/showcase/[slug]/page.tsx",
       "src/app/(app)/showcase/PublicShowcaseGallery.tsx",
     ];

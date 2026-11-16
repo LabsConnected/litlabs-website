@@ -23,7 +23,7 @@ export default function CapabilitiesPage() {
           </p>
         </div>
       </div>
-      <CapabilityGrid />
+      <CapabilityGrid showIntro={false} />
     </main>
   );
 }
