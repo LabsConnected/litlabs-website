@@ -49,7 +49,9 @@ import {
   writeSandboxInstallStamp,
 } from "../sandbox/install-stamp";
 import {
+  buildSandboxInstallEnv,
   describeSandboxInstallExit,
+  logSandboxInstallMemoryEvidence,
   runSandboxInstallOnce,
 } from "../sandbox/install-flight";
 import type { WorkspaceDescriptor } from "../workspace/WorkspaceManager";
@@ -180,23 +182,36 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
         // fit a cold install of this repo, so every cold preview
         // failed and retried the whole install (2026-11-16 proof).
         timeoutMs: SANDBOX_INSTALL_TIMEOUT_MS,
-        env: {
-          NODE_ENV: "development",
-          NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
-          // HOME pin, same as the executor's exec and prepare-install
-          // paths: this call goes through provider.execute directly,
-          // so without the pin the composed base env's Phase 1 default
-          // (HOME=/workspace) applies — and the pnpm corepack shim then
-          // tries to create /workspace/.cache/node/corepack, which the
-          // non-root command user cannot do in the root-owned,
-          // 755 workspace root (EACCES, live failure 2026-11-14).
-          // /home/litt is the template's writable home (chmod 777,
-          // outside the synced tree).
-          HOME: SANDBOX_HOME_DIR,
-        },
+        // Shared SHAPED install env (install-flight.ts, round 12) —
+        // the same builder the executor's background install uses, so
+        // the sites cannot drift: heap cap overriding the tree
+        // .npmrc's 4 GB allowance for this exec only, pnpm
+        // concurrency bounds for 1 vCPU / 1024 MB, and the HOME pin:
+        // this call goes through provider.execute directly, so
+        // without the pin the composed base env's Phase 1 default
+        // (HOME=/workspace) applies — and the pnpm corepack shim then
+        // tries to create /workspace/.cache/node/corepack, which the
+        // non-root command user cannot do in the root-owned,
+        // 755 workspace root (EACCES, live failure 2026-11-14).
+        // /home/litt is the template's writable home (chmod 777,
+        // outside the synced tree). The dev-server launch env below
+        // is deliberately NOT shaped — shaping is install-only.
+        env: buildSandboxInstallEnv(SANDBOX_HOME_DIR),
       }),
     );
     const install = flight.result;
+    // Round 12: log the sandbox's peak memory for this install
+    // through the sandbox-lifecycle logger (plus kernel OOM lines on
+    // a signal kill) so the next failure is self-settling. Runs
+    // BEFORE the failure handling below throws — a signal-killed
+    // install is exactly the case the evidence exists for.
+    // Best-effort: never changes the outcome (install-flight.ts).
+    await logSandboxInstallMemoryEvidence({
+      provider,
+      sandboxId,
+      install,
+      log: (m) => console.info(m),
+    });
     let installFailed = install.exitCode !== 0;
     if (installFailed && flight.adopted) {
       // The adopted install failed — but freshness is the ground

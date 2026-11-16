@@ -31,7 +31,7 @@
  * — this is deduplication of CONCURRENT installs, not caching.
  */
 
-import type { ExecuteCommandResult } from "./provider";
+import type { ExecuteCommandResult, SandboxProvider } from "./provider";
 
 export interface SandboxInstallFlight {
   /** The single install's outcome, whoever launched it. */
@@ -98,4 +98,153 @@ export function describeSandboxInstallExit(result: ExecuteCommandResult): string
     `envd reported no normal exit; at the sandbox's 1 vCPU / 1024 MB ` +
     `limits the in-sandbox OOM killer is the leading cause`
   );
+}
+
+/**
+ * Install memory shaping — round 12 (2026-11-16).
+ *
+ * The install is the heaviest workload the sandbox ever runs, and it
+ * ran UNSHAPED: both sites passed a bare `<pm> install
+ * --prefer-offline` with an env of only NODE_ENV / the workspace-root
+ * check / HOME, and the workspace tree's own .npmrc ships
+ * `node-options=--max-old-space-size=4096` — a 4 GB Node heap
+ * allowance inside a 1 GB sandbox. A Node process honoring that
+ * allowance applies no GC backpressure until ~4 GB of heap, so
+ * growth runs straight into the cgroup ceiling and the guest
+ * kernel's OOM killer decides (the standing explanation for the
+ * exit -1 install deaths; ROUND12-PREVIEW-DIAGNOSIS-2026-11-16.md).
+ * pnpm's defaults are tuned for developer machines, not 1 vCPU:
+ * network-concurrency 16, child-concurrency 5.
+ *
+ * buildSandboxInstallEnv is the ONE place the install env is built,
+ * so the two sites cannot drift apart (the same reason the budget
+ * lives in install-stamp.ts). It is used ONLY for the install exec:
+ * the dev-server launch and user command execs never see it.
+ */
+
+/** The sandbox's enforced memory ceiling (template-built, 1024 MB). */
+export const SANDBOX_MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024;
+
+/**
+ * Node heap cap for the install process. 768 MB leaves 256 MB of the
+ * 1024 MB cgroup for everything else resident in the box (envd, the
+ * shell, pnpm's non-heap RSS — binary, stacks, download buffers,
+ * mmap'd store files) while making V8 shed memory at a survivable
+ * bound instead of growing to the ceiling. Deliberately above the
+ * diagnosis's 512 MB example: resolving/linking a ~1,620-package
+ * monorepo at 512 MB risks GC thrash inside the 900 s budget, and
+ * 768 MB still guarantees the heap alone can never reach the limit.
+ */
+export const SANDBOX_INSTALL_NODE_HEAP_MB = 768;
+
+/**
+ * pnpm fetch parallelism for installs. Default is 16 concurrent
+ * downloads, each holding TLS state and buffers the single vCPU
+ * cannot service anyway; 4 keeps the fetch pipeline saturated at a
+ * quarter of the connection memory.
+ */
+export const SANDBOX_INSTALL_NETWORK_CONCURRENCY = 4;
+
+/**
+ * pnpm child-process parallelism for installs. Default is 5; every
+ * child is a Node process carrying its own heap allowance, so on
+ * 1 vCPU / 1024 MB the bound is 2.
+ */
+export const SANDBOX_INSTALL_CHILD_CONCURRENCY = 2;
+
+/**
+ * The full environment for ONE sandbox dependency install, shared by
+ * prepare's background install and preview start's inline install.
+ *
+ * NODE_OPTIONS is set in the exec env — not via the tree's .npmrc —
+ * because Node reads it at process start: it caps pnpm's own heap
+ * (the resolve/link peak lives in the main process) and is inherited
+ * by every child pnpm spawns. The workspace .npmrc file itself is
+ * NOT edited: its 4096 allowance is the project's choice for its own
+ * machines, and the override applies to the install exec only.
+ *
+ * The concurrency bounds travel as npm_config_* env vars, the
+ * channel pnpm reads config from; for npm/yarn installs the extra
+ * keys are inert and NODE_OPTIONS still applies (both are Node).
+ */
+export function buildSandboxInstallEnv(homeDir: string): Record<string, string> {
+  return {
+    NODE_ENV: "development",
+    NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
+    HOME: homeDir,
+    NODE_OPTIONS: `--max-old-space-size=${SANDBOX_INSTALL_NODE_HEAP_MB}`,
+    npm_config_network_concurrency: String(SANDBOX_INSTALL_NETWORK_CONCURRENCY),
+    npm_config_child_concurrency: String(SANDBOX_INSTALL_CHILD_CONCURRENCY),
+  };
+}
+
+/**
+ * Install memory evidence — round 12 (2026-11-16).
+ *
+ * The provider adapter returns only an exit code for an install, so
+ * no log the code wrote could distinguish an OOM kill from any other
+ * signal — every exit -1 cost a diagnosis round. After each install
+ * attempt this reads the two settlers back out of the (surviving)
+ * sandbox and logs them through the sandbox-lifecycle logger:
+ *
+ *   - /sys/fs/cgroup/memory.peak — the attempt's high-water mark
+ *     against the 1073741824 limit (cgroup v2 path, with the v1
+ *     memory.max_usage_in_bytes as fallback). Peak ≈ limit proves
+ *     the box hit the ceiling; a peak well below it exonerates
+ *     memory entirely.
+ *   - on a signal-killed install (negative exit), the tail of the
+ *     kernel's OOM lines from dmesg, which names the victim process
+ *     and its RSS when the kill was a cgroup OOM.
+ *
+ * STRICTLY best-effort: a short timeout, every error swallowed, and
+ * the install's outcome, stamp, and control flow are exactly what
+ * they would have been without it. It only ever writes log lines.
+ */
+
+/** Budget for the evidence read — a cat and maybe a dmesg tail. */
+export const SANDBOX_INSTALL_EVIDENCE_TIMEOUT_MS = 10_000;
+
+export async function logSandboxInstallMemoryEvidence(args: {
+  provider: SandboxProvider;
+  sandboxId: string;
+  install: ExecuteCommandResult;
+  log: (message: string) => void;
+}): Promise<void> {
+  const { provider, sandboxId, install, log } = args;
+  try {
+    const signalKilled = install.exitCode < 0;
+    const command =
+      "peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null || " +
+      "cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes 2>/dev/null); " +
+      "printf 'LITT_MEMORY_PEAK=%s\\n' \"${peak:-unknown}\"" +
+      (signalKilled
+        ? "; dmesg 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | tail -n 5"
+        : "");
+    const evidence = await provider.execute(sandboxId, {
+      command,
+      timeoutMs: SANDBOX_INSTALL_EVIDENCE_TIMEOUT_MS,
+    });
+    const lines = evidence.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    const peakLine = lines.find((line) => line.startsWith("LITT_MEMORY_PEAK="));
+    const peakRaw = peakLine?.slice("LITT_MEMORY_PEAK=".length) ?? "unknown";
+    const peak = /^\d+$/.test(peakRaw) ? peakRaw : "unknown";
+    log(
+      `[sandbox-lifecycle] install memory evidence sandbox=${sandboxId} ` +
+        `exit=${install.exitCode} memory.peak=${peak} limit=${SANDBOX_MEMORY_LIMIT_BYTES}`,
+    );
+    if (signalKilled) {
+      for (const line of lines) {
+        if (line.startsWith("LITT_MEMORY_PEAK=")) continue;
+        log(
+          `[sandbox-lifecycle] install memory evidence sandbox=${sandboxId} kernel: ${line}`,
+        );
+      }
+    }
+  } catch {
+    // Best effort — see docstring. A failed evidence read (sandbox
+    // already gone, provider transport error) changes nothing.
+  }
 }

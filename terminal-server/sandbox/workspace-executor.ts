@@ -72,7 +72,9 @@ import {
   writeSandboxInstallStamp,
 } from "./install-stamp";
 import {
+  buildSandboxInstallEnv,
   describeSandboxInstallExit,
+  logSandboxInstallMemoryEvidence,
   runSandboxInstallOnce,
 } from "./install-flight";
 import {
@@ -775,7 +777,13 @@ export class SandboxWorkspaceExecutor {
           // install of this repo could never finish, so the stamp was
           // never written and every preview retried the full install.
           timeoutMs: SANDBOX_INSTALL_TIMEOUT_MS,
-          env,
+          // Shared SHAPED install env (install-flight.ts, round 12):
+          // heap cap overriding the tree .npmrc's 4 GB allowance for
+          // this exec only, plus pnpm concurrency bounds for the
+          // sandbox's 1 vCPU / 1024 MB. The plain `env` above remains
+          // for the TypeScript pre-install below, which is not the
+          // shaped install exec.
+          env: buildSandboxInstallEnv(SANDBOX_HOME_DIR),
         }),
       );
       installExitCode = flight.result.exitCode;
@@ -785,6 +793,16 @@ export class SandboxWorkspaceExecutor {
           `[sandbox-lifecycle] background install for workspace=${descriptor.workspaceId}: ${killNote}`,
         );
       }
+      // Round 12: log the sandbox's peak memory for this install
+      // (plus kernel OOM lines on a signal kill) so the next failure
+      // is self-settling. Best-effort — never changes the outcome
+      // or the phase-3 bookkeeping below (install-flight.ts).
+      await logSandboxInstallMemoryEvidence({
+        provider: this.provider,
+        sandboxId,
+        install: flight.result,
+        log: (m) => this.log(m),
+      });
     } catch {
       // Non-fatal — preview start retries the install (§4.1 step 9).
       return;

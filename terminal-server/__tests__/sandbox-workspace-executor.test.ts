@@ -38,7 +38,10 @@ import {
   SANDBOX_INSTALL_TIMEOUT_MS,
   sandboxInstallIsFresh,
 } from "../sandbox/install-stamp";
-import { runSandboxInstallOnce } from "../sandbox/install-flight";
+import {
+  buildSandboxInstallEnv,
+  runSandboxInstallOnce,
+} from "../sandbox/install-flight";
 const OWNER = "user_owner_executor";
 const OTHER = "user_someone_else";
 const TOKEN = ["test", "scoped", "token", "0002"].join("-");
@@ -358,6 +361,126 @@ describe("background install budget (round 8)", () => {
     }
     expect(installTimeoutMs).toBe(SANDBOX_INSTALL_TIMEOUT_MS);
     expect(SANDBOX_INSTALL_TIMEOUT_MS).toBe(900_000);
+  });
+});
+
+/**
+ * Round 12 (2026-11-16): the prepare background install runs with
+ * the shared SHAPED install env (install-flight.ts) — heap cap
+ * overriding the tree .npmrc's 4 GB allowance for the install exec
+ * only, plus pnpm concurrency bounds — and the shaping does not
+ * appear in ordinary command execs through the same executor.
+ */
+describe("background install memory shaping (round 12)", () => {
+  it("shapes the background install env; a plain command exec stays unshaped", async () => {
+    const provider = new FakeSandboxProvider({
+      cloneFiles: {
+        "package.json": JSON.stringify({ name: "app", packageManager: "pnpm@9.15.0" }),
+        "server.js": "console.log('app');\n",
+      },
+    });
+    const executor = executorFor(provider);
+    const inputs: Array<{ command: string; env?: Record<string, string> }> = [];
+    const original = provider.execute.bind(provider);
+    provider.execute = async (id, input) => {
+      inputs.push(input);
+      return original(id, input);
+    };
+
+    const ws = await executor.prepareRepoWorkspace({
+      userId: OWNER,
+      projectId: "proj-install-shaping",
+      installationId: 42,
+      owner: "acme",
+      repo: "site",
+      branch: "main",
+      workspaceRoot: volumeParent,
+      githubToken: TOKEN,
+    });
+
+    // The background install fires on a timer after prepare returns.
+    const deadline = Date.now() + 15_000;
+    let install: { command: string; env?: Record<string, string> } | undefined;
+    while (!install && Date.now() < deadline) {
+      install = inputs.find((i) => i.command.includes("install"));
+      if (!install) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(install, "a background install execute call").toBeDefined();
+    expect(install!.env).toEqual(buildSandboxInstallEnv(SANDBOX_HOME_DIR));
+    expect(install!.env?.NODE_OPTIONS).toBe("--max-old-space-size=768");
+    expect(install!.env?.npm_config_network_concurrency).toBe("4");
+    expect(install!.env?.npm_config_child_concurrency).toBe("2");
+
+    // A user command exec through the same executor carries none of
+    // the install shaping.
+    await executor.executeCommand(ws, { command: "pwd" });
+    const pwd = inputs.find((i) => i.command === "pwd");
+    expect(pwd, "a pwd execute call").toBeDefined();
+    expect(pwd!.env?.NODE_OPTIONS).toBeUndefined();
+    expect(pwd!.env?.npm_config_network_concurrency).toBeUndefined();
+    expect(pwd!.env?.npm_config_child_concurrency).toBeUndefined();
+  });
+});
+
+/**
+ * Round 12 (2026-11-16): after the background install attempt, the
+ * sandbox's memory peak is logged through the sandbox-lifecycle
+ * logger (the executor's log), so the next install failure settles
+ * itself. The fake provider cannot read a real cgroup, so the peak
+ * reads unknown — the pin is that the evidence line fires, carries
+ * the sandbox id / exit / limit, and the install still completes
+ * (stamp written, sandbox fresh).
+ */
+describe("background install memory evidence (round 12)", () => {
+  it("logs install memory evidence after the background install; the install still stamps", async () => {
+    const provider = new FakeSandboxProvider({
+      cloneFiles: {
+        "package.json": JSON.stringify({ name: "app", packageManager: "pnpm@9.15.0" }),
+        "server.js": "console.log('app');\n",
+      },
+    });
+    const logs: string[] = [];
+    const executor = new SandboxWorkspaceExecutor({
+      provider,
+      gate: gateFor(provider),
+      templateId: "fake-template",
+      log: (m) => logs.push(m),
+    });
+
+    const ws = await executor.prepareRepoWorkspace({
+      userId: OWNER,
+      projectId: "proj-install-evidence",
+      installationId: 42,
+      owner: "acme",
+      repo: "site",
+      branch: "main",
+      workspaceRoot: volumeParent,
+      githubToken: TOKEN,
+    });
+    const sandboxId = ws.sandbox!.sandboxId;
+
+    const deadline = Date.now() + 15_000;
+    let line: string | undefined;
+    while (!line && Date.now() < deadline) {
+      line = logs.find((l) => l.includes("install memory evidence"));
+      if (!line) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(line, "an install memory evidence log line").toBeDefined();
+    expect(line).toContain(`sandbox=${sandboxId}`);
+    expect(line).toContain("exit=0");
+    expect(line).toContain("limit=1073741824");
+
+    // The evidence read did not disturb the install outcome: the
+    // stamp landed and the sandbox reads fresh.
+    const stamp = readVolumeInstallStamp(ws.root);
+    expect(stamp).not.toBeNull();
+    const freshDeadline = Date.now() + 15_000;
+    let fresh = false;
+    while (!fresh && Date.now() < freshDeadline) {
+      fresh = await sandboxInstallIsFresh(provider, sandboxId, stamp);
+      if (!fresh) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(fresh).toBe(true);
   });
 });
 

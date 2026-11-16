@@ -926,12 +926,17 @@ export async function POST(
       let resumeFailure: string | undefined;
       let resumePreview: Awaited<ReturnType<typeof ensureProjectPreviewReady>> | null = null;
       if (!result.pendingApproval && !result.cancelled) {
-        if (result.modelFailed) {
+        if (result.modelFailed && !result.completedWithWarning) {
           // The resumed loop stopped because the model itself failed
           // (provider routes exhausted, budget spent, upstream error).
           // Surface that real reason — letting the artifact gate run here
           // would mask it behind a misleading "no runnable entry file"
           // error even though the approved mutation may have succeeded.
+          // Round 11 exception: when the loop settled
+          // completedWithWarning, the deliverable had already landed and
+          // passed the gate — the model failure hit only the closing
+          // summary, so it is recorded as a contributor on the run
+          // record (below), not promoted to the run's verdict.
           resumeFailure =
             result.modelFailureText ??
             `The resumed run could not complete: ${result.modelFailed}`;
@@ -1003,13 +1008,23 @@ export async function POST(
         });
         // Canonical settle FIRST — the outcome is recorded on the action_run
         // (errors propagate; a silent divergence is worse than a loud
-        // failure). The claim is verified and released inside.
+        // failure). The claim is verified and released inside. The
+        // runResult carries EVERY failure contributor (round 11): the
+        // headline reason above is the display choice, not the whole
+        // record — a route failure must not erase a tool defect.
         await settleResumedRunOutcome({
           record: resolved,
           userId,
           status: "failed",
           eventType: "run.failed",
           patch: { currentActivity: "Task failed", failureCode: "TASK_FAILED", failureMessage: resumeFailure },
+          runResult: {
+            finalText: resumeFailure,
+            stepsUsed: result.stepsUsed,
+            toolCalls: result.toolCalls,
+            cancelled: false,
+            failureContributors: result.failureContributors,
+          },
           executionToken,
           logEvent: "approval:action_run_failure_settle_failed",
         });
@@ -1130,6 +1145,9 @@ export async function POST(
         finalText,
         stepsUsed: result.stepsUsed,
         toolCalls: result.toolCalls,
+        // Round 11: all failure contributors ride the run record, on
+        // completed runs too — the warning state must stay diagnosable.
+        failureContributors: result.failureContributors,
         cancelled: result.cancelled,
         cancelReason: result.cancelReason,
         pendingApproval: result.pendingApproval
