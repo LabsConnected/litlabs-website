@@ -84,4 +84,23 @@ describe("searchPlace", () => {
     fetchSpy.mockResolvedValueOnce(new Response("", { status: 500 }));
     await expect(searchPlace("Best Buy")).rejects.toThrow("Places search failed");
   });
+
+  it("throws (does not return null) when text search reports REQUEST_DENIED", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      response({ status: "REQUEST_DENIED", error_message: "invalid key", results: [] }),
+    );
+    await expect(searchPlace("Best Buy")).rejects.toThrow("Places search failed: REQUEST_DENIED");
+  });
+
+  it("throws (does not return null) when details reports OVER_QUERY_LIMIT", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        response({
+          status: "OK",
+          results: [{ place_id: "p1", name: "Best Buy", formatted_address: "123 Main St" }],
+        }),
+      )
+      .mockResolvedValueOnce(response({ status: "OVER_QUERY_LIMIT" }));
+    await expect(searchPlace("Best Buy")).rejects.toThrow("Place details failed: OVER_QUERY_LIMIT");
+  });
 });

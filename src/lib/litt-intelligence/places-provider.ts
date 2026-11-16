@@ -20,6 +20,15 @@ export interface PlaceHours {
   mapsUrl: string | null;
 }
 
+// Google returns HTTP 200 with these body statuses for key/quota/request
+// failures. They are NOT "no match", so they must throw instead of null.
+const PLACES_ERROR_STATUSES = new Set([
+  "REQUEST_DENIED",
+  "OVER_QUERY_LIMIT",
+  "INVALID_REQUEST",
+  "UNKNOWN_ERROR",
+]);
+
 function getApiKey(): string | null {
   return process.env.GOOGLE_PLACES_API_KEY?.trim() || null;
 }
@@ -47,6 +56,9 @@ export async function searchPlace(query: string): Promise<PlaceHours | null> {
     status: string;
     results?: Array<{ place_id: string; name: string; formatted_address: string }>;
   };
+  if (PLACES_ERROR_STATUSES.has(searchData.status)) {
+    throw new Error(`Places search failed: ${searchData.status}`);
+  }
   if (searchData.status !== "OK" || !searchData.results || searchData.results.length === 0) {
     return null;
   }
@@ -74,6 +86,9 @@ export async function searchPlace(query: string): Promise<PlaceHours | null> {
       url?: string;
     };
   };
+  if (PLACES_ERROR_STATUSES.has(detailsData.status)) {
+    throw new Error(`Place details failed: ${detailsData.status}`);
+  }
   if (detailsData.status !== "OK" || !detailsData.result) {
     return null;
   }
