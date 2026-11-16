@@ -22,7 +22,9 @@ import { SandboxExecGate } from "../sandbox/exec-router";
 import {
   ensureSandboxWorkspaceWritable,
   SandboxWorkspaceExecutor,
+  SANDBOX_HOME_DIR,
 } from "../sandbox/workspace-executor";
+import { SANDBOX_GIT_HOME_DIR } from "../sandbox/git-clone";
 import type { SandboxProvider } from "../sandbox/provider";
 import {
   getWorkspace,
@@ -404,6 +406,51 @@ describe("forward push", () => {
     expect(getWorkspace(ws.workspaceId)?.sandbox?.pendingForward).toEqual([]);
     const late = await t.readFile(getWorkspace(ws.workspaceId)!.sandbox!.sandboxId, "/workspace/late.txt");
     expect(new TextDecoder().decode(late)).toBe("late-content");
+  });
+});
+
+/**
+ * Round 7: a sandbox bootstrapped by an exec (or a preview start)
+ * never passes through prepare, so nothing registered the mirrored
+ * root as a git safe.directory — and every git command the web
+ * sends through the exec route exited 128 (dubious ownership: the
+ * mirror lands files owned by the provider's files-API user, not
+ * the command user). The bootstrap must register it, under the
+ * same HOME the exec itself runs with, before the first command.
+ */
+describe("mirror bootstrap git hygiene (round 7)", () => {
+  it("keeps the git module's registration home identical to the exec home", () => {
+    // git-clone.ts cannot import the executor's constant (the
+    // executor imports git-clone), so the two are pinned equal here.
+    expect(SANDBOX_GIT_HOME_DIR).toBe(SANDBOX_HOME_DIR);
+    expect(SANDBOX_HOME_DIR).toBe("/home/litt");
+  });
+
+  it("registers safe.directory under the exec HOME before the first command runs", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-mirror-git");
+    const calls: Array<{ command: string; env?: Record<string, string> }> = [];
+    const original = provider.execute.bind(provider);
+    provider.execute = async (id, input) => {
+      calls.push({ command: input.command, env: input.env });
+      return original(id, input);
+    };
+
+    const outcome = await executor.executeCommand(ws, {
+      command: "git status --porcelain=v1 -b",
+    });
+    expect(outcome).not.toBeNull();
+
+    const registrationIdx = calls.findIndex((c) => c.command.includes("safe.directory"));
+    const commandIdx = calls.findIndex((c) => c.command.includes("git status"));
+    expect(registrationIdx).toBeGreaterThanOrEqual(0);
+    expect(commandIdx).toBeGreaterThan(registrationIdx);
+    // The registration and the command read/write ONE global config:
+    // both run under the sandbox home, never the base env's
+    // /workspace default.
+    expect(calls[registrationIdx].env?.HOME).toBe(SANDBOX_HOME_DIR);
+    expect(calls[commandIdx].env?.HOME).toBe(SANDBOX_HOME_DIR);
   });
 });
 
