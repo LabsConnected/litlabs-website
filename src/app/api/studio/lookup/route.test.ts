@@ -84,4 +84,31 @@ describe("POST /api/studio/lookup", () => {
     const res = await POST(req({}));
     expect(res.status).toBe(400);
   });
+
+  it("returns 400 when the query is not a string", async () => {
+    const res = await POST(req({ query: 123 }));
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(typeof body.error).toBe("string");
+  });
+
+  it("returns 400 when the query exceeds the length cap", async () => {
+    const res = await POST(req({ query: "a".repeat(501) }));
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+  });
+
+  it("reports a handled failure instead of throwing when getUserContext rejects", async () => {
+    mocks.getUserContext.mockRejectedValueOnce(new Error("db unavailable"));
+
+    const res = await POST(req({ query: "Best Buy hours" }));
+    const body = await res.json();
+
+    expect(body.success).toBe(false);
+    expect(typeof body.error).toBe("string");
+  });
 });
