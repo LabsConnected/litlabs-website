@@ -45,7 +45,10 @@ export async function executePlacesLookup(
   }
 
   try {
-    const place = await searchPlace(query);
+    const locatedQuery = ctx.location.city
+      ? `${query} near ${ctx.location.city}${ctx.location.region ? `, ${ctx.location.region}` : ""}`
+      : query;
+    const place = await searchPlace(locatedQuery);
     if (!place) {
       await recordToolCall(ctx.userId, {
         capabilityId: "places.search",

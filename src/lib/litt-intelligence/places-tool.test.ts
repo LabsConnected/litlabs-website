@@ -21,7 +21,11 @@ vi.mock("./permission-gate", () => ({
 
 import { executePlacesLookup } from "./places-tool";
 
-const ctx = { userId: "user-1", capabilities: {} } as unknown as UserContext;
+const ctx = {
+  userId: "user-1",
+  capabilities: {},
+  location: { city: null, region: null, country: null, latitude: null, longitude: null, source: "none" },
+} as unknown as UserContext;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -80,5 +84,48 @@ describe("executePlacesLookup", () => {
 
     expect(res.success).toBe(false);
     if (!res.success) expect(res.error).toContain("Places search failed: 500");
+  });
+
+  it("appends the user's resolved city to the provider query when location is known", async () => {
+    mocks.searchPlace.mockResolvedValue({
+      name: "Best Buy",
+      address: "123 Main St",
+      openNow: true,
+      weekdayText: [],
+      mapsUrl: null,
+    });
+
+    const locatedCtx = {
+      userId: "user-1",
+      capabilities: {},
+      location: { city: "Seattle", region: null, country: null, latitude: null, longitude: null, source: "manual_city" },
+    } as unknown as UserContext;
+
+    const res = await executePlacesLookup(locatedCtx, "Best Buy");
+
+    expect(res.success).toBe(true);
+    expect(mocks.searchPlace).toHaveBeenCalledWith(expect.stringContaining("Seattle"));
+    expect(mocks.searchPlace).toHaveBeenCalledWith(expect.stringContaining("Best Buy"));
+  });
+
+  it("keeps the original query in error messages and recorded input even when located", async () => {
+    mocks.searchPlace.mockResolvedValue(null);
+
+    const locatedCtx = {
+      userId: "user-1",
+      capabilities: {},
+      location: { city: "Seattle", region: "WA", country: null, latitude: null, longitude: null, source: "manual_city" },
+    } as unknown as UserContext;
+
+    const res = await executePlacesLookup(locatedCtx, "a place that does not exist");
+
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.error).toBe(`I couldn't find a match for "a place that does not exist".`);
+    }
+    expect(mocks.recordToolCall).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({ inputSummary: { query: "a place that does not exist" } }),
+    );
   });
 });
