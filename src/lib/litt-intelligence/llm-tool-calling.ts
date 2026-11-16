@@ -2648,8 +2648,25 @@ export function summarizeToolResult(toolId: string, result: unknown): string {
     if (obj.savedToProject === false || saveError) {
       return `Image generated but project save failed: ${saveError || "unknown error"}`.slice(0, 200);
     }
+    // The file save and the asset record are two different writes:
+    // savedToProject tracks the workspace file; assetPersistenceFailed
+    // tracks the generation_jobs row the Media panel reads. When the
+    // job persistence failed, "saved to project" would claim a success
+    // the Media surface cannot back up — the image is missing there
+    // while the progress list reads clean (round-10 diagnosis Q3b).
+    // Name the failure, and surface where the file actually landed.
+    const projectPath =
+      typeof obj.projectPath === "string" && obj.projectPath ? obj.projectPath : "";
+    if (obj.assetPersistenceFailed === true) {
+      return (
+        `Image generated${projectPath ? ` (file at ${projectPath})` : ""} ` +
+        `but its asset record failed to persist — it may not appear in Media`
+      ).slice(0, 200);
+    }
     if (obj.savedToProject === true) {
-      return "Image generated and saved to project";
+      return projectPath
+        ? `Image generated and saved to project (${projectPath})`
+        : "Image generated and saved to project";
     }
     // Media results carry a multi-KB data: URL — never let it become the
     // summary. Chat-context generations (no project save) land here.

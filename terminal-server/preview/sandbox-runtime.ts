@@ -48,6 +48,10 @@ import {
   sandboxInstallIsFresh,
   writeSandboxInstallStamp,
 } from "../sandbox/install-stamp";
+import {
+  describeSandboxInstallExit,
+  runSandboxInstallOnce,
+} from "../sandbox/install-flight";
 import type { WorkspaceDescriptor } from "../workspace/WorkspaceManager";
 import {
   PreviewError,
@@ -160,29 +164,57 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
     // install dies EACCES before it starts (live failure 2026-11-15;
     // see ensureSandboxWorkspaceWritable).
     await ensureSandboxWorkspaceWritable(provider, sandboxId);
-    const install = await provider.execute(sandboxId, {
-      command: buildShellCommand([args.packageManager, "install", "--prefer-offline"]),
-      cwd: SANDBOX_WORKSPACE_ROOT,
-      // Shared install budget (install-stamp.ts): 300 s could never
-      // fit a cold install of this repo, so every cold preview
-      // failed and retried the whole install (2026-11-16 proof).
-      timeoutMs: SANDBOX_INSTALL_TIMEOUT_MS,
-      env: {
-        NODE_ENV: "development",
-        NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
-        // HOME pin, same as the executor's exec and prepare-install
-        // paths: this call goes through provider.execute directly,
-        // so without the pin the composed base env's Phase 1 default
-        // (HOME=/workspace) applies — and the pnpm corepack shim then
-        // tries to create /workspace/.cache/node/corepack, which the
-        // non-root command user cannot do in the root-owned,
-        // 755 workspace root (EACCES, live failure 2026-11-14).
-        // /home/litt is the template's writable home (chmod 777,
-        // outside the synced tree).
-        HOME: SANDBOX_HOME_DIR,
-      },
-    });
-    if (install.exitCode !== 0) {
+    // Single-flight (round 10, install-flight.ts): prepare fires a
+    // background install into this same sandbox on every provision,
+    // and this start usually races it — the stamp check above ran
+    // while that install was still in flight (no stamp yet), so this
+    // path launched a SECOND pnpm install against the same store on
+    // 1 vCPU / 1024 MB, and envd signal-killed one of them mid-flight
+    // (exit -1, 2026-11-16 proof). Adopt the in-flight install
+    // instead; the freshness stamp stays the ground truth below.
+    const flight = await runSandboxInstallOnce(sandboxId, () =>
+      provider.execute(sandboxId, {
+        command: buildShellCommand([args.packageManager, "install", "--prefer-offline"]),
+        cwd: SANDBOX_WORKSPACE_ROOT,
+        // Shared install budget (install-stamp.ts): 300 s could never
+        // fit a cold install of this repo, so every cold preview
+        // failed and retried the whole install (2026-11-16 proof).
+        timeoutMs: SANDBOX_INSTALL_TIMEOUT_MS,
+        env: {
+          NODE_ENV: "development",
+          NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
+          // HOME pin, same as the executor's exec and prepare-install
+          // paths: this call goes through provider.execute directly,
+          // so without the pin the composed base env's Phase 1 default
+          // (HOME=/workspace) applies — and the pnpm corepack shim then
+          // tries to create /workspace/.cache/node/corepack, which the
+          // non-root command user cannot do in the root-owned,
+          // 755 workspace root (EACCES, live failure 2026-11-14).
+          // /home/litt is the template's writable home (chmod 777,
+          // outside the synced tree).
+          HOME: SANDBOX_HOME_DIR,
+        },
+      }),
+    );
+    const install = flight.result;
+    let installFailed = install.exitCode !== 0;
+    if (installFailed && flight.adopted) {
+      // The adopted install failed — but freshness is the ground
+      // truth, not another caller's exit code: if the sandbox's deps
+      // are fresh for the volume's current lockfile anyway (a stamp
+      // landed from an earlier attempt), proceed; otherwise surface
+      // the failure exactly as an own-install failure below.
+      if (await sandboxInstallIsFresh(provider, sandboxId, installStamp)) {
+        installFailed = false;
+        pushPreviewLog(
+          runtime,
+          `[preview] Adopted install exited ${install.exitCode}, but dependencies are fresh — continuing`,
+        );
+      }
+    }
+    if (installFailed) {
+      const killNote = describeSandboxInstallExit(install);
+      if (killNote) pushPreviewLog(runtime, `[preview] ${killNote}`);
       runtime.status = "failed";
       runtime.errorCode = "preview_dependency_install_failed";
       runtime.error =
