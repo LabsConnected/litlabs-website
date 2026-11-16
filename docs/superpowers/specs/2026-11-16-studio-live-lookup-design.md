@@ -2,7 +2,7 @@
 
 Date: 2026-11-16
 Branch: `worktree-studio-live-lookup`
-Status: Approved by Larry (2026-11-16), implementation in progress
+Status: Approved by Larry (2026-11-16), implemented — PR open, pending LiTT's review and merge
 
 ## Problem
 
@@ -137,10 +137,11 @@ contents are extended.
    `places-tool.ts` → `places-provider.ts` → Google Places.
 4. The tool's sourced text is persisted as the assistant message and
    streamed back over SSE. The LLM is never called for this turn.
-5. Independently, if the user opens the new "Browser" board panel and types
-   a query, `LiveLookupPanel` calls `useLiveLookup`, which POSTs to
-   `/api/studio/lookup`, which calls the same `places-tool`/`web-search-tool`
-   functions and returns the same structured, sourced result.
+5. Independently, if the user opens the board's existing "Browser" panel
+   (`BoardBrowserPanel.tsx`) and types a query into its lookup bar,
+   `useLiveLookup` POSTs to `/api/studio/lookup`, which calls the same
+   `places-tool`/`web-search-tool` functions and returns the same
+   structured, sourced result.
 
 Both surfaces call the same underlying tool functions — no divergent logic
 path, no duplicated provider code.
@@ -164,9 +165,9 @@ path, no duplicated provider code.
 - `tool-executor` routing test — "What time does Best Buy open?" routes to
   the places tool; asserts the LLM generation path is never invoked.
 - Manifest test — `places` appears in `buildToolManifest()`'s output.
-- `LiveLookupPanel` / `BoardPanelBindings` test mirroring
-  `BoardPanelBindings.test.tsx`'s existing pattern, asserting no
-  placeholder content renders when there are no results yet.
+- `BoardBrowserPanel.test.tsx` — asserts no placeholder content renders
+  when there are no results yet, and that a real lookup renders the
+  genuine sourced result or an honest error.
 
 PR-body transcript: produced from the mocked-provider test output, labeled
 explicitly as a test-harness run (no live `BRAVE_SEARCH_API_KEY` /
