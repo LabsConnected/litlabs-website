@@ -72,6 +72,10 @@ import {
   writeSandboxInstallStamp,
 } from "./install-stamp";
 import {
+  describeSandboxInstallExit,
+  runSandboxInstallOnce,
+} from "./install-flight";
+import {
   getWorkspace,
   listAllWorkspaceDescriptors,
   managedWorkspaceId,
@@ -720,11 +724,14 @@ export class SandboxWorkspaceExecutor {
     // forward pushes) behind the whole install — the preview-start
     // timeout of
     // 2026-11-15 (PREVIEW-TIMEOUT-DIAGNOSIS-2026-11-15.md, fix #1).
-    // Running it unlocked is safe: preview start's own freshness
-    // check tolerates a concurrent or missing install (it installs
-    // inline if not fresh), and the stamp comparison makes a
-    // duplicate install benign. The binding is re-validated under
-    // the lock in phase 3 before anything is stamped or synced back.
+    // Running it unlocked is safe: the install exec itself is
+    // single-flight per sandbox (install-flight.ts), so preview
+    // start's inline install and this background install adopt each
+    // other instead of running two package managers against the same
+    // store — the concurrency the stamp comparison alone used to
+    // call "benign" until a duplicate got signal-killed mid-install
+    // (round 10). The binding is re-validated under the lock in
+    // phase 3 before anything is stamped or synced back.
 
     // The install writes into the tree (pnpm's store probe file,
     // node_modules, the lockfile) as the non-root command user —
@@ -749,16 +756,35 @@ export class SandboxWorkspaceExecutor {
     };
     let installExitCode: number | null = null;
     try {
-      const installResult = await this.provider.execute(sandboxId, {
-        command: buildShellCommand([pm, "install", "--prefer-offline"]),
-        cwd: SANDBOX_WORKSPACE_ROOT,
-        // Shared install budget (install-stamp.ts): at 300 s a cold
-        // install of this repo could never finish, so the stamp was
-        // never written and every preview retried the full install.
-        timeoutMs: SANDBOX_INSTALL_TIMEOUT_MS,
-        env,
-      });
-      installExitCode = installResult.exitCode;
+      // Single-flight (round 10, install-flight.ts): preview start
+      // installs inline in this same sandbox when it finds the deps
+      // stale — if an install is already running here (preview's, or
+      // another prepare's), adopt its outcome instead of running a
+      // second package-manager install against the same store on
+      // 1 vCPU / 1024 MB. The duplicate is what got the preview
+      // install signal-killed mid-flight (exit -1) in the 2026-11-16
+      // proof. The adopted outcome feeds the same phase-3 bookkeeping
+      // below: the stamp is written only on a clean exit, whoever ran
+      // the install — the command, cwd, and env are identical at both
+      // sites by construction.
+      const flight = await runSandboxInstallOnce(sandboxId, () =>
+        this.provider.execute(sandboxId, {
+          command: buildShellCommand([pm, "install", "--prefer-offline"]),
+          cwd: SANDBOX_WORKSPACE_ROOT,
+          // Shared install budget (install-stamp.ts): at 300 s a cold
+          // install of this repo could never finish, so the stamp was
+          // never written and every preview retried the full install.
+          timeoutMs: SANDBOX_INSTALL_TIMEOUT_MS,
+          env,
+        }),
+      );
+      installExitCode = flight.result.exitCode;
+      const killNote = describeSandboxInstallExit(flight.result);
+      if (killNote) {
+        this.log(
+          `[sandbox-lifecycle] background install for workspace=${descriptor.workspaceId}: ${killNote}`,
+        );
+      }
     } catch {
       // Non-fatal — preview start retries the install (§4.1 step 9).
       return;

@@ -382,18 +382,22 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
   }
 
   /**
-   * Heal-on-404 for the write path (round 9 fix E). The files and
-   * preview routes have healed a workspace-level 404 via
-   * ensureWorkspaceAlive since #1012, but this transport — the agent's
-   * own write path, the one that saves generated images — never did:
-   * a lost terminal workspace made every write fail with the raw 404
-   * ("Image generated but project save failed") even while the heal
-   * machinery sat one module away. On a workspace-level 404, run the
+   * Heal-on-404 for the write path (round 9 fix E) and the exec path
+   * (round 10). The files and preview routes have healed a
+   * workspace-level 404 via ensureWorkspaceAlive since #1012, but this
+   * transport — the agent's own write path, the one that saves
+   * generated images — never did: a lost terminal workspace made every
+   * write fail with the raw 404 ("Image generated but project save
+   * failed") even while the heal machinery sat one module away. The
+   * run's change-verification rode the same unhealed route through
+   * exec(): a descriptor-level miss failed every git probe and the
+   * run reported "Workspace unknown / 0 files" while the Files panel
+   * read the same workspace fine. On a workspace-level 404, run the
    * heal ONCE and return the workspaceId to retry against (the
    * transport's own id, or the re-registered one the heal produced).
    * Returns null when the heal did not restore a live workspace —
    * the caller then surfaces the original 404. Never throws: a heal
-   * failure must not mask the write's own error.
+   * failure must not mask the caller's own error.
    */
   private async healWorkspaceAfterNotFound(): Promise<string | null> {
     try {
@@ -554,9 +558,8 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   async exec(command: string, timeoutMs = EXEC_TIMEOUT_MS, stdin?: string): Promise<ExecResult> {
     const t0 = Date.now();
-    const resp = await fetch(
-      `${terminalBase()}/internal/workspace/${this.workspaceId}/exec`,
-      {
+    const attempt = (workspaceId: string) =>
+      fetch(`${terminalBase()}/internal/workspace/${workspaceId}/exec`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -564,19 +567,56 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
         },
         body: JSON.stringify({ command, userId: this.userId, timeout: timeoutMs, stdin }),
         signal: AbortSignal.timeout(timeoutMs + 5_000),
-      },
-    );
-    const durationMs = Date.now() - t0;
+      });
+    let resp = await attempt(this.workspaceId);
+    if (resp.status === 404 || resp.status === 409) {
+      const errText = await resp.text().catch(() => "");
+      // Workspace-level failures only: the terminal has no descriptor
+      // for this workspace (404 "Workspace not found") or holds one
+      // that is not ready (409 "Workspace not ready"). Heal once and
+      // retry, mirroring the write path's fix-E shape — the run's
+      // change-verification probes (computeWorkspaceChange's git
+      // status) ride this method, and a descriptor-level miss the
+      // panel routes would heal was terminal for every probe
+      // (round-10 diagnosis Q2). Every other failure is surfaced
+      // untouched: the sandbox gate's fail-closed 503 and a sandbox
+      // execution 500 are NOT workspace misses, and healing must
+      // never become a way around the gate.
+      const workspaceLevel =
+        (resp.status === 404 && errText.includes("Workspace not found")) ||
+        (resp.status === 409 && errText.includes("Workspace not ready"));
+      if (workspaceLevel) {
+        const healedId = await this.healWorkspaceAfterNotFound();
+        if (healedId) {
+          resp = await attempt(healedId);
+          if (!resp.ok) {
+            const retryErr = await resp.text().catch(() => "");
+            throw new Error(`exec failed (${resp.status}): ${retryErr}`);
+          }
+          return this.parseExecResponse(resp, t0);
+        }
+      }
+      throw new Error(`exec failed (${resp.status}): ${errText}`);
+    }
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");
       throw new Error(`exec failed (${resp.status}): ${err}`);
     }
-    const data = await resp.json();
+    return this.parseExecResponse(resp, t0);
+  }
+
+  private async parseExecResponse(resp: Response, t0: number): Promise<ExecResult> {
+    const data = (await resp.json()) as {
+      exitCode?: number;
+      exit_code?: number;
+      stdout?: string;
+      stderr?: string;
+    };
     return {
       exitCode: data.exitCode ?? data.exit_code ?? 1,
       stdout: data.stdout ?? "",
       stderr: data.stderr ?? "",
-      durationMs,
+      durationMs: Date.now() - t0,
     };
   }
 

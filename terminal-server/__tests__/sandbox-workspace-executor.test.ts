@@ -38,6 +38,7 @@ import {
   SANDBOX_INSTALL_TIMEOUT_MS,
   sandboxInstallIsFresh,
 } from "../sandbox/install-stamp";
+import { runSandboxInstallOnce } from "../sandbox/install-flight";
 const OWNER = "user_owner_executor";
 const OTHER = "user_someone_else";
 const TOKEN = ["test", "scoped", "token", "0002"].join("-");
@@ -357,6 +358,71 @@ describe("background install budget (round 8)", () => {
     }
     expect(installTimeoutMs).toBe(SANDBOX_INSTALL_TIMEOUT_MS);
     expect(SANDBOX_INSTALL_TIMEOUT_MS).toBe(900_000);
+  });
+});
+
+describe("background install single-flight (round 10)", () => {
+  it("adopts an in-flight install for the sandbox instead of launching a duplicate", async () => {
+    const provider = new FakeSandboxProvider({
+      cloneFiles: {
+        "package.json": JSON.stringify({ name: "app", packageManager: "pnpm@9.15.0" }),
+        "server.js": "console.log('app');\n",
+      },
+    });
+    const executor = executorFor(provider);
+    const executed: string[] = [];
+    const original = provider.execute.bind(provider);
+    provider.execute = async (id, input) => {
+      executed.push(input.command);
+      return original(id, input);
+    };
+
+    const ws = await executor.prepareRepoWorkspace({
+      userId: OWNER,
+      projectId: "proj-install-adopt",
+      installationId: 42,
+      owner: "acme",
+      repo: "site",
+      branch: "main",
+      workspaceRoot: volumeParent,
+      githubToken: TOKEN,
+    });
+    const sandboxId = ws.sandbox!.sandboxId;
+
+    // Occupy the sandbox's install flight (as a racing preview start
+    // would) BEFORE the background install — fired on a timer by
+    // prepare step 9 — reaches its exec.
+    let releaseFlight!: (exitCode: number) => void;
+    const flightGate = new Promise<number>((resolve) => {
+      releaseFlight = resolve;
+    });
+    const manual = runSandboxInstallOnce(sandboxId, async () => ({
+      exitCode: await flightGate,
+      stdout: "",
+      stderr: "",
+      durationMs: 1,
+    }));
+
+    // Give the background install time to run its phases and reach
+    // the flight: it must adopt, so its own install exec never fires.
+    await new Promise((r) => setTimeout(r, 250));
+    expect(executed.some((c) => c.includes("install"))).toBe(false);
+
+    releaseFlight(0);
+    await manual;
+
+    // The adopted success feeds phase 3 exactly like an own success:
+    // the freshness stamp lands in the sandbox.
+    const stamp = readVolumeInstallStamp(ws.root);
+    expect(stamp).not.toBeNull();
+    const deadline = Date.now() + 15_000;
+    let fresh = false;
+    while (!fresh && Date.now() < deadline) {
+      fresh = await sandboxInstallIsFresh(provider, sandboxId, stamp);
+      if (!fresh) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(fresh).toBe(true);
+    expect(executed.some((c) => c.includes("install"))).toBe(false);
   });
 });
 

@@ -245,7 +245,21 @@ const MODE_PATTERNS: ModePattern[] = [
       // Media added to an existing target: "add images ... to my project".
       // The project/site target keeps this in the execution lane; a bare
       // "make me a logo" (no project target) still falls through to create.
-      /\b(add|upload|generate)\b.*\b(images?|photos?|pictures?|media|gallery)\b.*\b(project|site|website|page|section)\b/i,
+      // Additive verbs only (add/upload/insert/put): the deliverable is
+      // existing media being placed into the target.
+      /\b(add|upload|insert|put)\b.*\b(images?|photos?|pictures?|media|gallery)\b.*\b(project|site|website|page|section)\b/i,
+      // Generation INTO a site element stays build: "generate an image
+      // for my landing page" asks for the image AND its placement in
+      // the page — file-writing work the media lane does not do. The
+      // target list deliberately excludes bare "project": "generate an
+      // image ... and save it to this project" is a bare generation
+      // whose deliverable merely lands in the project (the registry's
+      // auto-insert saves it there) — this pattern's predecessor also
+      // matched `generate ... project`, stole the turn into build, and
+      // a successful generation then failed the build quality gate
+      // (round-10 proof, 2026-11-16). That wording now falls through
+      // to the media group below (taskKind "media").
+      /\b(generate)\b.*\b(images?|photos?|pictures?|media|gallery)\b.*\b(site|website|page|section)\b/i,
       /\b(add|implement|support)\b.*\b(dark mode|feature|endpoint|route|page)\b/i,
       /\b(fix|debug|resolve|patch)\b.*\b(bug|error|issue|crash|fail)\b/i,
       /\b(edit|update|change|modify|rename|delete)\b.*\b(file|readme|config|code|component)\b/i,
