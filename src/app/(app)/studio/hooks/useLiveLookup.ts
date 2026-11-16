@@ -49,8 +49,8 @@ export function useLiveLookup() {
       }
 
       setResult({ formatted: data.formatted ?? "", source: data.source ?? null });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "That lookup failed.");
+    } catch {
+      setError("That lookup failed.");
     } finally {
       setLoading(false);
     }

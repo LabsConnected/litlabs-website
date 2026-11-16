@@ -76,6 +76,19 @@ describe("useLiveLookup", () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it("shows the honest fallback, not a raw error message, for a network failure", async () => {
+    fetchSpy.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const { result } = renderHook(() => useLiveLookup());
+    await act(async () => {
+      await result.current.search("best buy hours");
+    });
+
+    expect(result.current.result).toBeNull();
+    expect(result.current.error).toBe("That lookup failed.");
+    expect(result.current.loading).toBe(false);
+  });
+
   it("does nothing for a blank query", async () => {
     const { result } = renderHook(() => useLiveLookup());
     await act(async () => {
