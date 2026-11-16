@@ -43,17 +43,33 @@ describe("detectPlacesIntent", () => {
   it("does not match weather questions", () => {
     expect(detectPlacesIntent("what's the weather like, is it going to rain?")).toBe(false);
   });
+
+  it("does not match a screenshot request that happens to say 'store hours'", () => {
+    expect(detectPlacesIntent("take a screenshot of the store hours page")).toBe(false);
+  });
 });
 
 describe("extractPlaceQuery", () => {
   it("extracts the business name from a 'what time does X open' question", () => {
     expect(extractPlaceQuery("What time does Best Buy open?")).toBe("Best Buy");
   });
+
+  it("extracts the business name from a possessive 'X's store hours' question", () => {
+    expect(extractPlaceQuery("What are Target's store hours?")).toBe("Target");
+  });
 });
 
 describe("detectToolIntent — places routing", () => {
   it("routes a store-hours question to the places tool", () => {
     expect(detectToolIntent("What time does Best Buy open?")).toEqual({ tool: "places" });
+  });
+
+  it("does not hijack a web search containing the bare word 'hours'", () => {
+    expect(detectToolIntent("search typical office hours in Japan")).not.toEqual({ tool: "places" });
+  });
+
+  it("does not hijack a web_fetch request for a URL path containing 'hours'", () => {
+    expect(detectToolIntent("read https://mystore.com/hours")).toEqual({ tool: "web_fetch" });
   });
 });
 

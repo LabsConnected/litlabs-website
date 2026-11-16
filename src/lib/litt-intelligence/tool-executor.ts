@@ -254,12 +254,16 @@ export function extractSearchQuery(message: string): string {
 
 /** Nouns that indicate a Studio UI/navigation request, not a places lookup. */
 const PLACES_EXCLUDE_NOUNS =
-  /\b(file|files|terminal|approval|approvals|settings|panel|project|repo|repository|branch|deploy|deployment|editor|code|component|task|pr|pull request)\b/i;
+  /\b(file|files|terminal|approval|approvals|settings|panel|project|repo|repository|branch|deploy|deployment|editor|code|component|task|pr|pull request|screenshot|screen shot)\b/i;
 
 const PLACES_PATTERNS = [
   /\b(?:what time does|what time is|when does|when is)\b[^.!?]{0,60}\b(?:open|close|closes|opens|closed)\b/i,
   /\bis\b[^.!?]{0,40}\bopen\b[^.!?]{0,20}\b(?:now|today|right now|still)\b/i,
-  /\b(?:hours|opening hours|business hours|store hours)\b/i,
+  // Deliberately requires a two-word phrase, not bare "hours" — a bare
+  // "\bhours\b" matched inside unrelated URLs/content (e.g. a fetch
+  // request for ".../hours", or a web search for "office hours") and
+  // hijacked web_fetch/web_search routing.
+  /\b(?:opening hours|business hours|store hours)\b/i,
   /\bcloses?\s+at\b/i,
   /\bopens?\s+at\b/i,
 ];
@@ -285,7 +289,12 @@ export function extractPlaceQuery(message: string): string {
   const patterns = [
     /(?:what time does|what time is|when does|when is)\s+(.+?)\s+(?:open|close|closes|opens|closed)\b/i,
     /\bis\s+(.+?)\s+open\b/i,
-    /(.+?)(?:'s)?\s+(?:hours|opening hours|business hours|store hours)\b/i,
+    // Anchored to a capitalized-word run (the business name), not an
+    // unanchored lazy ".+?" — the lazy version matched too much of the
+    // leading question clause (e.g. "What are Target's store hours?"
+    // extracted "What are Target" instead of "Target") because nothing
+    // stopped it from swallowing "What are" before the possessive "'s".
+    /\b([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*){0,3})(?:'s)?\s+(?:opening hours|business hours|store hours)\b/,
     /(.+?)\s+closes?\s+at\b/i,
     /(.+?)\s+opens?\s+at\b/i,
   ];
