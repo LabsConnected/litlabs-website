@@ -350,7 +350,17 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     ["files.write", ["./assets/hero.jpg"]],
     ["files.write", ["assets\\hero.jpg"]],
     ["files.write", undefined],
-  ])("does not complete an untouched welcome page after %s", async (toolId, paths) => {
+  ])("settles on its own result after an asset-only %s mutation — the artifact gate guards site-file mutations only", async (toolId, paths) => {
+    // Behavior change (LION-RUN-DIAGNOSIS-2026-11-16 Q1/F1b): the
+    // artifact/preview gate used to run on ANY successful mutation, so
+    // an asset-only resume into a still-untouched starter failed with
+    // the welcome-screen error. That same overreach is what replaced a
+    // successful image generation's reply with "No runnable website
+    // entry file was created" on a real project. The gate now runs
+    // only when the resumed run actually wrote site files; an
+    // asset-only run settles on its own result, and the welcome-marker
+    // protection still applies in full to site-file mutations (pinned
+    // by the styles.css test below) and to the initial launch flow.
     const transport = await createWorkspaceTransport("ws-123", "user_123");
     Object.assign(transport, {
       readFile: vi.fn(async () => ({ content: '<html><body>LITT-WELCOME-SCREEN</body></html>' })),
@@ -362,8 +372,99 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
       workspaceChange: { status: "changed", changedPaths: ["assets/hero.jpg"] },
     } as never);
     expect((await POST(makeRequest("approved"), routeParams)).status).toBe(202);
+    await vi.waitFor(() => expect(settleCall("completed")).not.toBeNull());
+    expect(settleCall("failed")).toBeNull();
+    // The gate never ran: no preview bring-up was attempted.
+    expect(vi.mocked(transport.startPreview)).not.toHaveBeenCalled();
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      "msg-assistant-1",
+      "user_123",
+      "completed",
+      "Done",
+    );
+  });
+
+  it("keeps an image-only approved run's finalText as the reply — the artifact gate cannot replace it", async () => {
+    // Production defect (2026-11-16 lion proof, build 280035ab): the
+    // approved image.generate succeeded and the loop's finalText
+    // carried the image markdown, but the settlement ran the website
+    // artifact gate on the strength of that asset-only mutation; the
+    // gate failed and its error sentence became the transcript reply,
+    // discarding the image. The transport below lists NO entry file,
+    // so the gate would fail deterministically if it ran at all.
+    const transport = await createWorkspaceTransport("ws-123", "user_123");
+    Object.assign(transport, {
+      listFiles: vi.fn(async () => ({ entries: [{ name: "README.md", type: "file" }] })),
+    });
+    vi.mocked(createWorkspaceTransport).mockResolvedValueOnce(transport);
+    const finalText = "Here is your lion: ![lion](https://cdn.test/lion.png)";
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText,
+      stepsUsed: 2,
+      cancelled: false,
+      toolCalls: [{ toolId: "image.generate", success: true, summary: "generated", mutating: true }],
+    } as any);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    await vi.waitFor(() => expect(settleCall("completed")).not.toBeNull());
+    expect(settleCall("failed")).toBeNull();
+    // The reply is the run's own finalText — image markdown intact,
+    // not the gate's "No runnable website entry file…" sentence.
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      "msg-assistant-1",
+      "user_123",
+      "completed",
+      finalText,
+    );
+    // The gate never ran: no artifact walk, no preview bring-up.
+    expect(vi.mocked(transport.listFiles)).not.toHaveBeenCalled();
+    expect(vi.mocked(transport.startPreview)).not.toHaveBeenCalled();
+  });
+
+  it("still fails a site-file mutation that leaves the workspace on the blank starter screen", async () => {
+    // The welcome-marker protection survives the F1b scoping — for
+    // runs that DID write site files. A files.write to a non-entry
+    // site file (styles.css) is a site-file mutation, so the gate
+    // runs, finds only the untouched welcome entry, and fails the run
+    // honestly instead of reporting success on an unbuilt site.
+    const transport = await createWorkspaceTransport("ws-123", "user_123");
+    Object.assign(transport, {
+      readFile: vi.fn(async () => ({ content: '<html><body>LITT-WELCOME-SCREEN</body></html>' })),
+    });
+    vi.mocked(createWorkspaceTransport).mockResolvedValueOnce(transport);
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "Done", stepsUsed: 1, cancelled: false,
+      toolCalls: [{ toolId: "files.write", success: true, summary: "saved", mutating: true, paths: ["styles.css"] }],
+    } as never);
+    expect((await POST(makeRequest("approved"), routeParams)).status).toBe(202);
     await vi.waitFor(() => expect(settleCall("failed")).not.toBeNull());
     expect(settleCall("completed")).toBeNull();
+    const failed = settleCall("failed");
+    expect(failed!.args.patch?.failureMessage).toContain("blank starter screen");
+  });
+
+  it("still triggers preview readiness for a site-file mutation", async () => {
+    // The other half of the F1b pin: a real site-file write keeps the
+    // pre-change behavior — the artifact gate runs and the preview is
+    // brought up before the run settles completed.
+    const transport = await createWorkspaceTransport("ws-123", "user_123");
+    vi.mocked(createWorkspaceTransport).mockResolvedValueOnce(transport);
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "Created index.html with the new hero.",
+      stepsUsed: 3,
+      toolCalls: [{ toolId: "files.write", success: true, summary: "saved", mutating: true, paths: ["index.html"] }],
+      cancelled: false,
+      pendingApproval: undefined,
+    } as any);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    await vi.waitFor(() => expect(settleCall("completed")).not.toBeNull());
+    expect(settleCall("failed")).toBeNull();
+    expect(vi.mocked(transport.startPreview)).toHaveBeenCalled();
   });
 
   it("reports the real model failure when the resumed loop dies after an approved mutation", async () => {

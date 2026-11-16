@@ -1680,3 +1680,76 @@ describe("Launch Flow: exec-only runs", () => {
     expect(runAgentLoop.mock.calls[0][2].buildCapabilityGuard).toEqual({ maxStepsWithoutFileWrite: 3 });
   });
 });
+
+// ─── Tests: media-generation runs (lion proof, 2026-11-16) ──────
+//
+// Live defect: a kernel-classified media ask ("Need a picture of a
+// lion") generated successfully, but the launch flow treated the run
+// as a build — the artifact/preview phases demanded a website entry
+// file and the run failed with "No runnable website entry file was
+// created in the project workspace", replacing the image result. A
+// media-only run is complete when the generation delivers: no build
+// guard, no zero-mutation reprompt, no artifact/preview phases, and
+// the agent's text (which carries the image markdown) is the result.
+
+describe("Launch Flow: media-generation runs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  const LION_TEXT = "Here is your lion: ![Need a picture of a lion](https://img.test/lion.png)";
+
+  function mediaAgentResult(overrides: Partial<AgentLoopResult> = {}): AgentLoopResult {
+    return successAgentResult({
+      finalText: LION_TEXT,
+      stepsUsed: 2,
+      toolCalls: [{ toolId: "image.generate", success: true, summary: "Image generated and saved to project", mutating: true }],
+      buildFixResult: undefined,
+      ...overrides,
+    });
+  }
+
+  it("completes a media-only run in one pass and delivers the generation result verbatim", async () => {
+    const transport = createMockTransport();
+    const runAgentLoop = vi.fn().mockResolvedValue(mediaAgentResult());
+    const options = makeOptions({
+      userMessage: "Need a picture of a lion",
+      transport,
+      runAgentLoop,
+      requiresExecution: true,
+      mediaOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(runAgentLoop.mock.calls[0][2].buildCapabilityGuard).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe(LION_TEXT);
+    // No build machinery: no artifact/preview phase was entered.
+    expect(transport.startPreview).not.toHaveBeenCalled();
+  });
+
+  it("does not claim success when the generation produced no successful tool call", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(mediaAgentResult({
+      finalText: "The image provider failed.",
+      toolCalls: [{ toolId: "image.generate", success: false, summary: "provider failed", mutating: true }],
+    }));
+    const options = makeOptions({
+      userMessage: "Need a picture of a lion",
+      runAgentLoop,
+      requiresExecution: true,
+      mediaOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("MEDIA_NOT_COMPLETED");
+    expect(result.finalText).toContain("The image provider failed");
+  });
+});

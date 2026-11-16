@@ -821,6 +821,18 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // files" act, so it is never exec-only either.
   const execTurn =
     built.kernelResult.decision.routing.taskKind === "exec" && !detcodegenPinned;
+  // Media-generation turn (kernel taskKind "media"): the user asked
+  // for a deliverable media file, not site work. The quality session
+  // scopes to the evidence a generation produces (see quality-loop
+  // "media"). Without this signal the session fell back to the prose
+  // classifier, which has no media case and defaulted the turn to the
+  // "standard" build scope — demanding build/test evidence for a
+  // one-image ask and failing a successful generation
+  // (LION-RUN-DIAGNOSIS-2026-11-16 Q1). The deterministic-codegen pin
+  // is an explicit "answer by generating files" act, so it is never
+  // media either.
+  const mediaTurn =
+    built.kernelResult.decision.routing.taskKind === "media" && !detcodegenPinned;
 
   const useV2 = canonicalCtx.workspaceExecutionAvailable
     && !!runProjectId
@@ -916,7 +928,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // evidence a read produces (see quality-loop "inspection").
           // An exec-only turn is scoped the same way: its evidence is
           // the tool lane's answer (the command ran), never a build.
-          taskScope: inspectionTurn || execTurn ? ("inspection" as const) : undefined,
+          // A media-generation turn gets the "media" scope: its
+          // evidence is the generated media result, never a build.
+          taskScope: mediaTurn
+            ? ("media" as const)
+            : inspectionTurn || execTurn
+              ? ("inspection" as const)
+              : undefined,
         }
       : undefined,
     evalMetadata: {
@@ -1426,6 +1444,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // command's output, not a file write (launch-flow). Never
           // true on the reroute for the same reason as readOnly.
           execOnly: execTurn,
+          // Kernel-classified media-generation turn: completion is
+          // the generated media result, not a site build (launch-flow).
+          // Never true on the reroute for the same reason as execOnly.
+          mediaOnly: mediaTurn,
           // A production execution request is not complete until the
           // agent-created website entry file is physically present in the
           // verified workspace. This is enforced again after approval
@@ -1581,8 +1603,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         // launchFlowResult.success below. An exec-only turn is the
         // same: the command's output is the deliverable, so demanding
         // mutation evidence would fail a command that ran exactly as
-        // asked.
-        const mutationRequired = effectiveRequiresExecution === true && !inspectionTurn && !execTurn;
+        // asked. A media-generation turn is the same again: the
+        // generated media result is the deliverable, and its only
+        // workspace change is the auto-inserted asset file — demanding
+        // site-mutation evidence would fail a generation that
+        // delivered exactly what was asked.
+        const mutationRequired = effectiveRequiresExecution === true && !inspectionTurn && !execTurn && !mediaTurn;
         const v2ToolCalls = v2Result?.toolCalls ?? [];
         const completionRequirement = {
           mutation: mutationRequired,

@@ -146,8 +146,16 @@ export const STAGE_REQUIREMENTS: Record<QualityStage, StageRequirement> = {
  *   Its required stages are exactly the cognitive stages the loop
  *   files from the request itself; the read's tool output is judged
  *   as the run's evidence by the completion path, not by this gate.
+ * - "media": a media-generation turn (kernel taskKind "media", same
+ *   threading). A generation produces a media file, not a site build —
+ *   gating it on build/test stages failed a successful image
+ *   generation whose only "mutation" was the generation tool itself
+ *   (live defect, LION-RUN-DIAGNOSIS-2026-11-16 Q1). Its required
+ *   stages match inspection's set for the same reason: the cognitive
+ *   stages are filed from the request itself, and the generation's
+ *   tool result is judged by the completion path, not by this gate.
  */
-export type QualityTaskScope = "trivial" | "standard" | "full" | "inspection";
+export type QualityTaskScope = "trivial" | "standard" | "full" | "inspection" | "media";
 
 /**
  * Stages that must pass with recorded evidence for each task scope.
@@ -172,6 +180,13 @@ export const REQUIRED_STAGES_BY_SCOPE: Record<QualityTaskScope, readonly Quality
   // request itself; whether the read actually answered is judged from
   // the tool results by the completion path.
   inspection: ["understand", "plan"],
+  // Media generation (kernel-classified): the run's deliverable is a
+  // generated media file. Build/test evidence for a site the user
+  // never asked to build can never exist, so — exactly as with
+  // inspection — the gate requires only the cognitive stages; whether
+  // the generation actually delivered is judged from the tool results
+  // by the completion path.
+  media: ["understand", "plan"],
 };
 
 /**
