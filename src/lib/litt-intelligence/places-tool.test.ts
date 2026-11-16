@@ -16,7 +16,7 @@ vi.mock("./places-provider", () => ({
 
 vi.mock("./permission-gate", () => ({
   checkPermission: () => ({ allowed: true }),
-  recordToolCall: (...args: unknown[]) => mocks.recordToolCall(...args),
+  recordToolCall: mocks.recordToolCall,
 }));
 
 import { executePlacesLookup } from "./places-tool";
