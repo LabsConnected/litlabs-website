@@ -97,3 +97,30 @@ describe("loadPersisted registry reload", () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("malformed"));
   });
 });
+
+describe("loadPersisted with the registry file itself missing (round 5)", () => {
+  it("starts empty AND logs that no registry file was found at load", async () => {
+    // Separate fixture root with NO .workspaces.json: the whole-file
+    // sibling of the root-missing case above. Before round 5 this
+    // returned silently, so a boot that could not see the persist file
+    // (volume mount timing) was indistinguishable in the logs from a
+    // healthy empty registry — while the web DB kept pointing at the
+    // lost ids and every lookup 404'd "Workspace not found".
+    const emptyRoot = mkdtempSync(join(tmpdir(), "litt-registry-empty-"));
+    try {
+      vi.stubEnv("TERMINAL_WORKSPACE_ROOT", emptyRoot);
+      vi.resetModules();
+      const fresh = await import("../workspace/WorkspaceManager");
+      expect(fresh.listAllWorkspaceDescriptors()).toEqual([]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("No persisted workspace registry found"),
+      );
+    } finally {
+      try {
+        rmSync(emptyRoot, { recursive: true, force: true });
+      } catch {
+        // Temp dir is disposable.
+      }
+    }
+  });
+});

@@ -26,6 +26,7 @@ vi.mock("@/lib/projects/project-repository", () => ({
 vi.mock("@/lib/studio/workspace-recovery", () => ({
   ensureWorkspaceAlive: vi.fn(),
   provisionWorkspaceForProject: vi.fn(),
+  reprepareWorkspace: vi.fn(),
 }));
 
 vi.mock("@/lib/terminal-v1/secret-broker", () => ({
@@ -71,7 +72,7 @@ import { getProject } from "@/lib/projects/project-repository";import { startPre
   getPreviewStatusInternal,
   isSandboxExecutionAvailable,
 } from "@/lib/terminal-internal-client";
-import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { ensureWorkspaceAlive, provisionWorkspaceForProject, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
 import { createPreviewToken } from "@/lib/projects/preview-token";
 
 const authMock = vi.mocked(auth);
@@ -79,6 +80,8 @@ const getProjectMock = vi.mocked(getProject);
 const getPreviewStatusMock = vi.mocked(getPreviewStatusInternal);
 const startPreviewMock = vi.mocked(startPreviewInternal);
 const provisionMock = vi.mocked(provisionWorkspaceForProject);
+const ensureAliveMock = vi.mocked(ensureWorkspaceAlive);
+const reprepareMock = vi.mocked(reprepareWorkspace);
 const createPreviewTokenMock = vi.mocked(createPreviewToken);
 const sandboxAvailableMock = vi.mocked(isSandboxExecutionAvailable);
 
@@ -412,5 +415,83 @@ describe("studio-projects preview route — workspace failure code threading (wa
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.runtimeErrorCode).toBeNull();
+  });
+});
+
+describe("studio-projects preview route — workspace-not-found heal (round 5)", () => {
+  const githubProject = {
+    id: "proj-1",
+    userId: "user-1",
+    workspaceId: "ws-dead",
+    workspaceRoot: "/data/workspaces/user-1/proj-1",
+    workspaceStatus: "ready",
+    sourceType: "github",
+    framework: "nextjs",
+    developmentCommand: "pnpm dev",
+    packageManager: "pnpm",
+  };
+
+  function postPreview() {
+    return POST(
+      new Request("https://x.test/api/studio-projects/proj-1/preview", { method: "POST" }) as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user-1" } as never);
+    getProjectMock.mockResolvedValue({ ...githubProject } as never);
+    provisionMock.mockResolvedValue("ws-dead");
+    startPreviewMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("POST heals a workspace-level 404 from start and retries with the recovered ID", async () => {
+    startPreviewMock
+      .mockRejectedValueOnce(new Error('Preview start failed (404): {"error":"Workspace not found"}'))
+      .mockResolvedValueOnce({
+        status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 123,
+      } as never);
+    ensureAliveMock.mockResolvedValue({ workspaceId: "ws-healed", reprepared: true } as never);
+
+    const res = await postPreview();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("starting");
+    expect(ensureAliveMock).toHaveBeenCalledWith("proj-1", "user-1", "ws-dead");
+    expect(startPreviewMock).toHaveBeenCalledTimes(2);
+    expect(startPreviewMock.mock.calls[1][0]).toBe("ws-healed");
+    expect(reprepareMock).not.toHaveBeenCalled();
+  });
+
+  it("POST escalates to a full re-prepare when the bounded heal reports healFailed", async () => {
+    startPreviewMock
+      .mockRejectedValueOnce(new Error('Preview start failed (404): {"error":"Workspace not found"}'))
+      .mockResolvedValueOnce({
+        status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 123,
+      } as never);
+    ensureAliveMock.mockResolvedValue({ workspaceId: "ws-dead", reprepared: false, healFailed: true } as never);
+    reprepareMock.mockResolvedValue("ws-fresh");
+
+    const res = await postPreview();
+    expect(res.status).toBe(200);
+    expect(reprepareMock).toHaveBeenCalledWith("proj-1", "user-1");
+    expect(startPreviewMock).toHaveBeenCalledTimes(2);
+    expect(startPreviewMock.mock.calls[1][0]).toBe("ws-fresh");
+  });
+
+  it("POST does not heal or retry on a non-404 start failure", async () => {
+    startPreviewMock.mockRejectedValue(new Error("Preview start failed (500): boom"));
+
+    const res = await postPreview();
+    expect(res.status).toBe(500);
+    expect(startPreviewMock).toHaveBeenCalledTimes(1);
+    expect(ensureAliveMock).not.toHaveBeenCalled();
+    expect(reprepareMock).not.toHaveBeenCalled();
   });
 });

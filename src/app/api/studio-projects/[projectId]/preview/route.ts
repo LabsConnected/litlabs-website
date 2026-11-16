@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProject, updateProjectRuntime } from "@/lib/projects/project-repository";
-import { ensureWorkspaceAlive, provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { ensureWorkspaceAlive, provisionWorkspaceForProject, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
 import { SecretBroker } from "@/lib/terminal-v1/secret-broker";
 import { extractClerkEnvFromSecrets } from "@/lib/preview-clerk-env";
 import { createTerminalToken } from "@/lib/terminal-auth";
@@ -373,12 +373,39 @@ export async function POST(
       projectEnv = {};
     }
 
-    const result = await startPreviewInternal(workspaceId, userId, {
-      framework: project.framework ?? undefined,
-      command: project.developmentCommand ?? undefined,
-      packageManager: project.packageManager ?? undefined,
-      projectEnv,
-    });
+    const startOnce = (id: string) =>
+      startPreviewInternal(id, userId, {
+        framework: project.framework ?? undefined,
+        command: project.developmentCommand ?? undefined,
+        packageManager: project.packageManager ?? undefined,
+        projectEnv,
+      });
+
+    let result;
+    try {
+      result = await startOnce(workspaceId);
+    } catch (startErr) {
+      // Workspace-level 404: the terminal server's registry does not
+      // hold the workspace the provisioning step just returned — the
+      // registry is in-memory (persisted to one JSON file), so a
+      // terminal restart whose boot load missed the persist file loses
+      // descriptors the DB still calls ready, and the mirror branch
+      // above can return the stale ID after a failed heal. The files
+      // route already heals exactly this miss and retries; preview
+      // start historically passed the 404 straight to the user
+      // ("Preview start failed (404): Workspace not found", round 5,
+      // 2026-11-15). Heal once and retry once with the recovered ID.
+      const isWorkspaceNotFound =
+        startErr instanceof Error &&
+        startErr.message.startsWith("Preview start failed (404)") &&
+        startErr.message.includes("Workspace not found");
+      if (!isWorkspaceNotFound) throw startErr;
+      const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
+      workspaceId = recovered.healFailed
+        ? await reprepareWorkspace(projectId, userId)
+        : recovered.workspaceId;
+      result = await startOnce(workspaceId);
+    }
 
     const previewUrl = result.status === "ready"
       ? buildPreviewProxyUrl(workspaceId, { userId, projectId })

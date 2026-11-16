@@ -400,7 +400,7 @@ export default function StudioPreviewPanel({
   // top (each new request supersedes the previous, so a slow API would never
   // get a response applied).
   const statusInFlightRef = useRef(false);
-  const MAX_START_POLL_ATTEMPTS = 40; // 40 × 3s ≈ 2 minutes
+  const MAX_START_POLL_ATTEMPTS = 110; // 110 × 3s ≈ 330s — matches the start-POST budget; a cold sandbox start (create + mirror + install + boot) legitimately runs past the old ~2-minute bound, which made the panel declare "took too long to start" over starts that were still alive (round 5, 2026-11-15)
   // Which project this panel is showing right now, and a token per start
   // attempt: late results for a previous project are discarded, not applied.
   const activeProjectRef = useRef<string | null>(projectId);
