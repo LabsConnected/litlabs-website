@@ -204,6 +204,69 @@ describe("build capability guard arming on resume", () => {
   });
 });
 
+describe("media-only resume and explicit task scope (round 8)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123" } as never);
+    vi.mocked(markRunProcessing).mockResolvedValue(true as never);
+    vi.mocked(getActionRun).mockResolvedValue({ id: "run-parent-1", status: "working" } as never);
+    vi.mocked(verifyProjectWorkspace).mockResolvedValue({ workspaceId: "ws-123" } as never);
+    vi.mocked(getAwaitingApprovalAssistantMessage).mockResolvedValue(
+      { id: "msg-1", content: "Approval required." } as never,
+    );
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "Done",
+      stepsUsed: 1,
+      toolCalls: [],
+      cancelled: false,
+    } as never);
+  });
+
+  it("disarms the guard for a media-scoped resume gated on image.generate", async () => {
+    const config = await postAndCaptureConfig({
+      toolId: "image.generate",
+      executionMode: "act",
+      qualityLoopState: { taskScope: "media" },
+      pausedMessages: [{ role: "user", content: "Generate an image of a lion" }],
+    });
+    expect(config.buildCapabilityGuard).toBeUndefined();
+  });
+
+  it("passes the recorded media scope to the resumed quality session explicitly", async () => {
+    const config = await postAndCaptureConfig({
+      toolId: "image.generate",
+      executionMode: "act",
+      qualityLoopState: { taskScope: "media" },
+      pausedMessages: [{ role: "user", content: "Generate an image of a lion" }],
+    });
+    const qualityLoop = config.qualityLoop as { taskScope?: string } | undefined;
+    expect(qualityLoop?.taskScope).toBe("media");
+  });
+
+  it("keeps the guard for a media-scoped run that already wrote site files before the pause", async () => {
+    const config = await postAndCaptureConfig({
+      toolId: "image.generate",
+      executionMode: "act",
+      qualityLoopState: { taskScope: "media" },
+      priorToolCalls: [
+        { toolId: "files.write", success: true, mutating: true },
+      ],
+    });
+    expect(config.buildCapabilityGuard).toEqual({ maxStepsWithoutFileWrite: 3 });
+  });
+
+  it("a build-scoped run resuming on image.generate keeps its guard and its recorded scope", async () => {
+    const config = await postAndCaptureConfig({
+      toolId: "image.generate",
+      executionMode: "auto",
+      qualityLoopState: { taskScope: "full" },
+    });
+    expect(config.buildCapabilityGuard).toEqual({ maxStepsWithoutFileWrite: 3 });
+    const qualityLoop = config.qualityLoop as { taskScope?: string } | undefined;
+    expect(qualityLoop?.taskScope).toBe("full");
+  });
+});
+
 describe("nested deploy-gate handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -35,6 +35,7 @@ import {
 } from "../workspace/WorkspaceManager";
 import {
   readVolumeInstallStamp,
+  SANDBOX_INSTALL_TIMEOUT_MS,
   sandboxInstallIsFresh,
 } from "../sandbox/install-stamp";
 const OWNER = "user_owner_executor";
@@ -322,6 +323,43 @@ describe("background install (the lock is not held across the install exec)", ()
   });
 });
 
+describe("background install budget (round 8)", () => {
+  it("runs the prepare background install with the shared SANDBOX_INSTALL_TIMEOUT_MS budget", async () => {
+    const provider = new FakeSandboxProvider({
+      cloneFiles: {
+        "package.json": JSON.stringify({ name: "app", packageManager: "pnpm@9.15.0" }),
+        "server.js": "console.log('app');\n",
+      },
+    });
+    const executor = executorFor(provider);
+    let installTimeoutMs: number | undefined;
+    const original = provider.execute.bind(provider);
+    provider.execute = async (id, input) => {
+      if (input.command.includes("install")) installTimeoutMs = input.timeoutMs;
+      return original(id, input);
+    };
+
+    await executor.prepareRepoWorkspace({
+      userId: OWNER,
+      projectId: "proj-install-budget",
+      installationId: 42,
+      owner: "acme",
+      repo: "site",
+      branch: "main",
+      workspaceRoot: volumeParent,
+      githubToken: TOKEN,
+    });
+
+    // The background install fires on a timer after prepare returns.
+    const deadline = Date.now() + 15_000;
+    while (installTimeoutMs === undefined && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(installTimeoutMs).toBe(SANDBOX_INSTALL_TIMEOUT_MS);
+    expect(SANDBOX_INSTALL_TIMEOUT_MS).toBe(900_000);
+  });
+});
+
 describe("reconcileBindings", () => {
   it("clears a binding whose sandbox is gone", async () => {
     const provider = new FakeSandboxProvider();
@@ -381,7 +419,13 @@ describe("forward push", () => {
     // Happy path: a volume write lands in the sandbox.
     writeFileSync(join(ws.root, "pushed.txt"), "from-volume");
     executor.forwardFileChange(ws, { relPath: "pushed.txt", kind: "write" });
-    await executor.withWorkspaceLock(ws.workspaceId, async () => {});
+    // Drain the workspace lock chain before asserting. This must pass
+    // the DESCRIPTOR: withWorkspaceLock keys the chain by
+    // descriptor.workspaceId, and passing the id string here silently
+    // keyed a different (empty) chain — the assertion below then raced
+    // the fire-and-forget push and passed only on microtask timing,
+    // which the ensure-routed push (round 8) legitimately changed.
+    await executor.withWorkspaceLock(ws, async () => {});
     const t = provider.fileTransfer!;
     const bytes = await t.readFile(getWorkspace(ws.workspaceId)!.sandbox!.sandboxId, "/workspace/pushed.txt");
     expect(new TextDecoder().decode(bytes)).toBe("from-volume");
@@ -399,7 +443,7 @@ describe("forward push", () => {
     };
     writeFileSync(join(ws.root, "late.txt"), "late-content");
     executor.forwardFileChange(ws, { relPath: "late.txt", kind: "write" });
-    await executor.withWorkspaceLock(ws.workspaceId, async () => {});
+    await executor.withWorkspaceLock(ws, async () => {});
     expect(getWorkspace(ws.workspaceId)?.sandbox?.pendingForward).toContain("late.txt");
 
     await executor.executeCommand(ws, { command: "pwd" });
@@ -451,6 +495,85 @@ describe("mirror bootstrap git hygiene (round 7)", () => {
     // /workspace default.
     expect(calls[registrationIdx].env?.HOME).toBe(SANDBOX_HOME_DIR);
     expect(calls[commandIdx].env?.HOME).toBe(SANDBOX_HOME_DIR);
+  });
+});
+
+/**
+ * Round 8 (2026-11-16 proof): a workspace sandbox killed at the
+ * provider (E2B's 15-minute hard timeout) stayed bound forever —
+ * ensure kept returning the corpse as healthy, so nothing recreated
+ * it until a terminal-process restart, and forward pushes fired at
+ * the dead id and were recorded pending while the run's evidence
+ * probe failed against the same corpse. The provider contract these
+ * tests exercise: get() returns null for a sandbox that is gone at
+ * the provider (the E2B provider now verifies that against E2B
+ * itself — see sandbox-e2b-provider.test.ts), and ensure takes its
+ * long-existing recreate branch.
+ */
+describe("sandbox death and recreation (round 8)", () => {
+  it("recreates the sandbox on the next exec after the bound one dies at the provider", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-corpse-exec");
+    const first = await executor.executeCommand(ws, { command: "pwd" });
+    expect(first).not.toBeNull();
+    expect(provider.calls.create).toBe(1);
+
+    // The sandbox dies at the provider (out-of-band kill).
+    await provider.destroy(first!.sandboxId);
+
+    const second = await executor.executeCommand(ws, { command: "pwd" });
+    expect(second).not.toBeNull();
+    expect(second!.sandboxId).not.toBe(first!.sandboxId);
+    expect(provider.calls.create).toBe(2);
+    expect(getWorkspace(ws.workspaceId)?.sandbox?.sandboxId).toBe(second!.sandboxId);
+    expect(getWorkspace(ws.workspaceId)?.sandbox?.state).toBe("running");
+  });
+
+  it("forward push after the bound sandbox dies lands in a recreated sandbox, not the corpse", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-corpse-forward");
+    const first = await executor.executeCommand(ws, { command: "pwd" });
+    const deadId = first!.sandboxId;
+    await provider.destroy(deadId);
+
+    writeFileSync(join(ws.root, "lion.txt"), "lion-content");
+    executor.forwardFileChange(ws, { relPath: "lion.txt", kind: "write" });
+    await executor.withWorkspaceLock(ws, async () => {});
+
+    const binding = getWorkspace(ws.workspaceId)?.sandbox;
+    expect(binding?.sandboxId).not.toBe(deadId);
+    expect(binding?.pendingForward).toEqual([]);
+    const bytes = await provider.fileTransfer!.readFile(binding!.sandboxId, "/workspace/lion.txt");
+    expect(new TextDecoder().decode(bytes)).toBe("lion-content");
+  });
+
+  it("re-registers safe.directory when ensure resumes an existing sandbox", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-resume-register");
+    const calls: string[] = [];
+    const original = provider.execute.bind(provider);
+    provider.execute = async (id, input) => {
+      calls.push(input.command);
+      return original(id, input);
+    };
+
+    await executor.executeCommand(ws, { command: "git status --porcelain=v1 -b" });
+    // Second exec: ensure takes the RESUME branch (sandbox exists).
+    // Registration must be re-issued there too — a sandbox created
+    // before the round-7 HOME pin carries a stale registration under
+    // the old HOME, and only this branch can heal it short of
+    // recreation.
+    calls.length = 0;
+    await executor.executeCommand(ws, { command: "git status --porcelain=v1 -b" });
+
+    const registrationIdx = calls.findIndex((c) => c.includes("safe.directory"));
+    const commandIdx = calls.findIndex((c) => c.includes("git status"));
+    expect(registrationIdx).toBeGreaterThanOrEqual(0);
+    expect(commandIdx).toBeGreaterThan(registrationIdx);
+    expect(provider.calls.create).toBe(1);
   });
 });
 

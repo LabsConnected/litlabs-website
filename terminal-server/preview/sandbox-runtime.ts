@@ -44,6 +44,7 @@ import {
 import { buildShellCommand, requireFileTransfer } from "../sandbox/sync";
 import {
   readVolumeInstallStamp,
+  SANDBOX_INSTALL_TIMEOUT_MS,
   sandboxInstallIsFresh,
   writeSandboxInstallStamp,
 } from "../sandbox/install-stamp";
@@ -162,7 +163,10 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
     const install = await provider.execute(sandboxId, {
       command: buildShellCommand([args.packageManager, "install", "--prefer-offline"]),
       cwd: SANDBOX_WORKSPACE_ROOT,
-      timeoutMs: 300_000,
+      // Shared install budget (install-stamp.ts): 300 s could never
+      // fit a cold install of this repo, so every cold preview
+      // failed and retried the whole install (2026-11-16 proof).
+      timeoutMs: SANDBOX_INSTALL_TIMEOUT_MS,
       env: {
         NODE_ENV: "development",
         NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",

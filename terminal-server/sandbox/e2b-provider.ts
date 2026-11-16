@@ -401,7 +401,17 @@ export class E2bSandboxProvider implements SandboxProvider {
 
     const handle = await this.client.create({
       template: this.templateId,
-      timeoutMs: limits.idleTimeoutMinutes * 60_000,
+      // The create-time timeoutMs is a HARD KILL in E2B, not an idle
+      // timeout — despite the limits field's name. Passing
+      // idleTimeoutMinutes (15) killed live workspace sandboxes at
+      // exactly 15:00 mid-session (2026-11-16 proof: created 11:34:41,
+      // killed 11:49:41, forward push failed 11:49:47). A workspace
+      // sandbox must live for a work session: maxSessionMinutes is
+      // the session-scale lifetime the limits already define (and the
+      // value start() already re-arms on resume). execute() extends
+      // the clock on activity, so an actively used sandbox never
+      // reaches even this bound.
+      timeoutMs: limits.maxSessionMinutes * 60_000,
       envs: createEnv,
       metadata: {
         littree_user_id: input.userId,
@@ -450,7 +460,35 @@ export class E2bSandboxProvider implements SandboxProvider {
 
   async get(sandboxId: string): Promise<SandboxInstance | null> {
     const entry = this.registry.get(sandboxId);
-    return entry ? { ...entry.instance } : null;
+    if (!entry) return null;
+    // Liveness is verified against E2B, not just the in-process
+    // registry: a sandbox E2B killed (timeout, host failure) stays in
+    // this Map forever otherwise, and every caller of get() — the
+    // workspace executor's ensure above all — kept certifying the
+    // corpse as "running", which made the executor's recreate branch
+    // unreachable until a terminal-process restart emptied the Map
+    // (2026-11-16 proof). A verified-dead sandbox is forgotten here
+    // so get() returns null and the caller takes its existing
+    // recreate path; the volume holds the last synced state, so
+    // recreation loses nothing (§2). A PAUSED sandbox (instance
+    // state "stopped") also reports not-running at E2B but is
+    // resumable via start()/connect — it is never probed, so pause
+    // semantics are untouched. A probe error reads as dead: the
+    // command a caller runs next would fail against a truly gone
+    // sandbox anyway, and recreation is the designed recovery.
+    if (entry.instance.state === "running") {
+      let running = false;
+      try {
+        running = await entry.handle.isRunning();
+      } catch {
+        running = false;
+      }
+      if (!running) {
+        this.registry.delete(sandboxId);
+        return null;
+      }
+    }
+    return { ...entry.instance };
   }
 
   private entry(sandboxId: string): RegistryEntry {
@@ -515,6 +553,20 @@ export class E2bSandboxProvider implements SandboxProvider {
           ),
         }
       : entry.env;
+    // Activity extends the sandbox's E2B lifetime: re-arm the
+    // session clock BEFORE the command runs, so a long command can
+    // never outlive its own sandbox and an actively used sandbox
+    // never reaches the create-time kill bound. Previously this
+    // method only updated the local lastActiveAt timestamp — the
+    // E2B clock kept counting down regardless of activity, which is
+    // how a busy workspace sandbox died at exactly 15:00
+    // (2026-11-16 proof). Best effort by design: if the extension
+    // itself fails, the command's own result stays authoritative —
+    // a truly dead sandbox fails runCommand with the SDK's error,
+    // and get()/ensure then recreate it.
+    await entry.handle
+      .setTimeout(entry.instance.limits.maxSessionMinutes * 60_000)
+      .catch(() => {});
     const startedMs = this.now();
     const result = await entry.handle.runCommand(input.command, {
       cwd: input.cwd ?? "/workspace",
