@@ -5,10 +5,10 @@
  *
  * Replaces the hardcoded "LiTT Online" indicator with a real health
  * check. Polls /api/health every 60s and derives one of:
- *   - "ready"    : runtime is reachable and healthy
- *   - "working"  : runtime is reachable but degraded (some providers down)
- *   - "degraded" : runtime is reachable but multiple providers down
- *   - "offline"  : runtime is unreachable
+ *   - "verified" : /api/health answered "ok" — every subsystem check
+ *                  (env, build, database, terminal, storage, auth) passed
+ *   - "degraded" : /api/health answered "degraded" — some checks degraded
+ *   - "offline"  : runtime is unreachable (or answered with an error)
  *   - "unknown"  : haven't checked yet (initial state)
  *
  * Never fakes "online". If the health check fails, shows "offline".
@@ -16,7 +16,7 @@
 
 import { useEffect, useState } from "react";
 
-export type LittHealthStatus = "ready" | "working" | "degraded" | "offline" | "unknown";
+export type LittHealthStatus = "verified" | "degraded" | "offline" | "unknown";
 
 export interface LittHealth {
   status: LittHealthStatus;
@@ -26,11 +26,10 @@ export interface LittHealth {
 }
 
 const HEALTH_MAP: Record<LittHealthStatus, Omit<LittHealth, "status">> = {
-  ready: { label: "LiTT Ready", color: "#34d399", pulse: false },
-  working: { label: "LiTT Working", color: "#60a5fa", pulse: true },
+  verified: { label: "LiTT Verified", color: "#34d399", pulse: false },
   degraded: { label: "LiTT Degraded", color: "#fbbf24", pulse: true },
   offline: { label: "LiTT Offline", color: "#f87171", pulse: false },
-  unknown: { label: "LiTT…", color: "#9ca3af", pulse: false },
+  unknown: { label: "LiTT Checking…", color: "#9ca3af", pulse: false },
 };
 
 export function useLittHealth(): LittHealth {
@@ -56,16 +55,14 @@ export function useLittHealth(): LittHealth {
         // Derive status from health response
         // If the API reports a status field, use it
         if (data.status === "ok" || data.status === "healthy") {
-          setStatus("ready");
+          setStatus("verified");
         } else if (data.status === "degraded") {
           setStatus("degraded");
-        } else if (data.status === "working") {
-          setStatus("working");
         } else if (data.healthy === false) {
           setStatus("offline");
         } else {
-          // Default to ready if the endpoint responded OK
-          setStatus("ready");
+          // Default to verified if the endpoint responded OK
+          setStatus("verified");
         }
       } catch {
         if (active) setStatus("offline");
