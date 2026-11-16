@@ -78,7 +78,7 @@ export const MEDIA_PROVIDERS: MediaProvider[] = [
   {
     id: "pollinations",
     label: "Pollinations (Experimental)",
-    description: "Experimental manual-only fallback. Never selected automatically.",
+    description: "Experimental no-key fallback. Selected automatically only as the last resort after every configured provider has failed; otherwise manual use.",
     supportedFormats: ["image"],
     cost: () => 0, // free!
     requiresKey: false,
