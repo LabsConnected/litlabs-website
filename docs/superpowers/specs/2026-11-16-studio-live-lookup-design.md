@@ -45,6 +45,21 @@ and chat has no hook for it.
 
 ## Architecture
 
+### 0. Correction to the declared `places.search` capability
+
+`src/lib/connectors/provider-registry.ts` already declares the
+`places.search` capability, but its `provider` field points at
+`brave_search` — a provider that never implemented it. Since this plan
+implements `places.search` via Google Places, the registry's mapping is
+corrected as part of this work: a new `google_places` `PlatformProvider`
+entry is added (`envVars: ["GOOGLE_PLACES_API_KEY"]`), `places.search` is
+removed from `brave_search`'s capability list, and
+`CAPABILITY_DEFINITIONS["places.search"].provider` is repointed at
+`"google_places"`. This is a small, directly-necessary fix to a stale
+mapping, not unrelated refactoring — the existing
+`provider-registry.test.ts` assertion that `places.search` belongs to
+`brave_search` is updated accordingly.
+
 ### 1. Places provider + tool (new files, existing pattern)
 
 `src/lib/litt-intelligence/places-provider.ts`:
@@ -85,19 +100,24 @@ to use the existing `web-search-tool.ts` (Brave → DuckDuckGo) unchanged.
 - Add `GOOGLE_PLACES_API_KEY: z.string().optional()` to
   `optionalIntegrationSchema`.
 
-### 3. New Studio board "Browser" panel
+### 3. Extend the existing Studio board "Browser" panel
 
-`src/app/(app)/studio/components/board/board-types.ts`:
-- Add `"browser"` to `BoardPanelId`.
-- Add an inventory entry following the `media`/`world` "honest slot"
-  convention (empty state text when there's no query yet, no fake rows).
+**Correction (2026-11-16, after implementation research):** the board's
+"Browser" panel already exists — `BoardPanelId` already includes
+`"browser"`, `BOARD_PANEL_INVENTORY` already has an entry for it, and
+`BoardPanelBindings.tsx` already has a `case "browser"` mounting
+`BoardBrowserPanel.tsx` (a real address-bar-driven iframe browser). That
+component's own header comment already flags "wiring LiTT's own web
+lookup through this panel" as an explicit next step. No new `BoardPanelId`,
+inventory entry, or binding case is added — only `BoardBrowserPanel.tsx`'s
+contents are extended.
 
-`src/app/(app)/studio/components/board/BoardPanelBindings.tsx`:
-- Add a case for `"browser"` mounting a new `LiveLookupPanel` component.
-
-`src/app/(app)/studio/components/board/LiveLookupPanel.tsx` (new):
-- A simple query input + result card, rendering the sourced result or an
-  honest empty/error state. No placeholder/fake activity rows ever.
+`src/app/(app)/studio/components/board/BoardBrowserPanel.tsx`:
+- Add a lookup bar (separate from the existing URL address bar) that posts
+  a query to the new `/api/studio/lookup` route via `useLiveLookup` and
+  renders the real, sourced result or an honest error. No placeholder/fake
+  result is ever shown — the result/error blocks only render when the
+  server actually returned one.
 
 `src/app/api/studio/lookup/route.ts` (new):
 - `POST { query }` → runs `places-tool`/`web-search-tool` logic server-side
@@ -108,9 +128,6 @@ to use the existing `web-search-tool.ts` (Brave → DuckDuckGo) unchanged.
 - Mirrors `useBrowserJobs.ts`'s shape: `{ result, loading, error, search(query) }`,
   calling the new route. No polling needed (lookup is request/response, not
   a long-running job).
-
-`useBoardLayoutStore.ts`: register the new panel id so it can be added to a
-board layout, following the existing registration pattern for other panels.
 
 ## Data flow
 
