@@ -185,7 +185,7 @@ export async function acquireOllamaLoadLock(
         : new DOMException("The operation was aborted.", "AbortError");
     }
     try {
-      const fh = await open(path, "wx");
+      const fh = await open(/*turbopackIgnore: true*/ path, "wx");
       try {
         await fh.writeFile(JSON.stringify(holder));
       } finally {
@@ -204,7 +204,7 @@ export async function acquireOllamaLoadLock(
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       // Lock held — reclaim if abandoned, otherwise wait and retry.
       try {
-        const st = await stat(path);
+        const st = await stat(/*turbopackIgnore: true*/ path);
         if (now() - st.mtimeMs > staleMs) {
           await rm(path, { force: true }).catch(() => {});
           continue;
