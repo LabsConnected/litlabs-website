@@ -2,22 +2,27 @@
 
 /**
  * BoardBrowserPanel — an embedded web view on the board (board-only
- * rebuild, 2026-11-14, checklist item 5).
+ * rebuild, 2026-11-14, checklist item 5), plus a live lookup bar wired
+ * to LiTT's places/web-search tools (2026-11-16).
  *
- * A real iframe with a small local history (back / forward / refresh),
- * a URL bar, and an open-in-new-tab escape hatch. Honest limits: many
- * sites send X-Frame-Options / CSP frame-ancestors and refuse to be
- * embedded — the panel cannot detect that reliably, so the empty state
- * says so up front and the external-open button is always one click
- * away. Wiring LiTT's own web lookup through this panel is a later
- * slice (out of scope here, per the brief).
+ * The address bar drives a real iframe with a small local history
+ * (back / forward / refresh) and an open-in-new-tab escape hatch.
+ * Honest limits: many sites send X-Frame-Options / CSP frame-ancestors
+ * and refuse to be embedded — the panel cannot detect that reliably, so
+ * the empty state says so up front.
+ *
+ * The lookup bar is separate from navigation: it posts a question to
+ * /api/studio/lookup (the same places/web-search tool functions Studio
+ * chat's pre-LLM router uses) and renders only the real, sourced answer
+ * or an honest error — no placeholder/fake result is ever shown.
  *
  * Token-bound surfaces; no pink.
  */
 
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, ExternalLink, Globe, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, RefreshCw, Search } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import { useLiveLookup } from "../../hooks/useLiveLookup";
 
 /** Normalize a typed address into a loadable URL, or null if empty. */
 export function normalizeBrowserUrl(raw: string): string | null {
@@ -35,6 +40,8 @@ export default function BoardBrowserPanel() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [reloadKey, setReloadKey] = useState(0);
   const currentUrl = historyIndex >= 0 ? history[historyIndex] : null;
+  const [lookupInput, setLookupInput] = useState("");
+  const { result: lookupResult, loading: lookupLoading, error: lookupError, search: runLookup } = useLiveLookup();
 
   const navigate = (raw: string) => {
     const url = normalizeBrowserUrl(raw);
@@ -124,6 +131,53 @@ export default function BoardBrowserPanel() {
           </a>
         )}
       </div>
+
+      <form
+        className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5"
+        style={{ borderColor: tokens.border }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void runLookup(lookupInput);
+        }}
+      >
+        <Search size={12} style={{ color: tokens.textMuted }} aria-hidden />
+        <input
+          data-testid="board-browser-lookup-input"
+          value={lookupInput}
+          onChange={(e) => setLookupInput(e.target.value)}
+          placeholder="Ask LiTT to look something up — e.g. “Best Buy hours”"
+          className="min-w-0 flex-1 rounded-full border bg-transparent px-3 py-1 text-xs outline-none"
+          style={{ borderColor: tokens.border, color: tokens.text }}
+        />
+        <button
+          type="submit"
+          data-testid="board-browser-lookup-submit"
+          className="shrink-0 rounded-full border px-3 py-1 text-xs disabled:opacity-40"
+          style={{ borderColor: tokens.border, color: tokens.text }}
+          disabled={lookupLoading || !lookupInput.trim()}
+        >
+          {lookupLoading ? "Looking…" : "Look up"}
+        </button>
+      </form>
+
+      {lookupError && (
+        <div
+          data-testid="board-browser-lookup-error"
+          className="shrink-0 border-b px-3 py-2 text-xs leading-5"
+          style={{ borderColor: tokens.border, color: tokens.text }}
+        >
+          {lookupError}
+        </div>
+      )}
+      {lookupResult && (
+        <div
+          data-testid="board-browser-lookup-result"
+          className="shrink-0 border-b px-3 py-2 text-xs leading-5"
+          style={{ borderColor: tokens.border, color: tokens.text }}
+        >
+          {lookupResult.formatted}
+        </div>
+      )}
 
       {currentUrl ? (
         <iframe
