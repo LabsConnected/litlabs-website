@@ -63,9 +63,9 @@ export async function GET(req: NextRequest) {
 
     if (hasSupermemory()) {
       try {
-        const results = (await getSupermemory().search.memories({
-          q,
-          containerTag: getContainerTag(userId, scope),
+        const results = (await getSupermemory().search(getContainerTag(userId, scope), {
+          query: q,
+          searchMode: "memories",
           limit,
         })) as { memories?: unknown[]; results?: unknown[] };
         rawHits = results.memories || results.results || [];

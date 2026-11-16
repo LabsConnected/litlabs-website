@@ -101,7 +101,7 @@
     "socket.io": "^4.8.3",
     "socket.io-client": "4.8.3",
     "stripe": "^18.0.0",
-    "supermemory": "^4.24.12",
+    "supermemory": "^5.1.2",
     "svix": "^1.95.1",
     "undici": "^8.10.2",
     "ws": "^8.21.1",

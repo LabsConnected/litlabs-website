@@ -219,9 +219,9 @@ async function checkMemory(): Promise<void> {
     try {
       const { Supermemory } = await import("supermemory");
       const sm = new Supermemory({ apiKey: smKey });
-      const searchResults = await sm.search.memories({
-        q: `${DIAG_NS} test`,
-        containerTag: `user:${DIAG_USER}:project:${DIAG_PROJECT}`,
+      const searchResults = await sm.search(`user:${DIAG_USER}:project:${DIAG_PROJECT}`, {
+        query: `${DIAG_NS} test`,
+        searchMode: "memories",
         limit: 1,
       });
       check("Memory", "semantic search", "pass", `search OK (${(searchResults.results || []).length} hits)`);
