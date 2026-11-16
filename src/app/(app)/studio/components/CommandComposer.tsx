@@ -851,11 +851,11 @@ export default function CommandComposer({
           />
         </button>
 
-        {/* LiTT presence indicator — idle green ring, thinking spinning ring */}
+        {/* LiTT presence indicator — idle green ring, working spinning ring */}
         <div
           className="relative flex h-11 w-11 shrink-0 items-center justify-center"
-          aria-label={busy ? "LiTT is thinking" : "LiTT is ready"}
-          title={busy ? "LiTT is thinking…" : "LiTT is ready"}
+          aria-label={busy ? "LiTT is working" : "LiTT is idle"}
+          title={busy ? "LiTT is working…" : "LiTT is idle"}
         >
           {/* Outer animated ring */}
           <div
