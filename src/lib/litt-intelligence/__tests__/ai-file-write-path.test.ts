@@ -308,3 +308,94 @@ describe("handleFilesWrite — preserving merge repairs destructive rewrites", (
     expect(String(result.error)).toContain("full-file rewrite");
   });
 });
+
+describe("handleFilesWrite — content-preservation floor (every lane)", () => {
+  /**
+   * P0 nondestructive-edit fix: a follow-up "change the heading + use a
+   * warm brown theme" overwrote a multi-section site with a minimal
+   * heading+gallery page — every nav, section, image, and style block
+   * deleted while read-back still "verified" the write. The small-lane
+   * styling-signature guard could not see it (the minimal page keeps
+   * style/class/font markers) and no other lane had any guard at all.
+   * The floor now measures prior-content survival and refuses the
+   * overwrite, steering the model to apply_patch — in EVERY lane.
+   */
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "litt-ws-floor-"));
+    delete process.env.LITT_LOCAL_SMALL; // floor must hold outside the small lane too
+  });
+  afterEach(() => {
+    delete process.env.LITT_LOCAL_SMALL;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const INCIDENT_SITE = `<!doctype html><html><head><title>Ember Oak</title><style>
+body{font-family:Georgia,serif;background:#f7f2ea;color:#2c2420}
+nav{display:flex;gap:18px;padding:14px 24px;background:#efe6d8}
+.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:24px}
+.gallery img{width:100%;border-radius:8px}
+.menu{padding:24px;max-width:720px;margin:0 auto}
+footer{padding:24px;text-align:center;background:#efe6d8}
+</style></head><body>
+<nav><a href="#menu">Menu</a><a href="#gallery">Gallery</a><a href="#about">About</a><a href="#contact">Contact</a></nav>
+<header class="hero"><h1>EMBER OAK</h1><p>Small-batch roasted coffee</p></header>
+<section class="gallery" id="gallery">
+<img src="gallery-1.jpg" alt="Pour over"><img src="gallery-2.jpg" alt="Espresso shot"><img src="gallery-3.jpg" alt="Roasted beans">
+</section>
+<section class="menu" id="menu"><h2>Menu</h2><ul><li>Pour Over — 4</li><li>Espresso — 3</li><li>Flat White — 5</li></ul></section>
+<section class="about" id="about"><h2>About</h2><p>Roasted in-house every week.</p></section>
+<footer id="contact"><p>Visit us — 12 Roast Lane</p></footer>
+</body></html>`;
+
+  // The incident output: requested change applied, everything else gone —
+  // but still styled, so the old guard could not see the destruction.
+  const GUTTED = `<!doctype html><html><head><title>Ember Oak Roasted</title><style>
+body{background:#5b3a29;color:#f5ead9;font-family:Georgia,serif}
+h1{color:#d9a05b}
+.gallery{display:grid;gap:16px;padding:24px}
+</style></head><body>
+<h1>EMBER OAK ROASTED</h1>
+<div class="gallery"><img src="a.jpg"><img src="b.jpg"></div>
+</body></html>`;
+
+  it("refuses a styled rewrite that deletes most of the existing page (non-small lane)", async () => {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(root, "index.html"), INCIDENT_SITE);
+    const transport = makeTestTransport(root);
+    const result = await handleFilesWrite({ path: "index.html", content: GUTTED }, transport);
+    expect(result.success).toBe(false);
+    // Truthful + actionable: names the file, the loss, and the patch path.
+    expect(String(result.error)).toContain("index.html");
+    expect(String(result.error)).toContain("existing content");
+    expect(String(result.error)).toContain("apply_patch");
+    // The file on disk is untouched — rejection stays a rejection.
+    expect(readFileSync(join(root, "index.html"), "utf-8")).toBe(INCIDENT_SITE);
+  });
+
+  it("still refuses in the small lane when styling markers survive the gutting", async () => {
+    process.env.LITT_LOCAL_SMALL = "1";
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(root, "index.html"), INCIDENT_SITE);
+    const transport = makeTestTransport(root);
+    const result = await handleFilesWrite({ path: "index.html", content: GUTTED }, transport);
+    expect(result.success).toBe(false);
+    expect(readFileSync(join(root, "index.html"), "utf-8")).toBe(INCIDENT_SITE);
+  });
+
+  it("lands a rewrite that keeps the existing content (heading + theme only)", async () => {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(root, "index.html"), INCIDENT_SITE);
+    const transport = makeTestTransport(root);
+    const preserving = INCIDENT_SITE
+      .replace("<h1>EMBER OAK</h1>", "<h1>EMBER OAK ROASTED</h1>")
+      .replace("background:#f7f2ea", "background:#5b3a29");
+    const result = await handleFilesWrite({ path: "index.html", content: preserving }, transport);
+    expect(result.success).toBe(true);
+    const landed = readFileSync(join(root, "index.html"), "utf-8");
+    expect(landed).toContain("EMBER OAK ROASTED");
+    for (const marker of ["<nav", "<section", "gallery-3.jpg", "<footer", "Roast Lane"]) {
+      expect(landed).toContain(marker);
+    }
+  });
+});

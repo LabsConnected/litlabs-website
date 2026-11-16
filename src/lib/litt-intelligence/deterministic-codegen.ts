@@ -35,6 +35,7 @@ import { ProgressEmitter } from "./progress-events";
 import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
 import type { WorkspaceTransport, CheckpointInfo } from "./workspace-transport";
+import { destructiveContentLoss } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { ensureProjectPreviewReady, type LaunchFlowResult } from "./launch-flow";
@@ -156,6 +157,7 @@ export function buildEditSystemPrompt(): string {
     "- Emit the SMALLEST file set that satisfies the request — never restyle, reformat, or rewrite files the request does not affect.",
     "- Do NOT output files that stay the same — they are already on disk.",
     "- Each file's content must be the COMPLETE new file, not a diff or patch.",
+    "- A CHANGED file keeps ALL of its existing content: every section, nav, image, and style rule already on disk stays unless the request names it for removal — apply the change ON TOP of the file shown, never regenerate the file from scratch.",
     "- APPLY THE REQUEST EXACTLY: every string, value, selector, or behavior the user names must appear verbatim in the emitted file. An emitted file that does not contain the requested change is a failure.",
     "- Change the RIGHT file: visual/style changes go in the .css file (add or edit the CSS rule itself — never invent a class without defining it), text/markup changes go in the .html file, behavior/logic changes go in the .js file.",
     "- Every .html file must be a full valid HTML5 document.",
@@ -1092,18 +1094,38 @@ export interface GenerateDeterministicEditOptions extends GenerateDeterministicW
 }
 
 /**
+ * True when the request explicitly asks for a whole new page/site —
+ * the only intent under which deleting most of an existing file's
+ * content is legitimate. Deliberately narrow: a missed phrase costs a
+ * bounded retry (the model re-emits a preserving file or the run fails
+ * honestly), while a too-wide phrase silently authorizes destruction.
+ */
+const FULL_REBUILD_RE =
+  /\b(?:rebuild|recreate|re-create|redesign|re-design|from scratch|start over|brand[\s-]?new|replace the (?:whole|entire) (?:site|page|website|file)|wipe (?:the|it|everything)|scrap (?:the|it|everything))\b/i;
+
+export function fullRebuildRequested(userRequest: string): boolean {
+  return FULL_REBUILD_RE.test(userRequest);
+}
+
+/**
  * Validate one candidate edit payload against the workspace: per-type
- * syntax, plus linked-asset completeness for every emitted .html file —
- * references may resolve to emitted files OR files already on disk.
- * Returns fileErrors (empty = valid).
+ * syntax, linked-asset completeness for every emitted .html file —
+ * references may resolve to emitted files OR files already on disk —
+ * and content preservation for files that exist on disk (an emitted
+ * "complete file" that deletes most of the prior content is the
+ * confirmed destructive-edit defect, not a valid edit). Returns
+ * fileErrors (empty = valid).
  */
 export function validateEditFiles(
   files: ParsedFileEntry[],
   existingFiles: Map<string, string>,
+  opts: { userRequest?: string } = {},
 ): string[] {
   const errors: string[] = [];
   const emitted = new Set(files.map((f) => f.path.toLowerCase()));
   const disk = new Set([...existingFiles.keys()].map((k) => k.toLowerCase()));
+  const prior = new Map([...existingFiles.entries()].map(([k, v]) => [k.toLowerCase(), v]));
+  const rebuild = fullRebuildRequested(opts.userRequest ?? "");
   for (const f of files) {
     const v = validateGeneratedFile(f.path, f.content);
     if (!v.ok) {
@@ -1117,6 +1139,21 @@ export function validateEditFiles(
         const rel = normalizePath(href).toLowerCase();
         if (!emitted.has(rel) && !disk.has(rel)) {
           errors.push(`${f.path} references "${href}" but it was not generated and does not exist on disk`);
+        }
+      }
+    }
+    if (!rebuild) {
+      const prev = prior.get(f.path.toLowerCase());
+      if (prev !== undefined) {
+        const loss = destructiveContentLoss(prev, f.content);
+        if (loss) {
+          const lostPct = Math.round((1 - loss.retention) * 100);
+          errors.push(
+            `${f.path}: the emitted file deletes ~${lostPct}% of the existing content` +
+              (loss.blocksLost ? " and removes every section/nav block" : "") +
+              ` — the request asked for a targeted change. Re-emit the COMPLETE file keeping ALL existing ` +
+              `sections, nav, images, copy, and styling; change only what the request asked.`,
+          );
         }
       }
     }
@@ -1204,7 +1241,9 @@ export async function generateDeterministicEdit(
     diagnostics.rejected.push(...parsed.rejected);
     diagnostics.repairs.push(...parsed.repairs);
 
-    const fileErrors = parsed.ok ? validateEditFiles(parsed.files, opts.existingFiles) : [];
+    const fileErrors = parsed.ok
+      ? validateEditFiles(parsed.files, opts.existingFiles, { userRequest: opts.userRequest })
+      : [];
 
     let plan: EditPlanFile[] = [];
     let effective = 0;

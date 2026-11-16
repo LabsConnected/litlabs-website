@@ -10,6 +10,7 @@ import {
   isDeterministicCodegenModel,
   generateDeterministicWebsite,
   generateDeterministicEdit,
+  persistDeterministicFiles,
   snapshotWebsiteFiles,
   referencedAssets,
   CODEGEN_FILES_SCHEMA,
@@ -280,6 +281,47 @@ const NEW_PAGE = `<!doctype html>
 <link rel="stylesheet" href="style.css"></head>
 <body><h1>About us</h1></body></html>`;
 
+// Multi-section page shaped like the incident site: nav, hero, gallery
+// images, menu/about sections, footer, and an inline theme. A follow-up
+// "change the heading + use a warm brown theme" once replaced ALL of
+// this with a heading and a two-image gallery — every unrelated block
+// deleted while read-back still "verified" the write.
+const INCIDENT_SITE = `<!doctype html><html><head><title>Ember Oak</title><style>
+body{font-family:Georgia,serif;background:#f7f2ea;color:#2c2420}
+nav{display:flex;gap:18px;padding:14px 24px;background:#efe6d8}
+nav a{color:#5b4636;text-decoration:none}
+.hero{padding:60px 24px;text-align:center}
+.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:24px}
+.gallery img{width:100%;border-radius:8px}
+.menu{padding:24px;max-width:720px;margin:0 auto}
+footer{padding:24px;text-align:center;background:#efe6d8}
+</style></head><body>
+<nav><a href="#menu">Menu</a><a href="#gallery">Gallery</a><a href="#about">About</a><a href="#contact">Contact</a></nav>
+<header class="hero"><h1>EMBER OAK</h1><p>Small-batch roasted coffee</p></header>
+<section class="gallery" id="gallery">
+<img src="gallery-1.jpg" alt="Pour over"><img src="gallery-2.jpg" alt="Espresso shot"><img src="gallery-3.jpg" alt="Roasted beans">
+</section>
+<section class="menu" id="menu"><h2>Menu</h2><ul><li>Pour Over — 4</li><li>Espresso — 3</li><li>Flat White — 5</li></ul></section>
+<section class="about" id="about"><h2>About</h2><p>Roasted in-house every week.</p></section>
+<footer id="contact"><p>Visit us — 12 Roast Lane</p></footer>
+</body></html>`;
+
+// The incident output: requested change applied, everything else deleted.
+// Still "styled" — the old styling-signature guard could not see it.
+const GUTTED_SITE = `<!doctype html><html><head><title>Ember Oak Roasted</title><style>
+body{background:#5b3a29;color:#f5ead9;font-family:Georgia,serif}
+h1{color:#d9a05b}
+.gallery{display:grid;gap:16px;padding:24px}
+</style></head><body>
+<h1>EMBER OAK ROASTED</h1>
+<div class="gallery"><img src="a.jpg"><img src="b.jpg"></div>
+</body></html>`;
+
+// The correct edit: heading + warm-brown body — everything else kept.
+const PRESERVING_SITE = INCIDENT_SITE
+  .replace("<h1>EMBER OAK</h1>", "<h1>EMBER OAK ROASTED</h1>")
+  .replace("background:#f7f2ea", "background:#5b3a29");
+
 describe("validateEditFiles", () => {
   const existing = new Map([
     ["index.html", VALID_HTML],
@@ -300,6 +342,36 @@ describe("validateEditFiles", () => {
   it("still enforces per-type syntax on emitted files", () => {
     const errs = validateEditFiles([mk("app.js", "function (broken {")], existing);
     expect(errs.join(" ")).toContain("app.js");
+  });
+
+  it("rejects a styled rewrite that deletes most of an existing file", () => {
+    const errs = validateEditFiles(
+      [mk("index.html", GUTTED_SITE)],
+      new Map([["index.html", INCIDENT_SITE]]),
+      { userRequest: "Change the main heading to EMBER OAK ROASTED and make the page use a warm brown theme" },
+    );
+    expect(errs.join(" ")).toContain("index.html");
+    expect(errs.join(" ")).toContain("existing content");
+  });
+
+  it("accepts a rewrite that keeps the existing content", () => {
+    expect(
+      validateEditFiles(
+        [mk("index.html", PRESERVING_SITE)],
+        new Map([["index.html", INCIDENT_SITE]]),
+        { userRequest: "Change the main heading and the theme" },
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not gate a full rewrite when the request asks for one", () => {
+    expect(
+      validateEditFiles(
+        [mk("index.html", GUTTED_SITE)],
+        new Map([["index.html", INCIDENT_SITE]]),
+        { userRequest: "rebuild the site from scratch as a single heading page" },
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -407,6 +479,111 @@ describe("generateDeterministicEdit (stubbed model)", () => {
       maxAttempts: 1,
     });
     expect(files[0].path).toBe("style.css");
+  });
+});
+
+describe("generateDeterministicEdit — destructive-rewrite guard (P0)", () => {
+  const incidentDisk = () => new Map([["index.html", INCIDENT_SITE]]);
+  const request =
+    "Change the main heading to EMBER OAK ROASTED and make the page use a warm brown theme";
+
+  it("retries a gutted rewrite, then accepts the preserving one", async () => {
+    let calls = 0;
+    const caller = async () => ({
+      content: ++calls === 1
+        ? filesPayload([{ path: "index.html", content: GUTTED_SITE }])
+        : filesPayload([{ path: "index.html", content: PRESERVING_SITE }]),
+      latencyMs: 5,
+    });
+    const { files, diagnostics } = await generateDeterministicEdit({
+      userRequest: request,
+      model: "litt-coder:8k",
+      existingFiles: incidentDisk(),
+      callModel: caller,
+      maxAttempts: 3,
+    });
+    expect(calls).toBe(2);
+    expect(diagnostics.attempts).toBe(2);
+    const index = files.find((f) => f.path === "index.html")!;
+    expect(index.kind).toBe("changed");
+    // The landed plan carries the requested change AND every unrelated block.
+    expect(index.content).toContain("EMBER OAK ROASTED");
+    for (const marker of ["<nav", "<section", "gallery-3.jpg", "<footer", "Roast Lane"]) {
+      expect(index.content).toContain(marker);
+    }
+  });
+
+  it("fails honestly when every attempt deletes the existing page", async () => {
+    const caller = async () => ({
+      content: filesPayload([{ path: "index.html", content: GUTTED_SITE }]),
+      latencyMs: 5,
+    });
+    await expect(
+      generateDeterministicEdit({
+        userRequest: request,
+        model: "litt-coder:8k",
+        existingFiles: incidentDisk(),
+        callModel: caller,
+        maxAttempts: 2,
+      }),
+    ).rejects.toMatchObject({ name: "DeterministicCodegenError", code: "invalid-output" });
+  });
+
+  it("end-to-end: the persisted file keeps nav/sections/images, changing only the request", async () => {
+    const disk = new Map([["index.html", INCIDENT_SITE]]);
+    let calls = 0;
+    const caller = async () => ({
+      content: ++calls === 1
+        ? filesPayload([{ path: "index.html", content: GUTTED_SITE }])
+        : filesPayload([{ path: "index.html", content: PRESERVING_SITE }]),
+      latencyMs: 5,
+    });
+    const transport = {
+      readFile: async (p: string) => {
+        if (!disk.has(p)) throw new Error("ENOENT");
+        return { content: disk.get(p)!, size: disk.get(p)!.length };
+      },
+      writeFile: async (p: string, c: string) => {
+        disk.set(p, c);
+        return { saved: true };
+      },
+      createCheckpointBeforeMutation: async () => null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    const { files } = await generateDeterministicEdit({
+      userRequest: request,
+      model: "litt-coder:8k",
+      existingFiles: new Map(disk),
+      callModel: caller,
+      maxAttempts: 3,
+    });
+    const persist = await persistDeterministicFiles(
+      transport,
+      files.map((f) => ({ path: f.path, content: f.content, bytes: f.bytes, source: "model" as const })),
+    );
+    expect(persist.writes.every((w) => w.ok && w.verified)).toBe(true);
+
+    // Read-back on the real stored bytes: the follow-up edit must preserve
+    // everything the request never mentioned and change only what it named.
+    const landed = disk.get("index.html")!;
+    expect(landed).toContain("EMBER OAK ROASTED");
+    expect(landed).toContain("background:#5b3a29");
+    for (const marker of [
+      "<nav", 'href="#menu"', "<section", "gallery-1.jpg", "gallery-3.jpg",
+      "Pour Over", "<footer", "Roast Lane",
+    ]) {
+      expect(landed).toContain(marker);
+    }
+    expect(landed).not.toContain("EMBER OAK</h1>");
+    // Every unrelated line of the original survives byte-for-byte — the
+    // diff between before/after is only the heading and the body color.
+    const before = new Set(INCIDENT_SITE.split("\n"));
+    const removedLines = [...before].filter((l) => !landed.includes(l));
+    expect(removedLines).toEqual([
+      "body{font-family:Georgia,serif;background:#f7f2ea;color:#2c2420}",
+      '<header class="hero"><h1>EMBER OAK</h1><p>Small-batch roasted coffee</p></header>',
+    ]);
   });
 });
 

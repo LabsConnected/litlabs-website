@@ -541,3 +541,136 @@ export function validateFilesWriteInputs(inputs: FilesWriteInputs): string | nul
 
   return null;
 }
+
+// ─── Content-preservation floor (destructive-overwrite guard) ─────────
+//
+// A "change X" request answered by regenerating the WHOLE file can
+// silently delete everything the request did not mention — confirmed in
+// production: a heading+theme follow-up overwrote a ~1.7KB multi-section
+// page with a minimal heading+gallery page, destroying the nav, the
+// other sections, and the stylesheet while read-back still verified
+// "success" because it compared the destroyed bytes. Neither the
+// placeholder guard nor the styling-signature guard can see that loss:
+// a minimal page keeps style/class/font markers while carrying a
+// fraction of the prior content.
+//
+// The floor measures how much of the EXISTING file's content tokens
+// survive the rewrite. Values and formatting may legitimately change
+// (a theme edit rewrites every color); losing most of the prior content
+// is destruction, not editing — the overwrite is refused and the retry
+// is steered to apply_patch, where a targeted change is expressed as
+// verbatim search/replace pairs.
+
+/** Below this many non-whitespace bytes the measure is unreliable: a
+ *  one-line file loses its whole content to any single-token edit, so
+ *  every legitimate small write would look destructive. Real pages (the
+ *  incident file was ~1.7KB) sit far above it. */
+const PRESERVATION_MIN_PREV_BYTES = 200;
+
+/** An overwrite may rewrite values and formatting; keeping under 40% of
+ *  the prior content tokens is destruction, not editing. */
+const PRESERVATION_MIN_RETENTION = 0.4;
+
+/**
+ * Content-bearing tokens: letter/digit runs of 2+ chars, case-folded.
+ * Markup names (`section`, `nav`, `class`), CSS selectors/properties,
+ * and human copy all count; a rewrite that keeps the markup skeleton but
+ * drops the content still loses most of the multiset.
+ */
+const CONTENT_TOKEN_RE = /[\p{L}\p{N}]{2,}/gu;
+
+/** Semantic page regions whose wholesale disappearance is destruction. */
+const SEMANTIC_BLOCK_RE = /<(section|nav|header|footer|article|main|aside)\b/gi;
+
+function contentTokenCounts(text: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const m of text.toLowerCase().matchAll(CONTENT_TOKEN_RE)) {
+    counts.set(m[0], (counts.get(m[0]) ?? 0) + 1);
+  }
+  return counts;
+}
+
+export interface DestructiveContentLoss {
+  /** Share of prev's content tokens surviving in next (0..1). */
+  retention: number;
+  /** prev tokens (multiset) that did not survive. */
+  lostTokens: number;
+  /** Total content tokens in prev. */
+  prevTokens: number;
+  /**
+   * prev held ≥2 semantic blocks (<section>/<nav>/<header>/…) and next
+   * kept none — the page's region structure was deleted even when raw
+   * token retention sits near the threshold.
+   */
+  blocksLost: boolean;
+}
+
+/**
+ * Returns loss statistics when overwriting `prev` with `next` destroys
+ * most of the prior content, else null. Exempts tiny files (below the
+ * byte floor — the measure is all-or-nothing there) and writes keeping
+ * ≥40% of prior content with at least one surviving semantic block.
+ */
+export function destructiveContentLoss(prev: string, next: string): DestructiveContentLoss | null {
+  if (prev.replace(/\s+/g, "").length < PRESERVATION_MIN_PREV_BYTES) return null;
+  const prevCounts = contentTokenCounts(prev);
+  const nextCounts = contentTokenCounts(next);
+  let prevTotal = 0;
+  let kept = 0;
+  for (const [token, count] of prevCounts) {
+    prevTotal += count;
+    kept += Math.min(count, nextCounts.get(token) ?? 0);
+  }
+  const retention = prevTotal > 0 ? kept / prevTotal : 1;
+  const prevBlocks = (prev.match(SEMANTIC_BLOCK_RE) ?? []).length;
+  const nextBlocks = (next.match(SEMANTIC_BLOCK_RE) ?? []).length;
+  const blocksLost = prevBlocks >= 2 && nextBlocks === 0;
+  if (retention >= PRESERVATION_MIN_RETENTION && !blocksLost) return null;
+  return { retention, lostTokens: prevTotal - kept, prevTokens: prevTotal, blocksLost };
+}
+
+/**
+ * Model-facing refusal for a destructive full-file rewrite. Truthful
+ * about what was rejected and prescriptive about the recovery path:
+ * apply_patch with search text copied verbatim from the current file.
+ */
+export function destructiveContentLossMessage(loss: DestructiveContentLoss, path: string): string {
+  const lostPct = Math.round((1 - loss.retention) * 100);
+  const blockNote = loss.blocksLost
+    ? " and removes every <section>/<nav>/<header>-level block"
+    : "";
+  return (
+    `Refusing this full-file rewrite of ${path}: it deletes ~${lostPct}% of the existing content${blockNote}. ` +
+    `The file already exists — do NOT emit files.write for it. ` +
+    `Emit apply_patch instead: set path to this file and patches to a list of ` +
+    `{search, replace} pairs where each search is an exact substring copied ` +
+    `verbatim from the current file content and replace is that same substring ` +
+    `with only the requested change applied.`
+  );
+}
+
+/**
+ * Pre-approval / handler-floor preservation check for files.write over
+ * an EXISTING file. Reads the current file through the workspace
+ * transport and refuses the write when it would delete most of the
+ * file's content. Returns null for new/unreadable files (nothing to
+ * preserve) and for the LITT-WELCOME-SCREEN scaffold, which exists
+ * precisely to be replaced.
+ */
+export async function existingFileRewriteError(
+  inputs: FilesWriteInputs,
+  transport: WorkspaceTransport,
+): Promise<string | null> {
+  const path = typeof inputs.path === "string" ? inputs.path : null;
+  const content = typeof inputs.content === "string" ? inputs.content : null;
+  if (!path || content === null) return null;
+  let prev: string;
+  try {
+    ({ content: prev } = await transport.readFile(path));
+  } catch {
+    return null; // Unreadable target = a new file — nothing to preserve.
+  }
+  if (prev.includes("LITT-WELCOME-SCREEN")) return null;
+  const loss = destructiveContentLoss(prev, content);
+  return loss ? destructiveContentLossMessage(loss, path) : null;
+}
