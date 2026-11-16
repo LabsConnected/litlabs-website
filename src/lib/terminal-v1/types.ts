@@ -38,7 +38,9 @@ export const DEFAULT_SANDBOX_LIMITS: SandboxResourceLimits = {
   processLimit: 100,
   diskGB: 5,
   idleTimeoutMinutes: 15,
-  maxSessionMinutes: 120,
+  // Mirror of terminal-server/sandbox/provider.ts: 60 matches the
+  // E2B Hobby plan's 1-hour sandbox lifetime cap (round 9).
+  maxSessionMinutes: 60,
 };
 
 // ─── Sandbox Usage ───────────────────────────────────────────────

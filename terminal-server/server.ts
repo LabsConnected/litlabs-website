@@ -49,6 +49,8 @@ import {
   getWorkspace,
   listWorkspaces,
   registerSandboxPrepareHandler,
+  retryRegistryLoadOnceAtListen,
+  shouldServeExistingWorkspace,
   type WorkspaceDescriptor,
 } from "./workspace/WorkspaceManager";
 import { resolveWorkspacePath as resolveWorkspacePathSecure, validateWritePayload } from "./workspace/WorkspaceSecurity";
@@ -995,9 +997,13 @@ app.post("/internal/workspace/prepare", requireInternalServiceAuth, async (req: 
       return;
     }
 
-    // Check for existing workspace (idempotent)
+    // Check for existing workspace (idempotent). A ready descriptor
+    // is served as-is only when nothing needs repair: a ready
+    // descriptor whose sandbox binding is lost/cleared must fall
+    // through to prepare so the sandbox path rebinds it (round 9) —
+    // see shouldServeExistingWorkspace.
     const existingWs = listWorkspaces(userId).find((w: WorkspaceDescriptor) => w.projectId === projectId);
-    if (existingWs && existingWs.ready) {
+    if (existingWs && shouldServeExistingWorkspace(existingWs, userId)) {
       const { workspaceId, root, branch, commitSha } = existingWs;
       res.json({ workspaceId, userId, projectId, root, branch, commitSha, ready: true });
       return;
@@ -2238,6 +2244,12 @@ server.listen(PORT, BIND.host, () => {
     sandboxStack.verification.start();
     sandboxStack.verification.startPeriodicRefresh();
   }
+  // Registry load retry: the import-time loadPersisted can run
+  // before the volume mount is visible and start empty even though
+  // the registry file exists. If the registry is still empty now,
+  // load once more BEFORE reconcile iterates the descriptors —
+  // reconciling an empty registry would skip every binding.
+  retryRegistryLoadOnceAtListen();
   // Phase 2 lifecycle: reconcile persisted sandbox bindings against
   // the provider (design note §2.4) — lost bindings are cleared,
   // paused sandboxes are left paused, nothing is woken at boot.

@@ -195,9 +195,18 @@ export async function ensureWorkspaceAlive(
   userId: string,
   currentWorkspaceId: string,
 ): Promise<RecoveredWorkspace> {
-  // First check if the workspace still exists on the terminal server
+  // First check if the workspace still exists on the terminal server.
+  // A descriptor that resolves but reports ready === false is NOT
+  // alive: loadPersisted keeps root-missing descriptors registered as
+  // not-ready, and /ws-files refuses them with 409 "Workspace not
+  // ready". Returning "not reprepared" for one (the previous behavior)
+  // told callers the workspace was fine and stranded Files on the 409
+  // forever — a not-ready descriptor must go through the same
+  // re-prepare path as a missing one. (ready is only ever false when
+  // the terminal explicitly says so; an absent flag keeps the old
+  // exists-means-alive reading.)
   const ws = await getWorkspaceInternal(currentWorkspaceId, userId).catch(() => null);
-  if (ws) {
+  if (ws && ws.ready !== false) {
     return { workspaceId: currentWorkspaceId, reprepared: false };
   }
 
@@ -209,9 +218,10 @@ export async function ensureWorkspaceAlive(
   }
 
   // Verify the re-prepare actually restored a live workspace before
-  // claiming it did (see the contract note above).
+  // claiming it did (see the contract note above). A descriptor that
+  // resolves but is still not-ready is not a restoration either.
   const verified = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
-  if (!verified) {
+  if (!verified || verified.ready === false) {
     return { workspaceId: project.workspaceId, reprepared: false, healFailed: true };
   }
   const recovered: RecoveredWorkspace = { workspaceId: project.workspaceId, reprepared: true };

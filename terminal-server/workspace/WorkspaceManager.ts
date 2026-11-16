@@ -122,7 +122,12 @@ const PERSIST_PATH = resolve(
   ".workspaces.json",
 );
 
-function loadPersisted(): void {
+interface RegistryLoadResult {
+  fileFound: boolean;
+  loaded: number;
+}
+
+function loadPersisted(): RegistryLoadResult {
   try {
     if (!existsSync(PERSIST_PATH)) {
       // Distinguishable in the boot log from "the file existed and its
@@ -139,9 +144,10 @@ function loadPersisted(): void {
         `[WorkspaceManager] No persisted workspace registry found at ${PERSIST_PATH} — ` +
           "starting with an empty registry",
       );
-      return;
+      return { fileFound: false, loaded: 0 };
     }
     const data = JSON.parse(readFileSync(PERSIST_PATH, "utf-8")) as WorkspaceDescriptor[];
+    let loaded = 0;
     for (const ws of data) {
       if (!ws.workspaceId || !ws.root) {
         console.error(
@@ -167,12 +173,33 @@ function loadPersisted(): void {
             "keeping descriptor registered as ready=false",
         );
         workspaces.set(ws.workspaceId, { ...ws, ready: false });
+        loaded++;
         continue;
       }
       workspaces.set(ws.workspaceId, ws);
+      loaded++;
     }
-  } catch {
-    // Corrupt or missing file — start fresh
+    // The successful load used to log NOTHING, so a boot that loaded
+    // the registry was indistinguishable in the logs from one that
+    // started empty — during the 2026-11-16 round-9 diagnosis the
+    // absence of any registry line was itself a multi-hour question.
+    // State the outcome plainly: how many descriptors, and which ids.
+    console.log(
+      `[WorkspaceManager] Loaded ${loaded} persisted workspace(s) from ${PERSIST_PATH}: ` +
+        (Array.from(workspaces.keys()).join(", ") || "(none)"),
+    );
+    return { fileFound: true, loaded };
+  } catch (err) {
+    // Corrupt or unreadable file — start fresh, but SAY SO: this catch
+    // used to swallow parse errors silently, so a registry file that
+    // existed but failed to parse looked exactly like a healthy empty
+    // registry while every lookup 404'd (round 9 observability gap).
+    console.error(
+      `[WorkspaceManager] FAILED to load persisted workspace registry at ${PERSIST_PATH}: ` +
+        (err instanceof Error ? err.message : String(err)) +
+        " — starting with an empty registry",
+    );
+    return { fileFound: true, loaded: 0 };
   }
 }
 
@@ -194,6 +221,27 @@ function persistWorkspaces(): void {
 }
 
 loadPersisted();
+
+/**
+ * One registry-load retry, called by the server once it is listening
+ * (before boot reconcile runs). The import-time load above can run
+ * before the volume mount is visible, in which case it finds no file
+ * and starts empty even though the registry exists on disk. When the
+ * registry is still empty at listen time, load once more: by then the
+ * mount has had the whole boot sequence to settle. A registry that
+ * already holds descriptors is never reloaded (the in-memory map is
+ * the live state; reloading could resurrect stale entries over it).
+ * Returns the descriptor count after the retry.
+ */
+export function retryRegistryLoadOnceAtListen(): number {
+  if (workspaces.size > 0) return workspaces.size;
+  const result = loadPersisted();
+  console.error(
+    `[WorkspaceManager] Registry load retry at listen: fileFound=${result.fileFound}, ` +
+      `loaded=${result.loaded} — registry now holds ${workspaces.size} workspace(s)`,
+  );
+  return workspaces.size;
+}
 
 export function getWorkspace(workspaceId: string): WorkspaceDescriptor | undefined {
   return workspaces.get(workspaceId);
@@ -257,6 +305,48 @@ export function registerSandboxPrepareHandler(
   handler: SandboxPrepareHandler | null,
 ): void {
   sandboxPrepareHandler = handler;
+}
+
+/** Whether the sandbox prepare path would route for this user right now. */
+export function sandboxPrepareAvailableFor(userId: string): boolean {
+  return sandboxPrepareHandler?.isAvailableFor(userId) ?? false;
+}
+
+/**
+ * The prepare route's idempotency decision: may an existing descriptor
+ * be served as-is instead of running prepare?
+ *
+ * Only when nothing needs repair. A descriptor whose sandbox binding
+ * is live (running/paused with an id) is complete — serve it. But a
+ * READY descriptor whose binding is lost, was cleared by boot
+ * reconcile, or was never created is NOT complete when the sandbox
+ * path is available for the user: serving it as-is certifies a
+ * workspace with no sandbox behind it, and the heal that called
+ * prepare goes away believing the binding was restored (round 9,
+ * 2026-11-16: boot reconcile cleared the binding, every heal prepare
+ * was answered from this short-circuit shape or the host path, and
+ * the workspace stayed sandbox-less). In that state the request must
+ * fall through to prepareWorkspace, whose sandbox branch recreates
+ * and rebinds via the executor's ensure path.
+ *
+ * When the sandbox path is NOT available for the user, the existing
+ * descriptor remains the honest answer: the fallthrough would run the
+ * host body, which refuses with 503 in production even though the
+ * volume workspace is fully usable for file operations. Gate-closed
+ * deployments keep their exact previous behavior.
+ */
+export function shouldServeExistingWorkspace(
+  existing: WorkspaceDescriptor,
+  userId: string,
+): boolean {
+  if (!existing.ready) return false;
+  const binding = existing.sandbox;
+  const bindingLive =
+    !!binding &&
+    binding.sandboxId !== "" &&
+    (binding.state === "running" || binding.state === "paused");
+  if (bindingLive) return true;
+  return !sandboxPrepareAvailableFor(userId);
 }
 
 export async function prepareWorkspace(

@@ -36,7 +36,12 @@ export const DEFAULT_SANDBOX_LIMITS: SandboxResourceLimits = {
   processLimit: 100,
   diskGB: 5,
   idleTimeoutMinutes: 15,
-  maxSessionMinutes: 120,
+  // 60, not 120: the production E2B account is on the Hobby plan,
+  // whose sandbox lifetime cap is 1 hour. Requesting 120 minutes at
+  // create risks the provider rejecting the create outright; the
+  // E2B provider additionally clamps every timeout it applies to
+  // E2B_MAX_TIMEOUT_MS, so no caller can exceed the cap (round 9).
+  maxSessionMinutes: 60,
 };
 
 export type SandboxState =

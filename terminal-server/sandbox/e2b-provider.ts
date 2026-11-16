@@ -65,6 +65,32 @@ export const DEFAULT_E2B_TEMPLATE_ID = "litt-sandbox-v1";
  */
 export const SANDBOX_EGRESS_DENY_OUT: readonly string[] = ["169.254.0.0/16"];
 
+/**
+ * The production E2B account's plan cap on sandbox lifetime: Hobby
+ * allows at most 1 hour per sandbox. A timeout request above the cap
+ * risks the provider rejecting the call (create or setTimeout)
+ * outright — the round-9 latent hazard, where the session limit was
+ * raised to 120 minutes against a 60-minute plan cap. Every timeout
+ * this provider applies to E2B passes through
+ * {@link clampSandboxTimeoutMs} at this boundary, so no caller —
+ * create limits, session re-arms, preview keepalive extensions —
+ * can exceed the cap; an over-cap request is clamped and logged,
+ * never rejected.
+ */
+export const E2B_MAX_TIMEOUT_MS = 60 * 60_000;
+
+export function clampSandboxTimeoutMs(
+  requestedMs: number,
+  log: (message: string) => void = (m) => console.info(m),
+): number {
+  if (requestedMs <= E2B_MAX_TIMEOUT_MS) return requestedMs;
+  log(
+    `[e2b-provider] Clamping sandbox timeout ${requestedMs}ms to the plan cap ` +
+      `${E2B_MAX_TIMEOUT_MS}ms (E2B Hobby lifetime limit)`,
+  );
+  return E2B_MAX_TIMEOUT_MS;
+}
+
 // ─── SDK adapter ────────────────────────────────────────────────────
 
 export interface E2bCommandResult {
@@ -411,7 +437,7 @@ export class E2bSandboxProvider implements SandboxProvider {
       // value start() already re-arms on resume). execute() extends
       // the clock on activity, so an actively used sandbox never
       // reaches even this bound.
-      timeoutMs: limits.maxSessionMinutes * 60_000,
+      timeoutMs: clampSandboxTimeoutMs(limits.maxSessionMinutes * 60_000),
       envs: createEnv,
       metadata: {
         littree_user_id: input.userId,
@@ -501,7 +527,9 @@ export class E2bSandboxProvider implements SandboxProvider {
     const entry = this.entry(sandboxId);
     // Sandbox.connect auto-resumes a paused sandbox.
     entry.handle = await this.client.connect(sandboxId);
-    await entry.handle.setTimeout(entry.instance.limits.maxSessionMinutes * 60_000);
+    await entry.handle.setTimeout(
+      clampSandboxTimeoutMs(entry.instance.limits.maxSessionMinutes * 60_000),
+    );
     entry.instance.state = "running";
     entry.instance.startedAt = this.isoNow();
     entry.instance.stoppedAt = null;
@@ -565,7 +593,7 @@ export class E2bSandboxProvider implements SandboxProvider {
     // a truly dead sandbox fails runCommand with the SDK's error,
     // and get()/ensure then recreate it.
     await entry.handle
-      .setTimeout(entry.instance.limits.maxSessionMinutes * 60_000)
+      .setTimeout(clampSandboxTimeoutMs(entry.instance.limits.maxSessionMinutes * 60_000))
       .catch(() => {});
     const startedMs = this.now();
     const result = await entry.handle.runCommand(input.command, {
@@ -609,7 +637,7 @@ export class E2bSandboxProvider implements SandboxProvider {
   /** Extend a live sandbox's remaining lifetime (preview keepalive). */
   async extendTimeout(sandboxId: string, timeoutMs: number): Promise<void> {
     const entry = this.entry(sandboxId);
-    await entry.handle.setTimeout(timeoutMs);
+    await entry.handle.setTimeout(clampSandboxTimeoutMs(timeoutMs));
     entry.instance.lastActiveAt = this.isoNow();
   }
 
