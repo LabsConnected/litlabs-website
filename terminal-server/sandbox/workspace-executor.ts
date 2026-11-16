@@ -57,6 +57,7 @@ import {
 import {
   cloneInSandbox,
   redactToken,
+  registerSandboxSafeDirectory,
   revParseHead,
   sanitizeRemote,
   validateCloneTarget,
@@ -315,6 +316,22 @@ export class SandboxWorkspaceExecutor {
         sandboxRoot: SANDBOX_WORKSPACE_ROOT,
       });
       this.manifests.set(descriptor.workspaceId, mirror.manifest);
+      // The mirror writes the tree (including .git) through the
+      // provider's privileged files API, so the files land owned by
+      // a different user than the one git commands run as — git
+      // refuses the repo ("dubious ownership", exit 128) until the
+      // root is registered as a safe directory in the command
+      // user's global config. Prepare's volume-has-.git branch gets
+      // this from sanitizeRemote, but a sandbox bootstrapped by an
+      // exec or a preview start never passes through prepare, so
+      // register here: every mirror bootstrap lands git-ready
+      // (round 7). The registration touches only global config and
+      // is harmless on workspaces that are not git repos.
+      await registerSandboxSafeDirectory(
+        this.provider,
+        created.sandboxId,
+        SANDBOX_WORKSPACE_ROOT,
+      );
     } else {
       this.manifests.set(descriptor.workspaceId, new Map());
     }

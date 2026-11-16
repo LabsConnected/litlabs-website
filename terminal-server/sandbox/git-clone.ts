@@ -46,6 +46,31 @@ export const GITHUB_TOKEN_ENV_VAR = "LITTREE_GITHUB_TOKEN";
 export const GITHUB_CREDENTIAL_HELPER =
   `!f() { echo "username=x-access-token"; echo "password=$${GITHUB_TOKEN_ENV_VAR}"; }; f`;
 
+/**
+ * HOME for every git command this module runs in a sandbox.
+ *
+ * `git config --global` resolves under $HOME. The commands that must
+ * READ the global config later — the exec route's git commands —
+ * run with HOME pinned to the sandbox home (SANDBOX_HOME_DIR in
+ * workspace-executor.ts; the template user's home in
+ * sandbox.Dockerfile; outside the synced tree). The provider's
+ * composed base env still defaults HOME to the workspace root
+ * (sandbox/env.ts), so a git command issued WITHOUT a per-command
+ * env writes its global config into the synced tree at
+ * /workspace/.gitconfig — a file the exec route's git never reads.
+ * That split was the round-7 exit-128 defect: sanitizeRemote
+ * registered safe.directory under /workspace while every later git
+ * command looked under /home/litt, so the registration never
+ * landed where it was read. Every execute in this module therefore
+ * pins HOME explicitly, matching the executor, the installer, and
+ * the preview runtime.
+ *
+ * Defined here rather than imported from workspace-executor.ts
+ * because the executor imports this module (a back-import would be
+ * a cycle); the two values must stay equal.
+ */
+export const SANDBOX_GIT_HOME_DIR = "/home/litt";
+
 // ─── Validation (copied from src/lib/terminal-v1/github-clone.ts) ───
 
 const OWNER_REPO_PATTERN = /^[A-Za-z0-9_.-]+$/;
@@ -140,7 +165,10 @@ export async function cloneInSandbox(
       command: buildShellCommand(argv),
       cwd,
       timeoutMs,
-      ...(token ? { env: { [GITHUB_TOKEN_ENV_VAR]: token } } : {}),
+      env: {
+        ...(token ? { [GITHUB_TOKEN_ENV_VAR]: token } : {}),
+        HOME: SANDBOX_GIT_HOME_DIR,
+      },
     });
   } catch (err) {
     throw new SandboxCloneError(
@@ -164,6 +192,42 @@ export async function cloneInSandbox(
 
   const head = await revParseHead(provider, sandboxId, cwd);
   return { commitSha: head };
+}
+
+/**
+ * Register the sandbox root as a git safe.directory in the command
+ * user's global config, with HOME pinned to the sandbox home so the
+ * registration lands in the global config the exec route's git
+ * commands actually read (see SANDBOX_GIT_HOME_DIR).
+ *
+ * Exported for the workspace executor's mirror bootstrap: a sandbox
+ * created by an exec or a preview start — never passing through
+ * prepare — needs the same registration before its first git
+ * command, or every such command exits 128 (round 7). The command
+ * touches only global config, so it is safe on workspaces that are
+ * not git repos at all. Throws SandboxCloneError on failure;
+ * callers treat that as fail-closed.
+ */
+export async function registerSandboxSafeDirectory(
+  provider: SandboxProvider,
+  sandboxId: string,
+  sandboxRoot: string,
+): Promise<void> {
+  const result = await provider.execute(sandboxId, {
+    command: buildShellCommand([
+      "git", "config", "--global", "--add", "safe.directory", sandboxRoot,
+    ]),
+    cwd: sandboxRoot,
+    timeoutMs: 30_000,
+    env: { HOME: SANDBOX_GIT_HOME_DIR },
+  });
+  if (result.exitCode !== 0) {
+    throw new SandboxCloneError(
+      `Failed to register safe.directory for ${sandboxRoot} ` +
+        `(exit ${result.exitCode}): ` +
+        (result.stderr || result.stdout).trim(),
+    );
+  }
 }
 
 /**
@@ -195,29 +259,18 @@ export async function sanitizeRemote(
   // ("detected dubious ownership", exit 128) for every command,
   // including the two below and the §4.3 verification read. The
   // registration lives in the command user's global config (HOME is
-  // pinned to the sandbox home, outside the synced tree), never in
-  // .git/config, so the verification posture is unchanged. A fresh
-  // clone is owned by the command user already; the registration is
-  // harmless there and keeps both paths identical.
-  const safeDirectory = await provider.execute(sandboxId, {
-    command: buildShellCommand([
-      "git", "config", "--global", "--add", "safe.directory", cwd,
-    ]),
-    cwd,
-    timeoutMs: 30_000,
-  });
-  if (safeDirectory.exitCode !== 0) {
-    throw new SandboxCloneError(
-      `Failed to register safe.directory for ${input.owner}/${input.repo} ` +
-        `(exit ${safeDirectory.exitCode}): ` +
-        (safeDirectory.stderr || safeDirectory.stdout).trim(),
-    );
-  }
+  // pinned per-command to the sandbox home, outside the synced
+  // tree — see SANDBOX_GIT_HOME_DIR), never in .git/config, so the
+  // verification posture is unchanged. A fresh clone is owned by
+  // the command user already; the registration is harmless there
+  // and keeps both paths identical.
+  await registerSandboxSafeDirectory(provider, sandboxId, cwd);
 
   const setUrl = await provider.execute(sandboxId, {
     command: buildShellCommand(["git", "remote", "set-url", "origin", url]),
     cwd,
     timeoutMs: 30_000,
+    env: { HOME: SANDBOX_GIT_HOME_DIR },
   });
   if (setUrl.exitCode !== 0) {
     throw new SandboxCloneError(
@@ -231,6 +284,7 @@ export async function sanitizeRemote(
     command: buildShellCommand(["git", "config", "gc.auto", "0"]),
     cwd,
     timeoutMs: 30_000,
+    env: { HOME: SANDBOX_GIT_HOME_DIR },
   });
   if (gcAuto.exitCode !== 0) {
     throw new SandboxCloneError(
@@ -259,6 +313,7 @@ export async function verifyCloneSanitized(
     command: buildShellCommand(["git", "config", "--get", "remote.origin.url"]),
     cwd,
     timeoutMs: 30_000,
+    env: { HOME: SANDBOX_GIT_HOME_DIR },
   });
   const actualUrl = remote.stdout.trim();
   if (remote.exitCode !== 0 || actualUrl !== expectedUrl) {
@@ -306,6 +361,7 @@ export async function revParseHead(
     command: buildShellCommand(["git", "rev-parse", "HEAD"]),
     cwd: sandboxRoot,
     timeoutMs: 30_000,
+    env: { HOME: SANDBOX_GIT_HOME_DIR },
   });
   const sha = result.stdout.trim();
   if (result.exitCode !== 0 || !/^[0-9a-fA-F]{7,64}$/.test(sha)) {

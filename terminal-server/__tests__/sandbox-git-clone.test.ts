@@ -15,8 +15,10 @@ import {
   cloneInSandbox,
   cleanCloneUrl,
   redactToken,
+  registerSandboxSafeDirectory,
   sanitizeRemote,
   validateCloneTarget,
+  SANDBOX_GIT_HOME_DIR,
   SandboxCloneError,
   SandboxCloneVerificationError,
 } from "../sandbox/git-clone";
@@ -180,6 +182,58 @@ describe("sanitizeRemote", () => {
         owner: "acme", repo: "site", branch: "main", sandboxRoot: ROOT,
       }),
     ).rejects.toBeInstanceOf(SandboxCloneError);
+  });
+});
+
+/**
+ * Round 7: the provider's composed base env defaults HOME to the
+ * workspace root (/workspace, inside the synced tree), while the
+ * exec route runs git with HOME pinned to the sandbox home
+ * (/home/litt). A `git config --global` issued without a per-command
+ * env therefore wrote safe.directory into /workspace/.gitconfig —
+ * a file the exec route's git never reads — and every later git
+ * command still exited 128 (dubious ownership). These tests pin
+ * that every git command this module issues carries the sandbox
+ * home, so the registration and its readers agree on one global
+ * config.
+ */
+describe("HOME pinning (round 7)", () => {
+  it("pins the sandbox home on the safe.directory registration, which needs no repo", async () => {
+    await registerSandboxSafeDirectory(provider, sandboxId, ROOT);
+    expect(executed).toHaveLength(1);
+    expect(executed[0].command).toContain("safe.directory");
+    expect(executed[0].env?.HOME).toBe(SANDBOX_GIT_HOME_DIR);
+    expect(SANDBOX_GIT_HOME_DIR).toBe("/home/litt");
+  });
+
+  it("pins the sandbox home on every sanitizeRemote command", async () => {
+    await cloneInSandbox(provider, sandboxId, {
+      sandboxRoot: ROOT,
+      owner: "acme", repo: "site", branch: "main", githubToken: TOKEN,
+    });
+    executed.length = 0;
+    await sanitizeRemote(provider, sandboxId, {
+      owner: "acme", repo: "site", branch: "main", sandboxRoot: ROOT,
+    });
+    expect(executed.length).toBeGreaterThanOrEqual(3);
+    for (const call of executed) {
+      expect(call.env?.HOME, call.command).toBe(SANDBOX_GIT_HOME_DIR);
+    }
+  });
+
+  it("pins the sandbox home on every cloneInSandbox command and keeps the token confined", async () => {
+    await cloneInSandbox(provider, sandboxId, {
+      sandboxRoot: ROOT,
+      owner: "acme", repo: "site", branch: "main", githubToken: TOKEN,
+    });
+    expect(executed.length).toBeGreaterThanOrEqual(4);
+    for (const call of executed) {
+      expect(call.env?.HOME, call.command).toBe(SANDBOX_GIT_HOME_DIR);
+      expect(call.command).not.toContain(TOKEN);
+    }
+    const tokenCalls = executed.filter((e) => e.env?.LITTREE_GITHUB_TOKEN === TOKEN);
+    expect(tokenCalls).toHaveLength(1);
+    expect(tokenCalls[0].command).toContain("clone");
   });
 });
 
