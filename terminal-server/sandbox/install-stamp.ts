@@ -37,6 +37,27 @@ import { requireFileTransfer } from "./sync";
 /** Stamp file path inside the sandbox workspace (sandbox-only tree). */
 export const INSTALL_STAMP_PATH = "node_modules/.litt-install-stamp";
 
+/**
+ * Wall-clock budget for ONE in-sandbox dependency install, shared by
+ * both install sites (the prepare background install in
+ * workspace-executor.ts and the preview-start install in
+ * preview/sandbox-runtime.ts) so the two can never drift apart.
+ *
+ * Was 300_000 at both sites. A cold `pnpm install` of this monorepo
+ * at the sandbox's 1 vCPU / 1024 MB cannot finish in 300 s, and the
+ * stamp above is written only after a fully successful install — so
+ * every cold preview 502'd and every retry restarted the same
+ * doomed install (2026-11-16 proof, attempt 1). 900 s paired with
+ * the session-scale sandbox lifetime (e2b-provider create/extend)
+ * lets the out-of-request prepare install actually complete and
+ * stamp, so preview start finds fresh deps and skips installing;
+ * when preview start must install inline, pnpm's incremental store
+ * plus this budget lets a retry converge instead of restarting from
+ * zero. The web preview REQUEST budget (~330 s) is unchanged — it
+ * was never the sandbox install's budget to consume.
+ */
+export const SANDBOX_INSTALL_TIMEOUT_MS = 900_000;
+
 /** Lockfiles an install resolves, in preference order. */
 const LOCKFILE_NAMES = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock"] as const;
 

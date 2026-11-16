@@ -2686,6 +2686,15 @@ async function runAgentLoopV2Inner(
             baselineCheckpoint: baselineCheckpoint ?? checkpoint ?? undefined,
             // Observability (Part J): the run pauses here awaiting approval.
             runObservability: finishRunObservability(runObs, "awaiting_approval"),
+            // The quality session snapshot rides at the TOP level too,
+            // not only inside pendingApproval: the messages route
+            // persists the paused run from this top-level field (the
+            // same field the final return below populates), and the
+            // pause return omitting it wrote quality_loop_state=NULL
+            // for every approval-paused run — the resume then
+            // re-derived the task scope from prose and a media run
+            // came back as "standard" (round-8 diagnosis Q1).
+            qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
             pendingApproval: {
               toolId: toolCall.toolId,
               toolCallId: toolCall.toolCallId,
@@ -4448,6 +4457,11 @@ async function resumeAgentLoopV2Inner(
           events,
           checkpoint: checkpoint ?? undefined,
           baselineCheckpoint: baselineCheckpoint ?? checkpoint ?? undefined,
+          // Top-level snapshot, same as the initial loop's pause
+          // return: the approvals route reads result.qualityLoopState
+          // for the resumed run's settlement, and a nested pause must
+          // not drop the session the run has been carrying.
+          qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
           pendingApproval: {
             toolId: toolCall.toolId,
             toolCallId: toolCall.toolCallId,

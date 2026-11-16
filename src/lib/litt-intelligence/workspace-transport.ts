@@ -525,6 +525,18 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   async gitStatus(): Promise<GitStatusResult> {
     const result = await this.exec("git status --porcelain=v1 -b");
+    // A failed status (exit 128 — dubious ownership, not a repo,
+    // dead sandbox) exits nonzero with EMPTY stdout, which the
+    // parser below would read as a clean tree: the workspace-change
+    // evidence then reported a false "unchanged" instead of
+    // "unknown", hiding the git fault (round-8 diagnosis Q2). Throw
+    // so callers fall back to "unknown", exactly as gitDiff already
+    // does for a failed baseline diff.
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `git status failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`,
+      );
+    }
     const lines = result.stdout.trim().split("\n").filter(Boolean);
     const branchLine = lines[0] || "";
     const branch = branchLine.replace(/^## /, "").replace(/\.\.\..*$/, "").trim() || "main";

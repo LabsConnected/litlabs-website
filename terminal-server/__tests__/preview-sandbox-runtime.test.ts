@@ -26,6 +26,7 @@ import {
 import {
   INSTALL_STAMP_PATH,
   readVolumeInstallStamp,
+  SANDBOX_INSTALL_TIMEOUT_MS,
 } from "../sandbox/install-stamp";
 import { PreviewError, type PreviewRuntime } from "../preview/PreviewManager";
 import { SANDBOX_HOME_DIR } from "../sandbox/workspace-executor";
@@ -38,6 +39,7 @@ interface CapturedExecute {
   cwd?: string;
   env?: Record<string, string>;
   user?: string;
+  timeoutMs?: number;
 }
 
 function makeRuntime(): PreviewRuntime {
@@ -87,6 +89,7 @@ function makeSupport(installExitCode = 0): {
           cwd?: string;
           env?: Record<string, string>;
           user?: string;
+          timeoutMs?: number;
         },
       ) => {
         executions.push(input);
@@ -133,6 +136,38 @@ const healthyProbe = async () => ({
   authConfigError: false,
   rootRouteMissing: false,
   status: 200,
+});
+
+/**
+ * Round 8 (2026-11-16 proof): the preview install ran with a 300 s
+ * timeoutMs while a cold `pnpm install` of this monorepo at 1 vCPU
+ * cannot finish in 300 s — and the freshness stamp is written only
+ * after a fully successful install, so every cold preview 502'd and
+ * retried the whole install forever. Both install sites now share
+ * SANDBOX_INSTALL_TIMEOUT_MS (install-stamp.ts); this pins the
+ * preview site to it.
+ */
+describe("startSandboxPreview — install budget (round 8)", () => {
+  it("runs the install with the shared SANDBOX_INSTALL_TIMEOUT_MS budget", async () => {
+    const { support, executions } = makeSupport();
+    const runtime = makeRuntime();
+
+    await startSandboxPreview({
+      support,
+      runtime,
+      ws: WS,
+      framework: "custom",
+      command: "node server.js --port 3000",
+      packageManager: "pnpm",
+      travelingEnv: {},
+      probe: healthyProbe,
+    });
+
+    const install = executions.find((e) => e.command.includes("install"));
+    expect(install, "an install execute call").toBeDefined();
+    expect(install!.timeoutMs).toBe(SANDBOX_INSTALL_TIMEOUT_MS);
+    expect(SANDBOX_INSTALL_TIMEOUT_MS).toBe(900_000);
+  });
 });
 
 describe("startSandboxPreview — HOME pin", () => {

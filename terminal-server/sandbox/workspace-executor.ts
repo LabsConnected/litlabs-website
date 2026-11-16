@@ -67,6 +67,7 @@ import {
 } from "./git-clone";
 import {
   readVolumeInstallStamp,
+  SANDBOX_INSTALL_TIMEOUT_MS,
   sandboxInstallIsFresh,
   writeSandboxInstallStamp,
 } from "./install-stamp";
@@ -259,6 +260,29 @@ export class SandboxWorkspaceExecutor {
           binding.state = "running";
           this.persistBinding(descriptor);
         }
+        // Re-register safe.directory on the resume branch too:
+        // registration otherwise happens only at create+mirror
+        // (below) or via prepare's sanitize, so a sandbox created
+        // before the round-7 HOME pin (registered under
+        // HOME=/workspace) and resumed after it kept the stale
+        // registration while exec pins HOME=/home/litt — every git
+        // command exited 128 for that workspace until recreation.
+        // The registration is idempotent (--add of the same root)
+        // and touches only the command user's global config.
+        // Best effort by design: a registration failure must not
+        // block non-git work on this sandbox — the git command
+        // itself remains the authority and surfaces its own error,
+        // the same posture as ensureSandboxWorkspaceWritable.
+        await registerSandboxSafeDirectory(
+          this.provider,
+          binding.sandboxId,
+          SANDBOX_WORKSPACE_ROOT,
+        ).catch((err) => {
+          this.log(
+            `[sandbox-lifecycle] safe.directory re-register failed for sandbox=${binding.sandboxId} ` +
+              `workspace=${descriptor.workspaceId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
         return { sandboxId: binding.sandboxId, created: false };
       }
       if (instance) {
@@ -426,11 +450,20 @@ export class SandboxWorkspaceExecutor {
     const binding = descriptor.sandbox;
     if (!binding || binding.state === "lost" || !binding.sandboxId) return;
     if (isSandboxOnlyPath(change.relPath)) return;
-    const sandboxId = binding.sandboxId;
     void this.withLock(descriptor.workspaceId, async () => {
       const ws = this.fresh(descriptor);
-      if (!ws.sandbox || ws.sandbox.sandboxId !== sandboxId) return;
+      if (!ws.sandbox || ws.sandbox.state === "lost" || !ws.sandbox.sandboxId) return;
       try {
+        // Route through ensure, never at the recorded binding
+        // verbatim: the binding's sandbox may be a corpse (E2B
+        // killed it — the 2026-11-16 lion images were generated and
+        // saved to the volume, then pushed at a dead sandbox and
+        // recorded pending while the run's evidence probe failed
+        // against the same corpse). Ensure verifies liveness at the
+        // provider and recreates + mirrors when it is gone, so the
+        // push lands in a live tree; with a healthy sandbox this is
+        // the same push as before.
+        const { sandboxId } = await this.ensureSandboxLocked(ws, { bootstrap: "mirror" });
         if (change.kind === "rename" && change.newRelPath) {
           await renameSandboxPath(this.provider, sandboxId, {
             sandboxRoot: SANDBOX_WORKSPACE_ROOT,
@@ -628,7 +661,7 @@ export class SandboxWorkspaceExecutor {
 
       // 9. Install AFTER the response: fire-and-forget on a timer so
       // the route's res.json goes out first (the web prepare budget
-      // is 180s; the install alone may run 300s). Failure is
+      // is 180s; the install alone may run far longer). Failure is
       // non-fatal, exactly as on the host path — preview start
       // installs when node_modules is missing in the sandbox.
       const installDescriptor = { ...descriptor };
@@ -680,11 +713,12 @@ export class SandboxWorkspaceExecutor {
     const { sandboxId, root, installStamp } = plan;
 
     // Phase 2 (UNLOCKED): the long sandbox work — the writable-tree
-    // chmod, the install exec (300s budget), and the TypeScript
-    // pre-install. This used to run inside the per-workspace lock,
-    // so a background install queued every other operation for the
-    // workspace (preview start, the exec route, forward pushes)
-    // behind up to 300s+ of install — the preview-start timeout of
+    // chmod, the install exec (SANDBOX_INSTALL_TIMEOUT_MS budget),
+    // and the TypeScript pre-install. This used to run inside the
+    // per-workspace lock, so a background install queued every other
+    // operation for the workspace (preview start, the exec route,
+    // forward pushes) behind the whole install — the preview-start
+    // timeout of
     // 2026-11-15 (PREVIEW-TIMEOUT-DIAGNOSIS-2026-11-15.md, fix #1).
     // Running it unlocked is safe: preview start's own freshness
     // check tolerates a concurrent or missing install (it installs
@@ -718,7 +752,10 @@ export class SandboxWorkspaceExecutor {
       const installResult = await this.provider.execute(sandboxId, {
         command: buildShellCommand([pm, "install", "--prefer-offline"]),
         cwd: SANDBOX_WORKSPACE_ROOT,
-        timeoutMs: 300_000,
+        // Shared install budget (install-stamp.ts): at 300 s a cold
+        // install of this repo could never finish, so the stamp was
+        // never written and every preview retried the full install.
+        timeoutMs: SANDBOX_INSTALL_TIMEOUT_MS,
         env,
       });
       installExitCode = installResult.exitCode;

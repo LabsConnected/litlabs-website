@@ -126,6 +126,36 @@ describe("gitStatus — porcelain rename and quoting", () => {
     const status = await transport.gitStatus();
     expect(status.modified).toEqual([{ path: "café.txt", status: " M" }]);
   });
+
+  // Round 8: a failed git status (exit 128 — dubious ownership, not a
+  // repo, dead sandbox) exits nonzero with EMPTY stdout, which the
+  // parser read as a clean tree. The workspace-change evidence then
+  // reported a false "unchanged" instead of "unknown", hiding the
+  // git fault. gitStatus must throw so callers fall back to
+  // "unknown", exactly as gitDiff already does for a failed diff.
+  it("throws on a nonzero git exit instead of reporting a clean tree", async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: unknown) => {
+      if (String(url).includes("/exec")) {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              exitCode: 128,
+              stdout: "",
+              stderr: "fatal: detected dubious ownership in repository",
+            }),
+        };
+      }
+      return { ok: true, json: () => Promise.resolve({ entries: [] }) };
+    });
+    const { createWorkspaceTransport } = await import(
+      "@/lib/litt-intelligence/workspace-transport"
+    );
+    const transport = await createWorkspaceTransport("proj-1", "user-1");
+    await expect(transport.gitStatus()).rejects.toThrow(
+      /git status failed \(exit 128\)/,
+    );
+  });
 });
 
 describe("createWorkspaceTransport — reachability probe", () => {
