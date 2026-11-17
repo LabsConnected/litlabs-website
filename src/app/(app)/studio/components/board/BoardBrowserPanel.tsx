@@ -20,9 +20,11 @@
  */
 
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, ExternalLink, Globe, RefreshCw, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, RefreshCw, Search, Square } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useLiveLookup } from "../../hooks/useLiveLookup";
+import { useApplyLookupResult } from "../../hooks/useApplyLookupResult";
+import LookupApplyDialog from "./LookupApplyDialog";
 
 /** Normalize a typed address into a loadable URL, or null if empty. */
 export function normalizeBrowserUrl(raw: string): string | null {
@@ -33,7 +35,7 @@ export function normalizeBrowserUrl(raw: string): string | null {
   return `https://${trimmed}`;
 }
 
-export default function BoardBrowserPanel() {
+export default function BoardBrowserPanel({ projectId = null }: { projectId?: string | null }) {
   const { tokens } = useTheme();
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<string[]>([]);
@@ -41,7 +43,16 @@ export default function BoardBrowserPanel() {
   const [reloadKey, setReloadKey] = useState(0);
   const currentUrl = historyIndex >= 0 ? history[historyIndex] : null;
   const [lookupInput, setLookupInput] = useState("");
-  const { result: lookupResult, loading: lookupLoading, error: lookupError, search: runLookup } = useLiveLookup();
+  const [lastQuery, setLastQuery] = useState("");
+  const {
+    result: lookupResult,
+    loading: lookupLoading,
+    error: lookupError,
+    search: runLookup,
+    cancel: cancelLookup,
+  } = useLiveLookup();
+  const [applyDialogOpen, setApplyDialogOpen] = useState(false);
+  const { apply, applying, error: applyError, appliedAt, resetError: resetApplyError, resetApplied } = useApplyLookupResult(projectId);
 
   const navigate = (raw: string) => {
     const url = normalizeBrowserUrl(raw);
@@ -137,6 +148,8 @@ export default function BoardBrowserPanel() {
         style={{ borderColor: tokens.border }}
         onSubmit={(e) => {
           e.preventDefault();
+          setLastQuery(lookupInput);
+          resetApplied();
           void runLookup(lookupInput);
         }}
       >
@@ -149,15 +162,41 @@ export default function BoardBrowserPanel() {
           className="min-w-0 flex-1 rounded-full border bg-transparent px-3 py-1 text-xs outline-none"
           style={{ borderColor: tokens.border, color: tokens.text }}
         />
-        <button
-          type="submit"
-          data-testid="board-browser-lookup-submit"
-          className="shrink-0 rounded-full border px-3 py-1 text-xs disabled:opacity-40"
-          style={{ borderColor: tokens.border, color: tokens.text }}
-          disabled={lookupLoading || !lookupInput.trim()}
-        >
-          {lookupLoading ? "Looking…" : "Look up"}
-        </button>
+        {lookupLoading ? (
+          <button
+            key="cancel"
+            type="button"
+            data-testid="board-browser-lookup-cancel"
+            onClick={(e) => {
+              // Distinct `key`s (vs. the submit button below) are load-bearing,
+              // not cosmetic: without them React reconciles both branches as
+              // the SAME <button> DOM node (same tag, same tree position) and
+              // just mutates its `type` attribute in place. That mutation can
+              // land mid-click, so the browser's native click-completion sees
+              // type="submit" and fires an unintended form resubmission —
+              // i.e. clicking Cancel silently re-ran the search. preventDefault
+              // is kept as a second, independent guard against that class of
+              // bug even if the keys are ever removed.
+              e.preventDefault();
+              cancelLookup();
+            }}
+            className="shrink-0 flex items-center gap-1 rounded-full border px-3 py-1 text-xs"
+            style={{ borderColor: tokens.border, color: tokens.text }}
+          >
+            <Square size={10} aria-hidden /> Cancel
+          </button>
+        ) : (
+          <button
+            key="submit"
+            type="submit"
+            data-testid="board-browser-lookup-submit"
+            className="shrink-0 rounded-full border px-3 py-1 text-xs disabled:opacity-40"
+            style={{ borderColor: tokens.border, color: tokens.text }}
+            disabled={!lookupInput.trim()}
+          >
+            Look up
+          </button>
+        )}
       </form>
 
       {lookupError && (
@@ -175,9 +214,45 @@ export default function BoardBrowserPanel() {
           className="shrink-0 border-b px-3 py-2 text-xs leading-5"
           style={{ borderColor: tokens.border, color: tokens.text }}
         >
-          {lookupResult.formatted}
+          <p>{lookupResult.formatted}</p>
+          {projectId && (
+            <div className="mt-1.5 flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="board-browser-lookup-apply"
+                onClick={() => {
+                  resetApplyError();
+                  setApplyDialogOpen(true);
+                }}
+                className="rounded-full border px-2.5 py-0.5 text-[11px] font-medium"
+                style={{ borderColor: tokens.border, color: tokens.text }}
+              >
+                Add to project
+              </button>
+              {appliedAt && !applyDialogOpen && (
+                <span data-testid="board-browser-lookup-applied" className="text-[11px]" style={{ color: tokens.textMuted }}>
+                  Saved ✓
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
+
+      <LookupApplyDialog
+        open={applyDialogOpen}
+        query={lastQuery}
+        formatted={lookupResult?.formatted ?? ""}
+        busy={applying}
+        error={applyError}
+        onCancel={() => setApplyDialogOpen(false)}
+        onConfirm={() => {
+          if (!lookupResult) return;
+          void apply(lastQuery, lookupResult.formatted, lookupResult.source).then((ok) => {
+            if (ok) setApplyDialogOpen(false);
+          });
+        }}
+      />
 
       {currentUrl ? (
         <iframe

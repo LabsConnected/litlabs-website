@@ -181,7 +181,7 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
     case "browser":
       return (
         <div className="h-full min-h-0" data-testid="board-binding-browser">
-          <BoardBrowserPanel />
+          <BoardBrowserPanel projectId={projectId} />
         </div>
       );
     case "preview":
