@@ -250,4 +250,58 @@ describe("/projects — rendered project list", () => {
     expect(screen.getByText("Alpha workspace")).toBeTruthy();
     expect(screen.queryByText("Older workspace")).toBeNull();
   });
+
+  it("bulk Select All excludes legacy-only projects, since DELETE 404s for them", async () => {
+    mockFetch({
+      projectList: {
+        projects: [listedProject("canon-1", "Canonical one")],
+        legacyOnly: [listedProject("legacy-1", "Legacy Project")],
+      },
+    });
+    const user = userEvent.setup();
+    render(<ProjectsPage />);
+
+    await waitFor(() => expect(screen.getByText("Canonical one")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Select" }));
+    await user.click(screen.getByRole("button", { name: "All" }));
+
+    expect(screen.getByRole("button", { name: /Delete \(1\)/ })).toBeTruthy();
+  });
+
+  it("bulk Duplicates excludes legacy-only projects even when the name matches the heuristic", async () => {
+    mockFetch({
+      projectList: {
+        projects: [],
+        legacyOnly: [listedProject("legacy-dup", "Ember Roast V1 Acceptance 08-17-25")],
+      },
+    });
+    const user = userEvent.setup();
+    render(<ProjectsPage />);
+
+    await waitFor(() => expect(screen.getByText("Ember Roast V1 Acceptance 08-17-25")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Select" }));
+    await user.click(screen.getByRole("button", { name: "Duplicates" }));
+
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Delete \(/ })).toBeNull();
+  });
+
+  it("ignores a tap on a legacy-only card while in select mode", async () => {
+    mockFetch({
+      projectList: {
+        projects: [],
+        legacyOnly: [listedProject("legacy-1", "Legacy Project")],
+      },
+    });
+    const user = userEvent.setup();
+    render(<ProjectsPage />);
+
+    await waitFor(() => expect(screen.getByText("Legacy Project")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Select" }));
+    const card = screen.getByText("Legacy Project").closest("a")!;
+    await user.click(card);
+
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Delete \(/ })).toBeNull();
+  });
 });

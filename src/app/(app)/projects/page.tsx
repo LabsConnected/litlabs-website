@@ -246,13 +246,17 @@ export default function ProjectsPage() {
   }, []);
 
   const toggleSelect = useCallback((id: string) => {
+    // Legacy-only rows have no studio_projects row to delete — the
+    // card withholds its checkbox copy, and this guards the same
+    // rule against a stale click.
+    if (projects.find((p) => p.id === id)?.isLegacyOnly) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }, []);
+  }, [projects]);
 
   const exitSelectMode = useCallback(() => {
     setSelectMode(false);
@@ -421,7 +425,7 @@ export default function ProjectsPage() {
                 <>
                   <button
                     type="button"
-                    onClick={() => setSelected(new Set(filtered.map((p) => p.id)))}
+                    onClick={() => setSelected(new Set(filtered.filter((p) => !p.isLegacyOnly).map((p) => p.id)))}
                     className="inline-flex h-9 items-center rounded-xl border px-3 text-xs font-bold"
                     style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
                   >
@@ -429,7 +433,7 @@ export default function ProjectsPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSelected(new Set(filtered.filter(isTestDuplicate).map((p) => p.id)))}
+                    onClick={() => setSelected(new Set(filtered.filter((p) => isTestDuplicate(p) && !p.isLegacyOnly).map((p) => p.id)))}
                     className="inline-flex h-9 items-center rounded-xl border px-3 text-xs font-bold"
                     style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
                     title="Select acceptance-test duplicates (timestamped names)"
