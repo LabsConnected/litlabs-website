@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOARD_CHAT_TOP_INSET,
   clampPanelsToArea,
   clampRect,
   defaultBoardLayout,
   overviewViewport,
   panelsBoundingBox,
+  seedPanelRect,
   tidyPanels,
   visiblePanels,
 } from "./board-layout";
-import { BOARD_PANEL_IDS } from "./board-types";
+import {
+  BOARD_CHAT_UNTOUCHED_DEFAULT_RECT,
+  BOARD_PANEL_IDS,
+  boardDefinition,
+} from "./board-types";
 
 describe("defaultBoardLayout", () => {
   it("contains the full frozen panel inventory", () => {
@@ -25,7 +31,6 @@ describe("defaultBoardLayout", () => {
     expect(layout.panels.media.open).toBe(true);
     expect(layout.panels.code.open).toBe(false);
     expect(layout.panels.health.open).toBe(false);
-    expect(layout.panels.inspector.open).toBe(false);
     expect(layout.panels.deploy.open).toBe(false);
     expect(layout.panels.browser.open).toBe(false);
     expect(layout.panels.world.open).toBe(false);
@@ -60,6 +65,80 @@ describe("defaultBoardLayout", () => {
     expect(layout.viewport).toEqual({ panX: 0, panY: 0, scale: 1 });
     expect(layout.presets).toEqual({});
     expect(layout.activePresetName).toBeNull();
+  });
+});
+
+describe("panel inventory (2026-11-16 layout spec)", () => {
+  it("retires inspector, plan and canvas; world stays its own panel", () => {
+    for (const removed of ["inspector", "plan", "canvas"]) {
+      expect(BOARD_PANEL_IDS).not.toContain(removed);
+    }
+    expect(BOARD_PANEL_IDS).toContain("world");
+    const layout = defaultBoardLayout("website");
+    expect(layout.panels).not.toHaveProperty("inspector");
+    expect(layout.panels).not.toHaveProperty("plan");
+    expect(layout.panels).not.toHaveProperty("canvas");
+    expect(layout.panels.world).toBeDefined();
+  });
+
+  it("code opens at the one-box size 1120×720", () => {
+    expect(boardDefinition("code").defaultRect).toEqual({
+      x: 436,
+      y: 72,
+      width: 1120,
+      height: 720,
+    });
+    expect(defaultBoardLayout("website").panels.code.rect.width).toBe(1120);
+    expect(defaultBoardLayout("website").panels.code.rect.height).toBe(720);
+  });
+
+  it("chat's default rect stays the untouched-default signature the v5 migration matches on", () => {
+    expect(boardDefinition("chat").defaultRect).toEqual(BOARD_CHAT_UNTOUCHED_DEFAULT_RECT);
+    expect(BOARD_CHAT_UNTOUCHED_DEFAULT_RECT).toEqual({ x: 16, y: 16, width: 404, height: 768 });
+  });
+});
+
+describe("seedPanelRect", () => {
+  it("seeds chat centered horizontally at the top of the area, at full default size", () => {
+    const rect = seedPanelRect("chat", { width: 1640, height: 800 });
+    expect(rect).toEqual({
+      x: Math.round((1640 - 404) / 2),
+      y: BOARD_CHAT_TOP_INSET,
+      width: 404,
+      height: 768,
+    });
+    // Genuinely centered: equal margins on both sides.
+    expect(rect.x).toBe(1640 - (rect.x + rect.width));
+  });
+
+  it("centers chat within an offset visible region (panned board)", () => {
+    const rect = seedPanelRect("chat", { x: 200, y: 50, width: 1200, height: 700 });
+    expect(rect.x).toBe(200 + Math.round((1200 - 404) / 2));
+    expect(rect.y).toBe(50 + BOARD_CHAT_TOP_INSET);
+    expect(rect.width).toBe(404);
+    expect(rect.height).toBe(768);
+  });
+
+  it("keeps chat at the area's left edge when the area is narrower than the panel", () => {
+    const rect = seedPanelRect("chat", { x: 30, y: 0, width: 300, height: 600 });
+    expect(rect.x).toBe(30);
+    expect(rect.width).toBe(404);
+  });
+
+  it("seeds every other panel at its standard default rect verbatim", () => {
+    for (const id of BOARD_PANEL_IDS) {
+      if (id === "chat") continue;
+      expect(seedPanelRect(id, { x: 200, y: 50, width: 1200, height: 700 })).toEqual(
+        boardDefinition(id).defaultRect,
+      );
+    }
+  });
+
+  it("does not mutate the inventory defaults", () => {
+    seedPanelRect("chat", { width: 1000, height: 800 });
+    seedPanelRect("code", { width: 1000, height: 800 });
+    expect(boardDefinition("chat").defaultRect).toEqual(BOARD_CHAT_UNTOUCHED_DEFAULT_RECT);
+    expect(boardDefinition("code").defaultRect.width).toBe(1120);
   });
 });
 

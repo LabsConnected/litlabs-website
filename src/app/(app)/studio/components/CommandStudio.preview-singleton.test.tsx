@@ -938,8 +938,12 @@ describe("CommandStudio — approval gate convergence", () => {
 });
 
 describe("CodeWorkspace — app preview", () => {
-  it("always mounts the app preview in App view (no external preview column exists)", async () => {
-    const user = userEvent.setup();
+  it("renders the ONE shared preview element in its preview region — it never mounts its own preview", async () => {
+    // Code-box build (mapping §1): the App view mode is gone. The live
+    // preview is a permanent region of the one box, and it renders the
+    // single shared element CommandStudio builds — CodeWorkspace must
+    // not mount a StudioPreviewPanel of its own.
+    const { default: StudioPreviewPanel } = await import("./StudioPreviewPanel");
     render(
       <CodeWorkspace
         projectId="project-1"
@@ -947,14 +951,39 @@ describe("CodeWorkspace — app preview", () => {
         branch="main"
         workspaceStatus="ready"
         writeAccess={true}
+        previewContent={
+          <StudioPreviewPanel
+            projectId="project-1"
+            projectName="Test Project"
+            repositoryName="owner/repo"
+            branch="main"
+            workspaceStatus="ready"
+          />
+        }
       />,
     );
-    await user.click(screen.getByTitle("App"));
     await settle();
-    // Canvas-first layout: there is no permanent right-column preview to
-    // defer to, so the App view always mounts its own preview panel.
+    expect(screen.queryByTitle("App")).toBeNull();
     expect(previewPanels()).toHaveLength(1);
-    expect(screen.queryByTestId("app-preview-external-notice")).toBeNull();
+    expect(
+      screen.getByTestId("code-preview-region").contains(previewPanels()[0]),
+    ).toBe(true);
+  });
+
+  it("mounts no preview at all when the shared element lives in the Preview panel", async () => {
+    render(
+      <CodeWorkspace
+        projectId="project-1"
+        repositoryName="owner/repo"
+        branch="main"
+        workspaceStatus="ready"
+        writeAccess={true}
+        previewPlaceholder={<div data-testid="preview-pointer-card" />}
+      />,
+    );
+    await settle();
+    expect(previewPanels()).toHaveLength(0);
+    expect(screen.getByTestId("preview-pointer-card")).toBeTruthy();
   });
 });
 

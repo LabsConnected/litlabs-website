@@ -34,12 +34,15 @@ export type NavSection = {
 
 /* ─── Canonical App Shell navigation ───────────────────────────────────
  * ONE canonical authenticated global nav (issue #627 — Studio Merge):
- *   Main: Studio · Discover · Projects
- *   More: Marketplace · Games · CLI · Deployments · Docs
- *   (Showcase was removed from More by Larry, 2026-11-14.)
+ *   Main: Studio · Discover · Projects · Marketplace · Games · CLI ·
+ *         Deployments · Docs
+ *   (Showcase was removed from More by Larry, 2026-11-14. The "More"
+ *   overflow menu itself was emptied and removed by Larry, 2026-11-16:
+ *   Marketplace · Games · CLI · Deployments · Docs each became their
+ *   own visible main-nav item — there is no More menu anymore.)
  *   Settings is NOT a Main item anymore (Studio Finish Spec, Larry
- *   2026-11-14): it lives in the account menu (AppShell IdentityDock)
- *   and in the phone More menu — never in the top navigation.
+ *   2026-11-14): it lives in the account menu (AppShell IdentityDock,
+ *   which renders on every viewport) — never in the top navigation.
  *
  * Studio is the one primary work surface and the prime signed-in
  * landing — there is still no separate Home item and no /dashboard
@@ -65,10 +68,8 @@ export const APP_NAV_MAIN: NavItem[] = [
   { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
   { label: "Discover", href: "/discover", icon: Compass },
   { label: "Projects", href: "/projects", icon: FolderKanban },
-];
-
-/* Secondary destinations behind the More menu — real routes only. */
-export const APP_NAV_MORE: NavItem[] = [
+  // Promoted out of the old More overflow menu (Larry, 2026-11-16) —
+  // labels and hrefs are exactly the ones the More menu used.
   { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
   { label: "Games", href: "/games", icon: GamesIcon },
   { label: "CLI", href: "/cli", icon: Terminal },
@@ -76,22 +77,17 @@ export const APP_NAV_MORE: NavItem[] = [
   { label: "Docs", href: "/docs", icon: FileText },
 ];
 
-export interface NavMenuSection {
-  id: string;
-  label: string;
-  items: NavItem[];
-}
-
-export const APP_NAV_MORE_SECTIONS: NavMenuSection[] = [
-  { id: "build", label: "Build", items: APP_NAV_MORE.filter((item) => ["CLI", "Deployments"].includes(item.label)) },
-  { id: "explore", label: "Explore", items: APP_NAV_MORE.filter((item) => ["Marketplace", "Games"].includes(item.label)) },
-  { id: "learn", label: "Learn", items: APP_NAV_MORE.filter((item) => item.label === "Docs") },
-];
+/* The More overflow menu is GONE (Larry, 2026-11-16): every destination
+ * it held is a visible main-nav item above, so nothing remains in it.
+ * This export stays (empty) because src/lib/litt/page-context.ts still
+ * spreads it into its closed destination set — those destinations now
+ * reach that set through APP_NAV_MAIN instead. */
+export const APP_NAV_MORE: NavItem[] = [];
 
 /* ─── Secondary navigation ─────────────────────────────────────────────
  * Library + Developer Tools destinations. Rendered inside the identity
- * dock's account menu (AppShell) — the top bar only carries Main pills +
- * More, so secondary surfaces live one click away without flooding the bar.
+ * dock's account menu (AppShell) — the top bar only carries Main pills,
+ * so secondary surfaces live one click away without flooding the bar.
  */
 export const APP_NAV_SECONDARY: NavSection[] = [
   {
@@ -114,10 +110,16 @@ export const APP_NAV_SECONDARY: NavSection[] = [
 /* ─── Flag-gated visibility ──────────────────────────────────────────── */
 // /games hides while the retroGameRuntime flag is off (see
 // src/app/(app)/games/layout.tsx) so no nav surface ever links to a 404.
+// Games carried this gate in the old More menu; it keeps it now that it
+// is a Main item (Larry's 2026-11-16 promotion), so it is the ONE
+// flag-gated Main item — every other Main item is always visible.
 // Discover moved to the always-on Main nav (issue #627) and lost this
 // gate in the process — see navigation.test.ts for the flagged caveat.
 export function getVisibleMainNav(): NavItem[] {
-  return APP_NAV_MAIN;
+  return APP_NAV_MAIN.filter((item) => {
+    if (item.href === "/games") return isFeatureEnabled("retroGameRuntime");
+    return true;
+  });
 }
 
 /**
@@ -153,20 +155,6 @@ export function withActiveProjectContext(
     params.set("project", id);
     return { ...item, href: `${path}?${params.toString()}` };
   });
-}
-
-export function getVisibleMoreNav(): NavItem[] {
-  return APP_NAV_MORE.filter((item) => {
-    if (item.href === "/games") return isFeatureEnabled("retroGameRuntime");
-    return true;
-  });
-}
-
-export function getVisibleMoreNavSections(): NavMenuSection[] {
-  const visible = new Set(getVisibleMoreNav().map((item) => item.label));
-  return APP_NAV_MORE_SECTIONS
-    .map((section) => ({ ...section, items: section.items.filter((item) => visible.has(item.label)) }))
-    .filter((section) => section.items.length > 0);
 }
 
 /**
