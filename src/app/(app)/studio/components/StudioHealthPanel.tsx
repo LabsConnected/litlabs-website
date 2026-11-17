@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ChevronDown, CircleCheck, Clock3, Loader2, Play, RefreshCw, ShieldCheck, Zap } from "lucide-react";
+import { AlertCircle, ChevronDown, CircleCheck, Clock3, FileCode2, Loader2, Play, RefreshCw, ShieldCheck, Zap } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
+import { parseFileRef } from "@/lib/studio/file-ref";
+import {
+  useBoardPanelStatusStore,
+  type BoardPanelStatus,
+} from "../stores/useBoardPanelStatusStore";
 import { useProjectRuntime } from "../hooks/useProjectRuntime";
 import { HOST_EXECUTION_UNAVAILABLE_LABEL, runtimePhaseLabel, runtimeRecoveryActions } from "@/lib/projects/runtime-state";
 import { HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
@@ -105,6 +111,38 @@ function statusLabel(status: CheckStatus): string {
   if (status === "not_run") return "Not run";
   if (status === "not_configured") return "Not configured";
   return status[0].toUpperCase() + status.slice(1).replace("_", " ");
+}
+
+/**
+ * Kimi wiring item 4: the clickable file:line chip on a check card.
+ * The reference is parsed from the check's OWN error/output text — when
+ * neither names a file, no chip renders (nothing is invented). Clicking
+ * dispatches the same studio:open-file event the canvas uses; the Code
+ * panel opens the file and, with a line present, reveals it.
+ */
+function CheckFileRefChip({ check, projectId }: { check: HealthCheck; projectId: string }) {
+  const ref = parseFileRef(check.error) ?? parseFileRef(check.output);
+  if (!ref) return null;
+  const label = ref.line ? `${ref.path}:${ref.line}` : ref.path;
+  return (
+    <button
+      type="button"
+      data-testid={`check-file-ref-${check.id}`}
+      onClick={() => {
+        window.dispatchEvent(
+          new CustomEvent(STUDIO_EVENT_OPEN_FILE, {
+            detail: { projectId, path: ref.path, line: ref.line, source: "checks" },
+          }),
+        );
+      }}
+      className="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-1 font-mono text-[9px] font-bold transition hover:bg-white/8"
+      style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
+      title={`Open ${label} in Code`}
+    >
+      <FileCode2 size={10} className="shrink-0" />
+      <span className="truncate">{label}</span>
+    </button>
+  );
 }
 
 export default function StudioHealthPanel({
@@ -315,6 +353,28 @@ export default function StudioHealthPanel({
     error: null,
   }), [payload.checks]);
 
+  // Kimi wiring item 2: publish the checks summary as this panel's own
+  // board-header status (checks mode only — approvals mode publishes
+  // nothing). Derived from the same payload the cards render.
+  const setPanelStatus = useBoardPanelStatusStore((s) => s.setPanelStatus);
+  useEffect(() => {
+    if (mode !== "checks") return;
+    const failedCount = checks.filter((check) => check.status === "failed").length;
+    const passedCount = checks.filter((check) => check.status === "passed").length;
+    const anyRunning = runningAll || running !== null || checks.some((check) => check.status === "running");
+    const status: BoardPanelStatus = anyRunning
+      ? { tone: "working", label: "Checks running", pulse: true }
+      : failedCount > 0
+        // Kimi wiring item 11: the failed count also rides as the
+        // toolbar badge, so it is visible when the panel is closed.
+        ? { tone: "error", label: `${failedCount} check${failedCount === 1 ? "" : "s"} failing`, badge: failedCount }
+        : passedCount > 0
+          ? { tone: "ready", label: "Checks passing" }
+          : { tone: "idle", label: "No checks run yet" };
+    setPanelStatus("health", status);
+  }, [mode, checks, running, runningAll, setPanelStatus]);
+  useEffect(() => () => setPanelStatus("health", null), [setPanelStatus]);
+
   if (!projectId) return <div className="flex h-full min-h-40 items-center justify-center px-4 text-center text-[10px]" style={{ color: "var(--text-muted)" }}>{mode === "checks" ? "Select a project to run checks." : "Select a project to view approvals."}</div>;
 
   if (mode === "approvals") {
@@ -338,6 +398,23 @@ export default function StudioHealthPanel({
   // be refused by the same policy.
   const hostExecGated = runtime.error?.code === HOST_EXECUTION_DISABLED_CODE;
   const recoveryActions = hostExecGated ? [] : runtimeRecoveryActions(runtime.phase);
+
+  // Kimi wiring item 4: run provenance from the payload itself — the
+  // latest check timestamp is the last run; the newest checkpoint's
+  // gitSha is the revision it ran against. Files changed since that run
+  // (the payload's own changedFiles list) make the results stale.
+  // Nothing renders for a fact the payload does not carry.
+  const lastRunAt = payload.checks.reduce<string | null>(
+    (max, check) => (check.timestamp && (!max || check.timestamp > max) ? check.timestamp : max),
+    null,
+  );
+  const latestCheckpoint = payload.checkpoints.reduce<{ gitSha?: string; createdAt?: string } | undefined>(
+    (best, checkpoint) =>
+      checkpoint.createdAt && (!best?.createdAt || checkpoint.createdAt > best.createdAt) ? checkpoint : best,
+    undefined,
+  );
+  const lastRevision = latestCheckpoint?.gitSha ?? null;
+  const resultsStale = lastRunAt !== null && payload.changedFiles.length > 0;
 
   return (
     <div className="space-y-3" data-testid="studio-health-panel">
@@ -414,6 +491,19 @@ export default function StudioHealthPanel({
       )}
 
       {error && <div className="flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[9px]" style={{ borderColor: "rgba(239,68,68,0.3)", color: "#fca5a5" }}><AlertCircle size={12} className="shrink-0" />{error}</div>}
+
+      {/* Stale pill (Kimi wiring item 4): files changed after the last
+          run, so these results describe older code. */}
+      {resultsStale && (
+        <div
+          className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[9px] font-bold"
+          style={{ borderColor: "rgba(227,179,65,0.35)", color: "#e3b341", backgroundColor: "rgba(227,179,65,0.06)" }}
+          data-testid="checks-stale-pill"
+        >
+          <AlertCircle size={11} className="shrink-0" />
+          Results may be stale — files changed since this run
+        </div>
+      )}
       <div className="space-y-1.5">
         {checks.map((check) => (
           <div key={check.id} className="rounded-xl border px-2.5 py-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
@@ -429,6 +519,7 @@ export default function StudioHealthPanel({
             </div>
             <div className="mt-1 text-[9px] leading-4" style={{ color: "var(--text-muted)" }}>{check.source} · {formatTime(check.timestamp)}</div>
             {check.error && <div className="mt-1 text-[9px] leading-4" style={{ color: check.status === "unavailable" ? "#e3b341" : "#fca5a5" }}>{check.error}</div>}
+            {projectId && <CheckFileRefChip check={check} projectId={projectId} />}
             {check.suggestedFix && <div className="mt-1 text-[9px] leading-4" style={{ color: "#a78bfa" }}>Fix: {check.suggestedFix}</div>}
             {check.output && (
               <details className="mt-1.5">
@@ -451,6 +542,16 @@ export default function StudioHealthPanel({
           {payload.checkpoints.length ? <div className="space-y-1">{payload.checkpoints.slice(0, 4).map((checkpoint, index) => <div key={checkpoint.id ?? `${checkpoint.gitSha}-${index}`} className="flex items-center gap-2 rounded-md border px-2 py-1.5" style={{ borderColor: "var(--studio-border)" }}><span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: "var(--text-secondary)" }}>{checkpoint.label ?? checkpoint.gitSha ?? "Checkpoint"}</span><span className="shrink-0 text-[8px]" style={{ color: "var(--text-muted)" }}>{formatTime(checkpoint.createdAt)}</span></div>)}</div> : <div className="text-[9px]" style={{ color: "var(--text-muted)" }}>No checkpoints reported.</div>}
         </div>
       </div>
+
+      {/* Run provenance footer (Kimi wiring item 4) — only the facts
+          the payload carries: last run time, and the revision when a
+          checkpoint recorded one. */}
+      {lastRunAt && (
+        <div className="text-[9px]" style={{ color: "var(--text-muted)" }} data-testid="checks-footer">
+          Last run {formatTime(lastRunAt)}
+          {lastRevision ? <> · revision <span className="font-mono">{lastRevision.slice(0, 7)}</span></> : null}
+        </div>
+      )}
     </div>
   );
 }

@@ -97,6 +97,10 @@ export interface DeploymentRecord {
    * of creating a new one.
    */
   externalSiteId?: string | null;
+  /** Row timestamps (Kimi wiring item 5: deployment history). Optional —
+   *  absent on records built in memory before persistence. */
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }
 
 export interface DeploymentCreateInput {

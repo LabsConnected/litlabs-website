@@ -61,7 +61,8 @@ import StudioDeploySurface from "../shell/StudioDeploySurface";
 import MissionCards from "../MissionCards";
 import BoardMediaPanel from "./BoardMediaPanel";
 import BoardBrowserPanel from "./BoardBrowserPanel";
-import { boardDefinition, type BoardPanelId } from "./board-types";
+import WorkspaceBanner from "./WorkspaceBanner";
+import { boardDefinition, boardScopeKey, type BoardPanelId } from "./board-types";
 
 const CodeWorkspace = dynamic(() => import("../code/CodeWorkspace").then((m) => m.CodeWorkspace), { ssr: false });
 const StudioTerminalDrawer = dynamic(() => import("../StudioTerminalDrawer"), { ssr: false });
@@ -212,6 +213,18 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
   const previewHomeNow = useBoardPreviewHome();
 
   const summon = props.summonPanel;
+  // Workspace banner (Kimi wiring item 6): rendered INSIDE the panels
+  // that depend on the workspace (preview / health / files / code /
+  // browser) — never globally. Driven by the capabilities' real
+  // workspace status; Reconnect runs the real prepare POST inside the
+  // banner; View logs summons the Terminal / Logs panel.
+  const workspaceBanner = (
+    <WorkspaceBanner
+      projectId={projectId}
+      workspaceStatus={capabilities.workspaceStatus ?? null}
+      onViewLogs={() => summon("terminal")}
+    />
+  );
   const missionCards = (
     <MissionCards
       capabilities={capabilities}
@@ -254,8 +267,11 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
       );
     case "browser":
       return (
-        <div className="h-full min-h-0" data-testid="board-binding-browser">
-          <BoardBrowserPanel />
+        <div className="flex h-full min-h-0 flex-col" data-testid="board-binding-browser">
+          {workspaceBanner}
+          <div className="min-h-0 flex-1">
+            <BoardBrowserPanel />
+          </div>
         </div>
       );
     case "preview":
@@ -276,7 +292,10 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
       }
       return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-preview">
+          {workspaceBanner}
+          <div className="flex min-h-0 flex-1 flex-col">
           {props.previewContent}
+          </div>
         </div>
       );
     case "code": {
@@ -287,6 +306,8 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
       const inCode = previewHomeNow === "code";
       return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-code">
+          {workspaceBanner}
+          <div className="flex min-h-0 flex-1 flex-col">
           <CodeWorkspace
             projectId={projectId}
             repositoryName={capabilities.repositoryName}
@@ -311,13 +332,19 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
             onSummonPanel={(panelId) => summon(panelId as BoardPanelId)}
             onRollback={props.onRollback}
           />
+          </div>
         </div>
       );
     }
     case "files":
       // Relocated single instance — see the header note. The element is
       // CommandStudio's projectFilesContent, unchanged.
-      return <div className="h-full min-h-0" data-testid="board-binding-files">{props.filesContent}</div>;
+      return (
+        <div className="flex h-full min-h-0 flex-col" data-testid="board-binding-files">
+          {workspaceBanner}
+          <div className="min-h-0 flex-1">{props.filesContent}</div>
+        </div>
+      );
     case "terminal":
       // renderPanel only runs for open, non-minimized panels, so the
       // drawer is visible whenever it is mounted on the board.
@@ -334,6 +361,7 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
     case "health":
       return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-health">
+          {workspaceBanner}
           <StudioHealthPanel
             mode="checks"
             projectId={projectId}

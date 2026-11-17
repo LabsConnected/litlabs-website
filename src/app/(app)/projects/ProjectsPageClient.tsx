@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import PageShell from "@/components/PageShell";
@@ -12,7 +12,9 @@ import {
   Folder,
   GitBranch,
   AlertCircle,
+  ClipboardCheck,
   Lock,
+  Search,
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
@@ -30,6 +32,38 @@ type Installation = {
   account: string | null;
 };
 
+/**
+ * Project status presentation (Kimi wiring item 13). The /api/projects
+ * rows carry a free-form workspace `status` string; the pill maps it
+ * to a SPECIFIC label (finish spec: no vague states) — ready/online →
+ * "Ready", failed/error → "Workspace failed", provisioning family →
+ * "Preparing…", anything else shows the status itself, capitalized,
+ * rather than a made-up synonym. The same mapping drives the status
+ * filter chips and the failed-first sort.
+ */
+type ProjectStatusKind = "ready" | "failed" | "working" | "other";
+
+function projectStatusKind(status: string): ProjectStatusKind {
+  const s = (status ?? "").toLowerCase();
+  if (s === "ready" || s === "online") return "ready";
+  if (s === "failed" || s === "error") return "failed";
+  if (["provisioning", "preparing", "pending", "creating"].includes(s)) return "working";
+  return "other";
+}
+
+function projectStatusLabel(status: string): string {
+  switch (projectStatusKind(status)) {
+    case "ready":
+      return "Ready";
+    case "failed":
+      return "Workspace failed";
+    case "working":
+      return "Preparing…";
+    default:
+      return status ? status.charAt(0).toUpperCase() + status.slice(1) : "Unknown";
+  }
+}
+
 export default function ProjectsPageClient() {
   const { resolvedColors: T, tokens } = useTheme();
   const { isLoaded, isSignedIn } = useClerkAuth();
@@ -37,6 +71,33 @@ export default function ProjectsPageClient() {
   const [installations, setInstallations] = useState<Installation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // List controls (Kimi wiring item 13): search / sort / status
+  // filter, all over the full list /api/projects returns (the API
+  // returns every project unpaginated, so client filtering is exact).
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"recent" | "name" | "status">("recent");
+  const [statusFilter, setStatusFilter] = useState<"all" | ProjectStatusKind>("all");
+
+  const visibleProjects = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = projects.filter((p) => {
+      if (statusFilter !== "all" && projectStatusKind(p.status) !== statusFilter) return false;
+      if (q && !`${p.owner}/${p.repository}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+    if (sort === "name") {
+      return [...filtered].sort((a, b) =>
+        `${a.owner}/${a.repository}`.localeCompare(`${b.owner}/${b.repository}`),
+      );
+    }
+    if (sort === "status") {
+      const rank: Record<ProjectStatusKind, number> = { failed: 0, working: 1, ready: 2, other: 3 };
+      return [...filtered].sort(
+        (a, b) => rank[projectStatusKind(a.status)] - rank[projectStatusKind(b.status)],
+      );
+    }
+    return filtered; // "recent" = the API's own updated_at-desc order
+  }, [projects, query, sort, statusFilter]);
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) {
@@ -220,6 +281,74 @@ export default function ProjectsPageClient() {
           </div>
         ) : (
           <div className="space-y-3">
+            {projects.length > 0 && (
+              <div className="flex flex-col gap-2 pb-1" data-testid="projects-controls">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label
+                    className="flex min-h-[44px] flex-1 items-center gap-2 rounded-xl border px-3 sm:max-w-xs"
+                    style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
+                  >
+                    <Search size={14} style={{ color: tokens.textMuted }} aria-hidden />
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Search projects…"
+                      aria-label="Search projects"
+                      data-testid="projects-search"
+                      className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                      style={{ color: tokens.text }}
+                    />
+                  </label>
+                  <select
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value as typeof sort)}
+                    aria-label="Sort projects"
+                    data-testid="projects-sort"
+                    className="min-h-[44px] rounded-xl border px-2 text-xs font-bold"
+                    style={{ borderColor: T.borderColor, backgroundColor: T.boxBg, color: tokens.text }}
+                  >
+                    <option value="recent">Recently updated</option>
+                    <option value="name">Name A–Z</option>
+                    <option value="status">Status (failed first)</option>
+                  </select>
+                </div>
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by status">
+                  {(
+                    [
+                      ["all", "All"],
+                      ["ready", "Ready"],
+                      ["failed", "Failed"],
+                      ["working", "Preparing"],
+                      ["other", "Other"],
+                    ] as ["all" | ProjectStatusKind, string][]
+                  ).map(([kind, label]) => {
+                    const count =
+                      kind === "all"
+                        ? projects.length
+                        : projects.filter((p) => projectStatusKind(p.status) === kind).length;
+                    if (kind !== "all" && count === 0) return null;
+                    const active = statusFilter === kind;
+                    return (
+                      <button
+                        key={kind}
+                        type="button"
+                        data-testid={`projects-filter-${kind}`}
+                        aria-pressed={active}
+                        onClick={() => setStatusFilter(kind)}
+                        className="rounded-full border px-3 py-1.5 text-[11px] font-bold"
+                        style={
+                          active
+                            ? { backgroundColor: tokens.primary, borderColor: tokens.primary, color: tokens.background }
+                            : { borderColor: T.borderColor, color: tokens.textMuted }
+                        }
+                      >
+                        {label} · {count}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {projects.length === 0 ? (
               <div
                 className="rounded-2xl border p-10 text-center"
@@ -262,8 +391,32 @@ export default function ProjectsPageClient() {
                   Or start with an idea first →
                 </Link>
               </div>
+            ) : visibleProjects.length === 0 ? (
+              <div
+                className="rounded-2xl border p-8 text-center"
+                style={{ backgroundColor: T.boxBg, borderColor: T.borderColor }}
+                data-testid="projects-no-match"
+              >
+                <div className="mb-1 font-black text-sm" style={{ color: tokens.text }}>
+                  No projects match
+                </div>
+                <p className="text-xs mb-4 leading-relaxed" style={{ color: tokens.textMuted }}>
+                  Nothing here fits the current search and filters.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    setStatusFilter("all");
+                  }}
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-black"
+                  style={{ backgroundColor: tokens.primary, color: tokens.background }}
+                >
+                  Clear filters
+                </button>
+              </div>
             ) : (
-              projects.map((p) => (
+              visibleProjects.map((p) => (
                 <div
                   key={String(p.id)}
                   className="rounded-2xl border p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all hover:border-opacity-60"
@@ -300,31 +453,51 @@ export default function ProjectsPageClient() {
                           className="rounded-full px-1.5 py-0.5 font-bold"
                           style={{
                             backgroundColor:
-                              p.status === "ready" || p.status === "online"
+                              projectStatusKind(p.status) === "ready"
                                 ? "#22c55e20"
-                                : p.status === "failed"
+                                : projectStatusKind(p.status) === "failed"
                                   ? "#ef444420"
-                                  : `${tokens.primary}15`,
+                                  : projectStatusKind(p.status) === "working"
+                                    ? "#e3b34120"
+                                    : `${tokens.primary}15`,
                             color:
-                              p.status === "ready" || p.status === "online"
+                              projectStatusKind(p.status) === "ready"
                                 ? "#22c55e"
-                                : p.status === "failed"
+                                : projectStatusKind(p.status) === "failed"
                                   ? "#ef4444"
-                                  : tokens.primary,
+                                  : projectStatusKind(p.status) === "working"
+                                    ? "#e3b341"
+                                    : tokens.primary,
                           }}
                         >
-                          {p.status}
+                          {projectStatusLabel(p.status)}
                         </span>
                       </div>
                     </div>
                   </div>
-                  <Link
-                    href={`/projects?id=${p.id}`}
-                    className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all hover:opacity-80"
-                    style={{ borderColor: T.borderColor, color: tokens.text }}
-                  >
-                    <ExternalLink size={11} /> Open Mission Control
-                  </Link>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {projectStatusKind(p.status) === "failed" && (
+                      // Failed → Studio Checks deep link (item 13):
+                      // lands in the Studio for this project with the
+                      // Checks panel summoned (?tool=checks is handled
+                      // by CommandStudio's deep-link effect).
+                      <Link
+                        href={`/studio?project=${encodeURIComponent(String(p.id))}&tool=checks`}
+                        data-testid={`project-view-checks-${p.id}`}
+                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all hover:opacity-80"
+                        style={{ borderColor: "#ef444440", color: "#ef4444", backgroundColor: "#ef444408" }}
+                      >
+                        <ClipboardCheck size={11} /> View checks
+                      </Link>
+                    )}
+                    <Link
+                      href={`/projects?id=${p.id}`}
+                      className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all hover:opacity-80"
+                      style={{ borderColor: T.borderColor, color: tokens.text }}
+                    >
+                      <ExternalLink size={11} /> Open Mission Control
+                    </Link>
+                  </div>
                 </div>
               ))
             )}
