@@ -943,7 +943,7 @@ export default function StudioPreviewPanel({
 
   const setPreviewPreparing = useExecutionStore((s) => s.setPreviewPreparing);
 
-  const preparePreview = useCallback(async () => {
+  const preparePreview = useCallback(async (opts?: { forceRestart?: boolean }) => {
     if (!projectId) return;
     // Single-flight guard: only one preview start in flight at a time.
     // Mobile rerenders and rapid prop changes cannot launch duplicate runtimes.
@@ -1021,6 +1021,13 @@ export default function StudioPreviewPanel({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+        // Round 13: an explicit Restart on a FAILED preview sends
+        // { restart: true } so the web route takes the terminal's
+        // force-restart path. A plain start can silently adopt a
+        // wedged in-flight runtime (the start path's reuse gate),
+        // which made Restart a no-op against the failure it was
+        // meant to clear. Every other start sends an empty body.
+        body: JSON.stringify(opts?.forceRestart ? { restart: true } : {}),
         // Starting a dev server can take a while: the web route behind
         // this POST can legitimately spend 180s provisioning plus 120s
         // starting (TERMINAL_TIMEOUTS) back-to-back — a 300s worst
@@ -1329,8 +1336,12 @@ export default function StudioPreviewPanel({
     setIframeFailed(false);
     setFrameKey((value) => value + 1);
     autoStartedForRef.current = projectId;
-    void preparePreview();
-  }, [preparePreview, projectId]);
+    // Round 13: in the failed state this button IS "Restart preview"
+    // — an explicit user restart takes the force path, not a plain
+    // start that can adopt the wedged runtime. Other states keep
+    // the plain start.
+    void preparePreview(state === "failed" ? { forceRestart: true } : undefined);
+  }, [preparePreview, projectId, state]);
 
   // Export the project's publishable source as a ZIP download. Server-side
   // build — the button only reports what the endpoint actually returned.
@@ -1477,7 +1488,7 @@ export default function StudioPreviewPanel({
         {(isLive || state === "failed") && !isStaticProject && !hostExecKnown && (
           <button
             type="button"
-            onClick={() => void preparePreview()}
+            onClick={() => void preparePreview(state === "failed" ? { forceRestart: true } : undefined)}
             className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
             aria-label="Restart preview"
             title="Restart preview runtime"

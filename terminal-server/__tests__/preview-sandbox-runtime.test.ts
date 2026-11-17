@@ -20,8 +20,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
+  checkSandboxPreviewLiveness,
   startSandboxPreview,
+  verifySandboxPreviewHealth,
+  PREVIEW_VERIFY_FAILURE_THRESHOLD,
+  PREVIEW_VERIFY_FAILURE_WINDOW_MS,
   type SandboxPreviewSupport,
+  type SandboxProbeResult,
 } from "../preview/sandbox-runtime";
 import {
   INSTALL_STAMP_PATH,
@@ -31,6 +36,7 @@ import {
 import { PreviewError, type PreviewRuntime } from "../preview/PreviewManager";
 import {
   buildSandboxInstallEnv,
+  SANDBOX_PREVIEW_NODE_HEAP_MB,
   runSandboxInstallOnce,
 } from "../sandbox/install-flight";
 import { SANDBOX_HOME_DIR } from "../sandbox/workspace-executor";
@@ -178,11 +184,21 @@ describe("startSandboxPreview — install budget (round 8)", () => {
  * Round 12 (2026-11-16): the preview install exec carries the shared
  * SHAPED install env (heap cap + pnpm concurrency bounds from
  * install-flight.ts) — the same builder the executor's background
- * install uses — and the shaping does NOT leak into the dev-server
- * launch exec.
+ * install uses — and the install shaping does NOT leak into the
+ * dev-server launch exec.
+ *
+ * Round 13 repair: this test originally also pinned the launch env
+ * as carrying NO NODE_OPTIONS at all ("shaping is install-only").
+ * That premise is the defect round 13 fixes — the unshaped launch
+ * inherited the tree .npmrc's 4 GB heap allowance in a 2048 MB box.
+ * The launch now carries its OWN shaping
+ * (buildSandboxPreviewLaunchEnv: heap bound only, sized for a dev
+ * server), and this test pins the separation in its new form: the
+ * install env never reaches the launch, and the launch's bound is
+ * the preview bound, not the install's 768.
  */
 describe("startSandboxPreview — install memory shaping (round 12)", () => {
-  it("runs the install with the shared shaped env, and keeps the launch env unshaped", async () => {
+  it("runs the install with the shared shaped env, and the launch with only its own shaping", async () => {
     const { support, executions } = makeSupport();
     const runtime = makeRuntime();
 
@@ -206,7 +222,13 @@ describe("startSandboxPreview — install memory shaping (round 12)", () => {
 
     const launch = executions.find((e) => e.command.includes("setsid nohup"));
     expect(launch, "a launch execute call").toBeDefined();
-    expect(launch!.env?.NODE_OPTIONS).toBeUndefined();
+    // Round 13: the launch's own heap bound — not the install's.
+    expect(launch!.env?.NODE_OPTIONS).toBe(
+      `--max-old-space-size=${SANDBOX_PREVIEW_NODE_HEAP_MB}`,
+    );
+    expect(launch!.env?.NODE_OPTIONS).not.toBe("--max-old-space-size=768");
+    expect(SANDBOX_PREVIEW_NODE_HEAP_MB).toBe(1280);
+    // Install-only concurrency semantics never reach the launch.
     expect(launch!.env?.npm_config_network_concurrency).toBeUndefined();
     expect(launch!.env?.npm_config_child_concurrency).toBeUndefined();
   });
@@ -753,5 +775,263 @@ describe("startSandboxPreview — install single-flight (round 10)", () => {
     } finally {
       rmSync(volumeDir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Round 13 (2026-11-17): the live verify must EARN a "crashed"
+ * verdict. Before this fix, verifySandboxPreviewHealth flipped a
+ * ready runtime to failed on a SINGLE probe fetch returning
+ * anything non-healthy — including a 3 s timeout while the dev
+ * server was busy compiling (the 2026-11-17 proof: runtimes passed
+ * real upstream fetches, then a later single fetch failed and the
+ * preview was declared crashed). The verify now requires sustained
+ * failure across a window AND a dead preview pid; a live pid blocks
+ * the flip outright, and a confirmed-dead pid convicts at once.
+ */
+describe("verifySandboxPreviewHealth — earned crash verdict (round 13)", () => {
+  const failingProbe = async (): Promise<SandboxProbeResult> => ({
+    healthy: false,
+    authConfigError: false,
+    rootRouteMissing: false,
+    status: null,
+  });
+
+  type LivenessMode = "alive" | "dead" | "unreadable";
+
+  function makeVerifySupport(mode: LivenessMode, logText = ""): SandboxPreviewSupport {
+    const provider = {
+      name: "stub",
+      fileTransfer: {
+        listDir: vi.fn(async () => []),
+        makeDir: vi.fn(async () => {}),
+        writeFile: vi.fn(async () => {}),
+        readFile: vi.fn(async (_id: string, path: string) => {
+          if (path === "/tmp/litt-preview/preview.log") {
+            return new TextEncoder().encode(logText);
+          }
+          return new Uint8Array();
+        }),
+        listTree: vi.fn(async () => []),
+        removePath: vi.fn(async () => {}),
+        renamePath: vi.fn(async () => {}),
+      },
+      execute: vi.fn(async (_sandboxId: string, input: { command: string }) => {
+        if (input.command.includes("LITT_PREVIEW_LIVENESS")) {
+          if (mode === "unreadable") throw new Error("envd unreachable");
+          return {
+            exitCode: 0,
+            stdout:
+              mode === "alive"
+                ? "LITT_PREVIEW_LIVENESS=alive pid=4242\n"
+                : "LITT_PREVIEW_LIVENESS=dead pid=4242\n",
+            stderr: "",
+            durationMs: 1,
+          };
+        }
+        return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+      }),
+      exposePort: vi.fn(async () => ({
+        url: "https://stub-preview.invalid",
+        previewToken: "stub-token",
+      })),
+      extendTimeout: vi.fn(async () => true),
+    };
+    const executor = {
+      ensureSandboxForPreview: vi.fn(async () => ({ sandboxId: "sbx-1" })),
+      notePreviewPort: vi.fn(),
+    };
+    return {
+      executor: executor as unknown as SandboxWorkspaceExecutor,
+      provider: provider as unknown as SandboxProvider,
+    };
+  }
+
+  function makeReadyRuntime(): PreviewRuntime {
+    const runtime = makeRuntime();
+    runtime.status = "ready";
+    runtime.upstream = {
+      kind: "sandbox",
+      sandboxId: "sbx-1",
+      origin: "https://stub-preview.invalid",
+      headers: { "e2b-traffic-access-token": "stub-token" },
+    };
+    return runtime;
+  }
+
+  it("a single failed probe does NOT flip a ready runtime whose pid is alive", async () => {
+    const support = makeVerifySupport("alive");
+    const runtime = makeReadyRuntime();
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(runtime.errorCode).toBeNull();
+    expect(runtime.healthFailureCount).toBe(1);
+    expect(
+      runtime.logs.some((l) => l.includes("is alive in the sandbox — staying ready")),
+    ).toBe(true);
+  });
+
+  it("repeated failed probes across the whole window still do NOT flip while the pid is alive", async () => {
+    const support = makeVerifySupport("alive");
+    const runtime = makeReadyRuntime();
+
+    for (let i = 0; i < PREVIEW_VERIFY_FAILURE_THRESHOLD + 2; i++) {
+      // Age the window past the conviction span before each call —
+      // even sustained failure cannot convict a living process.
+      runtime.healthFailureSince = Date.now() - PREVIEW_VERIFY_FAILURE_WINDOW_MS - 1000;
+      const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+      expect(ok).toBe(true);
+      expect(runtime.status).toBe("ready");
+    }
+    expect(runtime.healthFailureCount).toBe(PREVIEW_VERIFY_FAILURE_THRESHOLD + 2);
+  });
+
+  it("a confirmed-dead pid flips on the FIRST failed probe, with the log tail in the error", async () => {
+    const support = makeVerifySupport(
+      "dead",
+      "dev server booting\nError: JavaScript heap out of memory\n",
+    );
+    const runtime = makeReadyRuntime();
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+
+    expect(ok).toBe(false);
+    expect(runtime.status).toBe("failed");
+    expect(runtime.errorCode).toBe("preview_dev_server_failed");
+    expect(runtime.error).toContain("pid 4242");
+    expect(runtime.error).toContain("no longer running");
+    // The diagnostic carries the server's own last words, not a guess.
+    expect(runtime.error).toContain("JavaScript heap out of memory");
+    expect(runtime.error).not.toContain("may have crashed");
+  });
+
+  it("sustained failure with liveness unreadable flips after the window, with the log tail", async () => {
+    const support = makeVerifySupport("unreadable", "last words from the server\n");
+    const runtime = makeReadyRuntime();
+
+    // Failures 1..threshold-1: not yet sustained, no flip.
+    for (let i = 0; i < PREVIEW_VERIFY_FAILURE_THRESHOLD - 1; i++) {
+      const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+      expect(ok).toBe(true);
+      expect(runtime.status).toBe("ready");
+    }
+    // Age the window past the span, then fail once more: sustained.
+    runtime.healthFailureSince = Date.now() - PREVIEW_VERIFY_FAILURE_WINDOW_MS - 1000;
+    const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+
+    expect(ok).toBe(false);
+    expect(runtime.status).toBe("failed");
+    expect(runtime.errorCode).toBe("preview_dev_server_failed");
+    expect(runtime.error).toContain("stopped responding");
+    expect(runtime.error).toContain("last words from the server");
+  });
+
+  it("failures below the threshold with liveness unreadable do NOT flip, even across the window", async () => {
+    const support = makeVerifySupport("unreadable");
+    const runtime = makeReadyRuntime();
+    runtime.healthFailureSince = Date.now() - PREVIEW_VERIFY_FAILURE_WINDOW_MS - 1000;
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(runtime.healthFailureCount).toBe(1);
+  });
+
+  it("a healthy probe resets the failure accounting", async () => {
+    const support = makeVerifySupport("unreadable");
+    const runtime = makeReadyRuntime();
+
+    await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+    await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+    expect(runtime.healthFailureCount).toBe(2);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, { probe: healthyProbe });
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(runtime.healthFailureCount).toBe(0);
+    expect(runtime.healthFailureSince).toBeNull();
+  });
+
+  it("a non-ready runtime is never probed", async () => {
+    const support = makeVerifySupport("dead");
+    const runtime = makeReadyRuntime();
+    runtime.status = "starting";
+    const probe = vi.fn(failingProbe);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, { probe });
+
+    expect(ok).toBe(false);
+    expect(probe).not.toHaveBeenCalled();
+    expect(runtime.status).toBe("starting");
+  });
+});
+
+describe("checkSandboxPreviewLiveness (round 13)", () => {
+  function livenessSupport(stdout: string | Error): SandboxPreviewSupport {
+    const provider = {
+      name: "stub",
+      fileTransfer: {
+        listDir: vi.fn(async () => []),
+        makeDir: vi.fn(async () => {}),
+        writeFile: vi.fn(async () => {}),
+        readFile: vi.fn(async () => new Uint8Array()),
+        listTree: vi.fn(async () => []),
+        removePath: vi.fn(async () => {}),
+        renamePath: vi.fn(async () => {}),
+      },
+      execute: vi.fn(async () => {
+        if (stdout instanceof Error) throw stdout;
+        return { exitCode: 0, stdout, stderr: "", durationMs: 1 };
+      }),
+      exposePort: vi.fn(async () => ({
+        url: "https://stub-preview.invalid",
+        previewToken: "stub-token",
+      })),
+      extendTimeout: vi.fn(async () => true),
+    };
+    const executor = {
+      ensureSandboxForPreview: vi.fn(async () => ({ sandboxId: "sbx-1" })),
+      notePreviewPort: vi.fn(),
+    };
+    return {
+      executor: executor as unknown as SandboxWorkspaceExecutor,
+      provider: provider as unknown as SandboxProvider,
+    };
+  }
+
+  it("parses an alive verdict with its pid", async () => {
+    const liveness = await checkSandboxPreviewLiveness(
+      livenessSupport("LITT_PREVIEW_LIVENESS=alive pid=777\n"),
+      "sbx-1",
+    );
+    expect(liveness).toEqual({ pid: 777, alive: true });
+  });
+
+  it("parses a dead verdict with its pid", async () => {
+    const liveness = await checkSandboxPreviewLiveness(
+      livenessSupport("LITT_PREVIEW_LIVENESS=dead pid=777\n"),
+      "sbx-1",
+    );
+    expect(liveness).toEqual({ pid: 777, alive: false });
+  });
+
+  it("a missing pid file is undetermined, never a guessed death", async () => {
+    const liveness = await checkSandboxPreviewLiveness(
+      livenessSupport("LITT_PREVIEW_LIVENESS=no-pid\n"),
+      "sbx-1",
+    );
+    expect(liveness).toEqual({ pid: null, alive: null });
+  });
+
+  it("an exec failure is undetermined, never a guessed death", async () => {
+    const liveness = await checkSandboxPreviewLiveness(
+      livenessSupport(new Error("envd down")),
+      "sbx-1",
+    );
+    expect(liveness).toEqual({ pid: null, alive: null });
   });
 });

@@ -152,6 +152,18 @@ export interface PreviewRuntime {
    * origin + traffic-token header. Never serialized into a response.
    */
   upstream?: PreviewUpstream;
+  /**
+   * Round 13: consecutive failed live-verify probes against a ready
+   * sandbox runtime (verifySandboxPreviewHealth). A single failed
+   * probe is not evidence of a crash — the verify requires sustained
+   * failure across a window AND a dead preview pid before flipping a
+   * ready runtime to failed. Reset on every healthy probe. Optional:
+   * runtimes created before this field existed read as undefined,
+   * which the verify treats as no failures recorded.
+   */
+  healthFailureCount?: number;
+  /** Timestamp of the first failure in the current verify window. */
+  healthFailureSince?: number | null;
 }
 
 interface PreviewStartInput {

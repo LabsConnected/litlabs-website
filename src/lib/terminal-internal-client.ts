@@ -389,10 +389,17 @@ export async function stopPreviewInternal(
 
 /**
  * Restart a preview dev server on the terminal server.
+ *
+ * Round 13: accepts the caller's freshly resolved project env, like
+ * startPreviewInternal — the terminal's restart route takes it and
+ * prefers it over the runtime's persisted env, so an explicit
+ * restart after a secret change picks the new keys up instead of
+ * silently reusing the old ones.
  */
 export async function restartPreviewInternal(
   workspaceId: string,
   userId: string,
+  options?: { projectEnv?: Record<string, string> },
 ): Promise<PreviewStartResponse> {
   const key = INTERNAL_KEY();
   if (key.length < 32) {
@@ -408,7 +415,7 @@ export async function restartPreviewInternal(
         "Content-Type": "application/json",
         "X-Internal-Service-Key": key,
       },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, projectEnv: options?.projectEnv }),
     },
     TERMINAL_TIMEOUTS.restartPreview,
     "POST /internal/workspace/{id}/preview/restart",

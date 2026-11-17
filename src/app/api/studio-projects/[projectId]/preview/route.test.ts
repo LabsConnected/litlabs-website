@@ -51,6 +51,7 @@ vi.mock("@/lib/terminal-config", () => ({
 
 vi.mock("@/lib/terminal-internal-client", () => ({
   startPreviewInternal: vi.fn(),
+  restartPreviewInternal: vi.fn(),
   getPreviewStatusInternal: vi.fn(),
   stopPreviewInternal: vi.fn(),
   buildPreviewProxyUrl: vi.fn((workspaceId: string) => `https://proxy.test/${workspaceId}`),
@@ -69,6 +70,7 @@ vi.mock("@/lib/terminal-internal-client", () => ({
 
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";import { startPreviewInternal,
+  restartPreviewInternal,
   getPreviewStatusInternal,
   isSandboxExecutionAvailable,
 } from "@/lib/terminal-internal-client";
@@ -79,6 +81,7 @@ const authMock = vi.mocked(auth);
 const getProjectMock = vi.mocked(getProject);
 const getPreviewStatusMock = vi.mocked(getPreviewStatusInternal);
 const startPreviewMock = vi.mocked(startPreviewInternal);
+const restartPreviewMock = vi.mocked(restartPreviewInternal);
 const provisionMock = vi.mocked(provisionWorkspaceForProject);
 const ensureAliveMock = vi.mocked(ensureWorkspaceAlive);
 const reprepareMock = vi.mocked(reprepareWorkspace);
@@ -493,5 +496,102 @@ describe("studio-projects preview route — workspace-not-found heal (round 5)",
     expect(startPreviewMock).toHaveBeenCalledTimes(1);
     expect(ensureAliveMock).not.toHaveBeenCalled();
     expect(reprepareMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Round 13 (2026-11-17): the panel's failed-state Restart sends
+ * { restart: true }, and the route must take the terminal's FORCE
+ * restart path (restartPreviewInternal → PreviewManager's
+ * forceRestart) instead of a plain start that can silently adopt a
+ * wedged in-flight runtime. A restart with no live runtime to
+ * restart falls back to a plain start; a bodyless POST is a plain
+ * start, exactly as before.
+ */
+describe("studio-projects preview route — force restart (round 13)", () => {
+  const githubProject = {
+    id: "proj-1",
+    userId: "user-1",
+    workspaceId: "ws-1",
+    workspaceRoot: "/data/workspaces/user-1/proj-1",
+    workspaceStatus: "ready",
+    sourceType: "github",
+    framework: "nextjs",
+    developmentCommand: "pnpm dev",
+    packageManager: "pnpm",
+  };
+
+  function postPreview(body?: unknown) {
+    return POST(
+      new Request("https://x.test/api/studio-projects/proj-1/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }) as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user-1" } as never);
+    getProjectMock.mockResolvedValue({ ...githubProject } as never);
+    provisionMock.mockResolvedValue("ws-1");
+    startPreviewMock.mockReset();
+    restartPreviewMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("POST { restart: true } takes the force path and never plain-starts", async () => {
+    restartPreviewMock.mockResolvedValue({
+      status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 456,
+    } as never);
+
+    const res = await postPreview({ restart: true });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("starting");
+    expect(restartPreviewMock).toHaveBeenCalledTimes(1);
+    expect(restartPreviewMock.mock.calls[0][0]).toBe("ws-1");
+    expect(restartPreviewMock.mock.calls[0][1]).toBe("user-1");
+    expect(startPreviewMock).not.toHaveBeenCalled();
+  });
+
+  it("POST { restart: true } falls back to a plain start when no runtime exists to restart", async () => {
+    restartPreviewMock.mockRejectedValue(new Error("No preview runtime to restart"));
+    startPreviewMock.mockResolvedValue({
+      status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 789,
+    } as never);
+
+    const res = await postPreview({ restart: true });
+    expect(res.status).toBe(200);
+    expect(restartPreviewMock).toHaveBeenCalledTimes(1);
+    expect(startPreviewMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("POST without a body is a plain start and never touches the force path", async () => {
+    startPreviewMock.mockResolvedValue({
+      status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 101,
+    } as never);
+
+    const res = await postPreview();
+    expect(res.status).toBe(200);
+    expect(startPreviewMock).toHaveBeenCalledTimes(1);
+    expect(restartPreviewMock).not.toHaveBeenCalled();
+  });
+
+  it("POST { restart: false } is a plain start", async () => {
+    startPreviewMock.mockResolvedValue({
+      status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 102,
+    } as never);
+
+    const res = await postPreview({ restart: false });
+    expect(res.status).toBe(200);
+    expect(startPreviewMock).toHaveBeenCalledTimes(1);
+    expect(restartPreviewMock).not.toHaveBeenCalled();
   });
 });
