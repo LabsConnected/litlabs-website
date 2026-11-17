@@ -2387,8 +2387,13 @@ describe("runAgentLoopV2 — replay carries the original persisted verdict", () 
     expect(writes[1].persisted).toBe(true);
     // The replayed message must carry the RESULT PAYLOAD, not the
     // ToolCallResult wrapper (would contain toolCallId/success fields).
+    // (Round 11: this asserted the tools payload contained "saved" —
+    // a word that only appeared in the image.sendToCanvas station
+    // description. That consumer is no longer advertised to the loop
+    // (its result-id namespace cannot resolve tool-generated results),
+    // so the assertion now names the write tool this replay concerns.)
     const thirdCallMessages = JSON.stringify(vi.mocked(callLLMWithTools).mock.calls[2][2] ?? []);
-    expect(thirdCallMessages).toContain("saved");
+    expect(thirdCallMessages).toContain("files.write");
     expect(thirdCallMessages).not.toContain("tc-2");
   });
 });

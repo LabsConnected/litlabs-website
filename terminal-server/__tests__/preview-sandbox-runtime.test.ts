@@ -29,7 +29,10 @@ import {
   SANDBOX_INSTALL_TIMEOUT_MS,
 } from "../sandbox/install-stamp";
 import { PreviewError, type PreviewRuntime } from "../preview/PreviewManager";
-import { runSandboxInstallOnce } from "../sandbox/install-flight";
+import {
+  buildSandboxInstallEnv,
+  runSandboxInstallOnce,
+} from "../sandbox/install-flight";
 import { SANDBOX_HOME_DIR } from "../sandbox/workspace-executor";
 import type { SandboxProvider } from "../sandbox/provider";
 import type { SandboxWorkspaceExecutor } from "../sandbox/workspace-executor";
@@ -168,6 +171,138 @@ describe("startSandboxPreview — install budget (round 8)", () => {
     expect(install, "an install execute call").toBeDefined();
     expect(install!.timeoutMs).toBe(SANDBOX_INSTALL_TIMEOUT_MS);
     expect(SANDBOX_INSTALL_TIMEOUT_MS).toBe(900_000);
+  });
+});
+
+/**
+ * Round 12 (2026-11-16): the preview install exec carries the shared
+ * SHAPED install env (heap cap + pnpm concurrency bounds from
+ * install-flight.ts) — the same builder the executor's background
+ * install uses — and the shaping does NOT leak into the dev-server
+ * launch exec.
+ */
+describe("startSandboxPreview — install memory shaping (round 12)", () => {
+  it("runs the install with the shared shaped env, and keeps the launch env unshaped", async () => {
+    const { support, executions } = makeSupport();
+    const runtime = makeRuntime();
+
+    await startSandboxPreview({
+      support,
+      runtime,
+      ws: WS,
+      framework: "custom",
+      command: "node server.js --port 3000",
+      packageManager: "pnpm",
+      travelingEnv: {},
+      probe: healthyProbe,
+    });
+
+    const install = executions.find((e) => e.command.includes("install"));
+    expect(install, "an install execute call").toBeDefined();
+    expect(install!.env).toEqual(buildSandboxInstallEnv(SANDBOX_HOME_DIR));
+    expect(install!.env?.NODE_OPTIONS).toBe("--max-old-space-size=768");
+    expect(install!.env?.npm_config_network_concurrency).toBe("4");
+    expect(install!.env?.npm_config_child_concurrency).toBe("2");
+
+    const launch = executions.find((e) => e.command.includes("setsid nohup"));
+    expect(launch, "a launch execute call").toBeDefined();
+    expect(launch!.env?.NODE_OPTIONS).toBeUndefined();
+    expect(launch!.env?.npm_config_network_concurrency).toBeUndefined();
+    expect(launch!.env?.npm_config_child_concurrency).toBeUndefined();
+  });
+});
+
+/**
+ * Round 12 (2026-11-16): after the preview install attempt, the
+ * sandbox's memory peak is logged through the sandbox-lifecycle
+ * logger — on success AND on a signal kill (where the log must
+ * happen before the failure surfaces) — and a broken evidence read
+ * changes nothing about the start's outcome.
+ */
+describe("startSandboxPreview — install memory evidence (round 12)", () => {
+  function withEvidence(
+    support: SandboxPreviewSupport,
+    executions: CapturedExecute[],
+    evidenceStdout: string,
+  ) {
+    const provider = support.provider as unknown as {
+      execute: (
+        id: string,
+        input: CapturedExecute,
+      ) => Promise<{ exitCode: number; stdout: string; stderr: string; durationMs: number }>;
+    };
+    const original = provider.execute.bind(provider);
+    provider.execute = async (id, input) => {
+      if (input.command.includes("memory.peak")) {
+        executions.push(input);
+        return { exitCode: 0, stdout: evidenceStdout, stderr: "", durationMs: 1 };
+      }
+      return original(id, input);
+    };
+  }
+
+  it("logs the peak after a successful install and the start proceeds", async () => {
+    const { support, executions } = makeSupport();
+    withEvidence(support, executions, "LITT_MEMORY_PEAK=1048576000\n");
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const runtime = makeRuntime();
+      await startSandboxPreview({
+        support,
+        runtime,
+        ws: WS,
+        framework: "custom",
+        command: "node server.js --port 3000",
+        packageManager: "pnpm",
+        travelingEnv: {},
+        probe: healthyProbe,
+      });
+      const evidence = executions.find((e) => e.command.includes("memory.peak"));
+      expect(evidence, "an evidence execute call").toBeDefined();
+      const line = info.mock.calls.map((c) => String(c[0])).find((l) => l.includes("install memory evidence"));
+      expect(line).toContain("sandbox=sbx-1");
+      expect(line).toContain("exit=0");
+      expect(line).toContain("memory.peak=1048576000");
+      expect(line).toContain("limit=1073741824");
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it("logs the peak and kernel lines on a signal-killed install, before the failure surfaces", async () => {
+    const { support, executions } = makeSupport(-1);
+    withEvidence(
+      support,
+      executions,
+      "LITT_MEMORY_PEAK=1073741824\n[9.9] Memory cgroup out of memory: Killed process 4242 (node)\n",
+    );
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const runtime = makeRuntime();
+      await expect(
+        startSandboxPreview({
+          support,
+          runtime,
+          ws: WS,
+          framework: "custom",
+          command: "node server.js --port 3000",
+          packageManager: "pnpm",
+          travelingEnv: {},
+          probe: healthyProbe,
+        }),
+      ).rejects.toBeInstanceOf(PreviewError);
+
+      const evidence = executions.find((e) => e.command.includes("memory.peak"));
+      expect(evidence, "an evidence execute call").toBeDefined();
+      expect(evidence!.command).toContain("dmesg");
+      const lines = info.mock.calls.map((c) => String(c[0]));
+      const peak = lines.find((l) => l.includes("install memory evidence") && l.includes("memory.peak="));
+      expect(peak).toContain("exit=-1");
+      expect(peak).toContain("memory.peak=1073741824");
+      expect(lines.some((l) => l.includes("kernel:") && l.includes("Killed process 4242"))).toBe(true);
+    } finally {
+      info.mockRestore();
+    }
   });
 });
 

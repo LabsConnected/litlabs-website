@@ -112,6 +112,14 @@ export interface WorkspaceChangeEvidence {
   rollbackAvailable?: boolean;
   /** Why the status is "unknown" — surfaced for support, never a claim. */
   unknownReason?: string;
+  /**
+   * Round 11: which read path produced this evidence. "git-diff" is the
+   * checkpoint diff (the default when absent); "volume-listing" means
+   * the exec/checkpoint path failed and the change was verified by
+   * enumerating the workspace volume directly (the Files panel's read
+   * path) — real files, but no diff and no rollback.
+   */
+  evidenceSource?: "git-diff" | "volume-listing";
 }
 
 export interface ExecutionEvidence {

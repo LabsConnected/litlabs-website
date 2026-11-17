@@ -129,6 +129,15 @@ export interface WorkspaceTransport {
   readonly workspaceRoot: string;
   readonly projectId: string;
   /**
+   * Round 11: the reason the most recent createCheckpointBeforeMutation
+   * call failed, or null when it succeeded (or has not run yet).
+   * Checkpoint failures used to be swallowed to a bare null, which
+   * surfaced downstream as an unexplained "Workspace unknown"
+   * verification; the settlement now reads this into the run's
+   * workspace_change.unknownReason.
+   */
+  readonly lastCheckpointError?: string | null;
+  /**
    * Stable identity of the approved operation being executed (the paused
    * run id), when known. Tools that perform idempotent side effects (e.g.
    * image.generate billing) derive their operation key from it so a retried
@@ -334,6 +343,9 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   /** Set by createWorkspaceTransport() from the reachability probe. */
   public fileOpsReachable = true;
+
+  /** Round 11: see the interface field. Set on failure, cleared on success. */
+  public lastCheckpointError: string | null = null;
 
   /**
    * Cheap reachability probe for /ws-files. Returns true when the terminal
@@ -893,13 +905,18 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   async createCheckpointBeforeMutation(label: string): Promise<CheckpointInfo | null> {
     try {
-      return await createWorkspaceCheckpoint({
+      const checkpoint = await createWorkspaceCheckpoint({
         projectId: this.projectId,
         userId: this.userId,
         workspaceId: this.workspaceId,
         label,
       });
-    } catch {
+      this.lastCheckpointError = null;
+      return checkpoint;
+    } catch (err) {
+      // Round 11: record WHY instead of swallowing to a silent null —
+      // the run settlement surfaces this in workspace_change.unknownReason.
+      this.lastCheckpointError = err instanceof Error ? err.message : String(err);
       return null;
     }
   }
