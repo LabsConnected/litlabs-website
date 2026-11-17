@@ -122,7 +122,7 @@ export function describeSandboxInstallExit(result: ExecuteCommandResult): string
  * the dev-server launch and user command execs never see it.
  */
 
-/** The sandbox's enforced memory ceiling (template-built, 1024 MB). */
+/** The sandbox's enforced memory ceiling (template-built, 2048 MB). */
 export const SANDBOX_MEMORY_LIMIT_BYTES = 2048 * 1024 * 1024;
 
 /**
@@ -179,6 +179,48 @@ export function buildSandboxInstallEnv(homeDir: string): Record<string, string> 
 }
 
 /**
+ * Dev-server launch memory shaping — round 13 (2026-11-17).
+ *
+ * Until now the launch was the ONLY heavy sandbox workload still
+ * unshaped: sandbox-runtime passed no NODE_OPTIONS, so the dev
+ * server inherited the workspace tree .npmrc's
+ * `--max-old-space-size=4096` — a 4 GB heap allowance inside the
+ * 2048 MB template. `next dev` cold-compiling this monorepo is the
+ * heaviest thing the server ever does, and it happens exactly in
+ * the health-probe window; with no GC backpressure before 4 GB,
+ * heap growth runs into the cgroup ceiling and the guest OOM killer
+ * can take the whole process group after the server first answered
+ * (the leading hypothesis of ROUND13-PREVIEW-DIAGNOSIS-2026-11-17.md
+ * for the "ready, then flipped to crashed" failures).
+ *
+ * The bound is the launch's OWN, not the install env reused: the
+ * install's 768 MB caps a resolve/link workload whose peak lives in
+ * one main process, while a dev server additionally holds the
+ * module graph and compiled routes in heap — 768 MB risks GC thrash
+ * mid-compile. 1280 MB gives compile headroom while still
+ * guaranteeing the heap alone can never reach the 2048 MB ceiling:
+ * ~768 MB stays for envd, the launch shell, and the server's
+ * non-heap RSS (binary, stacks, mmap'd files, native compiler
+ * buffers, which live outside the V8 heap). And when V8 does hit
+ * the bound it prints a "JavaScript heap out of memory" line into
+ * preview.log — which the round-13 failure diagnostics now surface —
+ * instead of dying as a silent cgroup kill.
+ *
+ * Deliberately ONLY NODE_OPTIONS: the install env's npm_config_*
+ * concurrency keys are install-only semantics (fetch/child
+ * parallelism for a package manager run) and mean nothing to a dev
+ * server; the launch site composes this over its own env.
+ */
+export const SANDBOX_PREVIEW_NODE_HEAP_MB = 1280;
+
+/** The memory-shaping subset of the sandbox dev-server launch env. */
+export function buildSandboxPreviewLaunchEnv(): Record<string, string> {
+  return {
+    NODE_OPTIONS: `--max-old-space-size=${SANDBOX_PREVIEW_NODE_HEAP_MB}`,
+  };
+}
+
+/**
  * Install memory evidence — round 12 (2026-11-16).
  *
  * The provider adapter returns only an exit code for an install, so
@@ -187,11 +229,19 @@ export function buildSandboxInstallEnv(homeDir: string): Record<string, string> 
  * attempt this reads the two settlers back out of the (surviving)
  * sandbox and logs them through the sandbox-lifecycle logger:
  *
- *   - /sys/fs/cgroup/memory.peak — the attempt's high-water mark
- *     against the 2147483648 limit (cgroup v2 path, with the v1
- *     memory.max_usage_in_bytes as fallback). Peak ≈ limit proves
- *     the box hit the ceiling; a peak well below it exonerates
- *     memory entirely.
+ *   - the sandbox cgroup's memory.peak — the attempt's high-water
+ *     mark against the 2147483648 limit. Round 13: the cgroup
+ *     directory is resolved from /proc/self/cgroup FIRST (the v2
+ *     unified line `0::/<scope>`), because in the E2B guest the
+ *     sandbox's accounting lives under a scoped subpath and BOTH
+ *     hardcoded paths below were absent — every live evidence line
+ *     read memory.peak=unknown while the install half worked fine
+ *     (ROUND13-PREVIEW-DIAGNOSIS-2026-11-17.md, Q6). The canonical
+ *     v2 path and the v1 memory.max_usage_in_bytes remain as
+ *     fallbacks, and when no path yields a number the read's first
+ *     stderr line is logged alongside — the evidence can never
+ *     again fail silently. Peak ≈ limit proves the box hit the
+ *     ceiling; a peak well below it exonerates memory entirely.
  *   - on a signal-killed install (negative exit), the tail of the
  *     kernel's OOM lines from dmesg, which names the victim process
  *     and its RSS when the kill was a cgroup OOM.
@@ -213,10 +263,28 @@ export async function logSandboxInstallMemoryEvidence(args: {
   const { provider, sandboxId, install, log } = args;
   try {
     const signalKilled = install.exitCode < 0;
+    // Resolve the cgroup directory from /proc/self/cgroup (round
+    // 13): the v2 unified line is `0::/<scope>` and the peak file is
+    // /sys/fs/cgroup<scope>/memory.peak. In the E2B guest the scope
+    // is not `/`, so the two hardcoded paths this command used to
+    // try do not exist and the peak silently read "unknown". Each
+    // attempt's stderr is captured (last try wins) and reported when
+    // no path yields a number, so a future layout change is
+    // diagnosable from the log line alone.
     const command =
-      "peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null || " +
-      "cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes 2>/dev/null); " +
-      "printf 'LITT_MEMORY_PEAK=%s\\n' \"${peak:-unknown}\"" +
+      'errf=/tmp/litt-memory-evidence.err; peak=""; err=""; ' +
+      "cg=$(awk -F: '$1==0 {print $3; exit}' /proc/self/cgroup 2>/dev/null); " +
+      'if [ -n "$cg" ] && [ "$cg" != "/" ]; then ' +
+      'peak=$(cat "/sys/fs/cgroup${cg}/memory.peak" 2>"$errf"); ' +
+      '[ -s "$errf" ] && err=$(head -n 1 "$errf"); fi; ' +
+      'if [ -z "$peak" ]; then ' +
+      'peak=$(cat /sys/fs/cgroup/memory.peak 2>"$errf"); ' +
+      '[ -s "$errf" ] && err=$(head -n 1 "$errf"); fi; ' +
+      'if [ -z "$peak" ]; then ' +
+      'peak=$(cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes 2>"$errf"); ' +
+      '[ -s "$errf" ] && err=$(head -n 1 "$errf"); fi; ' +
+      "printf 'LITT_MEMORY_PEAK=%s\\n' \"${peak:-unknown}\"; " +
+      "printf 'LITT_MEMORY_PEAK_ERR=%s\\n' \"$err\"" +
       (signalKilled
         ? "; dmesg 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | tail -n 5"
         : "");
@@ -235,6 +303,16 @@ export async function logSandboxInstallMemoryEvidence(args: {
       `[sandbox-lifecycle] install memory evidence sandbox=${sandboxId} ` +
         `exit=${install.exitCode} memory.peak=${peak} limit=${SANDBOX_MEMORY_LIMIT_BYTES}`,
     );
+    if (peak === "unknown") {
+      const errLine = lines.find((line) => line.startsWith("LITT_MEMORY_PEAK_ERR="));
+      const peakErr = errLine?.slice("LITT_MEMORY_PEAK_ERR=".length).trim() ?? "";
+      if (peakErr) {
+        log(
+          `[sandbox-lifecycle] install memory evidence sandbox=${sandboxId} ` +
+            `peak read failed: ${peakErr.slice(0, 200)}`,
+        );
+      }
+    }
     if (signalKilled) {
       for (const line of lines) {
         if (line.startsWith("LITT_MEMORY_PEAK=")) continue;

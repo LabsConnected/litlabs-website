@@ -50,6 +50,7 @@ import {
 } from "../sandbox/install-stamp";
 import {
   buildSandboxInstallEnv,
+  buildSandboxPreviewLaunchEnv,
   describeSandboxInstallExit,
   logSandboxInstallMemoryEvidence,
   runSandboxInstallOnce,
@@ -58,6 +59,7 @@ import type { WorkspaceDescriptor } from "../workspace/WorkspaceManager";
 import {
   PreviewError,
   extractClerkEnv,
+  formatPreviewDiagnostic,
   pushPreviewLog,
   type PreviewRuntime,
 } from "./PreviewManager";
@@ -195,7 +197,8 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
         // 755 workspace root (EACCES, live failure 2026-11-14).
         // /home/litt is the template's writable home (chmod 777,
         // outside the synced tree). The dev-server launch env below
-        // is deliberately NOT shaped — shaping is install-only.
+        // carries its OWN shaping (buildSandboxPreviewLaunchEnv,
+        // round 13) — the install env is never reused for it.
         env: buildSandboxInstallEnv(SANDBOX_HOME_DIR),
       }),
     );
@@ -271,6 +274,15 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
     // Set after travelingEnv so a project env can never re-point
     // HOME at the root-owned workspace root.
     HOME: SANDBOX_HOME_DIR,
+    // Round 13: memory-shape the launch itself. Unshaped, the dev
+    // server inherited the tree .npmrc's 4 GB heap allowance inside
+    // the 2048 MB sandbox, so cold-compile heap growth met the
+    // cgroup ceiling with no GC backpressure (install-flight.ts has
+    // the sizing rationale). Only NODE_OPTIONS — the install env's
+    // concurrency keys are install-only semantics. The workspace
+    // .npmrc is NOT edited; this overrides it for this exec only,
+    // exactly as the install shaping does.
+    ...buildSandboxPreviewLaunchEnv(),
   };
   const launch = await provider.execute(sandboxId, {
     command:
@@ -332,22 +344,29 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
     } else if (result.rootRouteMissing) {
       runtime.status = "failed";
       runtime.errorCode = "preview_root_route_missing";
-      runtime.error =
+      runtime.error = withPreviewLogDiagnostic(
         "The preview server is running, but GET / returned 404 (Cannot GET /). " +
-        "The detected dev server does not expose the project entry route at /. " +
-        "Fix the project's dev command or serve index.html from the root, then restart preview.";
+          "The detected dev server does not expose the project entry route at /. " +
+          "Fix the project's dev command or serve index.html from the root, then restart preview.",
+        boundedPreviewLogTail(runtime.logs),
+      );
       pushPreviewLog(runtime, `[preview] Root route missing (HTTP ${result.status})`);
     } else if (result.authConfigError) {
       runtime.status = "failed";
       runtime.errorCode = "preview_auth_config_error";
-      runtime.error =
+      runtime.error = withPreviewLogDiagnostic(
         `Dev server booted but returned a ${result.status} with an authentication configuration error. ` +
-        "The Clerk secret key or publishable key is invalid, stale, or mismatched.";
+          "The Clerk secret key or publishable key is invalid, stale, or mismatched.",
+        boundedPreviewLogTail(runtime.logs),
+      );
       pushPreviewLog(runtime, `[preview] Auth config error (HTTP ${result.status})`);
     } else {
       runtime.status = "failed";
       runtime.errorCode = "preview_port_never_ready";
-      runtime.error = `Dev server did not become healthy within ${HEALTH_PROBE_TIMEOUT_MS / 1000}s`;
+      runtime.error = withPreviewLogDiagnostic(
+        `Dev server did not become healthy within ${HEALTH_PROBE_TIMEOUT_MS / 1000}s`,
+        boundedPreviewLogTail(runtime.logs),
+      );
       pushPreviewLog(runtime, `[preview] Health check failed — timeout`);
     }
   })();
@@ -408,18 +427,139 @@ export async function tailSandboxPreviewLogs(
 }
 
 /**
+ * Round 13 — the live verify must EARN a "crashed" verdict.
+ *
+ * Before this fix, ONE probe through the public E2B upstream (3 s
+ * abort) returning anything non-healthy — including a mere timeout
+ * while the 2 vCPU dev server was busy compiling routes for the
+ * panel's own iframe load — permanently flipped a ready runtime to
+ * failed with a guessed "may have crashed". The 2026-11-17 proof
+ * showed runtimes passing real upstream fetches (healthy verifies
+ * extending the session) and then dying on a later single fetch.
+ * A single failed probe is therefore treated as what it is: one
+ * missed fetch, not a death certificate. A crash verdict now
+ * requires BOTH:
+ *
+ *   - sustained failure: at least PREVIEW_VERIFY_FAILURE_THRESHOLD
+ *     consecutive failed probes spanning at least
+ *     PREVIEW_VERIFY_FAILURE_WINDOW_MS (~15–30 s window), tracked on
+ *     the runtime and reset by any healthy probe; AND
+ *   - a dead server: the in-sandbox liveness check (pid file +
+ *     kill -0, zombie-aware) reports the preview process gone.
+ *
+ * Two honest exceptions: a pid confirmed dead convicts on the FIRST
+ * check that confirms it (no window to wait out — the evidence is
+ * direct), and sustained failure with liveness UNREADABLE (the
+ * check itself errored) still convicts — otherwise a broken liveness
+ * path would make a genuinely dead server immortal. A live pid
+ * always blocks the flip: the runtime stays ready and the miss is
+ * logged as the transient it is.
+ */
+export const PREVIEW_VERIFY_FAILURE_THRESHOLD = 3;
+export const PREVIEW_VERIFY_FAILURE_WINDOW_MS = 20_000;
+
+/** Bounded tail of the preview log carried in a failure diagnostic. */
+const PREVIEW_LOG_DIAGNOSTIC_MAX_CHARS = 2_000;
+
+/** The bounded, line-safe tail of a set of preview log lines. */
+function boundedPreviewLogTail(lines: readonly string[]): string {
+  return formatPreviewDiagnostic(lines).slice(-PREVIEW_LOG_DIAGNOSTIC_MAX_CHARS);
+}
+
+/**
+ * Append the dev server's own last lines to a failure diagnostic
+ * (round 13): the user-facing error used to be a guess ("may have
+ * crashed") while the server's actual last words sat unread in the
+ * sandbox. No tail available → the base text stands alone.
+ */
+function withPreviewLogDiagnostic(base: string, tail: string): string {
+  if (!tail) return base;
+  return `${base}\nLast lines from the dev server log (in-sandbox preview.log):\n${tail}`;
+}
+
+/** The last lines of the in-sandbox preview log, read fresh. */
+async function readSandboxPreviewLogTail(
+  support: SandboxPreviewSupport,
+  sandboxId: string,
+): Promise<string> {
+  try {
+    const transfer = requireFileTransfer(support.provider);
+    const bytes = await transfer.readFile(sandboxId, LOG_PATH);
+    const text = new TextDecoder().decode(bytes);
+    return boundedPreviewLogTail(text.split("\n"));
+  } catch {
+    return ""; // no log (never started / already gone) — diagnostic stands alone
+  }
+}
+
+export interface SandboxPreviewLiveness {
+  /** The pid from the preview pid file, when one could be read. */
+  pid: number | null;
+  /** true = process alive; false = confirmed gone; null = undetermined. */
+  alive: boolean | null;
+}
+
+/**
+ * In-sandbox liveness of the preview process: read the pid file and
+ * test the pid with kill -0, treating a zombie as dead (the launcher
+ * `exec`s the dev command, so the pid IS the server process; a
+ * zombie is a corpse awaiting reaping, not a server). Any failure
+ * of the check itself — unreadable pid file, exec transport error,
+ * unparseable output — yields alive: null, never a guessed verdict.
+ */
+export async function checkSandboxPreviewLiveness(
+  support: SandboxPreviewSupport,
+  sandboxId: string,
+): Promise<SandboxPreviewLiveness> {
+  try {
+    const command =
+      `pid=$(cat ${PID_PATH} 2>/dev/null); ` +
+      'if [ -z "$pid" ]; then echo LITT_PREVIEW_LIVENESS=no-pid; exit 0; fi; ' +
+      'if ! kill -0 "$pid" 2>/dev/null; then echo "LITT_PREVIEW_LIVENESS=dead pid=$pid"; exit 0; fi; ' +
+      'state=$(awk \'{print $3}\' /proc/"$pid"/stat 2>/dev/null); ' +
+      'if [ "$state" = "Z" ]; then echo "LITT_PREVIEW_LIVENESS=dead pid=$pid"; ' +
+      'else echo "LITT_PREVIEW_LIVENESS=alive pid=$pid"; fi';
+    const res = await support.provider.execute(sandboxId, {
+      command,
+      cwd: SANDBOX_WORKSPACE_ROOT,
+      timeoutMs: 10_000,
+    });
+    const match = /LITT_PREVIEW_LIVENESS=(alive|dead) pid=(\d+)/.exec(res.stdout);
+    if (match) {
+      return { pid: Number(match[2]), alive: match[1] === "alive" };
+    }
+    return { pid: null, alive: null };
+  } catch {
+    return { pid: null, alive: null };
+  }
+}
+
+/**
  * Live health verification for a sandbox runtime (the status route's
  * verifyPreviewHealth, sandbox branch): probe through the upstream
- * and flip the runtime truthfully, like the host path.
+ * and flip the runtime truthfully, like the host path. Round 13: the
+ * generic non-healthy verdict no longer flips on a single probe —
+ * see the round-13 note above for the conviction rules. The
+ * definitive verdicts (root route 404, auth-config 500) are
+ * unchanged: those responses prove a live server answering wrongly,
+ * so they still flip immediately.
  */
 export async function verifySandboxPreviewHealth(
   support: SandboxPreviewSupport,
   runtime: PreviewRuntime,
+  deps: {
+    /** Upstream probe override (tests). Defaults to a real fetch. */
+    probe?: (
+      origin: string,
+      headers: Record<string, string>,
+    ) => Promise<SandboxProbeResult>;
+  } = {},
 ): Promise<boolean> {
   const upstream = runtime.upstream;
   if (!upstream || upstream.kind !== "sandbox" || runtime.status !== "ready") return false;
   await tailSandboxPreviewLogs(support, runtime).catch(() => {});
-  const result = await probeUpstream(upstream.origin, upstream.headers).catch(
+  const probe = deps.probe ?? probeUpstream;
+  const result = await probe(upstream.origin, upstream.headers).catch(
     (): SandboxProbeResult => ({
       healthy: false,
       authConfigError: false,
@@ -428,6 +568,8 @@ export async function verifySandboxPreviewHealth(
     }),
   );
   if (result.healthy) {
+    runtime.healthFailureCount = 0;
+    runtime.healthFailureSince = null;
     runtime.lastHealthCheck = Date.now();
     // Traffic is flowing: keep the sandbox alive (§3.3).
     if (support.provider.extendTimeout) {
@@ -440,22 +582,77 @@ export async function verifySandboxPreviewHealth(
   if (result.rootRouteMissing) {
     runtime.status = "failed";
     runtime.errorCode = "preview_root_route_missing";
-    runtime.error = "The preview server is running, but GET / returned 404 (Cannot GET /). Fix the project's root entry route and restart preview.";
+    runtime.error = withPreviewLogDiagnostic(
+      "The preview server is running, but GET / returned 404 (Cannot GET /). Fix the project's root entry route and restart preview.",
+      boundedPreviewLogTail(runtime.logs),
+    );
     pushPreviewLog(runtime, "[preview] Root route missing during live health check (HTTP 404)");
     return false;
   }
   if (result.authConfigError) {
     runtime.status = "failed";
     runtime.errorCode = "preview_auth_config_error";
-    runtime.error =
+    runtime.error = withPreviewLogDiagnostic(
       `Health check detected an authentication configuration error (HTTP ${result.status}). ` +
-      "The Clerk secret key or publishable key is invalid, stale, or mismatched.";
+        "The Clerk secret key or publishable key is invalid, stale, or mismatched.",
+      boundedPreviewLogTail(runtime.logs),
+    );
     pushPreviewLog(runtime, `[preview] Auth config error detected during health check (HTTP ${result.status})`);
     return false;
   }
+
+  // Generic non-healthy (a 500 without auth text, a 3xx, a refused
+  // connection, a 3 s timeout): evidence of a missed fetch, not yet
+  // of a crash. Accumulate it, then ask the sandbox whether the
+  // server process still exists.
+  const now = Date.now();
+  if (!runtime.healthFailureSince) runtime.healthFailureSince = now;
+  runtime.healthFailureCount = (runtime.healthFailureCount ?? 0) + 1;
+  const failures = runtime.healthFailureCount;
+  const windowMs = now - runtime.healthFailureSince;
+  const probeNote = `HTTP ${result.status ?? "no response"}`;
+
+  const liveness = await checkSandboxPreviewLiveness(support, upstream.sandboxId);
+  if (liveness.alive === true) {
+    // The server process exists — the probe missed a busy or slow
+    // upstream. Stay ready; the next healthy probe resets the count.
+    pushPreviewLog(
+      runtime,
+      `[preview] Live health probe failed (${probeNote}) but the dev server process ` +
+        `(pid ${liveness.pid}) is alive in the sandbox — staying ready`,
+    );
+    return true;
+  }
+  const sustained =
+    failures >= PREVIEW_VERIFY_FAILURE_THRESHOLD &&
+    windowMs >= PREVIEW_VERIFY_FAILURE_WINDOW_MS;
+  if (liveness.alive !== false && !sustained) {
+    pushPreviewLog(
+      runtime,
+      `[preview] Live health probe failed (${probeNote}, ${failures} consecutive) — ` +
+        `not enough evidence of a crash yet, staying ready`,
+    );
+    return true;
+  }
+
+  // Conviction earned: the pid is confirmed dead, or failures were
+  // sustained across the window with liveness unreadable. The
+  // diagnostic carries the server's own last lines, not a guess.
+  const tail = await readSandboxPreviewLogTail(support, upstream.sandboxId);
   runtime.status = "failed";
   runtime.errorCode = "preview_dev_server_failed";
-  runtime.error = "Health check failed — the sandbox dev server may have crashed";
+  runtime.error = withPreviewLogDiagnostic(
+    liveness.alive === false
+      ? `Health check failed — the sandbox dev server process (pid ${liveness.pid}) is no longer running`
+      : `Health check failed — the sandbox dev server stopped responding to ${failures} health probes over ${Math.round(windowMs / 1000)}s`,
+    tail,
+  );
+  pushPreviewLog(
+    runtime,
+    liveness.alive === false
+      ? `[preview] Health check failed — dev server process (pid ${liveness.pid}) is dead`
+      : `[preview] Health check failed — dev server unresponsive across ${failures} probes`,
+  );
   return false;
 }
 

@@ -226,3 +226,70 @@ describe("describeSandboxInstallExit", () => {
     expect(describeSandboxInstallExit(result(1))).toBeNull();
   });
 });
+
+/**
+ * Round 13 (2026-11-17): the evidence read resolves the cgroup
+ * directory from /proc/self/cgroup before the hardcoded paths — in
+ * the E2B guest the sandbox's accounting lives under a scoped v2
+ * subpath, so both literal paths were absent and every live line
+ * read memory.peak=unknown. When no path yields a number, the
+ * read's first stderr line is logged alongside the unknown, so the
+ * evidence can never fail silently again.
+ */
+describe("logSandboxInstallMemoryEvidence — cgroup resolution (round 13)", () => {
+  function evidenceProvider(stdout: string, commands: string[]) {
+    return {
+      execute: vi.fn(async (_sandboxId: string, input: { command: string }) => {
+        commands.push(input.command);
+        return { exitCode: 0, stdout, stderr: "", durationMs: 1 };
+      }),
+    } as unknown as SandboxProvider;
+  }
+
+  it("resolves the cgroup dir from /proc/self/cgroup, keeping the canonical paths as fallbacks", async () => {
+    const commands: string[] = [];
+    await logSandboxInstallMemoryEvidence({
+      provider: evidenceProvider("LITT_MEMORY_PEAK=1048576000\n", commands),
+      sandboxId: "sbx-ev-5",
+      install: result(0),
+      log: () => {},
+    });
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain("/proc/self/cgroup");
+    expect(commands[0]).toContain("/sys/fs/cgroup${cg}/memory.peak");
+    expect(commands[0]).toContain("/sys/fs/cgroup/memory.peak");
+    expect(commands[0]).toContain("/sys/fs/cgroup/memory/memory.max_usage_in_bytes");
+  });
+
+  it("logs the raw read failure alongside an unknown peak", async () => {
+    const logs: string[] = [];
+    const stdout =
+      "LITT_MEMORY_PEAK=unknown\n" +
+      "LITT_MEMORY_PEAK_ERR=cat: /sys/fs/cgroup/memory/memory.max_usage_in_bytes: No such file or directory\n";
+    await logSandboxInstallMemoryEvidence({
+      provider: evidenceProvider(stdout, []),
+      sandboxId: "sbx-ev-6",
+      install: result(0),
+      log: (m) => logs.push(m),
+    });
+    expect(logs).toHaveLength(2);
+    expect(logs[0]).toContain("memory.peak=unknown");
+    expect(logs[1]).toContain("peak read failed");
+    expect(logs[1]).toContain("No such file or directory");
+  });
+
+  it("a known peak logs no failure line even when an err line rides along", async () => {
+    const logs: string[] = [];
+    const stdout =
+      "LITT_MEMORY_PEAK=1048576000\n" +
+      "LITT_MEMORY_PEAK_ERR=cat: /sys/fs/cgroup/memory.peak: No such file or directory\n";
+    await logSandboxInstallMemoryEvidence({
+      provider: evidenceProvider(stdout, []),
+      sandboxId: "sbx-ev-7",
+      install: result(0),
+      log: (m) => logs.push(m),
+    });
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain("memory.peak=1048576000");
+  });
+});
