@@ -37,6 +37,8 @@ interface DeploymentRow {
   error_message: string | null;
   /** Added by the netlify_deployment_external_site migration; absent on older rows/DBs. */
   external_site_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 function rowToRecord(row: DeploymentRow): DeploymentRecord {
@@ -55,6 +57,8 @@ function rowToRecord(row: DeploymentRow): DeploymentRecord {
     errorClass: row.error_class,
     errorMessage: row.error_message,
     externalSiteId: row.external_site_id ?? null,
+    createdAt: row.created_at ?? null,
+    updatedAt: row.updated_at ?? null,
   };
 }
 
@@ -466,6 +470,31 @@ export async function findLatestDeploymentForProjectTarget(
     .maybeSingle();
   if (error || !data) return null;
   return rowToRecord(data as DeploymentRow);
+}
+
+/**
+ * Recent deployment history for a project, newest first, across all
+ * targets (Kimi wiring item 5). Powers the Deploy surface's history
+ * list. Read-only reporting — there is deliberately no rollback
+ * counterpart: no deployment rollback path exists in this system, and
+ * the surface must not pretend one does. Returns [] when storage is
+ * unavailable.
+ */
+export async function listDeploymentHistoryForProject(
+  projectId: string,
+  userId: string,
+  limit = 10,
+): Promise<DeploymentRecord[]> {
+  if (!supabaseAdmin) return [];
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(Math.max(1, Math.min(limit, 50)));
+  if (error || !data) return [];
+  return (data as DeploymentRow[]).map(rowToRecord);
 }
 
 /**

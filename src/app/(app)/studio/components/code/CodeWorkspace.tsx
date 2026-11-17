@@ -134,6 +134,17 @@ function isTextFile(path: string): boolean {
   return TEXT_EXTENSIONS.has(ext);
 }
 
+/** Relative "saved" phrasing for the save-status line (Kimi wiring
+ *  item 15): "just now" under 5s, then Ns / Nm / Nh ago. */
+export function formatSavedAgo(at: number, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - at) / 1000));
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
+}
+
 function getLanguage(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   const map: Record<string, string> = {
@@ -215,6 +226,16 @@ export function CodeWorkspace({
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Save-status line state (Kimi wiring item 15): the last successful
+  // save's path + timestamp, recorded by saveFile itself — never
+  // inferred. nowTick re-renders the relative phrasing every 10s.
+  const [lastSaved, setLastSaved] = useState<{ path: string; at: number } | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!lastSaved) return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 10_000);
+    return () => window.clearInterval(id);
+  }, [lastSaved]);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
@@ -222,6 +243,31 @@ export function CodeWorkspace({
   const [selectedFileInfo, setSelectedFileInfo] = useState<{ path: string; size: number | null } | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const editorRef = useRef<unknown>(null);
+  // Kimi wiring item 4: a pending line reveal from a studio:open-file
+  // event that carried a line (the Checks file:line chip). The reveal
+  // fires once the target tab is active AND the editor has mounted —
+  // whichever completes last — then clears so later tab switches never
+  // yank the scroll position.
+  const pendingRevealRef = useRef<{ path: string; line: number } | null>(null);
+  const activeTabRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+  const tryRevealPendingLine = useCallback(() => {
+    const pending = pendingRevealRef.current;
+    if (!pending) return;
+    if (activeTabRef.current !== pending.path) return;
+    const editor = editorRef.current as {
+      revealLineInCenter?: (line: number) => void;
+      setPosition?: (position: { lineNumber: number; column: number }) => void;
+      focus?: () => void;
+    } | null;
+    if (!editor || typeof editor.revealLineInCenter !== "function") return;
+    pendingRevealRef.current = null;
+    editor.revealLineInCenter(pending.line);
+    editor.setPosition?.({ lineNumber: pending.line, column: 1 });
+    editor.focus?.();
+  }, []);
   // Track the current project ID so we only reset state on actual project change,
   // not on callback identity changes or preparation status toggles.
   const projectIdRef = useRef<string | null>(null);
@@ -355,6 +401,8 @@ export function CodeWorkspace({
         body: JSON.stringify({ action: "write", path, content: tab.content }),
       });
       setOpenTabs((prev) => prev.map((t) => t.path === path ? { ...t, original: t.content } : t));
+      setLastSaved({ path, at: Date.now() });
+      setNowTick(Date.now());
       void loadDirectory(parentPath(path), true);
       onPreviewRefreshRequest?.();
       // Mark the source so our own files-changed handler doesn't re-read
@@ -611,11 +659,28 @@ export function CodeWorkspace({
         return;
       }
       if (normalized === ".") return;
-      void openFile(normalized);
+      // A line rides along only from senders that parsed one out of
+      // real output (the Checks chip). Anything else opens at the top,
+      // exactly as before.
+      const line =
+        typeof detail?.line === "number" && Number.isInteger(detail.line) && detail.line > 0
+          ? detail.line
+          : null;
+      pendingRevealRef.current = line ? { path: normalized, line } : null;
+      void openFile(normalized).then(() => tryRevealPendingLine());
     };
     window.addEventListener(STUDIO_EVENT_OPEN_FILE, handler);
     return () => window.removeEventListener(STUDIO_EVENT_OPEN_FILE, handler);
-  }, [projectId, openFile]);
+  }, [projectId, openFile, tryRevealPendingLine]);
+
+  // The editor mounts after the tab's content loads; if a reveal is
+  // still pending for the now-active tab, fire it on mount and whenever
+  // the active tab settles.
+  useEffect(() => {
+    if (pendingRevealRef.current && pendingRevealRef.current.path === activeTab) {
+      tryRevealPendingLine();
+    }
+  }, [activeTab, openTabs, tryRevealPendingLine]);
 
   const activeTabData = openTabs.find((t) => t.path === activeTab);
   const isDirty = activeTabData && activeTabData.content !== activeTabData.original;
@@ -877,6 +942,37 @@ export function CodeWorkspace({
                 )}
               </div>
 
+              {/* Save-status line (Kimi wiring item 15): language,
+                  line count, and the save state of the ACTIVE tab —
+                  "Saved · just now / Ns ago" from the timestamp
+                  saveFile recorded, "Unsaved changes" while dirty.
+                  Monaco's native find (Ctrl+F) already covers the
+                  find half of the Kimmy original; nothing ported. */}
+              {activeTabData && (
+                <div
+                  className="flex shrink-0 items-center gap-1.5 border-b px-2.5 py-1 text-[9px]"
+                  style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)", backgroundColor: "var(--studio-surface)" }}
+                  data-testid="code-save-status"
+                >
+                  <span className="font-mono">{getLanguage(activeTabData.path)}</span>
+                  <span aria-hidden>·</span>
+                  <span className="tabular-nums">
+                    {activeTabData.content ? activeTabData.content.split("\n").length : 0} lines
+                  </span>
+                  {isDirty ? (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span style={{ color: "#e3b341" }}>Unsaved changes</span>
+                    </>
+                  ) : lastSaved && lastSaved.path === activeTabData.path ? (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span>Saved · {formatSavedAgo(lastSaved.at, nowTick)}</span>
+                    </>
+                  ) : null}
+                </div>
+              )}
+
               {/* External-change conflict strip — saving a stale tab must be explicit */}
               {activeTab && conflictPaths.has(activeTab) && (
                 <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)", color: "#dc2626" }}>
@@ -947,7 +1043,7 @@ export function CodeWorkspace({
                     value={activeTabData.content}
                     theme="vs-dark"
                     onChange={(value) => updateTabContent(activeTabData.path, value ?? "")}
-                    onMount={(editor) => { editorRef.current = editor; }}
+                    onMount={(editor) => { editorRef.current = editor; tryRevealPendingLine(); }}
                     options={{
                       fontSize: 13,
                       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",

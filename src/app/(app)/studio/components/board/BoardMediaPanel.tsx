@@ -72,6 +72,33 @@ interface GeneratedCandidate {
   url: string;
 }
 
+/** m:ss from a real durationSeconds when the asset carries one. */
+function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Deterministic pseudo-waveform bar heights for an audio asset
+ * (Kimi wiring item 8). Pure presentation derived from the asset's
+ * own id — same asset, same shape, every render. It decorates the
+ * row; it is NOT measured audio data and claims nothing about the
+ * track's actual waveform.
+ */
+function waveformBars(assetId: string, count = 24): number[] {
+  let hash = 0;
+  for (let i = 0; i < assetId.length; i += 1) {
+    hash = (hash * 31 + assetId.charCodeAt(i)) >>> 0;
+  }
+  const bars: number[] = [];
+  let state = hash || 1;
+  for (let i = 0; i < count; i += 1) {
+    state = (state * 1103515245 + 12345) >>> 0;
+    bars.push(20 + ((state >> 8) % 80));
+  }
+  return bars;
+}
+
 export interface BoardMediaPanelProps {
   projectId: string | null;
 }
@@ -87,6 +114,9 @@ export default function BoardMediaPanel({ projectId }: BoardMediaPanelProps) {
   const [prompt, setPrompt] = useState("");
   const [styleId, setStyleId] = useState("none");
   const [generating, setGenerating] = useState(false);
+  // The prompt of the in-flight generation, captioned on the shimmer
+  // tile (Kimi wiring item 8) so the wait is visibly tied to the ask.
+  const [generatingPrompt, setGeneratingPrompt] = useState<string | null>(null);
   const [composerNote, setComposerNote] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<GeneratedCandidate[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -136,6 +166,16 @@ export default function BoardMediaPanel({ projectId }: BoardMediaPanelProps) {
   }, [fetchAssets, refreshTrigger]);
 
   const visibleAssets = useMemo(() => assets.filter(TAB_KINDS[tab]), [assets, tab]);
+  // Per-tab counts for the tab badges (item 8) — counted from the same
+  // fetched lake the tabs render; a tab with none shows no badge.
+  const tabCounts = useMemo(
+    () => ({
+      images: assets.filter(TAB_KINDS.images).length,
+      video: assets.filter(TAB_KINDS.video).length,
+      music: assets.filter(TAB_KINDS.music).length,
+    }),
+    [assets],
+  );
   const selected = useMemo(
     () => visibleAssets.find((a) => a.id === selectedId) ?? null,
     [visibleAssets, selectedId],
@@ -202,6 +242,7 @@ export default function BoardMediaPanel({ projectId }: BoardMediaPanelProps) {
     const trimmed = prompt.trim();
     if (!trimmed || generating) return;
     setGenerating(true);
+    setGeneratingPrompt(trimmed);
     setComposerNote(null);
     try {
       // Refresh semantics: a new set replaces the old one, and the old
@@ -257,6 +298,7 @@ export default function BoardMediaPanel({ projectId }: BoardMediaPanelProps) {
       setComposerNote("Generation failed — the request never completed.");
     } finally {
       setGenerating(false);
+      setGeneratingPrompt(null);
     }
   };
 
@@ -365,6 +407,19 @@ export default function BoardMediaPanel({ projectId }: BoardMediaPanelProps) {
       }}
     >
       {label}
+      {tabCounts[id] > 0 && (
+        <span
+          className="ml-1.5 rounded-full px-1.5 py-px text-[9px] font-bold tabular-nums"
+          style={
+            tab === id
+              ? { backgroundColor: "rgba(255,255,255,0.22)", color: "#FFFFFF" }
+              : { backgroundColor: tokens.surfaceElevated, color: tokens.textMuted }
+          }
+          data-testid={`board-media-count-${id}`}
+        >
+          {tabCounts[id]}
+        </span>
+      )}
     </button>
   );
 
@@ -546,6 +601,20 @@ export default function BoardMediaPanel({ projectId }: BoardMediaPanelProps) {
         </div>
       )}
 
+      {/* Music honesty banner (Kimi wiring item 8): this panel has no
+          music generation path — the composer below is images-only and
+          no music generate route exists — so the tab says so plainly
+          instead of implying generation is coming from here. */}
+      {tab === "music" && (
+        <div
+          className="mx-2 mt-2 shrink-0 rounded-lg border px-2.5 py-1.5 text-[10px] leading-4"
+          style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}
+          data-testid="board-media-music-note"
+        >
+          Uploads only — generation coming soon.
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {error ? (
           <p className="p-2 text-xs" style={{ color: tokens.textMuted }} data-testid="board-media-error">
@@ -555,15 +624,76 @@ export default function BoardMediaPanel({ projectId }: BoardMediaPanelProps) {
           <p className="p-2 text-xs" style={{ color: tokens.textMuted }}>
             Loading media…
           </p>
-        ) : visibleAssets.length === 0 ? (
+        ) : visibleAssets.length === 0 && !(generating && tab === "images") ? (
           <p className="p-2 text-xs leading-5" style={{ color: tokens.textMuted }}>
             {tab === "images" &&
               "No images yet. Generate one with LiTT in the chat, or describe an asset below — it lands here."}
             {tab === "video" && "No video assets in this project yet."}
             {tab === "music" && "No music or audio assets in this project yet."}
           </p>
+        ) : tab === "music" ? (
+          // Music renders as rows (Kimi wiring item 8): name, a
+          // decorative per-asset waveform (deterministic from the
+          // asset id — presentation, not measured audio), and the
+          // real duration when the asset carries one. Selecting a row
+          // loads it into the player above, as tiles do on other tabs.
+          <div className="flex flex-col gap-1.5">
+            {visibleAssets.map((asset) => (
+              <button
+                key={asset.id}
+                type="button"
+                data-testid={`board-media-asset-${asset.id}`}
+                aria-pressed={selectedId === asset.id}
+                className="flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left"
+                style={{
+                  borderColor: selectedId === asset.id ? BOARD_ACCENT_VIOLET : tokens.border,
+                  backgroundColor: tokens.surfaceElevated,
+                }}
+                onClick={() => setSelectedId(asset.id)}
+                title={asset.name}
+              >
+                <Music size={14} className="shrink-0" style={{ color: tokens.textMuted }} aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[11px] font-medium" style={{ color: tokens.text }}>
+                    {asset.name}
+                  </span>
+                  <span className="mt-0.5 flex h-3 items-end gap-px" aria-hidden>
+                    {waveformBars(asset.id).map((height, i) => (
+                      <span
+                        key={i}
+                        className="w-[2px] rounded-sm"
+                        style={{ height: `${height}%`, backgroundColor: tokens.textMuted, opacity: 0.55 }}
+                      />
+                    ))}
+                  </span>
+                </span>
+                {typeof asset.durationSeconds === "number" && (
+                  <span className="shrink-0 text-[10px] tabular-nums" style={{ color: tokens.textMuted }}>
+                    {formatDuration(asset.durationSeconds)}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         ) : (
           <div className="grid grid-cols-3 gap-1.5">
+            {generating && tab === "images" && (
+              // Generating shimmer tile (item 8): the in-flight ask,
+              // captioned with its own prompt, at the head of the grid
+              // until the real asset lands and replaces it.
+              <div
+                className="relative flex aspect-square flex-col items-center justify-center gap-1.5 overflow-hidden rounded-lg border p-1.5"
+                style={{ borderColor: BOARD_ACCENT_VIOLET, backgroundColor: tokens.surfaceElevated }}
+                data-testid="board-media-generating-tile"
+                aria-live="polite"
+              >
+                <span className="absolute inset-0 animate-pulse" style={{ backgroundColor: tokens.surface }} aria-hidden />
+                <LoaderCircle size={16} className="relative animate-spin" style={{ color: BOARD_ACCENT_VIOLET }} aria-hidden />
+                <span className="relative line-clamp-3 w-full text-center text-[9px] leading-3" style={{ color: tokens.textMuted }}>
+                  {generatingPrompt}
+                </span>
+              </div>
+            )}
             {visibleAssets.map((asset) => (
               <button
                 key={asset.id}
@@ -607,6 +737,11 @@ export default function BoardMediaPanel({ projectId }: BoardMediaPanelProps) {
                     <span className="absolute inset-0 flex items-center justify-center">
                       <Play size={16} className="text-white drop-shadow" aria-hidden />
                     </span>
+                    {typeof asset.durationSeconds === "number" && (
+                      <span className="absolute right-1 bottom-1 rounded bg-black/70 px-1 py-px text-[9px] font-bold text-white tabular-nums">
+                        {formatDuration(asset.durationSeconds)}
+                      </span>
+                    )}
                   </>
                 ) : (
                   <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-1">

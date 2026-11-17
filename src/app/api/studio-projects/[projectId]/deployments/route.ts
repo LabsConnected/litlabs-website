@@ -4,6 +4,7 @@ import { getProject } from "@/lib/projects/project-repository";
 import {
   findLatestDeploymentForProject,
   findLatestDeploymentForProjectTarget,
+  listDeploymentHistoryForProject,
 } from "@/lib/deployments/deployment-store";
 import {
   getHostingBackend,
@@ -54,11 +55,12 @@ export async function GET(
   // on Netlify independently, and the Deploy surface shows each target's
   // own state. Plus the Netlify connection state (never the token) so the
   // surface can offer a connect-first state instead of a doomed deploy.
-  const [littDeployment, netlifyDeployment, netlifyConnection] =
+  const [littDeployment, netlifyDeployment, netlifyConnection, history] =
     await Promise.all([
       findLatestDeploymentForProjectTarget(projectId, userId, HOSTING_TARGET),
       findLatestDeploymentForProjectTarget(projectId, userId, NETLIFY_TARGET),
       getNetlifyConnection(userId).catch(() => null),
+      listDeploymentHistoryForProject(projectId, userId).catch(() => []),
     ]);
 
   const hostingCheck = getHostingBackend().isConfigured();
@@ -68,6 +70,10 @@ export async function GET(
       [HOSTING_TARGET]: littDeployment,
       [NETLIFY_TARGET]: netlifyDeployment,
     },
+    // Recent deployment history across targets (Kimi wiring item 5) —
+    // reporting only; no rollback action is offered anywhere because
+    // no rollback path exists.
+    history,
     netlifyConnection: {
       connected: !!netlifyConnection,
       accountName: netlifyConnection?.accountName ?? null,
