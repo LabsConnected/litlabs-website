@@ -49,14 +49,33 @@ import ProjectsPage from "./page";
 
 const PROJECT_LIST = { projects: [], legacyOnly: [] };
 
-function mockFetch({ create }: { create?: () => Promise<Response> | Response } = {}) {
+function listedProject(id: string, name: string, updatedAt = new Date().toISOString()) {
+  return {
+    id,
+    name,
+    sourceType: "blank",
+    githubFullName: null,
+    githubBranch: null,
+    workspaceStatus: "ready",
+    runtimeStatus: "stopped",
+    updatedAt,
+  };
+}
+
+function mockFetch({
+  create,
+  projectList = PROJECT_LIST,
+}: {
+  create?: () => Promise<Response> | Response;
+  projectList?: unknown;
+} = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url.includes("/api/studio-projects") && init?.method === "POST") {
       return (await create?.()) ?? new Response(JSON.stringify({ project: { id: "proj-new", name: "X" } }), { status: 201 });
     }
     if (url.includes("/api/studio-projects")) {
-      return new Response(JSON.stringify(PROJECT_LIST), { status: 200 });
+      return new Response(JSON.stringify(projectList), { status: 200 });
     }
     if (url.includes("/api/github/installations")) {
       return new Response(JSON.stringify({ installations: [] }), { status: 200 });
@@ -180,5 +199,55 @@ describe("/projects — New project", () => {
     await user.click(screen.getByRole("button", { name: /create project/i }));
     await waitFor(() => expect(createPosts()).toHaveLength(4));
     expect(createPosts()[3].idempotencyKey).not.toBe(createPosts()[2].idempotencyKey);
+  });
+});
+
+describe("/projects — rendered project list", () => {
+  it("merges canonical and legacy rows once, keeps canonical data, and links projects to Studio", async () => {
+    mockFetch({
+      projectList: {
+        projects: [listedProject("shared-id", "Canonical project")],
+        legacyOnly: [
+          listedProject("shared-id", "Duplicate legacy project"),
+          listedProject("legacy-id", "Legacy project"),
+        ],
+      },
+    });
+    render(<ProjectsPage />);
+
+    await waitFor(() => expect(screen.getByText("Legacy project")).toBeTruthy());
+    expect(screen.getByText("Canonical project")).toBeTruthy();
+    expect(screen.queryByText("Duplicate legacy project")).toBeNull();
+    expect(document.querySelector('a[href="/studio?project=shared-id"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/studio?project=legacy-id"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Delete Canonical project" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete Legacy project" })).toBeNull();
+  });
+
+  it("searches project names and applies the existing Recent category filter", async () => {
+    const oldDate = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    mockFetch({
+      projectList: {
+        projects: [
+          listedProject("alpha", "Alpha workspace"),
+          listedProject("beta", "Beta workspace"),
+          listedProject("old", "Older workspace", oldDate),
+        ],
+        legacyOnly: [],
+      },
+    });
+    const user = userEvent.setup();
+    render(<ProjectsPage />);
+
+    await waitFor(() => expect(screen.getByText("Alpha workspace")).toBeTruthy());
+    const search = screen.getByPlaceholderText("Search projects...");
+    await user.type(search, "Beta");
+    expect(screen.getByText("Beta workspace")).toBeTruthy();
+    expect(screen.queryByText("Alpha workspace")).toBeNull();
+
+    await user.clear(search);
+    await user.click(screen.getByRole("button", { name: /Recent/ }));
+    expect(screen.getByText("Alpha workspace")).toBeTruthy();
+    expect(screen.queryByText("Older workspace")).toBeNull();
   });
 });

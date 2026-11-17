@@ -34,6 +34,7 @@ import ProjectStatusBadge from "./ProjectStatusBadge";
 export type ProjectCardData = {
   id: string;
   name: string;
+  isLegacyOnly?: boolean;
   sourceType: "github" | "blank" | "template";
   githubFullName: string | null;
   githubBranch: string | null;
@@ -218,19 +219,21 @@ export default function ProjectCard({
                 {retrying ? "Retrying…" : "Retry setup"}
               </button>
             )}
-            <button
-              type="button"
-              aria-label={`Delete ${name}`}
-              title="Delete project"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onDelete(project);
-              }}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-red-400/30 text-red-500/80 opacity-70 transition-opacity hover:opacity-100"
-            >
-              <Trash2 size={14} />
-            </button>
+            {!project.isLegacyOnly && (
+              <button
+                type="button"
+                aria-label={`Delete ${name}`}
+                title="Delete project"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDelete(project);
+                }}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-red-400/30 text-red-500/80 opacity-70 transition-opacity hover:opacity-100"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
             <span className="inline-flex items-center gap-1 font-bold" style={{ color: T.accentColor }}>
               {isResumable ? "Resume" : "Open"} <ArrowRight size={12} />
             </span>
