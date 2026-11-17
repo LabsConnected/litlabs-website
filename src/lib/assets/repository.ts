@@ -42,7 +42,11 @@ export interface ListStudioAssetsOptions {
   limit?: number;
   /**
    * Scope:
-   *   "project"  — only project_assets for the given projectId
+   *   "project"  — project_assets for the given projectId, plus the
+   *                user's generation_jobs bound to that project
+   *                (metadata.projectId) — image.generate persists ONLY
+   *                a job row, so a project surface without them can
+   *                never show a generated asset
    *   "user"     — only the user's own user_media
    *   "all"      — both (default)
    */
@@ -279,6 +283,30 @@ export async function listStudioAssets(
       results.push(...projectAssets);
     } catch {
       // If project_assets fetch fails, continue with user_media.
+    }
+  }
+
+  // Fetch generation_jobs bound to this project if scoped to project.
+  // image.generate persists exactly one record — a generation_jobs row
+  // whose metadata.projectId binds it to the project — and never
+  // writes a project_assets row. The board Media panel reads with
+  // scope "project", so when this source was only consulted under
+  // user/all, the panel could not display an agent-generated image
+  // even when generation, job persistence, and the file save all
+  // succeeded (round-10 diagnosis Q3a). fetchGenerationJobs with a
+  // projectId already restricts to jobs bound to that project;
+  // unbound jobs stay account-wide Library records and never leak
+  // into a project surface. user_media and music_tracks keep their
+  // user/all scoping — they are not part of the generation chain.
+  if (scope === "project" && opts.projectId) {
+    try {
+      const internalUserId = await resolveInternalUserId(opts.clerkId);
+      if (internalUserId) {
+        const jobAssets = await fetchGenerationJobs(internalUserId, limit, opts.projectId);
+        results.push(...jobAssets);
+      }
+    } catch {
+      // If the generation_jobs fetch fails, continue with what we have.
     }
   }
 

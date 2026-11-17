@@ -129,6 +129,15 @@ export interface WorkspaceTransport {
   readonly workspaceRoot: string;
   readonly projectId: string;
   /**
+   * Round 11: the reason the most recent createCheckpointBeforeMutation
+   * call failed, or null when it succeeded (or has not run yet).
+   * Checkpoint failures used to be swallowed to a bare null, which
+   * surfaced downstream as an unexplained "Workspace unknown"
+   * verification; the settlement now reads this into the run's
+   * workspace_change.unknownReason.
+   */
+  readonly lastCheckpointError?: string | null;
+  /**
    * Stable identity of the approved operation being executed (the paused
    * run id), when known. Tools that perform idempotent side effects (e.g.
    * image.generate billing) derive their operation key from it so a retried
@@ -335,6 +344,9 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
   /** Set by createWorkspaceTransport() from the reachability probe. */
   public fileOpsReachable = true;
 
+  /** Round 11: see the interface field. Set on failure, cleared on success. */
+  public lastCheckpointError: string | null = null;
+
   /**
    * Cheap reachability probe for /ws-files. Returns true when the terminal
    * server answers a root listing for this project, false on any failure
@@ -368,6 +380,85 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       Authorization: `Bearer ${this.token}`,
       "X-Workspace-Id": this.workspaceId,
     };
+  }
+
+  private wsFileHeadersFor(workspaceId: string): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${createTerminalToken(this.userId, {
+        workspaceId,
+        projectId: this.projectId,
+      }).token}`,
+      "X-Workspace-Id": workspaceId,
+    };
+  }
+
+  /**
+   * Heal-on-404 for the write path (round 9 fix E) and the exec path
+   * (round 10). The files and preview routes have healed a
+   * workspace-level 404 via ensureWorkspaceAlive since #1012, but this
+   * transport — the agent's own write path, the one that saves
+   * generated images — never did: a lost terminal workspace made every
+   * write fail with the raw 404 ("Image generated but project save
+   * failed") even while the heal machinery sat one module away. The
+   * run's change-verification rode the same unhealed route through
+   * exec(): a descriptor-level miss failed every git probe and the
+   * run reported "Workspace unknown / 0 files" while the Files panel
+   * read the same workspace fine. On a workspace-level 404, run the
+   * heal ONCE and return the workspaceId to retry against (the
+   * transport's own id, or the re-registered one the heal produced).
+   * Returns null when the heal did not restore a live workspace —
+   * the caller then surfaces the original 404. Never throws: a heal
+   * failure must not mask the caller's own error.
+   */
+  private async healWorkspaceAfterNotFound(): Promise<string | null> {
+    try {
+      const { ensureWorkspaceAlive } = await import("@/lib/studio/workspace-recovery");
+      const recovered = await ensureWorkspaceAlive(this.projectId, this.userId, this.workspaceId);
+      if (recovered.healFailed) return null;
+      return recovered.workspaceId;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * POST /ws-files/write with one heal-and-retry on a workspace-level
+   * 404 (see healWorkspaceAfterNotFound). A file-level failure (any
+   * other status, or a 404 whose body is not the workspace error) is
+   * surfaced immediately, exactly as before.
+   */
+  private async postWsFileWrite(
+    body: Record<string, unknown>,
+    timeoutMs: number,
+    opName: "writeFile" | "writeBinaryFile",
+  ): Promise<{ saved: boolean }> {
+    const attempt = (workspaceId: string) =>
+      fetch(`${terminalBase()}/ws-files/write`, {
+        method: "POST",
+        headers: this.wsFileHeadersFor(workspaceId),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    let resp = await attempt(this.workspaceId);
+    if (resp.status === 404) {
+      const errText = await resp.text().catch(() => "");
+      if (errText.includes("Workspace not found")) {
+        const healedId = await this.healWorkspaceAfterNotFound();
+        if (healedId) {
+          resp = await attempt(healedId);
+          if (resp.ok) return resp.json();
+          const retryErr = await resp.text().catch(() => "");
+          throw new Error(`${opName} failed (${resp.status}): ${retryErr}`);
+        }
+      }
+      throw new Error(`${opName} failed (404): ${errText}`);
+    }
+    if (!resp.ok) {
+      const err = await resp.text().catch(() => "");
+      throw new Error(`${opName} failed (${resp.status}): ${err}`);
+    }
+    return resp.json();
   }
 
   // ── File operations ──
@@ -422,31 +513,15 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
   }
 
   async writeFile(path: string, content: string): Promise<{ saved: boolean }> {
-    const resp = await fetch(`${terminalBase()}/ws-files/write`, {
-      method: "POST",
-      headers: this.wsFileHeaders,
-      body: JSON.stringify({ path, content }),
-      signal: AbortSignal.timeout(FILE_OP_TIMEOUT_MS),
-    });
-    if (!resp.ok) {
-      const err = await resp.text().catch(() => "");
-      throw new Error(`writeFile failed (${resp.status}): ${err}`);
-    }
-    return resp.json();
+    return this.postWsFileWrite({ path, content }, FILE_OP_TIMEOUT_MS, "writeFile");
   }
 
   async writeBinaryFile(path: string, base64Content: string): Promise<{ saved: boolean }> {
-    const resp = await fetch(`${terminalBase()}/ws-files/write`, {
-      method: "POST",
-      headers: this.wsFileHeaders,
-      body: JSON.stringify({ path, content: base64Content, encoding: "base64" }),
-      signal: AbortSignal.timeout(BINARY_WRITE_TIMEOUT_MS),
-    });
-    if (!resp.ok) {
-      const err = await resp.text().catch(() => "");
-      throw new Error(`writeBinaryFile failed (${resp.status}): ${err}`);
-    }
-    return resp.json();
+    return this.postWsFileWrite(
+      { path, content: base64Content, encoding: "base64" },
+      BINARY_WRITE_TIMEOUT_MS,
+      "writeBinaryFile",
+    );
   }
 
   async deleteFile(path: string): Promise<{ deleted: boolean }> {
@@ -495,9 +570,8 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   async exec(command: string, timeoutMs = EXEC_TIMEOUT_MS, stdin?: string): Promise<ExecResult> {
     const t0 = Date.now();
-    const resp = await fetch(
-      `${terminalBase()}/internal/workspace/${this.workspaceId}/exec`,
-      {
+    const attempt = (workspaceId: string) =>
+      fetch(`${terminalBase()}/internal/workspace/${workspaceId}/exec`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -505,19 +579,56 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
         },
         body: JSON.stringify({ command, userId: this.userId, timeout: timeoutMs, stdin }),
         signal: AbortSignal.timeout(timeoutMs + 5_000),
-      },
-    );
-    const durationMs = Date.now() - t0;
+      });
+    let resp = await attempt(this.workspaceId);
+    if (resp.status === 404 || resp.status === 409) {
+      const errText = await resp.text().catch(() => "");
+      // Workspace-level failures only: the terminal has no descriptor
+      // for this workspace (404 "Workspace not found") or holds one
+      // that is not ready (409 "Workspace not ready"). Heal once and
+      // retry, mirroring the write path's fix-E shape — the run's
+      // change-verification probes (computeWorkspaceChange's git
+      // status) ride this method, and a descriptor-level miss the
+      // panel routes would heal was terminal for every probe
+      // (round-10 diagnosis Q2). Every other failure is surfaced
+      // untouched: the sandbox gate's fail-closed 503 and a sandbox
+      // execution 500 are NOT workspace misses, and healing must
+      // never become a way around the gate.
+      const workspaceLevel =
+        (resp.status === 404 && errText.includes("Workspace not found")) ||
+        (resp.status === 409 && errText.includes("Workspace not ready"));
+      if (workspaceLevel) {
+        const healedId = await this.healWorkspaceAfterNotFound();
+        if (healedId) {
+          resp = await attempt(healedId);
+          if (!resp.ok) {
+            const retryErr = await resp.text().catch(() => "");
+            throw new Error(`exec failed (${resp.status}): ${retryErr}`);
+          }
+          return this.parseExecResponse(resp, t0);
+        }
+      }
+      throw new Error(`exec failed (${resp.status}): ${errText}`);
+    }
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");
       throw new Error(`exec failed (${resp.status}): ${err}`);
     }
-    const data = await resp.json();
+    return this.parseExecResponse(resp, t0);
+  }
+
+  private async parseExecResponse(resp: Response, t0: number): Promise<ExecResult> {
+    const data = (await resp.json()) as {
+      exitCode?: number;
+      exit_code?: number;
+      stdout?: string;
+      stderr?: string;
+    };
     return {
       exitCode: data.exitCode ?? data.exit_code ?? 1,
       stdout: data.stdout ?? "",
       stderr: data.stderr ?? "",
-      durationMs,
+      durationMs: Date.now() - t0,
     };
   }
 
@@ -525,6 +636,18 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   async gitStatus(): Promise<GitStatusResult> {
     const result = await this.exec("git status --porcelain=v1 -b");
+    // A failed status (exit 128 — dubious ownership, not a repo,
+    // dead sandbox) exits nonzero with EMPTY stdout, which the
+    // parser below would read as a clean tree: the workspace-change
+    // evidence then reported a false "unchanged" instead of
+    // "unknown", hiding the git fault (round-8 diagnosis Q2). Throw
+    // so callers fall back to "unknown", exactly as gitDiff already
+    // does for a failed baseline diff.
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `git status failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`,
+      );
+    }
     const lines = result.stdout.trim().split("\n").filter(Boolean);
     const branchLine = lines[0] || "";
     const branch = branchLine.replace(/^## /, "").replace(/\.\.\..*$/, "").trim() || "main";
@@ -782,13 +905,18 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   async createCheckpointBeforeMutation(label: string): Promise<CheckpointInfo | null> {
     try {
-      return await createWorkspaceCheckpoint({
+      const checkpoint = await createWorkspaceCheckpoint({
         projectId: this.projectId,
         userId: this.userId,
         workspaceId: this.workspaceId,
         label,
       });
-    } catch {
+      this.lastCheckpointError = null;
+      return checkpoint;
+    } catch (err) {
+      // Round 11: record WHY instead of swallowing to a silent null —
+      // the run settlement surfaces this in workspace_change.unknownReason.
+      this.lastCheckpointError = err instanceof Error ? err.message : String(err);
       return null;
     }
   }

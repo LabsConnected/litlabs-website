@@ -17,6 +17,8 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  clampSandboxTimeoutMs,
+  E2B_MAX_TIMEOUT_MS,
   E2bSandboxProvider,
   SANDBOX_EGRESS_DENY_OUT,
   type E2bClient,
@@ -305,6 +307,140 @@ describe("E2bSandboxProvider — lifecycle", () => {
   it("satisfies the Phase 0 CanaryProvider subset structurally", () => {
     const provider: CanaryProvider = makeProvider(new FakeE2bClient());
     expect(provider.name).toBe("e2b");
+  });
+});
+
+/**
+ * Round 8 (2026-11-16 proof): the create-time timeoutMs is a HARD
+ * KILL in E2B despite the limits field being named "idle" — a
+ * workspace sandbox created at 11:34:41 was killed at exactly
+ * 11:49:41 (15:00), and because execute() never extended the clock
+ * and get() never verified liveness against E2B, every later
+ * operation (forward push, git evidence probe, preview) ran against
+ * the corpse. These tests pin the three-part fix: session-scale
+ * create lifetime, extension on exec activity, real liveness in
+ * get().
+ */
+describe("E2bSandboxProvider — lifetime and liveness (round 8)", () => {
+  it("creates with the session-scale lifetime (maxSessionMinutes), not the 15-minute idle value", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+
+    expect(client.creates).toHaveLength(1);
+    expect(client.creates[0].timeoutMs).toBe(60 * 60_000);
+    expect(client.creates[0].timeoutMs).not.toBe(15 * 60_000);
+  });
+
+  it("execute re-arms the session clock on activity", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    const handle = client.handles.get(instance.sandboxId)!;
+    expect(handle.timeoutExtensions).toEqual([]);
+
+    await provider.execute(instance.sandboxId, { command: "echo one" });
+    await provider.execute(instance.sandboxId, { command: "echo two" });
+
+    expect(handle.timeoutExtensions).toEqual([60 * 60_000, 60 * 60_000]);
+  });
+
+  /**
+   * Round 9: the production E2B account is Hobby, whose sandbox
+   * lifetime cap is 1 hour. A caller asking for more (the round-8
+   * session limit was 120 minutes) must be CLAMPED at the provider
+   * boundary, never passed through for E2B to reject.
+   */
+  it("clamps an over-cap create lifetime to the plan cap instead of requesting it", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+      limits: { maxSessionMinutes: 180 },
+    });
+
+    expect(client.creates).toHaveLength(1);
+    expect(client.creates[0].timeoutMs).toBe(E2B_MAX_TIMEOUT_MS);
+    expect(client.creates[0].timeoutMs).toBe(60 * 60_000);
+  });
+
+  it("clamps extendTimeout (preview keepalive) to the plan cap", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    const handle = client.handles.get(instance.sandboxId)!;
+
+    await provider.extendTimeout(instance.sandboxId, 120 * 60_000);
+
+    expect(handle.timeoutExtensions).toEqual([60 * 60_000]);
+  });
+
+  it("clampSandboxTimeoutMs passes under-cap values through and logs over-cap ones", () => {
+    const logs: string[] = [];
+    const log = (m: string) => logs.push(m);
+    expect(clampSandboxTimeoutMs(30 * 60_000, log)).toBe(30 * 60_000);
+    expect(logs).toEqual([]);
+    expect(clampSandboxTimeoutMs(120 * 60_000, log)).toBe(E2B_MAX_TIMEOUT_MS);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain("Clamping sandbox timeout");
+  });
+
+  it("get() returns null once E2B has killed the sandbox out-of-band, and forgets it", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    expect(await provider.get(instance.sandboxId)).not.toBeNull();
+
+    // E2B-side death (timeout kill): the handle reports not running
+    // while the provider's registry still holds the entry — exactly
+    // the corpse state the 2026-11-16 proof hit.
+    client.handles.get(instance.sandboxId)!.killed = true;
+
+    expect(await provider.get(instance.sandboxId)).toBeNull();
+    // Forgotten, not re-probed forever: still null on the next call,
+    // and execute now refuses with the typed not-found error instead
+    // of running against the corpse.
+    expect(await provider.get(instance.sandboxId)).toBeNull();
+    await expect(
+      provider.execute(instance.sandboxId, { command: "echo x" }),
+    ).rejects.toThrow(/Sandbox not found/);
+  });
+
+  it("get() still returns a paused (stopped) sandbox — pause is not death", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+
+    await provider.stop(instance.sandboxId);
+    // isRunning() is false for a paused sandbox; the liveness probe
+    // must not mistake that for a kill and forget a resumable box.
+    expect(client.handles.get(instance.sandboxId)!.paused).toBe(true);
+    const fetched = await provider.get(instance.sandboxId);
+    expect(fetched?.state).toBe("stopped");
   });
 });
 

@@ -88,6 +88,34 @@ describe("intent-router media generation — build routing unchanged", () => {
   });
 });
 
+describe("intent-router media generation — round-10 scope steal (2026-11-16 proof)", () => {
+  // The exact failing ask from the round-10 live proof: the build
+  // group's old `generate ... project` pattern matched first, the run
+  // was born with build scope, and a successful generation failed the
+  // build quality gate ("task scope: standard"). The persistence fix
+  // (#1018) faithfully carried the wrong scope — the wording was the
+  // defect.
+  it("generation-led ask with a save-to-project tail routes to media", () => {
+    const r = mediaCase("Generate an image of a lion and save it to this project.");
+    expect(r.taskKind).toBe("media");
+  });
+
+  it("the same steal is gone without the lion subject", () => {
+    const r = mediaCase("generate an image and save it to this project");
+    expect(r.taskKind).toBe("media");
+  });
+
+  it("additive placement into a project page stays build", () => {
+    buildCase("Add images to my project page");
+    buildCase("insert a photo into the gallery section of my site");
+  });
+
+  it("generation into a named site element stays build", () => {
+    buildCase("generate an image for my landing page");
+    buildCase("generate a banner image for the homepage section");
+  });
+});
+
 describe("intent-router media generation — non-generation stays out", () => {
   it("question about images gains no execution requirement", () => {
     const r = classifyIntent("what is an image gallery?");

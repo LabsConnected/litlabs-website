@@ -35,6 +35,7 @@ import {
   snapshotQualityLoopSession,
   stripQualityVerdictSuffix,
 } from "@/lib/litt-intelligence/quality-loop-flow";
+import type { QualityTaskScope } from "@/lib/litt-intelligence/quality-loop";
 import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getCheckpoint } from "@/lib/missions/mission-repository";
 import {
@@ -716,6 +717,39 @@ export async function POST(
     ? await getProject(resolved.projectId, userId).catch(() => null)
     : null;
 
+  // The resumed run's task scope, passed EXPLICITLY (round-8
+  // diagnosis Q1, defense in depth): the persisted quality snapshot
+  // is the run's own record of the kernel-classified scope. A
+  // restored snapshot carries its scope by design, so this
+  // pass-through is the backstop for the fresh-session branch (a
+  // snapshot whose identity no longer matches is not restored) —
+  // without it that branch re-derives the scope from prose via
+  // classifyTaskScope, which has no media case, and a media run is
+  // gated as a "standard" build. Deliberately NOT derived from the
+  // gated tool: a build turn can pause on image.generate mid-build,
+  // and only the kernel signal (recorded in the snapshot) may set
+  // the scope — the tool that happened to gate proves nothing about
+  // the turn.
+  const resumeTaskScope: QualityTaskScope | undefined =
+    resolved.qualityLoopState?.taskScope;
+
+  // Media-only resume (round-8 diagnosis Q2): phase 1 disarms the
+  // build-capability guard for a media turn (launch-flow: mediaOnly)
+  // because the generation's persisted asset IS the deliverable —
+  // image.generate is not a file-writing tool, so the guard's
+  // "no successful file-writing operation" verdict is unreachable
+  // truth for such a run and fired even when generation succeeded.
+  // The resume mirrors that disarm when the run's recorded scope
+  // is media AND no file-writing call succeeded before the pause.
+  // An image-first BUILD keeps its guard twice over: its recorded
+  // scope is the build scope the kernel classified (not media),
+  // and any site writes it already landed show in priorToolCalls.
+  const resumeMediaOnly =
+    resumeTaskScope === "media" &&
+    !(resolved.priorToolCalls ?? []).some(
+      (call) => call.success && isFileWritingTool(call.toolId),
+    );
+
   const resumeConfig: Partial<AgentLoopConfig> = {
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
@@ -754,10 +788,14 @@ export async function POST(
     // existing build-intent test (the same one that enables the quality
     // loop below: act/auto mode with a project) as the second arming
     // condition, so an image-first build keeps its zero-write protection
-    // across the resume.
+    // across the resume. A media-only resume is the one exclusion
+    // (resumeMediaOnly above): its deliverable is the persisted
+    // generation, never a file write, so the guard could only ever
+    // misread it — phase 1 disarms it for media turns the same way.
     buildCapabilityGuard:
-      isFileWritingTool(resolved.toolId) ||
-      shouldEnableQualityLoop(resolved.executionMode, resolved.projectId)
+      !resumeMediaOnly &&
+      (isFileWritingTool(resolved.toolId) ||
+        shouldEnableQualityLoop(resolved.executionMode, resolved.projectId))
         ? { maxStepsWithoutFileWrite: 3 }
         : undefined,
     // Quality loop: resume with a fresh evidence session so the resumed
@@ -774,6 +812,10 @@ export async function POST(
             resolved.pausedMessages.find((m) => m.role === "user")?.content ?? "",
           ).slice(0, 2000),
           state: resolved.qualityLoopState,
+          // Explicit scope (see resumeTaskScope above): a restored
+          // snapshot ignores it by design; a missing snapshot must
+          // not fall back to prose classification.
+          taskScope: resumeTaskScope,
         }
       : undefined,
   };
@@ -884,12 +926,17 @@ export async function POST(
       let resumeFailure: string | undefined;
       let resumePreview: Awaited<ReturnType<typeof ensureProjectPreviewReady>> | null = null;
       if (!result.pendingApproval && !result.cancelled) {
-        if (result.modelFailed) {
+        if (result.modelFailed && !result.completedWithWarning) {
           // The resumed loop stopped because the model itself failed
           // (provider routes exhausted, budget spent, upstream error).
           // Surface that real reason — letting the artifact gate run here
           // would mask it behind a misleading "no runnable entry file"
           // error even though the approved mutation may have succeeded.
+          // Round 11 exception: when the loop settled
+          // completedWithWarning, the deliverable had already landed and
+          // passed the gate — the model failure hit only the closing
+          // summary, so it is recorded as a contributor on the run
+          // record (below), not promoted to the run's verdict.
           resumeFailure =
             result.modelFailureText ??
             `The resumed run could not complete: ${result.modelFailed}`;
@@ -961,13 +1008,23 @@ export async function POST(
         });
         // Canonical settle FIRST — the outcome is recorded on the action_run
         // (errors propagate; a silent divergence is worse than a loud
-        // failure). The claim is verified and released inside.
+        // failure). The claim is verified and released inside. The
+        // runResult carries EVERY failure contributor (round 11): the
+        // headline reason above is the display choice, not the whole
+        // record — a route failure must not erase a tool defect.
         await settleResumedRunOutcome({
           record: resolved,
           userId,
           status: "failed",
           eventType: "run.failed",
           patch: { currentActivity: "Task failed", failureCode: "TASK_FAILED", failureMessage: resumeFailure },
+          runResult: {
+            finalText: resumeFailure,
+            stepsUsed: result.stepsUsed,
+            toolCalls: result.toolCalls,
+            cancelled: false,
+            failureContributors: result.failureContributors,
+          },
           executionToken,
           logEvent: "approval:action_run_failure_settle_failed",
         });
@@ -1088,6 +1145,9 @@ export async function POST(
         finalText,
         stepsUsed: result.stepsUsed,
         toolCalls: result.toolCalls,
+        // Round 11: all failure contributors ride the run record, on
+        // completed runs too — the warning state must stay diagnosable.
+        failureContributors: result.failureContributors,
         cancelled: result.cancelled,
         cancelReason: result.cancelReason,
         pendingApproval: result.pendingApproval
