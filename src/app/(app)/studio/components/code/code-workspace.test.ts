@@ -175,5 +175,16 @@ describe("Code workspace view-mode toggle", () => {
     expect(new Set(labels).size).toBe(labels.length);
     const ids = CODE_VIEW_MODES.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
-  });
+    // The live app preview is a permanent region of the one-box layout
+    // now — it is not a view mode that hides the editor.
+    expect(ids).not.toContain("app-preview");
+  }, 30000);
+
+  it("Plan, Canvas and Design are views inside the Code box (Amendment 4)", async () => {
+    const { CODE_BOX_VIEWS } = await import("./CodeWorkspace");
+    expect(CODE_BOX_VIEWS.map((v) => v.id)).toEqual(["code", "plan", "canvas-design"]);
+    const labels = CODE_BOX_VIEWS.map((v) => v.label);
+    expect(labels).toContain("Plan");
+    expect(labels).toContain("Canvas / Design");
+  }, 30000);
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import {
   ChevronDown,
@@ -21,8 +21,10 @@ import {
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
-import StudioPreviewPanel from "../StudioPreviewPanel";
+import type { ConnectionCapabilities } from "../../hooks/useConnectionSummary";
 import { StudioFilePreview } from "../StudioFilePreview";
+
+const StudioPlanSurface = dynamic(() => import("../StudioPlanSurface"), { ssr: false });
 
 const MonacoEditor = dynamic(
   () =>
@@ -43,17 +45,35 @@ interface FileEntry {
   gitStatus?: "M" | "A" | "D" | "U" | "C";
 }
 
-type ViewMode = "code" | "split" | "file-preview" | "app-preview";
+type ViewMode = "code" | "split" | "file-preview";
 
 /**
- * View-mode toggle for the Code workspace tab toolbar. There is
- * intentionally no "Code" option: the Code workspace tab itself is the code
- * view, and a second Code button here duplicated it in the same toolbar.
+ * Editor-region toggle for the Code box's "Code" view. There is
+ * intentionally no "App" option anymore: the live app preview is a
+ * permanent third region of the one-box layout (Explorer + editor +
+ * preview side by side, spec 2026-11-16 §1), not a mode that hides the
+ * editor. The per-file preview (StudioFilePreview) stays available as
+ * an editor-side view, distinct from the app preview region.
  */
 export const CODE_VIEW_MODES: { id: ViewMode; icon: typeof Columns2; label: string }[] = [
   { id: "split", icon: Columns2, label: "Split" },
   { id: "file-preview", icon: Eye, label: "File" },
-  { id: "app-preview", icon: Monitor, label: "App" },
+  { id: "code", icon: Monitor, label: "Editor" },
+];
+
+/**
+ * Code-box views (spec Amendment 4): Plan, Canvas and Design moved
+ * inside the Code box. Canvas and Design are ONE inseparable surface
+ * (CommandStudio's canvasContent carries its own Build/Design toggle
+ * over the same builder), so they are presented as a single
+ * "Canvas / Design" view rather than two fake views.
+ */
+export type CodeBoxView = "code" | "plan" | "canvas-design";
+
+export const CODE_BOX_VIEWS: { id: CodeBoxView; label: string }[] = [
+  { id: "code", label: "Code" },
+  { id: "plan", label: "Plan" },
+  { id: "canvas-design", label: "Canvas / Design" },
 ];
 
 type DialogState =
@@ -133,12 +153,49 @@ export function CodeWorkspace({
   branch,
   workspaceStatus,
   writeAccess,
+  previewContent,
+  previewPlaceholder,
+  canvasContent,
+  planCapabilities,
+  planModelLabel,
+  onPreviewRefreshRequest,
+  onSummonPanel,
+  onRollback,
 }: {
   projectId: string | null;
   repositoryName: string | null;
   branch: string | null;
   workspaceStatus: string | null;
   writeAccess: boolean;
+  /**
+   * The ONE shared preview element, built by CommandStudio and
+   * relocated into this box when the Code panel is the preview's home
+   * (mapping §1, the filesContent pattern). CodeWorkspace never mounts
+   * its own StudioPreviewPanel — a second mount would be a second
+   * preview session driver.
+   */
+  previewContent?: ReactNode;
+  /**
+   * Rendered in the preview region when the live preview's home is
+   * the standalone Preview panel (the pointer card, supplied by
+   * BoardPanelBindings).
+   */
+  previewPlaceholder?: ReactNode;
+  /** The Canvas & Design stage element, built by CommandStudio. */
+  canvasContent?: ReactNode;
+  /** Plan view data — StudioPlanSurface renders inside the Code box. */
+  planCapabilities?: ConnectionCapabilities;
+  planModelLabel?: string;
+  /**
+   * Save / external-change → preview refresh coupling, re-threaded
+   * through CommandStudio, which owns the previewRefreshKey state
+   * passed into the shared preview element.
+   */
+  onPreviewRefreshRequest?: () => void;
+  /** Board summon for surfaces that keep their own board home
+   *  (Terminal, Activity, …). */
+  onSummonPanel?: (id: string) => void;
+  onRollback?: () => void;
 }) {
   const { getToken } = useClerkAuth();
   const [entries, setEntries] = useState<Record<string, FileEntry[]>>({});
@@ -161,8 +218,8 @@ export function CodeWorkspace({
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [codeBoxView, setCodeBoxView] = useState<CodeBoxView>("code");
   const [selectedFileInfo, setSelectedFileInfo] = useState<{ path: string; size: number | null } | null>(null);
-  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [dialog, setDialog] = useState<DialogState>(null);
   const editorRef = useRef<unknown>(null);
   // Track the current project ID so we only reset state on actual project change,
@@ -299,7 +356,7 @@ export function CodeWorkspace({
       });
       setOpenTabs((prev) => prev.map((t) => t.path === path ? { ...t, original: t.content } : t));
       void loadDirectory(parentPath(path), true);
-      setPreviewRefreshKey((k) => k + 1);
+      onPreviewRefreshRequest?.();
       // Mark the source so our own files-changed handler doesn't re-read
       // the tab we just saved (a reload racing the user's next keystroke
       // could discard it).
@@ -309,7 +366,7 @@ export function CodeWorkspace({
     } finally {
       setSaving(false);
     }
-  }, [projectId, requestJson, writeAccess, openTabs, loadDirectory]);
+  }, [projectId, requestJson, writeAccess, openTabs, loadDirectory, onPreviewRefreshRequest]);
 
   // Reload a tab's content from disk (after an external change). Clears any
   // conflict flag for the path.
@@ -514,7 +571,7 @@ export function CodeWorkspace({
         void loadDirectory(parentPath(changedPath), true);
         // Also reload root to catch top-level changes
         if (changedPath !== ".") void loadDirectory(".", true);
-        setPreviewRefreshKey((k) => k + 1);
+        onPreviewRefreshRequest?.();
         // Skip our own save echo — the tab already holds the saved content
         // and a re-read could race the user's next keystroke.
         if (detail?.source === "code-save") return;
@@ -534,7 +591,7 @@ export function CodeWorkspace({
     };
     window.addEventListener("studio:files-changed", handler);
     return () => window.removeEventListener("studio:files-changed", handler);
-  }, [projectId, loadDirectory, reloadTabContent]);
+  }, [projectId, loadDirectory, reloadTabContent, onPreviewRefreshRequest]);
 
   // Panel linking (board B3, also live in the stage layout): a file
   // opened in the Files panel — or via the studio.open_file action —
@@ -583,8 +640,40 @@ export function CodeWorkspace({
             <span className="text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>{branch}</span>
           </>
         )}
+        {/* Code-box views (Amendment 4): Code / Plan / Canvas / Design
+            all live inside this one box. */}
+        <div
+          className="flex items-center gap-0.5 rounded-md p-0.5"
+          style={{ backgroundColor: "rgba(0,0,0,0.04)" }}
+          role="tablist"
+          aria-label="Code panel views"
+          data-testid="code-box-view-tabs"
+        >
+          {CODE_BOX_VIEWS.map((view) => {
+            const isActive = codeBoxView === view.id;
+            return (
+              <button
+                key={view.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                data-testid={`code-box-view-${view.id}`}
+                onClick={() => setCodeBoxView(view.id)}
+                className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold transition"
+                style={{
+                  backgroundColor: isActive ? "rgba(155,77,255,0.15)" : "transparent",
+                  color: isActive ? "#9b4dff" : "var(--text-muted)",
+                }}
+                title={view.label}
+              >
+                {view.label}
+              </button>
+            );
+          })}
+        </div>
         <div className="flex-1" />
-        {/* View mode toggle */}
+        {/* Editor-region toggle — only meaningful in the Code view */}
+        {codeBoxView === "code" && (
         <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: "rgba(0,0,0,0.04)" }}>
           {CODE_VIEW_MODES.map((mode) => {
             const Icon = mode.icon;
@@ -607,6 +696,7 @@ export function CodeWorkspace({
             );
           })}
         </div>
+        )}
       </div>
 
       {/* Error banner */}
@@ -627,9 +717,12 @@ export function CodeWorkspace({
         </div>
       )}
 
-      {/* Main content area — only render when we have a project */}
-      {projectId && (
-      <div className="flex min-h-0 flex-1">
+      {/* Main content area — the one-box three-region layout
+          (Explorer + editor + app preview, simultaneously), shown in
+          the Code view only. Plan and Canvas / Design are separate
+          Code-box views below. */}
+      {projectId && codeBoxView === "code" && (
+      <div className="flex min-h-0 flex-1" data-testid="code-box-code-view">
         {/* Left: File Explorer */}
         <div
           className="shrink-0 overflow-y-auto glass-panel"
@@ -900,22 +993,75 @@ export function CodeWorkspace({
             </div>
           )}
 
-          {/* App Preview — shown in app-preview mode. Canvas-first layout:
-              there is no permanent right-column preview, so the App view
-              always mounts its own StudioPreviewPanel. */}
-          {viewMode === "app-preview" && (
-            <div className="flex min-w-0 flex-1 flex-col">
-              <StudioPreviewPanel
-                projectId={projectId}
-                projectName={repositoryName}
-                repositoryName={repositoryName}
-                branch={branch}
-                workspaceStatus={workspaceStatus}
-                refreshKey={previewRefreshKey}
-              />
+          {/* App Preview region — the third region of the one-box
+              layout, visible simultaneously with Explorer + editor.
+              It renders the ONE shared preview element relocated from
+              CommandStudio (previewContent), or the pointer card
+              (previewPlaceholder) when the standalone Preview panel is
+              the preview's current home. CodeWorkspace never mounts
+              its own StudioPreviewPanel. Device toggles and preview
+              logs travel with StudioPreviewPanel itself. */}
+          <div
+            className="flex min-w-0 flex-1 flex-col"
+            data-testid="code-preview-region"
+            style={{ borderLeft: "1px solid var(--studio-border)" }}
+          >
+            {previewContent ?? previewPlaceholder ?? (
+              <div
+                className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center"
+                data-testid="code-preview-unavailable"
+              >
+                <Monitor size={24} opacity={0.3} style={{ color: "var(--text-muted)" }} />
+                <p className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
+                  No preview is mounted in the Code panel.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+        </div>
+      )}
+
+      {/* Plan view — StudioPlanSurface inside the Code box
+          (Amendment 4). Its Open-* actions are rewired: targets that
+          now live in Code switch this box's view; the rest summon
+          their board panels. */}
+      {projectId && codeBoxView === "plan" && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="code-box-plan-view">
+          {planCapabilities ? (
+            <StudioPlanSurface
+              capabilities={planCapabilities}
+              modelLabel={planModelLabel ?? ""}
+              onOpenCode={() => setCodeBoxView("code")}
+              onOpenCanvas={() => setCodeBoxView("canvas-design")}
+              onOpenPreview={() => setCodeBoxView("code")}
+              onOpenTerminal={() => onSummonPanel?.("terminal")}
+              onOpenActivity={() => onSummonPanel?.("activity")}
+              onOpenFiles={() => setCodeBoxView("code")}
+              onRollback={() => onRollback?.()}
+            />
+          ) : (
+            <div className="flex flex-1 items-center justify-center px-4 text-center">
+              <p className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
+                Plan is not available in this Code panel mount.
+              </p>
             </div>
           )}
         </div>
+      )}
+
+      {/* Canvas / Design view — the single inseparable Canvas &
+          Design surface (its own Build/Design toggle), threaded in
+          from CommandStudio like the preview element. */}
+      {projectId && codeBoxView === "canvas-design" && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="code-box-canvas-design-view">
+          {canvasContent ?? (
+            <div className="flex flex-1 items-center justify-center px-4 text-center">
+              <p className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
+                Canvas / Design is not available in this Code panel mount.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

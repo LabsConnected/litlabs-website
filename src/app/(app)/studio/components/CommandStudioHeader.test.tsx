@@ -504,3 +504,58 @@ describe("CommandStudioHeader — failed run must not sit under a green Ready pi
     expect(screen.getByTestId("agent-status-pill").textContent).toContain("Working");
   });
 });
+
+describe("CommandStudioHeader — crossbreed layout switch (Amendment 8)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockProviderHealth = {};
+  });
+
+  it("renders no switch when the layout props are absent", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    expect(screen.queryByTestId("studio-layout-switch")).toBeNull();
+  });
+
+  it("shows Board selected in board mode and reports a flip to Regular", () => {
+    const onLayoutModeChange = vi.fn();
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+        layoutMode="board"
+        onLayoutModeChange={onLayoutModeChange}
+      />,
+    );
+    expect(screen.getByTestId("studio-layout-switch")).toBeTruthy();
+    expect(screen.getByTestId("studio-layout-mode-board").getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("studio-layout-mode-classic").getAttribute("aria-selected")).toBe("false");
+    fireEvent.click(screen.getByTestId("studio-layout-mode-classic"));
+    expect(onLayoutModeChange).toHaveBeenCalledWith("classic");
+  });
+
+  it("shows Regular selected in classic mode and reports a flip back to Board", () => {
+    const onLayoutModeChange = vi.fn();
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+        layoutMode="classic"
+        onLayoutModeChange={onLayoutModeChange}
+      />,
+    );
+    expect(screen.getByTestId("studio-layout-mode-classic").getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByTestId("studio-layout-mode-board"));
+    expect(onLayoutModeChange).toHaveBeenCalledWith("board");
+  });
+});

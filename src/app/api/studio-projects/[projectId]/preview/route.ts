@@ -8,6 +8,7 @@ import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
 import {
   startPreviewInternal,
+  restartPreviewInternal,
   getPreviewStatusInternal,
   stopPreviewInternal,
   buildPreviewProxyUrl,
@@ -295,15 +296,29 @@ export async function GET(
 
 /**
  * POST /api/studio-projects/[projectId]/preview
- * Start (or restart) the preview dev server on the Railway terminal server.
+ * Start the preview dev server on the Railway terminal server.
  * Does NOT mark "ready" until the dev server passes an HTTP health probe.
+ *
+ * Round 13: a body of { restart: true } — sent by the panel's
+ * failed-state Restart — takes the terminal's FORCE restart path
+ * (stop + fresh start, bypassing the reuse-a-healthy/in-flight
+ * runtime gate) instead of a plain start. A plain start can silently
+ * adopt a wedged in-flight runtime, which made an explicit user
+ * Restart a no-op against the exact failure it was meant to clear.
+ * A missing/unparseable body is a plain start, exactly as before.
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth(_request);
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const forceRestart =
+    (await request
+      .json()
+      .then((body) => (body as { restart?: unknown } | null)?.restart === true)
+      .catch(() => false)) === true;
 
   const { projectId } = await params;
   const project = await getProject(projectId, userId);
@@ -382,8 +397,20 @@ export async function POST(
       });
 
     let result;
+    if (forceRestart) {
+      // Explicit user Restart on a failed preview: the terminal's
+      // force path tears the runtime down and starts fresh. If there
+      // is no live runtime to restart (e.g. the terminal restarted
+      // and lost it), fall through to a plain start — the user's
+      // intent is a working preview, not a specific mechanism.
+      try {
+        result = await restartPreviewInternal(workspaceId, userId, { projectEnv });
+      } catch {
+        result = undefined;
+      }
+    }
     try {
-      result = await startOnce(workspaceId);
+      result ??= await startOnce(workspaceId);
     } catch (startErr) {
       // Workspace-level 404: the terminal server's registry does not
       // hold the workspace the provisioning step just returned — the

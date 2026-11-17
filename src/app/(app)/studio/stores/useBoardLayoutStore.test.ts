@@ -5,8 +5,13 @@ import {
   useBoardLayoutStore,
   type BoardLayoutPersistedState,
 } from "./useBoardLayoutStore";
-import { defaultBoardLayout } from "../components/board/board-layout";
-import { boardScopeKey } from "../components/board/board-types";
+import { defaultBoardLayout, seedPanelRect } from "../components/board/board-layout";
+import {
+  BOARD_CHAT_UNTOUCHED_DEFAULT_RECT,
+  BOARD_DESIGN_AREA,
+  boardDefinition,
+  boardScopeKey,
+} from "../components/board/board-types";
 
 const USER = "user_1";
 const PROJECT = "project_1";
@@ -71,14 +76,42 @@ describe("panel window actions", () => {
     expect(layout().panels.preview.rect).toEqual(rect);
   });
 
-  it("maximize fills the area and restore returns the exact prior rect", () => {
+  it("maximize fills the region and restore returns the exact prior rect", () => {
     const rect = { ...layout().panels.code.rect };
-    store.getState().toggleMaximize(SCOPE, "code", { width: 1400, height: 900 });
+    const region = { x: 0, y: 0, width: 1400, height: 900 };
+    store.getState().toggleMaximize(SCOPE, "code", region);
     expect(layout().panels.code.maximized).toBe(true);
     expect(layout().panels.code.rect).toEqual({ x: 0, y: 0, width: 1400, height: 900 });
-    store.getState().toggleMaximize(SCOPE, "code", { width: 1400, height: 900 });
+    store.getState().toggleMaximize(SCOPE, "code", region);
     expect(layout().panels.code.maximized).toBe(false);
     expect(layout().panels.code.rect).toEqual(rect);
+  });
+
+  it("maximize fills a region with a non-zero origin exactly (pan/zoom safe)", () => {
+    const region = { x: 120, y: 80, width: 1100, height: 700 };
+    store.getState().toggleMaximize(SCOPE, "code", region);
+    expect(layout().panels.code.maximized).toBe(true);
+    expect(layout().panels.code.rect).toEqual(region);
+  });
+
+  it("summoning a closed panel resets it to its full default size, keeping position", () => {
+    const def = boardDefinition("code");
+    store.getState().setPanelRect(SCOPE, "code", { x: 50, y: 60, width: 300, height: 200 });
+    store.getState().closePanel(SCOPE, "code");
+    store.getState().openPanel(SCOPE, "code");
+    const panel = layout().panels.code;
+    expect(panel.open).toBe(true);
+    expect(panel.rect.width).toBe(def.defaultRect.width);
+    expect(panel.rect.height).toBe(def.defaultRect.height);
+    expect(panel.rect.x).toBe(50);
+    expect(panel.rect.y).toBe(60);
+  });
+
+  it("re-summoning an already-open panel keeps the user's size", () => {
+    store.getState().openPanel(SCOPE, "files");
+    store.getState().setPanelRect(SCOPE, "files", { x: 70, y: 80, width: 320, height: 240 });
+    store.getState().openPanel(SCOPE, "files");
+    expect(layout().panels.files.rect).toEqual({ x: 70, y: 80, width: 320, height: 240 });
   });
 
   it("bringToFront raises z above every other panel exactly once", () => {
@@ -95,7 +128,7 @@ describe("panel window actions", () => {
   });
 
   it("setPanelRect clamps to the minimum size and clears maximized", () => {
-    store.getState().toggleMaximize(SCOPE, "code", { width: 1400, height: 900 });
+    store.getState().toggleMaximize(SCOPE, "code", { x: 0, y: 0, width: 1400, height: 900 });
     store.getState().setPanelRect(SCOPE, "code", { x: 5, y: 5, width: 10, height: 10 });
     expect(layout().panels.code.maximized).toBe(false);
     expect(layout().panels.code.rect.width).toBe(240);
@@ -198,7 +231,7 @@ describe("persist migration → v3 (board-only rebuild defaults)", () => {
     for (const id of ["chat", "preview", "files", "media"] as const) {
       expect(website.panels[id].open).toBe(true);
     }
-    for (const id of ["code", "health", "inspector", "deploy", "browser"] as const) {
+    for (const id of ["code", "health", "deploy", "browser"] as const) {
       expect(website.panels[id].open).toBe(false);
     }
     // Old geometry is gone — panels carry the new default rects.
@@ -219,9 +252,9 @@ describe("persist migration → v3 (board-only rebuild defaults)", () => {
     expect(website.presets.Keep.panels.files.rect).toEqual({ x: 300, y: 260, width: 420, height: 300 });
   });
 
-  it("leaves v4 state and unrecognized input untouched", () => {
-    const v4 = oldState();
-    expect(migrateBoardLayoutPersistedState(v4, 4)).toBe(v4);
+  it("leaves v5 state and unrecognized input untouched", () => {
+    const v5 = oldState();
+    expect(migrateBoardLayoutPersistedState(v5, 5)).toBe(v5);
     expect(migrateBoardLayoutPersistedState(null, 1)).toBeNull();
     expect(migrateBoardLayoutPersistedState("junk", 1)).toBe("junk");
   });
@@ -241,5 +274,64 @@ describe("persist migration → v3 (board-only rebuild defaults)", () => {
     arranged.scopes[SCOPE].panels.terminal.rect = { x: 40, y: 40, width: 500, height: 200 };
     const kept = migrateBoardLayoutPersistedState(arranged, 3);
     expect(kept.scopes[SCOPE].panels.terminal.open).toBe(true);
+  });
+});
+
+describe("persist migration → v5 (centered chat + retired panels)", () => {
+  /** A v4 save: chat still at its old untouched default rect unless a
+   *  test moves it, plus — in one test — entries for the retired
+   *  inspector / plan / canvas panels injected past the type system,
+   *  the way a real pre-v5 localStorage save would carry them. */
+  function v4State(): BoardLayoutPersistedState {
+    return {
+      enabledByUser: { [USER]: true },
+      scopes: { [SCOPE]: defaultBoardLayout("website") },
+    };
+  }
+
+  it("moves a chat still at the exact untouched default to the centered-top seed", () => {
+    const state = v4State();
+    expect(state.scopes[SCOPE].panels.chat.rect).toEqual(BOARD_CHAT_UNTOUCHED_DEFAULT_RECT);
+    const migrated = migrateBoardLayoutPersistedState(state, 4);
+    expect(migrated.scopes[SCOPE].panels.chat.rect).toEqual(
+      seedPanelRect("chat", BOARD_DESIGN_AREA),
+    );
+    // Nothing else moved: a neighbour keeps its exact rect and state.
+    expect(migrated.scopes[SCOPE].panels.files).toBe(state.scopes[SCOPE].panels.files);
+    expect(migrated.enabledByUser[USER]).toBe(true);
+  });
+
+  it("keeps a user-moved chat exactly where the user put it", () => {
+    const state = v4State();
+    const moved = { x: 900, y: 300, width: 500, height: 400 };
+    state.scopes[SCOPE].panels.chat.rect = { ...moved };
+    const migrated = migrateBoardLayoutPersistedState(state, 4);
+    expect(migrated.scopes[SCOPE].panels.chat.rect).toEqual(moved);
+    // No change was needed anywhere, so the scope passes through as-is.
+    expect(migrated.scopes[SCOPE]).toBe(state.scopes[SCOPE]);
+  });
+
+  it("drops retired panel entries (inspector / plan / canvas) without crashing", () => {
+    const state = v4State();
+    const panels = state.scopes[SCOPE].panels as unknown as Record<string, unknown>;
+    const ghost = {
+      id: "inspector",
+      rect: { x: 10, y: 10, width: 300, height: 300 },
+      z: 99,
+      open: true,
+      minimized: false,
+      maximized: false,
+      restoreRect: null,
+    };
+    panels.inspector = ghost;
+    panels.plan = { ...ghost, id: "plan" };
+    panels.canvas = { ...ghost, id: "canvas" };
+    const migrated = migrateBoardLayoutPersistedState(state, 4);
+    const migratedPanels = migrated.scopes[SCOPE].panels as unknown as Record<string, unknown>;
+    expect(migratedPanels.inspector).toBeUndefined();
+    expect(migratedPanels.plan).toBeUndefined();
+    expect(migratedPanels.canvas).toBeUndefined();
+    expect(migrated.scopes[SCOPE].panels.chat).toBeDefined();
+    expect(migrated.scopes[SCOPE].panels.world).toBeDefined();
   });
 });

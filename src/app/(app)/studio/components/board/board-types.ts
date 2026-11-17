@@ -17,12 +17,9 @@ export type BoardPanelId =
   | "terminal"
   | "files"
   | "health"
-  | "inspector"
   | "deploy"
   | "media"
   | "browser"
-  | "plan"
-  | "canvas"
   | "activity"
   | "world";
 
@@ -82,9 +79,38 @@ export interface BoardPanelDefinition {
 }
 
 /**
+ * Panel ids retired by the 2026-11-16 layout spec (Amendments 2–4):
+ * Inspector folded away (its keepers — approvals, changes, plans — live
+ * in the Chat panel's Jobs tab), and Plan / Canvas moved inside the
+ * Code box. Persisted layouts and presets may still carry these ids;
+ * the store migration drops them gracefully. Game World ("world")
+ * stays its own panel — Larry has not decided its fate.
+ */
+export const REMOVED_BOARD_PANEL_IDS: readonly string[] = ["inspector", "plan", "canvas"];
+
+/**
+ * Chat's pre-centering default rect. This exact value is the
+ * "untouched default" signature the layout v5 migration matches on: a
+ * persisted chat panel still sitting at precisely this rect was never
+ * moved by the user, so the migration may recenter it. Do NOT change
+ * this constant without updating the migration to match the OLD value.
+ */
+export const BOARD_CHAT_UNTOUCHED_DEFAULT_RECT: BoardRect = {
+  x: 16,
+  y: 16,
+  width: 404,
+  height: 768,
+};
+
+/** The board's design-space area (~1640×800). The layout migration has
+ *  no live board area to center against, so it seeds chat centered in
+ *  this space; the live board rescues it into view like any panel. */
+export const BOARD_DESIGN_AREA = { width: 1640, height: 800 } as const;
+
+/**
  * The panel inventory. Order here is the board toolbar order — the
  * mockup's pill toolbar (Chat, Preview, Code, Terminal, Files, Checks,
- * Inspector, Deploy, Media, Browser) first, then the remaining panels.
+ * Deploy, Media, Browser) first, then the remaining panels.
  *
  * Default rects live in a ~1640×800 board coordinate space and mirror
  * Larry's Command Center mockup (1672×941): Chat left full-height,
@@ -98,7 +124,11 @@ export const BOARD_PANEL_INVENTORY: BoardPanelDefinition[] = [
   {
     id: "chat",
     title: "Chat",
-    defaultRect: { x: 16, y: 16, width: 404, height: 768 },
+    // Stays at the pre-centering default on purpose: this value IS the
+    // untouched-default signature the v5 migration matches on (see
+    // BOARD_CHAT_UNTOUCHED_DEFAULT_RECT). New scopes are recentered by
+    // the migration / area-aware seed, not by changing this constant.
+    defaultRect: { ...BOARD_CHAT_UNTOUCHED_DEFAULT_RECT },
     defaultOpenFor: ["website", "game"],
     bindingNote:
       "Binds to the LiTT Command Center — the real conversation (transcript + composer) with Chat / Files tabs and New Chat inside the panel.",
@@ -113,7 +143,9 @@ export const BOARD_PANEL_INVENTORY: BoardPanelDefinition[] = [
   {
     id: "code",
     title: "Code",
-    defaultRect: { x: 436, y: 72, width: 700, height: 532 },
+    // Grown for the one-box layout (spec §1): file tree + editor +
+    // preview side by side need the wider box (mapping §8 / §1.6).
+    defaultRect: { x: 436, y: 72, width: 1120, height: 720 },
     defaultOpenFor: [],
     bindingNote: "Binds to the Studio Code surface on the shared project store.",
   },
@@ -143,13 +175,6 @@ export const BOARD_PANEL_INVENTORY: BoardPanelDefinition[] = [
       "Binds to StudioHealthPanel in checks mode — the board's ONE home for Checks (the Inspector's duplicate Checks tab is not carried into the board).",
   },
   {
-    id: "inspector",
-    title: "Inspector",
-    defaultRect: { x: 1152, y: 72, width: 436, height: 460 },
-    defaultOpenFor: [],
-    bindingNote: "Binds to the Inspector (Plan / Changes / Approvals) content.",
-  },
-  {
     id: "deploy",
     title: "Deploy",
     defaultRect: { x: 1152, y: 384, width: 436, height: 260 },
@@ -170,20 +195,6 @@ export const BOARD_PANEL_INVENTORY: BoardPanelDefinition[] = [
     defaultRect: { x: 436, y: 72, width: 860, height: 560 },
     defaultOpenFor: [],
     bindingNote: "An embedded web view on the board — look things up without leaving Studio.",
-  },
-  {
-    id: "plan",
-    title: "Plan",
-    defaultRect: { x: 16, y: 16, width: 436, height: 560 },
-    defaultOpenFor: [],
-    bindingNote: "Binds to StudioPlanSurface — mission, checkpoints, next actions, rollback.",
-  },
-  {
-    id: "canvas",
-    title: "Canvas & Design",
-    defaultRect: { x: 436, y: 72, width: 700, height: 532 },
-    defaultOpenFor: [],
-    bindingNote: "Binds to the unified Canvas & Design stage (Build / Design modes, one builder).",
   },
   {
     id: "activity",

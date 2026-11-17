@@ -37,20 +37,22 @@ import {
   Globe,
   Image as ImageIcon,
   LayoutGrid,
-  ListChecks,
   MessageSquare,
   Monitor,
   MoreHorizontal,
-  Palette,
   Rocket,
   Settings as SettingsIcon,
-  SlidersHorizontal,
   SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useBoardLayoutStore } from "../../stores/useBoardLayoutStore";
+import {
+  BOARD_TOOLBAR_PANEL_IDS,
+  useBoardSettingsStore,
+} from "../../stores/useBoardSettingsStore";
 import BoardPanel from "./BoardPanel";
+import BoardSettingsMenu from "./BoardSettingsMenu";
 import { visiblePanels } from "./board-layout";
 import {
   BOARD_ACCENT_VIOLET,
@@ -68,32 +70,30 @@ const PANEL_ICONS: Record<BoardPanelId, LucideIcon> = {
   terminal: SquareTerminal,
   files: FolderOpen,
   health: ClipboardCheck,
-  inspector: SlidersHorizontal,
   deploy: Rocket,
   media: ImageIcon,
   browser: Globe,
-  plan: ListChecks,
-  canvas: Palette,
   activity: Activity,
   world: Gamepad2,
 };
 
-/** The mockup's pill toolbar: exactly these ten toggles, in this order. */
-const TOOLBAR_PANELS: BoardPanelId[] = [
-  "chat",
-  "preview",
-  "code",
-  "terminal",
-  "files",
-  "health",
-  "inspector",
-  "deploy",
-  "media",
-  "browser",
-];
+/**
+ * The pill toolbar: exactly these nine toggles, in this order. The
+ * Inspector entry is retired (Amendments 2–3, Larry 2026-11-16): its
+ * keepers — approvals, changes, plans — live in the chat panel's Jobs
+ * tab, so the toolbar no longer summons an Inspector window.
+ */
+const TOOLBAR_PANELS: BoardPanelId[] = BOARD_TOOLBAR_PANEL_IDS;
 
-/** Panels that live in the Layout menu rather than the pill itself. */
-const MENU_PANELS: BoardPanelId[] = ["plan", "canvas", "activity", "world"];
+/**
+ * Panels that live in the Layout menu rather than the pill itself.
+ * Plan and Canvas & Design used to sit here — the board's scrollable
+ * strip (Amendment 4, Larry 2026-11-16): they move inside the Code
+ * box, so they leave this menu. Activity stays (it is its own panel
+ * by standing rule) and World stays (Larry has not decided its home
+ * yet — do not move or remove it).
+ */
+const MENU_PANELS: BoardPanelId[] = ["activity", "world"];
 
 export const BOARD_MIN_SCALE = 0.25;
 export const BOARD_MAX_SCALE = 2;
@@ -120,6 +120,10 @@ export default function StudioBoard({
 }: StudioBoardProps) {
   const { tokens } = useTheme();
   const scope = boardScopeKey(userId, projectId);
+  // Board settings (Amendment 5): the toolbar shows only the panels
+  // Larry left on in Board Settings. Ctrl+scroll and the default zoom
+  // are read fresh from the same store where they are used.
+  const toolbarPanels = useBoardSettingsStore((s) => s.toolbarPanels);
   const ensureScope = useBoardLayoutStore((s) => s.ensureScope);
   const layout = useBoardLayoutStore((s) => s.scopes[scope] ?? null);
   const store = useBoardLayoutStore;
@@ -211,6 +215,10 @@ export default function StudioBoard({
     if (!el) return;
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
+      // Board Settings toggle (Amendment 5): with Ctrl+scroll zoom
+      // off, the gesture is left alone entirely — no zoom, and the
+      // page keeps its normal scroll behavior.
+      if (!useBoardSettingsStore.getState().ctrlScrollZoom) return;
       event.preventDefault();
       const state = store.getState();
       const current = state.scopes[scope];
@@ -234,6 +242,23 @@ export default function StudioBoard({
     return () => el.removeEventListener("wheel", onWheel);
   }, [scope, store, hasLayout]);
 
+  // Default zoom (Board Settings, Amendment 5): a board that still
+  // sits at the untouched seed viewport starts at Larry's chosen
+  // default zoom. A viewport he has panned or zoomed himself — which
+  // is what the persisted layout holds — is never overridden.
+  const zoomSeededForScope = useRef<string | null>(null);
+  useEffect(() => {
+    if (!layout) return;
+    if (zoomSeededForScope.current === scope) return;
+    zoomSeededForScope.current = scope;
+    const percent = useBoardSettingsStore.getState().defaultZoomPercent;
+    if (percent === 100) return;
+    const v = layout.viewport;
+    if (v.panX === 0 && v.panY === 0 && (v.scale || 1) === 1) {
+      store.getState().setViewport(scope, { panX: 0, panY: 0, scale: percent / 100 });
+    }
+  }, [layout, scope, store]);
+
   if (!layout) return null;
   const { viewport } = layout;
   const area = {
@@ -245,6 +270,18 @@ export default function StudioBoard({
   const visibleArea = {
     width: Math.round(area.width / (viewport.scale || 1)),
     height: Math.round(area.height / (viewport.scale || 1)),
+  };
+  // The visible REGION (origin + size) in board coordinates — what
+  // maximize snaps to (spec §4b + mapping §7). The origin is the part
+  // the old size-only area missed: under pan, the visible top-left is
+  // (-panX/scale, -panY/scale), not (0, 0), so a size-only maximize
+  // landed at the board origin, potentially off-screen, with drag
+  // disabled while maximized.
+  const visibleRegion = {
+    x: Math.round(-viewport.panX / (viewport.scale || 1)),
+    y: Math.round(-viewport.panY / (viewport.scale || 1)),
+    width: visibleArea.width,
+    height: visibleArea.height,
   };
 
   const onBackgroundPointerDown = (event: ReactPointerEvent) => {
@@ -412,7 +449,7 @@ export default function StudioBoard({
             onRectChange={(id, rect) => store.getState().setPanelRect(scope, id, rect)}
             onBringToFront={(id) => store.getState().bringToFront(scope, id)}
             onMinimize={(id) => store.getState().minimizePanel(scope, id)}
-            onToggleMaximize={(id) => store.getState().toggleMaximize(scope, id, visibleArea)}
+            onToggleMaximize={(id) => store.getState().toggleMaximize(scope, id, visibleRegion)}
             onClose={(id) => store.getState().closePanel(scope, id)}
           >
             {renderPanel ? (
@@ -430,15 +467,18 @@ export default function StudioBoard({
         ))}
       </div>
 
-      {/* ONE compact pill toolbar floating over the board (mockup).
-          Hidden on the phone — the bottom nav + More sheet own that
-          job there (Finish Spec). */}
+      {/* ONE compact pill toolbar floating over the board (mockup),
+          CENTERED in the board's top bar area — left-1/2 with a -50%
+          self-translate, never docked to either edge. Hidden on the
+          phone — the bottom nav + More sheet own that job there
+          (Finish Spec). */}
       <div
         data-board-chrome
+        data-testid="board-toolbar"
         className={`absolute left-1/2 top-3 z-[9999] max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded-full border px-1.5 py-1 shadow-md ${narrow ? "hidden" : "flex"}`}
         style={{ backgroundColor: tokens.surface, borderColor: tokens.border }}
       >
-        {TOOLBAR_PANELS.map(renderSummonButton)}
+        {TOOLBAR_PANELS.filter((id) => toolbarPanels[id]).map(renderSummonButton)}
         <span className="mx-1 h-4 w-px shrink-0" style={{ backgroundColor: tokens.border }} />
         <div className="relative shrink-0">
           <button
@@ -558,6 +598,10 @@ export default function StudioBoard({
             </div>
           )}
         </div>
+        {/* Board Settings (Amendment 5): how the board behaves — open
+            size, maximize, placement, layout memory, zoom, and which
+            panels this toolbar shows. */}
+        <BoardSettingsMenu />
         <span className="mx-1 h-4 w-px shrink-0" style={{ backgroundColor: tokens.border }} />
         {/* Zoom control — "— 100% +" (mockup), plus preset levels. */}
         <div className="flex shrink-0 items-center gap-0.5" data-testid="board-zoom-control">

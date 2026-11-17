@@ -11,7 +11,6 @@ import {
   Eye,
   CircleCheck,
   ShieldCheck,
-  Globe,
   AlertTriangle,
 } from "lucide-react";
 import type { InspectorTab } from "../lib/studio-destinations";
@@ -23,7 +22,6 @@ import { StudioActivityPanel } from "./StudioActivityPanel";
 import StudioHealthPanel from "./StudioHealthPanel";
 import StudioPreviewPanel from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
-import StudioBrowserJobsPanel from "./StudioBrowserJobsPanel";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { describeProjectState } from "@/lib/projects/project-state";
 
@@ -315,7 +313,6 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
   { id: "preview", label: "Preview", icon: Eye },
   { id: "checks", label: "Checks", icon: CircleCheck },
   { id: "approvals", label: "Approvals", icon: ShieldCheck },
-  { id: "browser", label: "Browser", icon: Globe },
 ];
 
 export interface StudioInspectorData {
@@ -422,10 +419,6 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
     return <StudioHealthPanel mode="approvals" projectId={capabilities.projectId} conversationId={data.conversationId ?? null} refreshKey={data.workspaceRevision} />;
   }
 
-  if (tab === "browser") {
-    return <StudioBrowserJobsPanel projectId={capabilities.projectId} conversationId={data.conversationId ?? null} />;
-  }
-
   return (
     <div className="space-y-4">
       <InspectorSection title="Command center">
@@ -516,7 +509,7 @@ export function StudioInspector({
         })}
       </div>
       <div
-        className={activeTab === "browser" ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto p-2.5"}
+        className="min-h-0 flex-1 overflow-y-auto p-2.5"
         role="region"
         aria-label={`${activeTab} inspector`}
       >
