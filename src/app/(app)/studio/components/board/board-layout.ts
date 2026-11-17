@@ -10,6 +10,7 @@ import {
   BOARD_MIN_PANEL_WIDTH,
   BOARD_PANEL_IDS,
   BOARD_PANEL_INVENTORY,
+  boardDefinition,
   type BoardLayoutState,
   type BoardPanelId,
   type BoardPanelState,
@@ -27,6 +28,45 @@ export function clampRect(rect: BoardRect): BoardRect {
     width: Math.max(BOARD_MIN_PANEL_WIDTH, Math.round(rect.width)),
     height: Math.max(BOARD_MIN_PANEL_HEIGHT, Math.round(rect.height)),
   };
+}
+
+/** Top inset for the centered chat anchor — chat sits at the top of
+ *  the board area, directly under the project bar (spec §2; the bar
+ *  itself is chrome above the board, so "project-bar level" lands
+ *  here — mapping §5 flag 1). Matches chat's historical default y. */
+export const BOARD_CHAT_TOP_INSET = 16;
+
+/** A board area a seed is computed against: a visible region in board
+ *  coordinates (origin + size), or a bare size (origin assumed 0,0). */
+export type BoardSeedArea = {
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+};
+
+/**
+ * Area-aware seed rect for a panel (mapping §2/§8).
+ *
+ * Chat is the one anchored panel: within `area` it seeds centered
+ * horizontally at the top — centered, NOT jammed next to the project
+ * name (Larry, spec §2). Its size is its full default size. Every
+ * other panel seeds at its standard default rect verbatim.
+ *
+ * Pure; never mutates the inventory defaults.
+ */
+export function seedPanelRect(panelId: BoardPanelId, area: BoardSeedArea): BoardRect {
+  const def = boardDefinition(panelId);
+  if (panelId !== "chat") return { ...def.defaultRect };
+  const originX = area.x ?? 0;
+  const originY = area.y ?? 0;
+  const centeredX = originX + Math.max(0, Math.round((area.width - def.defaultRect.width) / 2));
+  return clampRect({
+    x: centeredX,
+    y: originY + BOARD_CHAT_TOP_INSET,
+    width: def.defaultRect.width,
+    height: def.defaultRect.height,
+  });
 }
 
 /** The prototype-default arrangement for a project type. */

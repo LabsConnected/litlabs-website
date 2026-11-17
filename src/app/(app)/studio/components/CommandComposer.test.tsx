@@ -495,3 +495,27 @@ describe("CommandComposer — F1 selection context chips (slice B)", () => {
     expect(row.className).toContain("overflow-x-auto");
   });
 });
+
+describe("CommandComposer — composer row cleanup (spec §2c)", () => {
+  it("the glowing presence circle between mic and send is gone; mic and send stay", () => {
+    render(
+      <CommandComposer value="Hello" onChange={vi.fn()} onSend={vi.fn()} busy={false} />,
+    );
+    // The removed element was the LiTT presence indicator: a glowing
+    // ring/dot labelled "LiTT is idle" / "LiTT is working".
+    expect(screen.queryByLabelText(/LiTT is (idle|working)/)).toBeNull();
+    expect(screen.queryByTitle(/LiTT is (idle|working)/)).toBeNull();
+    // Mic and send controls are intact.
+    expect(screen.getByRole("button", { name: /start voice/i })).toBeInTheDocument();
+    expect(screen.getByTestId("studio-send-button")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeInTheDocument();
+  });
+
+  it("busy state still offers cancel on the send button (no presence ring needed)", () => {
+    render(
+      <CommandComposer value="" onChange={vi.fn()} onSend={vi.fn()} onCancel={vi.fn()} busy />,
+    );
+    expect(screen.queryByLabelText(/LiTT is working/)).toBeNull();
+    expect(screen.getByRole("button", { name: /cancel response/i })).toBeInTheDocument();
+  });
+});

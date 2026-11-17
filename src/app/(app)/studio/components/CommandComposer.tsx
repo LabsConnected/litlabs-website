@@ -851,32 +851,14 @@ export default function CommandComposer({
           />
         </button>
 
-        {/* LiTT presence indicator — idle green ring, working spinning ring */}
-        <div
-          className="relative flex h-11 w-11 shrink-0 items-center justify-center"
-          aria-label={busy ? "LiTT is working" : "LiTT is idle"}
-          title={busy ? "LiTT is working…" : "LiTT is idle"}
-        >
-          {/* Outer animated ring */}
-          <div
-            className={`absolute inset-1 rounded-full ${busy ? "animate-spin" : ""}`}
-            style={{
-              border: `2px solid ${busy ? "var(--litt-primary)" : "color-mix(in srgb, var(--color-accent) 40%, transparent)"}`,
-              borderTopColor: busy ? "transparent" : "color-mix(in srgb, var(--color-accent) 80%, transparent)",
-              transition: "border-color 0.3s ease",
-            }}
-          />
-          {/* Inner glow dot */}
-          <div
-            className="h-2 w-2 rounded-full transition-all"
-            style={{
-              backgroundColor: busy ? "var(--litt-primary)" : "var(--color-accent)",
-              boxShadow: busy
-                ? "0 0 8px var(--litt-primary), 0 0 16px var(--litt-primary)"
-                : "0 0 4px color-mix(in srgb, var(--color-accent) 60%, transparent)",
-            }}
-          />
-        </div>
+        {/* REMOVED (spec §2c, Larry 2026-11-16): the glowing circle
+            that sat here between the mic and the send arrow — the
+            LiTT presence indicator (an idle/working status ring with
+            a glowing inner dot, not wired to any action; it only
+            reflected `busy`). Larry: "no need for this", and no pink /
+            glowing ornament stays in the composer row. Busy state is
+            still carried by the send button itself (it becomes the
+            cancel control while a run is live). */}
 
         {/* Send */}
         <button

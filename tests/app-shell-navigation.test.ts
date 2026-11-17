@@ -4,9 +4,11 @@
  * Verifies the ONE canonical authenticated global nav (issue #627 —
  * Studio Merge, 2026-11-12, superseding the prior Assets/Agents/Missions
  * pill layout this file used to encode):
- *   Main: Studio · Discover · Projects
- *   More: Marketplace · Showcase · Games · CLI · Deployments · Docs
- *   Settings moved out of Main into the account menu + phone More menu
+ *   Main: Studio · Discover · Projects · Marketplace · Games · CLI ·
+ *         Deployments · Docs
+ *   More: GONE — emptied and removed (Larry, 2026-11-16); the five
+ *         destinations it held are visible Main items now.
+ *   Settings moved out of Main into the account menu
  *   (Studio Finish Spec, Larry 2026-11-14).
  *
  * Studio is the prime signed-in surface — there is no Home item and no
@@ -35,6 +37,11 @@ describe("AppShell Navigation", () => {
         "Studio",
         "Discover",
         "Projects",
+        "Marketplace",
+        "Games",
+        "CLI",
+        "Deployments",
+        "Docs",
       ]);
     });
 
@@ -44,6 +51,11 @@ describe("AppShell Navigation", () => {
         "/studio",
         "/discover",
         "/projects",
+        "/marketplace",
+        "/games",
+        "/cli",
+        "/deployments",
+        "/docs",
       ]);
     });
 
@@ -70,32 +82,27 @@ describe("AppShell Navigation", () => {
 
     it("no competing legacy nav bars remain (single flat main list)", () => {
       // One source of truth — no sectioned groups duplicating the bar.
-      expect(APP_NAV_MAIN.length).toBe(3);
+      expect(APP_NAV_MAIN.length).toBe(8);
       expect(getVisibleMainNav()).toEqual(APP_NAV_MAIN);
     });
   });
 
-  describe("More menu", () => {
-    it("carries every secondary destination", () => {
-      const labels = APP_NAV_MORE.map((i) => i.label);
-      // "Showcase" removed from More (Larry's header cleanup, 2026-11-14).
-      expect(labels).toEqual([
-        "Marketplace",
-        "Games",
-        "CLI",
-        "Deployments",
-        "Docs",
-      ]);
+  describe("More menu (removed — Larry, 2026-11-16)", () => {
+    it("is empty: every destination it held was promoted to Main", () => {
+      expect(APP_NAV_MORE).toEqual([]);
     });
 
-    it("all More items have real hrefs", () => {
-      APP_NAV_MORE.forEach((item) => {
-        expect(item.href).toMatch(/^\//);
-      });
+    it("the five promoted destinations are Main items with their exact More hrefs", () => {
+      const byLabel = new Map(APP_NAV_MAIN.map((i) => [i.label, i.href]));
+      expect(byLabel.get("Marketplace")).toBe("/marketplace");
+      expect(byLabel.get("Games")).toBe("/games");
+      expect(byLabel.get("CLI")).toBe("/cli");
+      expect(byLabel.get("Deployments")).toBe("/deployments");
+      expect(byLabel.get("Docs")).toBe("/docs");
     });
 
-    it("CLI is reachable from nav (Developer tooling)", () => {
-      const cli = APP_NAV_MORE.find((i) => i.label === "CLI");
+    it("CLI is reachable from the main nav (Developer tooling)", () => {
+      const cli = APP_NAV_MAIN.find((i) => i.label === "CLI");
       expect(cli?.href).toBe("/cli");
     });
   });
@@ -106,7 +113,7 @@ describe("AppShell Navigation", () => {
       expect(ids).toEqual(["library", "devtools"]);
       const hrefs = APP_NAV_SECONDARY.flatMap((s) => s.items.map((i) => i.href));
       // Account menu keeps Files / Saved / Connections. Product resources
-      // such as Docs stay in More, not the personal account menu.
+      // such as Docs are Main nav items, not personal account menu items.
       expect(hrefs).toEqual([
         "/library/files",
         "/library/saved",
@@ -115,10 +122,12 @@ describe("AppShell Navigation", () => {
     });
   });
 
-  it("does not duplicate account destinations in More", () => {
-    const moreLabels = APP_NAV_MORE.map((item) => item.label);
-    expect(moreLabels).not.toEqual(expect.arrayContaining(["Profile", "Wallet", "Settings"]));
-    expect(moreLabels).toEqual(expect.arrayContaining(["Docs", "Deployments"]));
+  it("does not duplicate account destinations in the main nav", () => {
+    const mainLabels = APP_NAV_MAIN.map((item) => item.label);
+    expect(mainLabels).not.toEqual(expect.arrayContaining(["Profile", "Wallet", "Settings"]));
+    expect(mainLabels).toEqual(expect.arrayContaining(["Docs", "Deployments"]));
+    // And nothing at all is left hiding in a More menu.
+    expect(APP_NAV_MORE.map((item) => item.label)).toEqual([]);
   });
 
   // Regression: /hire is permanently retired — the page always redirects

@@ -520,14 +520,16 @@ describe("Board-only shell — the full-window board", () => {
     expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
   });
 
-  it("Inspector, Checks, Deploy and Activity summon as real board bindings; MissionCards ride inside Activity exactly once", async () => {
+  it("Checks, Deploy and Activity summon as real board bindings; MissionCards ride inside Activity exactly once", async () => {
     const { user } = await renderStudioShell();
     await waitFor(() => expect(screen.getByTestId("studio-board")).toBeTruthy());
 
-    await user.click(screen.getByTestId("board-summon-inspector"));
-    await waitFor(() => expect(screen.getByTestId("board-binding-inspector")).toBeTruthy());
-    // The board owns the inspector content — no second right-hand
-    // ContextInspector opens alongside it.
+    // The Inspector board panel is retired (Studio layout build,
+    // 2026-11-17): the board offers no Inspector summon at all and no
+    // binding ever renders — its keepers (approvals / changes / plans)
+    // live in the chat panel's Jobs tab and inside the Code box.
+    expect(screen.queryByTestId("board-summon-inspector")).toBeNull();
+    expect(screen.queryByTestId("board-binding-inspector")).toBeNull();
     expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
 
     await user.click(screen.getByTestId("board-summon-health"));
@@ -543,13 +545,25 @@ describe("Board-only shell — the full-window board", () => {
     expect(screen.getAllByTestId("mission-cards")).toHaveLength(1);
   });
 
-  it("the chat panel's Files tab points at the single Files panel — no second file tree mounts", async () => {
+  it("the chat panel's second tab is Jobs, not Files — Files keeps its single board home", async () => {
     const { user } = await renderStudioShell();
     await waitFor(() => expect(screen.getByTestId("board-chat-panel")).toBeTruthy());
-    await user.click(screen.getByTestId("board-chat-tab-files"));
-    expect(screen.getByTestId("board-chat-open-files")).toBeTruthy();
+    // Spec Amendments 1/3 (2026-11-16): the Files tab was removed from
+    // the chat panel and replaced by the Jobs tab (plan, live steps,
+    // checks summary, approvals, changes). Files lives in the board
+    // Files panel and inside the Code box — still exactly one
+    // StudioProjectFiles instance on the board.
+    expect(screen.queryByTestId("board-chat-tab-files")).toBeNull();
     expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
-    await user.click(screen.getByTestId("board-chat-open-files"));
+    await user.click(screen.getByTestId("board-chat-tab-jobs"));
+    expect(screen.getByTestId("board-chat-jobs")).toBeTruthy();
+    expect(screen.getByTestId("board-chat-jobs-plan")).toBeTruthy();
+    expect(screen.getByTestId("board-chat-jobs-checks")).toBeTruthy();
+    // The Open Checks action renders only when CommandStudio wires
+    // onOpenChecks (Jobs props wiring) — it summons the ONE board
+    // Checks (health) panel, never a second checks instance.
+    await user.click(screen.getByTestId("board-chat-jobs-open-checks"));
+    await waitFor(() => expect(screen.getByTestId("board-binding-health")).toBeTruthy());
     expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
   });
 });
@@ -608,13 +622,15 @@ describe("Board-only — ?tool=design deep link", () => {
     useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
   });
 
-  it("summons the Canvas & Design panel with Design mode preselected, never the retired DesignCanvas", async () => {
+  it("summons the Code panel — Canvas & Design lives inside the Code box now, never the retired DesignCanvas", async () => {
     await renderStudioShell();
-    await waitFor(() => expect(screen.getByTestId("board-panel-canvas")).toBeTruthy());
-    expect(screen.getByTestId("board-binding-canvas")).toBeTruthy();
-    await waitFor(() => {
-      expect(screen.getByTestId("canvas-design-mode-design")).toHaveAttribute("aria-selected", "true");
-    });
+    // Amendment 4: the standalone Canvas board panel is retired; the
+    // ?tool=design deep link summons the Code panel, inside which the
+    // Canvas & Design stage is a view.
+    await waitFor(() => expect(screen.getByTestId("board-panel-code")).toBeTruthy());
+    expect(screen.getByTestId("board-binding-code")).toBeTruthy();
+    expect(screen.queryByTestId("board-panel-canvas")).toBeNull();
+    expect(screen.queryByTestId("board-binding-canvas")).toBeNull();
     expect(screen.queryByTestId("design-canvas")).toBeNull();
   });
 });
