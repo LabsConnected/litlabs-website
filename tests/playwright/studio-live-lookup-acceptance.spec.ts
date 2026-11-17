@@ -34,6 +34,17 @@ async function ensureProject(page: import("@playwright/test").Page) {
 }
 
 async function openBrowserPanel(page: import("@playwright/test").Page) {
+  // The site-wide cookie consent banner (src/components/CookieConsent.tsx,
+  // unrelated to this feature) renders on first load in a fresh browser
+  // context and can intercept pointer events on board-summon-browser.
+  // Pre-seed the same localStorage key it checks so it never mounts,
+  // rather than reaching into unrelated product code or racing its UI.
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "cookie-consent",
+      JSON.stringify({ essential: true, preferences: true, analytics: true, marketing: true, timestamp: Date.now() }),
+    );
+  });
   await page.goto("/studio");
   await waitForPageReady(page, { testId: "studio-command-composer", timeout: 30_000 }).catch(() => {});
   await ensureProject(page);
