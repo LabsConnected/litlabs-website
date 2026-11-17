@@ -79,7 +79,7 @@ const HEALTH_PROBE_INTERVAL_MS = 1000;
  * production preview failures of 2026-11-14 showed the system's own
  * budgets are the binding constraint — the web grants a preview
  * start 120s (TERMINAL_TIMEOUTS.startPreview) and the sandbox runs
- * at 1 vCPU / 1024 MB (DEFAULT_SANDBOX_LIMITS), where a Next.js dev
+ * at 2 vCPU / 2048 MB (DEFAULT_SANDBOX_LIMITS), where a Next.js dev
  * server's cold boot plus first-route compilation has to fit. The
  * probe runs in the background after the start response, so a wider
  * window costs the user nothing but truth: a slow-but-alive server

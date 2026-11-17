@@ -123,7 +123,7 @@ export function describeSandboxInstallExit(result: ExecuteCommandResult): string
  */
 
 /** The sandbox's enforced memory ceiling (template-built, 1024 MB). */
-export const SANDBOX_MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024;
+export const SANDBOX_MEMORY_LIMIT_BYTES = 2048 * 1024 * 1024;
 
 /**
  * Node heap cap for the install process. 768 MB leaves 256 MB of the
@@ -188,7 +188,7 @@ export function buildSandboxInstallEnv(homeDir: string): Record<string, string> 
  * sandbox and logs them through the sandbox-lifecycle logger:
  *
  *   - /sys/fs/cgroup/memory.peak — the attempt's high-water mark
- *     against the 1073741824 limit (cgroup v2 path, with the v1
+ *     against the 2147483648 limit (cgroup v2 path, with the v1
  *     memory.max_usage_in_bytes as fallback). Peak ≈ limit proves
  *     the box hit the ceiling; a peak well below it exonerates
  *     memory entirely.

@@ -468,7 +468,7 @@ describe("background install memory evidence (round 12)", () => {
     expect(line, "an install memory evidence log line").toBeDefined();
     expect(line).toContain(`sandbox=${sandboxId}`);
     expect(line).toContain("exit=0");
-    expect(line).toContain("limit=1073741824");
+    expect(line).toContain("limit=2147483648");
 
     // The evidence read did not disturb the install outcome: the
     // stamp landed and the sandbox reads fresh.
