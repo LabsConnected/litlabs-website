@@ -10,6 +10,10 @@ import {
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
 import {
+  STUDIO_LAYOUT_MODE_OPTIONS,
+  type StudioLayoutMode,
+} from "../stores/useBoardSettingsStore";
+import {
   resolveSelectedModelHealth,
   summarizeProviderHealth,
   type ProviderHealthSummary,
@@ -95,6 +99,8 @@ export default function CommandStudioHeader({
   lastRunFailed = false,
   executionMode = "auto",
   onExecutionModeChange,
+  layoutMode,
+  onLayoutModeChange,
 }: {
   onPreviewAction?: () => void;
   /** Toggles the bottom dock (Activity/Terminal/Inspector/Media). */
@@ -139,6 +145,15 @@ export default function CommandStudioHeader({
   /** Execution mode — shown as a segmented PLAN/ACT/AUTO control. */
   executionMode?: StudioTopBarMode;
   onExecutionModeChange?: (mode: StudioTopBarMode) => void;
+  /**
+   * The crossbreed layout switch (Amendment 8): the effective Studio
+   * layout. Rendered as a Board | Regular segmented control in the
+   * header — visible in BOTH layouts, so a user who flips to Regular
+   * can always flip back. Absent props = no switch (non-studio
+   * destinations, mobile).
+   */
+  layoutMode?: StudioLayoutMode;
+  onLayoutModeChange?: (mode: StudioLayoutMode) => void;
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
@@ -312,6 +327,47 @@ export default function CommandStudioHeader({
         )}
 
       <div className="flex-1" />
+
+      {/* Crossbreed layout switch (Amendment 8) — Board | Regular.
+          Lives in the one header both layouts share, so it is always
+          reachable whichever layout is active. */}
+      {layoutMode && onLayoutModeChange && (
+        <div
+          role="tablist"
+          aria-label="Studio layout"
+          data-testid="studio-layout-switch"
+          className="flex shrink-0 items-center gap-0.5 rounded-lg border p-0.5"
+          style={{ borderColor: "var(--studio-border)" }}
+        >
+          {STUDIO_LAYOUT_MODE_OPTIONS.map((option) => {
+            const selected = layoutMode === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                data-testid={`studio-layout-mode-${option.value}`}
+                onClick={() => onLayoutModeChange(option.value)}
+                className="min-h-8 shrink-0 whitespace-nowrap rounded-md px-2.5 text-[11px] font-bold transition-all active:scale-95 lg:min-h-7"
+                style={{
+                  color: selected ? "var(--text-main)" : "var(--text-dim)",
+                  backgroundColor: selected
+                    ? "color-mix(in srgb, var(--color-accent) 12%, transparent)"
+                    : "transparent",
+                }}
+                title={
+                  option.value === "board"
+                    ? "Board layout — every surface a movable panel"
+                    : "Regular layout — chat beside the workspace"
+                }
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Preview quick action — only when the runtime is actually verified. */}
       {mutationActionsAllowed && runtimeReady && (

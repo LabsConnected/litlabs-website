@@ -195,7 +195,7 @@ export type MissionMode =
   | "templates";
 
 /** Internal tabs inside the right inspector. */
-export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals" | "browser";
+export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals";
 
 /** Internal tabs inside the bottom drawer. */
 export type DrawerTab = "activity" | "terminal" | "media";

@@ -41,6 +41,19 @@ import type {
   FirstMissionLaunchpadState,
 } from "../lib/first-mission-launchpad";
 
+/**
+ * The welcome line shown over the composer before the first run
+ * (spec §2c, Larry 2026-11-16: the old line — "Describe what you want
+ * to build — LiTT drafts it, you review the changes, and nothing
+ * publishes without your say" — gets rewritten). This wording is
+ * PROPOSED for Larry's final pick; it lives in exactly this one
+ * place so changing it is a one-line edit. BoardChatPanel renders it
+ * as its first-action line (the line never lived in this component's
+ * JSX — the empty state renders no welcome by design).
+ */
+export const LITT_WELCOME_LINE =
+  "Tell LiTT what you want to build. LiTT drafts it, shows you every change, and nothing goes live without your say.";
+
 const FACT_META: Record<
   FirstMissionFact["status"],
   { label: string; color: string; icon: typeof CheckCircle2 }

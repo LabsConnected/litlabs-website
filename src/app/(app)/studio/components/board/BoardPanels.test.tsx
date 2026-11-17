@@ -4,6 +4,30 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "@/context/ThemeContext";
 import BoardChatPanel from "./BoardChatPanel";
 import BoardMediaPanel from "./BoardMediaPanel";
+
+// The Jobs tab mounts these three real feeds; stub them here so this
+// suite pins BoardChatPanel's WIRING (which feed, which props) — each
+// feed's own internals are covered by its own suite.
+vi.mock("../StudioHealthPanel", () => ({
+  default: (props: { mode: string; projectId: string | null; conversationId?: string | null }) => (
+    <div
+      data-testid="jobs-approvals-stub"
+      data-mode={props.mode}
+      data-project={props.projectId ?? ""}
+      data-conversation={props.conversationId ?? ""}
+    />
+  ),
+}));
+vi.mock("../RunChangesPanel", () => ({
+  default: (props: { projectId: string | null }) => (
+    <div data-testid="jobs-changes-stub" data-project={props.projectId ?? ""} />
+  ),
+}));
+vi.mock("../ActionRunStatusPanel", () => ({
+  ActionRunStatusPanel: (props: { conversationId: string }) => (
+    <div data-testid="jobs-live-steps-stub" data-conversation={props.conversationId} />
+  ),
+}));
 import BoardBrowserPanel, { normalizeBrowserUrl } from "./BoardBrowserPanel";
 import { useExecutionStore, type ExecutionEvent } from "../../stores/useExecutionStore";
 
@@ -33,11 +57,15 @@ describe("BoardChatPanel (Command Center)", () => {
     onOpenFiles: vi.fn(),
   };
 
-  it("lands straight in the conversation with Chat / Files tabs and New Chat inside the panel", () => {
+  it("lands straight in the conversation with Chat / Jobs tabs and New Chat inside the panel", () => {
     wrap(<BoardChatPanel {...chatProps} />);
     expect(screen.getByTestId("board-chat-panel")).toBeInTheDocument();
     expect(screen.getByTestId("board-chat-tab-chat")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("board-chat-tab-files")).toBeInTheDocument();
+    expect(screen.getByTestId("board-chat-tab-jobs")).toBeInTheDocument();
+    // The Files tab is GONE entirely (Amendments 1+3) — no tab, no pointer content.
+    expect(screen.queryByTestId("board-chat-tab-files")).toBeNull();
+    expect(screen.queryByRole("tab", { name: /files/i })).toBeNull();
+    expect(screen.queryByTestId("board-chat-open-files")).toBeNull();
     // Activity is NOT a chat tab — it is its own board panel.
     expect(screen.queryByRole("tab", { name: /activity/i })).toBeNull();
     expect(screen.getByTestId("transcript-stub")).toBeInTheDocument();
@@ -46,15 +74,94 @@ describe("BoardChatPanel (Command Center)", () => {
     expect(chatProps.onNewChat).toHaveBeenCalled();
   });
 
-  it("the Files tab points at the single Files panel instead of mounting a second tree", () => {
+  it("the Jobs tab holds the plan, work log and checks summary from real store state — the Chat tab stays conversation-only", () => {
+    useExecutionStore.setState({
+      phase: "editing",
+      isRunning: true,
+      events: [
+        executionEvent("e1", "Design landing page"),
+        executionEvent("e2", "Build hero section"),
+        {
+          id: "e3",
+          seq: 3,
+          type: "build_result",
+          summary: "Typecheck finished",
+          check: "typecheck",
+          success: false,
+          errorCount: 2,
+        } as ExecutionEvent,
+      ],
+      checkpoint: null,
+    });
     wrap(<BoardChatPanel {...chatProps} />);
-    fireEvent.click(screen.getByTestId("board-chat-tab-files"));
+    // None of the run machinery is in the conversation anymore.
+    expect(screen.queryByTestId("board-chat-jobs-plan")).toBeNull();
+    expect(screen.queryByText("Design landing page")).toBeNull();
+    fireEvent.click(screen.getByTestId("board-chat-tab-jobs"));
     expect(screen.queryByTestId("transcript-stub")).toBeNull();
-    fireEvent.click(screen.getByTestId("board-chat-open-files"));
-    expect(chatProps.onOpenFiles).toHaveBeenCalled();
+    const plan = screen.getByTestId("board-chat-jobs-plan");
+    expect(plan).toHaveTextContent("Design landing page");
+    expect(plan).toHaveTextContent("Build hero section");
+    const worklog = screen.getByTestId("board-chat-jobs-worklog");
+    expect(worklog).toHaveTextContent("Design landing page");
+    expect(worklog).toHaveTextContent("Typecheck finished");
+    const checks = screen.getByTestId("board-chat-jobs-checks");
+    expect(checks).toHaveTextContent("typecheck");
+    expect(checks).toHaveTextContent("2 errors");
+    // New Chat stays visible and reachable from the Jobs tab chrome too.
+    fireEvent.click(screen.getByTestId("board-chat-new-chat"));
+    expect(chatProps.onNewChat).toHaveBeenCalled();
   });
 
-  it("shows the run's plan as a green-check list and the Site ready card when a run finishes", () => {
+  it("Jobs shows honest empty states when no run, project or conversation is in scope", () => {
+    wrap(<BoardChatPanel {...chatProps} />);
+    fireEvent.click(screen.getByTestId("board-chat-tab-jobs"));
+    expect(screen.getByTestId("board-chat-jobs-plan")).toHaveTextContent("No plan yet");
+    expect(screen.getByTestId("board-chat-jobs-worklog")).toHaveTextContent("No work logged yet");
+    expect(screen.getByTestId("board-chat-jobs-checks")).toHaveTextContent(
+      "No checks have run for this conversation yet.",
+    );
+    expect(screen.getByTestId("board-chat-jobs-live-steps-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("board-chat-jobs-approvals")).toHaveTextContent(
+      "Approvals appear here once a project is open.",
+    );
+    expect(screen.getByTestId("board-chat-jobs-changes")).toHaveTextContent(
+      "Changes appear here once a project is open.",
+    );
+    // No feed panel is mounted against a null project/conversation.
+    expect(screen.queryByTestId("jobs-approvals-stub")).toBeNull();
+    expect(screen.queryByTestId("jobs-changes-stub")).toBeNull();
+    expect(screen.queryByTestId("jobs-live-steps-stub")).toBeNull();
+  });
+
+  it("Jobs mounts approvals (never a second checks instance), changes and live steps from real props", () => {
+    const onOpenChecks = vi.fn();
+    wrap(
+      <BoardChatPanel
+        {...chatProps}
+        projectId="project-1"
+        conversationId="conversation-1"
+        onOpenChecks={onOpenChecks}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("board-chat-tab-jobs"));
+    const approvals = screen.getByTestId("jobs-approvals-stub");
+    expect(approvals).toHaveAttribute("data-mode", "approvals");
+    expect(approvals).toHaveAttribute("data-project", "project-1");
+    expect(approvals).toHaveAttribute("data-conversation", "conversation-1");
+    // Single-home doctrine: no StudioHealthPanel mode="checks" anywhere in Jobs.
+    expect(document.querySelector('[data-mode="checks"]')).toBeNull();
+    expect(screen.getByTestId("jobs-changes-stub")).toHaveAttribute("data-project", "project-1");
+    expect(screen.getByTestId("jobs-live-steps-stub")).toHaveAttribute(
+      "data-conversation",
+      "conversation-1",
+    );
+    // The Checks section summons the one board Checks panel.
+    fireEvent.click(screen.getByTestId("board-chat-jobs-open-checks"));
+    expect(onOpenChecks).toHaveBeenCalled();
+  });
+
+  it("shows the Site ready card when a run finishes — Preview only, no View Files button", () => {
     useExecutionStore.setState({
       phase: "done",
       isRunning: false,
@@ -62,16 +169,12 @@ describe("BoardChatPanel (Command Center)", () => {
       checkpoint: { label: "Landing page build", gitSha: "abc123" },
     });
     wrap(<BoardChatPanel {...chatProps} />);
-    const plan = screen.getByTestId("board-chat-plan");
-    expect(plan).toHaveTextContent("Design landing page");
-    expect(plan).toHaveTextContent("Build hero section");
     const card = screen.getByTestId("board-chat-result-card");
     expect(card).toHaveTextContent("Test Project — Site ready!");
     expect(card).toHaveTextContent("Landing page build");
     fireEvent.click(screen.getByTestId("board-chat-result-preview"));
     expect(chatProps.onOpenPreview).toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId("board-chat-result-files"));
-    expect(chatProps.onOpenFiles).toHaveBeenCalled();
+    expect(screen.queryByTestId("board-chat-result-files")).toBeNull();
   });
 
   it("Try next rows prime the composer through studio:ask-litt — nothing sends itself", () => {
@@ -100,7 +203,7 @@ describe("BoardChatPanel (Command Center)", () => {
   it("before any run, the first action is stated plainly (Finish Spec)", () => {
     wrap(<BoardChatPanel {...chatProps} />);
     expect(screen.getByTestId("board-chat-first-action")).toHaveTextContent(
-      "Describe what you want to build",
+      "Tell LiTT what you want to build. LiTT drafts it, shows you every change, and nothing goes live without your say.",
     );
   });
 

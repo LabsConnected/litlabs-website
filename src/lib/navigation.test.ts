@@ -5,41 +5,58 @@ afterEach(() => {
   vi.doUnmock("@/config/feature-flags");
 });
 
-describe("getVisibleMoreNav — flag-gated nav items", () => {
-  it("shows /games now that retroGameRuntime is enabled (default)", async () => {
-    const { getVisibleMoreNav } = await import("./navigation");
-    const hrefs = getVisibleMoreNav().map((i) => i.href);
-    expect(hrefs).toContain("/games");
-    // The rest of More stays intact. /projects/discover live in Main
-    // now (issue #627 Studio Merge) — they are not More items anymore.
-    expect(hrefs).toEqual(
-      expect.arrayContaining(["/marketplace", "/docs", "/deployments"]),
-    );
+describe("getVisibleMainNav — promoted items + flag-gated Games", () => {
+  it("shows all eight main items now that retroGameRuntime is enabled (default)", async () => {
+    const { getVisibleMainNav } = await import("./navigation");
+    const hrefs = getVisibleMainNav().map((i) => i.href);
+    // The five destinations promoted out of the old More menu (Larry,
+    // 2026-11-16) are visible main items with their exact More hrefs.
+    expect(hrefs).toEqual([
+      "/studio",
+      "/discover",
+      "/projects",
+      "/marketplace",
+      "/games",
+      "/cli",
+      "/deployments",
+      "/docs",
+    ]);
   });
 
-  it("hides /games when retroGameRuntime is disabled", async () => {
+  it("hides /games when retroGameRuntime is disabled — and only /games", async () => {
     vi.doMock("@/config/feature-flags", () => ({
       isFeatureEnabled: (flag: string) => flag !== "retroGameRuntime",
     }));
-    const { getVisibleMoreNav } = await import("./navigation");
-    expect(getVisibleMoreNav().map((i) => i.href)).not.toContain("/games");
+    const { getVisibleMainNav } = await import("./navigation");
+    const hrefs = getVisibleMainNav().map((i) => i.href);
+    expect(hrefs).not.toContain("/games");
+    expect(hrefs).toEqual(
+      expect.arrayContaining(["/marketplace", "/cli", "/docs", "/deployments"]),
+    );
   });
 
-  it("never mutates the canonical APP_NAV_MORE", async () => {
-    vi.doMock("@/config/feature-flags", () => ({
-      isFeatureEnabled: () => false,
-    }));
-    const { getVisibleMoreNav, APP_NAV_MORE } = await import("./navigation");
-    getVisibleMoreNav();
-    expect(APP_NAV_MORE.map((i) => i.href)).toContain("/games");
-  });
-
-  it("main nav is never flag-gated", async () => {
+  it("never mutates the canonical APP_NAV_MAIN", async () => {
     vi.doMock("@/config/feature-flags", () => ({
       isFeatureEnabled: () => false,
     }));
     const { getVisibleMainNav, APP_NAV_MAIN } = await import("./navigation");
-    expect(getVisibleMainNav()).toEqual(APP_NAV_MAIN);
+    getVisibleMainNav();
+    expect(APP_NAV_MAIN.map((i) => i.href)).toContain("/games");
+  });
+
+  it("non-Games main items are never flag-gated", async () => {
+    vi.doMock("@/config/feature-flags", () => ({
+      isFeatureEnabled: () => false,
+    }));
+    const { getVisibleMainNav, APP_NAV_MAIN } = await import("./navigation");
+    expect(getVisibleMainNav()).toEqual(
+      APP_NAV_MAIN.filter((i) => i.href !== "/games"),
+    );
+  });
+
+  it("the More menu is empty — nothing remains in it", async () => {
+    const { APP_NAV_MORE } = await import("./navigation");
+    expect(APP_NAV_MORE).toEqual([]);
   });
 });
 
@@ -67,9 +84,10 @@ describe("withActiveProjectContext — Studio nav keeps the active project", () 
   });
 
   it("leaves non-Studio hrefs untouched", async () => {
-    const { withActiveProjectContext, APP_NAV_MORE } = await import("./navigation");
-    const items = withActiveProjectContext(APP_NAV_MORE, "proj-9");
-    expect(items.map((i) => i.href)).toEqual(APP_NAV_MORE.map((i) => i.href));
+    const { withActiveProjectContext, APP_NAV_MAIN } = await import("./navigation");
+    const nonStudio = APP_NAV_MAIN.filter((i) => i.label !== "Studio");
+    const items = withActiveProjectContext(nonStudio, "proj-9");
+    expect(items.map((i) => i.href)).toEqual(nonStudio.map((i) => i.href));
   });
 
   it("replaces a stale project param instead of duplicating it", async () => {
@@ -96,6 +114,11 @@ describe("withActiveProjectContext — Studio nav keeps the active project", () 
       "/studio",
       "/discover",
       "/projects",
+      "/marketplace",
+      "/games",
+      "/cli",
+      "/deployments",
+      "/docs",
     ]);
   });
 });

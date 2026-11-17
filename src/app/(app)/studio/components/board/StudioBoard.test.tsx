@@ -1,9 +1,10 @@
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/context/ThemeContext";
 import StudioBoard from "./StudioBoard";
 import { useBoardLayoutStore } from "../../stores/useBoardLayoutStore";
+import { useBoardSettingsStore } from "../../stores/useBoardSettingsStore";
 import { boardScopeKey } from "./board-types";
 
 const USER = "user_1";
@@ -26,6 +27,7 @@ function openLayoutMenu() {
 beforeEach(() => {
   localStorage.clear();
   store.setState({ enabledByUser: {}, scopes: {} });
+  useBoardSettingsStore.getState().resetBoardSettings();
 });
 
 describe("StudioBoard surface (board-only)", () => {
@@ -50,7 +52,7 @@ describe("StudioBoard surface (board-only)", () => {
     expect(screen.getByTestId("board-panel-slot-preview")).toHaveTextContent("StudioPreviewPanel");
   });
 
-  it("the pill toolbar holds exactly the ten mockup toggles plus Layout and zoom", () => {
+  it("the pill toolbar holds exactly the nine toggles plus Layout, Board settings and zoom — no Inspector", () => {
     renderBoard();
     for (const id of [
       "chat",
@@ -59,16 +61,30 @@ describe("StudioBoard surface (board-only)", () => {
       "terminal",
       "files",
       "health",
-      "inspector",
       "deploy",
       "media",
       "browser",
     ]) {
       expect(screen.getByTestId(`board-summon-${id}`)).toBeInTheDocument();
     }
+    // Inspector is retired as a toolbar entry (Amendments 2–3): its
+    // keepers live in the chat panel's Jobs tab.
+    expect(screen.queryByTestId("board-summon-inspector")).toBeNull();
     expect(screen.getByTestId("board-layout-menu")).toBeInTheDocument();
+    expect(screen.getByTestId("board-settings-button")).toBeInTheDocument();
     expect(screen.getByTestId("board-zoom-control")).toBeInTheDocument();
     expect(screen.getByTestId("board-zoom-label")).toHaveTextContent("100%");
+  });
+
+  it("the pill toolbar is centered in the board's top bar area, not docked to an edge", () => {
+    renderBoard();
+    const toolbar = screen.getByTestId("board-toolbar");
+    // Horizontally centered: positioned at the container's midpoint
+    // and translated back by half its own width.
+    expect(toolbar.className).toContain("left-1/2");
+    expect(toolbar.className).toContain("-translate-x-1/2");
+    expect(toolbar.className).not.toContain("left-3");
+    expect(toolbar.className).not.toContain("right-3");
   });
 
   it("the toolbar summons a closed panel — user action only", () => {
@@ -78,17 +94,38 @@ describe("StudioBoard surface (board-only)", () => {
     expect(store.getState().scopes[SCOPE].panels.code.open).toBe(true);
   });
 
-  it("the Layout menu summons Plan, Canvas & Design and Activity", () => {
+  it("the Layout menu holds Activity and World — Plan and Canvas left with the scroll strip (Amendment 4)", () => {
     renderBoard();
     openLayoutMenu();
-    fireEvent.click(screen.getByTestId("board-summon-plan"));
-    expect(store.getState().scopes[SCOPE].panels.plan.open).toBe(true);
-    openLayoutMenu();
-    fireEvent.click(screen.getByTestId("board-summon-canvas"));
-    expect(store.getState().scopes[SCOPE].panels.canvas.open).toBe(true);
-    openLayoutMenu();
+    // Plan / Canvas & Design moved inside the Code box; they are gone
+    // from the menu so nothing a user needs hides in a scrollable strip.
+    expect(screen.queryByTestId("board-summon-plan")).toBeNull();
+    expect(screen.queryByTestId("board-summon-canvas")).toBeNull();
     fireEvent.click(screen.getByTestId("board-summon-activity"));
     expect(store.getState().scopes[SCOPE].panels.activity.open).toBe(true);
+    openLayoutMenu();
+    fireEvent.click(screen.getByTestId("board-summon-world"));
+    expect(store.getState().scopes[SCOPE].panels.world.open).toBe(true);
+  });
+
+  it("maximize receives the visible REGION in board coordinates — origin follows pan and scale", () => {
+    const toggleMaximize = vi.fn();
+    store.setState({ toggleMaximize });
+    renderBoard();
+    // Pan the board and zoom to 200%: the visible top-left in board
+    // coordinates is (-panX/scale, -panY/scale) = (100, 40), and the
+    // visible size is the container divided by scale (jsdom measures
+    // 0×0, floored to 1×1 by the board, so 1/2 rounds to 1).
+    act(() => {
+      store.getState().setViewport(SCOPE, { panX: -200, panY: -80, scale: 2 });
+    });
+    fireEvent.click(screen.getByTestId("board-panel-maximize-chat"));
+    expect(toggleMaximize).toHaveBeenCalledWith(SCOPE, "chat", {
+      x: 100,
+      y: 40,
+      width: 1,
+      height: 1,
+    });
   });
 
   it("closing a panel removes it; minimizing parks it in the tray and restore returns it", () => {
@@ -172,6 +209,63 @@ describe("StudioBoard surface (board-only)", () => {
     fireEvent.click(screen.getByTestId("board-zoom-out"));
     expect(store.getState().scopes[SCOPE].viewport.scale).toBeCloseTo(0.9);
     expect(screen.getByTestId("board-zoom-label")).toHaveTextContent("90%");
+  });
+});
+
+describe("StudioBoard Board Settings wiring (Amendment 5)", () => {
+  function openSettingsMenu() {
+    fireEvent.click(screen.getByTestId("board-settings-button"));
+  }
+
+  it("the settings menu explains that a maximized panel is restored before it can be dragged", () => {
+    renderBoard();
+    openSettingsMenu();
+    expect(screen.getByTestId("board-settings-menu")).toBeInTheDocument();
+    expect(screen.getByTestId("board-settings-maximized-note")).toHaveTextContent(
+      /maximized panel.*cannot be dragged/i,
+    );
+  });
+
+  it("toolbar visibility checkboxes in Board Settings show and hide toolbar buttons", () => {
+    renderBoard();
+    expect(screen.getByTestId("board-summon-media")).toBeInTheDocument();
+    openSettingsMenu();
+    fireEvent.click(screen.getByTestId("board-settings-toolbar-media"));
+    expect(useBoardSettingsStore.getState().toolbarPanels.media).toBe(false);
+    expect(screen.queryByTestId("board-summon-media")).toBeNull();
+    // Other toolbar buttons are untouched.
+    expect(screen.getByTestId("board-summon-chat")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("board-settings-toolbar-media"));
+    expect(screen.getByTestId("board-summon-media")).toBeInTheDocument();
+  });
+
+  it("the Ctrl+scroll toggle in Board Settings enables and disables wheel zoom", () => {
+    renderBoard();
+    const board = screen.getByTestId("studio-board");
+    openSettingsMenu();
+    fireEvent.click(screen.getByTestId("board-settings-ctrl-scroll"));
+    expect(useBoardSettingsStore.getState().ctrlScrollZoom).toBe(false);
+    fireEvent.wheel(board, { deltaY: -120, ctrlKey: true });
+    expect(store.getState().scopes[SCOPE].viewport.scale).toBe(1);
+    fireEvent.click(screen.getByTestId("board-settings-ctrl-scroll"));
+    expect(useBoardSettingsStore.getState().ctrlScrollZoom).toBe(true);
+    fireEvent.wheel(board, { deltaY: -120, ctrlKey: true });
+    expect(store.getState().scopes[SCOPE].viewport.scale).toBeGreaterThan(1);
+  });
+
+  it("the Board Settings default zoom applies on board mount", () => {
+    useBoardSettingsStore.getState().setDefaultZoomPercent(150);
+    renderBoard();
+    expect(store.getState().scopes[SCOPE].viewport.scale).toBe(1.5);
+    expect(screen.getByTestId("board-zoom-label")).toHaveTextContent("150%");
+  });
+
+  it("the default zoom never overrides a viewport the user already arranged", () => {
+    store.getState().ensureScope(USER, PROJECT, "website");
+    store.getState().setViewport(SCOPE, { panX: 24, panY: 12, scale: 1 });
+    useBoardSettingsStore.getState().setDefaultZoomPercent(150);
+    renderBoard();
+    expect(store.getState().scopes[SCOPE].viewport).toEqual({ panX: 24, panY: 12, scale: 1 });
   });
 });
 

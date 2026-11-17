@@ -56,6 +56,7 @@ import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import { ActionRunStatusPanel } from "./ActionRunStatusPanel";
+import RunChangesPanel from "./RunChangesPanel";
 import StudioBrowserStatusChip from "./StudioBrowserStatusChip";
 import { ChatBrowserLiveView } from "./ChatBrowserLiveView";
 import LiTTLiveActivity from "./LiTTLiveActivity";
@@ -91,6 +92,7 @@ import BoardChatPanel from "./board/BoardChatPanel";
 import { useBoardProjectType } from "./board/useBoardProjectType";
 import { boardScopeKey, type BoardPanelId } from "./board/board-types";
 import { useBoardLayoutStore } from "../stores/useBoardLayoutStore";
+import { useStudioLayoutMode } from "../stores/useStudioLayoutMode";
 import ContextInspector from "./shell/ContextInspector";
 import ResizeHandle from "./shell/ResizeHandle";
 import StudioDeploySurface from "./shell/StudioDeploySurface";
@@ -398,6 +400,19 @@ function CommandStudioContent() {
   // F1: holds the full StudioSelectionPayload when present, so the structured
   // selection reaches the real LLM send context — not just composer chrome.
   const [previewSelection, setPreviewSelection] = useState<PreviewSelection | StudioSelectionPayload | null>(null);
+  // The shared preview element's refresh key (Code-box build, mapping
+  // §1): CommandStudio owns it because CommandStudio builds the ONE
+  // previewContent element; CodeWorkspace's save path bumps it through
+  // the onPreviewRefreshRequest callback instead of local state.
+  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
+  const handlePreviewRefreshRequest = useCallback(() => {
+    setPreviewRefreshKey((k) => k + 1);
+  }, []);
+  // Browser-jobs surface state (plain local state, NOT InspectorTab):
+  // the StudioBrowserJobsPanel surface is driven by this boolean, so
+  // CommandStudio no longer depends on the "browser" member of the
+  // InspectorTab union (removed by the inspector-retirement lane).
+  const [browserJobsSurfaceActive, setBrowserJobsSurfaceActive] = useState(false);
   // F1: session-scoped ask-litt selection pinned per server task id.
   // Ephemeral by design (never persisted) — declared up here because the
   // studio:ask-litt listener below stamps into it.
@@ -440,7 +455,15 @@ function CommandStudioContent() {
     deriveWorkspaceStage(initial.destination, (initial.mode as StudioMode) ?? "preview") ?? "preview",
   );
 
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>(initial.openInspector ?? "plan");
+  // A legacy "browser" openInspector value (the InspectorTab union's
+  // browser member is being removed by another lane) must never land
+  // in inspector-tab state — it routes to the browser-jobs surface
+  // instead (see handleOpenInspectorTab below).
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>(
+    initial.openInspector && (initial.openInspector as string) !== "browser"
+      ? initial.openInspector
+      : "plan",
+  );
 
   // ── Studio dock state (P2/P3) ────────────────────────────────────
   // The single bottom dock replaces the old left ContextDrawer (desktop),
@@ -469,6 +492,10 @@ function CommandStudioContent() {
     return 320;
   });
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  // Live-run flag for the classic layout's right-side live region
+  // (Amendment 8) — the same store field the board chat's Jobs tab
+  // reads for its live-steps feed.
+  const executionRunning = useExecutionStore((s) => s.isRunning);
   const approvalPhase = useExecutionStore((s) => s.approvalPhase);
   const approvalError = useExecutionStore((s) => s.approvalError);
   const approvalRetryable = useExecutionStore((s) => s.approvalRetryable);
@@ -481,16 +508,17 @@ function CommandStudioContent() {
   const viewportTier = useViewportTier();
   const isMobileLitt = viewportTier === "mobile";
 
-  // Hidden escape hatch while the shell migration lands: the classic
-  // panel layout is also the mobile/non-studio body — honoring this pref
-  // keeps it reachable on desktop. There is intentionally NO toggle UI.
-  const [classicOverride] = useState(() => {
-    try {
-      return window.localStorage.getItem("litt:studio:layout-mode") === "classic";
-    } catch {
-      return false;
-    }
-  });
+  // The crossbreed layout switch (Amendment 8, Larry 2026-11-17):
+  // Studio offers BOTH layouts — the board (flagship default) and the
+  // regular (classic) layout, which is also the mobile/non-studio
+  // body — behind a real, visible toggle in the header and in Board
+  // Settings. The effective mode resolves in useStudioLayoutMode
+  // (explicit persisted choice → the pre-switch escape-hatch key
+  // `litt:studio:layout-mode` → board) and is reactive: flipping the
+  // switch swaps the body branch in place, so the conversation,
+  // project, and preview session this component owns never unmount.
+  const { layoutMode, setLayoutMode } = useStudioLayoutMode();
+  const classicOverride = layoutMode === "classic";
 
   const studioShellActive =
     destination === "studio" && viewportTier !== null && !isMobileLitt && !classicOverride;
@@ -582,6 +610,33 @@ function CommandStudioContent() {
     },
     [userId, boardProjectId, boardProjectType],
   );
+  // Inspector-tab opens, with the retired "browser" tab re-driven:
+  // a "browser" inspector intent no longer lands in inspector-tab
+  // state (that InspectorTab member is being removed). It activates
+  // the plain browser-jobs surface state instead — the board Browser
+  // panel when the board is active, the stage browser surface
+  // otherwise. StudioBrowserJobsPanel itself is unchanged and keeps
+  // rendering from the stage surface (see renderStageSurface).
+  const handleOpenInspectorTab = useCallback(
+    (tab: InspectorTab) => {
+      if ((tab as string) === "browser") {
+        setBrowserJobsSurfaceActive(true);
+        if (studioShellActive) summonBoardPanel("browser");
+        else openStageSurface("browser");
+        return;
+      }
+      setInspectorTab(tab);
+    },
+    [studioShellActive, summonBoardPanel, openStageSurface],
+  );
+  // The browser-jobs surface flag follows the stage surface: leaving
+  // the browser surface deactivates it, so the plain local state never
+  // claims the surface is up when another surface is showing.
+  useEffect(() => {
+    if (stageSurface !== "browser" && browserJobsSurfaceActive) {
+      setBrowserJobsSurfaceActive(false);
+    }
+  }, [stageSurface, browserJobsSurfaceActive]);
   // Deep links (?tool=…) summon the matching board panel — the
   // board-only successor to landing on a stage surface. Runs once per
   // project + tool pair; following the link is the user's gesture.
@@ -595,9 +650,16 @@ function CommandStudioContent() {
     const key = `${boardProjectId}::${tool}`;
     if (handledToolLinkRef.current === key) return;
     handledToolLinkRef.current = key;
+    // NOTE on "browser": this entry maps the stage *surface* to the
+    // standalone Browser BOARD panel — it is not, and never was, the
+    // retired Inspector "browser" tab (InspectorTab). The browser-jobs
+    // surface is driven separately by browserJobsSurfaceActive.
+    // Plan and Canvas/Design summon the Code panel now — those
+    // surfaces live inside the Code box (spec Amendment 4) and their
+    // standalone board panels are retired.
     const panelBySurface: Record<StudioStageSurface, BoardPanelId> = {
-      plan: "plan",
-      design: "canvas",
+      plan: "code",
+      design: "code",
       preview: "preview",
       browser: "browser",
       code: "code",
@@ -655,7 +717,9 @@ function CommandStudioContent() {
       const panelByTab: Record<StudioDockTab, BoardPanelId> = {
         activity: "activity",
         terminal: "terminal",
-        inspector: "inspector",
+        // Inspector is retired as a board panel (Amendments 2-3): its
+        // approvals/changes/plans live in the chat panel's Jobs tab.
+        inspector: "chat",
         media: "media",
       };
       summonBoardPanel(panelByTab[tab]);
@@ -1420,7 +1484,7 @@ function CommandStudioContent() {
     }
     if (mapped.openInspector) {
       handleOpenContextInspector();
-      setInspectorTab(mapped.openInspector);
+      handleOpenInspectorTab(mapped.openInspector);
     }
     // Shell: studio workspace modes select the corresponding stage surface.
     if (studioShellActive && mapped.destination === "studio" && !mapped.openDrawer && !mapped.openInspector) {
@@ -1428,7 +1492,7 @@ function CommandStudioContent() {
       if (surface) openStageSurface(surface);
     }
     setPendingCommand(command);
-  }, [capabilities.terminalStatus, handleOpenContextInspector, handleOpenDockTab, handleOpenFilesPanel, studioShellActive, openStageSurface]);
+  }, [capabilities.terminalStatus, handleOpenContextInspector, handleOpenDockTab, handleOpenFilesPanel, studioShellActive, openStageSurface, handleOpenInspectorTab]);
 
   // One-chat entry chips retired (board-only cleanup, 2026-11-14):
   // the creation-type chips no longer render in the empty state, so
@@ -1476,7 +1540,7 @@ function CommandStudioContent() {
   const conversation = useCanonicalConversation({
     onRouteToolAction: handleRouteTool,
     onRouteInspectorAction: (tab) => {
-      setInspectorTab(tab);
+      handleOpenInspectorTab(tab);
       handleOpenContextInspector();
     },
     onRunHealthChecks: () => {
@@ -3281,6 +3345,11 @@ function CommandStudioContent() {
         </div>
       }
       operatorBar={operatorBar}
+      projectId={capabilities.projectId}
+      conversationId={conversation.selectedConversationId}
+      jobsBusy={conversation.busy}
+      jobsRefreshKey={workspaceRevision}
+      onOpenChecks={() => summonBoardPanel("health")}
       onNewChat={() => {
         void conversation.createConversation({ forceNew: true });
       }}
@@ -3289,7 +3358,9 @@ function CommandStudioContent() {
       onUndo={() => { void handleUndoCompletion(); }}
       onReviewChanges={() => {
         setInspectorTab("changes");
-        summonBoardPanel("inspector");
+        // Inspector is retired as a board panel (Amendments 2-3): changes
+        // live in the chat panel's Jobs tab now, so land on chat.
+        summonBoardPanel("chat");
       }}
     />
   );
@@ -3395,6 +3466,42 @@ function CommandStudioContent() {
     </div>
   );
 
+  // The ONE shared Preview element (Code-box build, mapping §1 — the
+  // filesContent pattern): StudioPreviewPanel with the board binding's
+  // full prop set, built once here and threaded through
+  // BoardPanelBindings. Exactly one home renders it at a time — the
+  // standalone Preview panel or the Code box's preview region; the
+  // other home shows a pointer card. CommandStudio owns the
+  // previewRefreshKey state passed into it; CodeWorkspace's save path
+  // bumps it via onPreviewRefreshRequest.
+  const previewContent = (
+    <StudioPreviewPanel
+      projectId={capabilities.projectId}
+      projectName={capabilities.projectName}
+      repositoryName={capabilities.repositoryName}
+      branch={capabilities.activeBranch}
+      sourceKind={capabilities.sourceKind}
+      sourceStatus={capabilities.sourceStatus}
+      versionControl={capabilities.versionControl}
+      workspaceStatus={capabilities.workspaceStatus ?? null}
+      lastRunFailureNote={lastRunFailureNote}
+      onSelectionChange={setPreviewSelection}
+      refreshKey={previewRefreshKey}
+    />
+  );
+
+  // The browser-jobs surface element — StudioBrowserJobsPanel, driven
+  // by the plain browserJobsSurfaceActive state above, NOT by any
+  // InspectorTab value. The component is unchanged; this is its
+  // chat-side / stage-side home after the Inspector browser tab's
+  // retirement.
+  const browserJobsContent = (
+    <StudioBrowserJobsPanel
+      projectId={capabilities.projectId}
+      conversationId={conversation.selectedConversationId}
+    />
+  );
+
   // The dockable live Preview panel (Phase 2): the SAME
   // StudioPreviewPanel component + props as the Preview stage — no
   // second preview implementation — rendering the same active
@@ -3475,6 +3582,8 @@ function CommandStudioContent() {
       lastRunFailureNote={lastRunFailureNote}
       onPreviewSelectionChange={setPreviewSelection}
       filesContent={projectFilesContent}
+      previewContent={previewContent}
+      onPreviewRefreshRequest={handlePreviewRefreshRequest}
       workspaceRevision={workspaceRevision}
       healthRunTrigger={healthRunTrigger}
       previewSelection={previewSelection}
@@ -3596,25 +3705,26 @@ function CommandStudioContent() {
         // stage (Build/Design toggle around the same builder).
         return renderCanvasDesignStage();
       case "preview":
-        return (
-          <StudioPreviewPanel
-            projectId={projectId}
-            projectName={capabilities.projectName}
-            repositoryName={capabilities.repositoryName}
-            branch={capabilities.activeBranch}
-            sourceKind={capabilities.sourceKind}
-            sourceStatus={capabilities.sourceStatus}
-            versionControl={capabilities.versionControl}
-            workspaceStatus={capabilities.workspaceStatus ?? null}
-            lastRunFailureNote={lastRunFailureNote}
-            onSelectionChange={setPreviewSelection}
-          />
-        );
+        // The ONE shared preview element — the same element the board
+        // Preview panel and the Code box relocate between homes.
+        return previewContent;
       case "browser":
-        return <StudioBrowserJobsPanel projectId={projectId} conversationId={conversation.selectedConversationId} />;
+        // Browser-jobs surface — driven by the plain
+        // browserJobsSurfaceActive local state, not InspectorTab.
+        return browserJobsContent;
       case "code":
         return (
           <CodeWorkspace
+            previewContent={previewContent}
+            canvasContent={renderCanvasDesignStage()}
+            planCapabilities={capabilities}
+            planModelLabel={modelLabel}
+            onPreviewRefreshRequest={handlePreviewRefreshRequest}
+            onSummonPanel={(panelId) => {
+              if (panelId === "terminal") openStageSurface("terminal");
+              else if (panelId === "activity") openStageSurface("activity");
+            }}
+            onRollback={handleRollback}
             projectId={capabilities.projectId}
             repositoryName={capabilities.repositoryName}
             branch={capabilities.activeBranch}
@@ -3822,6 +3932,19 @@ function CommandStudioContent() {
           lastRunFailed={lastRunFailed}
           executionMode={executionMode}
           onExecutionModeChange={setExecutionMode}
+          // The crossbreed switch shows only where the choice exists:
+          // the desktop Studio destination (mobile keeps its sheet/nav
+          // model; other destinations have no layout to switch).
+          layoutMode={
+            destination === "studio" && viewportTier !== null && !isMobileLitt
+              ? layoutMode
+              : undefined
+          }
+          onLayoutModeChange={
+            destination === "studio" && viewportTier !== null && !isMobileLitt
+              ? setLayoutMode
+              : undefined
+          }
         />
 
         {/* Export result toast — reports the server's real outcome. */}
@@ -4015,6 +4138,65 @@ function CommandStudioContent() {
                   toggled from the top command bar. */}
             </div>
 
+            {/* Amendment 8 — the regular layout's right side works hand
+                in hand with chat: while a run is live, the workspace
+                shows the run as it happens — the Jobs live-steps feed
+                (ActionRunStatusPanel, the same action-run projection
+                the board chat's Jobs tab reads) plus the run's file
+                changes (RunChangesPanel, refreshed by the same
+                workspace revision the board passes its Jobs tab). It
+                mounts only while a run is active; the settled record
+                stays in the chat transcript and the dock Activity tab. */}
+            {conversation.selectedConversationId && (executionRunning || conversation.busy) && (
+              <div
+                className="max-h-64 shrink-0 overflow-y-auto border-b"
+                style={{
+                  borderColor: "var(--studio-border)",
+                  backgroundColor: "var(--studio-surface)",
+                }}
+                data-testid="classic-live-run"
+              >
+                <div className="flex items-center gap-2 px-3 pt-2">
+                  <span
+                    className="h-1.5 w-1.5 animate-pulse rounded-full"
+                    style={{ backgroundColor: "var(--color-accent)" }}
+                    aria-hidden
+                  />
+                  <span
+                    className="text-[10px] font-black uppercase tracking-[0.12em]"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    Live — LiTT is working
+                  </span>
+                  <div className="flex-1" />
+                  <button
+                    type="button"
+                    onClick={() => handleOpenDockTab("activity")}
+                    className="rounded px-1.5 py-0.5 text-[10px] font-bold hover:bg-black/5"
+                    style={{ color: "var(--text-muted)" }}
+                    data-testid="classic-live-run-open-activity"
+                  >
+                    Open activity
+                  </button>
+                </div>
+                <div className="px-3 pb-2" data-testid="classic-live-run-steps">
+                  <ActionRunStatusPanel
+                    conversationId={conversation.selectedConversationId}
+                    busy={executionRunning || conversation.busy}
+                  />
+                </div>
+                {capabilities.projectId && (
+                  <div className="px-3 pb-3" data-testid="classic-live-run-changes">
+                    <RunChangesPanel
+                      projectId={capabilities.projectId}
+                      busy={executionRunning || conversation.busy}
+                      refreshKey={workspaceRevision}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Workspace content — a single primary surface. No second pane
                 is ever reserved beside it; the canvas zone takes all
                 remaining width whether chat is expanded or collapsed. */}
@@ -4049,26 +4231,32 @@ function CommandStudioContent() {
                       branch={capabilities.activeBranch}
                       workspaceStatus={capabilities.workspaceStatus ?? null}
                       writeAccess={capabilities.writeAccess ?? true}
+                      previewContent={previewContent}
+                      canvasContent={renderCanvasDesignStage()}
+                      planCapabilities={capabilities}
+                      planModelLabel={modelLabel}
+                      onPreviewRefreshRequest={handlePreviewRefreshRequest}
+                      onSummonPanel={(panelId) => {
+                        if (panelId === "terminal") handleOpenTerminal();
+                        else if (panelId === "activity") handleOpenDockTab("activity");
+                      }}
+                      onRollback={handleRollback}
                     />
                   </div>
                 ) : isPreview ? (
                   /* Preview is the primary workspace tab — the live preview
                      consumes the full workspace width. No second preview
                      column is ever mounted beside it (canvas-first 2-zone
-                     layout). */
+                     layout). Amendment 8: this renders the ONE shared
+                     preview element (previewContent) — the same element
+                     the board's Preview panel, the Code box, and this
+                     layout's Code view relocate between homes — instead
+                     of a separate StudioPreviewPanel instance, so the
+                     classic Preview tab gets the shared element's
+                     refresh key (Code saves bump it) and there is never
+                     a second preview implementation on this surface. */
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    <StudioPreviewPanel
-                      projectId={capabilities.projectId}
-                      projectName={capabilities.projectName}
-                      repositoryName={capabilities.repositoryName}
-                      branch={capabilities.activeBranch}
-                      sourceKind={capabilities.sourceKind}
-                      sourceStatus={capabilities.sourceStatus}
-                      versionControl={capabilities.versionControl}
-                      workspaceStatus={capabilities.workspaceStatus ?? null}
-                      lastRunFailureNote={lastRunFailureNote}
-                      onSelectionChange={setPreviewSelection}
-                    />
+                    {previewContent}
                   </div>
                 ) : isMedia ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
