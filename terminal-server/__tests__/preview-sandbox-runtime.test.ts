@@ -970,6 +970,240 @@ describe("verifySandboxPreviewHealth — earned crash verdict (round 13)", () =>
   });
 });
 
+/**
+ * Round 14 (2026-11-17 re-proof on the round-13 build): the verify
+ * could prove the dev server alive (pid + log tail) while every
+ * probe through the public preview address got NO response — the
+ * stored E2B endpoint, minted once at start and never refreshed,
+ * had died underneath a healthy guest, and the code had no repair
+ * path, only a conviction round 13 rightly refuses for a live pid.
+ * The verify now re-exposes the port and re-probes BEFORE judging:
+ * recovery precedes conviction, and round 13's conviction rules are
+ * untouched for a genuinely dead server.
+ */
+describe("verifySandboxPreviewHealth — upstream repair (round 14)", () => {
+  const OLD_ORIGIN = "https://old-preview.invalid";
+  const NEW_ORIGIN = "https://fresh-preview.invalid";
+
+  const failing: SandboxProbeResult = {
+    healthy: false,
+    authConfigError: false,
+    rootRouteMissing: false,
+    status: null,
+  };
+  const healthy: SandboxProbeResult = {
+    healthy: true,
+    authConfigError: false,
+    rootRouteMissing: false,
+    status: 200,
+  };
+  const probeByOrigin =
+    (healthyOrigins: ReadonlySet<string>) =>
+    async (origin: string): Promise<SandboxProbeResult> =>
+      healthyOrigins.has(origin) ? healthy : failing;
+
+  type LivenessMode = "alive" | "dead" | "unreadable";
+
+  function makeRepairSupport(
+    mode: LivenessMode,
+    exposeImpl?: () => Promise<{ url: string; previewToken: string; expiresAt?: string }>,
+  ): { support: SandboxPreviewSupport; exposePort: ReturnType<typeof vi.fn> } {
+    const exposePort = vi.fn(
+      exposeImpl ??
+        (async () => ({
+          url: NEW_ORIGIN,
+          previewToken: "fresh-token",
+          expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+        })),
+    );
+    const provider = {
+      name: "stub",
+      fileTransfer: {
+        listDir: vi.fn(async () => []),
+        makeDir: vi.fn(async () => {}),
+        writeFile: vi.fn(async () => {}),
+        readFile: vi.fn(async () => new Uint8Array()),
+        listTree: vi.fn(async () => []),
+        removePath: vi.fn(async () => {}),
+        renamePath: vi.fn(async () => {}),
+      },
+      execute: vi.fn(async (_sandboxId: string, input: { command: string }) => {
+        if (input.command.includes("LITT_PREVIEW_LIVENESS")) {
+          if (mode === "unreadable") throw new Error("envd unreachable");
+          return {
+            exitCode: 0,
+            stdout:
+              mode === "alive"
+                ? "LITT_PREVIEW_LIVENESS=alive pid=4242\n"
+                : "LITT_PREVIEW_LIVENESS=dead pid=4242\n",
+            stderr: "",
+            durationMs: 1,
+          };
+        }
+        return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+      }),
+      exposePort,
+      extendTimeout: vi.fn(async () => true),
+    };
+    const executor = {
+      ensureSandboxForPreview: vi.fn(async () => ({ sandboxId: "sbx-1" })),
+      notePreviewPort: vi.fn(),
+    };
+    return {
+      support: {
+        executor: executor as unknown as SandboxWorkspaceExecutor,
+        provider: provider as unknown as SandboxProvider,
+      },
+      exposePort,
+    };
+  }
+
+  function makeReadyRuntime(expiresAt?: number | null): PreviewRuntime {
+    const runtime = makeRuntime();
+    runtime.status = "ready";
+    runtime.upstream = {
+      kind: "sandbox",
+      sandboxId: "sbx-1",
+      origin: OLD_ORIGIN,
+      headers: { "e2b-traffic-access-token": "stub-token" },
+      expiresAt: expiresAt ?? null,
+    };
+    return runtime;
+  }
+
+  it("repairs a dead address under a live pid: re-exposes, swaps the upstream, re-probes healthy", async () => {
+    const { support, exposePort } = makeRepairSupport("alive");
+    const runtime = makeReadyRuntime();
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set([NEW_ORIGIN])),
+    });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(exposePort).toHaveBeenCalledTimes(1);
+    expect(exposePort).toHaveBeenCalledWith("sbx-1", 3000);
+    // The stored upstream now points at the fresh endpoint — origin,
+    // traffic token, and expiry all swapped together.
+    expect(runtime.upstream).toMatchObject({
+      kind: "sandbox",
+      origin: NEW_ORIGIN,
+      headers: { "e2b-traffic-access-token": "fresh-token" },
+    });
+    expect(runtime.healthFailureCount).toBe(0);
+    expect(runtime.healthFailureSince).toBeNull();
+    expect(runtime.logs.some((l) => l.includes("Re-exposed the preview port"))).toBe(true);
+    expect(runtime.logs.some((l) => l.includes("Preview address recovered"))).toBe(true);
+  });
+
+  it("a fresh address that also fails under a live pid stays ready — no conviction — and the failure still counts", async () => {
+    const { support, exposePort } = makeRepairSupport("alive");
+    const runtime = makeReadyRuntime();
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set<string>()),
+    });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(runtime.errorCode).toBeNull();
+    expect(exposePort).toHaveBeenCalledTimes(1);
+    expect(runtime.healthFailureCount).toBe(1);
+    // The failure line names the address that was actually probed —
+    // the discriminator the round-14 diagnosis was starved of.
+    expect(
+      runtime.logs.some((l) => l.includes(`probed ${OLD_ORIGIN}`)),
+    ).toBe(true);
+  });
+
+  it("an expired endpoint triggers re-exposure even when liveness is unreadable, and a healthy fresh address recovers", async () => {
+    const { support, exposePort } = makeRepairSupport("unreadable");
+    const runtime = makeReadyRuntime(Date.now() - 1_000); // lapsed
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set([NEW_ORIGIN])),
+    });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(exposePort).toHaveBeenCalledTimes(1);
+    expect(runtime.healthFailureCount).toBe(0);
+  });
+
+  it("an unexpired endpoint with unreadable liveness does NOT trigger re-exposure below the conviction threshold", async () => {
+    const { support, exposePort } = makeRepairSupport("unreadable");
+    const runtime = makeReadyRuntime(Date.now() + 10 * 60_000);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set<string>()),
+    });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(exposePort).not.toHaveBeenCalled();
+  });
+
+  it("a confirmed-dead pid convicts on the first probe WITHOUT re-exposure when the endpoint is unexpired", async () => {
+    const { support, exposePort } = makeRepairSupport("dead");
+    const runtime = makeReadyRuntime(Date.now() + 10 * 60_000);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set<string>()),
+    });
+
+    expect(ok).toBe(false);
+    expect(runtime.status).toBe("failed");
+    expect(runtime.errorCode).toBe("preview_dev_server_failed");
+    expect(exposePort).not.toHaveBeenCalled();
+  });
+
+  it("when re-exposure itself fails, a live pid still stays ready under the round-13 rules", async () => {
+    const { support } = makeRepairSupport("alive", async () => {
+      throw new Error("provider unavailable");
+    });
+    const runtime = makeReadyRuntime();
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set<string>()),
+    });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(runtime.healthFailureCount).toBe(1);
+  });
+
+  it("the start path stores the endpoint expiry on the runtime upstream", async () => {
+    const { support } = makeSupport();
+    const provider = support.provider as unknown as {
+      exposePort: ReturnType<typeof vi.fn>;
+    };
+    const expiryIso = new Date(1_893_456_000_000).toISOString();
+    provider.exposePort.mockResolvedValue({
+      url: "https://stub-preview.invalid",
+      previewToken: "stub-token",
+      expiresAt: expiryIso,
+    });
+    const runtime = makeRuntime();
+
+    await startSandboxPreview({
+      support,
+      runtime,
+      ws: WS,
+      framework: "custom",
+      command: "node server.js --port 3000",
+      packageManager: "pnpm",
+      travelingEnv: {},
+      probe: healthyProbe,
+    });
+
+    expect(runtime.upstream).toMatchObject({
+      kind: "sandbox",
+      origin: "https://stub-preview.invalid",
+      expiresAt: 1_893_456_000_000,
+    });
+  });
+});
+
 describe("checkSandboxPreviewLiveness (round 13)", () => {
   function livenessSupport(stdout: string | Error): SandboxPreviewSupport {
     const provider = {

@@ -232,10 +232,12 @@ describe("resume stall watchdog", () => {
     await flushMicrotasks();
 
     // 12 seconds of wall time (past the 5s stall bound) with a progress
-    // event every 2 seconds: the watchdog must stay quiet.
+    // event every 2 seconds: the watchdog must stay quiet. Round 14:
+    // the events must be SUBSTANTIVE (a tool result here) — narration
+    // no longer resets the stall clock; see the storm test below.
     for (let i = 0; i < 6; i++) {
       await vi.advanceTimersByTimeAsync(2_000);
-      capturedProgress?.emit({ type: "status", summary: "working" });
+      capturedProgress?.emit({ type: "tool_result", toolId: "files.write", success: true, summary: "ok", durationMs: 5 });
       await flushMicrotasks();
     }
     expect(settleCalls("failed")).toHaveLength(0);
@@ -255,5 +257,33 @@ describe("resume stall watchdog", () => {
     expect(
       settleCalls("failed").filter((a) => a.patch?.failureCode === "EXECUTION_STALLED"),
     ).toHaveLength(0);
+  });
+
+  it("a route-retry storm does NOT reset the stall clock — the watchdog still fires (round 14)", async () => {
+    const res = await POST(makeRequest(), routeParams);
+    expect(res.status).toBe(202);
+    await flushMicrotasks();
+
+    // The lion proof's wrap-up signature: routing/failure events on
+    // repeat for 12 seconds of wall time. Before round 14 every one
+    // of these refreshed lastProgressAt, so the watchdog could never
+    // fire on exactly the runs it exists for.
+    const storm: Array<Record<string, unknown>> = [
+      { type: "route_plan", routes: [{ provider: "gemini", models: ["m"] }], excluded: [] },
+      { type: "model_routing", model: "m", provider: "gemini" },
+      { type: "model_failed", model: "m", category: "quota", message: "429" },
+      { type: "status", summary: "All AI routes unavailable" },
+    ];
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(2_000);
+      for (const event of storm) {
+        capturedProgress?.emit(event as never);
+      }
+      await flushMicrotasks();
+    }
+
+    const failed = settleCalls("failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0].patch?.failureCode).toBe("EXECUTION_STALLED");
   });
 });

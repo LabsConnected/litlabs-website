@@ -573,6 +573,26 @@ describe("studio-projects preview route — force restart (round 13)", () => {
     expect(startPreviewMock).toHaveBeenCalledTimes(1);
   });
 
+  it("POST { restart: true } LOGS the fallback when the force restart throws (round 14)", async () => {
+    // Round 14: the fallback used to be silent, so a "Restart" that
+    // quietly became "reuse the same dead runtime" was invisible in
+    // every surface. The fallback still happens — but it is logged.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    restartPreviewMock.mockRejectedValue(new Error("No preview runtime to restart"));
+    startPreviewMock.mockResolvedValue({
+      status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 790,
+    } as never);
+
+    const res = await postPreview({ restart: true });
+    expect(res.status).toBe(200);
+    expect(startPreviewMock).toHaveBeenCalledTimes(1);
+    const logged = errorSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((line) => line.includes("preview:force_restart_fallback_to_start"));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain("No preview runtime to restart");
+  });
+
   it("POST without a body is a plain start and never touches the force path", async () => {
     startPreviewMock.mockResolvedValue({
       status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 101,

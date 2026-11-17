@@ -67,6 +67,13 @@ describe("maybeAutoInsertGeneratedImage", () => {
     expect(out.siteReference).toContain(out.sitePath as string);
     // Chat rendering is preserved alongside the project save.
     expect(out.downloadUrl).toBe("https://cdn.example.com/gen-abc.png");
+    // Round 14: the UI-only chatImage payload survives the strip so
+    // the loop can render the image inline in the settled chat text
+    // (the model-facing markdown stays stripped — see below).
+    expect(out.chatImage).toEqual({
+      url: "https://cdn.example.com/gen-abc.png",
+      prompt: "hero dog",
+    });
     // The save already happened — the result must not still tell the model
     // to insert the image itself or hand it a payload to re-emit.
     expect(out.insertHint).toBeUndefined();

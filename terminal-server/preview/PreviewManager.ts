@@ -118,6 +118,18 @@ export type PreviewUpstream =
       sandboxId: string;
       origin: string;
       headers: Record<string, string>;
+      /**
+       * Round 14: when the provider endpoint behind `origin` lapses
+       * (epoch ms, from PreviewEndpoint.expiresAt at mint time). The
+       * endpoint is minted once at start; before this field existed
+       * the expiry was recorded on the endpoint and never read by
+       * anyone, so a dead public address was undetectable and
+       * unrepairable. The live verify (sandbox-runtime.ts) treats a
+       * lapsed/near-lapsed endpoint as grounds to re-expose the port
+       * and swap this upstream. Optional: runtimes created before
+       * this field existed read as undefined = no expiry known.
+       */
+      expiresAt?: number | null;
     };
 
 export interface PreviewRuntime {

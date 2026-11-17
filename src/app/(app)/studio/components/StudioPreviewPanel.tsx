@@ -1385,8 +1385,12 @@ export default function StudioPreviewPanel({
       setFrameError(null);
     }
     let cancelled = false;
+    let timedOut = false;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FRAME_PROBE_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, FRAME_PROBE_TIMEOUT_MS);
     (async () => {
       try {
         const response = await fetch(effectivePreviewUrl, { cache: "no-store", credentials: "include", signal: controller.signal });
@@ -1403,7 +1407,17 @@ export default function StudioPreviewPanel({
       } catch {
         if (cancelled) return;
         setFrameCheck("failed");
-        setFrameError("The preview address did not respond. Retry to check it again.");
+        // Round 14: a thrown fetch is two different failures wearing
+        // one message. If OUR probe timer fired, the address was
+        // reached but never answered in time (a black-holed upstream
+        // makes the terminal proxy hang past this probe's budget).
+        // Any other throw means the request never completed at all —
+        // network failure or a cross-origin rejection in the browser.
+        // Say which one happened; the old single "did not respond"
+        // hid the distinction the diagnosis needed.
+        setFrameError(timedOut
+          ? "The preview address did not answer in time — it may still be starting, or the connection is stuck. Retry to check it again."
+          : "The preview address could not be reached from your browser. Retry to check it again.");
       } finally {
         clearTimeout(timer);
       }

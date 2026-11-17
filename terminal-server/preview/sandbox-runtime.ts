@@ -62,6 +62,7 @@ import {
   formatPreviewDiagnostic,
   pushPreviewLog,
   type PreviewRuntime,
+  type PreviewUpstream,
 } from "./PreviewManager";
 
 /** Fixed dev-server port inside the sandbox (one project per sandbox). */
@@ -300,12 +301,17 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
   }
 
   // The upstream: origin + traffic-token header, memory only (§3.2).
+  // Round 14: the endpoint's expiry is stored WITH the upstream —
+  // before this it was minted onto the endpoint object and read by
+  // nobody, so the verify could not tell a lapsed address from a
+  // live one (see verifySandboxPreviewHealth's repair path).
   const endpoint = await provider.exposePort(sandboxId, SANDBOX_PREVIEW_PORT);
   runtime.upstream = {
     kind: "sandbox",
     sandboxId,
     origin: endpoint.url,
     headers: { [SANDBOX_TRAFFIC_TOKEN_HEADER]: endpoint.previewToken },
+    expiresAt: parseEndpointExpiry(endpoint.expiresAt),
   };
   runtime.port = SANDBOX_PREVIEW_PORT;
   executor.notePreviewPort(ws, SANDBOX_PREVIEW_PORT);
@@ -534,6 +540,85 @@ export async function checkSandboxPreviewLiveness(
   }
 }
 
+/** PreviewEndpoint.expiresAt is an ISO string; the runtime stores epoch ms. */
+function parseEndpointExpiry(expiresAt: string | undefined): number | null {
+  if (!expiresAt) return null;
+  const ms = Date.parse(expiresAt);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Round 14: an endpoint this close to its recorded expiry (or past
+ * it) is grounds for re-exposure on a failed verify round. The
+ * endpoint's nominal life is the provider's idle timeout (15 min);
+ * the skew keeps a verify round from racing the lapse.
+ */
+export const PREVIEW_EXPOSURE_REFRESH_SKEW_MS = 60_000;
+
+interface UpstreamRepairOutcome {
+  /** The probe result against the FRESH upstream. */
+  result: SandboxProbeResult;
+  /** The upstream now stored on the runtime. */
+  upstream: Extract<PreviewUpstream, { kind: "sandbox" }>;
+}
+
+/**
+ * Round 14 — repair the data path before judging the server.
+ *
+ * Re-expose the preview port, swap the runtime's stored upstream to
+ * the fresh endpoint (origin + traffic token + expiry), and probe
+ * the fresh address once. This is the discriminator the round-14
+ * diagnosis named: a fresh address that answers proves the stored
+ * one had died; a fresh address that also fails while the guest
+ * serves locally proves the provider ingress/token path is down —
+ * either way the runtime learns something conviction never could.
+ *
+ * Returns null when re-exposure itself is unavailable (provider
+ * error) — the caller's round-13 rules then decide, exactly as
+ * before this repair existed.
+ */
+async function repairSandboxPreviewUpstream(
+  support: SandboxPreviewSupport,
+  runtime: PreviewRuntime,
+  probe: (
+    origin: string,
+    headers: Record<string, string>,
+  ) => Promise<SandboxProbeResult>,
+): Promise<UpstreamRepairOutcome | null> {
+  const upstream = runtime.upstream;
+  if (!upstream || upstream.kind !== "sandbox") return null;
+  let endpoint;
+  try {
+    endpoint = await support.provider.exposePort(
+      upstream.sandboxId,
+      SANDBOX_PREVIEW_PORT,
+    );
+  } catch {
+    return null;
+  }
+  const fresh: Extract<PreviewUpstream, { kind: "sandbox" }> = {
+    kind: "sandbox",
+    sandboxId: upstream.sandboxId,
+    origin: endpoint.url,
+    headers: { [SANDBOX_TRAFFIC_TOKEN_HEADER]: endpoint.previewToken },
+    expiresAt: parseEndpointExpiry(endpoint.expiresAt),
+  };
+  runtime.upstream = fresh;
+  pushPreviewLog(
+    runtime,
+    `[preview] Re-exposed the preview port — fresh address ${endpoint.url} (was ${upstream.origin})`,
+  );
+  const result = await probe(fresh.origin, fresh.headers).catch(
+    (): SandboxProbeResult => ({
+      healthy: false,
+      authConfigError: false,
+      rootRouteMissing: false,
+      status: null,
+    }),
+  );
+  return { result, upstream: fresh };
+}
+
 /**
  * Live health verification for a sandbox runtime (the status route's
  * verifyPreviewHealth, sandbox branch): probe through the upstream
@@ -543,6 +628,15 @@ export async function checkSandboxPreviewLiveness(
  * definitive verdicts (root route 404, auth-config 500) are
  * unchanged: those responses prove a live server answering wrongly,
  * so they still flip immediately.
+ *
+ * Round 14: a generic failure with a LIVE pid — or with a stored
+ * endpoint at/past its recorded expiry — first tries to repair the
+ * data path (re-expose + swap + re-probe, see
+ * repairSandboxPreviewUpstream). The 2026-11-17 re-proof showed the
+ * state round 13 could not express: guest alive and serving, public
+ * address dead, no repair path — the runtime sat failed-but-alive
+ * forever. Recovery now precedes conviction; the conviction rules
+ * themselves are untouched for a genuinely dead server.
  */
 export async function verifySandboxPreviewHealth(
   support: SandboxPreviewSupport,
@@ -559,15 +653,29 @@ export async function verifySandboxPreviewHealth(
   if (!upstream || upstream.kind !== "sandbox" || runtime.status !== "ready") return false;
   await tailSandboxPreviewLogs(support, runtime).catch(() => {});
   const probe = deps.probe ?? probeUpstream;
-  const result = await probe(upstream.origin, upstream.headers).catch(
-    (): SandboxProbeResult => ({
-      healthy: false,
-      authConfigError: false,
-      rootRouteMissing: false,
-      status: null,
-    }),
-  );
-  if (result.healthy) {
+
+  const flipRootRouteMissing = (): false => {
+    runtime.status = "failed";
+    runtime.errorCode = "preview_root_route_missing";
+    runtime.error = withPreviewLogDiagnostic(
+      "The preview server is running, but GET / returned 404 (Cannot GET /). Fix the project's root entry route and restart preview.",
+      boundedPreviewLogTail(runtime.logs),
+    );
+    pushPreviewLog(runtime, "[preview] Root route missing during live health check (HTTP 404)");
+    return false;
+  };
+  const flipAuthConfigError = (status: number | null): false => {
+    runtime.status = "failed";
+    runtime.errorCode = "preview_auth_config_error";
+    runtime.error = withPreviewLogDiagnostic(
+      `Health check detected an authentication configuration error (HTTP ${status}). ` +
+        "The Clerk secret key or publishable key is invalid, stale, or mismatched.",
+      boundedPreviewLogTail(runtime.logs),
+    );
+    pushPreviewLog(runtime, `[preview] Auth config error detected during health check (HTTP ${status})`);
+    return false;
+  };
+  const markHealthy = async (): Promise<true> => {
     runtime.healthFailureCount = 0;
     runtime.healthFailureSince = null;
     runtime.lastHealthCheck = Date.now();
@@ -578,28 +686,19 @@ export async function verifySandboxPreviewHealth(
         .catch(() => {});
     }
     return true;
-  }
-  if (result.rootRouteMissing) {
-    runtime.status = "failed";
-    runtime.errorCode = "preview_root_route_missing";
-    runtime.error = withPreviewLogDiagnostic(
-      "The preview server is running, but GET / returned 404 (Cannot GET /). Fix the project's root entry route and restart preview.",
-      boundedPreviewLogTail(runtime.logs),
-    );
-    pushPreviewLog(runtime, "[preview] Root route missing during live health check (HTTP 404)");
-    return false;
-  }
-  if (result.authConfigError) {
-    runtime.status = "failed";
-    runtime.errorCode = "preview_auth_config_error";
-    runtime.error = withPreviewLogDiagnostic(
-      `Health check detected an authentication configuration error (HTTP ${result.status}). ` +
-        "The Clerk secret key or publishable key is invalid, stale, or mismatched.",
-      boundedPreviewLogTail(runtime.logs),
-    );
-    pushPreviewLog(runtime, `[preview] Auth config error detected during health check (HTTP ${result.status})`);
-    return false;
-  }
+  };
+
+  const result = await probe(upstream.origin, upstream.headers).catch(
+    (): SandboxProbeResult => ({
+      healthy: false,
+      authConfigError: false,
+      rootRouteMissing: false,
+      status: null,
+    }),
+  );
+  if (result.healthy) return markHealthy();
+  if (result.rootRouteMissing) return flipRootRouteMissing();
+  if (result.authConfigError) return flipAuthConfigError(result.status);
 
   // Generic non-healthy (a 500 without auth text, a 3xx, a refused
   // connection, a 3 s timeout): evidence of a missed fetch, not yet
@@ -613,13 +712,46 @@ export async function verifySandboxPreviewHealth(
   const probeNote = `HTTP ${result.status ?? "no response"}`;
 
   const liveness = await checkSandboxPreviewLiveness(support, upstream.sandboxId);
+
+  // Round 14 repair: the pid lives (the address, not the server, is
+  // the suspect) or the stored endpoint has lapsed — re-expose and
+  // re-probe BEFORE any conviction. A confirmed-dead pid with an
+  // unexpired endpoint skips repair entirely: re-exposure cannot
+  // resurrect a process, and round 13's first-check conviction
+  // stands. The probed origin rides every failure line below — one
+  // line per verify round — so the next diagnosis can see WHICH
+  // address died instead of reconstructing it.
+  const endpointExpired =
+    upstream.expiresAt != null &&
+    now >= upstream.expiresAt - PREVIEW_EXPOSURE_REFRESH_SKEW_MS;
+  if (liveness.alive === true || endpointExpired) {
+    const repair = await repairSandboxPreviewUpstream(support, runtime, probe);
+    if (repair) {
+      if (repair.result.healthy) {
+        pushPreviewLog(
+          runtime,
+          `[preview] Preview address recovered — the re-exposed address is answering; ` +
+            `the dev server (pid ${liveness.pid ?? "unknown"}) never died`,
+        );
+        return markHealthy();
+      }
+      if (repair.result.rootRouteMissing) return flipRootRouteMissing();
+      if (repair.result.authConfigError) return flipAuthConfigError(repair.result.status);
+      // The fresh address fails generically too. With a live pid
+      // that is the provider-ingress signature, not a crash — the
+      // round-13 rules below still govern (stay ready). With a dead
+      // or unreadable pid, conviction proceeds on the accumulated
+      // evidence, unchanged.
+    }
+  }
+
   if (liveness.alive === true) {
     // The server process exists — the probe missed a busy or slow
     // upstream. Stay ready; the next healthy probe resets the count.
     pushPreviewLog(
       runtime,
       `[preview] Live health probe failed (${probeNote}) but the dev server process ` +
-        `(pid ${liveness.pid}) is alive in the sandbox — staying ready`,
+        `(pid ${liveness.pid}) is alive in the sandbox — staying ready (probed ${upstream.origin})`,
     );
     return true;
   }
@@ -630,7 +762,7 @@ export async function verifySandboxPreviewHealth(
     pushPreviewLog(
       runtime,
       `[preview] Live health probe failed (${probeNote}, ${failures} consecutive) — ` +
-        `not enough evidence of a crash yet, staying ready`,
+        `not enough evidence of a crash yet, staying ready (probed ${upstream.origin})`,
     );
     return true;
   }
