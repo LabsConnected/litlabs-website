@@ -17,7 +17,7 @@ import {
   type PausedRunRecord,
   type RunResult,
 } from "@/lib/litt-intelligence/paused-run-store";
-import { ProgressEmitter } from "@/lib/litt-intelligence/progress-events";
+import { ProgressEmitter, isSubstantiveProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, isFileWritingTool, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
@@ -65,8 +65,18 @@ import { attachActionRunToConversationTask, settleConversationTask } from "@/lib
  * resumed execution finishes — without this writeback a page refresh would
  * show a run that never resolved. If the original message can't be found
  * (deleted conversation etc.), the result is appended as a new message so
- * the work isn't invisible. Best-effort: the authoritative outcome is
- * already durable on the canonical action_run.
+ * the work isn't invisible.
+ *
+ * Round 14 — durability split, stated plainly: the settlement OUTCOME
+ * is durable independent of this write. settleResumedRunOutcome
+ * persists the full RunResult (final text included) on the canonical
+ * action_run's terminal event, and the paused-run row carries its own
+ * run_result — both land regardless of the transcript. This write is
+ * the transcript RENDERING of that outcome. It used to fail silently
+ * (one attempt, log-only), which is how the lion proof's chat showed
+ * nothing after a completed run. It now retries once and RETURNS
+ * whether the transcript reflects the outcome, so callers can log
+ * the lag explicitly instead of the failure disappearing.
  */
 async function writeResumedResultToTranscript(opts: {
   conversationId: string;
@@ -75,32 +85,38 @@ async function writeResumedResultToTranscript(opts: {
   pausedRunId: string;
   status: MessageStatus;
   content?: string;
-}): Promise<void> {
-  try {
-    const awaiting = await getAwaitingApprovalAssistantMessage(opts.conversationId, opts.userId);
-    if (awaiting) {
-      await updateMessageStatus(awaiting.id, opts.userId, opts.status, opts.content);
-      return;
+}): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const awaiting = await getAwaitingApprovalAssistantMessage(opts.conversationId, opts.userId);
+      if (awaiting) {
+        await updateMessageStatus(awaiting.id, opts.userId, opts.status, opts.content);
+        return true;
+      }
+      if (opts.content?.trim()) {
+        await insertMessage({
+          conversationId: opts.conversationId,
+          ownerId: opts.userId,
+          projectId: opts.projectId,
+          role: "assistant",
+          content: opts.content,
+          status: opts.status,
+          clientRequestId: `resume:${opts.pausedRunId}`,
+        });
+      }
+      return true;
+    } catch (err) {
+      if (attempt === 1) {
+        studioLog("approval:transcript_writeback_failed", {
+          conversationId: opts.conversationId,
+          userId: opts.userId,
+          pausedRunId: opts.pausedRunId,
+          errorClass: err instanceof Error ? err.message : "unknown",
+        });
+      }
     }
-    if (opts.content?.trim()) {
-      await insertMessage({
-        conversationId: opts.conversationId,
-        ownerId: opts.userId,
-        projectId: opts.projectId,
-        role: "assistant",
-        content: opts.content,
-        status: opts.status,
-        clientRequestId: `resume:${opts.pausedRunId}`,
-      });
-    }
-  } catch (err) {
-    studioLog("approval:transcript_writeback_failed", {
-      conversationId: opts.conversationId,
-      userId: opts.userId,
-      pausedRunId: opts.pausedRunId,
-      errorClass: err instanceof Error ? err.message : "unknown",
-    });
   }
+  return false;
 }
 
 /**
@@ -644,10 +660,18 @@ export async function POST(
       .catch(() => undefined);
   }, RUN_HEARTBEAT_MS);
   (heartbeat as NodeJS.Timeout).unref?.();
-  // Zero-cost progress signal: every loop event refreshes the timestamp
-  // the next heartbeat persists. A wedged loop stops producing events —
-  // that is what separates "slow but working" from "alive but stalled".
-  const runProgress = new ProgressEmitter(() => {
+  // Zero-cost progress signal: SUBSTANTIVE loop events refresh the
+  // timestamp the next heartbeat persists. Round 14: this used to
+  // refresh on every event, so a wrap-up route-retry storm
+  // (route_plan / model_routing / model_failed on repeat) refreshed
+  // the stall clock forever while the loop went nowhere — the
+  // watchdog above could never fire on exactly the runs it exists
+  // for. Only events that prove the loop's state advanced count now
+  // (isSubstantiveProgressEvent); a wedged loop stops producing
+  // those — that is what separates "slow but working" from "alive
+  // but stalled".
+  const runProgress = new ProgressEmitter((event) => {
+    if (!isSubstantiveProgressEvent(event)) return;
     lastProgressAt = new Date().toISOString();
     lastProgressAtMs = Date.now();
   });
@@ -1125,8 +1149,11 @@ export async function POST(
       // Reflect the final outcome on the transcript BEFORE marking the run
       // completed — a poller that sees "completed" can then loadMessages
       // and get the real persisted result. An honest loop failure is
-      // reported as failed, never completed.
-      await writeResumedResultToTranscript({
+      // reported as failed, never completed. Round 14: if the writeback
+      // still fails after its retry, say so in the log — the outcome
+      // itself stays durable via settleResumedRunOutcome's RunResult
+      // below; only the transcript rendering lags.
+      const transcriptWritten = await writeResumedResultToTranscript({
         conversationId,
         userId,
         projectId: resolved.projectId,
@@ -1140,6 +1167,13 @@ export async function POST(
               : "completed",
         content: (terminalFailure || finalText) || undefined,
       });
+      if (!transcriptWritten) {
+        studioLog("approval:settled_outcome_transcript_lagging", {
+          conversationId,
+          userId,
+          pausedRunId,
+        });
+      }
 
       const runResult: RunResult = {
         finalText,
@@ -1465,6 +1499,9 @@ function resumedDeployPublicUrl(
  * is read from the workspace and must contain non-trivial content. An
  * unreadable or empty file files nothing — the gate keeps its honesty.
  */
+/** Round 14: a sandbox read in the settle path gets a hard bound. */
+const RESUMED_ARTIFACT_READ_TIMEOUT_MS = 10_000;
+
 async function fileResumedArtifactCheck(
   qualitySession: Parameters<typeof noteStaticArtifactCheck>[0],
   transport: { readFile(path: string): Promise<{ content: string } | string> },
@@ -1472,7 +1509,24 @@ async function fileResumedArtifactCheck(
 ): Promise<void> {
   try {
     const candidate = (resumePreview?.files ?? []).find((f) => /\.(html?|css|js)$/i.test(f)) ?? "index.html";
-    const file = await transport.readFile(candidate);
+    // Round 14: this read sits between the loop's return and the
+    // settlement writes. It used to be unbounded, so a hung sandbox
+    // read blocked settlement exactly like a hung checkpoint did.
+    // A timeout lands in the same honest bucket as a failed read:
+    // contentMatches null — the gate files nothing it could not see.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const file = await Promise.race([
+      transport.readFile(candidate),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("artifact read timed out")),
+          RESUMED_ARTIFACT_READ_TIMEOUT_MS,
+        );
+        (timer as { unref?: () => void }).unref?.();
+      }),
+    ]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
     const content = typeof file === "string" ? file : file?.content;
     noteStaticArtifactCheck(qualitySession, {
       path: candidate,

@@ -57,6 +57,50 @@ export type AgentLoopPhase =
   | "finished"
   | "cancelled";
 
+/**
+ * Round 14 — what counts as PROGRESS for stall detection.
+ *
+ * The resume watchdog's stall clock used to refresh on EVERY loop
+ * event. A wrap-up route-retry storm (route_plan → model_routing →
+ * model_failed, repeated for minutes while every provider route
+ * fails) therefore looked exactly like progress, and the watchdog
+ * could never fire — the run sat "alive" while doing nothing. The
+ * 2026-11-17 lion proof's tail died in precisely that storm.
+ *
+ * Substantive progress = the loop's state actually advancing: a
+ * phase change, a tool starting or returning, a workspace change,
+ * a checkpoint, a build/preview/deploy step, a quality verdict, a
+ * repair attempt, an approval gate, or the run finishing. Model
+ * routing/response/failure bookkeeping, step timings, reasoning
+ * summaries, and free-text status narration are NOT progress — they
+ * can all be produced by a loop that is going nowhere.
+ */
+const SUBSTANTIVE_PROGRESS_TYPES: ReadonlySet<ProgressEvent["type"]> = new Set([
+  "phase",
+  "tool_start",
+  "tool_result",
+  "approval_required",
+  "checkpoint",
+  "build_start",
+  "build_result",
+  "workspace_change",
+  "repair_attempt",
+  "preview_start",
+  "preview_status",
+  "preview_result",
+  "deploy_start",
+  "deploy_status",
+  "deploy_result",
+  "deploy_verify",
+  "quality_verdict",
+  "finished",
+  "cancelled",
+]);
+
+export function isSubstantiveProgressEvent(event: ProgressEvent): boolean {
+  return SUBSTANTIVE_PROGRESS_TYPES.has(event.type);
+}
+
 export class ProgressEmitter {
   private listeners: Array<(event: ProgressEvent) => void> = [];
 

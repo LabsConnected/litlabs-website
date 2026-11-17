@@ -17,6 +17,7 @@ import {
 import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
 import { createPreviewToken } from "@/lib/projects/preview-token";
 import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE, isHostExecutionPermitted } from "@/lib/host-execution-guard";
+import { studioLog } from "@/lib/studio/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -403,9 +404,20 @@ export async function POST(
       // is no live runtime to restart (e.g. the terminal restarted
       // and lost it), fall through to a plain start — the user's
       // intent is a working preview, not a specific mechanism.
+      // Round 14: the fallback is LOGGED, never silent. In the
+      // 2026-11-17 proof a "Restart" silently became a plain start
+      // whose reuse gate handed back the same runtime with the same
+      // dead preview address — indistinguishable from a real restart
+      // in every surface. The fallback is still the right recovery;
+      // it just has to be visible.
       try {
         result = await restartPreviewInternal(workspaceId, userId, { projectEnv });
-      } catch {
+      } catch (restartErr) {
+        studioLog("preview:force_restart_fallback_to_start", {
+          projectId,
+          userId,
+          errorClass: restartErr instanceof Error ? restartErr.message : "unknown",
+        });
         result = undefined;
       }
     }

@@ -40,6 +40,7 @@ import {
 } from "@/lib/billing/canonical-pricing";
 import {
   createGenerationJob,
+  getGenerationJob,
   getGenerationJobByRequestId,
   updateGenerationJobStatus,
   updateGenerationJobMetadata,
@@ -1154,6 +1155,12 @@ export interface ImageServiceDeps {
     jobId: string,
     metadataUpdates: Record<string, unknown>,
   ) => Promise<void>;
+  /**
+   * Round 14: read a job row back by id — the completion read-back
+   * in §8 verifies the completion writes actually landed before the
+   * service reports a persisted asset.
+   */
+  getJob: (jobId: string) => Promise<GenerationJob | null>;
   getBalances: (clerkId: string) => Promise<{ total: number }>;
   debit: (
     clerkId: string,
@@ -1180,10 +1187,25 @@ const defaultDeps: ImageServiceDeps = {
   getJobByRequestId: (internalUserId, requestId) =>
     getGenerationJobByRequestId(internalUserId, requestId),
   createJob: (input) => createGenerationJob(input),
-  setJobStatus: (jobId, status, updates) =>
-    updateGenerationJobStatus(jobId, status, updates),
-  updateJobMetadata: (jobId, metadataUpdates) =>
-    updateGenerationJobMetadata(jobId, metadataUpdates),
+  // Round 14: the jobs layer now reports write failures. A failed
+  // "completed" flip is the one failure that must not pass silently
+  // (it is exactly what made a saved image invisible to Media), so
+  // it throws into §8's persistence-failure handling. Non-terminal
+  // marks stay best-effort, as before — a lost "processing" mark is
+  // recoverable noise, and failJob already swallows its own errors.
+  setJobStatus: async (jobId, status, updates) => {
+    const ok = await updateGenerationJobStatus(jobId, status, updates);
+    if (!ok && status === "completed") {
+      throw new Error(`generation job completion write failed for jobId=${jobId}`);
+    }
+  },
+  updateJobMetadata: async (jobId, metadataUpdates) => {
+    const ok = await updateGenerationJobMetadata(jobId, metadataUpdates);
+    if (!ok) {
+      throw new Error(`generation job metadata write failed for jobId=${jobId}`);
+    }
+  },
+  getJob: (jobId) => getGenerationJob(jobId),
   getBalances: (clerkId) => getCreditBalances(clerkId),
   debit: async (clerkId, amount, reason, idempotencyKey) => {
     const charge = await adjustWalletBalance({
@@ -1652,6 +1674,25 @@ export async function generateImage(
         assetId: `generation_job:${job.id}`,
         actualProviderCostCents: usedCostResult.providerCostCents,
       });
+      // Round 14 — completion read-back. The jobs layer historically
+      // swallowed Supabase errors, so the two writes above could fail
+      // while this service reported clean success — and the row,
+      // still "processing" or missing its durableUrl, stayed
+      // invisible to the project-scope Media repository. Never claim
+      // a persisted asset on writes alone: the row must READ BACK
+      // completed with its durable URL, which is precisely the state
+      // the repository surfaces.
+      const verified = await deps.getJob(job.id).catch(() => null);
+      if (
+        !verified ||
+        verified.status !== "completed" ||
+        typeof verified.metadata?.durableUrl !== "string" ||
+        !verified.metadata.durableUrl
+      ) {
+        throw new Error(
+          `generation job completion could not be verified on read-back for jobId=${job.id}`,
+        );
+      }
       generationJobId = job.id;
     } catch (persistErr) {
       console.error(
