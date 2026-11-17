@@ -62,7 +62,7 @@ import MissionCards from "../MissionCards";
 import BoardMediaPanel from "./BoardMediaPanel";
 import BoardBrowserPanel from "./BoardBrowserPanel";
 import WorkspaceBanner from "./WorkspaceBanner";
-import { boardDefinition, boardScopeKey, type BoardPanelId } from "./board-types";
+import { boardDefinition, type BoardPanelId } from "./board-types";
 
 const CodeWorkspace = dynamic(() => import("../code/CodeWorkspace").then((m) => m.CodeWorkspace), { ssr: false });
 const StudioTerminalDrawer = dynamic(() => import("../StudioTerminalDrawer"), { ssr: false });
@@ -294,7 +294,7 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
         <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-preview">
           {workspaceBanner}
           <div className="flex min-h-0 flex-1 flex-col">
-          {props.previewContent}
+            {props.previewContent}
           </div>
         </div>
       );
@@ -308,30 +308,30 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
         <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-code">
           {workspaceBanner}
           <div className="flex min-h-0 flex-1 flex-col">
-          <CodeWorkspace
-            projectId={projectId}
-            repositoryName={capabilities.repositoryName}
-            branch={capabilities.activeBranch}
-            workspaceStatus={capabilities.workspaceStatus ?? null}
-            writeAccess={capabilities.writeAccess ?? true}
-            previewContent={inCode ? props.previewContent : undefined}
-            previewPlaceholder={
-              inCode ? undefined : (
-                <PreviewPointerCard
-                  testId="code-preview-pointer-to-preview"
-                  message="Preview is showing in the Preview panel"
-                  actionLabel="Bring preview here"
-                  onAction={() => setBoardPreviewHome("code")}
-                />
-              )
-            }
-            canvasContent={props.canvasContent}
-            planCapabilities={capabilities}
-            planModelLabel={props.activityModelLabel}
-            onPreviewRefreshRequest={props.onPreviewRefreshRequest}
-            onSummonPanel={(panelId) => summon(panelId as BoardPanelId)}
-            onRollback={props.onRollback}
-          />
+            <CodeWorkspace
+              projectId={projectId}
+              repositoryName={capabilities.repositoryName}
+              branch={capabilities.activeBranch}
+              workspaceStatus={capabilities.workspaceStatus ?? null}
+              writeAccess={capabilities.writeAccess ?? true}
+              previewContent={inCode ? props.previewContent : undefined}
+              previewPlaceholder={
+                inCode ? undefined : (
+                  <PreviewPointerCard
+                    testId="code-preview-pointer-to-preview"
+                    message="Preview is showing in the Preview panel"
+                    actionLabel="Bring preview here"
+                    onAction={() => setBoardPreviewHome("code")}
+                  />
+                )
+              }
+              canvasContent={props.canvasContent}
+              planCapabilities={capabilities}
+              planModelLabel={props.activityModelLabel}
+              onPreviewRefreshRequest={props.onPreviewRefreshRequest}
+              onSummonPanel={(panelId) => summon(panelId as BoardPanelId)}
+              onRollback={props.onRollback}
+            />
           </div>
         </div>
       );

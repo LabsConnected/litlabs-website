@@ -3513,6 +3513,12 @@ function CommandStudioContent() {
       lastRunFailureNote={lastRunFailureNote}
       onSelectionChange={setPreviewSelection}
       refreshKey={previewRefreshKey}
+      // Kimi wiring item 1: the failure surface's View logs summons the
+      // Terminal/Logs panel. In the pre-layout tree the board binding
+      // wired this prop on its own panel instance; the shared element
+      // carries it now (this element IS the board binding's full prop
+      // set), summoning the board Terminal panel.
+      onViewLogs={() => summonBoardPanel("terminal")}
     />
   );
 
