@@ -117,10 +117,18 @@ export interface CanaryOptions {
   hostSentinelDir?: string;
 }
 
-/** Small on purpose: the canary must be cheap enough to re-run often. */
+/**
+ * The memory figure must match the litt-sandbox template's built size:
+ * the resource-limits probe proves enforcement by allocating 1.6x this
+ * figure inside the sandbox, so if the template is built larger than
+ * this, the allocation completes and the check fails (live failure
+ * 2026-11-16: template rebuilt at 2048 MB while this said 512).
+ * CPU/memory here are the values the provider records and echoes; the
+ * E2B SDK takes real sizing from the template build.
+ */
 export const CANARY_LIMITS: SandboxResourceLimits = {
-  cpuVcpus: 1,
-  memoryMB: 512,
+  cpuVcpus: 2,
+  memoryMB: 2048,
   processLimit: 64,
   diskGB: 2,
   idleTimeoutMinutes: 5,
