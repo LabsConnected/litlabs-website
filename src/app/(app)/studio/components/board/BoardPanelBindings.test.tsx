@@ -1,12 +1,15 @@
 import "@testing-library/jest-dom";
-import { useState, type ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/context/ThemeContext";
 import type { ConnectionCapabilities } from "../../hooks/useConnectionSummary";
 import type { StudioInspectorData } from "../StudioWorkspaceFrame";
-import type { PreviewSelection } from "../StudioPreviewPanel";
-import BoardPanelBindings, { type BoardPanelBindingsProps } from "./BoardPanelBindings";
+import BoardPanelBindings, {
+  resetBoardPreviewHome,
+  setBoardPreviewHome,
+  type BoardPanelBindingsProps,
+} from "./BoardPanelBindings";
 import type { BoardPanelId } from "./board-types";
 
 // ── Mocks ────────────────────────────────────────────────────────────
@@ -40,36 +43,27 @@ vi.mock("next/dynamic", async () => {
   };
 });
 
-vi.mock("../StudioPreviewPanel", () => ({
-  default: (props: {
-    projectId: string | null;
-    onSelectionChange?: (sel: PreviewSelection) => void;
-  }) => (
-    <div data-testid="studio-preview-panel" data-project-id={props.projectId ?? ""}>
-      <button
-        type="button"
-        data-testid="preview-stub-select"
-        onClick={() =>
-          props.onSelectionChange?.({
-            label: "Hero heading",
-            selector: "#hero",
-            tagName: "h1",
-          } as PreviewSelection)
-        }
-      >
-        select element
-      </button>
-    </div>
-  ),
-}));
-
 vi.mock("../code/CodeWorkspace", () => ({
-  CodeWorkspace: (props: { projectId: string | null; writeAccess?: boolean }) => (
+  CodeWorkspace: (props: {
+    projectId: string | null;
+    writeAccess?: boolean;
+    previewContent?: ReactNode;
+    previewPlaceholder?: ReactNode;
+    canvasContent?: ReactNode;
+    planCapabilities?: unknown;
+    onPreviewRefreshRequest?: () => void;
+  }) => (
     <div
       data-testid="code-workspace"
       data-project-id={props.projectId ?? ""}
       data-write-access={String(props.writeAccess)}
-    />
+      data-has-plan={props.planCapabilities ? "yes" : "no"}
+      data-has-refresh-callback={props.onPreviewRefreshRequest ? "yes" : "no"}
+    >
+      {props.previewContent}
+      {props.previewPlaceholder}
+      {props.canvasContent}
+    </div>
   ),
 }));
 
@@ -108,37 +102,10 @@ vi.mock("../shell/StudioDeploySurface", () => ({
   ),
 }));
 
-vi.mock("../shell/ElementInspectorPanel", () => ({
-  default: (props: { selection: { label?: string } }) => (
-    <div data-testid="element-inspector" data-label={props.selection?.label ?? ""} />
-  ),
-}));
-
 vi.mock("../StudioWorkspaceFrame", () => ({
-  StudioInspector: (props: { activeTab: string; data?: unknown; excludeTabs?: string[] }) => (
-    <div
-      data-testid="studio-inspector"
-      data-tab={props.activeTab}
-      data-has-data={props.data ? "yes" : "no"}
-      data-exclude-tabs={(props.excludeTabs ?? []).join(",")}
-    />
-  ),
   StudioActivityPanel: (props: { runId: string | null; missionContent?: ReactNode }) => (
     <div data-testid="studio-activity-panel" data-run-id={props.runId ?? ""}>
       {props.missionContent}
-    </div>
-  ),
-}));
-
-vi.mock("../StudioPlanSurface", () => ({
-  default: (props: { onOpenPreview?: () => void; onOpenFiles?: () => void }) => (
-    <div data-testid="studio-plan-surface">
-      <button type="button" data-testid="plan-stub-open-preview" onClick={() => props.onOpenPreview?.()}>
-        open preview
-      </button>
-      <button type="button" data-testid="plan-stub-open-files" onClick={() => props.onOpenFiles?.()}>
-        open files
-      </button>
     </div>
   ),
 }));
@@ -179,6 +146,7 @@ function baseProps(overrides: Partial<BoardPanelBindingsProps> = {}): BoardPanel
     lastRunFailureNote: null,
     onPreviewSelectionChange: vi.fn(),
     filesContent: <div data-testid="studio-project-files" />,
+    previewContent: <div data-testid="studio-preview-panel" data-project-id="project-1" />,
     workspaceRevision: 3,
     healthRunTrigger: 2,
     previewSelection: null,
@@ -210,11 +178,16 @@ function renderBinding(id: BoardPanelId, overrides: Partial<BoardPanelBindingsPr
 }
 
 describe("BoardPanelBindings (B3)", () => {
-  it("preview binds the real StudioPreviewPanel for the active project", async () => {
+  beforeEach(() => {
+    resetBoardPreviewHome();
+  });
+
+  it("preview renders the single shared previewContent element built by CommandStudio", async () => {
     renderBinding("preview");
     expect(screen.getByTestId("board-binding-preview")).toBeInTheDocument();
     const panel = await screen.findByTestId("studio-preview-panel");
     expect(panel).toHaveAttribute("data-project-id", "project-1");
+    expect(screen.getAllByTestId("studio-preview-panel")).toHaveLength(1);
   });
 
   it("code binds the real CodeWorkspace with write access from capabilities", async () => {
@@ -222,6 +195,84 @@ describe("BoardPanelBindings (B3)", () => {
     const ws = await screen.findByTestId("code-workspace");
     expect(ws).toHaveAttribute("data-project-id", "project-1");
     expect(ws).toHaveAttribute("data-write-access", "true");
+  });
+
+  it("code receives the canvas element, plan data and the preview refresh callback", async () => {
+    renderBinding("code", { onPreviewRefreshRequest: vi.fn() });
+    const ws = await screen.findByTestId("code-workspace");
+    expect(ws).toHaveAttribute("data-has-plan", "yes");
+    expect(ws).toHaveAttribute("data-has-refresh-callback", "yes");
+    expect(screen.getByTestId("board-canvas-content")).toBeInTheDocument();
+  });
+
+  it("only one preview home renders the shared element at a time — Code home", async () => {
+    act(() => setBoardPreviewHome("code"));
+    render(
+      <ThemeProvider>
+        <BoardPanelBindings {...baseProps({ id: "preview" })} />
+        <BoardPanelBindings {...baseProps({ id: "code" })} />
+      </ThemeProvider>,
+    );
+    // Exactly one instance of the shared element across both panels.
+    expect(await screen.findAllByTestId("studio-preview-panel")).toHaveLength(1);
+    // The Preview panel shows the honest pointer card instead.
+    expect(screen.getByTestId("board-preview-pointer-to-code")).toBeInTheDocument();
+    expect(screen.getByTestId("board-preview-pointer-to-code").textContent).toContain(
+      "Preview is showing in the Code panel",
+    );
+  });
+
+  it("only one preview home renders the shared element at a time — Preview home", async () => {
+    render(
+      <ThemeProvider>
+        <BoardPanelBindings {...baseProps({ id: "preview" })} />
+        <BoardPanelBindings {...baseProps({ id: "code" })} />
+      </ThemeProvider>,
+    );
+    expect(await screen.findAllByTestId("studio-preview-panel")).toHaveLength(1);
+    // The Code box's preview region shows the reverse pointer card.
+    expect(screen.getByTestId("code-preview-pointer-to-preview")).toBeInTheDocument();
+    expect(screen.getByTestId("code-preview-pointer-to-preview").textContent).toContain(
+      "Preview is showing in the Preview panel",
+    );
+  });
+
+  it("the Code-side pointer card brings the preview here — home moves to Code", async () => {
+    render(
+      <ThemeProvider>
+        <BoardPanelBindings {...baseProps({ id: "preview" })} />
+        <BoardPanelBindings {...baseProps({ id: "code" })} />
+      </ThemeProvider>,
+    );
+    await screen.findByTestId("code-workspace");
+    // Preview starts in the Preview panel; the Code-side card offers to
+    // bring it here. Clicking moves the ONE shared element into Code —
+    // still exactly one mounted preview afterwards.
+    fireEvent.click(screen.getByRole("button", { name: "Bring preview here" }));
+    expect(await screen.findAllByTestId("studio-preview-panel")).toHaveLength(1);
+    expect(screen.queryByTestId("code-preview-pointer-to-preview")).toBeNull();
+    expect(screen.getByTestId("board-preview-pointer-to-code")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("code-workspace").contains(screen.getByTestId("studio-preview-panel")),
+    ).toBe(true);
+  });
+
+  it("the Preview-side pointer card brings the preview back — home moves to Preview", async () => {
+    act(() => setBoardPreviewHome("code"));
+    render(
+      <ThemeProvider>
+        <BoardPanelBindings {...baseProps({ id: "preview" })} />
+        <BoardPanelBindings {...baseProps({ id: "code" })} />
+      </ThemeProvider>,
+    );
+    await screen.findByTestId("code-workspace");
+    fireEvent.click(screen.getByRole("button", { name: "Bring preview here" }));
+    expect(await screen.findAllByTestId("studio-preview-panel")).toHaveLength(1);
+    expect(screen.queryByTestId("board-preview-pointer-to-code")).toBeNull();
+    expect(screen.getByTestId("code-preview-pointer-to-preview")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("board-binding-preview").contains(screen.getByTestId("studio-preview-panel")),
+    ).toBe(true);
   });
 
   it("files renders the single relocated Files element — exactly one instance", () => {
@@ -247,21 +298,22 @@ describe("BoardPanelBindings (B3)", () => {
     expect(panel).toHaveAttribute("data-run-trigger", "2");
   });
 
-  it("inspector binds the StudioInspector tab set when nothing is selected", () => {
-    renderBinding("inspector");
-    const inspector = screen.getByTestId("studio-inspector");
-    expect(inspector).toHaveAttribute("data-tab", "plan");
-    expect(inspector).toHaveAttribute("data-has-data", "yes");
-    expect(screen.queryByTestId("element-inspector")).toBeNull();
+  it("inspector is retired — no board binding renders for it", () => {
+    const { container } = renderBinding("inspector" as BoardPanelId);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId("board-binding-inspector")).toBeNull();
   });
 
-  it("inspector binds ElementInspectorPanel when a preview element is selected", () => {
-    renderBinding("inspector", {
-      previewSelection: { label: "Hero heading", selector: "#hero", tagName: "h1" } as PreviewSelection,
-      showElementInspector: true,
-    });
-    expect(screen.getByTestId("element-inspector")).toHaveAttribute("data-label", "Hero heading");
-    expect(screen.queryByTestId("studio-inspector")).toBeNull();
+  it("plan is retired as a board panel — Plan lives inside the Code box", () => {
+    const { container } = renderBinding("plan" as BoardPanelId);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId("board-binding-plan")).toBeNull();
+  });
+
+  it("canvas is retired as a board panel — Canvas / Design lives inside the Code box", () => {
+    const { container } = renderBinding("canvas" as BoardPanelId);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId("board-binding-canvas")).toBeNull();
   });
 
   it("deploy binds StudioDeploySurface and forwards the deploy request", () => {
@@ -285,12 +337,6 @@ describe("BoardPanelBindings (B3)", () => {
     expect(screen.getByTestId("board-chat-content")).toBeInTheDocument();
   });
 
-  it("canvas binds the Canvas & Design stage content built by CommandStudio", () => {
-    renderBinding("canvas");
-    expect(screen.getByTestId("board-binding-canvas")).toBeInTheDocument();
-    expect(screen.getByTestId("board-canvas-content")).toBeInTheDocument();
-  });
-
   it("media binds the real BoardMediaPanel (Asset Lake tabs)", () => {
     renderBinding("media");
     expect(screen.getByTestId("board-binding-media")).toBeInTheDocument();
@@ -306,16 +352,6 @@ describe("BoardPanelBindings (B3)", () => {
     expect(screen.getByTestId("board-browser-panel")).toBeInTheDocument();
   });
 
-  it("plan binds StudioPlanSurface with its Open actions rewired to board summons", async () => {
-    const summonPanel = vi.fn();
-    renderBinding("plan", { summonPanel });
-    expect(await screen.findByTestId("studio-plan-surface")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("plan-stub-open-preview"));
-    expect(summonPanel).toHaveBeenCalledWith("preview");
-    fireEvent.click(screen.getByTestId("plan-stub-open-files"));
-    expect(summonPanel).toHaveBeenCalledWith("files");
-  });
-
   it("activity binds StudioActivityPanel with MissionCards, actions rewired to summons", () => {
     const summonPanel = vi.fn();
     renderBinding("activity", { summonPanel });
@@ -325,36 +361,4 @@ describe("BoardPanelBindings (B3)", () => {
     expect(summonPanel).toHaveBeenCalledWith("code");
   });
 
-  it("the board Inspector excludes the tabs that duplicate board panels and never activates one", () => {
-    renderBinding("inspector", { inspectorTab: "checks" });
-    const inspector = screen.getByTestId("studio-inspector");
-    expect(inspector).toHaveAttribute("data-exclude-tabs", "checks,files,preview");
-    // An excluded active tab falls back to Plan instead of rendering a
-    // duplicate Checks home.
-    expect(inspector).toHaveAttribute("data-tab", "plan");
-  });
-
-  it("Preview→Inspector link: a selection made in the Preview binding surfaces in the Inspector binding", async () => {
-    // Mirrors CommandStudio's wiring: ONE selection state feeds the
-    // Preview's onSelectionChange and the Inspector's selection props.
-    function Harness() {
-      const [selection, setSelection] = useState<PreviewSelection | null>(null);
-      const shared: Partial<BoardPanelBindingsProps> = {
-        onPreviewSelectionChange: (sel) => setSelection(sel),
-        previewSelection: selection,
-        showElementInspector: Boolean(selection),
-      };
-      return (
-        <ThemeProvider>
-          <BoardPanelBindings {...baseProps({ id: "preview", ...shared })} />
-          <BoardPanelBindings {...baseProps({ id: "inspector", ...shared })} />
-        </ThemeProvider>
-      );
-    }
-    render(<Harness />);
-    expect(screen.queryByTestId("element-inspector")).toBeNull();
-    fireEvent.click(await screen.findByTestId("preview-stub-select"));
-    const editor = await screen.findByTestId("element-inspector");
-    expect(editor).toHaveAttribute("data-label", "Hero heading");
-  });
 });

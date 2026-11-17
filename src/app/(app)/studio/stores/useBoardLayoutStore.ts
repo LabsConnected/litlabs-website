@@ -23,10 +23,14 @@ import {
   clampRect,
   defaultBoardLayout,
   overviewViewport,
+  seedPanelRect,
   tidyPanels,
   topZ,
 } from "../components/board/board-layout";
 import {
+  BOARD_CHAT_UNTOUCHED_DEFAULT_RECT,
+  BOARD_DESIGN_AREA,
+  REMOVED_BOARD_PANEL_IDS,
   boardDefinition,
   boardScopeKey,
   type BoardLayoutState,
@@ -51,7 +55,7 @@ export interface BoardLayoutPersistedState {
  * default). Changes and Browser ride along inside the Inspector panel;
  * Checks' board home is the Health panel.
  */
-const BOARD_LAYOUT_V2_WEBSITE_OPEN: BoardPanelId[] = ["files", "health", "inspector", "deploy"];
+const BOARD_LAYOUT_V2_WEBSITE_OPEN: BoardPanelId[] = ["files", "health", "deploy"];
 
 /**
  * zustand/persist migration for the board layout store.
@@ -75,12 +79,82 @@ const BOARD_LAYOUT_V2_WEBSITE_OPEN: BoardPanelId[] = ["files", "health", "inspec
  * the active preset name and viewports carry over untouched — and
  * applyPreset backfills any panel a v2-era preset does not know.
  */
+/** True when a rect is exactly chat's pre-centering default — the
+ *  untouched-default signature (see BOARD_CHAT_UNTOUCHED_DEFAULT_RECT). */
+function isUntouchedChatRect(rect: BoardRect | undefined): boolean {
+  return (
+    !!rect &&
+    rect.x === BOARD_CHAT_UNTOUCHED_DEFAULT_RECT.x &&
+    rect.y === BOARD_CHAT_UNTOUCHED_DEFAULT_RECT.y &&
+    rect.width === BOARD_CHAT_UNTOUCHED_DEFAULT_RECT.width &&
+    rect.height === BOARD_CHAT_UNTOUCHED_DEFAULT_RECT.height
+  );
+}
+
+/**
+ * Drop retired panel ids (inspector / plan / canvas) from a panels
+ * record. Returns the SAME record when nothing is removed, so layouts
+ * without retired panels pass through byte-identical.
+ */
+function dropRemovedPanels<T extends Record<string, unknown>>(panels: T): T {
+  if (!panels || typeof panels !== "object") return panels;
+  if (!REMOVED_BOARD_PANEL_IDS.some((id) => id in panels)) return panels;
+  const next: Record<string, unknown> = {};
+  for (const [id, panel] of Object.entries(panels)) {
+    if (!REMOVED_BOARD_PANEL_IDS.includes(id)) next[id] = panel;
+  }
+  return next as T;
+}
+
+/**
+ * v4 → v5 (2026-11-16 layout spec): two surgical changes, nothing else.
+ *
+ * 1. Centered chat: a chat panel still sitting at EXACTLY its old
+ *    untouched default rect (16,16,404,768) was never moved by the
+ *    user, so it moves to the centered-top seed (computed against the
+ *    board design area — a migration has no live board area; the live
+ *    board rescues panels into view as usual). A chat the user moved
+ *    or resized keeps its rect exactly (Larry's standing rule: saved
+ *    layouts untouched).
+ * 2. Retired panels: layouts (and presets) carrying inspector / plan /
+ *    canvas entries load without crashing — those entries are dropped.
+ *    Preset chat rects are NOT recentered: a preset is a chosen
+ *    arrangement, and only the live scope layout migrates.
+ *
+ * Scopes needing neither change keep their exact object identity.
+ */
+function migrateLayoutV4ToV5(layout: BoardLayoutState): BoardLayoutState {
+  if (!layout || !layout.panels) return layout;
+  let panels = dropRemovedPanels(layout.panels);
+  const chat = panels.chat;
+  if (chat && isUntouchedChatRect(chat.rect)) {
+    panels = { ...panels, chat: { ...chat, rect: seedPanelRect("chat", BOARD_DESIGN_AREA) } };
+  }
+  let presets = layout.presets;
+  if (presets) {
+    let presetsChanged = false;
+    const nextPresets: typeof presets = {};
+    for (const [name, preset] of Object.entries(presets)) {
+      const cleaned = preset?.panels ? dropRemovedPanels(preset.panels) : preset?.panels;
+      if (preset && cleaned !== preset.panels) {
+        presetsChanged = true;
+        nextPresets[name] = { ...preset, panels: cleaned };
+      } else {
+        nextPresets[name] = preset;
+      }
+    }
+    if (presetsChanged) presets = nextPresets;
+  }
+  if (panels === layout.panels && presets === layout.presets) return layout;
+  return { ...layout, panels, presets };
+}
+
 export function migrateBoardLayoutPersistedState(
   persistedState: unknown,
   version: number,
 ): BoardLayoutPersistedState {
   if (
-    version >= 4 ||
+    version >= 5 ||
     !persistedState ||
     typeof persistedState !== "object" ||
     !("scopes" in persistedState) ||
@@ -109,9 +183,18 @@ export function migrateBoardLayoutPersistedState(
         terminal.rect.y === def.y &&
         terminal.rect.width === def.width &&
         terminal.rect.height === def.height;
-      scopes[key] = untouched
+      const nextLayout = untouched
         ? { ...layout, panels: { ...layout.panels, terminal: { ...terminal, open: false } } }
         : layout;
+      // Chain into the v4 → v5 step so a v3 save lands fully current.
+      scopes[key] = migrateLayoutV4ToV5(nextLayout);
+    }
+    return { ...state, scopes };
+  }
+  if (version === 4) {
+    const scopes: Record<string, BoardLayoutState> = {};
+    for (const [key, layout] of Object.entries(state.scopes)) {
+      scopes[key] = migrateLayoutV4ToV5(layout);
     }
     return { ...state, scopes };
   }
@@ -129,10 +212,10 @@ export function migrateBoardLayoutPersistedState(
         if (panel && !panel.open) panels[id] = { ...panel, open: true };
       }
     }
-    scopes[key] = {
+    scopes[key] = migrateLayoutV4ToV5({
       ...layout,
       panels: defaultBoardLayout(layout.projectType ?? "website").panels,
-    };
+    });
   }
   return { ...state, scopes };
 }
@@ -152,7 +235,11 @@ interface BoardLayoutStore {
   closePanel: (scope: string, id: BoardPanelId) => void;
   minimizePanel: (scope: string, id: BoardPanelId) => void;
   restorePanel: (scope: string, id: BoardPanelId) => void;
-  toggleMaximize: (scope: string, id: BoardPanelId, area: { width: number; height: number }) => void;
+  /** Maximize fills the passed REGION in board coordinates (origin +
+   *  size) — the board chrome passes its visible region, so a
+   *  maximized panel snaps to exactly what the user sees, pan and
+   *  zoom included (mapping §7). Un-maximizing restores the prior rect. */
+  toggleMaximize: (scope: string, id: BoardPanelId, region: BoardRect) => void;
   bringToFront: (scope: string, id: BoardPanelId) => void;
   setPanelRect: (scope: string, id: BoardPanelId, rect: BoardRect) => void;
   setViewport: (scope: string, viewport: BoardViewport) => void;
@@ -220,13 +307,39 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
 
       openPanel: (scope, id) =>
         set((s) =>
-          withScope(s, scope, (layout) =>
-            updatePanel(layout, id, {
+          withScope(s, scope, (layout) => {
+            const panel = layout.panels[id];
+            if (!panel) return layout;
+            if (panel.open) {
+              // Re-summon of an already-open panel only raises it (and
+              // un-minimizes) — its size is the user's current choice,
+              // not a summon-from-closed (mapping §8.2).
+              return updatePanel(layout, id, {
+                open: true,
+                minimized: false,
+                z: topZ(layout) + 1,
+              });
+            }
+            // Summon from CLOSED resets the panel to its FULL default
+            // size (spec §4b: panels open full size — a panel once
+            // shrunk must not reopen shrunk forever). Position is
+            // kept; tray restore and preset application deliberately
+            // do NOT reset size (mapping §8.3).
+            const def = boardDefinition(id);
+            return updatePanel(layout, id, {
               open: true,
               minimized: false,
+              maximized: false,
+              restoreRect: null,
+              rect: clampRect({
+                x: panel.rect.x,
+                y: panel.rect.y,
+                width: def.defaultRect.width,
+                height: def.defaultRect.height,
+              }),
               z: topZ(layout) + 1,
-            }),
-          ),
+            });
+          }),
         ),
 
       closePanel: (scope, id) =>
@@ -248,10 +361,11 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
           ),
         ),
 
-      toggleMaximize: (scope, id, area) =>
+      toggleMaximize: (scope, id, region) =>
         set((s) =>
           withScope(s, scope, (layout) => {
             const panel = layout.panels[id];
+            if (!panel) return layout;
             if (panel.maximized) {
               return updatePanel(layout, id, {
                 maximized: false,
@@ -263,7 +377,16 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
             return updatePanel(layout, id, {
               maximized: true,
               restoreRect: panel.rect,
-              rect: { x: 0, y: 0, width: Math.max(1, area.width), height: Math.max(1, area.height) },
+              // Fill the REGION itself — origin included. Anchoring at
+              // (0,0) was the defect: under pan/zoom the maximized
+              // panel landed at the board origin, off-screen, with
+              // drag disabled while maximized (mapping §7).
+              rect: {
+                x: Math.round(region.x),
+                y: Math.round(region.y),
+                width: Math.max(1, Math.round(region.width)),
+                height: Math.max(1, Math.round(region.height)),
+              },
               z: topZ(layout) + 1,
             });
           }),
@@ -350,11 +473,12 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
             return {
               ...layout,
               // Backfill panels the preset predates (v2-era presets do
-              // not know chat / plan / canvas / activity / browser) so
-              // the record is always complete.
+              // not know chat / activity / browser) so the record is
+              // always complete — and drop retired ids a pre-v5 preset
+              // still carries (inspector / plan / canvas).
               panels: {
                 ...defaultBoardLayout(layout.projectType).panels,
-                ...structuredClone(preset.panels),
+                ...dropRemovedPanels(structuredClone(preset.panels)),
               },
               activePresetName: name,
               overviewReturnViewport: null,
@@ -388,7 +512,7 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
     }),
     {
       name: BOARD_LAYOUT_STORAGE_KEY,
-      version: 4,
+      version: 5,
       migrate: migrateBoardLayoutPersistedState,
       partialize: (s) => ({ enabledByUser: s.enabledByUser, scopes: s.scopes }),
     },

@@ -18,14 +18,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   Bell,
   LogOut,
   Settings as SettingsIcon,
   UserCircle,
   Wallet as WalletIcon,
-  ChevronDown,
 } from "lucide-react";
 import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
 import { useTheme, resolveEffectiveMode } from "@/context/ThemeContext";
@@ -35,12 +33,10 @@ import { useLittHealth } from "@/hooks/useLittHealth";
 import { planDisplayLabel } from "@/lib/plan-label";
 import {
   getVisibleMainNav,
-  getVisibleMoreNavSections,
   withActiveProjectContext,
   APP_NAV_SECONDARY,
   isAppNavActive,
   type NavItem,
-  type NavMenuSection,
 } from "@/lib/navigation";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 
@@ -338,137 +334,6 @@ function TopNavItem({
   );
 }
 
-/* ─── More menu (secondary destinations) ────────────────────────────── */
-
-/**
- * MoreNavMenu — the "More" overflow item in the canonical nav.
- * Opens a grouped product-navigation dropdown. Account destinations stay in
- * the avatar menu. Portaled to document.body because the mobile nav strip is
- * overflow-x:auto and the blurred header is a containing block for fixed
- * descendants — an in-place dropdown would clip on both.
- */
-function MoreNavMenu({
-  sections,
-  active,
-  T,
-}: {
-  sections: NavMenuSection[];
-  active: boolean;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const pathname = usePathname();
-
-  // Close on route change (a picked destination navigates away)
-  useEffect(() => setOpen(false), [pathname]);
-
-  // Close on outside click / Escape
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (btnRef.current?.contains(target)) return;
-      if ((target as Element).closest?.("[data-more-menu]")) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  const toggle = () => {
-    if (!open) {
-      const r = btnRef.current?.getBoundingClientRect();
-      if (r) {
-        setAnchor({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
-      }
-    }
-    setOpen((v) => !v);
-  };
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-current={active ? "page" : undefined}
-        data-testid="nav-more"
-        className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-bold transition-all"
-        style={{
-          background: active ? `${T.accentColor}14` : "transparent",
-          color: active ? T.textColor : T.textMuted,
-          boxShadow: active ? `inset 0 -2px 0 ${T.accentColor}` : "none",
-        }}
-      >
-        More
-        <ChevronDown
-          size={14}
-          style={{
-            transform: open ? "rotate(180deg)" : "none",
-            transition: "transform 150ms",
-            color: active ? T.accentColor : undefined,
-          }}
-        />
-      </button>
-      {open &&
-        anchor &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            data-more-menu
-            role="menu"
-            aria-label="More"
-            className="w-64 rounded-xl border p-2 shadow-2xl"
-            style={{
-              position: "fixed",
-              top: anchor.top,
-              right: anchor.right,
-              zIndex: 60,
-              borderColor: `${T.borderColor}30`,
-              background: `${T.bgColor}f8`,
-              backdropFilter: "blur(16px)",
-            }}
-          >
-            {sections.map((section) => (
-              <div key={section.id} className="not-first:mt-2">
-                <div className="px-2.5 pb-1 pt-1 text-[9px] font-black uppercase tracking-[0.14em]" style={{ color: T.textMuted }}>
-                  {section.label}
-                </div>
-                {section.items.map((item) => {
-                  if (!item.href) return null;
-                  const Icon = item.icon;
-                  return (
-                    <Link
-                      key={item.label}
-                      href={item.href}
-                      role="menuitem"
-                      onClick={() => setOpen(false)}
-                      className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-xs font-bold transition hover:bg-white/5"
-                      style={{ color: T.textMuted }}
-                    >
-                      <Icon size={14} className="shrink-0" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </div>
-            ))}
-          </div>,
-          document.body,
-        )}
-    </>
-  );
-}
-
 /* ─── Notifications bell ─────────────────────────────────────────────
  * Lives in the TOP ROW beside the LiTT status (Larry, board-only
  * cleanup 2026-11-14) — it moved up from the Studio header, which no
@@ -545,9 +410,6 @@ function TopBar() {
     getVisibleMainNav(),
     searchParams?.get("project"),
   );
-  const moreSections = getVisibleMoreNavSections();
-  const moreActive = moreSections.some((section) => section.items.some((i) => i.href && checkActive(i.href)));
-
   return (
     <header
       // Studio owns a viewport-locked, overflow-hidden layout. A sticky
@@ -578,7 +440,8 @@ function TopBar() {
           className={isStudio ? "rounded-lg bg-[#050505] px-1.5 py-1 shadow-sm ring-1 ring-black/15" : ""}
         />
 
-        {/* Desktop nav — canonical main items + More overflow */}
+        {/* Desktop nav — canonical main items, all visible (the More
+            overflow menu was emptied and removed, Larry 2026-11-16) */}
         <nav className="ml-2 hidden items-center gap-0.5 md:flex" aria-label="Primary">
           {mainItems.map((item) => (
             <TopNavItem
@@ -588,7 +451,6 @@ function TopBar() {
               T={T}
             />
           ))}
-          <MoreNavMenu sections={moreSections} active={moreActive} T={T} />
         </nav>
 
         <div className="flex-1" />
@@ -668,7 +530,6 @@ function TopBar() {
               T={T}
             />
           ))}
-          <MoreNavMenu sections={moreSections} active={moreActive} T={T} />
         </nav>
       )}
     </header>

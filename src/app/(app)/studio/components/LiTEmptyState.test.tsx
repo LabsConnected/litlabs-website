@@ -331,3 +331,15 @@ describe("LiTEmptyState direct conversation open (no welcome screen)", () => {
     expect(screen.queryByText(/or resume a real conversation/i)).not.toBeInTheDocument();
   });
 });
+
+describe("LITT_WELCOME_LINE (spec §2c proposed wording)", () => {
+  it("is exactly the proposed welcome line, in this one place", async () => {
+    const { LITT_WELCOME_LINE } = await import("./LiTEmptyState");
+    expect(LITT_WELCOME_LINE).toBe(
+      "Tell LiTT what you want to build. LiTT drafts it, shows you every change, and nothing goes live without your say.",
+    );
+    // The superseded wording is retired.
+    expect(LITT_WELCOME_LINE).not.toContain("Describe what you want to build");
+    expect(LITT_WELCOME_LINE).not.toContain("nothing publishes without your say");
+  });
+});

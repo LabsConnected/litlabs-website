@@ -5,10 +5,19 @@
  *
  * StudioBoard's `renderPanel` hook lands here. Every binding renders the
  * SAME component with the SAME props and handlers the fixed stage layout
- * uses (the compositions mirror CommandStudio's stage surfaces exactly):
+ * uses:
  *
- *   preview   → StudioPreviewPanel (the live active project)
- *   code      → CodeWorkspace (Monaco surface on the project files API)
+ *   preview   → the single previewContent element built by
+ *               CommandStudio (ONE StudioPreviewPanel instance, with
+ *               the full board prop set). Relocated, never duplicated:
+ *               when the Code box is the preview's home, this panel
+ *               renders a pointer card instead (mapping §1).
+ *   code      → CodeWorkspace (Monaco surface on the project files
+ *               API) — the one box: Explorer + editor + the shared
+ *               preview region side by side, plus Plan and
+ *               Canvas / Design as internal Code-box views
+ *               (spec Amendment 4). The standalone plan / canvas board
+ *               panels are retired — those surfaces live in Code now.
  *   files     → the single projectFilesContent element — the SAME
  *               StudioProjectFiles instance definition as the chat-panel
  *               Files tab. CommandStudio relocates it: while the board
@@ -18,54 +27,123 @@
  *   terminal  → StudioTerminalDrawer (sandbox exec + terminal surface;
  *               the interactive sandbox PTY is its own lane, D1)
  *   health    → StudioHealthPanel, checks mode
- *   inspector → ElementInspectorPanel while a preview element is
- *               selected (the Preview→Inspector link: both sides read
- *               CommandStudio's one previewSelection state), otherwise
- *               the StudioInspector tab set (Plan/Changes/Checks/…)
  *   deploy    → StudioDeploySurface (the real deploy request path)
  *
  * Board-only rebuild additions (2026-11-14):
  *   chat      → BoardChatPanel (Command Center chrome around the real
  *               transcript + composer, built by CommandStudio)
- *   plan      → StudioPlanSurface, its Open-* actions rewired to board
- *               panel summons (there is no stage to jump to anymore)
- *   canvas    → the unified Canvas & Design stage element, built by
- *               CommandStudio (renderCanvasDesignStage)
  *   activity  → StudioActivityPanel + MissionCards — Activity's own
  *               board panel, never a chat tab
  *   media     → BoardMediaPanel (Asset Lake: images / video / music)
  *   browser   → BoardBrowserPanel (embedded web view)
- *   inspector → same tab set, minus the tabs that duplicate board
- *               panels (Checks / Files / Preview have their own homes)
+ *
+ * Retired (Studio layout build, 2026-11-17):
+ *   inspector → the Inspector window is retired. Its keepers
+ *               (approvals / changes / plans) live in the chat panel's
+ *               Jobs tab (another lane); there is no board binding.
+ *   plan      → StudioPlanSurface lives inside the Code box now.
+ *   canvas    → the Canvas & Design stage lives inside the Code box.
  *
  *   world → honest slot. Later slice — no fake system.
  */
 
 import dynamic from "next/dynamic";
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import type { DeployTargetChoice } from "@/lib/deployments/deploy-targets";
 import type { ConnectionCapabilities } from "../../hooks/useConnectionSummary";
 import type { InspectorTab } from "../../lib/studio-destinations";
-import { useBoardLayoutStore } from "../../stores/useBoardLayoutStore";
 import type { PreviewSelection } from "../StudioPreviewPanel";
 import type { StudioSelectionPayload } from "../studioSelectionPayload";
 import StudioHealthPanel from "../StudioHealthPanel";
-import { StudioActivityPanel, StudioInspector, type StudioInspectorData } from "../StudioWorkspaceFrame";
+import { StudioActivityPanel, type StudioInspectorData } from "../StudioWorkspaceFrame";
 import StudioDeploySurface from "../shell/StudioDeploySurface";
-import ElementInspectorPanel from "../shell/ElementInspectorPanel";
 import MissionCards from "../MissionCards";
 import BoardMediaPanel from "./BoardMediaPanel";
 import BoardBrowserPanel from "./BoardBrowserPanel";
-import { boardDefinition, boardScopeKey, type BoardPanelId } from "./board-types";
+import { boardDefinition, type BoardPanelId } from "./board-types";
 
-const StudioPreviewPanel = dynamic(() => import("../StudioPreviewPanel"), { ssr: false });
 const CodeWorkspace = dynamic(() => import("../code/CodeWorkspace").then((m) => m.CodeWorkspace), { ssr: false });
 const StudioTerminalDrawer = dynamic(() => import("../StudioTerminalDrawer"), { ssr: false });
-const StudioPlanSurface = dynamic(() => import("../StudioPlanSurface"), { ssr: false });
 
-/** Inspector tabs that duplicate dedicated board panels. */
-const BOARD_INSPECTOR_EXCLUDED_TABS: InspectorTab[] = ["checks", "files", "preview"];
+// ── Preview home coordination ─────────────────────────────────────
+// The live preview runs in exactly ONE home at a time (spec §1): the
+// standalone Preview panel or the Code box's preview region. Every
+// board panel is a separate BoardPanelBindings instance, so the home
+// is kept in a tiny module-level store all instances subscribe to —
+// the same element is never rendered by two homes at once. Default
+// home is the standalone Preview panel (its historical home).
+
+export type BoardPreviewHome = "preview" | "code";
+
+let previewHome: BoardPreviewHome = "preview";
+const previewHomeListeners = new Set<() => void>();
+
+export function getBoardPreviewHome(): BoardPreviewHome {
+  return previewHome;
+}
+
+export function setBoardPreviewHome(home: BoardPreviewHome): void {
+  if (previewHome === home) return;
+  previewHome = home;
+  for (const listener of previewHomeListeners) listener();
+}
+
+/** Test hook — resets the shared preview home to its default. */
+export function resetBoardPreviewHome(): void {
+  setBoardPreviewHome("preview");
+}
+
+function subscribePreviewHome(listener: () => void): () => void {
+  previewHomeListeners.add(listener);
+  return () => {
+    previewHomeListeners.delete(listener);
+  };
+}
+
+function useBoardPreviewHome(): BoardPreviewHome {
+  return useSyncExternalStore(subscribePreviewHome, getBoardPreviewHome, getBoardPreviewHome);
+}
+
+// ── Pointer card ──────────────────────────────────────────────────
+// The honest placeholder shown by the home that does NOT currently
+// hold the live preview (the pointer-card pattern from mapping §1,
+// implemented fresh here). No fake preview, no second session.
+
+function PreviewPointerCard({
+  message,
+  actionLabel,
+  onAction,
+  testId,
+}: {
+  message: string;
+  actionLabel: string;
+  onAction: () => void;
+  testId: string;
+}) {
+  const { tokens } = useTheme();
+  return (
+    <div
+      data-testid={testId}
+      className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center"
+    >
+      <span className="text-xs font-bold" style={{ color: tokens.text }}>
+        {message}
+      </span>
+      <span className="max-w-sm text-[11px] leading-5" style={{ color: tokens.textMuted }}>
+        The live preview runs in one place at a time so there is only ever one preview session.
+      </span>
+      <button
+        type="button"
+        onClick={onAction}
+        className="mt-1 min-h-8 rounded-md border px-3 text-xs font-bold"
+        style={{ borderColor: "var(--studio-border)", color: tokens.text }}
+      >
+        {actionLabel}
+      </button>
+    </div>
+  );
+}
 
 export interface BoardPanelBindingsProps {
   id: BoardPanelId;
@@ -80,23 +158,40 @@ export interface BoardPanelBindingsProps {
   /** The single Files element (header + StudioProjectFiles), relocated
    *  from the chat panel while the board is active. */
   filesContent: ReactNode;
+  /**
+   * The single Preview element (StudioPreviewPanel with the board
+   * binding's full prop set), built once by CommandStudio and
+   * relocated between the Preview panel and the Code box — exactly
+   * one home renders it at a time (see the preview-home store above).
+   */
+  previewContent?: ReactNode;
+  /** Bump the shared preview element's refreshKey (CodeWorkspace's
+   *  save path, re-threaded through CommandStudio). */
+  onPreviewRefreshRequest?: () => void;
   workspaceRevision: number;
   healthRunTrigger: number;
-  /** Inspector: the live preview/builder selection, if any. */
-  previewSelection: PreviewSelection | StudioSelectionPayload | null;
-  /** True when the selection is a live preview element (mirrors the
-   *  shell ContextInspector's editor-slot condition). */
-  showElementInspector: boolean;
-  onAskAboutSelection: () => void;
-  onClearSelection: () => void;
-  inspectorTab: InspectorTab;
-  onInspectorTabChange: (tab: InspectorTab) => void;
-  inspectorData: StudioInspectorData;
+  /** Inspector: the live preview/builder selection, if any.
+   *  @deprecated The board Inspector panel is retired; kept optional
+   *  so in-flight callers from other lanes still compile. */
+  previewSelection?: PreviewSelection | StudioSelectionPayload | null;
+  /** @deprecated Retired with the board Inspector panel. */
+  showElementInspector?: boolean;
+  /** @deprecated Retired with the board Inspector panel. */
+  onAskAboutSelection?: () => void;
+  /** @deprecated Retired with the board Inspector panel. */
+  onClearSelection?: () => void;
+  /** @deprecated Retired with the board Inspector panel. */
+  inspectorTab?: InspectorTab;
+  /** @deprecated Retired with the board Inspector panel. */
+  onInspectorTabChange?: (tab: InspectorTab) => void;
+  /** @deprecated Retired with the board Inspector panel. */
+  inspectorData?: StudioInspectorData;
   /** The canonical deploy request path (ask-litt + approval gate). */
   onDeployRequest: (target: DeployTargetChoice) => void;
   /** The BoardChatPanel element (Command Center), built by CommandStudio. */
   chatContent: ReactNode;
-  /** The Canvas & Design stage element, built by CommandStudio. */
+  /** The Canvas & Design stage element, built by CommandStudio.
+   *  Threaded into CodeWorkspace (Canvas / Design lives in Code now). */
   canvasContent: ReactNode;
   /** Summon (open / restore / focus) a board panel — the board-only
    *  replacement for stage jumps in Plan / MissionCards actions. */
@@ -114,6 +209,7 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
   const { tokens } = useTheme();
   const { id, capabilities } = props;
   const projectId = capabilities.projectId;
+  const previewHomeNow = useBoardPreviewHome();
 
   const summon = props.summonPanel;
   const missionCards = (
@@ -121,7 +217,7 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
       capabilities={capabilities}
       modelLabel={props.activityModelLabel}
       onOpenCode={() => summon("code")}
-      onOpenCanvas={() => summon("canvas")}
+      onOpenCanvas={() => summon("code")}
       onOpenPreview={() => summon("preview")}
       onOpenTerminal={() => summon("terminal")}
       onOpenActivity={() => summon("activity")}
@@ -135,28 +231,6 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
       return (
         <div className="h-full min-h-0" data-testid="board-binding-chat">
           {props.chatContent}
-        </div>
-      );
-    case "plan":
-      return (
-        <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-plan">
-          <StudioPlanSurface
-            capabilities={capabilities}
-            modelLabel={props.activityModelLabel}
-            onOpenCode={() => summon("code")}
-            onOpenCanvas={() => summon("canvas")}
-            onOpenPreview={() => summon("preview")}
-            onOpenTerminal={() => summon("terminal")}
-            onOpenActivity={() => summon("activity")}
-            onOpenFiles={() => summon("files")}
-            onRollback={props.onRollback}
-          />
-        </div>
-      );
-    case "canvas":
-      return (
-        <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-canvas">
-          {props.canvasContent}
         </div>
       );
     case "activity":
@@ -185,25 +259,32 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
         </div>
       );
     case "preview":
-      // The SAME StudioPreviewPanel + props as the Preview stage and the
-      // dockable preview panel — no second preview implementation.
+      // The ONE shared preview element — rendered here only while the
+      // Preview panel is the preview's home. When the Code box shows
+      // the preview, this panel shows the honest pointer card instead.
+      if (previewHomeNow !== "preview") {
+        return (
+          <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-preview">
+            <PreviewPointerCard
+              testId="board-preview-pointer-to-code"
+              message="Preview is showing in the Code panel"
+              actionLabel="Bring preview here"
+              onAction={() => setBoardPreviewHome("preview")}
+            />
+          </div>
+        );
+      }
       return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-preview">
-          <StudioPreviewPanel
-            projectId={projectId}
-            projectName={capabilities.projectName}
-            repositoryName={capabilities.repositoryName}
-            branch={capabilities.activeBranch}
-            sourceKind={capabilities.sourceKind}
-            sourceStatus={capabilities.sourceStatus}
-            versionControl={capabilities.versionControl}
-            workspaceStatus={capabilities.workspaceStatus ?? null}
-            lastRunFailureNote={props.lastRunFailureNote}
-            onSelectionChange={props.onPreviewSelectionChange}
-          />
+          {props.previewContent}
         </div>
       );
-    case "code":
+    case "code": {
+      // The one box: CodeWorkspace receives the shared preview element
+      // only while Code is the preview's home; otherwise its preview
+      // region renders the reverse pointer card (its button brings the
+      // preview's home here, into the Code box).
+      const inCode = previewHomeNow === "code";
       return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-code">
           <CodeWorkspace
@@ -212,9 +293,27 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
             branch={capabilities.activeBranch}
             workspaceStatus={capabilities.workspaceStatus ?? null}
             writeAccess={capabilities.writeAccess ?? true}
+            previewContent={inCode ? props.previewContent : undefined}
+            previewPlaceholder={
+              inCode ? undefined : (
+                <PreviewPointerCard
+                  testId="code-preview-pointer-to-preview"
+                  message="Preview is showing in the Preview panel"
+                  actionLabel="Bring preview here"
+                  onAction={() => setBoardPreviewHome("code")}
+                />
+              )
+            }
+            canvasContent={props.canvasContent}
+            planCapabilities={capabilities}
+            planModelLabel={props.activityModelLabel}
+            onPreviewRefreshRequest={props.onPreviewRefreshRequest}
+            onSummonPanel={(panelId) => summon(panelId as BoardPanelId)}
+            onRollback={props.onRollback}
           />
         </div>
       );
+    }
     case "files":
       // Relocated single instance — see the header note. The element is
       // CommandStudio's projectFilesContent, unchanged.
@@ -243,44 +342,6 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
           />
         </div>
       );
-    case "inspector":
-      // Preview→Inspector link: a live preview selection swaps the tab
-      // set for the real element editor — the same precedence the shell
-      // ContextInspector applies (editor slot wins over default content).
-      if (props.showElementInspector && props.previewSelection) {
-        return (
-          <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-inspector">
-            <ElementInspectorPanel
-              selection={props.previewSelection}
-              projectId={projectId}
-              route={null}
-              onAskAboutSelection={props.onAskAboutSelection}
-              onClearSelection={props.onClearSelection}
-            />
-          </div>
-        );
-      }
-      return (
-        <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-inspector">
-          <StudioInspector
-            embedded
-            open
-            onToggle={() =>
-              useBoardLayoutStore
-                .getState()
-                .closePanel(boardScopeKey(props.userId, props.projectId), "inspector")
-            }
-            activeTab={
-              BOARD_INSPECTOR_EXCLUDED_TABS.includes(props.inspectorTab)
-                ? "plan"
-                : props.inspectorTab
-            }
-            onTabChange={props.onInspectorTabChange}
-            data={props.inspectorData}
-            excludeTabs={BOARD_INSPECTOR_EXCLUDED_TABS}
-          />
-        </div>
-      );
     case "deploy":
       return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="board-binding-deploy">
@@ -300,6 +361,10 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
         </div>
       );
     default:
+      // Retired panels (inspector / plan / canvas) have no binding —
+      // their surfaces live in the chat panel's Jobs tab and inside
+      // the Code box respectively. The board-core lane removes them
+      // from the panel inventory.
       return null;
   }
 }
