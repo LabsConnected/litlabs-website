@@ -20,11 +20,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
+  checkSandboxPreviewGroundTruth,
   checkSandboxPreviewLiveness,
   startSandboxPreview,
   verifySandboxPreviewHealth,
+  PREVIEW_LIVENESS_UNREADABLE_ESCALATION_ROUNDS,
   PREVIEW_VERIFY_FAILURE_THRESHOLD,
   PREVIEW_VERIFY_FAILURE_WINDOW_MS,
+  PREVIEW_VERIFY_PROBE_TIMEOUT_MS,
   type SandboxPreviewSupport,
   type SandboxProbeResult,
 } from "../preview/sandbox-runtime";
@@ -33,7 +36,11 @@ import {
   readVolumeInstallStamp,
   SANDBOX_INSTALL_TIMEOUT_MS,
 } from "../sandbox/install-stamp";
-import { PreviewError, type PreviewRuntime } from "../preview/PreviewManager";
+import {
+  PreviewError,
+  pushPreviewLog,
+  type PreviewRuntime,
+} from "../preview/PreviewManager";
 import {
   buildSandboxInstallEnv,
   SANDBOX_PREVIEW_NODE_HEAP_MB,
@@ -788,6 +795,13 @@ describe("startSandboxPreview — install single-flight (round 10)", () => {
  * preview was declared crashed). The verify now requires sustained
  * failure across a window AND a dead preview pid; a live pid blocks
  * the flip outright, and a confirmed-dead pid convicts at once.
+ *
+ * Round 15 (C1) amendment, applied to the tests below: the
+ * sustained-failure-with-unreadable-liveness conviction is RETIRED
+ * (an unreadable verdict is not evidence), alive rounds reset the
+ * accounting instead of banking it, and a confirmed-dead pid now
+ * convicts only when the in-sandbox ground-truth check does not
+ * find the server answering locally.
  */
 describe("verifySandboxPreviewHealth — earned crash verdict (round 13)", () => {
   const failingProbe = async (): Promise<SandboxProbeResult> => ({
@@ -868,7 +882,11 @@ describe("verifySandboxPreviewHealth — earned crash verdict (round 13)", () =>
     expect(ok).toBe(true);
     expect(runtime.status).toBe("ready");
     expect(runtime.errorCode).toBeNull();
-    expect(runtime.healthFailureCount).toBe(1);
+    // Round 15 (C1): an alive-but-failing round RESETS the failure
+    // accounting — round 13/14 banked it (this asserted 1), which
+    // let early patience be spent by a later conviction.
+    expect(runtime.healthFailureCount).toBe(0);
+    expect(runtime.healthFailureSince).toBeNull();
     expect(
       runtime.logs.some((l) => l.includes("is alive in the sandbox — staying ready")),
     ).toBe(true);
@@ -886,7 +904,10 @@ describe("verifySandboxPreviewHealth — earned crash verdict (round 13)", () =>
       expect(ok).toBe(true);
       expect(runtime.status).toBe("ready");
     }
-    expect(runtime.healthFailureCount).toBe(PREVIEW_VERIFY_FAILURE_THRESHOLD + 2);
+    // Round 15 (C1): every alive round resets the accounting, so
+    // the count never banks up across living-process rounds.
+    expect(runtime.healthFailureCount).toBe(0);
+    expect(runtime.healthFailureSince).toBeNull();
   });
 
   it("a confirmed-dead pid flips on the FIRST failed probe, with the log tail in the error", async () => {
@@ -908,25 +929,27 @@ describe("verifySandboxPreviewHealth — earned crash verdict (round 13)", () =>
     expect(runtime.error).not.toContain("may have crashed");
   });
 
-  it("sustained failure with liveness unreadable flips after the window, with the log tail", async () => {
+  it("sustained failure with liveness unreadable NEVER flips (round 15 C1: an unreadable verdict is not evidence)", async () => {
+    // Round 13/14 convicted here — failures past the threshold
+    // across the window with liveness unreadable flipped the
+    // runtime to "stopped responding". That is the exact
+    // combination that killed the 2026-11-17 re-proof: a saturated
+    // guest starved BOTH the probes and the liveness exec. Round
+    // 15 (C1) retires it: unreadable rounds record nothing.
     const support = makeVerifySupport("unreadable", "last words from the server\n");
     const runtime = makeReadyRuntime();
 
-    // Failures 1..threshold-1: not yet sustained, no flip.
-    for (let i = 0; i < PREVIEW_VERIFY_FAILURE_THRESHOLD - 1; i++) {
+    for (let i = 0; i < PREVIEW_VERIFY_FAILURE_THRESHOLD + 3; i++) {
+      runtime.healthFailureSince = Date.now() - PREVIEW_VERIFY_FAILURE_WINDOW_MS - 1000;
       const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
       expect(ok).toBe(true);
       expect(runtime.status).toBe("ready");
+      expect(runtime.errorCode).toBeNull();
     }
-    // Age the window past the span, then fail once more: sustained.
-    runtime.healthFailureSince = Date.now() - PREVIEW_VERIFY_FAILURE_WINDOW_MS - 1000;
-    const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
-
-    expect(ok).toBe(false);
-    expect(runtime.status).toBe("failed");
-    expect(runtime.errorCode).toBe("preview_dev_server_failed");
-    expect(runtime.error).toContain("stopped responding");
-    expect(runtime.error).toContain("last words from the server");
+    expect(runtime.healthFailureCount ?? 0).toBe(0);
+    expect(runtime.healthLivenessUnreadableCount).toBe(
+      PREVIEW_VERIFY_FAILURE_THRESHOLD + 3,
+    );
   });
 
   it("failures below the threshold with liveness unreadable do NOT flip, even across the window", async () => {
@@ -938,22 +961,26 @@ describe("verifySandboxPreviewHealth — earned crash verdict (round 13)", () =>
 
     expect(ok).toBe(true);
     expect(runtime.status).toBe("ready");
-    expect(runtime.healthFailureCount).toBe(1);
+    // Round 15 (C1): the unreadable round recorded no failure.
+    expect(runtime.healthFailureCount ?? 0).toBe(0);
+    expect(runtime.healthLivenessUnreadableCount).toBe(1);
   });
 
   it("a healthy probe resets the failure accounting", async () => {
     const support = makeVerifySupport("unreadable");
     const runtime = makeReadyRuntime();
-
-    await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
-    await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
-    expect(runtime.healthFailureCount).toBe(2);
+    // Seed the accounting as earlier rounds could have left it;
+    // one healthy probe must clear all of it.
+    runtime.healthFailureCount = 2;
+    runtime.healthFailureSince = Date.now() - 1000;
+    runtime.healthLivenessUnreadableCount = 3;
 
     const ok = await verifySandboxPreviewHealth(support, runtime, { probe: healthyProbe });
     expect(ok).toBe(true);
     expect(runtime.status).toBe("ready");
     expect(runtime.healthFailureCount).toBe(0);
     expect(runtime.healthFailureSince).toBeNull();
+    expect(runtime.healthLivenessUnreadableCount).toBe(0);
   });
 
   it("a non-ready runtime is never probed", async () => {
@@ -980,10 +1007,26 @@ describe("verifySandboxPreviewHealth — earned crash verdict (round 13)", () =>
  * The verify now re-exposes the port and re-probes BEFORE judging:
  * recovery precedes conviction, and round 13's conviction rules are
  * untouched for a genuinely dead server.
+ *
+ * Round 15 test-contract correction: the original round-14 tests
+ * mocked exposePort returning a DIFFERENT origin ("fresh-preview")
+ * and a "fresh-token" for the same sandboxId. The production E2B
+ * provider can never do that — getHost(port) is a deterministic
+ * function of (sandboxId, port) and the traffic token belongs to
+ * the sandbox (e2b-provider.ts) — so the suite proved the swap
+ * logic against a provider that does not exist, which is how the
+ * repair verified 892/892 locally and changed nothing live. The
+ * mocks below model the real contract: re-exposure returns the
+ * SAME origin and the SAME token, with only a fresh (synthetic)
+ * expiry. Recovery in these tests therefore comes from the
+ * re-probe itself (a transient miss clearing), never from a new
+ * address.
  */
 describe("verifySandboxPreviewHealth — upstream repair (round 14)", () => {
   const OLD_ORIGIN = "https://old-preview.invalid";
-  const NEW_ORIGIN = "https://fresh-preview.invalid";
+  // The deterministic provider contract: re-exposing the same
+  // sandbox returns this same origin and the stored token.
+  const SAME_ORIGIN = OLD_ORIGIN;
 
   const failing: SandboxProbeResult = {
     healthy: false,
@@ -1002,6 +1045,20 @@ describe("verifySandboxPreviewHealth — upstream repair (round 14)", () => {
     async (origin: string): Promise<SandboxProbeResult> =>
       healthyOrigins.has(origin) ? healthy : failing;
 
+  /**
+   * First probe fails, every later probe is healthy — a transient
+   * miss clearing on the repair's re-probe. Under the deterministic
+   * provider contract this is the ONLY way re-exposure recovers a
+   * runtime: the address never changes, the miss does.
+   */
+  const failFirstThenHealthy = () => {
+    let calls = 0;
+    return async (): Promise<SandboxProbeResult> => {
+      calls += 1;
+      return calls === 1 ? failing : healthy;
+    };
+  };
+
   type LivenessMode = "alive" | "dead" | "unreadable";
 
   function makeRepairSupport(
@@ -1011,8 +1068,11 @@ describe("verifySandboxPreviewHealth — upstream repair (round 14)", () => {
     const exposePort = vi.fn(
       exposeImpl ??
         (async () => ({
-          url: NEW_ORIGIN,
-          previewToken: "fresh-token",
+          // Deterministic reality (round 15): same sandbox → same
+          // origin, same sandbox-owned token; only the synthetic
+          // expiry is fresh.
+          url: SAME_ORIGIN,
+          previewToken: "stub-token",
           expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
         })),
     );
@@ -1071,32 +1131,37 @@ describe("verifySandboxPreviewHealth — upstream repair (round 14)", () => {
     return runtime;
   }
 
-  it("repairs a dead address under a live pid: re-exposes, swaps the upstream, re-probes healthy", async () => {
+  it("repairs a missed probe under a live pid: re-exposure returns the SAME address (deterministic provider) and the re-probe recovers", async () => {
     const { support, exposePort } = makeRepairSupport("alive");
     const runtime = makeReadyRuntime();
 
     const ok = await verifySandboxPreviewHealth(support, runtime, {
-      probe: probeByOrigin(new Set([NEW_ORIGIN])),
+      probe: failFirstThenHealthy(),
     });
 
     expect(ok).toBe(true);
     expect(runtime.status).toBe("ready");
     expect(exposePort).toHaveBeenCalledTimes(1);
     expect(exposePort).toHaveBeenCalledWith("sbx-1", 3000);
-    // The stored upstream now points at the fresh endpoint — origin,
-    // traffic token, and expiry all swapped together.
+    // Round 15 contract: the stored upstream still points at the
+    // SAME origin with the SAME sandbox token — re-exposure cannot
+    // mint a new address for the same sandbox. Only the synthetic
+    // expiry is fresh.
     expect(runtime.upstream).toMatchObject({
       kind: "sandbox",
-      origin: NEW_ORIGIN,
-      headers: { "e2b-traffic-access-token": "fresh-token" },
+      origin: SAME_ORIGIN,
+      headers: { "e2b-traffic-access-token": "stub-token" },
     });
+    expect(
+      (runtime.upstream as { expiresAt?: number | null }).expiresAt,
+    ).toBeGreaterThan(Date.now());
     expect(runtime.healthFailureCount).toBe(0);
     expect(runtime.healthFailureSince).toBeNull();
     expect(runtime.logs.some((l) => l.includes("Re-exposed the preview port"))).toBe(true);
     expect(runtime.logs.some((l) => l.includes("Preview address recovered"))).toBe(true);
   });
 
-  it("a fresh address that also fails under a live pid stays ready — no conviction — and the failure still counts", async () => {
+  it("a re-probe that also fails under a live pid stays ready — no conviction — and the alive round resets the failure count", async () => {
     const { support, exposePort } = makeRepairSupport("alive");
     const runtime = makeReadyRuntime();
 
@@ -1108,7 +1173,9 @@ describe("verifySandboxPreviewHealth — upstream repair (round 14)", () => {
     expect(runtime.status).toBe("ready");
     expect(runtime.errorCode).toBeNull();
     expect(exposePort).toHaveBeenCalledTimes(1);
-    expect(runtime.healthFailureCount).toBe(1);
+    // Round 15 (C1): alive-but-failing rounds reset, not bank.
+    expect(runtime.healthFailureCount).toBe(0);
+    expect(runtime.healthFailureSince).toBeNull();
     // The failure line names the address that was actually probed —
     // the discriminator the round-14 diagnosis was starved of.
     expect(
@@ -1116,12 +1183,12 @@ describe("verifySandboxPreviewHealth — upstream repair (round 14)", () => {
     ).toBe(true);
   });
 
-  it("an expired endpoint triggers re-exposure even when liveness is unreadable, and a healthy fresh address recovers", async () => {
+  it("an expired endpoint triggers re-exposure even when liveness is unreadable, and a healthy re-probe recovers", async () => {
     const { support, exposePort } = makeRepairSupport("unreadable");
     const runtime = makeReadyRuntime(Date.now() - 1_000); // lapsed
 
     const ok = await verifySandboxPreviewHealth(support, runtime, {
-      probe: probeByOrigin(new Set([NEW_ORIGIN])),
+      probe: failFirstThenHealthy(),
     });
 
     expect(ok).toBe(true);
@@ -1169,7 +1236,8 @@ describe("verifySandboxPreviewHealth — upstream repair (round 14)", () => {
 
     expect(ok).toBe(true);
     expect(runtime.status).toBe("ready");
-    expect(runtime.healthFailureCount).toBe(1);
+    // Round 15 (C1): the alive round resets the accounting.
+    expect(runtime.healthFailureCount).toBe(0);
   });
 
   it("the start path stores the endpoint expiry on the runtime upstream", async () => {
@@ -1267,5 +1335,285 @@ describe("checkSandboxPreviewLiveness (round 13)", () => {
       "sbx-1",
     );
     expect(liveness).toEqual({ pid: null, alive: null });
+  });
+});
+
+/**
+ * Round 15 (2026-11-17 re-proof diagnosis): the verdict machinery
+ * convicted a slow guest because its two safeguards shared one
+ * throat — 3 s probes read 6–12 s responses as silence, the
+ * liveness exec starved in the same window and returned unreadable,
+ * and unreadable + accumulated failures was the one convicting
+ * combination. C1: conviction requires a READABLE verdict backed
+ * by a patient in-sandbox ground-truth check; probes get 15 s of
+ * patience; alive rounds reset the accounting. C5: the [preview]
+ * verdict lines are mirrored to stdout so the evidence survives.
+ */
+describe("verifySandboxPreviewHealth — readable verdicts only (round 15, C1)", () => {
+  const failingProbe = async (): Promise<SandboxProbeResult> => ({
+    healthy: false,
+    authConfigError: false,
+    rootRouteMissing: false,
+    status: null,
+  });
+
+  type LivenessMode = "alive" | "dead" | "unreadable";
+  type GroundTruthMode = "answering" | "silent" | "unreadable";
+
+  function makeRound15Support(
+    mode: LivenessMode,
+    groundTruth: GroundTruthMode,
+  ): SandboxPreviewSupport {
+    const provider = {
+      name: "stub",
+      fileTransfer: {
+        listDir: vi.fn(async () => []),
+        makeDir: vi.fn(async () => {}),
+        writeFile: vi.fn(async () => {}),
+        readFile: vi.fn(async () => new Uint8Array()),
+        listTree: vi.fn(async () => []),
+        removePath: vi.fn(async () => {}),
+        renamePath: vi.fn(async () => {}),
+      },
+      execute: vi.fn(async (_sandboxId: string, input: { command: string }) => {
+        if (input.command.includes("LITT_PREVIEW_LIVENESS")) {
+          if (mode === "unreadable") throw new Error("envd unreachable");
+          return {
+            exitCode: 0,
+            stdout:
+              mode === "alive"
+                ? "LITT_PREVIEW_LIVENESS=alive pid=4242\n"
+                : "LITT_PREVIEW_LIVENESS=dead pid=4242\n",
+            stderr: "",
+            durationMs: 1,
+          };
+        }
+        if (input.command.includes("LITT_PREVIEW_GROUND_TRUTH")) {
+          if (groundTruth === "unreadable") throw new Error("envd unreachable");
+          return {
+            exitCode: 0,
+            stdout:
+              groundTruth === "answering"
+                ? "LITT_PREVIEW_GROUND_TRUTH=200\n"
+                : "LITT_PREVIEW_GROUND_TRUTH=000\n",
+            stderr: "",
+            durationMs: 1,
+          };
+        }
+        return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+      }),
+      exposePort: vi.fn(async () => ({
+        url: "https://stub-preview.invalid",
+        previewToken: "stub-token",
+      })),
+      extendTimeout: vi.fn(async () => true),
+    };
+    const executor = {
+      ensureSandboxForPreview: vi.fn(async () => ({ sandboxId: "sbx-1" })),
+      notePreviewPort: vi.fn(),
+    };
+    return {
+      executor: executor as unknown as SandboxWorkspaceExecutor,
+      provider: provider as unknown as SandboxProvider,
+    };
+  }
+
+  function makeReadyRuntime(): PreviewRuntime {
+    const runtime = makeRuntime();
+    runtime.status = "ready";
+    runtime.upstream = {
+      kind: "sandbox",
+      sandboxId: "sbx-1",
+      origin: "https://stub-preview.invalid",
+      headers: { "e2b-traffic-access-token": "stub-token" },
+    };
+    return runtime;
+  }
+
+  it("the live verify probes with 15 s patience, not the start loop's 3 s", async () => {
+    const support = makeRound15Support("alive", "silent");
+    const runtime = makeReadyRuntime();
+    const seen: (number | undefined)[] = [];
+    const probe = async (
+      _origin: string,
+      _headers: Record<string, string>,
+      timeoutMs?: number,
+    ): Promise<SandboxProbeResult> => {
+      seen.push(timeoutMs);
+      return failingProbe();
+    };
+
+    await verifySandboxPreviewHealth(support, runtime, { probe });
+
+    expect(PREVIEW_VERIFY_PROBE_TIMEOUT_MS).toBe(15_000);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((t) => t === PREVIEW_VERIFY_PROBE_TIMEOUT_MS)).toBe(true);
+  });
+
+  it("a confirmed-dead pid does NOT convict when the guest answers locally — data-path state, not a dead server", async () => {
+    const support = makeRound15Support("dead", "answering");
+    const runtime = makeReadyRuntime();
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(runtime.errorCode).toBeNull();
+    expect(runtime.healthFailureCount).toBe(0);
+    expect(
+      runtime.logs.some((l) =>
+        l.includes("answers inside the sandbox (local HTTP 200)"),
+      ),
+    ).toBe(true);
+  });
+
+  it("a confirmed-dead pid convicts when the guest does not answer locally", async () => {
+    const support = makeRound15Support("dead", "silent");
+    const runtime = makeReadyRuntime();
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+
+    expect(ok).toBe(false);
+    expect(runtime.status).toBe("failed");
+    expect(runtime.errorCode).toBe("preview_dev_server_failed");
+    expect(runtime.error).toContain("pid 4242");
+    expect(runtime.error).toContain("no longer running");
+  });
+
+  it("a confirmed-dead pid convicts even when the ground-truth check itself is unreadable", async () => {
+    const support = makeRound15Support("dead", "unreadable");
+    const runtime = makeReadyRuntime();
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, { probe: failingProbe });
+
+    expect(ok).toBe(false);
+    expect(runtime.status).toBe("failed");
+    expect(runtime.errorCode).toBe("preview_dev_server_failed");
+  });
+
+  it("sustained unreadable liveness escalates in the log — the machinery is degraded, not the server", async () => {
+    const support = makeRound15Support("unreadable", "silent");
+    const runtime = makeReadyRuntime();
+
+    for (let i = 0; i < PREVIEW_LIVENESS_UNREADABLE_ESCALATION_ROUNDS; i++) {
+      const ok = await verifySandboxPreviewHealth(support, runtime, {
+        probe: failingProbe,
+      });
+      expect(ok).toBe(true);
+      expect(runtime.status).toBe("ready");
+    }
+    expect(runtime.healthLivenessUnreadableCount).toBe(
+      PREVIEW_LIVENESS_UNREADABLE_ESCALATION_ROUNDS,
+    );
+    expect(runtime.healthFailureCount ?? 0).toBe(0);
+    expect(
+      runtime.logs.some((l) => l.includes("the verdict machinery")),
+    ).toBe(true);
+    expect(
+      runtime.logs.some((l) => l.includes("is degraded, not the server")),
+    ).toBe(true);
+  });
+});
+
+describe("checkSandboxPreviewGroundTruth (round 15, C1)", () => {
+  function groundTruthSupport(stdout: string | Error): SandboxPreviewSupport {
+    const provider = {
+      name: "stub",
+      fileTransfer: {
+        listDir: vi.fn(async () => []),
+        makeDir: vi.fn(async () => {}),
+        writeFile: vi.fn(async () => {}),
+        readFile: vi.fn(async () => new Uint8Array()),
+        listTree: vi.fn(async () => []),
+        removePath: vi.fn(async () => {}),
+        renamePath: vi.fn(async () => {}),
+      },
+      execute: vi.fn(
+        async (
+          _id: string,
+          input: { command: string; timeoutMs?: number },
+        ) => {
+          if (stdout instanceof Error) throw stdout;
+          return { exitCode: 0, stdout, stderr: "", durationMs: 1 };
+        },
+      ),
+      exposePort: vi.fn(async () => ({
+        url: "https://stub-preview.invalid",
+        previewToken: "stub-token",
+      })),
+      extendTimeout: vi.fn(async () => true),
+    };
+    const executor = {
+      ensureSandboxForPreview: vi.fn(async () => ({ sandboxId: "sbx-1" })),
+      notePreviewPort: vi.fn(),
+    };
+    return {
+      executor: executor as unknown as SandboxWorkspaceExecutor,
+      provider: provider as unknown as SandboxProvider,
+    };
+  }
+
+  it("parses a locally-answering guest with its HTTP status", async () => {
+    const truth = await checkSandboxPreviewGroundTruth(
+      groundTruthSupport("LITT_PREVIEW_GROUND_TRUTH=200\n"),
+      "sbx-1",
+    );
+    expect(truth).toEqual({ status: 200, answering: true });
+  });
+
+  it("curl's 000 is a readable 'not answering', not an unreadable check", async () => {
+    const truth = await checkSandboxPreviewGroundTruth(
+      groundTruthSupport("LITT_PREVIEW_GROUND_TRUTH=000\n"),
+      "sbx-1",
+    );
+    expect(truth).toEqual({ status: null, answering: false });
+  });
+
+  it("an exec failure is undetermined, never a guessed verdict", async () => {
+    const truth = await checkSandboxPreviewGroundTruth(
+      groundTruthSupport(new Error("envd down")),
+      "sbx-1",
+    );
+    expect(truth).toEqual({ status: null, answering: null });
+  });
+
+  it("asks the guest with a patient budget, not the liveness check's 10 s", async () => {
+    const support = groundTruthSupport("LITT_PREVIEW_GROUND_TRUTH=200\n");
+    const provider = support.provider as unknown as {
+      execute: ReturnType<typeof vi.fn>;
+    };
+    await checkSandboxPreviewGroundTruth(support, "sbx-1");
+    const call = provider.execute.mock.calls[0];
+    expect(call[1].command).toContain("curl");
+    expect(call[1].command).toContain("localhost:3000");
+    expect(call[1].timeoutMs).toBe(30_000);
+  });
+});
+
+describe("pushPreviewLog — stdout mirror (round 15, C5)", () => {
+  it("mirrors [preview] verdict lines to stdout so they survive the runtime", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const runtime = makeRuntime();
+      pushPreviewLog(runtime, "[preview] Health check passed — ready (sandbox)");
+      expect(runtime.logs).toContain("[preview] Health check passed — ready (sandbox)");
+      const mirrored = info.mock.calls.map((c) => String(c[0]));
+      expect(mirrored).toContain("[preview] Health check passed — ready (sandbox)");
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it("does NOT mirror the dev server's own output lines", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const runtime = makeRuntime();
+      pushPreviewLog(runtime, "GET / 200 in 6.8s");
+      pushPreviewLog(runtime, "[stderr] compiling…");
+      expect(runtime.logs).toHaveLength(2);
+      expect(info).not.toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+    }
   });
 });
