@@ -615,6 +615,20 @@ export class E2bSandboxProvider implements SandboxProvider {
   async exposePort(sandboxId: string, port: number): Promise<PreviewEndpoint> {
     const entry = this.entry(sandboxId);
     const host = entry.handle.getHost(port);
+    // Round 16 follow-up: record WHERE the traffic token came
+    // from — the sandbox handle's real token, or the random
+    // fallback substituted when the handle carries none. The
+    // fallback cannot authenticate against the provider's
+    // private-traffic gate, so this one bit separates "the
+    // terminal is sending a made-up token" from "the path to the
+    // provider ingress is black-holing" on the next dead-ingress
+    // proof. ONLY the source is logged — never the token value
+    // or any fragment of it.
+    const handleToken = entry.handle.trafficAccessToken;
+    console.info(
+      `[e2b-provider] exposePort sandbox=${sandboxId} port=${port} ` +
+        `trafficTokenSource=${handleToken != null ? "sandbox-handle" : "random-fallback"}`,
+    );
     return {
       port,
       url: `https://${host}`,
@@ -627,7 +641,7 @@ export class E2bSandboxProvider implements SandboxProvider {
       // token, exactly the Phase 1 behavior. The authenticated
       // preview proxy is the only consumer of either value; neither
       // is rendered to a browser or persisted anywhere.
-      previewToken: entry.handle.trafficAccessToken ?? randomBytes(16).toString("hex"),
+      previewToken: handleToken ?? randomBytes(16).toString("hex"),
       expiresAt: new Date(
         this.now() + entry.instance.limits.idleTimeoutMinutes * 60_000,
       ).toISOString(),

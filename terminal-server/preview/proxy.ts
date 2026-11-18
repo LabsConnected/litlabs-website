@@ -120,6 +120,18 @@ export function registerPreviewProxyRoute(
     const previewToken = String(req.query.token || req.headers["x-preview-token"] || "");
     const previewAuth = checkPreviewToken(previewToken, workspaceId);
     if (!previewAuth.ok) {
+      // Round 16 follow-up: this rejection used to be the one
+      // silent failure in the whole preview path — the Studio
+      // panel surfaced "The preview address returned HTTP 401"
+      // while the terminal logged nothing at all, because this
+      // branch returns before the upstream fingerprint log below
+      // and the verify machinery never traverses the proxy. Log
+      // the rejection with status + errorCode + workspace only —
+      // NEVER the presented token or any fragment of it.
+      console.warn(
+        `[Preview] auth rejected workspace=${workspaceId} ` +
+          `status=${previewAuth.status} errorCode=${previewAuth.errorCode}`,
+      );
       res.status(previewAuth.status).json({ error: previewAuth.error, errorCode: previewAuth.errorCode });
       return;
     }

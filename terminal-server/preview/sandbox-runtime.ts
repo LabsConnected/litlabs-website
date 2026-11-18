@@ -114,11 +114,34 @@ export interface SandboxPreviewStartArgs {
   probe?: (origin: string, headers: Record<string, string>) => Promise<SandboxProbeResult>;
 }
 
+/**
+ * Why a probe received no usable HTTP response (round 16
+ * follow-up). "http-status" means a response DID arrive but was
+ * not healthy (its status is on the result); the other classes
+ * describe a fetch that threw before any response — the classes
+ * the ingress diagnosis needs to tell a connect/TLS stall from a
+ * DNS failure from a plain patience timeout. "unknown" is the
+ * honest residue.
+ */
+export type SandboxProbeFailureClass =
+  | "timeout"
+  | "connect"
+  | "tls"
+  | "dns"
+  | "http-status"
+  | "unknown";
+
 export interface SandboxProbeResult {
   healthy: boolean;
   authConfigError: boolean;
   rootRouteMissing: boolean;
   status: number | null;
+  /**
+   * Failure class when the probe did not get a healthy response.
+   * Recorded by probeUpstream; absent on results built by hand
+   * (test doubles, catch fallbacks that never saw the error).
+   */
+  failureClass?: SandboxProbeFailureClass;
 }
 
 /** Byte offsets into the sandbox preview log, per workspace. */
@@ -548,6 +571,30 @@ export const PREVIEW_RECREATION_MAX_PER_SESSION = 2;
  */
 export const PREVIEW_RECREATION_COOLDOWN_MS = 120_000;
 
+/**
+ * Round 16 follow-up — settle watchdog for a launched recreation.
+ * The recreation promise runs detached (a cold provision takes
+ * minutes and a status poll must never block on it), and its first
+ * step can pend forever without rejecting: destroySandbox queues
+ * on the per-workspace mutex, which has no timeout, and the
+ * provider's kill carries none either. Before this watchdog, such
+ * a hang was invisible and permanent — no settle, no failure line,
+ * and healthRecreationInFlight stuck true, silently suppressing
+ * every later recreation (the 2026-11-18 proof: an announced
+ * recreation with no destroy/create line ever following it).
+ *
+ * The bound is 10 minutes: roughly twice the worst cold provision
+ * observed in production (~298.5 s, round 15) and five times the
+ * start loop's own 120 s health budget (HEALTH_PROBE_TIMEOUT_MS).
+ * A recreation that has not settled by then is wedged, not slow.
+ * When the watchdog fires it logs loudly and clears ONLY the
+ * in-flight flag, so later verify rounds can retry (still subject
+ * to the session cap and cooldown); the attempt itself is left
+ * running, and if it ever lands, its own completion/failure lines
+ * still record the outcome.
+ */
+export const PREVIEW_RECREATION_SETTLE_WATCHDOG_MS = 600_000;
+
 /** Bounded tail of the preview log carried in a failure diagnostic. */
 const PREVIEW_LOG_DIAGNOSTIC_MAX_CHARS = 2_000;
 
@@ -782,6 +829,68 @@ export function previewRecreationPromise(
 }
 
 /**
+ * Recreation launch generations, keyed by runtime (round 16
+ * follow-up). A settle-watchdog release can let a NEW recreation
+ * launch while an older attempt is still running in the
+ * background; the generation lets the older attempt's cleanup
+ * recognize that a newer attempt owns the shared state (the
+ * in-flight flag and the promise registry) and leave it alone.
+ */
+const recreationGenerations = new WeakMap<PreviewRuntime, number>();
+
+/**
+ * Arm the settle watchdog for one launched recreation (round 16
+ * follow-up; see PREVIEW_RECREATION_SETTLE_WATCHDOG_MS). If the
+ * promise has not settled within the bound, log the fact loudly
+ * and clear the in-flight flag so later verify rounds can retry
+ * instead of silently no-oping on a stuck flag forever. Only the
+ * flag is cleared: the bookkeeping (count, cooldown timestamp)
+ * stays as launched — the attempt DID start — and the attempt
+ * itself is left running; should it settle later, its guarded
+ * cleanup finds a newer generation in place and does not touch
+ * the shared state.
+ */
+function armRecreationSettleWatchdog(args: {
+  runtime: PreviewRuntime;
+  promise: Promise<void>;
+  generation: number;
+  sandboxId: string;
+  watchdogMs: number;
+}): void {
+  const { runtime, promise, generation, sandboxId, watchdogMs } = args;
+  let settled = false;
+  void promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  const timer = setTimeout(() => {
+    if (settled) return;
+    // A newer recreation has taken over this runtime (only
+    // possible after an earlier watchdog release): its own
+    // watchdog owns the flag now.
+    if (recreationGenerations.get(runtime) !== generation) return;
+    if (!runtime.healthRecreationInFlight) return;
+    pushPreviewLog(
+      runtime,
+      `[preview] Recreation watchdog: the sandbox recreation launched ` +
+        `${watchdogMs}ms ago for dead sandbox ${sandboxId} has not settled — ` +
+        `it may be wedged (for example behind the workspace lock or a ` +
+        `provider call that never returns). Clearing the in-flight flag so ` +
+        `later verify rounds can retry; the attempt itself is left running ` +
+        `and its outcome will still be logged if it ever lands`,
+    );
+    runtime.healthRecreationInFlight = false;
+  }, watchdogMs);
+  // Never keep the process alive just for the watchdog (mirrors
+  // the verify sweeper's timer).
+  if (typeof timer.unref === "function") timer.unref();
+}
+
+/**
  * Round 16 (C2) — recreate the sandbox to mint a genuinely new
  * preview address.
  *
@@ -820,6 +929,8 @@ async function recreateSandboxPreview(args: {
   support: SandboxPreviewSupport;
   runtime: PreviewRuntime;
   ws: WorkspaceDescriptor;
+  /** Launch generation (round 16 follow-up) — see recreationGenerations. */
+  generation: number;
   probe?: (
     origin: string,
     headers: Record<string, string>,
@@ -830,11 +941,25 @@ async function recreateSandboxPreview(args: {
   const oldSandboxId =
     upstream?.kind === "sandbox" ? upstream.sandboxId : "unknown";
   const oldOrigin = upstream?.kind === "sandbox" ? upstream.origin : "unknown";
+  // Round 16 follow-up: the recreation has a voice from its first
+  // step. Before this, the first lifecycle line was emitted only
+  // AFTER destroySandbox returned, so a recreation whose destroy
+  // never settled was indistinguishable from one that never ran.
+  pushPreviewLog(
+    runtime,
+    `[preview] Sandbox recreation started — destroying dead sandbox ` +
+      `${oldSandboxId} (dead address ${oldOrigin})`,
+  );
   runtime.status = "starting";
   runtime.startedAt = Date.now();
   runtime.error = null;
   runtime.errorCode = null;
   try {
+    pushPreviewLog(
+      runtime,
+      `[preview] Destroying sandbox ${oldSandboxId} — the recreation ` +
+        `continues once the destroy settles`,
+    );
     await support.executor.destroySandbox(ws);
     pushPreviewLog(
       runtime,
@@ -872,8 +997,15 @@ async function recreateSandboxPreview(args: {
     // its own terminal state keeps it.
     if (runtime.status === "starting") runtime.status = "ready";
   } finally {
-    runtime.healthRecreationInFlight = false;
-    recreationPromises.delete(runtime);
+    // Round 16 follow-up: only the CURRENT generation clears the
+    // shared state. If the settle watchdog released this attempt
+    // and a later round launched a newer recreation, that attempt
+    // owns the in-flight flag and the promise registry now — this
+    // attempt's late settle must not clobber either.
+    if (recreationGenerations.get(runtime) === args.generation) {
+      runtime.healthRecreationInFlight = false;
+      recreationPromises.delete(runtime);
+    }
   }
 }
 
@@ -943,6 +1075,13 @@ export async function verifySandboxPreviewHealth(
     resolveWorkspace?: (
       workspaceId: string,
     ) => WorkspaceDescriptor | undefined;
+    /**
+     * Settle-watchdog bound for a launched recreation (round 16
+     * follow-up). Defaults to
+     * PREVIEW_RECREATION_SETTLE_WATCHDOG_MS; tests inject a short
+     * bound to exercise the watchdog without waiting it out.
+     */
+    recreationSettleWatchdogMs?: number;
   } = {},
 ): Promise<boolean> {
   const upstream = runtime.upstream;
@@ -1006,6 +1145,9 @@ export async function verifySandboxPreviewHealth(
       authConfigError: false,
       rootRouteMissing: false,
       status: null,
+      // A probe double that throws never surfaces its error here;
+      // the real probeUpstream classifies its own failures.
+      failureClass: "unknown",
     }),
   );
   const probeMs = Date.now() - probeStartedAt;
@@ -1018,7 +1160,14 @@ export async function verifySandboxPreviewHealth(
   // yet of a crash. Ask the sandbox whether the server process
   // still exists BEFORE recording anything (round 15, C1).
   const now = Date.now();
-  const probeNote = `HTTP ${result.status ?? "no response"} after ${probeMs}ms`;
+  // Round 16 follow-up: a no-response failure names its class —
+  // "no response (timeout)" vs "(connect)" vs "(dns)" is the
+  // difference between a slow guest, a black-holed path, and a
+  // name that does not resolve.
+  const probeNote =
+    result.status !== null
+      ? `HTTP ${result.status} after ${probeMs}ms`
+      : `HTTP no response (${result.failureClass ?? "unknown"}) after ${probeMs}ms`;
 
   // Round 16 (C2): EVERY generic external failure counts toward
   // the recreation evidence, whatever this round's liveness
@@ -1114,6 +1263,18 @@ export async function verifySandboxPreviewHealth(
       );
       return;
     }
+    // Round 16 follow-up: re-check the in-flight flag AFTER the
+    // awaited ground-truth exec, before any bookkeeping is
+    // written. The check at the top of this gate ran BEFORE that
+    // await; a concurrent round can launch its recreation while
+    // this round's exec is outstanding, and without the re-check
+    // both rounds proceed to the ledger — the 2026-11-18 proof
+    // logged an "attempt 1 of 2" announcement and a "cooldown —
+    // not recreating yet" line in the same second from exactly
+    // that interleave. PreviewManager's verify is now
+    // single-flight (the driver-level hole), and this re-check
+    // closes the gate itself.
+    if (runtime.healthRecreationInFlight) return;
     const recreations = runtime.healthRecreationCount ?? 0;
     if (recreations >= PREVIEW_RECREATION_MAX_PER_SESSION) {
       pushPreviewLog(
@@ -1169,13 +1330,25 @@ export async function verifySandboxPreviewHealth(
         `${PREVIEW_RECREATION_MAX_PER_SESSION}); old sandbox ${upstream.sandboxId}, ` +
         `old address ${upstream.origin}`,
     );
+    const generation = (recreationGenerations.get(runtime) ?? 0) + 1;
+    recreationGenerations.set(runtime, generation);
     const promise = recreateSandboxPreview({
       support,
       runtime,
       ws,
+      generation,
       probe: (origin, headers) => probe(origin, headers),
     });
     recreationPromises.set(runtime, promise);
+    armRecreationSettleWatchdog({
+      runtime,
+      promise,
+      generation,
+      sandboxId: upstream.sandboxId,
+      watchdogMs:
+        deps.recreationSettleWatchdogMs ??
+        PREVIEW_RECREATION_SETTLE_WATCHDOG_MS,
+    });
     void promise;
   };
 
@@ -1279,15 +1452,80 @@ export async function verifySandboxPreviewHealth(
  * the live verify passes PREVIEW_VERIFY_PROBE_TIMEOUT_MS (round 15,
  * C1) — patience is a property of the caller, not of the probe.
  */
+/**
+ * Classify a thrown probe fetch (round 16 follow-up). Before
+ * this, every throw collapsed into `status: null` and the failure
+ * lines read "no response" — DNS failure, a connect/TLS stall,
+ * and the probe's own patience timeout were indistinguishable,
+ * which is exactly the discrimination the ingress diagnosis
+ * needs (a stall points at the path; a fast refusal points at
+ * the gate). Undici wraps the socket error as `cause` on a
+ * TypeError, so the whole cause chain is walked.
+ */
+export function classifyProbeFailure(err: unknown): SandboxProbeFailureClass {
+  const chain: unknown[] = [];
+  let current: unknown = err;
+  for (let i = 0; i < 5 && current != null; i += 1) {
+    chain.push(current);
+    current = (current as { cause?: unknown }).cause;
+  }
+  for (const link of chain) {
+    const name = (link as { name?: unknown } | null)?.name;
+    // AbortSignal.timeout rejects with a TimeoutError DOMException.
+    if (name === "TimeoutError" || name === "AbortError") return "timeout";
+  }
+  for (const link of chain) {
+    const code = String((link as { code?: unknown } | null)?.code ?? "");
+    if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "dns";
+    if (
+      code.startsWith("ERR_TLS") ||
+      code.startsWith("UNABLE_TO_") ||
+      code.includes("CERT") ||
+      code.includes("SELF_SIGNED")
+    ) {
+      return "tls";
+    }
+    if (
+      code === "ECONNREFUSED" ||
+      code === "ECONNRESET" ||
+      code === "ECONNABORTED" ||
+      code === "EPIPE" ||
+      code === "ETIMEDOUT" ||
+      code === "EHOSTUNREACH" ||
+      code === "ENETUNREACH" ||
+      code === "UND_ERR_SOCKET" ||
+      code === "UND_ERR_CONNECT_TIMEOUT"
+    ) {
+      return "connect";
+    }
+  }
+  return "unknown";
+}
+
 export async function probeUpstream(
   origin: string,
   headers: Record<string, string>,
   timeoutMs = 3000,
 ): Promise<SandboxProbeResult> {
-  const resp = await fetch(`${origin}/`, {
-    headers,
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(`${origin}/`, {
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    // No response at all: record WHY (round 16 follow-up) instead
+    // of collapsing every throw into an anonymous null status.
+    // Callers used to catch this throw themselves; returning the
+    // verdict keeps their catch fallbacks working unchanged.
+    return {
+      healthy: false,
+      authConfigError: false,
+      rootRouteMissing: false,
+      status: null,
+      failureClass: classifyProbeFailure(err),
+    };
+  }
   if (resp.ok) {
     return { healthy: true, authConfigError: false, rootRouteMissing: false, status: resp.status };
   }
@@ -1300,7 +1538,13 @@ export async function probeUpstream(
       return { healthy: false, authConfigError: true, rootRouteMissing: false, status: resp.status };
     }
   }
-  return { healthy: false, authConfigError: false, rootRouteMissing: false, status: resp.status };
+  return {
+    healthy: false,
+    authConfigError: false,
+    rootRouteMissing: false,
+    status: resp.status,
+    failureClass: "http-status",
+  };
 }
 
 /**
