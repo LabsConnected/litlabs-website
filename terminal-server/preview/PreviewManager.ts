@@ -176,6 +176,45 @@ export interface PreviewRuntime {
   healthFailureCount?: number;
   /** Timestamp of the first failure in the current verify window. */
   healthFailureSince?: number | null;
+  /**
+   * Round 15 (C1): consecutive live-verify rounds whose liveness
+   * check itself was UNREADABLE (verifySandboxPreviewHealth). An
+   * unreadable verdict is not evidence of death and never counts
+   * toward conviction — but a thermometer that stays broken is
+   * itself surfaced in the log after a few rounds. Reset whenever a
+   * round produces a readable verdict or a healthy probe.
+   */
+  healthLivenessUnreadableCount?: number;
+  /**
+   * Round 16 (C2): consecutive live-verify rounds whose EXTERNAL
+   * probe failed generically (verifySandboxPreviewHealth). Unlike
+   * healthFailureCount, this accounting is NOT reset by alive or
+   * unreadable verdict rounds — a dead preview address fails every
+   * round while the server stays alive, and that sustained external
+   * failure is exactly the recreation trigger's evidence. Reset
+   * only by a genuinely healthy probe (or at a recreation launch,
+   * so the fresh address earns its own window).
+   */
+  healthExternalFailureCount?: number;
+  /** Timestamp of the first external failure in the current window. */
+  healthExternalFailureSince?: number | null;
+  /**
+   * Round 16 (C2): sandbox recreations performed for this runtime
+   * (verifySandboxPreviewHealth's gated repair for a verifiably
+   * dead preview address). Capped per session — see
+   * PREVIEW_RECREATION_MAX_PER_SESSION in sandbox-runtime.ts.
+   */
+  healthRecreationCount?: number;
+  /** Timestamp of the last recreation launch (cooldown gate). */
+  healthLastRecreationAt?: number | null;
+  /** A recreation is currently in flight (detached from the verify). */
+  healthRecreationInFlight?: boolean;
+  /**
+   * The package manager the sandbox start resolved, recorded by
+   * startSandboxPreview so a recreation re-runs the start with the
+   * same manager instead of re-deriving it.
+   */
+  packageManager?: string;
 }
 
 interface PreviewStartInput {
@@ -1048,6 +1087,19 @@ function pushLog(runtime: PreviewRuntime, line: string): void {
   runtime.logs.push(line);
   if (runtime.logs.length > MAX_LOG_LINES) {
     runtime.logs.splice(0, runtime.logs.length - MAX_LOG_LINES);
+  }
+  // Round 15 (C5): mirror the preview machinery's own verdict lines
+  // to the terminal service's stdout, so they survive in the service
+  // logs (Railway) across restarts. Until now every [preview] line —
+  // including the live verify's per-round reasoning — lived only in
+  // this per-runtime memory ring and died with the runtime object,
+  // which starved the round-13/14/15 diagnoses of exactly the
+  // evidence that would have settled them. Only [preview]-prefixed
+  // lines are mirrored: the dev server's own output (pushed raw and
+  // as [stderr]) stays ring-only, so stdout gains the verdicts
+  // without inheriting the guest's noise.
+  if (line.startsWith("[preview]")) {
+    console.info(line);
   }
 }
 

@@ -55,7 +55,10 @@ import {
   logSandboxInstallMemoryEvidence,
   runSandboxInstallOnce,
 } from "../sandbox/install-flight";
-import type { WorkspaceDescriptor } from "../workspace/WorkspaceManager";
+import {
+  getWorkspace,
+  type WorkspaceDescriptor,
+} from "../workspace/WorkspaceManager";
 import {
   PreviewError,
   extractClerkEnv,
@@ -130,6 +133,9 @@ const logOffsets = new Map<string, number>();
 export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promise<PreviewRuntime> {
   const { support, runtime, ws } = args;
   const { executor, provider } = support;
+  // Recorded so a round-16 (C2) recreation re-runs this start with
+  // the same package manager the original start resolved.
+  runtime.packageManager = args.packageManager;
 
   const ensured = await executor.ensureSandboxForPreview(ws);
   if (!ensured) {
@@ -460,9 +466,87 @@ export async function tailSandboxPreviewLogs(
  * path would make a genuinely dead server immortal. A live pid
  * always blocks the flip: the runtime stays ready and the miss is
  * logged as the transient it is.
+ *
+ * Round 15 (C1) — the 2026-11-17 re-proof convicted a runtime under
+ * exactly the combination round 13 left open: probes capped at 3 s
+ * while the cold-compiling guest answered in 6–12 s, and the
+ * liveness exec starving in the same saturated guest and returning
+ * UNREADABLE, which the sustained-failure rule then treated as
+ * evidence of death. The rules above are therefore amended:
+ *
+ *   - an UNREADABLE liveness verdict is never evidence: those rounds
+ *     do not accumulate toward conviction at all (the window pauses;
+ *     after PREVIEW_LIVENESS_UNREADABLE_ESCALATION_ROUNDS consecutive
+ *     unreadable rounds the verify logs that the verdict machinery
+ *     itself is degraded);
+ *   - conviction requires a READABLE verdict — a confirmed-dead pid —
+ *     backed by a patient in-sandbox ground-truth check
+ *     (checkSandboxPreviewGroundTruth): if the guest's server
+ *     answers a local curl, the state is a data-path failure, never
+ *     "dev server failed";
+ *   - alive-but-failing rounds RESET the failure accounting instead
+ *     of banking it (round 13/14 let early patience accumulate until
+ *     a later unreadable round spent it);
+ *   - the live verify probes with PREVIEW_VERIFY_PROBE_TIMEOUT_MS
+ *     of patience instead of the start loop's 3 s.
+ *
+ * The threshold/window constants remain exported for the record
+ * (and the round-13 tests that reference them), but the
+ * sustained-failure conviction path they parameterized is retired:
+ * no combination of unreadable verdicts convicts anymore.
  */
 export const PREVIEW_VERIFY_FAILURE_THRESHOLD = 3;
 export const PREVIEW_VERIFY_FAILURE_WINDOW_MS = 20_000;
+
+/**
+ * Round 15 (C1): patience for the LIVE verify's probes. The verify
+ * used to share probeUpstream's 3 s abort with the start loop; a
+ * cold-compiling 2 vCPU guest answers GET / in 6–12 s, so verify
+ * probes read a live server as silence (2026-11-17 re-proof: the
+ * guest logged 200s at 6.8–12.3 s while the verify convicted on
+ * "no response"). The live verify runs on a ~30 s status cadence —
+ * it can afford patience the 1 s start loop cannot. The start loop
+ * keeps the 3 s default.
+ */
+export const PREVIEW_VERIFY_PROBE_TIMEOUT_MS = 15_000;
+
+/** Exec budget for the in-sandbox ground-truth check (round 15, C1). */
+export const PREVIEW_GROUND_TRUTH_TIMEOUT_MS = 30_000;
+
+/**
+ * Consecutive verify rounds with an UNREADABLE liveness verdict
+ * before the verify logs an escalation line (round 15, C1): a
+ * broken thermometer cannot convict, but it is worth surfacing.
+ */
+export const PREVIEW_LIVENESS_UNREADABLE_ESCALATION_ROUNDS = 5;
+
+/**
+ * Round 16 (C2) — gated sandbox recreation for a verifiably dead
+ * preview address. The verify's external probe must fail
+ * generically for at least this many consecutive rounds, spanning
+ * at least PREVIEW_RECREATION_FAILURE_WINDOW_MS, before recreation
+ * is even considered: at the panel's ~30 s status cadence that is
+ * roughly two minutes of sustained dead-address evidence, never a
+ * single bad round.
+ */
+export const PREVIEW_RECREATION_FAILURE_THRESHOLD = 4;
+export const PREVIEW_RECREATION_FAILURE_WINDOW_MS = 90_000;
+
+/**
+ * Hard cap on recreations per preview session (runtime lifetime).
+ * Recreation is expensive (a full cold provision) and a provider
+ * whose ingress is down for EVERY sandbox would otherwise be
+ * retried forever; after the cap the runtime stays ready-and-honest
+ * under the round-15 (C1) rules and the cap is logged.
+ */
+export const PREVIEW_RECREATION_MAX_PER_SESSION = 2;
+
+/**
+ * Minimum spacing between recreation launches. A fresh sandbox
+ * needs minutes to provision and start; a second recreation inside
+ * the cooldown could only be chasing the first one's shadow.
+ */
+export const PREVIEW_RECREATION_COOLDOWN_MS = 120_000;
 
 /** Bounded tail of the preview log carried in a failure diagnostic. */
 const PREVIEW_LOG_DIAGNOSTIC_MAX_CHARS = 2_000;
@@ -540,6 +624,56 @@ export async function checkSandboxPreviewLiveness(
   }
 }
 
+export interface SandboxPreviewGroundTruth {
+  /** HTTP status the guest's server returned to a local curl, when read. */
+  status: number | null;
+  /**
+   * true = the guest answered locally; false = confirmed not
+   * answering (curl completed with no HTTP response); null = the
+   * check itself was unreadable (exec error / unparseable output).
+   */
+  answering: boolean | null;
+}
+
+/**
+ * Round 15 (C1) — patient ground truth from INSIDE the sandbox:
+ * curl the dev server on localhost with a 20 s in-guest budget
+ * under a 30 s exec budget. This is the discriminator the round-15
+ * diagnosis found missing: a guest answering locally while public
+ * probes fail is a DATA-PATH state (dead ingress/token/address),
+ * never a dead server — and a pid verdict that disagrees with a
+ * locally-answering server is a pid-tracking failure, not a crash.
+ * Like the liveness check, any failure of the check itself yields
+ * answering: null, never a guessed verdict.
+ */
+export async function checkSandboxPreviewGroundTruth(
+  support: SandboxPreviewSupport,
+  sandboxId: string,
+): Promise<SandboxPreviewGroundTruth> {
+  try {
+    const command =
+      `code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 ` +
+      `http://localhost:${SANDBOX_PREVIEW_PORT}/ 2>/dev/null); ` +
+      'echo "LITT_PREVIEW_GROUND_TRUTH=$code"';
+    const res = await support.provider.execute(sandboxId, {
+      command,
+      cwd: SANDBOX_WORKSPACE_ROOT,
+      timeoutMs: PREVIEW_GROUND_TRUTH_TIMEOUT_MS,
+    });
+    const match = /LITT_PREVIEW_GROUND_TRUTH=(\d{3})/.exec(res.stdout);
+    if (match) {
+      const status = Number(match[1]);
+      // curl prints 000 when no HTTP response was received at all
+      // (connection refused / no listener): a readable "not
+      // answering", distinct from an unreadable check.
+      return { status: status === 0 ? null : status, answering: status !== 0 };
+    }
+    return { status: null, answering: null };
+  } catch {
+    return { status: null, answering: null };
+  }
+}
+
 /** PreviewEndpoint.expiresAt is an ISO string; the runtime stores epoch ms. */
 function parseEndpointExpiry(expiresAt: string | undefined): number | null {
   if (!expiresAt) return null;
@@ -576,6 +710,19 @@ interface UpstreamRepairOutcome {
  * Returns null when re-exposure itself is unavailable (provider
  * error) — the caller's round-13 rules then decide, exactly as
  * before this repair existed.
+ *
+ * Round 15 note: against the production E2B provider the "fresh"
+ * endpoint is the SAME origin and the SAME token — exposePort
+ * derives the host deterministically from (sandboxId, port) and
+ * the traffic token is a property of the sandbox, not of the
+ * exposure (e2b-provider.ts). The repair's real power is therefore
+ * one more probe of the same address (plus a fresh synthetic
+ * expiry); a genuinely new address requires a new sandbox — that
+ * is round 16's C2 recreation (recreateSandboxPreview below),
+ * which the verify escalates to only on sustained dead-address
+ * evidence. The round-14 tests that mocked a DIFFERENT origin for
+ * the same sandboxId modeled a provider that does not exist and
+ * have been corrected to the deterministic contract.
  */
 async function repairSandboxPreviewUpstream(
   support: SandboxPreviewSupport,
@@ -619,6 +766,117 @@ async function repairSandboxPreviewUpstream(
   return { result, upstream: fresh };
 }
 
+/** In-flight recreation promises, keyed by runtime (test/observability handle). */
+const recreationPromises = new WeakMap<PreviewRuntime, Promise<void>>();
+
+/**
+ * The detached recreation currently running for a runtime, if any.
+ * Recreation outlives the verify round that launched it (a cold
+ * provision takes minutes); tests await this to observe the
+ * outcome deterministically.
+ */
+export function previewRecreationPromise(
+  runtime: PreviewRuntime,
+): Promise<void> | null {
+  return recreationPromises.get(runtime) ?? null;
+}
+
+/**
+ * Round 16 (C2) — recreate the sandbox to mint a genuinely new
+ * preview address.
+ *
+ * The round-14 re-exposure repair cannot do this: exposePort
+ * derives the host deterministically from (sandboxId, port) and
+ * the traffic token belongs to the sandbox, so re-exposing a
+ * sandbox whose E2B ingress is dead returns the identical dead
+ * address forever (proven live 2026-11-17: the sandbox's dev
+ * server healthy inside, every external probe timing out, the
+ * "fresh address" log line naming the same URL twice). The only
+ * remedy is a NEW sandbox — new id, new host, new token.
+ *
+ * Mechanics — no new machinery is invented:
+ *   1. the executor's existing destroySandbox kills the dead
+ *      sandbox and clears its binding (the volume already holds
+ *      the workspace up to the last sync — the same durability
+ *      contract reconcileBindings relies on when a binding is
+ *      lost);
+ *   2. startSandboxPreview re-runs the standard provisioning path
+ *      (ensureSandboxForPreview provisions a fresh sandbox and
+ *      mirrors the workspace from the volume, install, launch,
+ *      expose), swapping runtime.upstream to the new endpoint and
+ *      resolving the runtime's status through its own background
+ *      health loop.
+ *
+ * Runs DETACHED from the verify round that triggered it: a cold
+ * provision takes minutes and a status poll must never block on
+ * it. The runtime is marked "starting" for the duration. A failure
+ * is logged and degrades honestly — the runtime is restored to
+ * ready (the C1 stay-ready posture) rather than wedged in
+ * "starting", unless the start itself already recorded a terminal
+ * state (e.g. an install failure, which startSandboxPreview marks
+ * failed with its own error).
+ */
+async function recreateSandboxPreview(args: {
+  support: SandboxPreviewSupport;
+  runtime: PreviewRuntime;
+  ws: WorkspaceDescriptor;
+  probe?: (
+    origin: string,
+    headers: Record<string, string>,
+  ) => Promise<SandboxProbeResult>;
+}): Promise<void> {
+  const { support, runtime, ws } = args;
+  const upstream = runtime.upstream;
+  const oldSandboxId =
+    upstream?.kind === "sandbox" ? upstream.sandboxId : "unknown";
+  const oldOrigin = upstream?.kind === "sandbox" ? upstream.origin : "unknown";
+  runtime.status = "starting";
+  runtime.startedAt = Date.now();
+  runtime.error = null;
+  runtime.errorCode = null;
+  try {
+    await support.executor.destroySandbox(ws);
+    pushPreviewLog(
+      runtime,
+      `[preview] Destroyed sandbox ${oldSandboxId} (dead address ${oldOrigin}) — ` +
+        `provisioning a fresh sandbox through the standard path`,
+    );
+    const started = await startSandboxPreview({
+      support,
+      runtime,
+      ws,
+      framework: runtime.framework,
+      command: runtime.command,
+      packageManager: runtime.packageManager ?? "pnpm",
+      travelingEnv: buildSandboxTravelingEnv(runtime.clerkProjectEnv ?? {}),
+      probe: args.probe,
+    });
+    const fresh = started.upstream;
+    pushPreviewLog(
+      runtime,
+      fresh?.kind === "sandbox"
+        ? `[preview] Sandbox recreation complete — new sandbox ${fresh.sandboxId}, ` +
+            `new preview address ${fresh.origin} (was ${oldOrigin})`
+        : `[preview] Sandbox recreation finished but the runtime has no sandbox ` +
+            `upstream — see the start lines above`,
+    );
+  } catch (err) {
+    pushPreviewLog(
+      runtime,
+      `[preview] Sandbox recreation failed (${err instanceof Error ? err.message : String(err)}) — ` +
+        `the runtime keeps reporting its state honestly and no further attempt ` +
+        `is made this round`,
+    );
+    // Never wedge the runtime in "starting" (a stale starting
+    // runtime poisons later starts); a start that already recorded
+    // its own terminal state keeps it.
+    if (runtime.status === "starting") runtime.status = "ready";
+  } finally {
+    runtime.healthRecreationInFlight = false;
+    recreationPromises.delete(runtime);
+  }
+}
+
 /**
  * Live health verification for a sandbox runtime (the status route's
  * verifyPreviewHealth, sandbox branch): probe through the upstream
@@ -637,6 +895,35 @@ async function repairSandboxPreviewUpstream(
  * address dead, no repair path — the runtime sat failed-but-alive
  * forever. Recovery now precedes conviction; the conviction rules
  * themselves are untouched for a genuinely dead server.
+ *
+ * Round 15 (C1): the conviction rules themselves ARE amended — see
+ * the round-15 note at PREVIEW_VERIFY_FAILURE_THRESHOLD. Probes run
+ * with 15 s patience; an unreadable liveness verdict records
+ * nothing and convicts nothing; a confirmed-dead pid must be backed
+ * by the in-sandbox ground-truth check before it convicts; and
+ * alive-but-failing rounds reset the failure accounting.
+ *
+ * Round 16 (C2): the stay-ready outcomes above are honest but, for
+ * a sandbox whose E2B ingress is genuinely dead, permanent — the
+ * server serves locally forever while no browser can ever reach
+ * it, and re-exposure returns the identical dead address. The
+ * verify therefore ALSO tracks consecutive external probe failures
+ * (healthExternalFailureCount/Since — reset only by a genuinely
+ * healthy probe, never by a verdict round). When that failure is
+ * sustained (PREVIEW_RECREATION_FAILURE_THRESHOLD rounds spanning
+ * PREVIEW_RECREATION_FAILURE_WINDOW_MS) and the ground-truth check
+ * says the guest answers locally — or the in-sandbox verdicts are
+ * themselves unreadable while the address keeps failing — the
+ * verify escalates to gated sandbox recreation
+ * (recreateSandboxPreview): destroy the dead sandbox, provision a
+ * fresh one, surface its new address. Ground truth saying the
+ * server does NOT answer locally blocks recreation outright (the
+ * server is the problem, not the address — the existing rules
+ * govern), and the confirmed-dead-pid conviction path is never
+ * preempted. Gates: at most PREVIEW_RECREATION_MAX_PER_SESSION
+ * recreations per session, spaced by
+ * PREVIEW_RECREATION_COOLDOWN_MS; after the cap the runtime stays
+ * ready-and-honest and the cap is logged.
  */
 export async function verifySandboxPreviewHealth(
   support: SandboxPreviewSupport,
@@ -646,7 +933,16 @@ export async function verifySandboxPreviewHealth(
     probe?: (
       origin: string,
       headers: Record<string, string>,
+      timeoutMs?: number,
     ) => Promise<SandboxProbeResult>;
+    /**
+     * Workspace descriptor resolver for a recreation (round 16,
+     * C2). Defaults to the workspace registry; tests inject the
+     * descriptor directly.
+     */
+    resolveWorkspace?: (
+      workspaceId: string,
+    ) => WorkspaceDescriptor | undefined;
   } = {},
 ): Promise<boolean> {
   const upstream = runtime.upstream;
@@ -678,6 +974,12 @@ export async function verifySandboxPreviewHealth(
   const markHealthy = async (): Promise<true> => {
     runtime.healthFailureCount = 0;
     runtime.healthFailureSince = null;
+    runtime.healthLivenessUnreadableCount = 0;
+    // Round 16 (C2): a genuinely healthy probe is the ONLY verdict
+    // that clears the external-failure accounting — the address
+    // demonstrably works, so the recreation evidence is gone.
+    runtime.healthExternalFailureCount = 0;
+    runtime.healthExternalFailureSince = null;
     runtime.lastHealthCheck = Date.now();
     // Traffic is flowing: keep the sandbox alive (§3.3).
     if (support.provider.extendTimeout) {
@@ -688,7 +990,17 @@ export async function verifySandboxPreviewHealth(
     return true;
   };
 
-  const result = await probe(upstream.origin, upstream.headers).catch(
+  // Round 15 (C1): the live verify probes with patience (15 s) —
+  // a cold-compiling guest answering in 6–12 s is slow, not dead.
+  // The probe's duration and outcome class ride the failure lines
+  // below: "no response" no longer conflates an abort with a
+  // network death.
+  const probeStartedAt = Date.now();
+  const result = await probe(
+    upstream.origin,
+    upstream.headers,
+    PREVIEW_VERIFY_PROBE_TIMEOUT_MS,
+  ).catch(
     (): SandboxProbeResult => ({
       healthy: false,
       authConfigError: false,
@@ -696,20 +1008,28 @@ export async function verifySandboxPreviewHealth(
       status: null,
     }),
   );
+  const probeMs = Date.now() - probeStartedAt;
   if (result.healthy) return markHealthy();
   if (result.rootRouteMissing) return flipRootRouteMissing();
   if (result.authConfigError) return flipAuthConfigError(result.status);
 
   // Generic non-healthy (a 500 without auth text, a 3xx, a refused
-  // connection, a 3 s timeout): evidence of a missed fetch, not yet
-  // of a crash. Accumulate it, then ask the sandbox whether the
-  // server process still exists.
+  // connection, a probe timeout): evidence of a missed fetch, not
+  // yet of a crash. Ask the sandbox whether the server process
+  // still exists BEFORE recording anything (round 15, C1).
   const now = Date.now();
-  if (!runtime.healthFailureSince) runtime.healthFailureSince = now;
-  runtime.healthFailureCount = (runtime.healthFailureCount ?? 0) + 1;
-  const failures = runtime.healthFailureCount;
-  const windowMs = now - runtime.healthFailureSince;
-  const probeNote = `HTTP ${result.status ?? "no response"}`;
+  const probeNote = `HTTP ${result.status ?? "no response"} after ${probeMs}ms`;
+
+  // Round 16 (C2): EVERY generic external failure counts toward
+  // the recreation evidence, whatever this round's liveness
+  // verdict turns out to be — a dead address fails under alive,
+  // dead-pid and unreadable verdicts alike. Only a genuinely
+  // healthy probe (markHealthy) clears this accounting.
+  runtime.healthExternalFailureCount =
+    (runtime.healthExternalFailureCount ?? 0) + 1;
+  if (!runtime.healthExternalFailureSince) {
+    runtime.healthExternalFailureSince = now;
+  }
 
   const liveness = await checkSandboxPreviewLiveness(support, upstream.sandboxId);
 
@@ -717,15 +1037,20 @@ export async function verifySandboxPreviewHealth(
   // the suspect) or the stored endpoint has lapsed — re-expose and
   // re-probe BEFORE any conviction. A confirmed-dead pid with an
   // unexpired endpoint skips repair entirely: re-exposure cannot
-  // resurrect a process, and round 13's first-check conviction
-  // stands. The probed origin rides every failure line below — one
-  // line per verify round — so the next diagnosis can see WHICH
-  // address died instead of reconstructing it.
+  // resurrect a process. The re-probe runs with the same patience
+  // as the round's own probe (round 15). The probed origin rides
+  // every failure line below — one line per verify round — so the
+  // next diagnosis can see WHICH address died instead of
+  // reconstructing it.
   const endpointExpired =
     upstream.expiresAt != null &&
     now >= upstream.expiresAt - PREVIEW_EXPOSURE_REFRESH_SKEW_MS;
   if (liveness.alive === true || endpointExpired) {
-    const repair = await repairSandboxPreviewUpstream(support, runtime, probe);
+    const repair = await repairSandboxPreviewUpstream(
+      support,
+      runtime,
+      (origin, headers) => probe(origin, headers, PREVIEW_VERIFY_PROBE_TIMEOUT_MS),
+    );
     if (repair) {
       if (repair.result.healthy) {
         pushPreviewLog(
@@ -739,63 +1064,229 @@ export async function verifySandboxPreviewHealth(
       if (repair.result.authConfigError) return flipAuthConfigError(repair.result.status);
       // The fresh address fails generically too. With a live pid
       // that is the provider-ingress signature, not a crash — the
-      // round-13 rules below still govern (stay ready). With a dead
-      // or unreadable pid, conviction proceeds on the accumulated
-      // evidence, unchanged.
+      // verdict rules below still govern (stay ready). Note what
+      // the round-15 diagnosis proved about this repair: for the
+      // same sandbox the re-exposure returns the SAME address and
+      // token (the provider derives both deterministically), so a
+      // generic failure here is one more patient probe of the same
+      // address, not a new endpoint — the tests now model exactly
+      // that.
     }
   }
 
+  /**
+   * Round 16 (C2) — the recreation gate, evaluated at this round's
+   * stay-ready outcomes. Sustained external failure is necessary
+   * but not sufficient: the ground-truth discriminator decides
+   * whether the ADDRESS or the SERVER is the problem. A guest that
+   * does not answer locally blocks recreation (the existing rules
+   * govern a dead server); a guest answering locally, or verdicts
+   * too degraded to read while the address keeps failing, warrant
+   * a fresh sandbox — subject to the session cap and cooldown.
+   * Launching resets the external accounting, so the fresh address
+   * earns its own evidence window. `knownGroundTruth` carries the
+   * verdict the conviction path already computed, when it ran.
+   */
+  const maybeRecreate = async (
+    knownGroundTruth: SandboxPreviewGroundTruth | null,
+  ): Promise<void> => {
+    if (runtime.healthRecreationInFlight) return;
+    const failures = runtime.healthExternalFailureCount ?? 0;
+    const since = runtime.healthExternalFailureSince ?? null;
+    if (
+      failures < PREVIEW_RECREATION_FAILURE_THRESHOLD ||
+      since === null ||
+      now - since < PREVIEW_RECREATION_FAILURE_WINDOW_MS
+    ) {
+      return;
+    }
+    const groundTruth =
+      knownGroundTruth ??
+      (await checkSandboxPreviewGroundTruth(support, upstream.sandboxId));
+    if (groundTruth.answering === false) {
+      pushPreviewLog(
+        runtime,
+        `[preview] Live health probe failed (${probeNote}) — the preview address has ` +
+          `failed ${failures} consecutive probes over ${now - since}ms, but the dev ` +
+          `server does not answer inside the sandbox either, so the server itself ` +
+          `is the problem and sandbox recreation is not the remedy — staying ready ` +
+          `(probed ${upstream.origin})`,
+      );
+      return;
+    }
+    const recreations = runtime.healthRecreationCount ?? 0;
+    if (recreations >= PREVIEW_RECREATION_MAX_PER_SESSION) {
+      pushPreviewLog(
+        runtime,
+        `[preview] Live health probe failed (${probeNote}) — the preview address is ` +
+          `still dead after ${recreations} sandbox recreations this session; the ` +
+          `recreation cap (${PREVIEW_RECREATION_MAX_PER_SESSION}) is reached, so no ` +
+          `further recreation is attempted — staying ready and reporting the ` +
+          `data-path state honestly (probed ${upstream.origin})`,
+      );
+      return;
+    }
+    const lastRecreationAt = runtime.healthLastRecreationAt ?? null;
+    if (
+      lastRecreationAt !== null &&
+      now - lastRecreationAt < PREVIEW_RECREATION_COOLDOWN_MS
+    ) {
+      pushPreviewLog(
+        runtime,
+        `[preview] Live health probe failed (${probeNote}) — the preview address has ` +
+          `failed ${failures} consecutive probes over ${now - since}ms, but the last ` +
+          `sandbox recreation was ${now - lastRecreationAt}ms ago, inside the ` +
+          `${PREVIEW_RECREATION_COOLDOWN_MS}ms cooldown — not recreating yet ` +
+          `(probed ${upstream.origin})`,
+      );
+      return;
+    }
+    const ws = (deps.resolveWorkspace ?? getWorkspace)(runtime.workspaceId);
+    if (!ws) {
+      pushPreviewLog(
+        runtime,
+        `[preview] Live health probe failed (${probeNote}) — the preview address is ` +
+          `dead across ${failures} consecutive probes over ${now - since}ms and ` +
+          `recreation is warranted, but the workspace descriptor no longer exists, ` +
+          `so there is nothing to recreate against — staying ready ` +
+          `(probed ${upstream.origin})`,
+      );
+      return;
+    }
+    runtime.healthRecreationCount = recreations + 1;
+    runtime.healthLastRecreationAt = now;
+    runtime.healthRecreationInFlight = true;
+    runtime.healthExternalFailureCount = 0;
+    runtime.healthExternalFailureSince = null;
+    pushPreviewLog(
+      runtime,
+      `[preview] Preview address dead across ${failures} consecutive probes over ` +
+        `${now - since}ms while ${
+          groundTruth.answering === true
+            ? `the dev server answers inside the sandbox (local HTTP ${groundTruth.status})`
+            : "the in-sandbox verdicts are unreadable"
+        } — recreating the sandbox for a fresh address (attempt ${recreations + 1} of ` +
+        `${PREVIEW_RECREATION_MAX_PER_SESSION}); old sandbox ${upstream.sandboxId}, ` +
+        `old address ${upstream.origin}`,
+    );
+    const promise = recreateSandboxPreview({
+      support,
+      runtime,
+      ws,
+      probe: (origin, headers) => probe(origin, headers),
+    });
+    recreationPromises.set(runtime, promise);
+    void promise;
+  };
+
+  if (liveness.alive === null) {
+    // Round 15 (C1): an unreadable liveness verdict is not evidence
+    // of anything about the server — the round records NO failure
+    // and the conviction window does not advance. (Round 13/14 let
+    // these rounds accumulate until they convicted a guest whose
+    // only fault was being too busy to answer the liveness exec.)
+    // Sustained unreadability is escalated in the log: the verdict
+    // machinery being degraded is itself worth surfacing.
+    runtime.healthLivenessUnreadableCount =
+      (runtime.healthLivenessUnreadableCount ?? 0) + 1;
+    const unreadable = runtime.healthLivenessUnreadableCount;
+    pushPreviewLog(
+      runtime,
+      unreadable >= PREVIEW_LIVENESS_UNREADABLE_ESCALATION_ROUNDS
+        ? `[preview] Live health probe failed (${probeNote}) and the liveness check itself ` +
+            `has been unreadable for ${unreadable} consecutive rounds — the verdict machinery ` +
+            `is degraded, not the server; staying ready (probed ${upstream.origin})`
+        : `[preview] Live health probe failed (${probeNote}) but the liveness verdict is ` +
+            `unreadable — no failure recorded, staying ready (probed ${upstream.origin})`,
+    );
+    // Round 16 (C2): unreadable verdicts plus a SUSTAINED dead
+    // address is itself the recreation signature (the verdict
+    // machinery and the ingress share the degraded channel).
+    await maybeRecreate(null);
+    return true;
+  }
+  runtime.healthLivenessUnreadableCount = 0;
+
   if (liveness.alive === true) {
     // The server process exists — the probe missed a busy or slow
-    // upstream. Stay ready; the next healthy probe resets the count.
+    // upstream. Stay ready, and RESET the failure accounting
+    // (round 15, C1): round 13/14 banked these failures, so the
+    // patience spent on alive rounds stayed on the books until a
+    // later bad round spent it on a conviction.
+    runtime.healthFailureCount = 0;
+    runtime.healthFailureSince = null;
     pushPreviewLog(
       runtime,
       `[preview] Live health probe failed (${probeNote}) but the dev server process ` +
         `(pid ${liveness.pid}) is alive in the sandbox — staying ready (probed ${upstream.origin})`,
     );
-    return true;
-  }
-  const sustained =
-    failures >= PREVIEW_VERIFY_FAILURE_THRESHOLD &&
-    windowMs >= PREVIEW_VERIFY_FAILURE_WINDOW_MS;
-  if (liveness.alive !== false && !sustained) {
-    pushPreviewLog(
-      runtime,
-      `[preview] Live health probe failed (${probeNote}, ${failures} consecutive) — ` +
-        `not enough evidence of a crash yet, staying ready (probed ${upstream.origin})`,
-    );
+    // Round 16 (C2): a live pid under a sustained dead address is
+    // the dead-ingress signature — escalate if ground truth agrees
+    // the server serves locally.
+    await maybeRecreate(null);
     return true;
   }
 
-  // Conviction earned: the pid is confirmed dead, or failures were
-  // sustained across the window with liveness unreadable. The
+  // liveness.alive === false: the pid is confirmed dead. Record the
+  // failure, then back the verdict with the patient ground-truth
+  // check before convicting (round 15, C1).
+  if (!runtime.healthFailureSince) runtime.healthFailureSince = now;
+  runtime.healthFailureCount = (runtime.healthFailureCount ?? 0) + 1;
+  const groundTruth = await checkSandboxPreviewGroundTruth(support, upstream.sandboxId);
+  if (groundTruth.answering === true) {
+    // The guest's server answers a local curl while its pid file
+    // names a dead process: the pid tracking and the serving
+    // reality disagree. That is a data-path / pid-tracking state —
+    // never "dev server failed". Stay ready; reset the accounting.
+    runtime.healthFailureCount = 0;
+    runtime.healthFailureSince = null;
+    pushPreviewLog(
+      runtime,
+      `[preview] Live health probe failed (${probeNote}) and the pid file's process ` +
+        `(pid ${liveness.pid}) is gone, but the dev server answers inside the sandbox ` +
+        `(local HTTP ${groundTruth.status}) — the public preview address is unreachable, ` +
+        `the server is not; staying ready (probed ${upstream.origin})`,
+    );
+    // Round 16 (C2): the ground truth is already in hand and it
+    // says the server serves locally — a sustained external
+    // failure on top of that is the dead-ingress signature.
+    await maybeRecreate(groundTruth);
+    return true;
+  }
+
+  // Conviction earned: the pid is confirmed dead AND the guest does
+  // not answer locally (a ground-truth check that is itself
+  // unreadable leaves the confirmed-dead pid standing alone — the
+  // strongest single verdict the machinery can produce). The
   // diagnostic carries the server's own last lines, not a guess.
   const tail = await readSandboxPreviewLogTail(support, upstream.sandboxId);
   runtime.status = "failed";
   runtime.errorCode = "preview_dev_server_failed";
   runtime.error = withPreviewLogDiagnostic(
-    liveness.alive === false
-      ? `Health check failed — the sandbox dev server process (pid ${liveness.pid}) is no longer running`
-      : `Health check failed — the sandbox dev server stopped responding to ${failures} health probes over ${Math.round(windowMs / 1000)}s`,
+    `Health check failed — the sandbox dev server process (pid ${liveness.pid}) is no longer running`,
     tail,
   );
   pushPreviewLog(
     runtime,
-    liveness.alive === false
-      ? `[preview] Health check failed — dev server process (pid ${liveness.pid}) is dead`
-      : `[preview] Health check failed — dev server unresponsive across ${failures} probes`,
+    `[preview] Health check failed — dev server process (pid ${liveness.pid}) is dead`,
   );
   return false;
 }
 
-/** One upstream health probe (mirrors PreviewManager.probeHealth's verdicts). */
+/**
+ * One upstream health probe (mirrors PreviewManager.probeHealth's
+ * verdicts). The timeout defaults to the start loop's snappy 3 s;
+ * the live verify passes PREVIEW_VERIFY_PROBE_TIMEOUT_MS (round 15,
+ * C1) — patience is a property of the caller, not of the probe.
+ */
 export async function probeUpstream(
   origin: string,
   headers: Record<string, string>,
+  timeoutMs = 3000,
 ): Promise<SandboxProbeResult> {
   const resp = await fetch(`${origin}/`, {
     headers,
-    signal: AbortSignal.timeout(3000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (resp.ok) {
     return { healthy: true, authConfigError: false, rootRouteMissing: false, status: resp.status };
