@@ -51,7 +51,7 @@ export default function MarketingHeader() {
           size={42}
           showText={false}
           variant="full"
-          className="max-w-[190px]"
+          className="max-w-[190px] rounded-lg bg-white px-2 py-1 shadow-sm ring-1 ring-black/10"
         />
 
         <nav aria-label="Primary navigation" className="hidden items-center gap-7 text-[13px] font-bold text-white/55 lg:flex">
