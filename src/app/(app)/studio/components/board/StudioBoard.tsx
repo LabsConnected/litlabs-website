@@ -595,10 +595,27 @@ export default function StudioBoard({
       <div
         data-board-chrome
         data-testid="board-toolbar"
-        className={`absolute left-1/2 top-3 z-[9999] max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded-full border px-1.5 py-1 shadow-md ${narrow ? "hidden" : "flex"}`}
+        className={`absolute left-1/2 top-3 z-[9999] max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-0.5 rounded-full border px-1.5 py-1 shadow-md ${narrow ? "hidden" : "flex"}`}
         style={{ backgroundColor: tokens.surface, borderColor: tokens.border }}
       >
-        {TOOLBAR_PANELS.filter((id) => toolbarPanels[id]).map(renderSummonButton)}
+        {/* The horizontal scroll region wraps ONLY the summon row.
+            It must never contain the Layout or Board Settings menus:
+            a scroll container clips its absolutely-positioned
+            descendants to its own box, and overflow-x:auto forces
+            overflow-y to compute to auto as well — when this pill
+            itself carried overflow-x-auto, both menus collapsed into
+            it as a ~35px strip showing one row at a time (live
+            defect, 2026-11-17). The menus stay direct children of
+            the pill, outside any scroll container, so their popovers
+            render at content size below the toolbar. min-w-0 lets
+            this row actually shrink (and scroll) instead of pushing
+            the pill past its max-width. */}
+        <div
+          data-testid="board-toolbar-scroll"
+          className="flex min-w-0 items-center gap-0.5 overflow-x-auto"
+        >
+          {TOOLBAR_PANELS.filter((id) => toolbarPanels[id]).map(renderSummonButton)}
+        </div>
         <span className="mx-1 h-4 w-px shrink-0" style={{ backgroundColor: tokens.border }} />
         <div className="relative shrink-0">
           <button
