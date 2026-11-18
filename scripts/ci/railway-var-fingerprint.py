@@ -48,8 +48,38 @@ def collect_values(node, vals):
             collect_values(item, vals)
 
 
+def list_services():
+    proc = subprocess.run(["railway", "status", "--json"], capture_output=True, text=True)
+    names = []
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return names
+
+    def walk(o):
+        if isinstance(o, dict):
+            for k in ("name", "serviceName"):
+                v = o.get(k)
+                if isinstance(v, str) and v and v not in names:
+                    names.append(v)
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for i in o:
+                walk(i)
+    walk(data)
+    return names
+
+
 def main():
     if len(sys.argv) < 2:
+        if "--all-services" in sys.argv:
+            for svc in list_services():
+                subprocess.run(
+                    [sys.executable, __file__, svc,
+                     "TERMINAL_INTERNAL_SERVICE_KEY", "TERMINAL_AUTH_SECRET"],
+                )
+            return 0
         print("usage: railway-var-fingerprint.py <service> [VAR ...]", file=sys.stderr)
         return 2
     service = sys.argv[1]

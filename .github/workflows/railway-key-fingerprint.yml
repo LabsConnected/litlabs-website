@@ -35,7 +35,8 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           set -u
-          for svc in "@litlabs/litt-shell" "terminal-server" "litt-shell"; do
+          python3 scripts/ci/railway-var-fingerprint.py --all-services
+          for svc in "@litlabs/litt-shell" "terminal-server"; do
             echo "=== service: $svc ==="
             python3 scripts/ci/railway-var-fingerprint.py "$svc" \
               TERMINAL_INTERNAL_SERVICE_KEY INTERNAL_SERVICE_KEY TERMINAL_AUTH_SECRET
