@@ -202,6 +202,24 @@ describe("build capability guard arming on resume", () => {
     const config = await postAndCaptureConfig({ projectId: null });
     expect(config.buildCapabilityGuard).toBeUndefined();
   });
+
+  // Deploy-gate resumes are post-build continuations: the site files
+  // already landed before project.deploy could be requested, so the
+  // resumed segment is deploy + verify — never file writes. Arming the
+  // guard here fails the run AFTER the deploy executed and loses the
+  // deploy evidence (staging acceptance 44226153887, journey 7:
+  // "resumed build made no successful file writes in 3 steps").
+  it.each([
+    "project.deploy",
+    "deploy.execute",
+    "deploy.preview",
+    "deploy.production",
+    "deploy.verify",
+    "deploy.status",
+  ])("leaves the guard off for a %s resume", async (toolId) => {
+    const config = await postAndCaptureConfig({ toolId });
+    expect(config.buildCapabilityGuard).toBeUndefined();
+  });
 });
 
 describe("media-only resume and explicit task scope (round 8)", () => {

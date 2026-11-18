@@ -60,6 +60,26 @@ import type { MessageStatus } from "@/lib/studio/types";
 import { attachActionRunToConversationTask, settleConversationTask } from "@/lib/studio/task-service";
 
 /**
+ * Gated tools whose approval resume is a POST-BUILD continuation, not a
+ * build-write segment. A run can only reach a deploy gate after the site
+ * files already landed, so the resumed loop's job is deploy + verify —
+ * reads and deploy/verify calls, never file writes. Arming the build
+ * capability guard on these resumes misreads that honest work as build
+ * incapacity and fails the run AFTER the deploy executed, losing the
+ * deploy evidence (staging acceptance 44226153887, journey 7). Includes
+ * the station aliases a model may gate on (deploy.preview delegates to
+ * project.deploy; deploy.status to deploy.verify).
+ */
+const DEPLOY_GATE_TOOL_IDS: ReadonlySet<string> = new Set([
+  "project.deploy",
+  "deploy.execute",
+  "deploy.preview",
+  "deploy.production",
+  "deploy.verify",
+  "deploy.status",
+]);
+
+/**
  * Write a resumed run's outcome back onto the conversation transcript.
  * The assistant message that paused stays "awaiting_approval" until the
  * resumed execution finishes — without this writeback a page refresh would
@@ -816,8 +836,11 @@ export async function POST(
     // (resumeMediaOnly above): its deliverable is the persisted
     // generation, never a file write, so the guard could only ever
     // misread it — phase 1 disarms it for media turns the same way.
+    // Deploy-gate resumes are the second exclusion (DEPLOY_GATE_TOOL_IDS):
+    // their segment is deploy + verify, not file writes.
     buildCapabilityGuard:
       !resumeMediaOnly &&
+      !DEPLOY_GATE_TOOL_IDS.has(resolved.toolId) &&
       (isFileWritingTool(resolved.toolId) ||
         shouldEnableQualityLoop(resolved.executionMode, resolved.projectId))
         ? { maxStepsWithoutFileWrite: 3 }
