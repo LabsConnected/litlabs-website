@@ -217,6 +217,16 @@ describe("StudioBoard Board Settings wiring (Amendment 5)", () => {
     fireEvent.click(screen.getByTestId("board-settings-button"));
   }
 
+  it("the Board settings trigger stays in the board toolbar, in the board (Larry, 2026-11-17)", () => {
+    renderBoard();
+    // Larry reversed an earlier placement: Board settings does NOT go
+    // up in the site header by the project name — it stays in the
+    // board, in the board's own pill toolbar.
+    const button = screen.getByTestId("board-settings-button");
+    expect(screen.getByTestId("board-toolbar")).toContainElement(button);
+    expect(screen.getByTestId("studio-board")).toContainElement(button);
+  });
+
   it("the settings menu explains that a maximized panel is restored before it can be dragged", () => {
     renderBoard();
     openSettingsMenu();
