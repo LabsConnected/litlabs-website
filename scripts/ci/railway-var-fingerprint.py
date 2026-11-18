@@ -19,17 +19,30 @@ URL_VARS = {
     "TERMINAL_PUBLIC_URL",
     "NEXT_PUBLIC_TERMINAL_HTTP_URL",
     "NEXT_PUBLIC_TERMINAL_WS_URL",
+    "RAILWAY_GIT_COMMIT_SHA",
 }
 
 
 def collect_values(node, vals):
     if isinstance(node, dict):
+        # Shape A: {"name": "K", "value": "V"}
         name = node.get("name")
         value = node.get("value")
         if isinstance(name, str) and isinstance(value, str):
             vals[name] = value
-        for v in node.values():
-            collect_values(v, vals)
+        # Shape B: {"KEY": "value", ...} — UPPER_SNAKE string->string entries
+        for k, v in node.items():
+            if (
+                isinstance(k, str)
+                and k not in ("name", "value")
+                and k.replace("_", "").isalnum()
+                and k == k.upper()
+                and isinstance(v, str)
+                and k not in vals
+            ):
+                vals[k] = v
+            else:
+                collect_values(v, vals)
     elif isinstance(node, list):
         for item in node:
             collect_values(item, vals)
@@ -58,6 +71,17 @@ def main():
     vals = {}
     collect_values(data, vals)
     print(f"SERVICE={service} var_count={len(vals)}")
+    if not vals:
+        # Debug shape only — keys, never values.
+        def shape(o, depth=0):
+            if depth > 4:
+                return "..."
+            if isinstance(o, dict):
+                return {k: shape(v, depth + 1) for k, v in list(o.items())[:10]}
+            if isinstance(o, list):
+                return [shape(o[0], depth + 1)] if o else []
+            return type(o).__name__
+        print("  JSON_SHAPE:", json.dumps(shape(data))[:800])
     for name in sorted(vals):
         print(f"  HAS_VAR {name}")
     for name in sorted(set(wanted) | URL_VARS):
