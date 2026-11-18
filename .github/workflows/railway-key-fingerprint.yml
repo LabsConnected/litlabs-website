@@ -1,0 +1,133 @@
+name: Railway Key Fingerprint Diagnostic
+
+# READ-ONLY diagnostic (manual dispatch only). Compares the
+# TERMINAL_INTERNAL_SERVICE_KEY configured on the staging web service
+# (@litlabs/litt-shell) against the one on the staging terminal-server
+# service — by length + SHA-256 fingerprint ONLY. Secret values are never
+# printed. Also prints non-secret URL variables and the service inventory.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Compare terminal service-key fingerprints (staging)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Service inventory
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway status || true
+          railway status --json 2>/dev/null | head -100 || true
+
+      - name: Fingerprint TERMINAL_INTERNAL_SERVICE_KEY per service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -u
+          SERVICES="@litlabs/litt-shell terminal-server litt-shell"
+          for svc in $SERVICES; do
+            echo "=== service: $svc ==="
+            json="$(railway variable list --service "$svc" --json 2>/dev/null || true)"
+            if [ -z "$json" ]; then
+              echo "  (variable list failed — service may not exist or token lacks access)"
+              continue
+            fi
+            printf '%s' "$json" | python3 -c '
+import json,sys,hashlib
+try:
+    data=json.load(sys.stdin)
+except Exception as e:
+    print("  (json parse failed:",e,")"); sys.exit(0)
+if isinstance(data,dict):
+    items=data.get("variables") or data.get("edges") or []
+else:
+    items=data
+names=[]
+secret_names={"TERMINAL_INTERNAL_SERVICE_KEY","INTERNAL_SERVICE_KEY","TERMINAL_AUTH_SECRET"}
+url_names={"TERMINAL_SERVER_INTERNAL_URL","TERMINAL_SERVER_URL","TERMINAL_PUBLIC_URL","NEXT_PUBLIC_TERMINAL_HTTP_URL","NEXT_PUBLIC_TERMINAL_WS_URL"}
+vals={}
+def walk(o):
+    if isinstance(o,dict):
+        n=o.get("name"); v=o.get("value")
+        if isinstance(n,str) and isinstance(v,str): vals[n]=v
+        for x in o.values(): walk(x)
+    elif isinstance(o,list):
+        for x in o: walk(x)
+walk(items)
+for n in sorted(vals): print("  var:",n)
+for n in sorted(secret_names):
+    v=vals.get(n)
+    if not v: print(f"  {n}: <absent>")
+    else: print(f"  {n}: len={len(v)} sha256_16={hashlib.sha256(v.encode()).hexdigest()[:16]}")
+for n in sorted(url_names):
+    v=vals.get(n)
+    print(f"  {n}: {v if v else chr(60)+chr(97)+chr(98)+chr(115)+chr(101)+chr(110)+chr(116)+chr(62)}")
+'
+          done
+
+      - name: Verdict
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -u
+          get() { railway variable list --service "$1" --json 2>/dev/null | python3 -c '
+import json,sys,hashlib
+data=json.load(sys.stdin)
+vals={}
+def walk(o):
+    if isinstance(o,dict):
+        n=o.get("name"); v=o.get("value")
+        if isinstance(n,str) and isinstance(v,str): vals[n]=v
+        for x in o.values(): walk(x)
+    elif isinstance(o,list):
+        for x in o: walk(x)
+walk(data)
+v=vals.get("TERMINAL_INTERNAL_SERVICE_KEY","")
+print(f"len={len(v)} sha={hashlib.sha256(v.encode()).hexdigest()[:16] if v else \"-\"}")
+'; }
+          w="$(get '@litlabs/litt-shell')"
+          t="$(get 'terminal-server')"
+          echo "web(@litlabs/litt-shell):      $w"
+          echo "terminal(terminal-server):    $t"
+          wl="${w#len=}"; wl="${wl%% *}"
+          tl="${t#len=}"; tl="${tl%% *}"
+          ws="$(echo "$w" | grep -o 'sha=[a-f0-9]*' | cut -d= -f2)"
+          ts="$(echo "$t" | grep -o 'sha=[a-f0-9]*' | cut -d= -f2)"
+          if [ -z "$ws" ] || [ -z "$ts" ] || [ "$ws" = "-" ] || [ "$ts" = "-" ]; then
+            echo "VERDICT: INCONCLUSIVE — could not read both keys"
+          elif [ "$ws" = "$ts" ] && [ "$wl" = "$tl" ]; then
+            echo "VERDICT: MATCH — same TERMINAL_INTERNAL_SERVICE_KEY on web and terminal-server"
+          else
+            echo "VERDICT: MISMATCH — web(len=$wl sha=$ws) vs terminal(len=$tl sha=$ts)"
+          fi
+          exit 0
+
+      - name: Service domains (non-secret)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          for svc in "@litlabs/litt-shell" "terminal-server" "litt-shell"; do
+            echo "=== domain: $svc ==="
+            railway domain --service "$svc" 2>&1 | head -10 || true
+          done
+          exit 0
+
+      - name: Recent deployments (non-secret metadata)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          for svc in "@litlabs/litt-shell" "terminal-server" "litt-shell"; do
+            echo "=== deployments: $svc ==="
+            railway deployment list --service "$svc" 2>&1 | head -15 || true
+          done
+          exit 0
