@@ -25,7 +25,7 @@
   display: inline-flex;
   align-items: center;
   padding-block: 0.35rem;
-  color: rgba(255, 255, 255, 0.55);
+  color: #63745f;
   transition: color var(--motion-fast) ease, transform var(--motion-fast) ease;
 }
 
@@ -36,7 +36,7 @@
   bottom: 0;
   left: 0;
   height: 1px;
-  background: linear-gradient(90deg, var(--litt-green), var(--litt-cyan));
+  background: linear-gradient(90deg, var(--litt-green), #8fd14f);
   content: "";
   opacity: 0;
   transform: scaleX(0.2);
@@ -46,7 +46,7 @@
 
 .litt-nav-link:hover,
 .litt-footer-link:hover {
-  color: rgba(255, 255, 255, 0.94);
+  color: #0c5a26;
   transform: translateY(-1px);
 }
 
@@ -77,9 +77,12 @@
   scroll-padding-top: 84px;
 }
 
+/* Signature conversion (ART-20261111-096): the shared public header wears
+   the light-locked design like every page under it — white glass, green
+   depth. The old rgba(3, 5, 10, …) charcoal was legacy dark-landing paint. */
 .litt-site-header {
-  background: rgba(3, 5, 10, 0.76);
-  box-shadow: 0 12px 42px rgba(0, 0, 0, 0.24);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 42px rgba(14, 60, 26, 0.12);
   backdrop-filter: blur(22px) saturate(135%);
   -webkit-backdrop-filter: blur(22px) saturate(135%);
 }

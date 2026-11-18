@@ -79,3 +79,45 @@ describe("public pages wear the light-locked design", () => {
     expect(src).toContain("#0b120d");
   });
 });
+
+describe("shared public header/footer wear the light-locked design (ART-20261111-096)", () => {
+  it("MarketingHeader carries no dark-theme paint", () => {
+    const src = read("src/components/marketing/MarketingHeader.tsx");
+    for (const stale of ["#05070d", "text-white", "border-white", "bg-white/5"]) {
+      expect(src).not.toContain(stale);
+    }
+    // Light Signature values: muted nav text, white mobile panel, and the
+    // deliberate #0b120d plate that keeps the dark-backdrop logo art legible.
+    expect(src).toContain("text-[#63745f]");
+    expect(src).toContain("bg-white/95");
+    expect(src).toContain("bg-[#0b120d]");
+  });
+
+  it("MarketingFooter is a white surface with muted Signature text", () => {
+    const src = read("src/components/marketing/MarketingFooter.tsx");
+    expect(src).not.toContain("#03050a");
+    expect(src).not.toContain("text-white");
+    expect(src).not.toContain("border-white");
+    expect(src).toContain("bg-white");
+    expect(src).toContain("text-[#63745f]");
+    expect(src).toContain("bg-[#0b120d]");
+  });
+
+  it("header chrome CSS paints white glass with green/lime accents", () => {
+    const css = read("src/app/landing-upgrade.css");
+    // The old charcoal header glass is gone (landing sections keep their
+    // own dark values elsewhere in this file — only the header rule is pinned).
+    expect(css).not.toContain("rgba(3, 5, 10, 0.76)");
+    const headerRule = css.slice(css.indexOf(".litt-site-header {"));
+    expect(headerRule).toContain("background: rgba(255, 255, 255, 0.86)");
+    // Nav/footer links: muted green-grey text, deep-green hover, lime
+    // underline tail (was white text + cyan tail).
+    const linkRule = css.slice(
+      css.indexOf(".litt-nav-link,"),
+      css.indexOf(".litt-nav-link::after"),
+    );
+    expect(linkRule).toContain("color: #63745f");
+    expect(css).toContain("linear-gradient(90deg, var(--litt-green), #8fd14f)");
+    expect(css).not.toContain("linear-gradient(90deg, var(--litt-green), var(--litt-cyan))");
+  });
+});

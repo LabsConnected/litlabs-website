@@ -44,17 +44,21 @@ export default function MarketingHeader() {
   }, []);
 
   return (
-    <header className="litt-site-header fixed inset-x-0 top-0 z-50 border-b border-white/8">
+    <header className="litt-site-header fixed inset-x-0 top-0 z-50 border-b border-[#177a36]/15">
       <div className="mx-auto flex h-[68px] max-w-[1500px] items-center justify-between px-5 lg:px-8">
+        {/* The full logo art carries a baked-in dark backdrop (white wordmark
+            on black glow) — it sits on a deliberate #0b120d plate, the
+            approved deep-green dark hue, so it stays legible on the light
+            header instead of smudging. ART-20261111-096. */}
         <BrandLogo
           href="/"
           size={42}
           showText={false}
           variant="full"
-          className="max-w-[190px]"
+          className="max-w-[190px] rounded-[10px] bg-[#0b120d] px-2 py-1"
         />
 
-        <nav aria-label="Primary navigation" className="hidden items-center gap-7 text-[13px] font-bold text-white/55 lg:flex">
+        <nav aria-label="Primary navigation" className="hidden items-center gap-7 text-[13px] font-bold text-[#63745f] lg:flex">
           {NAV_ITEMS.map((item) => {
             const onClick = item.trackEvent
               ? () => track(item.trackEvent as FunnelEvent, { source: "nav" })
@@ -78,7 +82,7 @@ export default function MarketingHeader() {
             </Link>
           ) : (
             <>
-              <Link href="/sign-in" className="hidden px-3 py-2 text-sm font-bold text-white/55 transition hover:text-white sm:block">
+              <Link href="/sign-in" className="hidden px-3 py-2 text-sm font-bold text-[#63745f] transition hover:text-[#0c5a26] sm:block">
                 Sign in
               </Link>
               <Link href="/sign-up" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm" onClick={() => track("hero_cta_click", { source: "header" })}>
@@ -92,7 +96,7 @@ export default function MarketingHeader() {
             aria-expanded={menuOpen}
             aria-controls="mobile-navigation"
             onClick={() => setMenuOpen((open) => !open)}
-            className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-white/5 text-white lg:hidden"
+            className="grid h-10 w-10 place-items-center rounded-xl border border-[#177a36]/20 bg-white text-[#0e1510] lg:hidden"
           >
             {menuOpen ? <X size={18} /> : <Menu size={18} />}
           </button>
@@ -103,7 +107,7 @@ export default function MarketingHeader() {
         <nav
           id="mobile-navigation"
           aria-label="Mobile navigation"
-          className="border-t border-white/8 bg-[#05070d]/96 px-5 py-4 backdrop-blur-2xl lg:hidden"
+          className="border-t border-[#177a36]/15 bg-white/95 px-5 py-4 backdrop-blur-2xl lg:hidden"
         >
           <div className="mx-auto grid max-w-[1500px] gap-1">
             {NAV_ITEMS.map((item) => {
@@ -116,7 +120,7 @@ export default function MarketingHeader() {
                   key={item.href}
                   href={item.href}
                   onClick={onClick}
-                  className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-bold text-white/72 hover:bg-white/5 hover:text-white"
+                  className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-bold text-[#0e1510]/75 hover:bg-[#177a36]/8 hover:text-[#0c5a26]"
                 >
                   {item.label} <ChevronRight size={15} />
                 </a>
@@ -125,7 +129,7 @@ export default function MarketingHeader() {
                   key={item.href}
                   href={item.href}
                   onClick={onClick}
-                  className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-bold text-white/72 hover:bg-white/5 hover:text-white"
+                  className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-bold text-[#0e1510]/75 hover:bg-[#177a36]/8 hover:text-[#0c5a26]"
                 >
                   {item.label} <ChevronRight size={15} />
                 </Link>
