@@ -444,7 +444,7 @@ export default function StudioBoard({
         type="button"
         data-testid={`board-summon-${id}`}
         aria-pressed={open}
-        className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors"
+        className="pointer-events-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors"
         style={
           open
             ? { backgroundColor: BOARD_ACCENT_VIOLET, color: "#FFFFFF" }
@@ -591,11 +591,20 @@ export default function StudioBoard({
           CENTERED in the board's top bar area — left-1/2 with a -50%
           self-translate, never docked to either edge. Hidden on the
           phone — the bottom nav + More sheet own that job there
-          (Finish Spec). */}
+          (Finish Spec).
+          Click-through (Larry, 2026-11-18): the pill is
+          pointer-events-none and every control inside it opts back
+          in with pointer-events-auto. The pill floats over the
+          top-center panel header strip, and as a solid box it was
+          swallowing nearly every panel drag that started at the top
+          of the board — presses hit the pill instead of the drag
+          handle. Presses on the pill's padding and gaps now fall
+          through to the panel header beneath; the pill's position
+          and appearance are unchanged. */}
       <div
         data-board-chrome
         data-testid="board-toolbar"
-        className={`absolute left-1/2 top-3 z-[9999] max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-0.5 rounded-full border px-1.5 py-1 shadow-md ${narrow ? "hidden" : "flex"}`}
+        className={`pointer-events-none absolute left-1/2 top-3 z-[9999] max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-0.5 rounded-full border px-1.5 py-1 shadow-md ${narrow ? "hidden" : "flex"}`}
         style={{ backgroundColor: tokens.surface, borderColor: tokens.border }}
       >
         {/* The horizontal scroll region wraps ONLY the summon row.
@@ -622,7 +631,7 @@ export default function StudioBoard({
             type="button"
             data-testid="board-layout-menu"
             aria-expanded={layoutMenuOpen}
-            className="flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium"
+            className="pointer-events-auto flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium"
             style={{ color: tokens.text }}
             onClick={() => setLayoutMenuOpen((open) => !open)}
           >
@@ -632,7 +641,7 @@ export default function StudioBoard({
           {layoutMenuOpen && (
             <div
               data-testid="board-layout-menu-popover"
-              className="absolute right-0 top-[calc(100%+8px)] w-52 rounded-xl border p-1.5 shadow-lg"
+              className="pointer-events-auto absolute right-0 top-[calc(100%+8px)] w-52 rounded-xl border p-1.5 shadow-lg"
               style={{ backgroundColor: tokens.surface, borderColor: tokens.border }}
             >
               {MENU_PANELS.map((id) => {
@@ -746,7 +755,7 @@ export default function StudioBoard({
             type="button"
             data-testid="board-zoom-out"
             aria-label="Zoom out"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-xs"
+            className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-full text-xs"
             style={{ color: tokens.text }}
             onClick={() => setScale((viewport.scale || 1) - 0.1)}
           >
@@ -755,7 +764,7 @@ export default function StudioBoard({
           <select
             data-testid="board-zoom-select"
             aria-label="Zoom level"
-            className="bg-transparent text-[11px] font-medium"
+            className="pointer-events-auto bg-transparent text-[11px] font-medium"
             style={{ color: tokens.text }}
             value={layout.overviewReturnViewport ? "fit" : String(zoomPercent)}
             onChange={(e) => {
@@ -784,7 +793,7 @@ export default function StudioBoard({
             type="button"
             data-testid="board-zoom-in"
             aria-label="Zoom in"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-xs"
+            className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-full text-xs"
             style={{ color: tokens.text }}
             onClick={() => setScale((viewport.scale || 1) + 0.1)}
           >
@@ -794,13 +803,16 @@ export default function StudioBoard({
       </div>
 
       {/* Offline state (Finish Spec): honest, specific, and it does
-          not block the board — layouts persist on this device. */}
+          not block the board — layouts persist on this device.
+          Click-through like the pill (2026-11-18): the banner is
+          plain status text at the same top-center coordinates, so
+          it must never swallow a panel drag either. */}
       {offline && (
         <div
           data-board-chrome
           data-testid="board-offline-banner"
           role="status"
-          className="absolute left-1/2 top-3 z-[9999] w-max max-w-[calc(100%-24px)] -translate-x-1/2 rounded-full border px-3.5 py-2 text-center text-[11px] font-semibold shadow-md"
+          className="pointer-events-none absolute left-1/2 top-3 z-[9999] w-max max-w-[calc(100%-24px)] -translate-x-1/2 rounded-full border px-3.5 py-2 text-center text-[11px] font-semibold shadow-md"
           style={{ backgroundColor: tokens.surfaceElevated, borderColor: tokens.border, color: tokens.text }}
         >
           You are offline — the board still works and saves on this device; LiTT needs a connection to build.
