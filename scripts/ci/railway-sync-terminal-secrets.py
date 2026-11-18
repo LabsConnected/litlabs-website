@@ -10,14 +10,18 @@ import json
 import subprocess
 import sys
 
-SOURCE = "terminal-server"
-TARGET = "@litlabs/litt-shell"
+import os
+
+SOURCE = os.environ.get("SYNC_SOURCE", "terminal-server")
+TARGET = os.environ.get("SYNC_TARGET", "@litlabs/litt-shell")
+RAILWAY_ENV = os.environ.get("RAILWAY_ENV") or None
 VARS = ["TERMINAL_INTERNAL_SERVICE_KEY", "TERMINAL_AUTH_SECRET"]
 
 
 def get_vars(service):
     proc = subprocess.run(
-        ["railway", "variable", "list", "--service", service, "--json"],
+        ["railway", "variable", "list", "--service", service, "--json"]
+        + (["--environment", RAILWAY_ENV] if RAILWAY_ENV else []),
         capture_output=True, text=True,
     )
     if proc.returncode != 0:
@@ -56,7 +60,8 @@ def fp(v):
 
 def set_var(service, name, value):
     proc = subprocess.run(
-        ["railway", "variable", "set", name, "--service", service, "--stdin"],
+        ["railway", "variable", "set", name, "--service", service, "--stdin"]
+        + (["--environment", RAILWAY_ENV] if RAILWAY_ENV else []),
         input=value, capture_output=True, text=True,
     )
     if proc.returncode != 0:
