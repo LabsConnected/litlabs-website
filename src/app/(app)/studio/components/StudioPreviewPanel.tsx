@@ -224,7 +224,7 @@ function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | nu
   if (runtimeStatus === "ready" && url) return { state: "ready", url, error: null, errorCode: null };
   if (runtimeStatus === "starting") return { state: "starting", url, error, errorCode };
   if (runtimeStatus === "restarting") return { state: "restarting", url, error, errorCode };
-  if (runtimeStatus === "failed") return { state: "failed", url, error: error ?? "Preview dev server crashed or failed to start", errorCode };
+  if (runtimeStatus === "failed") return { state: "failed", url, error: error ?? "The preview failed to start", errorCode };
   if (runtimeStatus === "unreachable") return { state: "unreachable", url, error: error ?? "Preview runtime is unreachable", errorCode };
   if (runtimeStatus === "not_started") return { state: "not_started", url, error, errorCode };
   if (["preparing", "provisioning"].includes(workspaceStatus ?? "")) return { state: "starting", url, error, errorCode };
@@ -410,7 +410,7 @@ export default function StudioPreviewPanel({
   // top (each new request supersedes the previous, so a slow API would never
   // get a response applied).
   const statusInFlightRef = useRef(false);
-  const MAX_START_POLL_ATTEMPTS = 110; // 110 × 3s ≈ 330s — matches the start-POST budget; a cold sandbox start (create + mirror + install + boot) legitimately runs past the old ~2-minute bound, which made the panel declare "took too long to start" over starts that were still alive (round 5, 2026-11-15)
+  const MAX_START_POLL_ATTEMPTS = 420; // 420 × 3s ≈ 21 min — with the terminal's async accept (C3/C4), the poll is the start's verdict channel, so its window must cover the terminal's own worst case: sandbox install budget (900s) + start health-probe window (120s) + provision/launch slack. The old 110 (≈330s, matched to the start-POST budget) declared "took too long" over starts that were still legitimately installing.
   // Which project this panel is showing right now, and a token per start
   // attempt: late results for a previous project are discarded, not applied.
   const activeProjectRef = useRef<string | null>(projectId);
@@ -875,7 +875,7 @@ export default function StudioPreviewPanel({
         statusInFlightRef.current = false;
         setState("failed");
         setStartPhase(null);
-        setError("The preview took too long to start. The dev server may have crashed during startup — check the logs, then try restarting.");
+        setError("The preview is taking much longer than a start should. It may still be starting on the server — check the logs, or try restarting.");
         setErrorCode(null);
         return;
       }
@@ -1047,6 +1047,11 @@ export default function StudioPreviewPanel({
         // (live failure 2026-11-15). 330s covers the route's budgets
         // plus its own non-fetch work (auth, DB writes, secrets) and
         // still terminates a start the route itself has given up on.
+        // C3/C4: the terminal now ACCEPTS starts (answers once the
+        // "starting" runtime is registered), so this POST normally
+        // returns in seconds; 330s remains only as the outer bound,
+        // and if it ever fires the catch below keeps polling instead
+        // of declaring the start dead.
         signal: AbortSignal.timeout(330000),
       });
       const payload = await response.json().catch(() => null) as PreviewPayload | null;
@@ -1089,9 +1094,25 @@ export default function StudioPreviewPanel({
       if (next.state === "ready") setFrameKey((value) => value + 1);
     } catch (prepareError) {
       if (!isCurrent()) return;
-      setState("failed");
-      setError(prepareError instanceof Error ? prepareError.message : "Preview preparation failed");
+      // Async start (C3/C4): everything that reaches this catch is a
+      // TRANSPORT-class failure — the POST itself rejected (network
+      // error, the 330s abort) or answered an unshaped body (an edge
+      // 502/524 while the web route was still working). None of that
+      // means the start failed: the terminal accepts the start and
+      // completes it in the background, and the status poll is the
+      // verdict channel. Shaped failures (a payload carrying
+      // runtimeStatus/runtimeError) never reach here — they settle
+      // above with their code intact. So: stay in "starting", clear
+      // the error, and give the poll a full fresh window. The poll
+      // resolves the truth — ready surfaces when the start lands, a
+      // failed runtime surfaces its real error, and a start that
+      // truly never landed ends at the poll bound or re-arms
+      // auto-start from not_started.
+      void prepareError;
+      setState("starting");
+      setError(null);
       setErrorCode(null);
+      startPollAttemptsRef.current = 0;
     } finally {
       if (startTokenRef.current === startToken) {
         startInFlightRef.current = false;
@@ -1268,7 +1289,7 @@ export default function StudioPreviewPanel({
   // Raw serialized server payloads never render — see humanizePreviewError.
   const humanError = humanizePreviewError(error);
   const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : frameCheck === "ok" ? "Preview ready" : "Loading preview…") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (humanError ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (humanError ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : humanError ?? "The dev server failed to start. Try restarting it.") : humanError ?? "The preview surface reports only real project runtime state.";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (humanError ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (humanError ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : humanError ?? "The preview failed to start. Try restarting it.") : humanError ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
 

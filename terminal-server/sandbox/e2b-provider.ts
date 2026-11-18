@@ -131,6 +131,13 @@ export interface E2bSandboxHandle {
   ): Promise<E2bCommandResult>;
   /** Host (no scheme) for an exposed port, per the SDK's getHost(). */
   getHost(port: number): string;
+  /**
+   * The sandbox's real expiration as reported by the provider
+   * (epoch ms), or null when the handle cannot report it. Optional:
+   * handles that predate this method simply do not implement it and
+   * the provider falls back to its own tracked lifetime.
+   */
+  getExpiry?(): Promise<number | null>;
   setTimeout(timeoutMs: number): Promise<void>;
   /** Pause preserves disk + memory state; used for stop(). */
   pause(): Promise<boolean>;
@@ -210,6 +217,8 @@ interface E2bSdkSandboxLike {
   pause(): Promise<boolean>;
   kill(): Promise<boolean>;
   isRunning(): Promise<boolean>;
+  /** Server-reported sandbox info; endAt is the real expiration. */
+  getInfo(): Promise<{ endAt: Date | string }>;
 }
 
 function mapSdkEntry(entry: E2bSdkEntryLike): E2bFileEntry {
@@ -275,6 +284,22 @@ function wrapSdkSandbox(sbx: E2bSdkSandboxLike): E2bSandboxHandle {
       }
     },
     getHost: (port) => sbx.getHost(port),
+    async getExpiry() {
+      // Sandbox.getInfo() reports the server-side endAt — the real
+      // expiration, which counts from the last setTimeout call. Any
+      // failure (or an unparseable value) yields null so the caller
+      // falls back to its tracked lifetime instead of guessing.
+      try {
+        const info = await sbx.getInfo();
+        const ms =
+          info.endAt instanceof Date
+            ? info.endAt.getTime()
+            : Date.parse(String(info.endAt));
+        return Number.isFinite(ms) ? ms : null;
+      } catch {
+        return null;
+      }
+    },
     setTimeout: (ms) => sbx.setTimeout(ms),
     pause: () => sbx.pause(),
     kill: () => sbx.kill(),
@@ -340,6 +365,15 @@ interface RegistryEntry {
   handle: E2bSandboxHandle;
   /** Full composed environment, re-supplied per command (see create). */
   env: Record<string, string>;
+  /**
+   * Tracked real expiry (epoch ms): set at create from the clamped
+   * create timeout and re-armed at every setTimeout this provider
+   * issues, mirroring E2B's rule that the lifetime counts from the
+   * last setTimeout call. exposePort prefers the handle's
+   * server-reported getInfo endAt and falls back to this — never to
+   * a synthetic offset.
+   */
+  expiresAtMs: number | null;
 }
 
 export class E2bTerminalUnsupportedError extends Error {
@@ -425,19 +459,20 @@ export class E2bSandboxProvider implements SandboxProvider {
       projectEnv: input.env,
     });
 
+    // The create-time timeoutMs is a HARD KILL in E2B, not an idle
+    // timeout — despite the limits field's name. Passing
+    // idleTimeoutMinutes (15) killed live workspace sandboxes at
+    // exactly 15:00 mid-session (2026-11-16 proof: created 11:34:41,
+    // killed 11:49:41, forward push failed 11:49:47). A workspace
+    // sandbox must live for a work session: maxSessionMinutes is
+    // the session-scale lifetime the limits already define (and the
+    // value start() already re-arms on resume). execute() extends
+    // the clock on activity, so an actively used sandbox never
+    // reaches even this bound.
+    const createTimeoutMs = clampSandboxTimeoutMs(limits.maxSessionMinutes * 60_000);
     const handle = await this.client.create({
       template: this.templateId,
-      // The create-time timeoutMs is a HARD KILL in E2B, not an idle
-      // timeout — despite the limits field's name. Passing
-      // idleTimeoutMinutes (15) killed live workspace sandboxes at
-      // exactly 15:00 mid-session (2026-11-16 proof: created 11:34:41,
-      // killed 11:49:41, forward push failed 11:49:47). A workspace
-      // sandbox must live for a work session: maxSessionMinutes is
-      // the session-scale lifetime the limits already define (and the
-      // value start() already re-arms on resume). execute() extends
-      // the clock on activity, so an actively used sandbox never
-      // reaches even this bound.
-      timeoutMs: clampSandboxTimeoutMs(limits.maxSessionMinutes * 60_000),
+      timeoutMs: createTimeoutMs,
       envs: createEnv,
       metadata: {
         littree_user_id: input.userId,
@@ -480,7 +515,12 @@ export class E2bSandboxProvider implements SandboxProvider {
       provider: this.name,
       endpoint: null,
     };
-    this.registry.set(handle.sandboxId, { instance, handle, env });
+    this.registry.set(handle.sandboxId, {
+      instance,
+      handle,
+      env,
+      expiresAtMs: this.now() + createTimeoutMs,
+    });
     return { ...instance };
   }
 
@@ -527,9 +567,11 @@ export class E2bSandboxProvider implements SandboxProvider {
     const entry = this.entry(sandboxId);
     // Sandbox.connect auto-resumes a paused sandbox.
     entry.handle = await this.client.connect(sandboxId);
-    await entry.handle.setTimeout(
-      clampSandboxTimeoutMs(entry.instance.limits.maxSessionMinutes * 60_000),
+    const startTimeoutMs = clampSandboxTimeoutMs(
+      entry.instance.limits.maxSessionMinutes * 60_000,
     );
+    await entry.handle.setTimeout(startTimeoutMs);
+    entry.expiresAtMs = this.now() + startTimeoutMs;
     entry.instance.state = "running";
     entry.instance.startedAt = this.isoNow();
     entry.instance.stoppedAt = null;
@@ -592,8 +634,14 @@ export class E2bSandboxProvider implements SandboxProvider {
     // itself fails, the command's own result stays authoritative —
     // a truly dead sandbox fails runCommand with the SDK's error,
     // and get()/ensure then recreate it.
+    const activityTimeoutMs = clampSandboxTimeoutMs(
+      entry.instance.limits.maxSessionMinutes * 60_000,
+    );
     await entry.handle
-      .setTimeout(clampSandboxTimeoutMs(entry.instance.limits.maxSessionMinutes * 60_000))
+      .setTimeout(activityTimeoutMs)
+      .then(() => {
+        entry.expiresAtMs = this.now() + activityTimeoutMs;
+      })
       .catch(() => {});
     const startedMs = this.now();
     const result = await entry.handle.runCommand(input.command, {
@@ -642,16 +690,42 @@ export class E2bSandboxProvider implements SandboxProvider {
       // preview proxy is the only consumer of either value; neither
       // is rendered to a browser or persisted anywhere.
       previewToken: handleToken ?? randomBytes(16).toString("hex"),
+      // Truthful expiry (C3/C4): the sandbox's REAL expiration —
+      // the server-reported endAt from getInfo when the handle can
+      // report it, else this provider's tracked lifetime (create /
+      // setTimeout re-arms). The previous value was a synthetic
+      // now + idleTimeoutMinutes (15 min) offset that ignored every
+      // extension, so consumers judged live addresses lapsed (and
+      // lapsed ones live) on a clock nothing else obeyed.
       expiresAt: new Date(
-        this.now() + entry.instance.limits.idleTimeoutMinutes * 60_000,
+        (await this.resolveExpiryMs(entry)) ?? this.now(),
       ).toISOString(),
     };
+  }
+
+  /**
+   * The sandbox's real expiry (epoch ms): the handle's
+   * server-reported endAt when available, else the tracked
+   * lifetime. A getInfo answer also refreshes the tracked value so
+   * later fallback reads stay close to the server truth.
+   */
+  private async resolveExpiryMs(entry: RegistryEntry): Promise<number | null> {
+    if (entry.handle.getExpiry) {
+      const reported = await entry.handle.getExpiry().catch(() => null);
+      if (reported != null) {
+        entry.expiresAtMs = reported;
+        return reported;
+      }
+    }
+    return entry.expiresAtMs;
   }
 
   /** Extend a live sandbox's remaining lifetime (preview keepalive). */
   async extendTimeout(sandboxId: string, timeoutMs: number): Promise<void> {
     const entry = this.entry(sandboxId);
-    await entry.handle.setTimeout(clampSandboxTimeoutMs(timeoutMs));
+    const clampedMs = clampSandboxTimeoutMs(timeoutMs);
+    await entry.handle.setTimeout(clampedMs);
+    entry.expiresAtMs = this.now() + clampedMs;
     entry.instance.lastActiveAt = this.isoNow();
   }
 
