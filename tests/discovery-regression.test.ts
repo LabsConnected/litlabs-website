@@ -511,9 +511,10 @@ describe("Discovery regression — Round 2 QA fixes", () => {
 
 // ── Trailer removal (Larry's order, 2026-11-10) ──────────
 // The portrait StudioTour trailer (the one with the phone scene) is OFF the
-// homepage for good: the StudioTour section was replaced by the interactive
-// HowItsMade stepper. The assets stay in public/demos; only the page embed
-// was removed. The landscape walkthrough film is the homepage's only video.
+// homepage for good. The assets stay in public/demos; only the page embed
+// was removed. The homepage composition has changed since (the HowItsMade
+// stepper that replaced the tour was itself replaced by Larry's mockup
+// port, 2026-11-18), but the trailer ban is permanent.
 describe("Discovery regression — trailer sources", () => {
   const homeSrc = readFileSync(
     path.resolve(__dirname, "../src/app/HomePageClient.tsx"),
@@ -523,7 +524,7 @@ describe("Discovery regression — trailer sources", () => {
   it("keeps the trailer and the old tour off the homepage", () => {
     expect(homeSrc).not.toContain("litt-trailer");
     expect(homeSrc).not.toContain("StudioTour");
-    expect(homeSrc).toContain("HowItsMade");
+    expect(homeSrc).toContain("After Midnight");
   });
 
   it("ships both trailer assets in public/demos", () => {

@@ -1,0 +1,97 @@
+/* ============================================================
+   Homepage mockup port (Larry's Littree_Labstudios_Mockup_Pages,
+   approved 2026-11-18) — scoped styles for HomePageClient.
+
+   Everything here is scoped under .litt-home-mockup so the
+   mockup's dark palette can live on the homepage without
+   touching shared/global styles. The mockup's --pink variable
+   is intentionally NOT ported: it is unused by the homepage
+   markup and pink stays out of the site's styles.
+   ============================================================ */
+
+.litt-home-mockup {
+  --hm-bg: #06060c;
+  --hm-surface: #0d0d18;
+  --hm-surface-2: #141422;
+  --hm-line: #26263a;
+  --hm-text: #f2f2f8;
+  --hm-muted: #a9a9c0;
+  --hm-green: #00ff9d;
+  --hm-purple: #a855f7;
+  --hm-violet: #7c3aed;
+
+  background: var(--hm-bg);
+  color: var(--hm-text);
+  font-family:
+    var(--font-next-ui),
+    "Space Grotesk",
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+.litt-home-mockup .hm-mono {
+  font-family:
+    var(--font-next-code),
+    "JetBrains Mono",
+    ui-monospace,
+    monospace;
+}
+
+.litt-home-mockup ::selection {
+  background: var(--hm-green);
+  color: #03130b;
+}
+
+.litt-home-mockup .hm-glow-green {
+  text-shadow: 0 0 28px rgba(0, 255, 157, 0.55);
+}
+
+.litt-home-mockup .hm-grid-bg {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.litt-home-mockup .hm-noise {
+  background-image:
+    radial-gradient(circle at 18% 18%, rgba(168, 85, 247, 0.22), transparent 28%),
+    radial-gradient(circle at 82% 22%, rgba(0, 255, 157, 0.16), transparent 30%),
+    radial-gradient(circle at 50% 90%, rgba(124, 58, 237, 0.22), transparent 34%);
+}
+
+.litt-home-mockup .hm-card-hover {
+  transition:
+    transform 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.litt-home-mockup .hm-card-hover:hover {
+  transform: translateY(-4px);
+  border-color: rgba(0, 255, 157, 0.55);
+  box-shadow:
+    0 18px 45px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 255, 157, 0.12);
+}
+
+.litt-home-mockup .hm-btn-primary {
+  transition: all 0.2s ease;
+}
+
+.litt-home-mockup .hm-btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 34px rgba(0, 255, 157, 0.45);
+  filter: brightness(1.08);
+}
+
+.litt-home-mockup .hm-btn-ghost {
+  transition: all 0.2s ease;
+}
+
+.litt-home-mockup .hm-btn-ghost:hover {
+  border-color: var(--hm-green);
+  color: var(--hm-green);
+  background: rgba(0, 255, 157, 0.08);
+}

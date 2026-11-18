@@ -9,11 +9,16 @@ describe("public landing demo truth", () => {
   const simulatedDemo = readFileSync(join(__dirname, "InteractiveProductDemo.tsx"), "utf-8");
   const realProject = readFileSync(join(__dirname, "RealProjectWalkthrough.tsx"), "utf-8");
 
-  it("places the real walkthrough before feature sections without changing the simulated demo label", () => {
-    expect(homePage).toContain("<LandingHeroV3 />");
-    expect(homePage).toContain("<RealProjectWalkthrough />");
-    expect(homePage.indexOf("<LandingHeroV3 />")).toBeLessThan(homePage.indexOf("<RealProjectWalkthrough />"));
-    expect(homePage.indexOf("<RealProjectWalkthrough />")).toBeLessThan(homePage.indexOf("<CapabilityGrid />"));
+  it("labels the homepage example panel as a recorded preview, never as live", () => {
+    // Homepage mockup port (Larry's order, 2026-11-18): the old hero +
+    // walkthrough composition was replaced by the mockup's sections. The
+    // truth contract carries over — the simulated workspace panel in the
+    // hero is labeled an example / recorded preview, never a live feed.
+    expect(homePage).toContain("Example workspace panel");
+    expect(homePage).toContain("Recorded preview");
+    expect(homePage).not.toContain("● LIVE");
+    expect(homePage).not.toContain("Missions active");
+    expect(homePage).not.toContain("Current mission");
     expect(simulatedDemo).toContain("Interactive product demonstration");
     expect(simulatedDemo).toContain('text-white/20">Demo</span>');
     expect(realProject).toContain("not a continuous live recording");
