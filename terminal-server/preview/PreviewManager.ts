@@ -1996,8 +1996,35 @@ export async function ensurePreviewEnv(
  * Verify that a preview runtime is actually alive — the process
  * exists AND HTTP health check passes. Used by GET /preview to
  * avoid trusting stale DB state.
+ *
+ * Round 16 follow-up: SINGLE-FLIGHT per workspace. Two drivers
+ * call this — the Studio panel's status route (server.ts) and the
+ * terminal-side verify sweeper — and nothing used to stop them
+ * overlapping. Overlapping rounds interleave their awaits, bank
+ * parallel counts for what is really one sustained failure
+ * window, and race the C2 recreation gate: the 2026-11-18 live
+ * proof produced an "attempt 1 of 2" recreation announcement and
+ * a "not recreating yet — cooldown" line in the same second, from
+ * two rounds that had both passed the gate's in-flight check
+ * before either wrote its bookkeeping. Concurrent callers now
+ * share the one in-flight round's promise; the first call after
+ * it settles starts a fresh round.
  */
-export async function verifyPreviewHealth(workspaceId: string): Promise<boolean> {
+const verifyRoundsInFlight = new Map<string, Promise<boolean>>();
+
+export function verifyPreviewHealth(workspaceId: string): Promise<boolean> {
+  const inFlight = verifyRoundsInFlight.get(workspaceId);
+  if (inFlight) return inFlight;
+  const promise = verifyPreviewHealthRound(workspaceId).finally(() => {
+    if (verifyRoundsInFlight.get(workspaceId) === promise) {
+      verifyRoundsInFlight.delete(workspaceId);
+    }
+  });
+  verifyRoundsInFlight.set(workspaceId, promise);
+  return promise;
+}
+
+async function verifyPreviewHealthRound(workspaceId: string): Promise<boolean> {
   const rt = runtimes.get(workspaceId);
   // Sandbox branch: no host process exists; health is probed through
   // the upstream instead of 127.0.0.1 (design note §3.3).
