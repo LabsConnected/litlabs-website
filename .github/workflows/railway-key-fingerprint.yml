@@ -75,6 +75,59 @@ jobs:
           done
           exit 0
 
+      - name: Probe Gemini credential directly (prints HTTP status + error only, never the key)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, urllib.request, urllib.error, os, re
+
+          def collect(node, vals):
+              if isinstance(node, dict):
+                  n, v = node.get("name"), node.get("value")
+                  if isinstance(n, str) and isinstance(v, str):
+                      vals[n] = v
+                  for k, v2 in node.items():
+                      if isinstance(k, str) and isinstance(v2, str) and k == k.upper() and k.replace("_","").isalnum():
+                          vals.setdefault(k, v2)
+                      else:
+                          collect(v2, vals)
+              elif isinstance(node, list):
+                  for i in node: collect(i, vals)
+
+          raw = subprocess.run(["railway","variable","list","--service","@litlabs/litt-shell","--json"],capture_output=True,text=True).stdout
+          vals = {}
+          try:
+              collect(json.loads(raw), vals)
+          except Exception as e:
+              print("PARSE_FAIL", e); raise SystemExit(0)
+          key = vals.get("GEMINI_API_KEY") or vals.get("GOOGLE_API_KEY") or ""
+          print("key_present:", bool(key), "len:", len(key))
+          if not key:
+              raise SystemExit(0)
+
+          def probe(url, payload=None):
+              req = urllib.request.Request(url, data=json.dumps(payload).encode() if payload else None,
+                                           headers={"Content-Type":"application/json"})
+              try:
+                  r = urllib.request.urlopen(req, timeout=30)
+                  return r.status, r.read()[:400].decode("utf-8","replace")
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read()[:600].decode("utf-8","replace")
+              except Exception as e:
+                  return -1, str(e)
+
+          st, body = probe(f"https://generativelanguage.googleapis.com/v1beta/models?key={key}")
+          print("MODELS_LIST status:", st)
+          print("MODELS_LIST body:", re.sub(key, "<redacted>", body)[:400])
+          payload = {"contents":[{"parts":[{"text":"Reply with the word ok"}]}],"generationConfig":{"maxOutputTokens":16}}
+          st, body = probe(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}", payload)
+          print("GENERATE gemini-2.5-flash status:", st)
+          print("GENERATE body:", re.sub(key, "<redacted>", body)[:600])
+          PY
+          exit 0
+
       - name: Provider error lines from staging web logs (filtered, no secrets)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
