@@ -389,8 +389,8 @@ const MODE_PATTERNS: ModePattern[] = [
   {
     mode: "create",
     patterns: [
-      /\b(generate|create|make|produce|draw|render|design|paint|sketch)\b[^.!?]{0,40}\b(images?|pictures?|photos?|photographs?|drawings?|illustrations?|graphics?|banners?|thumbnails?|icons?|artwork|posters?|logos?)\b(?!\s+(?:uploads?|bugs?|errors?|files?|formats?|sizes?|resolutions?)\b)/i,
-      /\b(need|want|would like|get me|give me|gimme)\b[^.!?]{0,30}\b(images?|pictures?|photos?|photographs?|drawings?|illustrations?|graphics?|banners?|thumbnails?|icons?|artwork|posters?|logos?)\b(?!\s+(?:uploads?|bugs?|errors?|files?|formats?|sizes?|resolutions?)\b)/i,
+      /\b(generate|create|make|produce|draw|render|design|paint|sketch)\b[^.!?]{0,40}\b(images?|pictures?|pics?|photos?|photographs?|drawings?|illustrations?|graphics?|banners?|thumbnails?|icons?|artwork|posters?|logos?|videos?|vids?)\b(?!\s+(?:uploads?|bugs?|errors?|files?|formats?|sizes?|resolutions?)\b)/i,
+      /\b(need|want|would like|get me|give me|gimme)\b[^.!?]{0,30}\b(images?|pictures?|pics?|photos?|photographs?|drawings?|illustrations?|graphics?|banners?|thumbnails?|icons?|artwork|posters?|logos?|videos?|vids?)\b(?!\s+(?:uploads?|bugs?|errors?|files?|formats?|sizes?|resolutions?)\b)/i,
       // "draw a dragon" names the subject, not a media noun — the
       // verb itself is the artifact signal. Idiom objects excluded.
       /\b(draw|sketch|paint)\b[^.!?]{0,40}\b(?:a|an)\b(?!\s+(?:conclusion|breath|attention|bath)\b)/i,
