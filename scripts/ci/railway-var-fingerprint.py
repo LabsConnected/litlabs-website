@@ -10,6 +10,7 @@ printed in full (they contain no credentials).
 """
 import hashlib
 import json
+import os
 import subprocess
 import sys
 
@@ -105,10 +106,11 @@ def main():
     service = sys.argv[1]
     wanted = sys.argv[2:] or ["TERMINAL_INTERNAL_SERVICE_KEY"]
 
-    proc = subprocess.run(
-        ["railway", "variable", "list", "--service", service, "--json"],
-        capture_output=True, text=True,
-    )
+    cmd = ["railway", "variable", "list", "--service", service, "--json"]
+    env_name = os.environ.get("RAILWAY_ENV")
+    if env_name:
+        cmd += ["--environment", env_name]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         print(f"SERVICE={service} ERROR variable-list-failed")
         return 0

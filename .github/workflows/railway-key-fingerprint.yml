@@ -64,6 +64,17 @@ jobs:
           fi
           exit 0
 
+      - name: Production fingerprints (read-only, same safe rules)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          for svc in "web" "litlabs-terminal-server" "terminal-server"; do
+            echo "=== PROD service: $svc ==="
+            RAILWAY_ENV=production python3 scripts/ci/railway-var-fingerprint.py "$svc"               TERMINAL_INTERNAL_SERVICE_KEY TERMINAL_AUTH_SECRET || true
+          done
+          exit 0
+
       - name: Provider error lines from staging web logs (filtered, no secrets)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
