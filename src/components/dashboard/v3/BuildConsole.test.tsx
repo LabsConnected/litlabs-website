@@ -23,6 +23,12 @@ vi.mock("@/hooks/useClerkAuth", () => ({
 }));
 
 import { BuildConsole } from "./BuildConsole";
+import { ThemeProvider } from "@/context/ThemeContext";
+
+// BuildConsole consumes theme tokens (layout/theme wave, 2026-11-10);
+// production always renders it inside the app ThemeProvider.
+const renderConsole = (ui: React.ReactElement) =>
+  render(<ThemeProvider>{ui}</ThemeProvider>);
 
 function mockFetch(handlers: {
   intent?: () => Response;
@@ -68,7 +74,7 @@ describe("BuildConsole project creation", () => {
         new Response(JSON.stringify({ project: { id: "proj-new", name: "A site" } }), { status: 201 }),
     });
     const user = userEvent.setup();
-    render(<BuildConsole />);
+    renderConsole(<BuildConsole />);
 
     await user.type(
       screen.getByLabelText("Describe what you want to make"),
@@ -120,7 +126,7 @@ describe("BuildConsole project creation", () => {
       },
     });
     const user = userEvent.setup();
-    render(<BuildConsole />);
+    renderConsole(<BuildConsole />);
 
     await user.type(
       screen.getByLabelText("Describe what you want to make"),
@@ -162,7 +168,7 @@ describe("BuildConsole project creation", () => {
         new Response(JSON.stringify({ project: { id: "proj-mixed" } }), { status: 201 }),
     });
     const user = userEvent.setup();
-    render(<BuildConsole />);
+    renderConsole(<BuildConsole />);
 
     await user.type(screen.getByLabelText("Describe what you want to make"), "Build a site and deploy it");
     await user.click(screen.getByRole("button", { name: /create/i }));
@@ -194,7 +200,7 @@ describe("BuildConsole project creation", () => {
         },
       });
       const user = userEvent.setup();
-      render(<BuildConsole />);
+      renderConsole(<BuildConsole />);
 
       await user.type(screen.getByLabelText("Describe what you want to make"), "Tell me something");
       await user.click(screen.getByRole("button", { name: /create/i }));
@@ -324,7 +330,7 @@ describe("BuildConsole project creation", () => {
         },
       });
       const user = userEvent.setup();
-      render(<BuildConsole />);
+      renderConsole(<BuildConsole />);
 
       await user.type(screen.getByLabelText("Describe what you want to make"), prompt);
       await user.click(screen.getByRole("button", { name: /create/i }));
@@ -371,7 +377,7 @@ describe("BuildConsole project creation", () => {
         },
       });
       const user = userEvent.setup();
-      render(<BuildConsole />);
+      renderConsole(<BuildConsole />);
 
       await user.type(screen.getByLabelText("Describe what you want to make"), "make an image of a cat");
       await user.click(screen.getByRole("button", { name: /create/i }));
@@ -451,7 +457,7 @@ describe("BuildConsole project creation", () => {
         },
       });
       const user = userEvent.setup();
-      render(<BuildConsole />);
+      renderConsole(<BuildConsole />);
 
       await user.type(screen.getByLabelText("Describe what you want to make"), prompt);
       await user.click(screen.getByRole("button", { name: /create/i }));
@@ -491,7 +497,7 @@ describe("BuildConsole project creation", () => {
         new Response(JSON.stringify({ project: { id: "proj-mixed-media" } }), { status: 201 }),
     });
     const user = userEvent.setup();
-    render(<BuildConsole />);
+    renderConsole(<BuildConsole />);
 
     await user.type(
       screen.getByLabelText("Describe what you want to make"),
@@ -527,7 +533,7 @@ describe("BuildConsole project creation", () => {
         },
       });
       const user = userEvent.setup();
-      render(<BuildConsole />);
+      renderConsole(<BuildConsole />);
 
       await user.type(screen.getByLabelText("Describe what you want to make"), "something ambiguous");
       await user.click(screen.getByRole("button", { name: /create/i }));
@@ -551,7 +557,7 @@ describe("BuildConsole project creation", () => {
       },
     });
     const user = userEvent.setup();
-    render(<BuildConsole />);
+    renderConsole(<BuildConsole />);
 
     await user.type(screen.getByLabelText("Describe what you want to make"), "???");
     await user.click(screen.getByRole("button", { name: /create/i }));
@@ -574,7 +580,7 @@ describe("BuildConsole project creation", () => {
         new Response(JSON.stringify({ project: { id: "proj-new" } }), { status: 201 }),
     });
     const user = userEvent.setup();
-    render(<BuildConsole />);
+    renderConsole(<BuildConsole />);
 
     await user.type(screen.getByLabelText("Describe what you want to make"), "A landing page");
     await user.click(screen.getByRole("button", { name: /create/i }));
@@ -603,7 +609,7 @@ describe("BuildConsole project creation", () => {
       },
     });
     const user = userEvent.setup();
-    render(<BuildConsole />);
+    renderConsole(<BuildConsole />);
 
     await user.type(screen.getByLabelText("Describe what you want to make"), "Website");
     await user.click(screen.getByRole("button", { name: /create/i }));
@@ -638,7 +644,7 @@ describe("BuildConsole project creation", () => {
         new Response(JSON.stringify({ error: "quota exceeded" }), { status: 402 }),
     });
     const user = userEvent.setup();
-    render(<BuildConsole />);
+    renderConsole(<BuildConsole />);
 
     await user.type(screen.getByLabelText("Describe what you want to make"), "A portfolio site");
     await user.click(screen.getByRole("button", { name: /create/i }));
@@ -669,7 +675,7 @@ describe("BuildConsole project creation", () => {
         }),
     });
     const user = userEvent.setup();
-    render(<BuildConsole />);
+    renderConsole(<BuildConsole />);
 
     await user.type(screen.getByLabelText("Describe what you want to make"), "A dashboard app");
     const button = screen.getByRole("button", { name: /create/i });

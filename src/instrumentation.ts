@@ -21,6 +21,21 @@ export async function register() {
     }
 
     await import("../sentry.server.config");
+
+    // Round 14: periodic stale-run sweep for approval-resumed runs.
+    // recoverStaleRun only fired when a read touched the run, so a
+    // fenced/dead executor whose conversation nobody re-read stayed
+    // "processing" forever (the approval card stuck on "running").
+    // The sweep gives the reaper a clock; it is idempotent per
+    // process and unref'd.
+    try {
+      const { startStaleRunSweeper } = await import(
+        "./lib/litt-intelligence/paused-run-store"
+      );
+      startStaleRunSweeper();
+    } catch (e) {
+      console.error("[instrumentation] Stale-run sweeper failed to start:", e);
+    }
   }
 
   if (process.env.NEXT_RUNTIME === "edge") {

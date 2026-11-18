@@ -15,11 +15,12 @@
  *   stripe prices retrieve price_1U36qFJ53kgx4fp52s6oy53l  # Pro $39
  *   stripe prices retrieve price_1U066EJ53kgx4fp5ZLKsk6wp  # Founder $149
  *
- * Catalog note (2026-10-31): Creator Lite $9.99 and the repriced Creator
- * $19.99 exist in Stripe TEST mode only. Their live price objects and
- * STRIPE_PRICE_CREATOR_LITE are pending owner provisioning; until then
- * this file encodes the intended catalog and VERIFIED_STRIPE_PLANS marks
- * those entries "test_mode_pending_live".
+ * Catalog note (2026-11-12, issue #419): Creator Lite $9.99, Creator $19.99,
+ * and Pro Builder $39.99 are now live-mode, active default prices in Stripe.
+ * STRIPE_PRICE_CREATOR_LITE, STRIPE_PRICE_CREATOR_BETA, and
+ * STRIPE_PRICE_PRO_BUILDER_BETA are all set in the Railway production
+ * environment. See src/config/product-truth.ts VERIFIED_STRIPE_PLANS for
+ * the full rewire record.
  */
 
 import { describe, it, expect } from "vitest";
@@ -47,15 +48,15 @@ export const EXPECTED_STRIPE_CATALOG = {
     label: "Creator $19.99/month",
   },
   pro_builder_beta: {
-    priceCents: 3900,
+    priceCents: 3999,
     priceMode: "recurring" as const,
     envVar: "STRIPE_PRICE_PRO_BUILDER_BETA",
-    label: "Pro Builder $39/month",
+    label: "Pro Builder $39.99/month",
   },
   founder: {
     priceCents: 14900,
     priceMode: "one_time" as const,
-    envVar: "STRIPE_PRICE_FOUNDER",
+    envVar: null as string | null,
     label: "Founder $149 one-time",
   },
 } as const;
@@ -159,10 +160,10 @@ describe("Stripe catalog normalization — single source of truth", () => {
     });
 
     it("is unwired from plans.ts now that it is retired", () => {
-      // The Stripe price object still exists under this env var name, which
-      // is why EXPECTED_STRIPE_CATALOG still records it. plans.ts no longer
-      // references it, so no new checkout can resolve against it.
-      expect(EXPECTED_STRIPE_CATALOG.founder.envVar).toBe("STRIPE_PRICE_FOUNDER");
+      // STRIPE_PRICE_FOUNDER has been deleted from the Railway environment
+      // entirely, so EXPECTED_STRIPE_CATALOG records no env var for it.
+      // plans.ts never referenced it either, so no checkout can resolve it.
+      expect(EXPECTED_STRIPE_CATALOG.founder.envVar).toBeNull();
       expect(PLANS.founder.stripePriceIdEnv).toBeUndefined();
     });
   });
@@ -191,7 +192,7 @@ describe("Stripe catalog normalization — single source of truth", () => {
       };
       expect(report.creatorLite).toBe("$9.99 monthly");
       expect(report.creator).toBe("$19.99 monthly");
-      expect(report.pro).toBe("$39 monthly");
+      expect(report.pro).toBe("$39.99 monthly");
       expect(report.founder).toBe("$149 one-time");
     });
   });

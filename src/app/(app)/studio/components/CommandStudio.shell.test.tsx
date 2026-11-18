@@ -278,12 +278,16 @@ const convState = vi.hoisted(() => ({
   selectedConversationId: null as string | null,
   loadMessages: vi.fn(async () => {}),
   reportSendError: vi.fn(),
+  // Phase 0 tests flip this to drive conversation.busy edges (run starts)
+  // through the mocked conversation hook. Defaults to false, which is what
+  // every pre-existing test in this file observed.
+  busy: false,
 }));
 
 vi.mock("../hooks/useCanonicalConversation", () => ({
   useCanonicalConversation: () => ({
     messages: [],
-    busy: false,
+    busy: convState.busy,
     send: sendMock,
     regenerate: vi.fn(),
     clear: vi.fn(),
@@ -326,7 +330,11 @@ vi.mock("../stores/useExecutionStore", () => {
     (selector: (s: Record<string, unknown>) => unknown) => selector(execState.state),
     { getState: () => execState.state },
   );
-  return { useExecutionStore };
+  // useWorktabBadges calls this once per worktab — with no server tasks
+  // it never runs, which is why the stub could be missing until a test
+  // served a real task. "idle" is the real function's answer for a tab
+  // with no live execution snapshot.
+  return { useExecutionStore, deriveWorktabBadge: () => "idle" as const };
 });
 
 vi.mock("../stores/useConversationStore", () => ({
@@ -400,6 +408,7 @@ if (!Element.prototype.scrollTo) {
 }
 
 import CommandStudio from "./CommandStudio";
+import { useBoardLayoutStore } from "../stores/useBoardLayoutStore";
 
 // ── Test viewport: 1600x900 desktop — the Studio destination renders the
 // operating shell (rail + stage + inspector + LiTT command layer), NOT the
@@ -412,27 +421,23 @@ async function renderStudioShell() {
   const view = render(<CommandStudio />);
 
   await waitFor(() => {
-    if (!screen.queryByTestId("studio-shell")) {
-      throw new Error("StudioShell has not mounted");
+    if (!screen.queryByTestId("studio-board-shell")) {
+      throw new Error("board shell has not mounted");
     }
   });
 
   return { user, ...view };
 }
 
-describe("StudioShell — desktop operating shell", () => {
+describe("Board-only shell — the full-window board", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sendMock.mockResolvedValue({ accepted: true });
     capState.projectId = "project-1";
     capState.projectName = "Test Project";
-    // Reset the chat-dock preference so every test starts from the
-    // default left dock unless it explicitly opts into bottom mode.
-    window.localStorage.removeItem("littree:studio:chat-dock");
+    window.localStorage.removeItem("litt-studio-board-layout-v1");
     window.localStorage.removeItem("litt-studio-layout");
-    window.localStorage.removeItem("littree:studio:litt-dock-width");
-    window.localStorage.removeItem("littree:studio:litt-collapsed");
-    window.sessionStorage.removeItem("littree:studio:litt-collapsed");
+    useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
 
     globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
     window.innerWidth = DESKTOP_WIDTH;
@@ -451,397 +456,115 @@ describe("StudioShell — desktop operating shell", () => {
     });
   });
 
-  it("mounts rail + stage + collapsed inspector + left-docked LiTT panel by default", async () => {
+  afterEach(() => {
+    useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+    window.localStorage.removeItem("litt-studio-board-layout-v1");
+  });
+
+  it("opens on the full-window board — no stage rail, no second nav rail, no Developer bar, no fixed chat column, no board toggle", async () => {
     await renderStudioShell();
-    expect(screen.getByTestId("studio-shell")).toBeTruthy();
-    expect(screen.getByTestId("studio-workspace-rail")).toBeTruthy();
-    expect(screen.getByTestId("studio-stage")).toBeTruthy();
-    expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
-    expect(screen.getByTestId("studio-inspector-open")).toBeTruthy();
-    expect(screen.getByTestId("dock-inspector-panel").style.width).toBe("20px");
-    expect(screen.queryByTestId("dock-resize-inspector")).toBeNull();
-    // Default chatDock is "left": the chat lives in the left panel and the
-    // bottom command layer is not mounted.
-    expect(screen.getByTestId("litt-panel")).toBeTruthy();
-    expect(screen.queryByTestId("litt-command-layer")).toBeNull();
-  });
-
-  it("opens and floats the inspector without hiding the docked chat", async () => {
-    const { user } = await renderStudioShell();
-    await user.click(screen.getByTestId("dock-float-toggle"));
-    await waitFor(() => expect(screen.getByTestId("studio-context-inspector")).toBeTruthy());
-    expect(screen.getByTestId("dock-inspector-panel").style.width).toBe("320px");
-
-    await user.click(screen.getByTestId("dock-float-toggle"));
-    expect(screen.getByTestId("floating-inspector")).toBeTruthy();
-    expect(screen.getByTestId("litt-panel")).toBeTruthy();
-    expect(screen.getByTestId("studio-left-panel").style.display).not.toBe("none");
-
-    await user.click(screen.getByTestId("dock-float-toggle"));
-    expect(screen.queryByTestId("floating-inspector")).toBeNull();
-    expect(screen.getByTestId("studio-context-inspector")).toBeTruthy();
-  });
-
-  it("expands the stage while keeping side-panel contents mounted, then restores them", async () => {
-    const { user } = await renderStudioShell();
-    const shell = screen.getByTestId("studio-shell");
-    const leftPanel = screen.getByTestId("studio-left-panel");
-    const rail = screen.getByTestId("studio-rail-slot");
-
-    await user.click(screen.getByTestId("studio-expand-toggle"));
-    expect(shell).toHaveAttribute("data-layout-expanded", "true");
-    expect(leftPanel.style.display).toBe("none");
-    expect(rail.style.display).toBe("none");
-    expect(screen.getByTestId("litt-panel")).toBeTruthy();
-    expect(screen.getByTestId("studio-preview-panel")).toBeTruthy();
-
-    await user.click(screen.getByTestId("studio-expand-toggle"));
-    expect(shell).toHaveAttribute("data-layout-expanded", "false");
-    expect(leftPanel.style.display).not.toBe("none");
-    expect(rail.style.display).not.toBe("none");
-  });
-
-  it("mounts the bottom LiTT command layer when the dock preference is bottom", async () => {
-    window.localStorage.setItem("littree:studio:chat-dock", "bottom");
-    try {
-      await renderStudioShell();
-      expect(screen.getByTestId("litt-command-layer")).toBeTruthy();
-      expect(screen.queryByTestId("litt-panel")).toBeNull();
-    } finally {
-      window.localStorage.removeItem("littree:studio:chat-dock");
-    }
-  });
-
-  it("does not render the classic workspace tabs or bottom dock", async () => {
-    await renderStudioShell();
-    expect(screen.queryByTestId("workspace-tab-preview")).toBeNull();
+    expect(screen.getByTestId("studio-board-shell")).toBeTruthy();
+    expect(screen.getByTestId("studio-board")).toBeTruthy();
+    // The retired shell chrome is gone from the Studio view.
+    expect(screen.queryByTestId("studio-shell")).toBeNull();
+    expect(screen.queryByTestId("studio-workspace-rail")).toBeNull();
+    expect(screen.queryByTestId("studio-stage")).toBeNull();
+    expect(screen.queryByTestId("stage-surface-preview")).toBeNull();
     expect(screen.queryByTestId("studio-dock")).toBeNull();
-    // And no floating-window launcher from the superseded compositor.
-    expect(screen.queryByTestId("studio-canvas-open-tool")).toBeNull();
-  });
-
-  it("renders the Preview surface on the stage by default", async () => {
-    await renderStudioShell();
-    await waitFor(() => {
-      expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
-      expect(screen.getByTestId("studio-preview-panel")).toBeTruthy();
-    });
-  });
-
-  it("rail switches the stage surface and keeps visited surfaces mounted", async () => {
-    const { user } = await renderStudioShell();
-    await waitFor(() => screen.getByTestId("studio-preview-panel"));
-    await user.click(screen.getByTestId("workspace-rail-design"));
-    await waitFor(() => {
-      expect(screen.getByTestId("stage-surface-design")).toHaveAttribute("data-active", "true");
-      expect(screen.getByTestId("visual-canvas-builder")).toBeTruthy();
-      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
-    });
-    // Preview stays mounted (hidden) — iframe/scroll state survives.
-    const previewSurface = screen.getByTestId("stage-surface-preview");
-    expect(previewSurface).toHaveAttribute("data-active", "false");
-    expect(previewSurface.querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
-  });
-
-  it("LiTT command layer expands to the transcript and collapses back to the bar", async () => {
-    // Bottom-dock mode: today's bottom-layer behavior, unchanged.
-    window.localStorage.setItem("littree:studio:chat-dock", "bottom");
-    const { user } = await renderStudioShell();
-    // Collapsed: composer bar present, transcript hidden.
-    expect(screen.getByTestId("litt-command-layer")).toBeTruthy();
-    expect(screen.queryByTestId("litt-layer-transcript")).toBeNull();
-
-    await user.click(screen.getByTestId("litt-layer-toggle"));
-    await waitFor(() => {
-      expect(screen.getByTestId("litt-layer-transcript")).toBeTruthy();
-    });
-
-    await user.click(screen.getByTestId("litt-layer-collapse"));
-    await waitFor(() => {
-      expect(screen.queryByTestId("litt-layer-transcript")).toBeNull();
-    });
-  });
-
-  it("Esc collapses the expanded LiTT layer", async () => {
-    // Bottom-dock mode: today's bottom-layer behavior, unchanged.
-    window.localStorage.setItem("littree:studio:chat-dock", "bottom");
-    const { user } = await renderStudioShell();
-    await user.click(screen.getByTestId("litt-layer-toggle"));
-    await waitFor(() => screen.getByTestId("litt-layer-transcript"));
-    await user.keyboard("{Escape}");
-    await waitFor(() => {
-      expect(screen.queryByTestId("litt-layer-transcript")).toBeNull();
-    });
-  });
-
-  it("an element selection surfaces the contextual inspector with an Ask-LiTT action", async () => {
-    // Bottom-dock mode: Ask LiTT expands the bottom command layer.
-    window.localStorage.setItem("littree:studio:chat-dock", "bottom");
-    await renderStudioShell();
-    const sel = {
-      kind: "preview-element",
-      label: "Hero heading",
-      selector: "h1.hero",
-      tagName: "h1",
-      sourceFile: "app/page.tsx",
-      route: "/",
-      projectId: "project-1",
-      timestamp: Date.now(),
-    };
-    act(() => {
-      window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
-    });
-    await waitFor(() => {
-      // The selection renders the real element editor (resolves the
-      // source file; shows its own identity + Ask-LiTT affordance).
-      expect(screen.getByTestId("element-inspector-panel")).toBeTruthy();
-      expect(screen.getByTestId("inspector-ask-litt")).toBeTruthy();
-      // Ask LiTT expanded the command layer for the pinned context.
-      expect(screen.getByTestId("litt-layer-transcript")).toBeTruthy();
-    });
-  });
-});
-
-describe("StudioShell — left chat dock", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    sendMock.mockResolvedValue({ accepted: true });
-    capState.projectId = "project-1";
-    capState.projectName = "Test Project";
-    window.localStorage.removeItem("littree:studio:chat-dock");
-    window.localStorage.removeItem("litt-studio-layout");
-    window.localStorage.removeItem("littree:studio:litt-dock-width");
-    window.localStorage.removeItem("littree:studio:litt-collapsed");
-    // The collapse preference is session-scoped (a manual collapse sticks for
-    // the session; a fresh entry restores Chat + Workspace). Clear it between
-    // cases so one test's manual collapse cannot leak into the next.
-    window.sessionStorage.removeItem("littree:studio:litt-collapsed");
-    window.sessionStorage.removeItem("littree:studio:mobile-litt-open");
-
-    globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
-    window.innerWidth = DESKTOP_WIDTH;
-    window.innerHeight = DESKTOP_HEIGHT;
-    Object.defineProperty(window, "visualViewport", {
-      value: {
-        width: DESKTOP_WIDTH,
-        height: DESKTOP_HEIGHT,
-        offsetTop: 0,
-        offsetLeft: 0,
-        scale: 1,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      },
-      configurable: true,
-    });
-  });
-
-  it("renders the left dock expanded at 360px on first run", async () => {
-    await renderStudioShell();
-    const panel = screen.getByTestId("litt-panel");
-    // First-run default: the persistent left dock opens expanded (the
-    // stored-preference effect flips the collapsed initial state).
-    await waitFor(() => {
-      expect(panel).toHaveAttribute("data-collapsed", "false");
-    });
-    expect(panel).toHaveAttribute("data-overlay", "false");
-    // 360px default width (expandedMaxWidth="500px" keeps the 26vw legacy
-    // clamp from capping it at 1600px).
-    expect(panel.style.width).toContain("360px");
-    expect(screen.getByTestId("studio-left-panel").style.width).toBe("360px");
-    expect(screen.getAllByTestId("litt-dock-resize")).toHaveLength(1);
-    expect(screen.queryByTestId("dock-resize-left")).toBeNull();
-    // Bottom layer is not mounted in left-dock mode.
-    expect(screen.queryByTestId("litt-command-layer")).toBeNull();
-  });
-
-  it("mounts exactly one composer in left-dock mode", async () => {
-    await renderStudioShell();
-    expect(screen.getAllByTestId("studio-command-composer")).toHaveLength(1);
-    // The composer lives inside the left dock's pinned composer region.
-    expect(screen.getByTestId("litt-dock-composer")).toContainElement(
-      screen.getByTestId("studio-command-composer"),
-    );
-  });
-
-  it("mounts exactly one composer in bottom-dock mode", async () => {
-    window.localStorage.setItem("littree:studio:chat-dock", "bottom");
-    await renderStudioShell();
-    expect(screen.getAllByTestId("studio-command-composer")).toHaveLength(1);
-    expect(screen.getByTestId("litt-command-layer")).toContainElement(
-      screen.getByTestId("studio-command-composer"),
-    );
-  });
-
-  it("the operator bar moves with the chat into the left dock", async () => {
-    await renderStudioShell();
-    // StudioOperatorBar is mocked to a testid stub — it must render inside
-    // the left panel, not the (absent) bottom layer.
-    expect(screen.getByTestId("litt-panel")).toContainElement(
-      screen.getByTestId("studio-operator-bar"),
-    );
-  });
-
-  it("switcher round-trip: left → bottom → left, preference persisted", async () => {
-    const { user } = await renderStudioShell();
-    // Left dock: switcher in the panel tab header.
-    await user.click(screen.getByTestId("chat-dock-bottom"));
-    await waitFor(() => {
-      expect(screen.getByTestId("litt-command-layer")).toBeTruthy();
-    });
     expect(screen.queryByTestId("litt-panel")).toBeNull();
-    expect(window.localStorage.getItem("littree:studio:chat-dock")).toBe("bottom");
-    // Exactly one composer after the switch.
+    expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
+    expect(screen.queryByTestId("dock-board-toggle")).toBeNull();
+    expect(screen.queryByTestId("dock-preview-toggle")).toBeNull();
+  });
+
+  it("the default panels bind the real systems; chat is a movable board panel with New Chat inside it and exactly one composer", async () => {
+    await renderStudioShell();
+    await waitFor(() => expect(screen.getByTestId("board-panel-chat")).toBeTruthy());
+    expect(screen.getByTestId("board-binding-chat")).toBeTruthy();
+    expect(screen.getByTestId("board-chat-panel")).toBeTruthy();
+    expect(screen.getByTestId("board-chat-new-chat")).toBeTruthy();
+    // Exactly one composer in the whole Studio, inside the chat panel.
     expect(screen.getAllByTestId("studio-command-composer")).toHaveLength(1);
-
-    // Bottom layer: switcher in the expanded header row — expand first.
-    await user.click(screen.getByTestId("litt-layer-toggle"));
-    await waitFor(() => screen.getByTestId("litt-layer-transcript"));
-    await user.click(screen.getByTestId("chat-dock-left"));
-    await waitFor(() => {
-      expect(screen.getByTestId("litt-panel")).toBeTruthy();
-    });
-    expect(screen.queryByTestId("litt-command-layer")).toBeNull();
-    expect(window.localStorage.getItem("littree:studio:chat-dock")).toBe("left");
-    expect(screen.getAllByTestId("studio-command-composer")).toHaveLength(1);
+    expect(
+      screen.getByTestId("board-panel-chat").contains(screen.getByTestId("studio-command-composer")),
+    ).toBe(true);
+    // The mockup default arrangement, bound to the real systems.
+    expect(screen.getByTestId("board-binding-preview")).toBeTruthy();
+    expect(await screen.findByTestId("studio-preview-panel")).toBeTruthy();
+    expect(screen.getByTestId("board-binding-media")).toBeTruthy();
+    expect(screen.getByTestId("board-media-panel")).toBeTruthy();
+    // Closed-by-default panels stay closed until summoned.
+    expect(screen.queryByTestId("board-panel-code")).toBeNull();
+    expect(screen.queryByTestId("board-panel-inspector")).toBeNull();
+    expect(screen.queryByTestId("board-panel-deploy")).toBeNull();
+    // The Terminal is closed until requested (Studio Finish Spec,
+    // Larry 2026-11-14): no terminal binding mounts by default, and
+    // summoning it binds the real terminal drawer.
+    expect(screen.queryByTestId("board-panel-terminal")).toBeNull();
+    expect(screen.queryByTestId("board-binding-terminal")).toBeNull();
+    fireEvent.click(screen.getByTestId("board-summon-terminal"));
+    await waitFor(() => expect(screen.getByTestId("board-binding-terminal")).toBeTruthy());
+    expect(await screen.findByTestId("terminal-drawer")).toBeTruthy();
   });
 
-  it("an invalid stored dock value falls back to left", async () => {
-    window.localStorage.setItem("littree:studio:chat-dock", "sideways");
-    await renderStudioShell();
-    expect(screen.getByTestId("litt-panel")).toBeTruthy();
-    expect(screen.queryByTestId("litt-command-layer")).toBeNull();
-  });
-
-  it("a stored collapsed preference wins over the first-run expanded default", async () => {
-    window.localStorage.setItem("littree:studio:litt-collapsed", "true");
-    await renderStudioShell();
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
-    expect(screen.getByTestId("studio-left-panel").style.width).toBe("64px");
-  });
-
-  it("a stored dock width is clamped to 300–500px", async () => {
-    window.localStorage.setItem("littree:studio:litt-dock-width", "999");
-    const { unmount } = await renderStudioShell();
-    await waitFor(() => {
-      expect(screen.getByTestId("litt-panel").style.width).toContain("500px");
-    });
-    unmount();
-    window.localStorage.removeItem("littree:studio:litt-dock-width");
-    window.localStorage.setItem("littree:studio:litt-dock-width", "50");
-    await renderStudioShell();
-    await waitFor(() => {
-      expect(screen.getByTestId("litt-panel").style.width).toContain("300px");
-    });
-  });
-
-  it("Esc collapses the left dock panel", async () => {
+  it("Files on the board is the ONLY StudioProjectFiles instance — the single-mount rule holds", async () => {
     const { user } = await renderStudioShell();
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-    await user.keyboard("{Escape}");
-    await waitFor(() => {
-      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
-    });
-    // Content stays mounted while collapsed.
-    expect(screen.getByTestId("studio-command-composer")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("board-panel-files")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1));
+    expect(
+      screen.getByTestId("board-panel-files").contains(screen.getAllByTestId("studio-project-files")[0]),
+    ).toBe(true);
+    // Summoning the already-open panel brings it to front — it must not
+    // mount a second instance either.
+    await user.click(screen.getByTestId("board-summon-files"));
+    expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
   });
 
-  it("dragging the resize handle resizes the dock within 300–500px", async () => {
-    await renderStudioShell();
-    const handle = screen.getByTestId("litt-dock-resize");
-    const panel = () => screen.getByTestId("litt-panel");
-    // Drag right by 100px → 460px.
-    fireEvent.mouseDown(handle, { clientX: 360, button: 0 });
-    fireEvent.mouseMove(document, { clientX: 460 });
-    fireEvent.mouseUp(document);
-    await waitFor(() => {
-      expect(panel().style.width).toContain("460px");
-    });
-    expect(screen.getByTestId("studio-left-panel").style.width).toBe("460px");
-    // Drag far left → clamped at 300px, and persisted (the hook persists
-    // via rAF debounce, so poll for it).
-    fireEvent.mouseDown(handle, { clientX: 460, button: 0 });
-    fireEvent.mouseMove(document, { clientX: 0 });
-    fireEvent.mouseUp(document);
-    await waitFor(() => {
-      expect(panel().style.width).toContain("300px");
-    });
-    expect(screen.getByTestId("studio-left-panel").style.width).toBe("300px");
-    await waitFor(() => {
-      expect(window.localStorage.getItem("littree:studio:litt-dock-width")).toBe("300");
-    });
-  });
-
-  it("reset layout realigns the shared chat width and exits focus mode", async () => {
-    window.localStorage.setItem("littree:studio:litt-dock-width", "440");
-    window.localStorage.setItem(
-      "litt-studio-layout",
-      JSON.stringify({ inspector: 420, floating: "inspector", expanded: true }),
-    );
+  it("Checks, Deploy and Activity summon as real board bindings; MissionCards ride inside Activity exactly once", async () => {
     const { user } = await renderStudioShell();
-    await waitFor(() => {
-      expect(screen.getByTestId("studio-shell")).toHaveAttribute("data-layout-expanded", "true");
-      expect(screen.getByTestId("studio-left-panel").style.width).toBe("440px");
-    });
+    await waitFor(() => expect(screen.getByTestId("studio-board")).toBeTruthy());
 
-    await user.click(screen.getByTestId("dock-reset"));
-    await waitFor(() => {
-      expect(screen.getByTestId("studio-shell")).toHaveAttribute("data-layout-expanded", "false");
-      expect(screen.getByTestId("studio-left-panel").style.width).toBe("360px");
-    });
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-    expect(screen.getByTestId("dock-inspector-panel").style.width).toBe("20px");
-  });
+    // The Inspector board panel is retired (Studio layout build,
+    // 2026-11-17): the board offers no Inspector summon at all and no
+    // binding ever renders — its keepers (approvals / changes / plans)
+    // live in the chat panel's Jobs tab and inside the Code box.
+    expect(screen.queryByTestId("board-summon-inspector")).toBeNull();
+    expect(screen.queryByTestId("board-binding-inspector")).toBeNull();
+    expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
 
-  it("P0: a fresh Studio entry shows LiTT Chat and a visible composer on desktop", async () => {
-    await renderStudioShell();
-    // The dock is expanded, not a collapsed rail.
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-    // The conversation composer is visible on initial load — this is the exact
-    // regression that made Studio look empty to users.
-    await expect(screen.getByTestId("studio-command-composer")).toBeVisible();
-  });
+    await user.click(screen.getByTestId("board-summon-health"));
+    await waitFor(() => expect(screen.getByTestId("board-binding-health")).toBeTruthy());
 
-  it("P0: a manual collapse is honoured for the rest of the session", async () => {
-    const { user } = await renderStudioShell();
-    await user.click(screen.getByTestId("litt-panel-collapse"));
-    await waitFor(() => {
-      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
-    });
-    // Survives a reload within the session (refresh preserves state).
-    expect(window.sessionStorage.getItem("littree:studio:litt-collapsed")).toBe("true");
-  });
+    await user.click(screen.getByTestId("board-summon-deploy"));
+    await waitFor(() => expect(screen.getByTestId("board-binding-deploy")).toBeTruthy());
 
-  it("P0: an explicit stored collapse preference is still honoured", async () => {
-    window.localStorage.setItem("littree:studio:litt-collapsed", "true");
-    await renderStudioShell();
-    // The fix must not silently override a deliberate user choice.
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
-  });
-
-  it("Ask LiTT expands a collapsed left dock panel", async () => {
-    const { user } = await renderStudioShell();
-    await user.click(screen.getByTestId("litt-panel-collapse"));
-    await waitFor(() => {
-      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
-    });
-    act(() => {
-      window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: {} }));
-    });
-    await waitFor(() => {
-      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-    });
-  });
-});
-describe("MissionCards — shell center activity stage surface", () => {
-  it("renders the mission cards once in the center activity surface (shell mode has no bottom dock)", async () => {
-    const { user } = await renderStudioShell();
-    await user.click(screen.getByTestId("workspace-rail-activity"));
-    await waitFor(() => {
-      expect(screen.getByTestId("stage-surface-activity")).toHaveAttribute("data-active", "true");
-    });
-    // The shell renders no bottom dock, so the center surface carries the
-    // single MissionCards instance in this layout.
+    // Activity summons from the board toolbar's Layout menu.
+    await user.click(screen.getByTestId("board-layout-menu"));
+    await user.click(screen.getByTestId("board-summon-activity"));
+    await waitFor(() => expect(screen.getByTestId("board-binding-activity")).toBeTruthy());
     expect(screen.getAllByTestId("mission-cards")).toHaveLength(1);
+  });
+
+  it("the chat panel's second tab is Jobs, not Files — Files keeps its single board home", async () => {
+    const { user } = await renderStudioShell();
+    await waitFor(() => expect(screen.getByTestId("board-chat-panel")).toBeTruthy());
+    // Spec Amendments 1/3 (2026-11-16): the Files tab was removed from
+    // the chat panel and replaced by the Jobs tab (plan, live steps,
+    // checks summary, approvals, changes). Files lives in the board
+    // Files panel and inside the Code box — still exactly one
+    // StudioProjectFiles instance on the board.
+    expect(screen.queryByTestId("board-chat-tab-files")).toBeNull();
+    expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
+    await user.click(screen.getByTestId("board-chat-tab-jobs"));
+    expect(screen.getByTestId("board-chat-jobs")).toBeTruthy();
+    expect(screen.getByTestId("board-chat-jobs-plan")).toBeTruthy();
+    expect(screen.getByTestId("board-chat-jobs-checks")).toBeTruthy();
+    // The Open Checks action renders only when CommandStudio wires
+    // onOpenChecks (Jobs props wiring) — it summons the ONE board
+    // Checks (health) panel, never a second checks instance.
+    await user.click(screen.getByTestId("board-chat-jobs-open-checks"));
+    await waitFor(() => expect(screen.getByTestId("board-binding-health")).toBeTruthy());
+    expect(screen.getAllByTestId("studio-project-files")).toHaveLength(1);
   });
 });
 
@@ -877,5 +600,152 @@ describe("MissionCards — classic desktop dock", () => {
       activityContent.querySelector('[data-testid="mission-cards"]'),
     ).toBeTruthy();
     expect(activityContent.querySelector('[data-testid="studio-activity-panel"]')).toBeTruthy();
+  });
+});
+
+describe("Board-only — ?tool=design deep link", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sendMock.mockResolvedValue({ accepted: true });
+    capState.projectId = "project-1";
+    capState.projectName = "Test Project";
+    stableSearchParams.set("tool", "design");
+    window.localStorage.removeItem("litt-studio-board-layout-v1");
+    useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+    globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
+    window.innerWidth = DESKTOP_WIDTH;
+    window.innerHeight = DESKTOP_HEIGHT;
+  });
+
+  afterEach(() => {
+    stableSearchParams.set("tool", "chat");
+    useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+  });
+
+  it("summons the Code panel — Canvas & Design lives inside the Code box now, never the retired DesignCanvas", async () => {
+    await renderStudioShell();
+    // Amendment 4: the standalone Canvas board panel is retired; the
+    // ?tool=design deep link summons the Code panel, inside which the
+    // Canvas & Design stage is a view.
+    await waitFor(() => expect(screen.getByTestId("board-panel-code")).toBeTruthy());
+    expect(screen.getByTestId("board-binding-code")).toBeTruthy();
+    expect(screen.queryByTestId("board-panel-canvas")).toBeNull();
+    expect(screen.queryByTestId("board-binding-canvas")).toBeNull();
+    expect(screen.queryByTestId("design-canvas")).toBeNull();
+  });
+});
+
+// ── Phase 0 (chat-first redesign, Larry 2026-11-14): the bottom dock NEVER
+// auto-opens. A chat send / run start (the conversation.busy edge) and agent
+// STUDIO_EVENT_OPEN_DOCK intents must leave a closed dock closed in BOTH
+// layouts; agent intents only preselect the tab. The dock opens solely by
+// the user's hand (collapsed-strip toggle, header toggle, Cmd/Ctrl+J, Esc,
+// explicit drawer deep links).
+function dispatchAgentOpenDock(tab: string) {
+  act(() => {
+    window.dispatchEvent(new CustomEvent("studio:open-dock", { detail: { tab } }));
+  });
+}
+
+describe("Phase 0 — board: agent intents never open panels on their own", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sendMock.mockResolvedValue({ accepted: true });
+    capState.projectId = "project-1";
+    capState.projectName = "Test Project";
+    convState.busy = false;
+    window.localStorage.removeItem("litt:studio:layout-mode");
+    window.localStorage.removeItem("litt-studio-board-layout-v1");
+    useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+    globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
+    window.innerWidth = DESKTOP_WIDTH;
+    window.innerHeight = DESKTOP_HEIGHT;
+  });
+
+  afterEach(() => {
+    convState.busy = false;
+    useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+  });
+
+  it("a run start (busy edge) leaves the default panel set untouched — twice", async () => {
+    const { rerender } = await renderStudioShell();
+    await waitFor(() => expect(screen.getByTestId("studio-board")).toBeTruthy());
+    expect(screen.queryByTestId("board-panel-deploy")).toBeNull();
+    expect(screen.queryByTestId("board-panel-inspector")).toBeNull();
+
+    convState.busy = true;
+    rerender(<CommandStudio />);
+    expect(screen.queryByTestId("board-panel-deploy")).toBeNull();
+    expect(screen.queryByTestId("board-panel-inspector")).toBeNull();
+
+    convState.busy = false;
+    rerender(<CommandStudio />);
+    convState.busy = true;
+    rerender(<CommandStudio />);
+    expect(screen.queryByTestId("board-panel-deploy")).toBeNull();
+    expect(screen.queryByTestId("board-panel-inspector")).toBeNull();
+    // And there is no bottom dock for anything to auto-open anymore.
+    expect(screen.queryByTestId("studio-dock")).toBeNull();
+  });
+
+  it("an agent open-dock event summons no board panel", async () => {
+    await renderStudioShell();
+    await waitFor(() => expect(screen.getByTestId("studio-board")).toBeTruthy());
+    dispatchAgentOpenDock("inspector");
+    dispatchAgentOpenDock("media");
+    expect(screen.queryByTestId("board-panel-inspector")).toBeNull();
+    expect(screen.queryByTestId("board-panel-deploy")).toBeNull();
+    expect(screen.queryByTestId("studio-dock")).toBeNull();
+  });
+});
+
+describe("Phase 0 — classic layout: the dock never auto-opens", () => {
+  beforeEach(() => {
+    // Force the classic layout (the mobile base body and the desktop
+    // escape hatch); the shell layout is covered above.
+    window.localStorage.setItem("litt:studio:layout-mode", "classic");
+    // Classic dockOpen restores sessionStorage "studio-dock-open" — start
+    // from the user-closed state so only this test's actions can open it.
+    window.sessionStorage.removeItem("studio-dock-open");
+    convState.busy = false;
+  });
+  afterEach(() => {
+    window.localStorage.removeItem("litt:studio:layout-mode");
+    window.sessionStorage.removeItem("studio-dock-open");
+    convState.busy = false;
+  });
+
+  async function renderClassicStudio() {
+    const user = userEvent.setup();
+    const view = render(<CommandStudio />);
+    await waitFor(() => {
+      if (!screen.queryByTestId("studio-dock")) {
+        throw new Error("StudioDock has not mounted");
+      }
+    });
+    return { user, ...view };
+  }
+
+  it("a run start (busy edge) leaves a closed dock closed", async () => {
+    const { rerender } = await renderClassicStudio();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+
+    convState.busy = true;
+    rerender(<CommandStudio />);
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+  });
+
+  it("an agent open-dock event preselects the tab without opening; the user's strip toggle then reveals that tab", async () => {
+    const { user } = await renderClassicStudio();
+    dispatchAgentOpenDock("media");
+    expect(screen.queryByTestId("dock-content-media")).toBeNull();
+    expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
+    const media = await screen.findByTestId("dock-content-media");
+    expect(media.style.display).not.toBe("none");
+    expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("dock-content-activity").style.display).toBe("none");
   });
 });

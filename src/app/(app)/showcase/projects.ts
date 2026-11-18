@@ -31,7 +31,7 @@ export const PROJECTS: Record<string, DemoProject> = {
     outcome: "A responsive artist launch page with an embedded music player, release copy, and social integration.",
     tools: ["HTML", "CSS", "JavaScript", "Image Generation", "Audio"],
     icon: Music,
-    accent: "#b58cff",
+    accent: "#7c3aed",
     steps: [
       { label: "Mission created", detail: "LiTT parses the prompt and defines a premium music artist website with 5 sections." },
       { label: "Plan generated", detail: "A 6-step execution plan: hero, layout, player, tour dates, merch, deploy." },
@@ -48,7 +48,7 @@ export const PROJECTS: Record<string, DemoProject> = {
     outcome: "An interactive dashboard with charts, filters, and exportable reports.",
     tools: ["React", "Charts", "Data", "Responsive"],
     icon: BarChart3,
-    accent: "#65f4ff",
+    accent: "#0e7490",
     steps: [
       { label: "Mission created", detail: "LiTT defines a business dashboard with sales, inventory, and customer panels." },
       { label: "Plan generated", detail: "An 8-step plan: data model, chart components, filters, layout, export, deploy." },
@@ -67,7 +67,7 @@ export const PROJECTS: Record<string, DemoProject> = {
     outcome: "Cover art, three social posts, and a press kit — all brand-consistent and ready to publish.",
     tools: ["Image Generation", "Copywriting", "Social", "Branding"],
     icon: Code2,
-    accent: "#a8ff2f",
+    accent: "#4d7c0f",
     steps: [
       { label: "Mission created", detail: "LiTT defines a single release campaign with cover art, social posts, and press kit." },
       { label: "Plan generated", detail: "A 5-step plan: brand direction, cover art, social copy, social assets, press kit." },

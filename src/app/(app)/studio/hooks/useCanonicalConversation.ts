@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { findRetryResendText } from "@/lib/studio/retry-strategy";
+import { findRetryResendText, resolveCanonicalRetryTarget } from "@/lib/studio/retry-strategy";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
@@ -45,6 +45,32 @@ import {
 } from "../lib/reconcile-run";
 
 export type SendErrorKind = "auth" | "conflict" | "network" | "provider" | "validation" | "cancelled";
+
+/** A project identity as named by the server's project guard. */
+export interface ProjectRef {
+  id: string;
+  name: string | null;
+}
+
+/**
+ * A stopped send awaiting the user's project decision (stop-and-ask).
+ * Set when the messages route refuses with 409 PROJECT_MISMATCH or
+ * PROJECT_CONTEXT_CONFIRM: nothing ran, and the send only proceeds when
+ * the user explicitly picks a decision (confirmProjectDecision) or
+ * cancels it (dismissProjectDecision). The route never moves or rebinds
+ * a conversation on its own.
+ */
+export interface ProjectDecisionPrompt {
+  code: "PROJECT_MISMATCH" | "PROJECT_CONTEXT_CONFIRM";
+  detail: string;
+  conversationProject: ProjectRef | null;
+  viewedProject: ProjectRef | null;
+  targetProject: ProjectRef | null;
+  /** The stopped send's original text/attachments, for the resubmit. */
+  message: string;
+  attachments?: string[];
+  clientRequestId: string;
+}
 
 /**
  * Identity of the server-side execution started by send(). Tracked so an
@@ -172,6 +198,7 @@ export function useCanonicalConversation({
   onOpenProjectNameDialog,
   onOpenImageStudio,
   onOpenVideoStudio,
+  onOpenMusicStudio,
   serverProjectId,
   cameraState,
   previewSelection,
@@ -187,6 +214,8 @@ export function useCanonicalConversation({
   onOpenImageStudio?: (prompt: string) => void;
   /** Open the real Video Studio surface with the prompt prefilled. */
   onOpenVideoStudio?: (prompt: string) => void;
+  /** Open the real Music Studio surface with the request staged. */
+  onOpenMusicStudio?: (prompt: string) => void;
   serverProjectId?: string | null;
   /** Camera dock state — passed to the LLM so it knows camera is available */
   cameraState?: { active: boolean; status: string };
@@ -212,6 +241,10 @@ export function useCanonicalConversation({
     sendErrorRef.current = value;
     setSendErrorState(value);
   }, []);
+  // Stop-and-ask project guard: a send the server stopped because it
+  // would run against (or silently rebind to) an unconfirmed project.
+  const [projectDecisionPrompt, setProjectDecisionPrompt] =
+    useState<ProjectDecisionPrompt | null>(null);
   const [requiresReauth, setRequiresReauth] = useState(false);
   const requestAbortRef = useRef<AbortController | null>(null);
   // Distinguishes an explicit user Stop from an involuntary transport loss —
@@ -276,6 +309,11 @@ export function useCanonicalConversation({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isSyncingFromUrl = useRef(false);
+  // The URL conversation id the sync-from-URL effect last applied. The
+  // effect applies a URL conversation only when this value changes —
+  // see the effect itself for why re-applying an unchanged (stale) URL
+  // id silently undid "+ New Chat" (live proof 2026-11-15).
+  const lastUrlConversationIdRef = useRef<string | null | undefined>(undefined);
   const activeAgentIdRef = useRef(activeAgentId);
   useEffect(() => { activeAgentIdRef.current = activeAgentId; }, [activeAgentId]);
   const previewSelectionRef = useRef(previewSelection);
@@ -335,6 +373,42 @@ export function useCanonicalConversation({
     () => canonicalMessages.map(toUIMessage),
     [canonicalMessages],
   );
+
+  // ── Approval-gate derivation (approve-in-chat, 2026-11-11) ─────────
+  // The chat ApprovalCard is fed by the execution store's pendingApproval
+  // — session-local state. The send flow arms it for THIS client's runs
+  // and loadMessages rehydrates it at load time, but only when no run is
+  // active locally. A session that opens a conversation whose run paused
+  // in ANOTHER session (or that tracks that run as running) therefore
+  // saw the chat announce the gate with no actionable card anywhere —
+  // the desktop half of Larry's approve-in-chat report. The canonical
+  // messages are the server-persisted truth every session loads, so arm
+  // the gate from them whenever they change: latest assistant message
+  // carries a paused run, the store has no gate mounted, no decision is
+  // in flight (approvalPhase idle), and the gate was not already decided
+  // in this session (resolvedPausedRunIds — the store's own
+  // anti-resurrection record). Same gate shape as loadMessages
+  // rehydration; no gating semantics change.
+  useEffect(() => {
+    const conversationId = selectedConversationId;
+    if (!conversationId || conversationId.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)) return;
+    const lastAssistant = [...canonicalMessages].reverse().find((m) => m.role === "assistant");
+    if (!lastAssistant) return;
+    const gate = lastAssistant.pendingApproval;
+    if (!gate?.pausedRunId) return;
+    if (lastAssistant.status !== "awaiting_approval" && lastAssistant.status !== "streaming") return;
+    const exec = useExecutionStore.getState();
+    if (exec.pendingApproval) return;
+    if (exec.approvalPhase !== "idle") return;
+    if (exec.resolvedPausedRunIds.includes(gate.pausedRunId)) return;
+    exec.setPendingApproval({
+      toolId: gate.toolId,
+      reason: gate.reason,
+      pausedRunId: gate.pausedRunId,
+      conversationId,
+      inputs: gate.inputs,
+    });
+  }, [canonicalMessages, selectedConversationId]);
 
   // Load messages for a conversation
   const loadMessages = useCallback(async (conversationId: string) => {
@@ -668,22 +742,37 @@ export function useCanonicalConversation({
       const conversations = (data.conversations || []) as Conversation[];
       s.setConversations(conversations);
 
-      const { conversationId, agentSlug } = parseConversationFromUrl(searchParamsRef.current);
-      const agentInstanceFromUrl = searchParamsRef.current?.get("agentInstance") ?? null;
-      if (conversationId && conversations.some((c) => c.id === conversationId)) {
-        s.selectConversation(conversationId);
-        if (agentInstanceFromUrl) {
-          useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
-        } else if (agentSlug) {
-          s.setActiveAgent(agentSlug);
-          setActiveAgentId(agentSlug);
+      // A re-run of this loader must not clobber a live selection. The
+      // loader's identity follows authHeaders → getToken, so Clerk
+      // identity churn re-runs it — and right after "+ New Chat" the
+      // freshly created conversation is selected while the URL still
+      // names the previous one (router.replace commits async), so
+      // re-applying the URL/first-conversation selection here silently
+      // undid the click (live proof 2026-11-15). Initial selection
+      // applies only when there is no live selection to keep: first
+      // mount, a project switch (which resets the store first), or the
+      // selected conversation no longer exists.
+      const liveSelection = s.selectedConversationId;
+      const keepSelection =
+        liveSelection !== null && conversations.some((c) => c.id === liveSelection);
+      if (!keepSelection) {
+        const { conversationId, agentSlug } = parseConversationFromUrl(searchParamsRef.current);
+        const agentInstanceFromUrl = searchParamsRef.current?.get("agentInstance") ?? null;
+        if (conversationId && conversations.some((c) => c.id === conversationId)) {
+          s.selectConversation(conversationId);
+          if (agentInstanceFromUrl) {
+            useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
+          } else if (agentSlug) {
+            s.setActiveAgent(agentSlug);
+            setActiveAgentId(agentSlug);
+          }
+          await loadMessages(conversationId);
+          await recoverInterruptedRuns(conversationId);
+        } else if (conversations.length > 0) {
+          s.selectConversation(conversations[0].id);
+          await loadMessages(conversations[0].id);
+          await recoverInterruptedRuns(conversations[0].id);
         }
-        await loadMessages(conversationId);
-        await recoverInterruptedRuns(conversationId);
-      } else if (conversations.length > 0) {
-        s.selectConversation(conversations[0].id);
-        await loadMessages(conversations[0].id);
-        await recoverInterruptedRuns(conversations[0].id);
       }
       conversationsHydratedRef.current = true;
     } catch {
@@ -695,7 +784,7 @@ export function useCanonicalConversation({
 
   // Create a new conversation
   const createConversation = useCallback(async (
-    options?: { optimisticConversationId?: string },
+    options?: { optimisticConversationId?: string; forceNew?: boolean },
   ): Promise<Conversation | null> => {
     let projectId = getActiveProjectId(serverProjectId, userId);
 
@@ -707,6 +796,12 @@ export function useCanonicalConversation({
         body: JSON.stringify({
           projectId: projectId || undefined,
           activeAgentSlug: activeAgentId,
+          // Explicit New Chat only: the server must mint a fresh
+          // conversation instead of reusing an existing empty one —
+          // the reusable one can be the conversation already on
+          // screen, which made the button read as dead (live proof
+          // 2026-11-15). Implicit creation (first send) keeps reuse.
+          forceNew: options?.forceNew ? true : undefined,
         }),
       });
       if (!res.ok) {
@@ -733,7 +828,9 @@ export function useCanonicalConversation({
           s.setMessages(conversation.id, optimisticMessages);
         }
       }
-      s.setConversations([conversation, ...s.conversations]);
+      // The server may return an existing empty conversation for a bare
+      // "New Chat" (empty-conversation reuse) — never list it twice.
+      s.setConversations([conversation, ...s.conversations.filter((c) => c.id !== conversation.id)]);
       s.selectConversation(conversation.id);
       if (!options?.optimisticConversationId) {
         s.setMessages(conversation.id, []);
@@ -780,16 +877,29 @@ export function useCanonicalConversation({
     }
     const { conversationId, agentSlug } = parseConversationFromUrl(searchParams);
     const agentInstanceFromUrl = searchParams.get("agentInstance") ?? null;
-    if (conversationId !== s.selectedConversationId) {
-      if (conversationId && s.conversations.some((c) => c.id === conversationId)) {
-        s.selectConversation(conversationId);
-        // Recovering interrupted runs is required here, not just on initial
-        // load — navigating to a conversation with an in-flight run (sidebar
-        // click, back button) must re-bind Stop and reconcile the bubble,
-        // not show a permanently-streaming orphan.
-        void loadMessages(conversationId).then(() => recoverInterruptedRuns(conversationId));
-      } else if (!conversationId && s.selectedConversationId) {
-        s.selectConversation(null);
+    // Apply the URL's conversation only when it actually CHANGED since
+    // this effect last applied one (a real navigation: deep link, back /
+    // forward, or the replace committed after a local selection). This
+    // effect also re-runs when its callback dependencies change identity
+    // (authHeaders → getToken churn), and on those re-runs the committed
+    // URL can still name the conversation the user just left via
+    // "+ New Chat" — router.replace commits async — so re-applying it
+    // silently undid the click and, with selection back at the URL id,
+    // syncUrl never wrote the new one (dead button, live proof
+    // 2026-11-15).
+    if (conversationId !== lastUrlConversationIdRef.current) {
+      lastUrlConversationIdRef.current = conversationId;
+      if (conversationId !== s.selectedConversationId) {
+        if (conversationId && s.conversations.some((c) => c.id === conversationId)) {
+          s.selectConversation(conversationId);
+          // Recovering interrupted runs is required here, not just on initial
+          // load — navigating to a conversation with an in-flight run (sidebar
+          // click, back button) must re-bind Stop and reconcile the bubble,
+          // not show a permanently-streaming orphan.
+          void loadMessages(conversationId).then(() => recoverInterruptedRuns(conversationId));
+        } else if (!conversationId && s.selectedConversationId) {
+          s.selectConversation(null);
+        }
       }
     }
     if (agentInstanceFromUrl) {
@@ -828,7 +938,11 @@ export function useCanonicalConversation({
 
   // The send function — matches useStudioConversation's contract
   const send = useCallback(
-    async (value: string, attachments?: string[]): Promise<SendResult> => {
+    async (
+      value: string,
+      attachments?: string[],
+      projectResume?: { decision: "switch" | "rebind"; clientRequestId: string },
+    ): Promise<SendResult> => {
       const text = value.trim();
       if ((!text && !attachments?.length) || busy) return { accepted: false, persisted: false };
 
@@ -868,7 +982,7 @@ export function useCanonicalConversation({
             addLocalMessage("Screen cleared. Previous messages are still saved on the server and will reappear on refresh.");
             return { accepted: true, persisted: true };
           case "new":
-            void createConversation();
+            void createConversation({ forceNew: true });
             return { accepted: true, persisted: true };
           case "terminal":
             onRouteToolAction?.("terminal");
@@ -1032,9 +1146,15 @@ export function useCanonicalConversation({
         }
       }
 
-      // 2. Deterministic product intents before any LLM call
+      // 2. Deterministic product intents before any LLM call.
+      // generate_image is deliberately NOT short-circuited (board-only
+      // rebuild, Larry 2026-11-14): an image request must reach the agent
+      // run, whose image.generate tool generates INSIDE this chat, renders
+      // the result inline, and persists it to the Asset Lake (where the
+      // board Media panel lists it). The old short-circuit bounced the
+      // user out to the Image Studio tool page instead.
       const intent = detectIntent(text);
-      if (intent && intent.intent !== "generate_code" && intent.intent !== "chat" && intent.intent !== "unknown") {
+      if (intent && intent.intent !== "generate_image" && intent.intent !== "generate_code" && intent.intent !== "chat" && intent.intent !== "unknown") {
         const intentMessage = buildIntentResponseMessage(intent, {
           terminalConnected: runtimeContext.terminalStatus === "connected",
         });
@@ -1071,6 +1191,7 @@ export function useCanonicalConversation({
           onOpenProjectNameDialog,
           onOpenImageStudio,
           onOpenVideoStudio,
+          onOpenMusicStudio,
           onNavigate: (url) => {
             if (typeof window !== "undefined") window.location.href = url;
           },
@@ -1079,10 +1200,13 @@ export function useCanonicalConversation({
           accepted: true,
           persisted: true,
           reply: intentMessage,
-          // P1-1: the image intent opens the Image Studio surface — it is
-          // not an agent run, so the "Done · No files changed" completion
-          // card must not render (it would fake a generation success).
-          suppressCompletion: intent.intent === "generate_image",
+          // P1-1: an intent that opens a tool surface is not an agent run,
+          // so the "Done · No files changed" completion card must not
+          // render (it would fake a generation success). generate_music
+          // opens the Music Studio that way (ART-20261111-035).
+          // generate_image no longer reaches this branch — it falls
+          // through to the real agent run above.
+          suppressCompletion: intent.intent === "generate_music",
         };
       }
 
@@ -1108,7 +1232,10 @@ export function useCanonicalConversation({
       // cleanly on any failure (401, 403, network, conflict, abort).
       const previousConversationId = s.selectedConversationId;
       const previousMessagesByConversationId = { ...s.messagesByConversationId };
-      const clientRequestId = generateClientRequestId();
+      // A project-guard resubmit reuses the original clientRequestId so
+      // the server treats it as the idempotent continuation of the
+      // stopped send (whose user message is already persisted).
+      const clientRequestId = projectResume?.clientRequestId ?? generateClientRequestId();
       const optimisticUserId = `optimistic_${clientRequestId}`;
       const optimisticAssistantId = `optimistic_assistant_${clientRequestId}`;
       const optimisticTimestamp = new Date().toISOString();
@@ -1142,7 +1269,9 @@ export function useCanonicalConversation({
         // made earlier LiTT replies appear to vanish from the page.
         current.setMessages(id, [
           ...current.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
-          optimisticUserMessage,
+          // On a project-guard resubmit the user message is already
+          // persisted and visible — stage only the assistant bubble.
+          ...(projectResume ? [] : [optimisticUserMessage]),
           optimisticAssistantMessage,
         ]);
       };
@@ -1209,6 +1338,9 @@ export function useCanonicalConversation({
 
       // Clear any previous send error
       setSendError(null);
+      // A fresh send supersedes any stopped send still awaiting a
+      // project decision; a resubmit IS that decision, so it keeps it.
+      if (!projectResume) setProjectDecisionPrompt(null);
 
       // 4. Real LLM call through canonical API
       getStore().setStreaming(true);
@@ -1280,6 +1412,9 @@ export function useCanonicalConversation({
               // an explicit error on mismatch, instead of silently mutating
               // the wrong project's workspace.
               projectId: getActiveProjectId(serverProjectId, userId) || undefined,
+              // The user's explicit stop-and-ask decision — present ONLY
+              // on a confirmed resubmit after a project-guard 409.
+              projectContextDecision: projectResume?.decision,
               provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
               category: isAutoBest ? "auto" : selectedModel.category,
               model: selectedModel.model,
@@ -1316,9 +1451,45 @@ export function useCanonicalConversation({
             error?: string;
             detail?: string;
             code?: string;
+            conversationProject?: ProjectRef | null;
+            viewedProject?: ProjectRef | null;
+            targetProject?: ProjectRef | null;
           } | null;
           const isStaleRevision =
             !conflictData?.code && (conflictData?.error ?? "").toLowerCase().includes("revision");
+          if (
+            !isStaleRevision &&
+            (conflictData?.code === "PROJECT_MISMATCH" ||
+              conflictData?.code === "PROJECT_CONTEXT_CONFIRM")
+          ) {
+            // Stop-and-ask: the server refused to run this send against
+            // a project the user hasn't confirmed (and refused to
+            // silently rebind the chat). The user message WAS persisted
+            // before the gate — reload canonical truth, then hand the
+            // choice to the blocking prompt. No error banner: the
+            // prompt IS the surface for this decision.
+            await loadMessages(activeConversationId);
+            const sGuard = getStore();
+            sGuard.setMessages(
+              activeConversationId,
+              sGuard.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
+            );
+            setProjectDecisionPrompt({
+              code: conflictData.code,
+              detail:
+                conflictData.detail ??
+                conflictData.error ??
+                "This chat belongs to a different project.",
+              conversationProject: conflictData.conversationProject ?? null,
+              viewedProject: conflictData.viewedProject ?? null,
+              targetProject: conflictData.targetProject ?? null,
+              message: text,
+              attachments,
+              clientRequestId,
+            });
+            mobileDiag("chat_api", "project_decision_required", { code: conflictData.code });
+            return { accepted: false, persisted: true, errorKind: "conflict" };
+          }
           if (!isStaleRevision) {
             // The user message WAS persisted server-side before the gate —
             // reload so the transcript shows canonical truth, then surface
@@ -1792,7 +1963,7 @@ export function useCanonicalConversation({
         // keeps offering Stop and the UI keeps claiming "working".
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, onOpenVideoStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply, serverProjectId, userId],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, onOpenVideoStudio, onOpenMusicStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply, serverProjectId, userId],
   );
 
   // Regenerate — calls canonical regenerate API
@@ -1814,12 +1985,53 @@ export function useCanonicalConversation({
 
     // A failed turn means the work never completed — re-send the parent user
     // message through the normal send pipeline so the turn is genuinely
-    // re-run (see findRetryResendText). Falls back to the regenerate API
-    // when there is no parent message to re-send.
+    // re-run (see findRetryResendText).
     const resendText = findRetryResendText(target, allMessages);
     if (resendText) {
       await send(resendText);
       return;
+    }
+
+    // Retry pressed on a specific turn (an id was passed): falling through
+    // to the chat-only regenerate API below would silently downgrade the
+    // retry — that endpoint cannot re-run workspace operations, so the
+    // failed turn would stay failed while a fresh chat reply pretends
+    // otherwise. The store's copy of the turn can diverge from the
+    // persisted row (locally constructed shapes carry parentMessageId:
+    // null; optimistic/canonical identity mixing can strand the parent
+    // outside the store's list), while the server persists the real
+    // linkage — resolve the turn from canonical messages before deciding.
+    let regenerateTargetId = target.id;
+    if (assistantMessageId) {
+      await loadMessages(conversationId);
+      const freshMessages = getStore().getMessages();
+      const canonicalTarget = resolveCanonicalRetryTarget(target, freshMessages);
+      if (canonicalTarget?.status === "failed") {
+        const canonicalResendText = findRetryResendText(canonicalTarget, freshMessages);
+        if (canonicalResendText) {
+          await send(canonicalResendText);
+          return;
+        }
+        // Canonically failed and no parent exists anywhere to re-send:
+        // say so honestly instead of fabricating a chat reply. The user
+        // can send the request again as a new turn to retry the task.
+        setSendError(
+          "Couldn't re-run that turn — its original message couldn't be found in this conversation. Send the request again as a new message to retry the task.",
+        );
+        return;
+      }
+      if (!canonicalTarget && target.status === "failed") {
+        setSendError(
+          "Couldn't re-run that turn — it couldn't be found in this conversation. Send the request again as a new message to retry the task.",
+        );
+        return;
+      }
+      if (canonicalTarget) {
+        // Canonical state disagrees with the store's stale copy (e.g. the
+        // turn actually completed) — regenerate the canonical message
+        // through the normal path below.
+        regenerateTargetId = canonicalTarget.id;
+      }
     }
 
     setBusy(true);
@@ -1835,7 +2047,7 @@ export function useCanonicalConversation({
         credentials: "include",
         headers: await authHeaders(true),
         body: JSON.stringify({
-          assistantMessageId: target.id,
+          assistantMessageId: regenerateTargetId,
           clientRequestId: generateClientRequestId(),
           expectedRevision: s.revision,
           runtimeContext,
@@ -2057,10 +2269,34 @@ export function useCanonicalConversation({
     }
   }, [setActiveAgentId, getStore, authHeaders]);
 
+  // Stop-and-ask project guard: the user's explicit choice on a stopped
+  // send. Confirming resubmits the SAME send (same clientRequestId) with
+  // the decision, so the server continues the already-persisted user
+  // message under the confirmed project context; dismissing leaves the
+  // send cancelled — nothing runs and nothing is rebound.
+  const confirmProjectDecision = useCallback(
+    (decision: "switch" | "rebind") => {
+      const prompt = projectDecisionPrompt;
+      if (!prompt) return undefined;
+      setProjectDecisionPrompt(null);
+      return send(prompt.message, prompt.attachments, {
+        decision,
+        clientRequestId: prompt.clientRequestId,
+      });
+    },
+    [projectDecisionPrompt, send],
+  );
+  const dismissProjectDecision = useCallback(() => {
+    setProjectDecisionPrompt(null);
+  }, []);
+
   return {
     messages,
     busy,
     send,
+    projectDecisionPrompt,
+    confirmProjectDecision,
+    dismissProjectDecision,
     cancel,
     regenerate,
     clear,

@@ -48,11 +48,18 @@ import {
   prepareStaticWorkspace,
   getWorkspace,
   listWorkspaces,
+  registerSandboxPrepareHandler,
+  retryRegistryLoadOnceAtListen,
+  shouldServeExistingWorkspace,
   type WorkspaceDescriptor,
 } from "./workspace/WorkspaceManager";
 import { resolveWorkspacePath as resolveWorkspacePathSecure, validateWritePayload } from "./workspace/WorkspaceSecurity";
-import { deleteResolvedPath } from "./workspace/FileService";
-import { replaceScaffoldingForWrite, SCAFFOLD_DIR_NAME } from "./workspace/scaffold";
+import { deleteResolvedPath, mkdirResolvedPath } from "./workspace/FileService";
+import { replaceScaffoldingForWrite, SCAFFOLD_DIR_NAME, SCAFFOLD_MANIFEST_NAME } from "./workspace/scaffold";
+import {
+  SandboxWorkspaceExecutor,
+  type ForwardFileChange,
+} from "./sandbox/workspace-executor";
 import { checkExpectedSha256 } from "./workspace/cas";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
@@ -64,6 +71,7 @@ import {
   getPreviewStatus,
   getPreviewLogs,
   verifyPreviewHealth,
+  registerSandboxPreviewSupport,
 } from "./preview/PreviewManager";
 
 /**
@@ -90,6 +98,7 @@ import { PtySessionManager, probeHostPty, type PtySessionSnapshot } from "./pty-
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
+import { createSandboxExecStack } from "./sandbox/exec-router";
 import {
   assertHostExecutionPermitted,
   evaluateTerminalIsolation,
@@ -196,12 +205,38 @@ async function probeDockerAvailability(): Promise<{ value: boolean; reason: stri
  */
 async function getTerminalIsolationVerdict() {
   const probe = await probeDockerAvailability();
+  // The sandbox input is read synchronously from the verification
+  // service's in-memory canary report and feeds ONLY the verdict's
+  // separate sandboxExecution dimension (health reporting + the web
+  // capability layer). The session gate and PTY spawn below read only
+  // the host fields, which this signal can never change.
+  const signal = sandboxStack.verification.getSignal();
   return evaluateTerminalIsolation({
     env: process.env,
     useDocker: USE_DOCKER,
     dockerAvailable: probe.value,
     dockerReason: probe.reason,
+    sandbox: {
+      provider: signal.provider,
+      state: signal.state,
+      verified: signal.verified,
+      checkedAt: signal.checkedAt,
+      freshUntil: signal.freshUntil,
+    },
   });
+}
+
+/** The `terminal.sandbox` object published by /health and /health/ready. */
+function sandboxHealthSection(isolation: Awaited<ReturnType<typeof getTerminalIsolationVerdict>>) {
+  const sandbox = isolation.sandboxExecution;
+  return {
+    execution: sandbox.execution,
+    provider: sandbox.provider,
+    state: sandbox.state,
+    checkedAt: sandbox.checkedAt,
+    freshUntil: sandbox.freshUntil,
+    reason: sandbox.reason,
+  };
 }
 
 {
@@ -290,6 +325,48 @@ initRuntime(io);
 // idle timeout, absolute lifetime, and max concurrent PTYs per user.
 const ptyManager = new PtySessionManager();
 ptyManager.startSweeper();
+
+// ─── Sandbox exec stack (Phase 1) ──────────────────────────────────
+// Provider + canary verification + gate + router for the ONE routed
+// surface (workspace.exec below). With no explicit E2B configuration
+// the factory yields the disabled provider and the gate can never
+// open, so default deployments behave exactly as before Phase 1.
+const sandboxStack = createSandboxExecStack(process.env);
+
+// ─── Sandbox workspace lifecycle (Phase 2) ─────────────────────────
+// The executor makes repo workspaces live inside sandboxes end to
+// end: descriptor bindings, per-workspace locking, sync-back held
+// before exec responses, /ws-files forward-push, sandbox prepare,
+// and the sandbox preview branch. It consumes the SAME gate and
+// provider as the Phase 1 stack, so its availability decision is the
+// gate's — identical to what /internal/sandbox/availability reports.
+// With the gate closed (every pre-cutover deployment) every entry
+// point below declines and behavior is byte-identical to Phase 1.
+const sandboxExecutor = new SandboxWorkspaceExecutor({
+  provider: sandboxStack.provider,
+  gate: sandboxStack.gate,
+  templateId: sandboxStack.config.templateId,
+});
+registerSandboxPrepareHandler({
+  isAvailableFor: (userId) => sandboxExecutor.isAvailableFor(userId),
+  prepare: (input) => sandboxExecutor.prepareRepoWorkspace(input),
+});
+registerSandboxPreviewSupport({
+  executor: sandboxExecutor,
+  provider: sandboxStack.provider,
+});
+
+/**
+ * Forward a completed /ws-files volume mutation into the workspace's
+ * live sandbox (design note §1.3 rule 2). Fire-and-forget: the
+ * executor queues the push on the workspace lock chain and records
+ * failures as pending on the binding; the next exec or preview start
+ * flushes them loudly. No live sandbox = nothing to do.
+ */
+function forwardWsFileChange(workspaceId: string, change: ForwardFileChange): void {
+  const ws = getWorkspace(workspaceId);
+  if (ws) sandboxExecutor.forwardFileChange(ws, change);
+}
 
 /**
  * How long a PTY survives with no socket attached. Long enough to cover a
@@ -779,6 +856,10 @@ app.get("/health/ready", async (_req, res) => {
       isolation: isolation.status,
       mode: isolation.mode,
       reason: isolation.reason,
+      // Separate sandbox dimension (Step 6): execution inside the
+      // verified sandbox, reported alongside — never instead of — the
+      // host verdict above.
+      sandbox: sandboxHealthSection(isolation),
     },
     readiness: allReady ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
@@ -813,6 +894,10 @@ app.get("/health", async (_req, res) => {
       isolation: isolation.status,
       mode: isolation.mode,
       reason: isolation.reason,
+      // Separate sandbox dimension (Step 6): execution inside the
+      // verified sandbox, reported alongside — never instead of — the
+      // host verdict above.
+      sandbox: sandboxHealthSection(isolation),
     },
     status: allReady ? "ok" : "degraded",
     uptime: process.uptime(),
@@ -912,9 +997,13 @@ app.post("/internal/workspace/prepare", requireInternalServiceAuth, async (req: 
       return;
     }
 
-    // Check for existing workspace (idempotent)
+    // Check for existing workspace (idempotent). A ready descriptor
+    // is served as-is only when nothing needs repair: a ready
+    // descriptor whose sandbox binding is lost/cleared must fall
+    // through to prepare so the sandbox path rebinds it (round 9) —
+    // see shouldServeExistingWorkspace.
     const existingWs = listWorkspaces(userId).find((w: WorkspaceDescriptor) => w.projectId === projectId);
-    if (existingWs && existingWs.ready) {
+    if (existingWs && shouldServeExistingWorkspace(existingWs, userId)) {
       const { workspaceId, root, branch, commitSha } = existingWs;
       res.json({ workspaceId, userId, projectId, root, branch, commitSha, ready: true });
       return;
@@ -1038,6 +1127,30 @@ app.get("/internal/workspace/:workspaceId", requireInternalServiceAuth, (req: Au
 });
 
 /**
+ * GET /internal/sandbox/availability?userId=<clerkId>
+ * Service-to-service only. Reports — from the gate itself, never
+ * from a config claim — whether sandbox execution would route for
+ * this user RIGHT NOW (design note §4.6): provider configured,
+ * routing-enabled environment, owner allowlist, and a fresh green
+ * canary. The web app's repo gates consult this instead of answering
+ * from their own copy of the host policy. Response carries booleans
+ * and the provider name only — no sandbox ids, no secrets.
+ */
+app.get("/internal/sandbox/availability", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.query.userId || "");
+  const decision = userId
+    ? sandboxStack.gate.decide(userId)
+    : { allowed: false, reason: "not-owner" as const };
+  res.json({
+    provider: sandboxStack.config.providerName,
+    routingEnabled: sandboxStack.config.routingEnabled,
+    verified: sandboxStack.verification.isVerified(),
+    allowed: decision.allowed,
+    reason: decision.reason,
+  });
+});
+
+/**
  * POST /internal/workspace/:workspaceId/exec
  * Execute a command in the workspace. Service-to-service only.
  * Returns stdout, stderr, exit code, and duration.
@@ -1047,6 +1160,18 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   const userId = String(req.body?.userId || "");
   const command = String(req.body?.command || "");
   const stdinInput = typeof req.body?.stdin === "string" ? req.body.stdin : undefined;
+  // Optional per-command PROJECT env (Phase 2): a plain object of
+  // string values, size-capped here and value-guarded against the
+  // terminal's own platform secrets inside the provider (env.ts).
+  // Anything malformed is dropped, never partially applied. Absent
+  // env keeps the pre-Phase-2 behavior byte-identical.
+  let commandEnv: Record<string, string> | undefined;
+  if (req.body?.env && typeof req.body.env === "object" && !Array.isArray(req.body.env)) {
+    const entries = Object.entries(req.body.env as Record<string, unknown>)
+      .filter((e): e is [string, string] => typeof e[1] === "string")
+      .slice(0, 64);
+    if (entries.length > 0) commandEnv = Object.fromEntries(entries);
+  }
 
   if (!userId || !command) {
     res.status(400).json({ error: "Missing userId or command" });
@@ -1075,6 +1200,50 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   }
 
   auditCommand(userId, workspaceId, command, false);
+
+  // ─── Sandbox route (Phase 1, production-enabled Phase 2) ─────────
+  // Exactly one surface routes into a verified sandbox: this one, and
+  // only when the gate passes (E2B provider configured +
+  // routing-enabled environment + owner + fresh green canary — see
+  // sandbox/exec-router.ts). Phase 2 lifecycle: the executor runs the
+  // command in the workspace's own sandbox (descriptor binding,
+  // content mirrored in, pending forward-pushes flushed first) and
+  // HOLDS this response until sync-back to the volume completes,
+  // because callers read files straight afterwards. When the gate is
+  // closed the executor returns null and the request continues down
+  // the pre-Phase-1 path below, untouched. A provider or sync failure
+  // after the gate opened is surfaced as an execution failure; it
+  // never falls back to host execution here.
+  const sandboxStartTime = Date.now();
+  try {
+    const sandboxOutcome = await sandboxExecutor.executeCommand(ws, {
+      command,
+      stdin: stdinInput,
+      timeoutMs: 120_000,
+      env: commandEnv,
+    });
+    if (sandboxOutcome) {
+      res.json({
+        exitCode: sandboxOutcome.result.exitCode,
+        stdout: sandboxOutcome.result.stdout,
+        stderr: sandboxOutcome.result.stderr,
+        durationMs: sandboxOutcome.result.durationMs,
+        runId: `sandbox:${sandboxOutcome.sandboxId}`,
+        policyEffect: "sandbox_exec",
+        approved: true,
+      });
+      return;
+    }
+  } catch (err) {
+    const durationMs = Date.now() - sandboxStartTime;
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      error: "Sandbox execution failed",
+      message,
+      durationMs,
+    });
+    return;
+  }
 
   // ─── Route through the canonical ExecutionGateway ───────────────
   // This endpoint previously called child_process.execFile directly
@@ -1633,6 +1802,20 @@ app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
     } else {
       writeFileSync(target, content, "utf-8");
     }
+    // Forward into a live sandbox (Phase 2 lifecycle): the volume
+    // write succeeded, so the sandbox must learn about it — the
+    // scaffold removals first (they happened before this write),
+    // then the manifest that recorded them, then the file itself.
+    if (scaffold?.acted) {
+      for (const removed of scaffold.removedFiles) {
+        forwardWsFileChange(req.workspaceId!, { relPath: removed, kind: "delete" });
+      }
+      forwardWsFileChange(req.workspaceId!, {
+        relPath: `${SCAFFOLD_DIR_NAME}/${SCAFFOLD_MANIFEST_NAME}`,
+        kind: "write",
+      });
+    }
+    forwardWsFileChange(req.workspaceId!, { relPath: filePath, kind: "write" });
     res.json({
       saved: true,
       workspaceId: req.workspaceId,
@@ -1652,6 +1835,7 @@ app.post("/ws-files/delete", (req: AuthenticatedRequest, res) => {
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
     deleteResolvedPath(target);
+    forwardWsFileChange(req.workspaceId!, { relPath: filePath, kind: "delete" });
     res.json({ deleted: true, workspaceId: req.workspaceId });
   } catch (err) {
     const { status, error } = fileErrorResponse(err, "Failed to delete file");
@@ -1666,8 +1850,8 @@ app.post("/ws-files/mkdir", (req: AuthenticatedRequest, res) => {
   }
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
-    if (existsSync(target)) return res.status(409).json({ error: "Path already exists" });
-    mkdirSync(target, { recursive: false });
+    if (mkdirResolvedPath(target) === "exists") return res.status(409).json({ error: "Path already exists" });
+    forwardWsFileChange(req.workspaceId!, { relPath: filePath, kind: "mkdir" });
     res.json({ created: true, workspaceId: req.workspaceId });
   } catch (err) {
     const { status, error } = fileErrorResponse(err, "Failed to create folder");
@@ -1687,6 +1871,11 @@ app.post("/ws-files/rename", (req: AuthenticatedRequest, res) => {
     if (!existsSync(source)) return res.status(404).json({ error: "Source path not found" });
     if (existsSync(target)) return res.status(409).json({ error: "Destination path already exists" });
     renameSync(source, target);
+    forwardWsFileChange(req.workspaceId!, {
+      relPath: filePath,
+      kind: "rename",
+      newRelPath: newPath,
+    });
     res.json({ renamed: true, workspaceId: req.workspaceId });
   } catch (err) {
     const { status, error } = fileErrorResponse(err, "Failed to rename path");
@@ -2036,12 +2225,41 @@ server.listen(PORT, BIND.host, () => {
   console.log(`   Allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
   console.log(`   Workspace root: ${WORKSPACE_ROOT}`);
   console.log(`   Docker mode: ${USE_DOCKER}`);
+  console.log(
+    `   Sandbox provider: ${sandboxStack.config.providerName}` +
+      (sandboxStack.config.providerName === "e2b"
+        ? ` (template ${sandboxStack.config.templateId}, staging=${sandboxStack.config.staging}, productionEnabled=${sandboxStack.config.productionEnabled}, routingEnabled=${sandboxStack.config.routingEnabled})`
+        : ""),
+  );
   warnIfOwnerAllowlistUnset();
+  // Phase 1: when a real provider is configured, start the canary so
+  // the verification signal exists for the exec gate. The disabled
+  // provider's canary can never pass, so this stays off there.
+  // Step 6: also refresh the canary periodically (every 2 minutes,
+  // inside the 5-minute freshness window, leaving 3 minutes of slack). The boot run alone left the
+  // signal verified for ~5 minutes after each restart, after which the
+  // exec gate — and now the health sandbox dimension — closed until the
+  // next restart.
+  if (sandboxStack.config.providerName !== "disabled") {
+    sandboxStack.verification.start();
+    sandboxStack.verification.startPeriodicRefresh();
+  }
+  // Registry load retry: the import-time loadPersisted can run
+  // before the volume mount is visible and start empty even though
+  // the registry file exists. If the registry is still empty now,
+  // load once more BEFORE reconcile iterates the descriptors —
+  // reconciling an empty registry would skip every binding.
+  retryRegistryLoadOnceAtListen();
+  // Phase 2 lifecycle: reconcile persisted sandbox bindings against
+  // the provider (design note §2.4) — lost bindings are cleared,
+  // paused sandboxes are left paused, nothing is woken at boot.
+  void sandboxExecutor.reconcileBindings();
 });
 
 // Graceful shutdown
 function shutdown(signal: string) {
   console.log(`[terminal-server] Received ${signal}, shutting down...`);
+  sandboxStack.verification.stopPeriodicRefresh();
   ptyManager.shutdown();
   io.close(() => {
     server.close(() => {

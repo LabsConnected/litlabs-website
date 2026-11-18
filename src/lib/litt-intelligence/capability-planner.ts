@@ -90,8 +90,10 @@ const RESEARCH_PATTERNS = [
 ];
 
 const IMAGE_PATTERNS = [
-  /generate (an |a )?image/i,
-  /create (an |a )?(image|logo|illustration|graphic|banner|hero)/i,
+  /generate (an |a )?(image|picture|photo|photograph|drawing|illustration|graphic|banner|poster|thumbnail|artwork)/i,
+  /create (an |a )?(image|picture|photo|photograph|logo|illustration|graphic|banner|hero|poster|thumbnail|drawing|artwork)/i,
+  /(make|draw|render|produce|design|paint|sketch) (me )?(an |a )?(image|picture|photo|photograph|drawing|illustration|graphic|banner|poster|thumbnail|artwork|logo)/i,
+  /(need|want|would like|get me|give me) (an |a |some )?(image|picture|photo|photograph|drawing|illustration|graphic|banner|poster|thumbnail|artwork|logo)/i,
   /visual/i,
   /custom (image|graphic|illustration|artwork)/i,
   /premium/i,

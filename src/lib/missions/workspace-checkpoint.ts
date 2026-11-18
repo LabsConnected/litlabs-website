@@ -35,29 +35,109 @@ function internalServiceKey(): string {
   return process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
 }
 
+/**
+ * Client budget for ONE checkpoint exec (round 10).
+ *
+ * The terminal holds the exec response until sync-back completes, and
+ * a checkpoint on a COLD sandbox first pays sandbox creation + the
+ * full volume mirror-in before the git commit even runs — the 120 s
+ * abort this replaces matched only the server's per-command budget,
+ * not the lifecycle work wrapped around it, so a cold first
+ * checkpoint aborted client-side, the caller swallowed it to null,
+ * and the run's change-verification reported "unknown" with no
+ * baseline to diff against (round-10 diagnosis Q2). 360 s is 3× the
+ * old abort: sized to the prepare path's cold create+mirror class of
+ * work, still bounded so a genuinely dead terminal fails the
+ * checkpoint (→ null → an honest "unknown") instead of hanging the
+ * run. The heal-and-retry below gives a descriptor-miss a second,
+ * warm attempt on top of this budget.
+ */
+export const CHECKPOINT_EXEC_TIMEOUT_MS = 360_000;
+
+/**
+ * Heal-on-workspace-failure for the checkpoint client (round 10),
+ * mirroring the transport's fix-E shape: on a workspace-level failure
+ * run ensureWorkspaceAlive ONCE and return the workspaceId to retry
+ * against. Returns null when the heal did not restore a live
+ * workspace — the caller then surfaces the original error. Never
+ * throws: a heal failure must not mask the exec's own error.
+ */
+async function healWorkspaceForCheckpoint(
+  projectId: string,
+  userId: string,
+  workspaceId: string,
+): Promise<string | null> {
+  try {
+    const { ensureWorkspaceAlive } = await import("@/lib/studio/workspace-recovery");
+    const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
+    if (recovered.healFailed) return null;
+    return recovered.workspaceId;
+  } catch {
+    return null;
+  }
+}
+
 async function execInWorkspace(
   workspaceId: string,
   userId: string,
   command: string,
   stdin?: string,
+  heal?: { projectId: string },
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const resp = await fetch(
-    `${terminalBase()}/internal/workspace/${workspaceId}/exec`,
-    {
+  const attempt = (wsId: string) =>
+    fetch(`${terminalBase()}/internal/workspace/${wsId}/exec`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Internal-Service-Key": internalServiceKey(),
       },
       body: JSON.stringify({ command, userId, stdin }),
-      signal: AbortSignal.timeout(30_000),
-    },
-  );
+      // The terminal server allows a sandbox exec 120s per command,
+      // but the response is held until sync-back completes and a cold
+      // sandbox pays creation + mirror-in first — see
+      // CHECKPOINT_EXEC_TIMEOUT_MS for why the client budget is 360s.
+      signal: AbortSignal.timeout(CHECKPOINT_EXEC_TIMEOUT_MS),
+    });
+  let resp = await attempt(workspaceId);
+  if (!resp.ok && heal && (resp.status === 404 || resp.status === 409)) {
+    const errText = await resp.text().catch(() => "");
+    // Workspace-level failures only (no descriptor / descriptor not
+    // ready) — the same pair the transport's exec heal keys on. The
+    // sandbox gate's fail-closed 503 and execution 500s surface
+    // untouched: healing re-registers a lost workspace through the
+    // sanctioned prepare path, it never routes around the gate.
+    const workspaceLevel =
+      (resp.status === 404 && errText.includes("Workspace not found")) ||
+      (resp.status === 409 && errText.includes("Workspace not ready"));
+    if (workspaceLevel) {
+      const healedId = await healWorkspaceForCheckpoint(heal.projectId, userId, workspaceId);
+      if (healedId) {
+        resp = await attempt(healedId);
+        if (!resp.ok) {
+          const retryErr = await resp.text().catch(() => "");
+          throw new Error(`Workspace exec failed (${resp.status}): ${retryErr}`);
+        }
+        return parseExecResponse(resp);
+      }
+    }
+    throw new Error(`Workspace exec failed (${resp.status}): ${errText}`);
+  }
   if (!resp.ok) {
     const err = await resp.text().catch(() => "");
     throw new Error(`Workspace exec failed (${resp.status}): ${err}`);
   }
-  const data = await resp.json();
+  return parseExecResponse(resp);
+}
+
+async function parseExecResponse(
+  resp: Response,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const data = (await resp.json()) as {
+    exitCode?: number;
+    exit_code?: number;
+    stdout?: string;
+    stderr?: string;
+  };
   return {
     exitCode: data.exitCode ?? data.exit_code ?? 1,
     stdout: data.stdout ?? "",
@@ -118,12 +198,17 @@ export async function createWorkspaceCheckpoint(
 
   const commitMessage = description ? `${label}\n\n${description}` : label;
 
-  // Ensure git user identity is configured, stage all changes, and commit via stdin
+  // Ensure git user identity is configured, stage all changes, and commit via stdin.
+  // Both steps pass the heal context: the checkpoint is the run's
+  // baseline, and a lost terminal descriptor must be re-registered
+  // through the sanctioned prepare path instead of failing the
+  // baseline (and with it the run's whole change-verification).
   const commit = await execInWorkspace(
     workspaceId,
     userId,
     "git config --local user.name 'LiTT Agent' && git config --local user.email 'agent@litt.ai' && git add -A && git commit --file=- --allow-empty",
     commitMessage,
+    { projectId },
   );
 
   if (commit.exitCode !== 0) {
@@ -131,7 +216,9 @@ export async function createWorkspaceCheckpoint(
   }
 
   // Get the SHA
-  const shaResult = await execInWorkspace(workspaceId, userId, "git rev-parse HEAD");
+  const shaResult = await execInWorkspace(workspaceId, userId, "git rev-parse HEAD", undefined, {
+    projectId,
+  });
   const gitSha = shaResult.stdout.trim();
 
   if (!gitSha) {

@@ -17,11 +17,17 @@ export default function StudioShell({
   inspector,
   inspectorOpen,
   onOpenInspector,
-  littLayer,
   leftPanel,
   leftWidth,
   onResetLeftWidth,
   dockHandle,
+  bottomPanel,
+  previewPanel,
+  previewPanelOpen,
+  onTogglePreviewPanel,
+  board,
+  boardActive,
+  onToggleBoard,
 }: {
   /** Durable worktabs — task identity, not layout. */
   taskbar: ReactNode;
@@ -34,9 +40,8 @@ export default function StudioShell({
   /** Controlled inspector visibility, shared with ContextInspector. */
   inspectorOpen: boolean;
   onOpenInspector: () => void;
-  /** Bottom LiTT command layer (null when the chat is left-docked). */
-  littLayer: ReactNode;
-  /** Left-docked LiTT panel, kept mounted while focus mode is active. */
+  /** Left-docked LiTT panel — the only chat surface — kept mounted
+      while focus mode is active. */
   leftPanel?: ReactNode;
   /** Width of leftPanel, from the same hook that sizes the panel itself. */
   leftWidth: number;
@@ -44,6 +49,24 @@ export default function StudioShell({
   onResetLeftWidth: () => void;
   /** The LiTTPanel-owned resize handle; this is the only chat resize control. */
   dockHandle?: ReactNode;
+  /** Phase 2 — bottom panel slot (StudioDock: terminal, output,
+      activity). Rendered under the workspace row, full width. */
+  bottomPanel?: ReactNode;
+  /** Phase 2 — the live, dockable Preview panel (the same
+      StudioPreviewPanel as the Preview stage). Rendered on the right
+      of the stage when open, so changes are visible while working in
+      Canvas & Design or Code without switching stages. */
+  previewPanel?: ReactNode;
+  /** Controlled preview-panel visibility, owned by CommandStudio. */
+  previewPanelOpen?: boolean;
+  onTogglePreviewPanel?: () => void;
+  /** Board mode (plan §2 B2): the floating-panel board surface. Rendered
+      in place of `stage` only while `boardActive` — the per-user board
+      toggle defaults OFF, so without these props the shell is exactly
+      the fixed stage layout. */
+  board?: ReactNode;
+  boardActive?: boolean;
+  onToggleBoard?: () => void;
 }) {
   const [floating, setFloating] = useState<"inspector" | null>(() => {
     try {
@@ -71,16 +94,37 @@ export default function StudioShell({
   });
   const inspectorWidthRef = useRef(inspectorWidth);
 
+  // Phase 2 slot — dockable Preview panel geometry. Persisted in the
+  // same layout record as the inspector so one Reset restores the
+  // whole frame. The Preview panel defaults closed and is toggled
+  // from the layout toolbar. (The standalone Files sidebar slot that
+  // used to sit beside the chat panel was retired 2026-11-14: Files
+  // lives only in the LiTT panel's top-row Files tab.)
+  const [previewWidth, setPreviewWidth] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("litt-studio-layout") ?? "{}").preview;
+      return typeof saved === "number" ? Math.max(280, Math.min(640, saved)) : 360;
+    } catch {
+      return 360;
+    }
+  });
+  const previewWidthRef = useRef(previewWidth);
+
   useEffect(() => {
     try {
       localStorage.setItem(
         "litt-studio-layout",
-        JSON.stringify({ inspector: inspectorWidth, floating, expanded: workspaceExpanded }),
+        JSON.stringify({
+          inspector: inspectorWidth,
+          floating,
+          expanded: workspaceExpanded,
+          preview: previewWidth,
+        }),
       );
     } catch {
       // Storage may be unavailable in private or embedded browser contexts.
     }
-  }, [inspectorWidth, floating, workspaceExpanded]);
+  }, [inspectorWidth, floating, workspaceExpanded, previewWidth]);
 
   useEffect(() => {
     try {
@@ -107,6 +151,7 @@ export default function StudioShell({
     setInspectorWidth(320);
     setFloating(null);
     setWorkspaceExpanded(false);
+    setPreviewWidth(360);
   }, [onResetLeftWidth]);
 
   const onInspectorHandleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -129,6 +174,45 @@ export default function StudioShell({
     inspectorWidthRef.current = inspectorWidth;
   }, [inspectorWidth]);
 
+  useEffect(() => {
+    previewWidthRef.current = previewWidth;
+  }, [previewWidth]);
+
+  // Preview panel widens to the LEFT (it sits right of the stage) —
+  // same geometry as the inspector handle.
+  const onPreviewHandleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setPreviewWidth((v) => Math.min(640, v + 10));
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setPreviewWidth((v) => Math.max(280, v - 10));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setPreviewWidth(640);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setPreviewWidth(280);
+    }
+  }, []);
+
+  const onPreviewMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = previewWidthRef.current;
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.max(280, Math.min(640, startW + startX - ev.clientX));
+      previewWidthRef.current = next;
+      setPreviewWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+
   const onInspectorMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -148,6 +232,7 @@ export default function StudioShell({
 
   const hasLeft = Boolean(leftPanel);
   const hasInspector = Boolean(inspector);
+  const showPreviewPanel = Boolean(previewPanel) && Boolean(previewPanelOpen) && !workspaceExpanded;
   const isFloating = floating === "inspector" && inspectorOpen;
   const compactLeftWidth = leftWidth <= 64;
 
@@ -163,7 +248,7 @@ export default function StudioShell({
       <div
         role="toolbar"
         aria-label="Workspace layout controls"
-        className="flex min-h-10 shrink-0 items-center gap-2 border-b px-3 py-1.5"
+        className="flex min-h-9 shrink-0 items-center gap-2 border-b px-3 py-1"
         style={{ borderColor: "var(--studio-border, rgba(255,255,255,0.08))" }}
       >
         <button
@@ -179,18 +264,44 @@ export default function StudioShell({
           aria-pressed={isFloating}
           aria-label={!inspectorOpen ? "Open inspector" : isFloating ? "Dock inspector" : "Float inspector"}
           title={!inspectorOpen ? "Open inspector" : isFloating ? "Dock inspector" : "Float inspector"}
-          className="min-h-8 rounded-md border border-white/10 px-3 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          className="min-h-8 rounded-md border px-3 text-xs font-medium hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" style={{ borderColor: "var(--studio-border)", color: "var(--text-main)" }}
           data-testid="dock-float-toggle"
         >
           {!inspectorOpen ? "Inspector" : isFloating ? "Dock inspector" : "Float inspector"}
         </button>
+        {onTogglePreviewPanel && (
+          <button
+            type="button"
+            onClick={onTogglePreviewPanel}
+            aria-pressed={Boolean(previewPanelOpen)}
+            aria-label={previewPanelOpen ? "Hide live preview panel" : "Show live preview panel"}
+            title={previewPanelOpen ? "Hide live preview panel" : "Show live preview panel"}
+            className="min-h-8 rounded-md border px-3 text-xs font-medium hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" style={{ borderColor: "var(--studio-border)", color: "var(--text-main)" }}
+            data-testid="dock-preview-toggle"
+          >
+            {previewPanelOpen ? "Hide preview" : "Preview panel"}
+          </button>
+        )}
+        {onToggleBoard && (
+          <button
+            type="button"
+            onClick={onToggleBoard}
+            aria-pressed={Boolean(boardActive)}
+            aria-label={boardActive ? "Switch back to the fixed stage layout" : "Open board mode"}
+            title={boardActive ? "Switch back to the fixed stage layout" : "Open board mode"}
+            className="min-h-8 rounded-md border px-3 text-xs font-medium hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" style={{ borderColor: "var(--studio-border)", color: "var(--text-main)" }}
+            data-testid="dock-board-toggle"
+          >
+            {boardActive ? "Stage layout" : "Board mode"}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setWorkspaceExpanded((v) => !v)}
           aria-pressed={workspaceExpanded}
           aria-label={workspaceExpanded ? "Exit focus workspace" : "Expand workspace"}
           title={workspaceExpanded ? "Exit focus workspace" : "Expand workspace"}
-          className="min-h-8 rounded-md border border-white/10 px-3 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          className="min-h-8 rounded-md border px-3 text-xs font-medium hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" style={{ borderColor: "var(--studio-border)", color: "var(--text-main)" }}
           data-testid="studio-expand-toggle"
         >
           {workspaceExpanded ? "Exit focus" : "Expand workspace"}
@@ -200,7 +311,7 @@ export default function StudioShell({
           onClick={handleReset}
           aria-label="Reset workspace layout"
           title="Reset workspace layout"
-          className="min-h-8 rounded-md border border-white/10 px-3 text-xs font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          className="min-h-8 rounded-md border px-3 text-xs font-medium hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" style={{ borderColor: "var(--studio-border)", color: "var(--text-main)" }}
           data-testid="dock-reset"
         >
           Reset layout
@@ -214,7 +325,7 @@ export default function StudioShell({
         </span>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 gap-1.5 overflow-hidden px-1.5 pb-1.5">
         {hasLeft && (
           <div
             data-testid="studio-left-panel"
@@ -233,16 +344,45 @@ export default function StudioShell({
         {!workspaceExpanded && dockHandle}
 
         <div
-          className="flex h-14 shrink-0 flex-col overflow-hidden"
-          style={{ minWidth: 56, width: 56, display: workspaceExpanded ? "none" : undefined }}
+          className="flex shrink-0 flex-col overflow-hidden"
+          style={{ minWidth: 48, width: 48, display: workspaceExpanded ? "none" : undefined }}
           data-testid="studio-rail-slot"
         >
           {rail}
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-testid="studio-stage">
-          {stage}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--studio-border)", background: "var(--studio-surface)" }} data-testid="studio-stage">
+          {boardActive && board ? board : stage}
         </div>
+
+        {showPreviewPanel && (
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize preview panel"
+              aria-valuemin={280}
+              aria-valuemax={640}
+              aria-valuenow={previewWidth}
+              tabIndex={0}
+              onKeyDown={onPreviewHandleKeyDown}
+              onMouseDown={onPreviewMouseDown}
+              data-testid="dock-resize-preview"
+              className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center bg-transparent hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            >
+              <span className="h-8 w-0.5 rounded-full bg-[var(--studio-border-strong)]" aria-hidden="true" />
+            </div>
+            <div
+              role="complementary"
+              aria-label="Live preview"
+              style={{ width: previewWidth, minWidth: 280, maxWidth: 640 }}
+              className="shrink-0 overflow-hidden rounded-xl border"
+              data-testid="dock-preview-panel"
+            >
+              {previewPanel}
+            </div>
+          </>
+        )}
 
         {hasInspector && (
           <>
@@ -258,9 +398,9 @@ export default function StudioShell({
                 onKeyDown={onInspectorHandleKeyDown}
                 onMouseDown={onInspectorMouseDown}
                 data-testid="dock-resize-inspector"
-                className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center bg-transparent hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center bg-transparent hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
               >
-                <span className="h-8 w-0.5 rounded-full bg-white/15 group-hover:bg-white/25" aria-hidden="true" />
+                <span className="h-8 w-0.5 rounded-full bg-[var(--studio-border-strong)]" aria-hidden="true" />
               </div>
             )}
             <div
@@ -281,27 +421,31 @@ export default function StudioShell({
         )}
       </div>
 
+      {bottomPanel}
+
       {isFloating && hasInspector && (
         <div
           role="dialog"
           aria-modal="false"
           aria-label="Floating inspector"
           data-testid="floating-inspector"
-          className="absolute right-3 top-16 z-50 flex max-h-[calc(100vh-96px)] w-[min(360px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border bg-[#0a0a0b] shadow-xl"
+          className="absolute right-3 top-16 z-50 flex max-h-[calc(100vh-96px)] w-[min(360px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border shadow-xl"
           style={{
             width: `min(${inspectorWidth}px, calc(100vw - 24px))`,
             maxWidth: "calc(100vw - 24px)",
             maxHeight: "calc(100vh - 96px)",
-            borderColor: "rgba(255,255,255,0.12)",
+            borderColor: "var(--studio-border)",
+            background: "var(--studio-surface)",
+            color: "var(--text-main)",
           }}
         >
-          <div className="flex min-h-10 shrink-0 items-center justify-between border-b px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+          <div className="flex min-h-10 shrink-0 items-center justify-between border-b px-3 py-2" style={{ borderColor: "var(--studio-border)" }}>
             <span className="text-xs font-semibold">Inspector · floating</span>
             <button
               type="button"
               onClick={() => setFloating(null)}
               aria-label="Dock floating inspector"
-              className="min-h-8 rounded-md px-3 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+              className="min-h-8 rounded-md px-3 text-xs hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
             >
               Dock inspector
             </button>
@@ -312,9 +456,6 @@ export default function StudioShell({
         </div>
       )}
 
-      <div style={{ display: workspaceExpanded ? "none" : undefined }} data-testid="studio-chat-layer-slot">
-        {littLayer}
-      </div>
     </div>
   );
 }

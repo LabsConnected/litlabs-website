@@ -61,8 +61,13 @@ export interface ProjectRuntimeState {
   sourceKind: "managed" | "github" | null;
   /** Display label for the source: "LiTT Managed" or "GitHub". */
   sourceLabel: string | null;
-  /** Provisioning state of the source itself, separate from the agent. */
-  sourceStatus: "provisioning" | "ready" | "error" | "needs_setup" | null;
+  /**
+   * Provisioning state of the source itself, separate from the agent.
+   * "unavailable" is the deliberate repo gate: a GitHub-backed project
+   * whose live workspace the hosted service does not offer yet (no
+   * verified sandbox) — a product decision, not an error.
+   */
+  sourceStatus: "provisioning" | "ready" | "error" | "needs_setup" | "unavailable" | null;
   /** Whether the workspace has a Git repository. Managed projects do. */
   versionControl: "git" | "none";
   /** Whether a GitHub repository is connected. Optional by design. */
@@ -182,6 +187,24 @@ export function runtimePhaseLabel(
       return "Sign in required";
   }
 }
+
+/**
+ * Honest copy for the HOST_EXECUTION_DISABLED workspace failure (wave-4).
+ *
+ * Repo-backed workspace preparation is fail-closed on the hosted service:
+ * opening the repo as a live workspace runs host git + install, which stays
+ * disabled until a verified sandbox exists (terminal-server isolation
+ * policy — deliberately no override). The generic "Workspace not ready /
+ * preparation failed" states lied about that: they implied a transient
+ * failure and offered retries that can never succeed. When the failure
+ * carries this code, every surface uses this copy instead, and no retry /
+ * restart affordance is offered.
+ */
+export const HOST_EXECUTION_UNAVAILABLE_LABEL =
+  "Repo-backed workspaces aren't available on the hosted service yet";
+export const HOST_EXECUTION_UNAVAILABLE_SHORT = "Repo workspace unavailable";
+export const HOST_EXECUTION_UNAVAILABLE_MESSAGE =
+  "Opening a GitHub repo as a live workspace needs a secure sandbox, which the hosted service doesn't have yet. Your project's files and builds aren't affected — only the live workspace and preview are paused.";
 
 /**
  * Human-readable label for the socket's heartbeat freshness.

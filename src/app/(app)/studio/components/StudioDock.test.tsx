@@ -14,7 +14,6 @@ function renderDock(overrides: Partial<React.ComponentProps<typeof StudioDock>> 
     height: 320,
     onHeightChange: vi.fn(),
     activityContent: <div data-testid="activity-slot">activity</div>,
-    filesContent: <div data-testid="files-slot">files</div>,
     terminalContent: <div data-testid="terminal-slot">terminal</div>,
     inspectorContent: <div data-testid="inspector-slot">inspector</div>,
     mediaContent: <div data-testid="media-slot">media</div>,
@@ -29,22 +28,23 @@ describe("StudioDock", () => {
     vi.clearAllMocks();
   });
 
-  it("renders all five tabs", () => {
+  it("renders all four tabs (Files retired to the LiTT panel top row)", () => {
     renderDock();
     expect(screen.getByTestId("studio-dock")).toBeDefined();
-    for (const id of ["activity", "files", "terminal", "inspector", "media"]) {
+    for (const id of ["activity", "terminal", "inspector", "media"]) {
       const tab = screen.getByTestId(`dock-tab-${id}`);
       expect(tab).toBeDefined();
       expect(tab.getAttribute("aria-selected")).toBe(
         id === "activity" ? "true" : "false",
       );
     }
+    expect(screen.queryByTestId("dock-tab-files")).toBeNull();
   });
 
   it("clicking a tab calls onTabChange", () => {
     const { props } = renderDock();
-    fireEvent.click(screen.getByTestId("dock-tab-files"));
-    expect(props.onTabChange).toHaveBeenCalledWith("files");
+    fireEvent.click(screen.getByTestId("dock-tab-terminal"));
+    expect(props.onTabChange).toHaveBeenCalledWith("terminal");
   });
 
   it("clicking a tab while collapsed opens the dock and selects the tab", () => {
@@ -68,7 +68,7 @@ describe("StudioDock", () => {
   });
 
   it("keeps terminal content mounted with display:none when another tab is active", () => {
-    renderDock({ activeTab: "files" });
+    renderDock({ activeTab: "media" });
     const terminal = screen.getByTestId("terminal-slot");
     expect(terminal).toBeDefined();
     const content = screen.getByTestId("dock-content-terminal");
@@ -138,7 +138,6 @@ describe("StudioDock", () => {
   it("marks the active tab with aria-pressed and exposes all slots", () => {
     const tabs: StudioDockTab[] = [
       "activity",
-      "files",
       "terminal",
       "inspector",
       "media",
@@ -155,7 +154,7 @@ describe("StudioDock", () => {
 
   it("tab strip scrolls horizontally on narrow screens so all tabs stay reachable", () => {
     renderDock();
-    // The tablist wraps the tab buttons; at 390px the five labeled tabs
+    // The tablist wraps the tab buttons; at 390px the labeled tabs
     // overflow, so the strip must scroll instead of clipping them.
     const tablist = screen.getByRole("tablist", { name: "Studio dock tabs" });
     expect(tablist.className).toMatch(/overflow-x-auto/);

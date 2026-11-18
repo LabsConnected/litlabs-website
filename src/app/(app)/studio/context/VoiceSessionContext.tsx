@@ -23,7 +23,9 @@
  *   (see transcript-validation.ts)
  * - Echo isolation: mic is PAUSED during TTS playback and resumed after cooldown
  * - Default UX: stop recording → transcript appears as editable draft → user presses Send.
- *   Auto-send is an opt-in toggle (autoSendEnabled, default false).
+ *   Auto-send (autoSendEnabled) defaults to VOICE_GATE_CONFIG.ptt.autoSendDefault;
+ *   a stored pref always wins — session, voice-prefs, and the Settings card
+ *   all read through readAutoSendEnabled() so they cannot disagree (B-01).
  * - State machine: idle → requesting_permission → connecting → listening →
  *   processing → transcript_ready → sending → assistant_speaking → idle
  * - Only explicit "End Voice" / unmount / fatal error destroys the session
@@ -57,6 +59,7 @@ import { createInitialTimingMetrics, computeLatencies, type VoiceTimingMetrics }
 import { useInworldSession, type TranscriptMetadata } from "@/features/voice/hooks/useInworldSession";
 import { validateTranscript, type RejectionReason, type TranscriptValidationResult } from "@/features/voice/lib/transcript-validation";
 import { VOICE_GATE_CONFIG } from "@/features/voice/lib/voice-gate-config";
+import { readAutoSendEnabled } from "@/features/voice/lib/voice-prefs";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -146,7 +149,7 @@ export interface VoiceSessionCtx {
    * (disable/hide voice controls) should key off this, not optimism.
    */
   voiceAvailable: boolean;
-  /** Auto-send finalized transcript (default: false — show editable draft). */
+  /** Auto-send finalized transcript (default: VOICE_GATE_CONFIG.ptt.autoSendDefault). */
   autoSendEnabled: boolean;
   diagnostics: VoiceDiagnostics;
   startVoice: () => void;
@@ -156,7 +159,13 @@ export interface VoiceSessionCtx {
   speakText: (text: string) => Promise<void>;
   stopSpeaking: () => void;
   selectDevice: (deviceId: string) => void;
-  setOnTurn: (handler: (text: string) => void) => void;
+  /**
+   * Register the turn handler. The handler MAY return a promise: the
+   * session then releases the "sending" state when that promise settles
+   * (resolve or reject), independent of the TTS chain (B-02). Handlers
+   * returning void keep the legacy behavior (exit via speakText).
+   */
+  setOnTurn: (handler: (text: string) => void | Promise<void>) => void;
   toggleTts: () => void;
   toggleAutoSend: () => void;
   /** Submit the pending transcript (explicit Send button). */
@@ -251,7 +260,7 @@ const defaultCtx: VoiceSessionCtx = {
   latencies: computeLatencies(createInitialTimingMetrics()),
   ttsEnabled: true,
   voiceAvailable: true,
-  autoSendEnabled: false,
+  autoSendEnabled: VOICE_GATE_CONFIG.ptt.autoSendDefault,
   diagnostics: defaultDiagnostics,
   startVoice: noop,
   stopVoice: noop,
@@ -308,10 +317,14 @@ export function VoiceSessionProvider({
     const stored = localStorage.getItem(TTS_PREF_KEY);
     return stored === null ? true : stored === "1";
   });
-  const [autoSendEnabled, setAutoSendEnabled] = useState<boolean>(() => {
-    if (typeof window === "undefined") return VOICE_GATE_CONFIG.ptt.autoSendDefault;
-    return localStorage.getItem(AUTO_SEND_PREF_KEY) === "1";
-  });
+  // B-01: read through the SAME helper voice-prefs/Settings use — a
+  // stored pref wins; when nothing is stored the config default applies.
+  // The previous initializer (`getItem(...) === "1"`) hard-coded unset →
+  // OFF in the live session while Settings showed ON (the #880 semantics
+  // #882 silently reverted).
+  const [autoSendEnabled, setAutoSendEnabled] = useState<boolean>(() =>
+    readAutoSendEnabled(),
+  );
   const [voiceAvailable, setVoiceAvailable] = useState<boolean>(true);
   const [diagnostics, setDiagnostics] = useState<VoiceDiagnostics>(defaultDiagnostics);
   const [pendingTranscript, setPendingTranscriptState] = useState<string | null>(null);
@@ -327,7 +340,7 @@ export function VoiceSessionProvider({
   const voiceStateRef = useRef<VoiceState>("idle");
   const voiceInputStateRef = useRef<VoiceInputState>("idle");
   const voiceOutputStateRef = useRef<VoiceOutputState>("idle");
-  const onTurnRef = useRef<(text: string) => void>(noop);
+  const onTurnRef = useRef<(text: string) => void | Promise<void>>(noop);
   const submittedTranscriptRef = useRef("");
   const sessionGenerationRef = useRef(0);
   const micStartInProgressRef = useRef(false);
@@ -374,6 +387,54 @@ export function VoiceSessionProvider({
   const inworldOnAgentTextRef = useRef<(delta: string) => void>(() => {});
   const inworldOnErrorRef = useRef<(msg: string) => void>(() => {});
   const inworldOnResponseCompleteRef = useRef<() => void>(() => {});
+  const inworldOnCloseRef = useRef<(msg: string) => void>(() => {});
+  // Sync Inworld connection state. Declared with the other session
+  // refs (it used to sit below the session hook): the B-04 close
+  // handler registered in the effect above reads/writes it, and the
+  // react-hooks immutability rule rejects writes to a ref first used
+  // in an effect before its declaration point.
+  const inworldConnectedRef = useRef(false);
+
+  // ---------------------------------------------------------------------------
+  // dispatchTurn — invoke the registered turn handler for a transcript.
+  //
+  // B-02: the "sending" state's only exit used to run through speakText,
+  // which early-returns when TTS is disabled — and a failed send was
+  // swallowed by the composer — so the mic wedged as a disabled spinner
+  // until reload. Now: when the handler returns a promise, the session
+  // releases "sending" as soon as it settles (resolve OR reject),
+  // independent of TTS; a rejection also surfaces an error. Handlers
+  // returning void keep the legacy exit (via the speakText chain).
+  // ---------------------------------------------------------------------------
+  const dispatchTurn = useCallback((text: string) => {
+    const finishSending = (failed: boolean) => {
+      if (failed) {
+        setErrorMessage(
+          "That message couldn't be sent. Check your connection and try again.",
+        );
+        updateDiagnostics({ lastError: "turn_handler_failed" });
+      }
+      if (voiceStateRef.current === "sending") {
+        setVoiceState("idle");
+        voiceStateRef.current = "idle";
+      }
+    };
+    try {
+      const result = onTurnRef.current(text) as unknown;
+      if (
+        result !== null &&
+        (typeof result === "object" || typeof result === "function") &&
+        typeof (result as { then?: unknown }).then === "function"
+      ) {
+        (result as Promise<void>).then(
+          () => finishSending(false),
+          () => finishSending(true),
+        );
+      }
+    } catch {
+      finishSending(true);
+    }
+  }, [updateDiagnostics]);
 
   useEffect(() => {
     inworldOnTranscriptRef.current = (text: string, final: boolean, metadata?: TranscriptMetadata) => {
@@ -410,8 +471,18 @@ export function VoiceSessionProvider({
 
         if (!validation.accepted) {
           console.debug("[Voice Pipeline] transcript rejected", validation);
-          // Don't send — write into composer if it's not empty/filler
-          if (validation.reason !== "empty" && validation.reason !== "filler_only" && validation.reason !== "no_speech_detected") {
+          // Don't auto-send — write into the composer as an editable draft
+          // instead. Only content-free rejections (empty / filler-only) are
+          // dropped outright. A "no_speech_detected" rejection is NOT
+          // dropped: the STT engine produced a real, non-filler transcript,
+          // and only the client-side VAD duration metadata failed the gate.
+          // That metadata is unreliable on the push-to-talk Stop path (it
+          // is written solely by VAD speech-end callbacks), so discarding
+          // the user's actual words here made real speech vanish with no
+          // trace — the production "I hit Stop and nothing happens" bug.
+          // The draft fallback keeps the anti-ghost property (nothing is
+          // auto-sent) without silently destroying real transcripts.
+          if (validation.reason !== "empty" && validation.reason !== "filler_only") {
             if (onTranscriptCompleteRef.current) {
               onTranscriptCompleteRef.current(trimmed);
               setVoiceState("idle");
@@ -443,7 +514,7 @@ export function VoiceSessionProvider({
           console.debug("[Voice Pipeline] auto-send enabled, sending transcript", { transcript: acceptedText.slice(0, 80) });
           setVoiceState("sending");
           voiceStateRef.current = "sending";
-          onTurnRef.current(acceptedText);
+          dispatchTurn(acceptedText);
           setTiming({ aiResponseCompletedAt: Date.now() });
         } else if (onTranscriptCompleteRef.current) {
           // Unified composer: write transcript directly into the composer textarea
@@ -484,6 +555,40 @@ export function VoiceSessionProvider({
       setErrorMessage(msg);
       updateDiagnostics({ lastError: msg });
     };
+    inworldOnCloseRef.current = (msg: string) => {
+      // B-04: the transport closed mid-session (the hook has already
+      // stopped capture/playback). If a turn was live, surface it —
+      // sitting on "Listening" over a dead mic was the failure. If
+      // nothing was live, just record the transport truth silently.
+      const wasActive =
+        micActiveRef.current ||
+        voiceStateRef.current === "listening" ||
+        voiceStateRef.current === "user_speaking" ||
+        voiceStateRef.current === "processing" ||
+        voiceStateRef.current === "sending" ||
+        voiceOutputStateRef.current === "connecting" ||
+        voiceOutputStateRef.current === "speaking";
+      micActiveRef.current = false;
+      inworldConnectedRef.current = false;
+      setVoiceTransportConnected(false);
+      if (!wasActive) {
+        updateDiagnostics({ transportConnected: false, micActive: false });
+        return;
+      }
+      if (
+        voiceOutputStateRef.current === "connecting" ||
+        voiceOutputStateRef.current === "speaking"
+      ) {
+        setVoiceOutputState("error");
+        voiceOutputStateRef.current = "error";
+      }
+      setVoiceInputState("error");
+      voiceInputStateRef.current = "error";
+      setVoiceState("error");
+      voiceStateRef.current = "error";
+      setErrorMessage(msg);
+      updateDiagnostics({ lastError: msg, transportConnected: false, micActive: false });
+    };
     inworldOnResponseCompleteRef.current = () => {
       // Inworld's auto-response finished. In STT-only mode we ignore this —
       // TTS is handled by Inworld's speakText which has its own response.done.
@@ -506,6 +611,7 @@ export function VoiceSessionProvider({
     onAgentText: (delta: string) => inworldOnAgentTextRef.current(delta),
     onError: (msg: string) => inworldOnErrorRef.current(msg),
     onResponseComplete: () => inworldOnResponseCompleteRef.current(),
+    onClose: (msg: string) => inworldOnCloseRef.current(msg),
   });
 
   // Keep resumeMicRef in sync so inworldOnResponseCompleteRef can call it
@@ -513,9 +619,6 @@ export function VoiceSessionProvider({
   useEffect(() => {
     resumeMicRef.current = inworldSession.resumeMic;
   }, [inworldSession.resumeMic]);
-
-  // Sync Inworld connection state
-  const inworldConnectedRef = useRef(false);
 
   // Sync Inworld mic level to context micLevel for waveform visualization
   const inworldAudioLevel = useVoiceStore((s) => s.audioLevel);
@@ -730,6 +833,28 @@ export function VoiceSessionProvider({
   const stopVoice = useCallback(() => {
     console.debug("[Voice] stopVoice");
     const wasSpeaking = voiceOutputStateRef.current === "speaking";
+    // Capture whether the VAD heard any speech during this hold BEFORE
+    // stopListening() tears the VAD down. Two signals: a measured speech
+    // duration from an endpointed utterance, or the VAD currently sitting
+    // in speech_detected (user stopped mid-utterance). Read defensively —
+    // older test doubles may not implement getLastSpeechDurationMs.
+    const lastSpeechMs =
+      typeof inworldSession.getLastSpeechDurationMs === "function"
+        ? inworldSession.getLastSpeechDurationMs()
+        : 0;
+    const heardSpeech =
+      lastSpeechMs > 0 || inworldSession.getVadState() === "speech_detected";
+    // Peak level is measured on the raw capture stream, independent of
+    // the VAD gate: it separates "the mic delivered real sound but the
+    // gate/transcription missed it" from genuine silence. The VAD speech
+    // metadata alone is unreliable on this Stop path (see the transcript
+    // handler's note), and blaming the user's microphone when the mic
+    // demonstrably delivered audio sends them chasing the wrong fix.
+    const peakLevel =
+      typeof inworldSession.getPeakLevel === "function"
+        ? inworldSession.getPeakLevel()
+        : 0;
+    const heardAudio = peakLevel >= VOICE_GATE_CONFIG.vad.silenceRmsThreshold;
     if (inworldConnectedRef.current) {
       // Stop the mic and commit the audio buffer so Inworld can finish STT.
       // Do NOT disconnect the WebSocket — the STT response
@@ -758,6 +883,10 @@ export function VoiceSessionProvider({
 
     // Safety timeout: if STT doesn't produce a transcript within 8s,
     // transition back to idle so the user isn't stuck in "processing".
+    // If the VAD never heard speech during the hold, say so — a silent
+    // return to idle left users with "I talked, hit Stop, nothing
+    // happened" and no hint that the microphone captured silence (wrong
+    // or dead input device, muted mixer, level under the VAD threshold).
     const gen = sessionGenerationRef.current;
     window.setTimeout(() => {
       if (
@@ -765,6 +894,17 @@ export function VoiceSessionProvider({
         voiceStateRef.current === "processing"
       ) {
         console.debug("[Voice] STT timeout — returning to idle");
+        if (!heardSpeech && heardAudio) {
+          // The mic captured real sound but no transcript came back —
+          // that is a detection/transcription miss, not a dead mic.
+          setErrorMessage(
+            "I heard sound but couldn't make out any words — try speaking a little louder or closer to the microphone, then tap the mic and try again.",
+          );
+        } else if (!heardSpeech) {
+          setErrorMessage(
+            "I didn't hear anything — check that the right microphone is selected and not muted, then tap the mic and try again.",
+          );
+        }
         setVoiceState("idle");
         voiceStateRef.current = "idle";
       }
@@ -869,11 +1009,29 @@ export function VoiceSessionProvider({
 
   const speakText = useCallback(
     async (text: string): Promise<void> => {
-      if (!text.trim()) return;
-      if (!ttsEnabledRef.current) return;
+      // B-02: when nothing will be spoken, a turn waiting in "sending"
+      // must still be released — no completion event will ever arrive
+      // for it, and the composer leaves the mic disabled in "sending".
+      const finishUnspokenTurn = () => {
+        if (voiceStateRef.current === "sending") {
+          setVoiceState("idle");
+          voiceStateRef.current = "idle";
+        }
+      };
+      if (!text.trim()) {
+        finishUnspokenTurn();
+        return;
+      }
+      if (!ttsEnabledRef.current) {
+        finishUnspokenTurn();
+        return;
+      }
 
       const sanitized = sanitizeSpeech(text);
-      if (!sanitized) return;
+      if (!sanitized) {
+        finishUnspokenTurn();
+        return;
+      }
 
       // ── Graceful degradation ──
       // Probe /api/voice/health once per session before starting the TTS
@@ -1044,7 +1202,7 @@ export function VoiceSessionProvider({
     [stopVoice, startVoice],
   );
 
-  const setOnTurn = useCallback((handler: (text: string) => void) => {
+  const setOnTurn = useCallback((handler: (text: string) => void | Promise<void>) => {
     onTurnRef.current = handler;
   }, []);
 
@@ -1111,9 +1269,9 @@ export function VoiceSessionProvider({
     setVoiceState("sending");
     voiceStateRef.current = "sending";
     if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] user submitted transcript", { transcript: trimmed.slice(0, 80) });
-    onTurnRef.current(trimmed);
+    dispatchTurn(trimmed);
     setTiming({ aiResponseCompletedAt: Date.now() });
-  }, [setTiming]);
+  }, [setTiming, dispatchTurn]);
 
   // ---------------------------------------------------------------------------
   // cancelRecording — stop recording and clear pending transcript

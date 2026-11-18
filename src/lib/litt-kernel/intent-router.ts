@@ -23,6 +23,24 @@ interface ModePattern {
   requiresProject?: boolean;
   requiresExecution?: boolean;
   requiresCurrentInformation?: boolean;
+  /**
+   * Set only by the read-only workspace-inspection group below: the
+   * turn requires the execution lane, but its completion is a read
+   * answer, never a mutation. Recorded on the classification so the
+   * quality gate and the launch flow can scope themselves by task
+   * kind instead of re-deriving it from prose.
+   *
+   * "exec" is set only by the shell-command group below: the turn's
+   * completion is a command's output, never a file write, so the
+   * launch flow must not judge it by the build guard's file-writing
+   * criterion.
+   *
+   * "media" is set only by the media-generation group below: the
+   * turn's completion is the generated media result, never a site
+   * build, so the quality gate must not judge it by the build
+   * pipeline's evidence (LION-RUN-DIAGNOSIS-2026-11-16 Q1).
+   */
+  taskKind?: "inspection" | "exec" | "media";
   domains?: string[];
 }
 
@@ -43,6 +61,52 @@ const MODE_PATTERNS: ModePattern[] = [
       /\b(check|verify|test)\b.*\b(capabilit|connection|status|voice|terminal)\b/i,
     ],
     domains: ["platform"],
+  },
+
+  // ─── build (inspection): live-browser / preview inspection ───
+  // A request to LOOK at this project's own rendered page — "use the
+  // live browser to inspect this project's preview page", "look at
+  // the site in the browser", "check that every image renders",
+  // "screenshot the preview", "open the preview and tell me what you
+  // see" — names no file and no mutation, so the #905 inspection
+  // group below (file/folder/filename vocabulary only) never matched
+  // it, and the build-mutation placement pattern ("use … page/hero")
+  // or the browser-session group claimed the turn instead. taskKind
+  // was never set, so the quality session fell back to prose scope
+  // "standard" and demanded build/test evidence a read can never
+  // produce — production run aa70559b (2026-11-11) failed the gate
+  // with '"build" (pending), "test" (pending)' for a pure inspection
+  // (ART-20261111-070 §2).
+  //
+  // ONE discriminating pattern, with the inspection group's exact
+  // semantics (mode build, project + execution, taskKind inspection).
+  // It must precede BOTH thief groups — first-match wins — so it sits
+  // here, ahead of browser-session control and build-mutation. Three
+  // guards keep that precedence safe:
+  //  1. Whole-message MUTATION exclusion: any mutation verb anywhere
+  //     ("inspect the preview and fix the hero", "check the page then
+  //     update the headline", "build a page and show me in the
+  //     browser") disqualifies the pattern, so hybrids keep their
+  //     existing routing and full build gating.
+  //  2. A page-ish object must be named (preview/site/page/hero/
+  //     image/…): bare browser control ("use the browser to check
+  //     the dashboard", "go to X in the browser") names none and
+  //     stays in the browser-session lane below.
+  //  3. The verb must be an inspection verb tied to a browser/preview
+  //     target (either order), an open/show-me of the preview, or a
+  //     check + renders pairing.
+  // classifyTaskScope and the required stage sets are untouched: the
+  // kernel signal remains the only source of the inspection scope.
+  // Corpus: intent-router.browser-inspection.test.ts.
+  {
+    mode: "build",
+    patterns: [
+      /^(?![\s\S]*?\b(fix|edit|change|add|remove|update|delete|create|build|make|deploy|publish|redesign|restyle|revamp|overhaul|repair|modify|replace|rename|insert|generate|write|improve)\b)(?=[\s\S]*?\b(preview|website|web\s?page|homepage|site|page|hero|images?)\b)[\s\S]*?(?:\b(?:inspect|check|look\s+at|view|screenshot|verify)\b[^.!?]{0,60}\b(?:live\s+browser|browser|preview|website|web\s?page|homepage|site|page)\b|\b(?:live\s+browser|preview)\b[^.!?]{0,40}\b(?:inspect|check|look|view|screenshot)\b|\bopen\b[^.!?]{0,40}\bpreview\b|\bshow\s+me\b[^.!?]{0,40}\bpreview\b|\b(?:check|inspect|verify)\b[^.!?]{0,60}\brenders?\b)/i,
+    ],
+    requiresProject: true,
+    requiresExecution: true,
+    taskKind: "inspection",
+    domains: ["engineering"],
   },
 
   // ─── browser: live browser session control ───────────────────
@@ -100,6 +164,39 @@ const MODE_PATTERNS: ModePattern[] = [
     domains: ["devops"],
   },
 
+  // ─── build (exec): explicit shell-command execution ─────────
+  // "run pwd && ls", "execute the command npm run build in the
+  // sandbox", "run git status" — the user asked for a COMMAND to run,
+  // not for files to be written. Without this group these turns fell
+  // into the build group below (via the loose run/execute + command
+  // pattern) with no taskKind, so the launch flow armed the build
+  // guard and the run was judged by the file-writing criterion: a
+  // successful `pwd && ls` ended with "The build produced no
+  // successful file-writing operation" and its output never reached
+  // the chat (Step 6 proof, 2026-11-14). Completion for this kind is
+  // the command's output — recorded as taskKind "exec" so the launch
+  // flow completes it like an inspection (tool-lane answer), never
+  // like a build. Placed BEFORE the build group (first-match wins);
+  // the patterns stay narrow so real builds are not stolen:
+  //  1. an exec verb tied to a command/shell/terminal noun,
+  //  2. an exec verb followed by shell chaining syntax (&& / ||) —
+  //     prose requests do not contain shell operators,
+  //  3. an exec verb tied to a bare well-known command token.
+  // "run the tests" / "run the build" match none of these (no noun,
+  // no operator, no command token) and stay in the build group.
+  {
+    mode: "build",
+    patterns: [
+      /\b(run|execute|exec)\b[^.!?]{0,40}\b(command|shell|terminal)\b/i,
+      /\b(run|execute|exec)\b[^.!?]{0,80}(&&|\|\|)/,
+      /\b(run|execute|exec)\b[^.!?]{0,60}\b(pwd|ls|cat|echo|whoami|uname|df|ps|env|printenv|node\s+--version|npm\s+--version|git\s+(status|log|diff|branch))\b/i,
+    ],
+    requiresProject: true,
+    requiresExecution: true,
+    taskKind: "exec",
+    domains: ["engineering"],
+  },
+
   // ─── build: implementation, file edits, code ─────────────────
   {
     mode: "build",
@@ -148,7 +245,21 @@ const MODE_PATTERNS: ModePattern[] = [
       // Media added to an existing target: "add images ... to my project".
       // The project/site target keeps this in the execution lane; a bare
       // "make me a logo" (no project target) still falls through to create.
-      /\b(add|upload|generate)\b.*\b(images?|photos?|pictures?|media|gallery)\b.*\b(project|site|website|page|section)\b/i,
+      // Additive verbs only (add/upload/insert/put): the deliverable is
+      // existing media being placed into the target.
+      /\b(add|upload|insert|put)\b.*\b(images?|photos?|pictures?|media|gallery)\b.*\b(project|site|website|page|section)\b/i,
+      // Generation INTO a site element stays build: "generate an image
+      // for my landing page" asks for the image AND its placement in
+      // the page — file-writing work the media lane does not do. The
+      // target list deliberately excludes bare "project": "generate an
+      // image ... and save it to this project" is a bare generation
+      // whose deliverable merely lands in the project (the registry's
+      // auto-insert saves it there) — this pattern's predecessor also
+      // matched `generate ... project`, stole the turn into build, and
+      // a successful generation then failed the build quality gate
+      // (round-10 proof, 2026-11-16). That wording now falls through
+      // to the media group below (taskKind "media").
+      /\b(generate)\b.*\b(images?|photos?|pictures?|media|gallery)\b.*\b(site|website|page|section)\b/i,
       /\b(add|implement|support)\b.*\b(dark mode|feature|endpoint|route|page)\b/i,
       /\b(fix|debug|resolve|patch)\b.*\b(bug|error|issue|crash|fail)\b/i,
       /\b(edit|update|change|modify|rename|delete)\b.*\b(file|readme|config|code|component)\b/i,
@@ -185,6 +296,54 @@ const MODE_PATTERNS: ModePattern[] = [
     domains: ["engineering"],
   },
 
+  // ─── build (inspection): read-only workspace inspection ──────
+  // A pure listing/read request names no MUTATION verb, so it matched
+  // no build pattern above and fell through to `think` with
+  // requiresExecution:false → the V1 text-only lane, whose model has
+  // no tools attached and honestly declined ("file inspection tools
+  // aren't available in this turn") while the turn created no run
+  // record (2026-11-11 staging acceptance, Gate B project, #902
+  // follow-up). Read-only inspection is still workspace execution: it
+  // must take the V2 structured-tool lane (files.list / files.read)
+  // where a verified workspace exists — and hit the messages route's
+  // coded TOOL_EXECUTION_UNAVAILABLE refusal where it does not —
+  // never a silent tool-less chat turn. Question-forms ABOUT a file
+  // ("what does index.html do?") and how-to questions ("how do I list
+  // files?") carry no inspection directive for THIS workspace and
+  // stay out — the same discriminator discipline as the bare-filename
+  // mutation pattern above.
+  {
+    mode: "build",
+    patterns: [
+      // Listing verbs + workspace nouns: "list the files in the
+      // project", "show me the files", "list files", "show the
+      // folder". How-to openings are teaching questions, not
+      // directives — excluded by the lookahead.
+      /^(?!\s*how\s+(do|can|would|should)\s+(i|you|we)\b)[\s\S]*?\b(list|show|display|enumerate)\b[^.!?]{0,60}\b(files?|file tree|directory|directories|folder|folders|project files|workspace contents)\b/i,
+      // "what files are in this project?", "which files does it have?"
+      /\b(what|which)\s+files?\b/i,
+      // "what's in the src folder?", "what is inside the project?"
+      /\bwhat(?:'s| is| are)\b[^.!?]{0,40}\b(in|inside)\b[^.!?]{0,40}\b(folder|directory|project|workspace|repo|repository|codebase)\b/i,
+      // Structure asks: "show me the project structure", "what's the
+      // directory structure of this project?"
+      /\b(file|directory|folder|project|repo|repository|codebase|workspace)\s+(structure|tree|layout)\b/i,
+      /\bstructure\s+of\b[^.!?]{0,40}\b(project|repo|repository|codebase|workspace)\b/i,
+      // Read a named file: "read index.html", "open src/app/page.tsx",
+      // "read the README.md file". The read verb is the discriminator;
+      // question-form openings are excluded exactly as in the
+      // bare-filename mutation pattern.
+      /^(?!\s*(how|what|why|when|where|which|who|explain|describe|tell\s+me)\b)[\s\S]*?\b(read|open|cat|print|view)\b[\s\S]{0,60}\b[\w./-]*\.(html?|css|scss|sass|less|js|jsx|mjs|cjs|ts|tsx|mts|cts|json|jsonc|md|mdx|txt|xml|svg|yml|yaml|toml|ini|cfg|conf|py|rb|go|rs|java|kt|kts|php|swift|c|h|cpp|hpp|cs|vue|svelte|sql|sh|bash|ps1|csv|tsv)\b/i,
+      // "show me the contents of src/app/page.tsx",
+      // "contents of the config file".
+      /\bcontents?\s+of\b[^.!?]{0,80}\b[\w./-]*\.(html?|css|scss|js|jsx|ts|tsx|json|md|txt|xml|yml|yaml|toml)\b/i,
+      /\bcontents?\s+of\b[^.!?]{0,40}\b(the\s+)?(file|folder|directory)\b/i,
+    ],
+    requiresProject: true,
+    requiresExecution: true,
+    taskKind: "inspection",
+    domains: ["engineering"],
+  },
+
   // ─── review: audits, reviews, security ───────────────────────
   {
     mode: "review",
@@ -209,6 +368,42 @@ const MODE_PATTERNS: ModePattern[] = [
     ],
     requiresCurrentInformation: true,
     domains: ["commerce", "current_events"],
+  },
+
+  // ─── create (media generation): bare media asks ─────────────
+  // "generate an image of a lion", "make me a logo", "need a
+  // picture of a lion" — a deliverable media file, not site work
+  // and not chat. image.generate lives in the V2 tool lane; without
+  // requiresExecution these fell to the V1 text-only lane, whose
+  // model has no tools and could only decline in prose (production
+  // refusal, 2026-11-15). Placed after the build groups — media
+  // added to a site ("add images to my project", line ~243 above)
+  // keeps its build routing — and before the generic create group,
+  // whose bare-verb/noun patterns carry no execution requirement.
+  // The noun list mirrors the build group's excluded media nouns;
+  // website/code artifacts are deliberately absent so build/create
+  // requests for sites are never swallowed. The trailing lookahead
+  // keeps support phrasings out: "I need to fix the image upload
+  // bug" names a defect, not a deliverable (the fix+bug build
+  // pattern claims it first anyway; this guards the bare forms).
+  {
+    mode: "create",
+    patterns: [
+      /\b(generate|create|make|produce|draw|render|design|paint|sketch)\b[^.!?]{0,40}\b(images?|pictures?|photos?|photographs?|drawings?|illustrations?|graphics?|banners?|thumbnails?|icons?|artwork|posters?|logos?)\b(?!\s+(?:uploads?|bugs?|errors?|files?|formats?|sizes?|resolutions?)\b)/i,
+      /\b(need|want|would like|get me|give me|gimme)\b[^.!?]{0,30}\b(images?|pictures?|photos?|photographs?|drawings?|illustrations?|graphics?|banners?|thumbnails?|icons?|artwork|posters?|logos?)\b(?!\s+(?:uploads?|bugs?|errors?|files?|formats?|sizes?|resolutions?)\b)/i,
+      // "draw a dragon" names the subject, not a media noun — the
+      // verb itself is the artifact signal. Idiom objects excluded.
+      /\b(draw|sketch|paint)\b[^.!?]{0,40}\b(?:a|an)\b(?!\s+(?:conclusion|breath|attention|bath)\b)/i,
+    ],
+    requiresExecution: true,
+    // A bare media ask is a deliverable media file, not site work:
+    // record the kind so the quality gate scopes the run to the
+    // evidence a generation produces instead of falling back to the
+    // prose classifier's "standard" build scope (which demanded
+    // build/test evidence and failed a successful lion generation,
+    // LION-RUN-DIAGNOSIS-2026-11-16 Q1).
+    taskKind: "media",
+    domains: ["design", "creative"],
   },
 
   // ─── create: design, generate, produce ───────────────────────
@@ -345,6 +540,7 @@ export function classifyIntent(
   const requiresProject = matchedPattern?.requiresProject ?? false;
   const requiresExecution = matchedPattern?.requiresExecution ?? false;
   const requiresCurrentInformation = matchedPattern?.requiresCurrentInformation ?? false;
+  const taskKind = matchedPattern?.taskKind;
 
   // Confidence: high when a pattern matched explicitly, lower for default
   const confidence = matchedPattern ? 0.85 : 0.5;
@@ -363,6 +559,7 @@ export function classifyIntent(
     requiresCurrentInformation,
     requiresPrivateData,
     requiresExecution,
+    taskKind,
     confidence,
     reasoning: anaphoricFollowUp
       ? `${reasoning} Anaphoric follow-up (no artifact noun)${opts?.hasProject ? " with project context — caller should clarify the target." : "."}`

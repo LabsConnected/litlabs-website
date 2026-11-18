@@ -5,8 +5,10 @@ import "@testing-library/jest-dom";
 
 // ── Mocks ────────────────────────────────────────────────────────────
 // Regression coverage for the mobile work-surface dock. Chat, Preview,
-// Files, Activity, and More must switch the existing shared Studio surfaces
+// Files, and More must switch the existing shared Studio surfaces
 // at a real mobile viewport (674x1536), without creating a second runtime.
+// (Finish Spec, Larry 2026-11-14: the phone dock is Chat · Preview ·
+// Files · More; Activity and Settings live inside More.)
 // Legacy destination routing remains covered by CommandStudio.routing.test.tsx.
 //
 // Same mock harness as CommandStudio.preview-singleton.test.tsx: next/dynamic
@@ -453,9 +455,12 @@ describe("MobileCommandNav — shared work surfaces", () => {
   it("renders work surfaces instead of desktop destinations", async () => {
     await renderMobileCommandStudio();
     const nav = within(mobileNav());
-    for (const label of ["Chat", "Preview", "Files", "Activity", "More"]) {
+    for (const label of ["Chat", "Preview", "Files", "More"]) {
       expect(nav.getByLabelText(label), `${label} surface should be present`).toBeTruthy();
     }
+    // Activity is not a bottom-nav entry — it lives inside More (the
+    // Tools sheet) and in its own board panel (Finish Spec, 2026-11-14).
+    expect(nav.queryByLabelText("Activity")).toBeNull();
     expect(nav.queryByLabelText("Agents")).toBeNull();
     expect(nav.queryByLabelText("Missions")).toBeNull();
   });
@@ -471,18 +476,18 @@ describe("MobileCommandNav — shared work surfaces", () => {
     const { user } = await renderMobileCommandStudio();
     const preview = within(mobileNav()).getByLabelText("Preview");
     expect(preview.getAttribute("aria-current")).toBe("page");
-    await user.click(within(mobileNav()).getByLabelText("Activity"));
+    await user.click(within(mobileNav()).getByLabelText("Files"));
     await waitFor(() => {
-      expect(within(mobileNav()).getByLabelText("Activity").getAttribute("aria-current")).toBe("page");
+      expect(within(mobileNav()).getByLabelText("Files").getAttribute("aria-current")).toBe("page");
     });
   });
 
-  it("opens Chat and Activity through the same LiTT sheet", async () => {
+  it("opens Chat through the LiTT sheet and Files through the context drawer", async () => {
     const { user } = await renderMobileCommandStudio();
     await user.click(within(mobileNav()).getByLabelText("Chat"));
     await waitFor(() => expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy());
-    await user.click(within(mobileNav()).getByLabelText("Activity"));
-    await waitFor(() => expect(screen.getByTestId("litt-mobile-tab-live")).toHaveAttribute("aria-pressed", "true"));
+    await user.click(within(mobileNav()).getByLabelText("Files"));
+    await waitFor(() => expect(screen.getByTestId("context-files-panel")).toBeTruthy());
   });
 });
 

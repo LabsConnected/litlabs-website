@@ -154,6 +154,7 @@ describe("prompt-builder: identity composition", () => {
       selection: { kind: "installed", instanceId: "marketplace_nova_123" },
       agentInstanceId: "marketplace_nova_123",
       agentId: "nova",
+      templateSlug: "nova",
       agentVersionId: "v1",
       displayName: "Nova",
       systemPrompt: "You are Nova — the AI Business Partner inside LiTTree Lab Studios.",

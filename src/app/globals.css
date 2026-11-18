@@ -92,7 +92,7 @@
   --text-primary: #f5f1fa;
   --text-secondary: #a29aaf;
   --text-muted: #8a8299;
-  --studio-header-h: 48px;
+  --studio-header-h: 44px;
   --studio-mobile-bottom-h: 62px;
   --studio-nav-w: 56px;
   --studio-rail-w: 300px;
@@ -234,6 +234,59 @@
 }
 .studio-anim-dropdown {
   animation: studio-dropdown-in var(--studio-anim-fast) ease;
+}
+
+/* Feed like-count pop (Kimi wiring item 17): the count span is keyed
+   by the count itself, so a like/unlike replays one small scale pop.
+   Presentation only — the number is the post's real like count. */
+@keyframes feed-like-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+.feed-like-count {
+  display: inline-block;
+  animation: feed-like-pop 0.25s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .feed-like-count {
+    animation: none;
+  }
+}
+
+/* Board panel spring settle (Kimi wiring item 2): one short overshoot
+   on drag/resize release. Transform-only — panel geometry lives in the
+   board layout store and is never animated. */
+@keyframes board-panel-settle {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.006); }
+  100% { transform: scale(1); }
+}
+.board-panel-settling {
+  animation: board-panel-settle 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-panel-settling {
+    animation: none;
+  }
+}
+
+/* Preview curtain-lift scanline (Kimi wiring item 1): one accent sweep
+   while a fresh preview reveals. The blur half of the reveal is inline
+   on the iframe; under reduced motion the scanline never renders its
+   sweep (the component still mounts it, so the animation is disabled
+   here and the reveal reads as a plain opacity fade). */
+@keyframes preview-scanline-sweep {
+  from { top: -10%; }
+  to { top: 105%; }
+}
+.preview-scanline {
+  animation: preview-scanline-sweep 0.45s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .preview-scanline {
+    display: none;
+  }
 }
 
 /* Playing indicator bars (for YouTube player + voice) */
@@ -2986,6 +3039,188 @@ main {
   --wallpaper-saturation: 1;
   --panel-opacity: 0.84;
   --glow-strength: 1;
+}
+
+/* ============================================================
+   STUDIO TLC SCOPE — approved design language (Larry, 2026-11-10)
+   ------------------------------------------------------------
+   Re-scopes the Studio's EXISTING token system (--studio-*,
+   --text-*, --bg-*, glass + shadow tokens) to the approved
+   homepage design language for everything inside the Studio
+   shell: true-white surfaces worked into green, deep-green
+   accent, lime kept as highlight only, one soft green shadow,
+   light-locked presentation (the Studio frame no longer flips
+   dark with the OS or the visual pack — same lesson as the
+   homepage mockup's removed dark palette). The lock governs
+   the default presentation only: when the user picks Dark (or
+   System under a dark OS), the STUDIO DARK RE-SCOPE directly
+   below re-points these tokens at the theme's skin tokens
+   (owner decision, 2026-11-14).
+
+   This is a token re-scope, NOT a new theme or visual pack:
+   registration stays with the ThemeContext / visual-pack
+   system. When the theme lane lands a first-class light pack,
+   it should carry these same values so this scope can retire.
+   Layout variants ([data-layout=...] below) still layer their
+   own !important surface treatments on top, as before.
+   ============================================================ */
+.studio-shell {
+  /* Surfaces — white worked into green. Polish pass (2026-11-13):
+     the shell backdrop deepened one step and the border/text tokens
+     darkened so hairlines and muted labels stay legible on white —
+     same light design language, stronger definition. */
+  --studio-bg: #e3edd8;
+  --studio-surface: #ffffff;
+  --studio-elevated: #ffffff;
+  --studio-card: #ffffff;
+  --studio-border: #86ac72;
+  --studio-border-strong: #6e9a57;
+  --bg-main: #e3edd8;
+  --bg-elevated: #ffffff;
+  --bg-solid: rgba(255, 255, 255, 0.96);
+  --bg-card: rgba(255, 255, 255, 0.92);
+  --glass-1: rgba(255, 255, 255, 0.85);
+  --glass-2: rgba(255, 255, 255, 0.9);
+  --glass-3: rgba(244, 249, 238, 0.95);
+  --glass-border: #86ac72;
+  --glass-border-highlight: #6e9a57;
+  --border-soft: rgba(14, 60, 26, 0.18);
+  --border-strong: rgba(14, 60, 26, 0.32);
+  --grid-line: rgba(23, 122, 54, 0.07);
+
+  /* Text — ink on white */
+  --text-main: #0e1510;
+  --text-primary: #0e1510;
+  --text-secondary: #3f5a42;
+  --text-muted: #52684f;
+
+  /* Accent — deep green primary; lime survives as highlight
+     (--mark / chartreuse usages outside these tokens unchanged).
+     Scoped override only: the canonical @theme accent tokens
+     and litt-tokens.ts are untouched. */
+  --color-accent: #177a36;
+  --color-accent-strong: #0c5a26;
+  --color-accent-deep: #0c5a26;
+  --color-on-accent: #ffffff;
+  --litt-primary: #177a36;
+  --litt-primary-strong: #0c5a26;
+  --shadow-accent-glow: 0 0 24px rgba(23, 122, 54, 0.28);
+  --shadow-accent-glow-strong: 0 0 40px rgba(23, 122, 54, 0.4);
+
+  /* Depth — one soft green shadow family, no black/purple glow */
+  --shadow-card: 0 20px 54px rgba(14, 60, 26, 0.14);
+  --shadow-glow: 0 0 40px rgba(23, 122, 54, 0.1);
+  --studio-glow-green: 0 0 8px rgba(23, 122, 54, 0.35);
+  --studio-glow-green-soft: 0 0 12px rgba(23, 122, 54, 0.18);
+  --studio-glow-purple: 0 0 16px rgba(23, 122, 54, 0.16);
+  --studio-glow-purple-soft: 0 0 20px rgba(23, 122, 54, 0.1);
+}
+
+/* ============================================================
+   STUDIO DARK RE-SCOPE — owner decision, 2026-11-14
+   ------------------------------------------------------------
+   The scope above light-locks the Studio token system to the
+   approved light design. That lock predates the owner's
+   decision that Dark mode must actually work in the Signature
+   skin (the same decision that authored darkSkins.signature).
+   When the EFFECTIVE theme mode is dark, the Studio tokens
+   re-point at the theme's own published root variables
+   (--bg-color / --box-bg / --border-color / --text-color /
+   --accent-color — set on <html> by ThemeProvider from the
+   resolved skin). No new palette is authored here: the Studio
+   consumes the same skin tokens Discover consumes. For the
+   Signature skin those are Larry's charcoal values (bg
+   #15171B, surface #1F2228, border #2E3238, text #F2F4F3)
+   with his Signature green as the accent voice. Light mode —
+   including "system" under a light OS — keeps the scope above
+   untouched, byte for byte. The two rules below carry the
+   same assignments: one for an explicit Dark choice, one for
+   "system" under a dark OS (mirroring resolveEffectiveMode).
+   ============================================================ */
+html[data-theme-mode="dark"] .studio-shell {
+  --studio-bg: var(--bg-color);
+  --studio-surface: var(--box-bg);
+  --studio-elevated: var(--box-bg);
+  --studio-card: var(--box-bg);
+  --studio-border: var(--border-color);
+  --studio-border-strong: color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%);
+  --bg-main: var(--bg-color);
+  --bg-elevated: var(--box-bg);
+  --bg-solid: var(--box-bg);
+  --bg-card: var(--box-bg);
+  --glass-1: var(--box-bg);
+  --glass-2: var(--box-bg);
+  --glass-3: var(--box-bg);
+  --glass-border: var(--border-color);
+  --glass-border-highlight: color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%);
+  --border-soft: color-mix(in srgb, var(--text-color) 14%, transparent);
+  --border-strong: color-mix(in srgb, var(--text-color) 28%, transparent);
+  --grid-line: color-mix(in srgb, var(--accent-color) 7%, transparent);
+
+  --text-main: var(--text-color);
+  --text-primary: var(--text-color);
+  --text-secondary: color-mix(in srgb, var(--text-color) 76%, var(--bg-color));
+  --text-muted: color-mix(in srgb, var(--text-color) 58%, var(--bg-color));
+
+  --color-accent: var(--accent-color);
+  --color-accent-strong: color-mix(in srgb, var(--accent-color) 76%, black);
+  --color-accent-deep: color-mix(in srgb, var(--accent-color) 76%, black);
+  --color-on-accent: var(--bg-color);
+  --litt-primary: var(--accent-color);
+  --litt-primary-strong: color-mix(in srgb, var(--accent-color) 76%, black);
+  --shadow-accent-glow: 0 0 24px color-mix(in srgb, var(--accent-color) 28%, transparent);
+  --shadow-accent-glow-strong: 0 0 40px color-mix(in srgb, var(--accent-color) 40%, transparent);
+
+  --shadow-card: 0 20px 54px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 40px color-mix(in srgb, var(--accent-color) 10%, transparent);
+  --studio-glow-green: 0 0 8px color-mix(in srgb, var(--accent-color) 35%, transparent);
+  --studio-glow-green-soft: 0 0 12px color-mix(in srgb, var(--accent-color) 18%, transparent);
+  --studio-glow-purple: 0 0 16px color-mix(in srgb, var(--accent-color) 16%, transparent);
+  --studio-glow-purple-soft: 0 0 20px color-mix(in srgb, var(--accent-color) 10%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-theme-mode="system"] .studio-shell {
+    --studio-bg: var(--bg-color);
+    --studio-surface: var(--box-bg);
+    --studio-elevated: var(--box-bg);
+    --studio-card: var(--box-bg);
+    --studio-border: var(--border-color);
+    --studio-border-strong: color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%);
+    --bg-main: var(--bg-color);
+    --bg-elevated: var(--box-bg);
+    --bg-solid: var(--box-bg);
+    --bg-card: var(--box-bg);
+    --glass-1: var(--box-bg);
+    --glass-2: var(--box-bg);
+    --glass-3: var(--box-bg);
+    --glass-border: var(--border-color);
+    --glass-border-highlight: color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%);
+    --border-soft: color-mix(in srgb, var(--text-color) 14%, transparent);
+    --border-strong: color-mix(in srgb, var(--text-color) 28%, transparent);
+    --grid-line: color-mix(in srgb, var(--accent-color) 7%, transparent);
+
+    --text-main: var(--text-color);
+    --text-primary: var(--text-color);
+    --text-secondary: color-mix(in srgb, var(--text-color) 76%, var(--bg-color));
+    --text-muted: color-mix(in srgb, var(--text-color) 58%, var(--bg-color));
+
+    --color-accent: var(--accent-color);
+    --color-accent-strong: color-mix(in srgb, var(--accent-color) 76%, black);
+    --color-accent-deep: color-mix(in srgb, var(--accent-color) 76%, black);
+    --color-on-accent: var(--bg-color);
+    --litt-primary: var(--accent-color);
+    --litt-primary-strong: color-mix(in srgb, var(--accent-color) 76%, black);
+    --shadow-accent-glow: 0 0 24px color-mix(in srgb, var(--accent-color) 28%, transparent);
+    --shadow-accent-glow-strong: 0 0 40px color-mix(in srgb, var(--accent-color) 40%, transparent);
+
+    --shadow-card: 0 20px 54px rgba(0, 0, 0, 0.45);
+    --shadow-glow: 0 0 40px color-mix(in srgb, var(--accent-color) 10%, transparent);
+    --studio-glow-green: 0 0 8px color-mix(in srgb, var(--accent-color) 35%, transparent);
+    --studio-glow-green-soft: 0 0 12px color-mix(in srgb, var(--accent-color) 18%, transparent);
+    --studio-glow-purple: 0 0 16px color-mix(in srgb, var(--accent-color) 16%, transparent);
+    --studio-glow-purple-soft: 0 0 20px color-mix(in srgb, var(--accent-color) 10%, transparent);
+  }
 }
 
 /* Map visual pack font variables to theme tokens */

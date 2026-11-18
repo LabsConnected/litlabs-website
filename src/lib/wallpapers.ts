@@ -352,6 +352,12 @@ export const WALLPAPERS: Wallpaper[] = [
     fullStyle: { background: 'linear-gradient(180deg, #fafafa 0%, #f5f5f5 100%)' },
     collection: 'ambient',
     gradientFallback: "#fafafa",
+    // Picking the plain light wallpaper must actually deliver it:
+    // without these, a stale dark overlay veil (0.46) and a leftover
+    // constellation effect from a previous wallpaper survived the
+    // selection and the page still rendered grey (verified live).
+    defaultEffect: 'none',
+    defaultOverlay: 0,
   },
   {
     id: 'glass',

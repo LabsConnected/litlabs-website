@@ -126,6 +126,57 @@ export async function listConversations(
 }
 
 /**
+ * Placeholder titles minted by eager creation paths ("New Chat" /
+ * "New worktab"). A conversation carrying one has never been given a
+ * real name — contrast voice-call conversations, which always carry a
+ * real "Voice call — …" title.
+ */
+export function isPlaceholderConversationTitle(title: string | null | undefined): boolean {
+  if (title === null || title === undefined) return true;
+  const trimmed = title.trim();
+  return trimmed === "" || trimmed === "New conversation";
+}
+
+/** How many candidate conversations to emptiness-check per lookup. */
+const REUSE_CANDIDATE_LIMIT = 10;
+
+async function countConversationMessages(conversationId: string): Promise<number> {
+  const { count, error } = await supabaseAdmin
+    .from("studio_conversation_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("conversation_id", conversationId);
+  // Unknown counts as non-empty: never reuse on uncertainty.
+  if (error || count === null) return Number.POSITIVE_INFINITY;
+  return count;
+}
+
+/**
+ * Find an existing conversation that a fresh "New Chat" may focus
+ * instead of minting another record: same owner + project, not
+ * archived, placeholder title, ZERO messages, and — when given — the
+ * requested agent slug, so surfaces never adopt each other's shells.
+ * Most recently updated wins (listConversations ordering). Returns
+ * null when nothing qualifies. Read-only: nothing is created, deleted,
+ * or migrated here.
+ */
+export async function findReusableEmptyConversation(
+  ownerId: string,
+  projectId: string,
+  options?: { activeAgentSlug?: AgentSlug },
+): Promise<Conversation | null> {
+  const conversations = await listConversations(ownerId, projectId);
+  let checked = 0;
+  for (const conversation of conversations) {
+    if (checked >= REUSE_CANDIDATE_LIMIT) break;
+    if (!isPlaceholderConversationTitle(conversation.title)) continue;
+    if (options?.activeAgentSlug && conversation.activeAgentSlug !== options.activeAgentSlug) continue;
+    checked++;
+    if ((await countConversationMessages(conversation.id)) === 0) return conversation;
+  }
+  return null;
+}
+
+/**
  * Get a single conversation, scoped by owner_id.
  * Returns null if not found or not owned by the user.
  */

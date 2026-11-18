@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -13,12 +13,17 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useStudioContext } from "../context/StudioContext";
 import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
+import { copyToClipboard } from "@/lib/studio/message-copy";
+import { useBoardPanelStatusStore } from "../stores/useBoardPanelStatusStore";
+import { attemptWorkspacePrepare, isHostExecSettled } from "@/lib/studio/host-exec-session";
+import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state";
 
 interface FileEntry {
   name: string;
@@ -36,6 +41,60 @@ const GIT_BADGE_COLORS: Record<NonNullable<FileEntry["gitStatus"]>, { bg: string
   U: { bg: "rgba(96,165,250,0.15)", color: "#60a5fa", label: "Untracked" },
   C: { bg: "rgba(34,211,238,0.15)", color: "#22d3ee", label: "Conflict" },
 };
+
+const GIT_STATUS_VALUES = new Set(["M", "A", "D", "U", "C"]);
+
+/** The files API returns a one-letter git status per entry (the Code
+ *  workspace's parser already keeps it); validate before trusting it. */
+function parseGitStatus(value: unknown): FileEntry["gitStatus"] {
+  return typeof value === "string" && GIT_STATUS_VALUES.has(value)
+    ? (value as FileEntry["gitStatus"])
+    : undefined;
+}
+
+/**
+ * Media file extensions (Kimi wiring item 7): image / video / audio
+ * files belong to the Media panel, not the text editor. Extension-based
+ * because the files API carries no media kind — the same extensions the
+ * Asset Lake classifies by.
+ */
+const MEDIA_EXTENSIONS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico",
+  "mp4", "webm", "mov", "m4v",
+  "mp3", "wav", "ogg", "m4a", "flac", "aac",
+]);
+
+export function isMediaPath(path: string): boolean {
+  const extension = path.split(".").pop()?.toLowerCase() ?? "";
+  return MEDIA_EXTENSIONS.has(extension);
+}
+
+/**
+ * Parse one directory listing from the files API into FileEntry rows
+ * (null when the payload is malformed). Shared by the user-facing
+ * loader, its prepare-retry path, and the search expansion walk so all
+ * three read gitStatus identically.
+ */
+function parseFileEntries(
+  payload: Record<string, unknown> | null,
+  directory: string,
+): FileEntry[] | null {
+  if (!payload || !Array.isArray(payload.entries)) return null;
+  return payload.entries
+    .flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const raw = entry as { name?: unknown; type?: unknown; size?: unknown; gitStatus?: unknown };
+      if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
+      return [{
+        name: raw.name,
+        type: raw.type,
+        size: typeof raw.size === "number" ? raw.size : undefined,
+        gitStatus: parseGitStatus(raw.gitStatus),
+        path: directory === "." ? raw.name : `${directory}/${raw.name}`,
+      } satisfies FileEntry];
+    })
+    .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1));
+}
 
 function GitBadge({ status }: { status: NonNullable<FileEntry["gitStatus"]> }) {
   const colors = GIT_BADGE_COLORS[status];
@@ -156,6 +215,7 @@ export default function StudioProjectFiles({
   onSaved,
   onMutation,
   onWorkspacePrepared,
+  onOpenMediaFile,
 }: {
   projectId: string | null;
   repositoryName: string | null;
@@ -165,6 +225,13 @@ export default function StudioProjectFiles({
   onSaved?: () => void;
   onMutation?: () => void;
   onWorkspacePrepared?: () => void;
+  /**
+   * Kimi wiring item 7: opening an image/video/audio file routes to
+   * the Media surface instead of the text editor. The host decides how
+   * (board: summon the Media panel; stage: open the Media dock tab).
+   * When absent, media files keep the honest not-text-editable state.
+   */
+  onOpenMediaFile?: (path: string) => void;
 }) {
   const { getToken } = useClerkAuth();
   const { setActiveFile } = useStudioContext();
@@ -177,7 +244,14 @@ export default function StudioProjectFiles({
   const [exporting, setExporting] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Specific save states (Studio Finish Spec): the button reads
+  // Saving… while the write runs, then Saved until the next edit.
+  const [justSaved, setJustSaved] = useState(false);
   const [preparing, setPreparing] = useState(false);
+  // True once this project returned the HOST_EXECUTION_DISABLED prepare
+  // verdict (this session): the panel settles into the honest unavailable
+  // explanation and never auto-retries or offers Prepare again.
+  const [hostExecUnavailable, setHostExecUnavailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unsupportedPath, setUnsupportedPath] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -186,6 +260,43 @@ export default function StudioProjectFiles({
    * Save is blocked until the user reloads or explicitly keeps their version.
    */
   const [conflictNotice, setConflictNotice] = useState<string | null>(null);
+  // Kimi wiring item 7: filename search + row context menu. The tree
+  // loads lazily per directory, so search first expands the tree —
+  // walking folders it has not loaded yet (capped) — and only then
+  // matches, so results are honest full-path matches, not just the
+  // rows that happen to be on screen.
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<FileEntry[] | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ entry: FileEntry; x: number; y: number } | null>(null);
+  const entriesRef = useRef(entries);
+  useEffect(() => {
+    entriesRef.current = entries;
+  }, [entries]);
+
+  // onWorkspacePrepared is invoked through a ref so loadDirectory never
+  // depends on the prop's identity: a parent passing an inline arrow can
+  // no longer recreate loadDirectory (and re-fire the panel-wiping load
+  // effect) on every render.
+  const onWorkspacePreparedRef = useRef(onWorkspacePrepared);
+  useEffect(() => {
+    onWorkspacePreparedRef.current = onWorkspacePrepared;
+  }, [onWorkspacePrepared]);
+
+  // Automatic prepare-recovery is bounded to ONE attempt per project
+  // per mount. host-exec-session only caches the coded
+  // HOST_EXECUTION_DISABLED verdict — any differently-shaped failure
+  // (non-coded 503, non-JSON error body, prepare "ready" but files
+  // still failing) previously cycled fetch → prepare → fetch forever,
+  // because `preparing` toggling recreated loadDirectory and re-fired
+  // the load effect. After the one attempt the load error stands and
+  // the manual Prepare button (prepareWorkspace) is the retry path.
+  // The budget bounds AUTOMATIC recovery only: an explicit user retry
+  // (Refresh, or the load after Prepare) deletes the project's entry
+  // first, so a manual retry is a real retry — before that, a failure
+  // that consumed the budget during an outage left Refresh standing
+  // on the same error and only a full remount ever retried.
+  const autoPrepareAttemptedRef = useRef<Set<string>>(new Set());
 
   const dirty = activePath !== null && content !== originalContent;
 
@@ -215,6 +326,20 @@ export default function StudioProjectFiles({
     }
     return payload;
   }, [authHeaders]);
+
+  // Prepare through the session guard: after a HOST_EXECUTION_DISABLED
+  // verdict this resolves "unavailable" without any request, so the
+  // files-recovery path below can never spin into a prepare loop.
+  const runPrepare = useCallback(() => {
+    if (!projectId) return Promise.resolve({ kind: "failed", message: "No project selected" } as const);
+    return attemptWorkspacePrepare(projectId, async () =>
+      fetchWithTimeout(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, {
+        method: "POST",
+        credentials: "include",
+        headers: await authHeaders(),
+      }),
+    );
+  }, [authHeaders, projectId]);
 
   const exportZip = useCallback(async () => {
     if (!projectId || exporting) return;
@@ -264,20 +389,14 @@ export default function StudioProjectFiles({
         signal: AbortSignal.timeout(20_000),
       });
       const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-      if (!response.ok || !payload || !Array.isArray(payload.entries)) {
+      // parseFileEntries keeps the API's git status (Kimi wiring items
+      // 7 + 11): the row badges and the board toolbar's changed-files
+      // count both read it. The inline parser this replaces dropped it,
+      // so the badges that already existed in this file never rendered.
+      const nextEntries = parseFileEntries(payload, safeDirectory);
+      if (!response.ok || !nextEntries) {
         throw new Error(typeof payload?.error === "string" ? payload.error : `Request failed (${response.status})`);
       }
-      const nextEntries = payload.entries.flatMap((entry) => {
-        if (!entry || typeof entry !== "object") return [];
-        const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
-        if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
-        return [{
-          name: raw.name,
-          type: raw.type,
-          size: typeof raw.size === "number" ? raw.size : undefined,
-          path: safeDirectory === "." ? raw.name : `${safeDirectory}/${raw.name}`,
-        } satisfies FileEntry];
-      }).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
       setEntries((current) => ({ ...current, [safeDirectory]: nextEntries }));
     } catch (loadError) {
       const msg = loadError instanceof Error ? loadError.message : "Failed to load project files";
@@ -287,32 +406,47 @@ export default function StudioProjectFiles({
         response?.status === 500 ||
         response?.status === 503;
       if (recoverable && !preparing) {
+        // Settled host-execution verdict: do not attempt prepare at all.
+        // (This branch previously re-POSTed prepare on every load cycle:
+        // `preparing` toggling recreated loadDirectory, which re-fired the
+        // mount effect, which failed files again — an unbounded loop of
+        // 503s for repo-backed projects.)
+        if (isHostExecSettled(projectId)) {
+          setHostExecUnavailable(true);
+          setError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+          return;
+        }
+        // One automatic prepare attempt per project per mount (see
+        // autoPrepareAttemptedRef above). Beyond it, surface the load
+        // error and leave the manual Prepare button as the retry path.
+        if (autoPrepareAttemptedRef.current.has(projectId)) {
+          setError(msg);
+          return;
+        }
+        autoPrepareAttemptedRef.current.add(projectId);
         setPreparing(true);
         try {
-          const prepPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
-          if (prepPayload && prepPayload.workspaceStatus === "ready") {
-            onWorkspacePrepared?.();
-            window.dispatchEvent(new CustomEvent("studio:workspace-recovered", { detail: { projectId, workspaceId: prepPayload.workspaceId } }));
-            await new Promise((resolve) => setTimeout(resolve, 600));
-            const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
-            if (retryPayload && Array.isArray(retryPayload.entries)) {
-              const retryEntries = retryPayload.entries.flatMap((entry) => {
-                if (!entry || typeof entry !== "object") return [];
-                const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
-                if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
-                return [{
-                  name: raw.name,
-                  type: raw.type,
-                  size: typeof raw.size === "number" ? raw.size : undefined,
-                  path: safeDirectory === "." ? raw.name : `${safeDirectory}/${raw.name}`,
-                } satisfies FileEntry];
-              }).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
-              setEntries((current) => ({ ...current, [safeDirectory]: retryEntries }));
-              return;
-            }
+          const outcome = await runPrepare();
+          if (outcome.kind === "unavailable") {
+            setHostExecUnavailable(true);
+            setError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+            return;
           }
-          const prepErr = typeof prepPayload?.error === "string" ? prepPayload.error : "Workspace re-preparation failed. Click Prepare to retry.";
-          setError(prepErr);
+          if (outcome.kind === "failed") {
+            setError(outcome.message);
+            return;
+          }
+          const prepPayload = outcome.payload;
+          onWorkspacePreparedRef.current?.();
+          window.dispatchEvent(new CustomEvent("studio:workspace-recovered", { detail: { projectId, workspaceId: prepPayload.workspaceId } }));
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
+          const retryEntries = parseFileEntries(retryPayload, safeDirectory);
+          if (retryEntries) {
+            setEntries((current) => ({ ...current, [safeDirectory]: retryEntries }));
+            return;
+          }
+          setError("Workspace re-preparation did not restore file access. Click Prepare to retry.");
         } catch {
           setError("Workspace was lost and could not be re-prepared automatically. Click Prepare to retry.");
         } finally {
@@ -324,7 +458,89 @@ export default function StudioProjectFiles({
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [projectId, requestJson, preparing, onWorkspacePrepared, authHeaders]);
+  }, [projectId, requestJson, runPrepare, preparing, authHeaders]);
+
+  // Search expansion loader (Kimi wiring item 7): like loadDirectory
+  // but with NO error/recovery side effects — a folder that fails to
+  // load during a background search walk simply stays unexpanded, and
+  // the match list is computed from whatever the tree actually holds.
+  const expandDirectory = useCallback(async (directory: string) => {
+    if (!projectId) return;
+    const safeDirectory = normalizePath(directory);
+    try {
+      const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`, {
+        credentials: "include",
+        headers: await authHeaders(),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!response.ok) return;
+      const parsed = parseFileEntries(payload, safeDirectory);
+      if (parsed) setEntries((current) => ({ ...current, [safeDirectory]: parsed }));
+    } catch {
+      // Best-effort: expansion keeps what the tree already has.
+    }
+  }, [authHeaders, projectId]);
+  const expandDirectoryRef = useRef(expandDirectory);
+  useEffect(() => {
+    expandDirectoryRef.current = expandDirectory;
+  }, [expandDirectory]);
+
+  // Filename search: expand the tree (bounded passes over unloaded
+  // folders), then match file paths against the query. While expansion
+  // runs the panel shows an honest "searching" state — results are
+  // never just the rows that happened to be loaded.
+  useEffect(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) {
+      setSearching(false);
+      setSearchResults(null);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    void (async () => {
+      for (let pass = 0; pass < 24 && !cancelled; pass += 1) {
+        const snapshot = entriesRef.current;
+        const unloaded = Object.values(snapshot)
+          .flat()
+          .filter((entry) => entry.type === "folder" && !(entry.path in snapshot))
+          .map((entry) => entry.path);
+        if (unloaded.length === 0) break;
+        await Promise.all(
+          unloaded.slice(0, 8).map((dir) => expandDirectoryRef.current(dir)),
+        );
+      }
+      if (cancelled) return;
+      const matches = Object.values(entriesRef.current)
+        .flat()
+        .filter((entry) => entry.type === "file" && entry.path.toLowerCase().includes(q))
+        .sort((a, b) => a.path.localeCompare(b.path));
+      setSearchResults(matches);
+      setSearching(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [query]);
+
+  // Kimi wiring item 11: publish the changed-files count (from the
+  // gitStatus the API returns, over the directories loaded so far —
+  // a full search expansion makes it tree-wide) as this panel's board
+  // status badge. Zero changes publishes nothing: no badge, no dot.
+  const setPanelStatus = useBoardPanelStatusStore((s) => s.setPanelStatus);
+  useEffect(() => {
+    const changed = Object.values(entries)
+      .flat()
+      .filter((entry) => entry.gitStatus).length;
+    setPanelStatus(
+      "files",
+      changed > 0
+        ? { tone: "working", label: `${changed} file${changed === 1 ? "" : "s"} changed`, badge: changed }
+        : null,
+    );
+  }, [entries, setPanelStatus]);
+  useEffect(() => () => setPanelStatus("files", null), [setPanelStatus]);
 
   useEffect(() => {
     setEntries({});
@@ -336,6 +552,7 @@ export default function StudioProjectFiles({
     setUnsupportedPath(null);
     setConflictNotice(null);
     setError(null);
+    setHostExecUnavailable(projectId ? isHostExecSettled(projectId) : false);
     if (projectId) {
       // Always try to load — the files route will auto-recover if the
       // workspace was lost on the terminal server.
@@ -345,25 +562,48 @@ export default function StudioProjectFiles({
 
   const prepareWorkspace = useCallback(async () => {
     if (!projectId || preparing) return;
+    // Settled verdict: explain, never re-POST.
+    if (isHostExecSettled(projectId)) {
+      setHostExecUnavailable(true);
+      setError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+      return;
+    }
     setPreparing(true);
     setError(null);
     try {
-      const payload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
-      if (!payload || payload.workspaceStatus !== "ready") throw new Error("Workspace preparation did not complete");
-      onWorkspacePrepared?.();
+      const outcome = await runPrepare();
+      if (outcome.kind === "unavailable") {
+        setHostExecUnavailable(true);
+        setError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+        return;
+      }
+      if (outcome.kind === "failed") throw new Error(outcome.message);
+      onWorkspacePreparedRef.current?.();
+      // User-initiated retry: reset the automatic prepare budget so
+      // the load below, if it still fails recoverably (registry still
+      // settling), gets one genuine automatic attempt instead of
+      // standing on a budget an earlier failure already consumed.
+      autoPrepareAttemptedRef.current.delete(projectId);
       await loadDirectory(".");
     } catch (prepareError) {
       setError(prepareError instanceof Error ? prepareError.message : "Workspace preparation failed");
     } finally {
       setPreparing(false);
     }
-  }, [loadDirectory, onWorkspacePrepared, preparing, projectId, requestJson]);
+  }, [loadDirectory, preparing, projectId, runPrepare]);
 
   const refresh = useCallback(async () => {
+    // Explicit Refresh is a user retry: hand back this project's
+    // one-shot automatic prepare budget before loading, so a load
+    // that fails recoverably runs a real recovery attempt instead of
+    // re-surfacing the error a previous attempt already consumed.
+    // The attempt the budget enables re-consumes it, so automatic
+    // loop protection is unchanged.
+    if (projectId) autoPrepareAttemptedRef.current.delete(projectId);
     setEntries({});
     setExpanded(new Set());
     await loadDirectory(".");
-  }, [loadDirectory]);
+  }, [loadDirectory, projectId]);
 
   // Re-read a file's content from disk without the dirty-confirm gate.
   // Used when an external change (agent/canvas) lands on the open file.
@@ -427,9 +667,29 @@ export default function StudioProjectFiles({
 
   const openFile = useCallback(async (entry: FileEntry) => {
     if (entry.type !== "file") return;
+    // Type-aware routing (Kimi wiring item 7): image/video/audio files
+    // open in the Media surface when the host provides one — they are
+    // not text, and the Asset Lake is their home. Without a host
+    // handler they fall through to the honest not-text-editable state.
+    if (isMediaPath(entry.path) && onOpenMediaFile) {
+      onOpenMediaFile(entry.path);
+      return;
+    }
     if (dirty && !window.confirm("Discard unsaved changes?")) return;
     setActivePath(entry.path);
     setActiveFile(entry.path); // Drive canonical StudioContext.activeFile
+    // Panel linking (board B3, also live in the stage layout): opening a
+    // file here surfaces it in the Code workspace as an editor tab, via
+    // the same studio:open-file event the ActionPanel uses. Tagged with
+    // this panel as the source so the listener below never re-enters
+    // openFile from its own dispatch.
+    if (projectId) {
+      window.dispatchEvent(
+        new CustomEvent(STUDIO_EVENT_OPEN_FILE, {
+          detail: { projectId, path: entry.path, source: "files-panel" },
+        }),
+      );
+    }
     setUnsupportedPath(null);
     setConflictNotice(null);
     setError(null);
@@ -455,7 +715,7 @@ export default function StudioProjectFiles({
     } finally {
       setFileLoading(false);
     }
-  }, [dirty, projectId, requestJson]);
+  }, [dirty, onOpenMediaFile, projectId, requestJson]);
 
   // Listen for the ActionPanel file tree's "open this file" request
   // (studio.open_file action). Selects the file through the same openFile
@@ -466,6 +726,9 @@ export default function StudioProjectFiles({
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.projectId !== projectId) return;
+      // Own dispatch (panel linking from openFile above) — the file is
+      // already selected here; re-entering openFile would loop.
+      if (detail?.source === "files-panel") return;
       const rawPath = typeof detail?.path === "string" ? detail.path : "";
       let normalized: string;
       try {
@@ -498,6 +761,7 @@ export default function StudioProjectFiles({
     try {
       await mutate("write", { path: normalizePath(activePath), content });
       setOriginalContent(content);
+      setJustSaved(true);
       setConflictNotice(null);
       await loadDirectory(parentPath(activePath), true);
       onSaved?.();
@@ -560,7 +824,16 @@ export default function StudioProjectFiles({
       const isOpen = expanded.has(entry.path);
       return (
         <div key={entry.path}>
-          <div className="group flex min-w-0 items-center gap-1 rounded-lg hover:bg-white/5" style={{ paddingLeft: `${Math.min(depth, 5) * 10 + 2}px` }}>
+          <div
+            className="group relative flex min-w-0 items-center gap-1 rounded-lg hover:bg-black/5"
+            style={{ paddingLeft: `${Math.min(depth, 5) * 10 + 2}px` }}
+            onContextMenu={(event) => {
+              // Row context menu (Kimi wiring item 7): Open / Open in
+              // Media / Copy path. Position is clamped at render time.
+              event.preventDefault();
+              setContextMenu({ entry, x: event.clientX, y: event.clientY });
+            }}
+          >
             <button
               type="button"
               onClick={() => entry.type === "folder" ? void toggleFolder(entry) : void openFile(entry)}
@@ -572,18 +845,30 @@ export default function StudioProjectFiles({
               {entry.type === "folder" ? <Folder size={13} /> : <FileText size={13} />}
               <span className="min-w-0 flex-1 truncate">{entry.name}</span>
               {entry.gitStatus && <GitBadge status={entry.gitStatus} />}
-              {entry.type === "file" && <span className="hidden shrink-0 text-[8px] text-white/30 xl:inline">{formatSize(entry.size)}</span>}
+              {entry.type === "file" && <span className="hidden shrink-0 text-[8px] @min-[560px]:inline" style={{ color: "var(--text-muted)" }}>{formatSize(entry.size)}</span>}
             </button>
-            {entry.type === "folder" && <>
-              <button type="button" onClick={() => setDialog({ kind: "file", directory: entry.path, value: "" })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md opacity-0 transition hover:bg-white/10 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Create file in ${entry.name}`} title={`Create file in ${entry.name}`}><Plus size={11} /></button>
-              <button type="button" onClick={() => setDialog({ kind: "folder", directory: entry.path, value: "" })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md opacity-0 transition hover:bg-white/10 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Create folder in ${entry.name}`} title={`Create folder in ${entry.name}`}><FolderPlus size={11} /></button>
-            </>}
-            <button type="button" onClick={() => setDialog({ kind: "rename", sourcePath: entry.path, value: entry.name })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md opacity-0 transition hover:bg-white/10 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Rename ${entry.name}`} title="Rename">
-              <Pencil size={11} />
-            </button>
-            <button type="button" onClick={() => void deleteEntry(entry)} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md opacity-0 transition hover:bg-red-500/10 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Delete ${entry.name}`} title="Delete">
-              <Trash2 size={11} />
-            </button>
+            {/* Row actions live OUT of the layout flow: as in-flow flex
+                children they reserved 72px (file) to 148px (folder) of
+                row width while invisible (opacity-0), which — in the
+                narrow Files sidebar — compressed the name span to zero
+                width and rendered the tree visually blank. As an
+                absolute overlay they cost no layout width until shown. */}
+            <div
+              data-testid="file-row-actions"
+              className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 rounded-lg pl-2 opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+              style={{ backgroundColor: "var(--studio-card)" }}
+            >
+              {entry.type === "folder" && <>
+                <button type="button" onClick={() => setDialog({ kind: "file", directory: entry.path, value: "" })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Create file in ${entry.name}`} title={`Create file in ${entry.name}`}><Plus size={11} /></button>
+                <button type="button" onClick={() => setDialog({ kind: "folder", directory: entry.path, value: "" })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Create folder in ${entry.name}`} title={`Create folder in ${entry.name}`}><FolderPlus size={11} /></button>
+              </>}
+              <button type="button" onClick={() => setDialog({ kind: "rename", sourcePath: entry.path, value: entry.name })} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Rename ${entry.name}`} title="Rename">
+                <Pencil size={11} />
+              </button>
+              <button type="button" onClick={() => void deleteEntry(entry)} disabled={!writeAccess} className="grid h-9 w-9 shrink-0 place-items-center rounded-md transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Delete ${entry.name}`} title="Delete">
+                <Trash2 size={11} />
+              </button>
+            </div>
           </div>
           {entry.type === "folder" && isOpen && renderEntries(entry.path, depth + 1)}
         </div>
@@ -595,8 +880,21 @@ export default function StudioProjectFiles({
     return <div className="flex h-full min-h-40 items-center justify-center px-4 text-center text-[10px]" style={{ color: "var(--text-muted)" }}>Select a project to browse files.</div>;
   }
 
+  // The gate banner below already explains a not-ready workspace. When
+  // the load error carries the exact same text (the settled host-exec
+  // verdict sets HOST_EXECUTION_UNAVAILABLE_MESSAGE as both), rendering
+  // the red error banner too showed the same message twice in one panel
+  // (yellow gate banner + red error banner). Suppress only the exact
+  // duplicate — distinct load errors still surface.
+  const gateBannerText = workspaceStatus !== "ready"
+    ? hostExecUnavailable
+      ? HOST_EXECUTION_UNAVAILABLE_MESSAGE
+      : `Workspace is ${workspaceStatus ?? "not prepared"}. Prepare it before browsing project files.`
+    : null;
+  const errorDuplicatesGate = gateBannerText !== null && error === gateBannerText;
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2" data-testid="studio-project-files">
+    <div className="flex h-full min-h-0 flex-col gap-2 @container" data-testid="studio-project-files">
       <div className="flex shrink-0 items-start gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
         <Folder size={14} className="mt-0.5 shrink-0" style={{ color: "var(--litt-primary)" }} />
         <div className="min-w-0 flex-1">
@@ -608,9 +906,9 @@ export default function StudioProjectFiles({
         </button>
       </div>
 
-      {workspaceStatus !== "ready" && <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}><span className="min-w-0 flex-1">Workspace is {workspaceStatus ?? "not prepared"}. Prepare it before browsing project files.</span><button type="button" onClick={() => void prepareWorkspace()} disabled={preparing || workspaceStatus === "provisioning" || workspaceStatus === "preparing"} className="flex min-h-10 shrink-0 items-center gap-1 rounded-md px-2 font-bold disabled:opacity-40" style={{ backgroundColor: "#e3b341", color: "#000" }}>{preparing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Prepare</button></div>}
+      {workspaceStatus !== "ready" && (hostExecUnavailable ? <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}><span className="min-w-0 flex-1">{HOST_EXECUTION_UNAVAILABLE_MESSAGE}</span></div> : <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}><span className="min-w-0 flex-1">Workspace is {workspaceStatus ?? "not prepared"}. Prepare it before browsing project files.</span><button type="button" onClick={() => void prepareWorkspace()} disabled={preparing || workspaceStatus === "provisioning" || workspaceStatus === "preparing"} className="flex min-h-10 shrink-0 items-center gap-1 rounded-md px-2 font-bold disabled:opacity-40" style={{ backgroundColor: "#e3b341", color: "#000" }}>{preparing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Prepare</button></div>)}
       {workspaceStatus === "ready" && !writeAccess && <div className="rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(227,179,65,0.25)", backgroundColor: "rgba(227,179,65,0.06)", color: "#e3b341" }}>Editing is unavailable because this workspace is read-only. The server will continue to enforce project ownership and mutation permissions.</div>}
-      {error && <div className="flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.06)", color: "#fca5a5" }}><span className="min-w-0 flex-1">{error}</span><button type="button" onClick={() => setError(null)} aria-label="Dismiss file error"><X size={12} /></button></div>}
+      {error && !errorDuplicatesGate && <div className="flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[9px] leading-4" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.06)", color: "#fca5a5" }}><span className="min-w-0 flex-1">{error}</span><button type="button" onClick={() => setError(null)} aria-label="Dismiss file error"><X size={12} /></button></div>}
 
       {dialog && (
         <form onSubmit={submitDialog} className="flex shrink-0 items-center gap-1.5 rounded-lg border p-1.5" style={{ borderColor: "var(--studio-border)" }}>
@@ -628,9 +926,59 @@ export default function StudioProjectFiles({
         <span className="ml-auto shrink-0 px-1 text-[9px]" style={{ color: "var(--text-muted)" }}>{loading ? "Loading…" : `${Object.values(entries).flat().length} loaded`}</span>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 xl:grid-cols-[minmax(130px,0.8fr)_minmax(0,1.7fr)]">
-        <div className="min-h-28 overflow-y-auto rounded-xl border p-1.5 xl:min-h-0" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
-          {loading && !entries["."] ? <div className="flex items-center gap-2 px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={12} className="animate-spin" /> Loading files…</div> : entries["."]?.length ? renderEntries(".") : <div className="px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}>No files found.</div>}
+      {/* Filename search (Kimi wiring item 7) */}
+      <div className="flex shrink-0 items-center gap-1.5 rounded-lg border px-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
+        <Search size={12} className="shrink-0" style={{ color: "var(--text-muted)" }} />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search files…"
+          className="min-h-9 min-w-0 flex-1 bg-transparent text-[10px] outline-none"
+          style={{ color: "var(--text-primary)" }}
+          aria-label="Search files by name or path"
+          data-testid="files-search-input"
+        />
+        {query && (
+          <button type="button" onClick={() => setQuery("")} className="grid h-7 w-7 shrink-0 place-items-center rounded-md hover:bg-white/8" style={{ color: "var(--text-muted)" }} aria-label="Clear file search">
+            <X size={11} />
+          </button>
+        )}
+      </div>
+
+      {/* Split by the component's OWN width, not the viewport's: this
+          panel is mounted both as the wide Files stage and inside the
+          ~286px Files sidebar, and the old viewport-xl split left the
+          tree only ~130px in the sidebar (see the row-actions note in
+          renderEntries). Below 560px of panel width the editor stacks
+          under the tree instead of starving it. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 @min-[560px]:grid-cols-[minmax(130px,0.8fr)_minmax(0,1.7fr)]" data-testid="studio-project-files-layout">
+        <div className="min-h-28 overflow-y-auto rounded-xl border p-1.5 @min-[560px]:min-h-0" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
+          {query.trim() ? (
+            // Search mode: flat full-path matches across the expanded
+            // tree (the search effect loads unloaded folders first).
+            searching ? (
+              <div className="flex items-center gap-2 px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={12} className="animate-spin" /> Searching files…</div>
+            ) : searchResults && searchResults.length > 0 ? (
+              <div data-testid="files-search-results">
+                {searchResults.map((entry) => (
+                  <button
+                    key={entry.path}
+                    type="button"
+                    onClick={() => void openFile(entry)}
+                    className="flex min-h-10 w-full min-w-0 items-center gap-1.5 rounded-lg px-1.5 text-left text-[10px] hover:bg-black/5"
+                    style={{ color: activePath === entry.path ? "var(--litt-primary)" : "var(--text-secondary)" }}
+                    title={entry.path}
+                  >
+                    <FileText size={13} className="shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{entry.path}</span>
+                    {entry.gitStatus && <GitBadge status={entry.gitStatus} />}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}>No files match &ldquo;{query.trim()}&rdquo;.</div>
+            )
+          ) : loading && !entries["."] ? <div className="flex items-center gap-2 px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={12} className="animate-spin" /> Loading files…</div> : entries["."]?.length ? renderEntries(".") : <div className="px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}>No files found.</div>}
         </div>
 
         <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
@@ -640,7 +988,7 @@ export default function StudioProjectFiles({
                 <FileText size={12} style={{ color: "var(--litt-primary)" }} />
                 <span className="min-w-0 flex-1 truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{activePath}</span>
                 {dirty && <span className="shrink-0 text-[9px] font-bold" style={{ color: "#e3b341" }}>Unsaved</span>}
-                <button type="button" onClick={() => void saveFile()} disabled={!dirty || saving || !writeAccess || Boolean(unsupportedPath) || Boolean(conflictNotice)} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-35" style={{ backgroundColor: dirty && writeAccess && !conflictNotice ? "var(--litt-primary)" : "var(--studio-surface)", color: dirty && writeAccess && !conflictNotice ? "#000" : "var(--text-muted)" }} title={conflictNotice ? "LiTT changed this file — reload first" : undefined}><Save size={11} /> {saving ? "Saving" : "Save"}</button>
+                <button type="button" onClick={() => void saveFile()} disabled={!dirty || saving || !writeAccess || Boolean(unsupportedPath) || Boolean(conflictNotice)} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-35" style={{ backgroundColor: dirty && writeAccess && !conflictNotice ? "var(--litt-primary)" : "var(--studio-surface)", color: dirty && writeAccess && !conflictNotice ? "#000" : "var(--text-muted)" }} title={conflictNotice ? "LiTT changed this file — reload first" : undefined}><Save size={11} /> {saving ? "Saving…" : justSaved && !dirty ? "Saved" : "Save"}</button>
               </div>
               {conflictNotice && (
                 <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[9px]" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)", color: "#fca5a5" }}>
@@ -680,6 +1028,78 @@ export default function StudioProjectFiles({
           ) : <div className="flex flex-1 items-center justify-center px-5 text-center text-[10px] leading-5" style={{ color: "var(--text-muted)" }}>Select a text file to inspect and edit it. Changes stay local until you press Save.</div>}
         </div>
       </div>
+
+      {/* Row context menu (Kimi wiring item 7) — clamped inside the
+          viewport; a transparent backdrop closes it on any outside
+          press. Only actions the row really supports: Open (editor or
+          folder toggle), Open in Media for media files when the host
+          routes them, Copy path. */}
+      {contextMenu && (
+        <>
+          <button
+            type="button"
+            aria-label="Close file menu"
+            className="fixed inset-0 z-40 cursor-default"
+            style={{ background: "transparent" }}
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(event) => { event.preventDefault(); setContextMenu(null); }}
+          />
+          <div
+            role="menu"
+            data-testid="files-context-menu"
+            className="fixed z-50 w-44 overflow-hidden rounded-lg border py-1 shadow-xl"
+            style={{
+              left: Math.max(4, Math.min(contextMenu.x, (typeof window !== "undefined" ? window.innerWidth : 320) - 184)),
+              top: Math.max(4, Math.min(contextMenu.y, (typeof window !== "undefined" ? window.innerHeight : 480) - 132)),
+              backgroundColor: "var(--studio-card)",
+              borderColor: "var(--studio-border)",
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="flex min-h-9 w-full items-center px-3 text-left text-[10px] font-bold hover:bg-white/8"
+              style={{ color: "var(--text-primary)" }}
+              onClick={() => {
+                const entry = contextMenu.entry;
+                setContextMenu(null);
+                if (entry.type === "folder") void toggleFolder(entry);
+                else void openFile(entry);
+              }}
+            >
+              Open
+            </button>
+            {contextMenu.entry.type === "file" && isMediaPath(contextMenu.entry.path) && onOpenMediaFile && (
+              <button
+                type="button"
+                role="menuitem"
+                className="flex min-h-9 w-full items-center px-3 text-left text-[10px] font-bold hover:bg-white/8"
+                style={{ color: "var(--text-primary)" }}
+                onClick={() => {
+                  const path = contextMenu.entry.path;
+                  setContextMenu(null);
+                  onOpenMediaFile(path);
+                }}
+              >
+                Open in Media
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              className="flex min-h-9 w-full items-center px-3 text-left text-[10px] font-bold hover:bg-white/8"
+              style={{ color: "var(--text-primary)" }}
+              onClick={() => {
+                const path = contextMenu.entry.path;
+                setContextMenu(null);
+                void copyToClipboard(path);
+              }}
+            >
+              Copy path
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

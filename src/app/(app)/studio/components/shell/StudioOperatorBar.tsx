@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import type { ComponentType, CSSProperties } from "react";
+import { useTheme } from "@/context/ThemeContext";
 import { useExecutionStore, type ExecutionPhase } from "../../stores/useExecutionStore";
 
 const PHASE_META: Record<ExecutionPhase, { label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: CSSProperties }>; color: string }> = {
@@ -53,6 +54,13 @@ export interface StudioOperatorBarProps {
   onResolveApproval?: (decision: "approved" | "rejected") => void;
   terminalStatus?: string;
   modelLabel?: string;
+  /**
+   * True when the conversation's most recent settled run failed. The
+   * execution store is live-only — after a reload its phase is "idle"
+   * even when the last run failed — so the parent passes the persisted
+   * outcome and the bar must not read "Idle" over a failed run.
+   */
+  lastRunFailed?: boolean;
 }
 
 export default function StudioOperatorBar({
@@ -63,7 +71,9 @@ export default function StudioOperatorBar({
   onResolveApproval,
   terminalStatus,
   modelLabel,
+  lastRunFailed = false,
 }: StudioOperatorBarProps) {
+  const { tokens } = useTheme();
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
@@ -79,9 +89,25 @@ export default function StudioOperatorBar({
   // only when no agent run is in progress (agent runs take precedence and
   // already set a non-idle phase).
   const showPreviewPreparing = previewPreparing && phase === "idle" && !isRunning;
-  const displayLabel = showPreviewPreparing ? "Preparing preview" : meta.label;
-  const displayColor = showPreviewPreparing ? "#e3b341" : meta.color;
-  const DisplayIcon = showPreviewPreparing ? Activity : PhaseIcon;
+  // Settled-failure display: only when the live store has nothing to say
+  // (idle, not running). A live phase always wins — it is newer truth.
+  const showLastRunFailed =
+    lastRunFailed && phase === "idle" && !isRunning && !showPreviewPreparing;
+  const displayLabel = showPreviewPreparing
+    ? "Preparing preview"
+    : showLastRunFailed
+      ? "Last run failed"
+      : meta.label;
+  const displayColor = showPreviewPreparing
+    ? "#e3b341"
+    : showLastRunFailed
+      ? "#ef4444"
+      : meta.color;
+  const DisplayIcon = showPreviewPreparing
+    ? Activity
+    : showLastRunFailed
+      ? XCircle
+      : PhaseIcon;
 
   const fileCount = changesSummary
     ? changesSummary.added + changesSummary.modified + changesSummary.deleted + changesSummary.renamed
@@ -99,8 +125,8 @@ export default function StudioOperatorBar({
     <div
       className="flex h-8 shrink-0 items-center gap-2 border-t px-3 text-[11px] overflow-x-auto"
       style={{
-        backgroundColor: "rgba(16,12,26,0.92)",
-        borderColor: "rgba(255,255,255,0.07)",
+        backgroundColor: tokens.surface,
+        borderColor: tokens.border,
         color: "var(--text-muted)",
         backdropFilter: "blur(8px)",
       }}

@@ -931,13 +931,29 @@ async function main() {
 
     // ── Step 7.7b: preview still serves after the refresh ──
     // API-level probe — the iframe itself may not have re-materialized yet.
-    const prevProbe = projectId
-      ? await page.request.get(`${BASE}/api/studio-projects/${projectId}/preview`, { timeout: 60_000 }).catch(() => null)
-      : null;
-    const prevBody = prevProbe ? await prevProbe.json().catch(() => null) : null;
+    // Poll (mirroring the step-1.5 prepare poll): a single unretried probe
+    // can catch a transient terminal blip — a staging redeploy or a slow
+    // /ws-files/read — and fail the run on a false not_started/unreachable
+    // for a preview that is actually serving. Accept as soon as the pass
+    // condition holds; the failure detail below keeps the LAST probe.
+    let prevProbe = null;
+    let prevBody = null;
+    const probePreview = async () => {
+      prevProbe = projectId
+        ? await page.request.get(`${BASE}/api/studio-projects/${projectId}/preview`, { timeout: 30_000 }).catch(() => null)
+        : null;
+      prevBody = prevProbe ? await prevProbe.json().catch(() => null) : null;
+      return !!prevProbe && prevProbe.status() === 200 &&
+        !!(prevBody?.previewUrl || prevBody?.runtimeStatus === "ready" || prevBody?.runtimeStatus === "running" || prevBody?.runtimeStatus === "starting");
+    };
+    let previewRecovered = await probePreview();
+    const prevDeadline = Date.now() + 75_000;
+    while (!previewRecovered && Date.now() < prevDeadline) {
+      await page.waitForTimeout(5000);
+      previewRecovered = await probePreview();
+    }
     step("preview_recovers_after_refresh",
-      !!prevProbe && prevProbe.status() === 200 &&
-        !!(prevBody?.previewUrl || prevBody?.runtimeStatus === "ready" || prevBody?.runtimeStatus === "running" || prevBody?.runtimeStatus === "starting"),
+      previewRecovered,
       `GET /preview → ${prevProbe?.status() ?? "unreachable"} ${JSON.stringify(prevBody)?.slice(0, 160)}`);
 
     // ── Step 7.8: no stale approval card left after run resolution ──

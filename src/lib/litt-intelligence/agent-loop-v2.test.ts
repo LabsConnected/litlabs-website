@@ -6,7 +6,7 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
   callLLMWithTools: vi.fn(),
 }));
 
-import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, type ResumeInput } from "./agent-loop-v2";
+import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, buildPatchRecoveryForceMessage, MAX_PATCH_RECOVERY_FORCES, type ResumeInput } from "./agent-loop-v2";
 import type { ProgressEvent } from "./progress-events";
 import { callLLMWithTools, AgentBudgetExhaustedError } from "./llm-tool-calling";
 import { toolRegistry } from "./tool-registry";
@@ -376,6 +376,329 @@ describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate
     expect(result.finalText).toContain("No mutation was executed");
     expect(result.toolCalls.filter((tool) => tool.toolId === "apply_patch")).toHaveLength(2);
     expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("runAgentLoopV2 — patch rejection recovery forcing (acceptance run #36)", () => {
+  // Staging-acceptance run #36, iteration 4: the follow-up's apply_patch
+  // was rejected because its search text was not verbatim in the built
+  // file, the model's next response contained no tool call, and the loop
+  // closed the run as failed — the edit was never attempted again.
+  // Iterations 2 and 3 recovered unaided. These tests pin the structural
+  // replacement for that voluntary recovery in capability-guarded runs:
+  // a bounded corrective step that hands the model the rejection detail
+  // and requires a corrected patch or the files.write fallback.
+  const FOOTER = "<footer>Ember Roast · 2024 · Handcrafted coffee.</footer>";
+  const GUARDED = {
+    model: "test-model",
+    systemPrompt: "You are LiTT.",
+    executionMode: "auto",
+    enableBuildFix: false,
+    buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+  } as const;
+
+  function diskTransport() {
+    const disk = new Map<string, string>([["index.html", FOOTER]]);
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      readFile: vi.fn(async (path: string) => {
+        const content = disk.get(path);
+        if (content === undefined) throw new Error(`readFile failed (404): ${path}`);
+        return { content, size: content.length };
+      }),
+      writeFile: vi.fn(async (path: string, content: string) => {
+        disk.set(path, content);
+      }),
+      applyPatch: vi.fn(async (path: string, patches: { search: string; replace: string }[]) => {
+        let content = disk.get(path);
+        if (content === undefined) throw new Error(`applyPatch failed (404): ${path}`);
+        for (const patch of patches) {
+          if (!content.includes(patch.search)) throw new Error(`applyPatch search not found in ${path}`);
+          content = content.replace(patch.search, patch.replace);
+        }
+        disk.set(path, content);
+        return { applied: true };
+      }),
+      createCheckpointBeforeMutation: vi.fn(async () => null),
+    } as unknown as WorkspaceTransport;
+    return { transport, disk };
+  }
+
+  const badPatchReply = {
+    text: "",
+    toolCalls: [{
+      toolCallId: "tc-bad-patch",
+      toolId: "apply_patch",
+      inputs: {
+        path: "index.html",
+        patches: [{ search: "<footer>Hallucinated content that was never written</footer>", replace: "<footer>new</footer>" }],
+      },
+    }],
+    finishReason: "tool_calls",
+    model: "test-model",
+  };
+  const silentReply = (text: string) => ({ text, toolCalls: [], finishReason: "stop", model: "test-model" });
+  const correctedPatchReply = {
+    text: "",
+    toolCalls: [{
+      toolCallId: "tc-fixed-patch",
+      toolId: "apply_patch",
+      inputs: {
+        path: "index.html",
+        patches: [{ search: "Handcrafted coffee.", replace: "Freshly roasted, delivered daily." }],
+      },
+    }],
+    finishReason: "tool_calls",
+    model: "test-model",
+  };
+
+  function forcedMessages(result: { finalMessages?: { role: string; content?: unknown }[] }) {
+    return (result.finalMessages ?? []).filter(
+      (m) => m.role === "user" && typeof m.content === "string" && m.content.includes("was rejected before execution"),
+    );
+  }
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("buildPatchRecoveryForceMessage names the path, the rejection detail, and both recovery routes", () => {
+    const message = buildPatchRecoveryForceMessage({
+      path: "index.html",
+      error: "apply_patch search string not found in current content of index.html",
+    });
+    expect(message).toContain("index.html");
+    expect(message).toContain("search string not found in current content");
+    expect(message).toContain("apply_patch");
+    expect(message).toContain("files.write");
+  });
+
+  it("(a) a no-tool-call response after a rejection triggers the corrective step instead of closing the run", async () => {
+    const { transport } = diskTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(badPatchReply)
+      .mockResolvedValueOnce(silentReply("The patch did not apply."))
+      .mockResolvedValueOnce(correctedPatchReply)
+      .mockResolvedValueOnce(silentReply("Footer updated."));
+
+    const result = await runAgentLoopV2("change the footer tagline", transport, { ...GUARDED });
+
+    // Pre-fix behavior (still pinned for non-guarded runs by the tests
+    // above): the silent reply after the rejection closed the run at 2
+    // model calls. The force must ask again, with the rejection detail
+    // and the required recovery action in the conversation.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(4);
+    const forced = forcedMessages(result);
+    expect(forced).toHaveLength(1);
+    expect(forced[0].content).toContain("index.html");
+    expect(forced[0].content).toContain("files.write");
+    expect(result.events.some((e) => e.type === "status" && e.summary.includes("requiring a corrected patch"))).toBe(true);
+  });
+
+  it("(b) recovery via a corrected patch succeeds", async () => {
+    const { transport, disk } = diskTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(badPatchReply)
+      .mockResolvedValueOnce(silentReply("The patch did not apply."))
+      .mockResolvedValueOnce(correctedPatchReply)
+      .mockResolvedValueOnce(silentReply("Footer updated."));
+
+    const result = await runAgentLoopV2("change the footer tagline", transport, { ...GUARDED });
+
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.toolCalls.some((t) => t.toolId === "apply_patch" && !t.success)).toBe(true);
+    expect(result.toolCalls.some((t) => t.toolId === "apply_patch" && t.success)).toBe(true);
+    expect(disk.get("index.html")).toContain("Freshly roasted, delivered daily.");
+    expect(result.finalText).toContain("Footer updated.");
+  });
+
+  it("(c) recovery via the files.write fallback succeeds", async () => {
+    const { transport, disk } = diskTransport();
+    const rewritten = "<footer>Ember Roast · 2024 · Golden Acceptance follow-up verified</footer>";
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(badPatchReply)
+      .mockResolvedValueOnce(silentReply("The patch did not apply."))
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-fallback-write",
+          toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: rewritten },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce(silentReply("Footer rewritten."));
+
+    const result = await runAgentLoopV2("change the footer tagline", transport, { ...GUARDED });
+
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.toolCalls.some((t) => t.toolId === "files.write" && t.success)).toBe(true);
+    expect(disk.get("index.html")).toBe(rewritten);
+    expect(result.finalText).toContain("Footer rewritten.");
+  });
+
+  it("(d) exhausting the recovery budget still closes the run as failed", async () => {
+    const { transport } = diskTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(badPatchReply)
+      .mockResolvedValueOnce(silentReply("Understood."))
+      .mockResolvedValueOnce(silentReply("Understood."))
+      .mockResolvedValueOnce(silentReply("Understood."));
+
+    const result = await runAgentLoopV2("change the footer tagline", transport, { ...GUARDED });
+
+    // One call for the rejected patch, then one silent reply per force,
+    // then the final silent reply the budget no longer rescues: the run
+    // closes through the ordinary path and the completion guard reports
+    // the honest build failure — never a silent fake-complete.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2 + MAX_PATCH_RECOVERY_FORCES);
+    expect(forcedMessages(result)).toHaveLength(MAX_PATCH_RECOVERY_FORCES);
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toBe("The build produced no successful file-writing operation, so it is not complete.");
+    expect(result.finalText).toBe("The build produced no successful file-writing operation, so it is not complete.");
+  });
+
+  it("(e) repeated invalid patches still hit the two-strike cancel in a guarded run", async () => {
+    const { transport } = diskTransport();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "",
+      toolCalls: [{
+        toolCallId: "tc-repeat",
+        toolId: "apply_patch",
+        inputs: { path: "index.html", patches: [{ search: "stale content", replace: "new content" }] },
+      }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2("change the footer", transport, { ...GUARDED });
+
+    expect(result.cancelled).toBe(true);
+    expect(result.finalText).toContain("No mutation was executed");
+    expect(result.toolCalls.filter((tool) => tool.toolId === "apply_patch")).toHaveLength(2);
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+    expect(forcedMessages(result)).toHaveLength(0);
+  });
+});
+
+describe("runAgentLoopV2 — build guard verdict vs workspace evidence (Step 6 proof, 2026-11-14)", () => {
+  // Live proof on the repo-backed project: the marker file LANDED
+  // (the project file list gained proof-marker.txt with the exact
+  // content) yet the run still closed with "The build produced no
+  // successful file-writing operation, so it is not complete." — the
+  // write never appeared as a successful file-writing TOOL call, and
+  // the work log could only say "could not verify whether files
+  // changed". The checkpoint diff is the authority on what landed:
+  // when it reports changes, the no-write sentence must not fire.
+  // When it reports no changes, the honest failure stands.
+  //
+  // terminal.execute is only OFFERED to an authenticated terminal
+  // owner (tool health, Part F) — without a userId in the owner
+  // allowlist the loop drops the tool and the call never executes.
+  const originalOwners = process.env.TERMINAL_OWNER_CLERK_IDS;
+  beforeEach(() => {
+    process.env.TERMINAL_OWNER_CLERK_IDS = "u-test";
+  });
+  afterEach(() => {
+    if (originalOwners === undefined) delete process.env.TERMINAL_OWNER_CLERK_IDS;
+    else process.env.TERMINAL_OWNER_CLERK_IDS = originalOwners;
+  });
+
+  const GUARDED = {
+    model: "test-model",
+    systemPrompt: "You are LiTT.",
+    userId: "u-test",
+    executionMode: "auto",
+    enableBuildFix: false,
+    buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+  } as const;
+
+  const SHA = "a".repeat(40);
+
+  function shellTransport(changed: boolean) {
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      exec: vi.fn(async () => ({
+        exitCode: 0,
+        stdout: "/workspace\nindex.html\nproof-marker.txt\n",
+        stderr: "",
+        durationMs: 1,
+      })),
+      createCheckpointBeforeMutation: vi.fn(async (label: string) => ({
+        checkpointId: "cp-1",
+        label,
+        gitSha: SHA,
+      })),
+      gitStatus: vi.fn(async () => ({
+        branch: "main",
+        ahead: 0,
+        behind: 0,
+        staged: [],
+        modified: [],
+        untracked: changed ? ["proof-marker.txt"] : [],
+        clean: !changed,
+      })),
+      gitDiff: vi.fn(async (options?: { untracked?: boolean }) => ({
+        diff: !changed || options?.untracked
+          ? ""
+          : "diff --git a/proof-marker.txt b/proof-marker.txt\nnew file mode 100644\n--- /dev/null\n+++ b/proof-marker.txt\n@@ -0,0 +1 @@\n+proof\n",
+      })),
+    } as unknown as WorkspaceTransport;
+    return transport;
+  }
+
+  const execReply = {
+    text: "",
+    toolCalls: [{
+      toolCallId: "tc-exec",
+      toolId: "terminal.execute",
+      inputs: { projectId: "p-test", command: "pwd && ls" },
+    }],
+    finishReason: "tool_calls",
+    model: "test-model",
+  };
+  const silentReply = (text: string) => ({ text, toolCalls: [], finishReason: "stop", model: "test-model" });
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("a run whose writes landed (diff reports changed) is NOT failed with the no-write sentence", async () => {
+    const transport = shellTransport(true);
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(execReply)
+      .mockResolvedValueOnce(silentReply("Done — proof-marker.txt is in the workspace."));
+
+    const result = await runAgentLoopV2("create a marker file in the project", transport, { ...GUARDED });
+
+    expect(result.toolCalls.some((t) => t.toolId === "terminal.execute" && t.success)).toBe(true);
+    expect(result.toolCalls.some((t) => t.success && t.toolId === "files.write")).toBe(false);
+    expect(result.workspaceChange?.status).toBe("changed");
+    expect(result.workspaceChange?.files).toContain("proof-marker.txt");
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.finalText).toContain("proof-marker.txt is in the workspace");
+  });
+
+  it("a guarded run with a verified-unchanged workspace still fails honestly with the no-write sentence", async () => {
+    const transport = shellTransport(false);
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(execReply)
+      .mockResolvedValueOnce(silentReply("Done."));
+
+    const result = await runAgentLoopV2("create a marker file in the project", transport, { ...GUARDED });
+
+    expect(result.workspaceChange?.status).toBe("unchanged");
+    expect(result.failedHonestly).toBe("The build produced no successful file-writing operation, so it is not complete.");
+    expect(result.finalText).toBe("The build produced no successful file-writing operation, so it is not complete.");
   });
 });
 
@@ -1093,6 +1416,58 @@ describe("runAgentLoopV2 — required first tool call (immediate execution)", ()
     expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
     expect(callToolChoice(0)).toBe("auto");
     expect(result.finalText).toBe("Done — the site is complete.");
+  });
+});
+
+describe("runAgentLoopV2 — user-visible final text (chat beauty, 2026-11-11)", () => {
+  // Production defect: a quality-gated run's final answer reached the
+  // persisted transcript (and therefore BOTH the docked chat and the
+  // Global overlay) with its internal stage declarations still in the
+  // text — "QUALITY: understand — … / QUALITY: plan — …" as the visible
+  // reply prefix. The markers are machine evidence: they must still be
+  // harvested for the gate, but the user-visible finalText must be the
+  // answer only.
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("strips QUALITY stage declarations from finalText while the gate still sees them", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text:
+        "QUALITY: understand — The user wants the project's file list.\n" +
+        "QUALITY: plan — Answer from the workspace listing.\n" +
+        "\n" +
+        "Your project contains index.html and an assets folder.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "gemini-2.5-flash",
+    });
+
+    const result = await runAgentLoopV2(
+      "List the files in this project",
+      fakeTransport,
+      {
+        model: "gemini-2.5-flash",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        isStaticWorkspace: true,
+        qualityLoop: {
+          enabled: true,
+          runId: "quality-visible-text",
+          projectId: "p-test",
+          userId: "u-test",
+          userRequest: "List the files in this project",
+          taskScope: "inspection",
+        },
+      },
+    );
+
+    expect(result.finalText).toBe("Your project contains index.html and an assets folder.");
+    expect(result.finalText).not.toContain("QUALITY:");
+    // The declarations were still harvested as gate evidence — the
+    // inspection-scope verdict passes on understand + plan.
+    expect(result.qualityLoop?.verdict.ok).toBe(true);
   });
 });
 
@@ -2012,8 +2387,13 @@ describe("runAgentLoopV2 — replay carries the original persisted verdict", () 
     expect(writes[1].persisted).toBe(true);
     // The replayed message must carry the RESULT PAYLOAD, not the
     // ToolCallResult wrapper (would contain toolCallId/success fields).
+    // (Round 11: this asserted the tools payload contained "saved" —
+    // a word that only appeared in the image.sendToCanvas station
+    // description. That consumer is no longer advertised to the loop
+    // (its result-id namespace cannot resolve tool-generated results),
+    // so the assertion now names the write tool this replay concerns.)
     const thirdCallMessages = JSON.stringify(vi.mocked(callLLMWithTools).mock.calls[2][2] ?? []);
-    expect(thirdCallMessages).toContain("saved");
+    expect(thirdCallMessages).toContain("files.write");
     expect(thirdCallMessages).not.toContain("tc-2");
   });
 });
@@ -2562,5 +2942,83 @@ describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incide
 
     expect(result.cancelReason ?? "").not.toContain("Repeated tool call detected");
     expect(transport.applyPatch).toHaveBeenCalledTimes(8);
+  });
+});
+
+describe("runAgentLoopV2 — route plan recording (route honesty)", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("records the run-start route plan exactly once across a multi-step run", async () => {
+    const planSummary = {
+      routes: [
+        { provider: "gemini", models: ["gemini-2.5-flash"], costClass: "free" },
+        { provider: "groq", models: ["openai/gpt-oss-120b"], costClass: "free" },
+      ],
+      excluded: [
+        {
+          provider: "groq",
+          reason: "request_exceeds_route_token_ceiling:openai/gpt-oss-120b",
+        },
+        { provider: "cloudflare", reason: "credential_missing" },
+      ],
+      estimatedRequestTokens: 9_100,
+    };
+    let call = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async (...args: unknown[]) => {
+      const options = args[3] as
+        | { onRoutePlan?: (summary: typeof planSummary) => void }
+        | undefined;
+      // The real router reports the plan on EVERY call; the loop must
+      // record only the run-start one.
+      options?.onRoutePlan?.(planSummary);
+      call++;
+      if (call === 1) {
+        return {
+          text: "",
+          toolCalls: [
+            {
+              toolCallId: "tc-rp1",
+              toolId: "files.write",
+              inputs: {
+                projectId: "p-test",
+                path: "index.html",
+                content: "<html><title>[PERSON_NAME] — Coffee</title></html>",
+              },
+            },
+          ],
+          finishReason: "tool_calls",
+          model: "test-model",
+        };
+      }
+      return {
+        text: "Done.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      };
+    });
+
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+    const planEvents = result.events.filter((e) => e.type === "route_plan");
+    expect(planEvents).toHaveLength(1);
+    const planEvent = planEvents[0] as Extract<ProgressEvent, { type: "route_plan" }>;
+    expect(planEvent.routes).toEqual([
+      { provider: "gemini", models: ["gemini-2.5-flash"] },
+      { provider: "groq", models: ["openai/gpt-oss-120b"] },
+    ]);
+    expect(planEvent.excluded).toEqual(planSummary.excluded);
   });
 });

@@ -4,6 +4,7 @@ import {
   centerStation,
   resolveInitialStation,
   stationToToolParam,
+  toolParamToCanvasDesignMode,
   toolParamToStation,
 } from "./station-url";
 
@@ -42,5 +43,24 @@ describe("station ⟷ URL", () => {
     expect(resolveInitialStation(null, "code")).toBe("code");
     expect(resolveInitialStation(null, "plan")).toBe("preview");
     expect(resolveInitialStation(undefined, null)).toBe("preview");
+  });
+});
+
+describe("Canvas & Design landing (Phase 2)", () => {
+  it("?tool=design and ?tool=canvas land on the same station (design surface)", () => {
+    expect(toolParamToStation("design")).toBe("design");
+    expect(toolParamToStation("canvas")).toBe("design");
+  });
+
+  it("design preselects Design mode; canvas/build preselect Build mode", () => {
+    expect(toolParamToCanvasDesignMode("design")).toBe("design");
+    expect(toolParamToCanvasDesignMode("canvas")).toBe("build");
+    expect(toolParamToCanvasDesignMode("build")).toBe("build");
+    expect(toolParamToCanvasDesignMode("preview")).toBeNull();
+    expect(toolParamToCanvasDesignMode(null)).toBeNull();
+  });
+
+  it("?tool=media lands on the Media stage's images surface", () => {
+    expect(toolParamToStation("media")).toBe("images");
   });
 });

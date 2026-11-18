@@ -21,6 +21,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { apiFetch, type ApiJson } from "@/lib/api-response";
+import { useTheme } from "@/context/ThemeContext";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -122,9 +123,10 @@ function ChipRow({
   onSelect: (val: string) => void;
   accentColor: string;
 }) {
+  const { tokens } = useTheme();
   return (
     <div>
-      <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">{label}</div>
+      <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>{label}</div>
       <div className="flex flex-wrap gap-1.5">
         {options.map((opt) => {
           const isSelected = selected === opt;
@@ -134,9 +136,9 @@ function ChipRow({
               onClick={() => onSelect(opt)}
               className="rounded-full border px-3 py-1.5 text-[11px] font-bold transition-all hover:scale-[1.04] active:scale-95"
               style={{
-                borderColor: isSelected ? `${accentColor}80` : "rgba(255,255,255,0.08)",
-                background: isSelected ? `${accentColor}18` : "rgba(255,255,255,0.03)",
-                color: isSelected ? accentColor : "rgba(255,255,255,0.55)",
+                borderColor: isSelected ? `${accentColor}80` : tokens.border,
+                background: isSelected ? `${accentColor}18` : tokens.text + "08",
+                color: isSelected ? accentColor : tokens.textMuted,
                 minHeight: 32,
               }}
             >
@@ -152,6 +154,7 @@ function ChipRow({
 /* ─── Main Component ─────────────────────────────────────────────────── */
 
 export default function AudioTool() {
+  const { tokens } = useTheme();
   const [mode, setMode] = useState<AudioMode>("voiceover");
   const [text, setText] = useState("");
   const [originalText, setOriginalText] = useState("");
@@ -456,25 +459,25 @@ export default function AudioTool() {
   /* ─── Render ──────────────────────────────────────────────────────── */
 
   return (
-    <div className="w-full space-y-4 p-4" style={{ background: "#050508", minHeight: "100%" }}>
+    <div className="w-full space-y-4 p-4" style={{ backgroundColor: tokens.background, color: tokens.text, minHeight: "100%" }}>
       {/* Header */}
       <Entrance delay={0}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "color-mix(in srgb, var(--color-accent) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--color-accent) 25%, transparent)" }}>
-              <Mic size={18} style={{ color: "var(--color-accent)" }} />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: tokens.primary + "1F", border: `1px solid ${tokens.primary}40` }}>
+              <Mic size={18} style={{ color: tokens.primary }} />
             </div>
             <div>
-              <div className="text-sm font-black tracking-tight text-white">LiTT Audio Lab</div>
-              <div className="text-[10px] text-white/40">Voice, speech and sound production</div>
+              <div className="text-sm font-black tracking-tight" style={{ color: tokens.text }}>LiTT Audio Lab</div>
+              <div className="text-[10px]" style={{ color: tokens.textMuted }}>Voice, speech and sound production</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <span className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[10px] font-black text-accent">
               {coinBalance ?? "—"} LiTTBits
             </span>
-            <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(255,255,255,0.08)", color: genStatus === "generating" ? "#F97316" : "var(--color-accent)" }}>
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: genStatus === "generating" ? "#F97316" : "var(--color-accent)" }} />
+            <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: tokens.border, color: genStatus === "generating" ? tokens.warning : tokens.primary }}>
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: genStatus === "generating" ? tokens.warning : tokens.primary }} />
               {genStatus === "generating" ? "RECORDING" : genStatus === "ready" ? "READY" : "READY"}
             </span>
           </div>
@@ -493,12 +496,12 @@ export default function AudioTool() {
               onClick={() => setMode(tab.id)}
               className="flex flex-col items-start rounded-xl border px-4 py-2.5 transition-all hover:scale-[1.02] active:scale-95"
               style={{
-                borderColor: mode === tab.id ? "color-mix(in srgb, var(--color-accent) 50%, transparent)" : "rgba(255,255,255,0.08)",
-                background: mode === tab.id ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.02)",
+                borderColor: mode === tab.id ? tokens.primary + "80" : tokens.border,
+                background: mode === tab.id ? tokens.primary + "1A" : tokens.text + "08",
               }}
             >
-              <span className="text-xs font-black" style={{ color: mode === tab.id ? "var(--color-accent)" : "rgba(255,255,255,0.6)" }}>{tab.label}</span>
-              <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.35)" }}>{tab.desc}</span>
+              <span className="text-xs font-black" style={{ color: mode === tab.id ? tokens.primary : tokens.text }}>{tab.label}</span>
+              <span className="text-[9px]" style={{ color: tokens.textMuted }}>{tab.desc}</span>
             </button>
           ))}
         </div>
@@ -506,9 +509,9 @@ export default function AudioTool() {
 
       {/* Audio Stage / Player */}
       <Entrance delay={0.1}>
-        <div className="relative overflow-hidden rounded-2xl border" style={{ borderColor: "rgba(255,255,255,0.08)", background: "#080710" }}>
+        <div className="relative overflow-hidden rounded-2xl border" style={{ borderColor: tokens.border, background: tokens.surface }}>
           {/* Ambient bloom */}
-          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--color-accent) 6%, transparent) 0%, transparent 70%)" }} />
+          <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(ellipse at 50% 50%, ${tokens.primary}0F 0%, transparent 70%)` }} />
 
           <div className="relative p-6" style={{ minHeight: 160 }}>
             {current?.audioUrl && genStatus === "ready" ? (
@@ -524,8 +527,8 @@ export default function AudioTool() {
                         className="w-1 rounded-full transition-colors duration-150"
                         style={{
                           height: `${Math.max(8, Math.min(64, height))}px`,
-                          background: active ? "var(--color-accent)" : "rgba(255,255,255,0.12)",
-                          boxShadow: active ? "0 0 4px color-mix(in srgb, var(--color-accent) 40%, transparent)" : "none",
+                          background: active ? tokens.primary : tokens.text + "1F",
+                          boxShadow: active ? `0 0 4px ${tokens.primary}66` : "none",
                         }}
                       />
                     );
@@ -534,10 +537,10 @@ export default function AudioTool() {
 
                 {/* Progress bar */}
                 <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-mono text-white/40">{formatTime(currentTime)}</span>
+                  <span className="text-[10px] font-mono" style={{ color: tokens.textMuted }}>{formatTime(currentTime)}</span>
                   <div
                     className="relative h-1.5 flex-1 cursor-pointer overflow-hidden rounded-full"
-                    style={{ background: "rgba(255,255,255,0.06)" }}
+                    style={{ background: tokens.text + "0F" }}
                     onClick={handleSeek}
                     role="slider"
                     aria-label="Seek audio"
@@ -545,31 +548,31 @@ export default function AudioTool() {
                     aria-valuemax={duration}
                     tabIndex={0}
                   >
-                    <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%`, background: "linear-gradient(90deg, var(--color-accent), var(--color-accent-strong))" }} />
+                    <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%`, background: tokens.primary }} />
                   </div>
-                  <span className="text-[10px] font-mono text-white/40">{formatTime(duration)}</span>
+                  <span className="text-[10px] font-mono" style={{ color: tokens.textMuted }}>{formatTime(duration)}</span>
                 </div>
 
                 {/* Controls */}
                 <div className="flex items-center gap-3">
-                  <button onClick={togglePlay} className="flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-bold transition hover:scale-105" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 30%, transparent)", background: "color-mix(in srgb, var(--color-accent) 8%, transparent)", color: "var(--color-accent)", minHeight: 40 }}>
+                  <button onClick={togglePlay} className="flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-bold transition hover:scale-105" style={{ borderColor: tokens.primary + "4D", background: tokens.primary + "14", color: tokens.primary, minHeight: 40 }}>
                     {isPlaying ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Play</>}
                   </button>
-                  <button onClick={() => handleDownload(current.audioUrl!, "voice")} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.6)", minHeight: 40 }}>
+                  <button onClick={() => handleDownload(current.audioUrl!, "voice")} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: tokens.border, color: tokens.text, minHeight: 40 }}>
                     <Download size={12} /> Download
                   </button>
-                  <button onClick={handleRemix} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.6)", minHeight: 40 }}>
+                  <button onClick={handleRemix} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: tokens.border, color: tokens.text, minHeight: 40 }}>
                     <RotateCcw size={12} /> Remix
                   </button>
                   {/* Volume */}
                   <div className="ml-auto flex items-center gap-2">
-                    <Volume2 size={14} className="text-white/30" />
+                    <Volume2 size={14} style={{ color: tokens.textMuted }} />
                     <input type="range" min={0} max={1} step={0.05} value={volume} onChange={handleVolume} className="w-20 accent-accent" aria-label="Volume" />
                   </div>
                 </div>
 
                 {/* Metadata */}
-                <div className="flex items-center gap-3 text-[9px] text-white/30">
+                <div className="flex items-center gap-3 text-[9px]" style={{ color: tokens.textMuted }}>
                   <span>{voice}</span>
                   <span>{delivery}</span>
                   <span>{pacing}</span>
@@ -578,22 +581,22 @@ export default function AudioTool() {
               </div>
             ) : genStatus === "generating" ? (
               <div className="flex flex-col items-center justify-center gap-4" style={{ minHeight: 120 }}>
-                <motion.div className="h-1 w-48 overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.06)" }}>
+                <motion.div className="h-1 w-48 overflow-hidden rounded-full" style={{ background: tokens.text + "0F" }}>
                   <motion.div
                     className="h-full rounded-full"
-                    style={{ background: "linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 80%, transparent), transparent)" }}
+                    style={{ background: `linear-gradient(90deg, transparent, ${tokens.primary}CC, transparent)` }}
                     animate={{ x: ["-100%", "100%"] }}
                     transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
                   />
                 </motion.div>
-                <div className="text-sm font-black uppercase tracking-[.2em] text-white/60">Generating your audio</div>
-                <div className="text-[10px] text-white/30">{voice} · {delivery}</div>
+                <div className="text-sm font-black uppercase tracking-[.2em]" style={{ color: tokens.text }}>Generating your audio</div>
+                <div className="text-[10px]" style={{ color: tokens.textMuted }}>{voice} · {delivery}</div>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center gap-3" style={{ minHeight: 120 }}>
-                <Mic size={36} className="opacity-20" style={{ color: "var(--color-accent)" }} />
-                <p className="text-sm text-white/40">Your audio will appear here</p>
-                <p className="text-[10px] text-white/20">{voice} · ~{formatTime(estimatedDuration)} estimated</p>
+                <Mic size={36} className="opacity-20" style={{ color: tokens.primary }} />
+                <p className="text-sm" style={{ color: tokens.textMuted }}>Your audio will appear here</p>
+                <p className="text-[10px]" style={{ color: tokens.textMuted }}>{voice} · ~{formatTime(estimatedDuration)} estimated</p>
               </div>
             )}
           </div>
@@ -602,23 +605,23 @@ export default function AudioTool() {
 
       {/* Script Editor + Controls */}
       <Entrance delay={0.15}>
-        <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.6)", backdropFilter: "blur(12px)" }}>
+        <div className="rounded-2xl border p-4" style={{ borderColor: tokens.border, background: tokens.surface, backdropFilter: "blur(12px)" }}>
           <div className="flex items-center gap-2">
-            <Sparkles size={14} style={{ color: "var(--color-accent)" }} />
-            <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/50">What should LiTT say?</span>
+            <Sparkles size={14} style={{ color: tokens.primary }} />
+            <span className="text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>What should LiTT say?</span>
           </div>
 
           {showDirected && directedText ? (
             <div className="mt-3 space-y-2">
               <div className="flex gap-2">
-                <button onClick={() => setShowDirected(false)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}>Original</button>
-                <button onClick={() => setShowDirected(true)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 40%, transparent)", background: "color-mix(in srgb, var(--color-accent) 12%, transparent)", color: "var(--color-accent)" }}>Directed</button>
+                <button onClick={() => setShowDirected(false)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: tokens.border, color: tokens.textMuted }}>Original</button>
+                <button onClick={() => setShowDirected(true)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: tokens.primary + "66", background: tokens.primary + "1F", color: tokens.primary }}>Directed</button>
               </div>
-              <div className="whitespace-pre-wrap rounded-xl border p-3 text-sm leading-relaxed" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 20%, transparent)", background: "color-mix(in srgb, var(--color-accent) 5%, transparent)", color: "rgba(255,255,255,0.85)" }}>
+              <div className="whitespace-pre-wrap rounded-xl border p-3 text-sm leading-relaxed" style={{ borderColor: tokens.primary + "33", background: tokens.primary + "0D", color: tokens.text }}>
                 {showDirected ? directedText : originalText}
               </div>
               {showDirected && (
-                <button onClick={() => { setText(directedText); setShowDirected(false); }} className="text-[10px] font-bold text-white/40 transition hover:text-white/70">
+                <button onClick={() => { setText(directedText); setShowDirected(false); }} className="text-[10px] font-bold transition" style={{ color: tokens.textMuted }}>
                   Use directed script →
                 </button>
               )}
@@ -631,12 +634,12 @@ export default function AudioTool() {
               rows={4}
               disabled={isGenerating}
               className="mt-3 w-full resize-none rounded-xl border bg-transparent px-3 py-2.5 text-sm leading-relaxed outline-none disabled:opacity-50"
-              style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.9)", background: "rgba(255,255,255,0.02)" }}
+              style={{ borderColor: tokens.border, color: tokens.text, background: tokens.text + "08" }}
               aria-label="Script text"
             />
           )}
 
-          <div className="mt-2 flex items-center justify-between text-[10px] text-white/30">
+          <div className="mt-2 flex items-center justify-between text-[10px]" style={{ color: tokens.textMuted }}>
             <span>{text.length} chars · ~{formatTime(estimatedDuration)}</span>
             <span>Markers: [pause] [slow] [emphasis] [excited]</span>
           </div>
@@ -646,7 +649,7 @@ export default function AudioTool() {
               onClick={handleDirect}
               disabled={!text.trim() || isDirecting || isGenerating}
               className="flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[11px] font-bold transition hover:scale-[1.02] active:scale-95 disabled:opacity-40"
-              style={{ borderColor: "color-mix(in srgb, var(--color-accent) 30%, transparent)", background: "color-mix(in srgb, var(--color-accent) 8%, transparent)", color: "var(--color-accent)", minHeight: 40 }}
+              style={{ borderColor: tokens.primary + "4D", background: tokens.primary + "14", color: tokens.primary, minHeight: 40 }}
             >
               {isDirecting ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
               Direct with LiTT
@@ -662,14 +665,14 @@ export default function AudioTool() {
           </div>
 
           {error && (
-            <div className="mt-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px]" style={{ borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.08)", color: "#ef4444" }}>
+            <div className="mt-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px]" style={{ borderColor: tokens.danger + "4D", background: tokens.danger + "14", color: tokens.danger }}>
               <AlertTriangle size={12} />
               <span>{error}</span>
               {(error.includes("failed") || error.includes("No audio")) && (
-                <button onClick={handleGenerate} className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: "rgba(239,68,68,0.2)" }}>Retry</button>
+                <button onClick={handleGenerate} className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: tokens.danger + "33" }}>Retry</button>
               )}
               {error.startsWith("Need ") && (
-                <a href="/pricing" className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: "rgba(239,68,68,0.2)" }}>Upgrade</a>
+                <a href="/pricing" className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: tokens.danger + "33" }}>Upgrade</a>
               )}
             </div>
           )}
@@ -680,8 +683,8 @@ export default function AudioTool() {
       <Entrance delay={0.2}>
         <div className="grid gap-4 lg:grid-cols-2">
           {/* Voice picker */}
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
-            <div className="mb-3 text-[10px] font-black uppercase tracking-[.16em] text-white/50">Voice</div>
+          <div className="rounded-2xl border p-4" style={{ borderColor: tokens.border, background: tokens.surface, backdropFilter: "blur(12px)" }}>
+            <div className="mb-3 text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Voice</div>
             <div className="space-y-2">
               {VOICES.map((v) => (
                 <button
@@ -690,31 +693,31 @@ export default function AudioTool() {
                   disabled={isGenerating}
                   className="w-full rounded-xl border p-3 text-left transition-all hover:scale-[1.01] disabled:opacity-50"
                   style={{
-                    borderColor: voice === v.id ? "color-mix(in srgb, var(--color-accent) 50%, transparent)" : "rgba(255,255,255,0.06)",
-                    background: voice === v.id ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.02)",
+                    borderColor: voice === v.id ? tokens.primary + "80" : "rgba(255,255,255,0.06)",
+                    background: voice === v.id ? tokens.primary + "1A" : tokens.text + "08",
                   }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ background: voice === v.id ? "var(--color-accent)" : "rgba(255,255,255,0.2)" }} />
-                      <span className="text-sm font-black" style={{ color: voice === v.id ? "var(--color-accent)" : "rgba(255,255,255,0.8)" }}>{v.label}</span>
+                      <span className="h-2 w-2 rounded-full" style={{ background: voice === v.id ? tokens.primary : tokens.textMuted }} />
+                      <span className="text-sm font-black" style={{ color: voice === v.id ? tokens.primary : tokens.text }}>{v.label}</span>
                     </div>
-                    <span className="text-[9px] text-white/30">{v.desc}</span>
+                    <span className="text-[9px]" style={{ color: tokens.textMuted }}>{v.desc}</span>
                   </div>
-                  <div className="mt-1 ml-4 text-[10px] text-white/30">Best for: {v.bestFor}</div>
+                  <div className="mt-1 ml-4 text-[10px]" style={{ color: tokens.textMuted }}>Best for: {v.bestFor}</div>
                 </button>
               ))}
             </div>
           </div>
 
           {/* Delivery controls */}
-          <div className="space-y-4 rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
+          <div className="space-y-4 rounded-2xl border p-4" style={{ borderColor: tokens.border, background: tokens.surface, backdropFilter: "blur(12px)" }}>
             <ChipRow label="Delivery" options={DELIVERY_OPTIONS} selected={delivery} onSelect={setDelivery} accentColor={brand.primary.DEFAULT} />
             <ChipRow label="Pacing" options={PACING_OPTIONS} selected={pacing} onSelect={setPacing} accentColor={brand.primary.DEFAULT} />
 
             {/* Direction */}
             <div>
-              <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">Direction</div>
+              <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Direction</div>
               <input
                 type="text"
                 value={direction}
@@ -722,7 +725,7 @@ export default function AudioTool() {
                 disabled={isGenerating}
                 placeholder="Sound like a late-night radio host, confident but relaxed..."
                 className="w-full rounded-xl border bg-transparent px-3 py-2 text-xs outline-none disabled:opacity-50"
-                style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.8)", background: "rgba(255,255,255,0.02)" }}
+                style={{ borderColor: tokens.border, color: tokens.text, background: tokens.text + "08" }}
                 aria-label="Direction notes"
               />
             </div>
@@ -730,18 +733,18 @@ export default function AudioTool() {
             {/* Advanced */}
             <div>
               <button onClick={() => setShowAdvanced(!showAdvanced)} className="flex w-full items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/40">Advanced</span>
-                <ChevronDown size={14} className="text-white/40 transition-transform" style={{ transform: showAdvanced ? "rotate(180deg)" : "none" }} />
+                <span className="text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Advanced</span>
+                <ChevronDown size={14} className="transition-transform" style={{ color: tokens.textMuted, transform: showAdvanced ? "rotate(180deg)" : "none" }} />
               </button>
               {showAdvanced && (
                 <div className="mt-3 space-y-2">
-                  <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-[10px]" style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}>
-                    <span className="text-white/40">Model</span>
-                    <span className="font-bold text-white/60">Gemini TTS</span>
+                  <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-[10px]" style={{ borderColor: tokens.border, background: tokens.text + "08" }}>
+                    <span style={{ color: tokens.textMuted }}>Model</span>
+                    <span className="font-bold" style={{ color: tokens.text }}>Gemini TTS</span>
                   </div>
-                  <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-[10px]" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 20%, transparent)", background: "color-mix(in srgb, var(--color-accent) 5%, transparent)" }}>
-                    <span className="text-white/40">Cost</span>
-                    <span className="font-black" style={{ color: "var(--color-accent)" }}>{COST} LiTTBits</span>
+                  <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-[10px]" style={{ borderColor: tokens.primary + "33", background: tokens.primary + "0D" }}>
+                    <span style={{ color: tokens.textMuted }}>Cost</span>
+                    <span className="font-black" style={{ color: tokens.primary }}>{COST} LiTTBits</span>
                   </div>
                 </div>
               )}
@@ -752,15 +755,15 @@ export default function AudioTool() {
 
       {/* Music redirect */}
       <Entrance delay={0.25}>
-        <div className="flex items-center justify-between rounded-2xl border p-4" style={{ borderColor: "rgba(139,92,246,0.15)", background: "rgba(139,92,246,0.04)" }}>
+        <div className="flex items-center justify-between rounded-2xl border p-4" style={{ borderColor: tokens.primary + "26", background: tokens.primary + "0A" }}>
           <div className="flex items-center gap-3">
-            <Music size={16} style={{ color: "#A970FF" }} />
+            <Music size={16} style={{ color: tokens.primary }} />
             <div>
-              <div className="text-xs font-bold text-white/70">Need a song or beat?</div>
-              <div className="text-[10px] text-white/40">LiTT Music has full music generation</div>
+              <div className="text-xs font-bold" style={{ color: tokens.text }}>Need a song or beat?</div>
+              <div className="text-[10px]" style={{ color: tokens.textMuted }}>LiTT Music has full music generation</div>
             </div>
           </div>
-          <a href="/studio?tool=music" className="flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[11px] font-bold transition hover:scale-105" style={{ borderColor: "rgba(139,92,246,0.3)", background: "rgba(139,92,246,0.08)", color: "#A970FF", minHeight: 40 }}>
+          <a href="/studio?tool=music" className="flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[11px] font-bold transition hover:scale-105" style={{ borderColor: tokens.primary + "4D", background: tokens.primary + "14", color: tokens.primary, minHeight: 40 }}>
             Open LiTT Music <ArrowRight size={12} />
           </a>
         </div>
@@ -768,25 +771,25 @@ export default function AudioTool() {
 
       {/* History */}
       <Entrance delay={0.3}>
-        <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
+        <div className="rounded-2xl border p-4" style={{ borderColor: tokens.border, background: tokens.surface, backdropFilter: "blur(12px)" }}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
-              <History size={11} className="text-white/40" />
-              <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/40">Recent Takes</span>
+              <History size={11} style={{ color: tokens.textMuted }} />
+              <span className="text-[10px] font-black uppercase tracking-[.16em]" style={{ color: tokens.textMuted }}>Recent Takes</span>
             </div>
             {history.length > 0 && (
-              <button onClick={handleClear} className="text-[9px] text-white/30 transition hover:text-white/60">Clear</button>
+              <button onClick={handleClear} className="text-[9px] transition" style={{ color: tokens.textMuted }}>Clear</button>
             )}
           </div>
           {history.length === 0 ? (
-            <div className="py-6 text-center text-[11px] text-white/25">No takes yet</div>
+            <div className="py-6 text-center text-[11px]" style={{ color: tokens.textMuted }}>No takes yet</div>
           ) : (
             <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
               {history.map((g) => (
                 <div
                   key={g.id}
                   className="relative w-36 shrink-0 overflow-hidden rounded-xl border p-3"
-                  style={{ borderColor: g.status === "failed" ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.06)", background: "rgba(0,0,0,0.3)" }}
+                  style={{ borderColor: g.status === "failed" ? tokens.danger + "33" : tokens.border, background: tokens.background }}
                 >
                   {/* Mini waveform */}
                   <div className="flex items-end gap-0.5 h-6 mb-2">
@@ -796,16 +799,16 @@ export default function AudioTool() {
                         className="w-0.5 rounded-full"
                         style={{
                           height: `${20 + Math.sin(i * 0.8) * 8 + (i % 5) * 3}px`,
-                          background: g.status === "ready" ? "color-mix(in srgb, var(--color-accent) 40%, transparent)" : "rgba(255,255,255,0.1)",
+                          background: g.status === "ready" ? tokens.primary + "66" : tokens.text + "1A",
                         }}
                       />
                     ))}
                   </div>
-                  <div className="truncate text-[10px] font-bold text-white/60">{g.voice}</div>
-                  <div className="truncate text-[9px] text-white/30">{g.delivery} · {g.pacing}</div>
-                  <div className="mt-1 text-[8px] text-white/20">{new Date(g.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div>
+                  <div className="truncate text-[10px] font-bold" style={{ color: tokens.text }}>{g.voice}</div>
+                  <div className="truncate text-[9px]" style={{ color: tokens.textMuted }}>{g.delivery} · {g.pacing}</div>
+                  <div className="mt-1 text-[8px]" style={{ color: tokens.textMuted }}>{new Date(g.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div>
                   {g.status === "failed" && (
-                    <div className="mt-1 flex items-center gap-1 text-[8px]" style={{ color: "#ef4444" }}>
+                    <div className="mt-1 flex items-center gap-1 text-[8px]" style={{ color: tokens.danger }}>
                       <AlertTriangle size={8} /> Failed
                     </div>
                   )}
@@ -813,7 +816,7 @@ export default function AudioTool() {
                     <button
                       onClick={() => { setCurrent(g); setGenStatus("ready"); if (g.audioUrl) playAudio(g.audioUrl); }}
                       className="mt-2 flex items-center gap-1 rounded-lg border px-2 py-1 text-[9px] font-bold transition hover:scale-105"
-                      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 20%, transparent)", color: "var(--color-accent)" }}
+                      style={{ borderColor: tokens.primary + "33", color: tokens.primary }}
                     >
                       <Play size={9} /> Play
                     </button>

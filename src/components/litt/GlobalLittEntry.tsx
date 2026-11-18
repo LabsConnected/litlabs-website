@@ -8,7 +8,7 @@ import { buildLittPageContext, resolveLittNavigation, studioBridgeUrl } from "@/
 
 /** Persistent navigation/composer bridge. Studio owns the sole runtime and conversation controller. */
 export default function GlobalLittEntry() {
-  const pathname = usePathname() ?? "/dashboard";
+  const pathname = usePathname() ?? "/studio";
   const params = useSearchParams();
   const router = useRouter();
   const { isSignedIn, userId } = useClerkAuth();

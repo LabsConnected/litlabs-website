@@ -134,23 +134,23 @@ export default function DiagnosticsPage() {
         {/* Summary */}
         {rows.length > 0 && (
           <div className="mb-4 grid grid-cols-4 gap-2">
-            <div className="rounded-lg border border-white/5 bg-black/20 px-3 py-2">
+            <div className="rounded-lg border border-black/5 bg-black/[0.03] px-3 py-2">
               <div className="text-lg font-black" style={{ color: "#22c55e" }}>{passCount}</div>
-              <div className="text-[10px] text-white/40">PASS</div>
+              <div className="text-[10px] text-zinc-500">PASS</div>
             </div>
-            <div className="rounded-lg border border-white/5 bg-black/20 px-3 py-2">
+            <div className="rounded-lg border border-black/5 bg-black/[0.03] px-3 py-2">
               <div className="text-lg font-black" style={{ color: "#f59e0b" }}>{warnCount}</div>
-              <div className="text-[10px] text-white/40">WARNING</div>
+              <div className="text-[10px] text-zinc-500">WARNING</div>
             </div>
-            <div className="rounded-lg border border-white/5 bg-black/20 px-3 py-2">
+            <div className="rounded-lg border border-black/5 bg-black/[0.03] px-3 py-2">
               <div className="text-lg font-black" style={{ color: "#ef4444" }}>{failCount}</div>
-              <div className="text-[10px] text-white/40">FAIL</div>
+              <div className="text-[10px] text-zinc-500">FAIL</div>
             </div>
-            <div className="rounded-lg border border-white/5 bg-black/20 px-3 py-2">
+            <div className="rounded-lg border border-black/5 bg-black/[0.03] px-3 py-2">
               <div className="text-lg font-black" style={{ color: "#6b7280" }}>
                 {rows.length - passCount - warnCount - failCount}
               </div>
-              <div className="text-[10px] text-white/40">N/A</div>
+              <div className="text-[10px] text-zinc-500">N/A</div>
             </div>
           </div>
         )}
@@ -166,12 +166,12 @@ export default function DiagnosticsPage() {
             {rows.map((row, idx) => (
               <div
                 key={idx}
-                className="flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-4 py-3"
+                className="flex items-center justify-between rounded-lg border border-black/5 bg-black/[0.03] px-4 py-3"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold text-white/80">{row.label}</div>
+                  <div className="text-xs font-semibold text-zinc-800">{row.label}</div>
                   {row.detail && (
-                    <div className="mt-0.5 text-[10px] text-white/40">{row.detail}</div>
+                    <div className="mt-0.5 text-[10px] text-zinc-500">{row.detail}</div>
                   )}
                 </div>
                 <span
@@ -189,10 +189,10 @@ export default function DiagnosticsPage() {
         )}
 
         {/* CLI hint */}
-        <div className="mt-6 rounded-lg border border-white/5 bg-black/20 p-4">
-          <div className="text-xs font-bold text-white/60">CLI Diagnostics</div>
-          <p className="mt-1 text-[11px] text-white/40">
-            Run <code className="rounded bg-white/10 px-1.5 py-0.5 text-[10px]">pnpm diagnose:connections</code> in your terminal for a full command-line diagnostic report.
+        <div className="mt-6 rounded-lg border border-black/5 bg-black/[0.03] p-4">
+          <div className="text-xs font-bold text-zinc-600">CLI Diagnostics</div>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            Run <code className="rounded bg-black/10 px-1.5 py-0.5 text-[10px]">pnpm diagnose:connections</code> in your terminal for a full command-line diagnostic report.
           </p>
         </div>
       </div>

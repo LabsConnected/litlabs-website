@@ -4,13 +4,20 @@ import {
   mapMediaIntentToDestination,
   destinationToLegacyTool,
   resolveCreatorDestination,
+  resolveEntryCreateType,
   DESTINATION_LABELS,
   type StudioDestination,
+  type StudioMode,
   type WorkspaceStage,
   type CreatorKind,
+  type StudioEntryCreateType,
   workspaceStageToMode,
   modeToWorkspaceStage,
   CREATOR_KIND_LABELS,
+  DIRECTIVE_STAGES,
+  DIRECTIVE_STAGE_LABELS,
+  directiveStageToMode,
+  modeToDirectiveStage,
 } from "./studio-destinations";
 
 describe("studio-destinations", () => {
@@ -120,6 +127,13 @@ describe("studio-destinations", () => {
 
     it("maps screen to Studio (capture action, not a destination)", () => {
       expect(mapLegacyToolToDestination("screen").destination).toBe("studio");
+    });
+
+    it("maps memory to Studio/Work, not the default fallthrough (regression: ?tool=memory used to silently land on the default case)", () => {
+      const result = mapLegacyToolToDestination("memory");
+      expect(result.destination).toBe("studio");
+      expect(result.mode).toBe("work");
+      expect(result.legacyTool).toBe("memory");
     });
 
     it("maps space to Studio / Work (skybox is a LiTT capability)", () => {
@@ -318,5 +332,93 @@ describe("studio-destinations", () => {
       expect(resolveCreatorDestination("design")).toBeNull();
       expect(resolveCreatorDestination("../../../etc")).toBeNull();
     });
+  });
+
+  describe("resolveEntryCreateType (one-chat entry chips)", () => {
+    // One-chat entry (Larry's directive, 2026-11-11; ART-20261111-031):
+    // the creation-type chips live INSIDE the one chat as entry hints.
+    // Each chip's plan must land exactly where the retired hub's chip
+    // landed — the hub's hrefs were /studio?creator=website (page-level
+    // website start), ?creator=image|video|music|game (Create
+    // destination), ?tool=code and ?tool=design (Studio stages) — but
+    // executed in place, never as a trip through a separate hub page.
+    const kinds: StudioEntryCreateType[] = [
+      "website",
+      "image",
+      "video",
+      "music",
+      "code",
+      "design",
+      "game",
+    ];
+
+    it("routes Website to the page-level website start, not a creator/tool", () => {
+      expect(resolveEntryCreateType("website")).toEqual({ kind: "website-start" });
+    });
+
+    it("routes Image/Video/Music/Game to the Create destination in that mode", () => {
+      for (const mode of ["image", "video", "music", "game"] as const) {
+        expect(resolveEntryCreateType(mode)).toEqual({ kind: "creator", mode });
+        // Parity with the hub's ?creator= deep link: the same state the
+        // deep link resolves to on load.
+        expect(resolveCreatorDestination(mode)).toEqual({
+          destination: "create",
+          mode,
+        });
+      }
+    });
+
+    it("routes Code/Design to the Studio destination's matching stage tool", () => {
+      for (const tool of ["code", "design"] as const) {
+        expect(resolveEntryCreateType(tool)).toEqual({ kind: "tool", tool });
+        // Parity with the hub's ?tool= deep link.
+        const dest = mapLegacyToolToDestination(tool);
+        expect(dest.destination).toBe("studio");
+        expect(dest.mode).toBe(tool);
+      }
+    });
+
+    it("covers exactly the seven creation types", () => {
+      for (const kind of kinds) {
+        expect(resolveEntryCreateType(kind)).toBeTruthy();
+      }
+    });
+  });
+});
+
+describe("Directive stages (Phase 2 — Master Build Directive §2)", () => {
+  it("presents exactly five stages in Larry's locked order", () => {
+    expect(DIRECTIVE_STAGES).toEqual(["plan", "canvas-design", "code", "preview", "media"]);
+    expect(DIRECTIVE_STAGE_LABELS["canvas-design"]).toBe("Canvas & Design");
+  });
+
+  it("every stage maps to a legacy StudioMode and back", () => {
+    for (const stage of DIRECTIVE_STAGES) {
+      expect(modeToDirectiveStage(directiveStageToMode(stage))).toBe(stage);
+    }
+  });
+
+  it("the legacy design mode lands in the Canvas & Design stage (unlike the WorkspaceStage mapping, which has none)", () => {
+    // The Phase 1 audit's structural finding: design had NO
+    // WorkspaceStage. The Directive adapter is where design gains its
+    // stage home — as a mode of Canvas & Design, never a sixth stage.
+    expect(modeToWorkspaceStage("design")).toBeNull();
+    expect(modeToDirectiveStage("design")).toBe("canvas-design");
+    expect(modeToDirectiveStage("files")).toBe("canvas-design");
+  });
+
+  it("?tool=design and ?tool=canvas both resolve into the studio destination the stage renders", () => {
+    const design = mapLegacyToolToDestination("design");
+    const canvas = mapLegacyToolToDestination("canvas");
+    expect(design.destination).toBe("studio");
+    expect(canvas.destination).toBe("studio");
+    // design keeps its legacy mode (which the stage reads as Design
+    // mode); canvas keeps the files mode (Build mode).
+    expect(design.mode).toBe("design");
+    expect(canvas.mode).toBe("files");
+    // The mapping's mode field is a loose union across destinations;
+    // for the studio destination both values are StudioModes.
+    expect(modeToDirectiveStage((design.mode ?? "preview") as StudioMode)).toBe("canvas-design");
+    expect(modeToDirectiveStage((canvas.mode ?? "preview") as StudioMode)).toBe("canvas-design");
   });
 });

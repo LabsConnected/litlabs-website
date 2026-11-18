@@ -22,7 +22,11 @@ export function describeSourceRows(
     : capabilities.sourceLabel ?? (capabilities.sourceKind === "github" ? "GitHub" : "LiTT Managed");
 
   const workspace =
-    capabilities.workspaceStatus === "ready" ? "Ready"
+    // The repo gate is a deliberate product state, not a failed attempt:
+    // a gated project's stored workspace status may still say "failed"
+    // (an earlier doomed prepare), but the fact row must not.
+    capabilities.sourceStatus === "unavailable" ? "Unavailable"
+    : capabilities.workspaceStatus === "ready" ? "Ready"
     : capabilities.workspaceStatus === "provisioning" || capabilities.workspaceStatus === "preparing" ? "Starting…"
     : capabilities.workspaceStatus === "failed" || capabilities.workspaceStatus === "error" ? "Failed"
     : "Not prepared";

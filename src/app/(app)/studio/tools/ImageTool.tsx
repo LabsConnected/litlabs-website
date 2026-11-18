@@ -47,6 +47,9 @@ import GenerationHistoryCard from "../components/GenerationHistoryCard";
 
 import { apiFetch, type ApiJson } from "@/lib/api-response";
 import { notifyAssetsChanged } from "../hooks/useAssetsRefresh";
+import { useElementSize } from "../hooks/useElementSize";
+import { fitWithinBox, type CanvasSize } from "../lib/canvas-fit";
+import { downloadMediaFile } from "../lib/download-media";
 import { useStudioContext } from "../context/StudioContext";
 
 type Workspace = {
@@ -85,6 +88,8 @@ type Generation = {
   provider: ProviderSelection;
   fileUrl?: string;
   thumbUrl?: string;
+  width?: number;
+  height?: number;
   status: GenerationStatus;
   error?: string;
   createdAt: number;
@@ -426,7 +431,7 @@ const VISUAL_STYLE_CARDS = [
 ];
 
 export default function ImageTool({ initialPrompt }: { initialPrompt?: string | null }) {
-  const { resolvedColors: T } = useTheme();
+  const { tokens, resolvedColors: T } = useTheme();
   const { setActiveAssetId, projectId } = useStudioContext();
 
   /* ── Prompt state ── */
@@ -460,7 +465,13 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
   }, [prompt]);
 
   /* ── Provider / format state ── */
-  const [providerId, setProviderId] = useState<ProviderSelection>("openai");
+  // Default is Auto, NOT a pinned provider: with no explicit user
+  // choice the request must enter the configured-provider chain
+  // (generationMode) instead of pinning one provider whose key/quota
+  // can be dead (production battery 2026-11-11: a fresh/chat-routed
+  // pane pinned OpenAI and died on its exhausted quota). An explicit
+  // pin picked in the UI is still respected as-is.
+  const [providerId, setProviderId] = useState<ProviderSelection>("auto-free");
   const [aspectRatio, setAspectRatio] = useState<
     "1:1" | "4:5" | "3:2" | "16:9" | "9:16"
   >("1:1");
@@ -553,7 +564,22 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
     }
   });
   const [imgError, setImgError] = useState<string | null>(null);
+  const desktopCanvasRef = useRef<HTMLDivElement>(null);
+  const desktopCanvasSize = useElementSize(desktopCanvasRef);
+  const [loadedImageSize, setLoadedImageSize] = useState<CanvasSize | null>(null);
   const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setLoadedImageSize(null);
+  }, [currentResult?.id, currentResult?.fileUrl]);
+  const resultImageSize: CanvasSize =
+    loadedImageSize ??
+    (currentResult?.width && currentResult?.height
+      ? { width: currentResult.width, height: currentResult.height }
+      : { width: currentAspect.width, height: currentAspect.height });
+  const desktopCanvasFrameSize = fitWithinBox(
+    resultImageSize,
+    desktopCanvasSize,
+  );
   const [imageHovered, setImageHovered] = useState(false);
   // Mobile: which generation is open in the full-screen preview (null = closed)
   const [previewGen, setPreviewGen] = useState<Generation | null>(null);
@@ -671,7 +697,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
       name: "Default",
       prompt: "",
       negativePrompt: "",
-      providerId: "openai",
+      providerId: "auto-free",
       aspectRatio: "1:1",
       imageSize: "1K",
       seed: 0,
@@ -1046,6 +1072,8 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
         prompt: activePrompt,
         negativePrompt: negativePrompt.trim(),
         provider: providerId,
+        width: currentAspect.width,
+        height: currentAspect.height,
         status: "submitting",
         createdAt: Date.now(),
         cost: providerCost,
@@ -1108,6 +1136,18 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
         const dataCost = typeof data.cost === "number" ? data.cost : 0;
         const assetId = data.assetId as string | null | undefined;
         const assetPersistenceFailed = data.assetPersistenceFailed === true;
+        // Truthful provider identification: the response names the
+        // provider that ACTUALLY served (after any fallthrough) —
+        // record and display THAT, never just the requested mode's
+        // label ("Auto Best (Free)" told the user nothing).
+        const servedProviderId =
+          typeof data.providerId === "string" && data.providerId
+            ? (data.providerId as ProviderSelection)
+            : null;
+        const servedProviderLabel = servedProviderId
+          ? (PROVIDER_OPTIONS.find((p) => p.id === servedProviderId)?.label ??
+            servedProviderId)
+          : null;
 
         setHistory((prev) =>
           prev.map((g) =>
@@ -1117,6 +1157,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                   status: "succeeded",
                   fileUrl: downloadUrl,
                   thumbUrl,
+                  ...(servedProviderId ? { provider: servedProviderId } : {}),
                 }
               : g,
           ),
@@ -1129,13 +1170,14 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                   status: "succeeded",
                   fileUrl: downloadUrl,
                   thumbUrl,
+                  ...(servedProviderId ? { provider: servedProviderId } : {}),
                 }
               : prev,
           );
 
         addLog(
           "success",
-          `[${i + 1}/${batchSize}] ✓ Done · ${isFree ? "FREE" : dataCost + " 🪙"}`,
+          `[${i + 1}/${batchSize}] ✓ Done · ${isFree ? "FREE" : dataCost + " 🪙"}${servedProviderLabel ? ` · ${servedProviderLabel}` : ""}`,
         );
         refreshWallet().catch(() => {});
 
@@ -1236,20 +1278,13 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
   );
 
   const handleDownload = useCallback(async (url: string, name: string) => {
-    try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `${name.replace(/[^a-z0-9]+/gi, "_").slice(0, 40)}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(url, "_blank");
-    }
+    // Shared blob-based downloader: works for cross-origin provider URLs
+    // (a bare <a download> is ignored there) and revokes the object URL
+    // after a delay — revoking synchronously can cancel the download.
+    await downloadMediaFile(
+      url,
+      `${name.replace(/[^a-z0-9]+/gi, "_").slice(0, 40)}.jpg`,
+    );
   }, []);
 
   const handleQuickAction = useCallback(
@@ -1378,14 +1413,15 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
   return (
     <div
       className="flex flex-col h-full overflow-hidden"
-      style={{ backgroundColor: "var(--glass-bg-0)", color: "var(--glass-text-1)" }}
+      style={{ backgroundColor: tokens.background, color: tokens.text }}
     >
       {/* ── Top chrome ──────────────────────────────────────────────── */}
       <header
-        className="shrink-0 flex items-center justify-between px-4 h-10 gap-3 glass-toolbar"
+        className="shrink-0 flex items-center justify-between px-4 h-10 gap-3"
         style={{
-          borderBottom: "1px solid var(--glass-border)",
+          borderBottom: `1px solid ${tokens.border}`,
           borderRadius: 0,
+          backgroundColor: tokens.surface,
         }}
       >
         {/* Left: title + workspace tabs */}
@@ -1394,7 +1430,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
             <Sparkles size={13} className="text-accent" />
             <span
               className="text-[11px] font-black uppercase tracking-widest"
-              style={{ color: "var(--glass-text-1)" }}
+              style={{ color: tokens.text }}
             >
               Image Studio
             </span>
@@ -1518,9 +1554,9 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
           <div
             className="hidden md:flex items-center gap-1 h-6 px-2 rounded border text-[10px] font-bold"
             style={{
-              borderColor: "var(--glass-border-green)",
-              color: "var(--glass-green)",
-              backgroundColor: "var(--glass-green-soft)",
+              borderColor: `${tokens.success}52`,
+              color: tokens.success,
+              backgroundColor: `${tokens.success}2E`,
             }}
           >
             <Coins size={10} /> {coinBalance ?? "—"}
@@ -1530,9 +1566,9 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
             disabled={claiming}
             className="hidden md:flex h-6 px-2 items-center gap-1 rounded border text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-40"
             style={{
-              borderColor: "var(--glass-border-purple)",
-              color: "var(--glass-purple)",
-              backgroundColor: "var(--glass-purple-soft)",
+              borderColor: `${tokens.primary}59`,
+              color: tokens.primary,
+              backgroundColor: `${tokens.primary}2E`,
             }}
             title="Claim daily bonus"
           >
@@ -1638,9 +1674,9 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                 <div
                   className="text-[11px] px-3 py-2.5 rounded-xl border"
                   style={{
-                    backgroundColor: error.includes("✓") ? T.success + "12" : "#f8514912",
-                    borderColor: error.includes("✓") ? T.success + "40" : "#f8514940",
-                    color: error.includes("✓") ? T.success : "#f85149",
+                    backgroundColor: error.includes("✓") ? T.success + "12" : tokens.danger + "12",
+                    borderColor: error.includes("✓") ? T.success + "40" : tokens.danger + "40",
+                    color: error.includes("✓") ? T.success : tokens.danger,
                   }}
                   role="alert"
                 >
@@ -1653,7 +1689,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                       onClick={() => void handleGenerate()}
                       disabled={isWorking}
                       className="mt-2 w-full min-h-[44px] rounded-lg border font-bold flex items-center justify-center gap-2 disabled:opacity-40"
-                      style={{ borderColor: "#f8514960", color: "#f85149" }}
+                      style={{ borderColor: tokens.danger + "60", color: tokens.danger }}
                     >
                       <RefreshCw size={13} /> Try again
                     </button>
@@ -1684,7 +1720,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                     />
                   </button>
                   {imgError ? (
-                    <div className="mt-1.5 text-[11px] px-3 py-2 rounded-lg" style={{ backgroundColor: "#f8514912", color: "#f85149" }}>
+                    <div className="mt-1.5 text-[11px] px-3 py-2 rounded-lg" style={{ backgroundColor: tokens.danger + "12", color: tokens.danger }}>
                       {imgError}
                     </div>
                   ) : (
@@ -1930,7 +1966,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                         <img src={g.thumbUrl || g.fileUrl} alt={g.prompt} className="h-full w-full object-cover" loading="lazy" />
                       ) : (
                         <div className="h-full w-full flex items-center justify-center">
-                          <AlertTriangle size={16} style={{ color: "#f85149" }} />
+                          <AlertTriangle size={16} style={{ color: tokens.danger }} />
                         </div>
                       )}
                       {g.status !== "succeeded" && g.fileUrl && (
@@ -1978,7 +2014,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
               className="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-3xl border-t p-4 pb-[calc(16px+env(safe-area-inset-bottom))]"
               style={{ backgroundColor: T.bgColor, borderColor: T.borderColor + "40" }}
             >
-              <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-white/20" aria-hidden />
+              <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-[rgba(127,127,127,0.35)]" aria-hidden />
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-black" style={{ color: T.textColor }}>More settings</span>
                 <button
@@ -2236,18 +2272,19 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
 
         {/* ── LEFT PANEL: Controls (desktop only) ─────────────────── */}
         <div
-          className="hidden md:flex shrink-0 flex-col overflow-hidden glass-panel"
+          className="hidden md:flex shrink-0 flex-col overflow-hidden"
           style={{
             "--left-panel-width": `${leftWidth}px`,
-            borderRight: "1px solid var(--glass-border)",
+            borderRight: `1px solid ${tokens.border}`,
             borderRadius: 0,
             width: `${leftWidth}px`,
+            backgroundColor: tokens.surface,
           } as CSSProperties}
         >
 
           {/* Tab nav — segmented control */}
           <div className="flex shrink-0 gap-0.5 px-3 pt-3 pb-2">
-            <div className="flex w-full items-center gap-0.5 rounded-lg p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
+            <div className="flex w-full items-center gap-0.5 rounded-lg p-0.5" style={{ backgroundColor: T.textColor + "0A" }}>
               {(["prompt", "style", "settings"] as const).map((tab) => {
                 const isActive = activeTab === tab;
                 return (
@@ -2256,9 +2293,9 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                     onClick={() => setActiveTab(tab)}
                     className="flex-1 h-7 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all"
                     style={{
-                      backgroundColor: isActive ? "var(--glass-purple-soft)" : "transparent",
-                      border: isActive ? "1px solid var(--glass-border-purple)" : "1px solid transparent",
-                      color: isActive ? "var(--glass-purple)" : "var(--glass-text-2)",
+                      backgroundColor: isActive ? T.accentColor + "2E" : "transparent",
+                      border: isActive ? `1px solid ${T.accentColor}` : "1px solid transparent",
+                      color: isActive ? T.accentColor : tokens.textMuted,
                     }}
                   >
                     {tab === "prompt" ? "Prompt" : tab === "style" ? "Style" : "Settings"}
@@ -2571,8 +2608,8 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                         disabled={isWorking}
                         className="relative aspect-[16/10] rounded-lg overflow-hidden border transition-all hover:scale-[1.03] disabled:opacity-40 group"
                         style={{
-                          borderColor: isSelected ? "var(--glass-border-purple)" : "var(--glass-border)",
-                          boxShadow: isSelected ? "0 0 12px rgba(139,92,246,0.25)" : "none",
+                          borderColor: isSelected ? T.accentColor : tokens.border,
+                          boxShadow: isSelected ? `0 0 12px ${T.accentColor}40` : "none",
                           backgroundColor: "rgba(20,15,30,0.82)",
                         }}
                       >
@@ -2595,7 +2632,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                           {card.label}
                         </span>
                         {isSelected && (
-                          <div className="absolute top-1 right-1 grid h-4 w-4 place-items-center rounded-full" style={{ backgroundColor: "var(--glass-purple)" }}>
+                          <div className="absolute top-1 right-1 grid h-4 w-4 place-items-center rounded-full" style={{ backgroundColor: T.accentColor }}>
                             <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                               <polyline points="20 6 9 17 4 12" />
                             </svg>
@@ -3335,7 +3372,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
           )}
 
           {/* ── Generate button — always visible ── */}
-          <div className="shrink-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-3 pt-2 space-y-2 border-t" style={{ borderColor: "var(--glass-border)", backgroundColor: "var(--glass-surface-3)" }}>
+          <div className="shrink-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-3 pt-2 space-y-2 border-t" style={{ borderColor: tokens.border, backgroundColor: tokens.surface }}>
             <button
               onClick={() => void handleGenerate()}
               disabled={!promptValid || !canAfford || isWorking}
@@ -3360,9 +3397,9 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                 style={{
                   backgroundColor: error.includes("✓")
                     ? T.success + "15"
-                    : "#f8514915",
-                  borderLeft: `3px solid ${error.includes("✓") ? T.success : "#f85149"}`,
-                  color: error.includes("✓") ? T.success : "#f85149",
+                    : tokens.danger + "15",
+                  borderLeft: `3px solid ${error.includes("✓") ? T.success : tokens.danger}`,
+                  color: error.includes("✓") ? T.success : tokens.danger,
                 }}
               >
                 {error.includes("✓") ? (
@@ -3408,8 +3445,8 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
             <div className="flex-1 flex flex-col min-w-0">
               {/* Preview header */}
               <div
-                className="shrink-0 flex items-center justify-between px-4 h-9 glass-toolbar"
-                style={{ borderBottom: "1px solid var(--glass-border)", borderRadius: 0 }}
+                className="shrink-0 flex items-center justify-between px-4 h-9"
+                style={{ borderBottom: `1px solid ${tokens.border}`, borderRadius: 0, backgroundColor: tokens.surface }}
               >
                 <div
                   className="flex items-center gap-2 text-[10px]"
@@ -3553,28 +3590,46 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
 
               {/* Canvas */}
               <div
+                ref={desktopCanvasRef}
                 className="flex-1 flex items-center justify-center relative overflow-hidden"
                 style={{
-                  background: "radial-gradient(circle at 50% 35%, rgba(139,92,246,0.09), transparent 40%), var(--glass-bg-0)",
+                  background: `radial-gradient(circle at 50% 35%, ${T.accentColor}17, transparent 40%), ${tokens.background}`,
                 }}
+                data-testid="image-tool-desktop-canvas"
               >
                 {currentResult?.fileUrl ? (
                   <>
                     <div
-                      className="relative max-w-full max-h-full"
+                      className="relative max-w-full max-h-full shrink-0"
+                      style={
+                        desktopCanvasFrameSize.width > 0
+                          ? desktopCanvasFrameSize
+                          : { width: "100%", height: "100%" }
+                      }
                       onMouseEnter={() => setImageHovered(true)}
                       onMouseLeave={() => setImageHovered(false)}
+                      data-testid="image-tool-desktop-canvas-frame"
                     >
                       <Image
                         src={currentResult.fileUrl}
                         alt={currentResult.prompt}
-                        width={1024}
-                        height={1024}
+                        width={resultImageSize.width}
+                        height={resultImageSize.height}
                         unoptimized={currentResult.fileUrl.startsWith("blob:") || currentResult.fileUrl.startsWith("data:")}
-                        className="object-contain"
-                        style={{ borderRadius: "4px", maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto" }}
+                        className="block h-full w-full object-contain"
+                        style={{ borderRadius: "4px" }}
                         onError={() => setImgError("Image failed to load.")}
-                        onLoad={() => setImgError(null)}
+                        onLoad={(event) => {
+                          const image = event.currentTarget;
+                          if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                            setLoadedImageSize({
+                              width: image.naturalWidth,
+                              height: image.naturalHeight,
+                            });
+                          }
+                          setImgError(null);
+                        }}
+                        data-testid="image-tool-desktop-canvas-image"
                       />
                       {/* Favorite heart button — top right */}
                       <button
@@ -3612,7 +3667,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                         >
                           {/* LiTT quick actions row */}
                           <div className="flex flex-wrap items-center gap-1">
-                            <span className="text-[9px] font-bold uppercase tracking-wider mr-1" style={{ color: "var(--glass-text-3)" }}>LiTT</span>
+                            <span className="text-[9px] font-bold uppercase tracking-wider mr-1" style={{ color: "rgba(255,255,255,0.55)" }}>LiTT</span>
                             {LITT_QUICK_ACTIONS.slice(0, 4).map((action) => (
                               <button
                                 key={action.label}
@@ -3784,11 +3839,11 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                           <AlertTriangle
                             size={28}
                             className="mx-auto mb-2"
-                            style={{ color: "#f85149" }}
+                            style={{ color: tokens.danger }}
                           />
                           <p
                             className="text-sm mb-3"
-                            style={{ color: "#f85149" }}
+                            style={{ color: tokens.danger }}
                           >
                             {imgError}
                           </p>
@@ -3853,13 +3908,13 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                   <div className="text-center px-8">
                     <div
                       className="w-16 h-16 mx-auto mb-3 rounded-full flex items-center justify-center"
-                      style={{ backgroundColor: "#f8514918" }}
+                      style={{ backgroundColor: tokens.danger + "18" }}
                     >
-                      <AlertTriangle size={26} style={{ color: "#f85149" }} />
+                      <AlertTriangle size={26} style={{ color: tokens.danger }} />
                     </div>
                     <p
                       className="text-sm font-bold mb-1"
-                      style={{ color: "#f85149" }}
+                      style={{ color: tokens.danger }}
                     >
                       Generation Failed
                     </p>
@@ -3900,16 +3955,16 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                       <div
                         className="grid h-20 w-20 place-items-center rounded-full mb-5"
                         style={{
-                          background: "radial-gradient(circle, var(--glass-purple-soft), transparent 70%)",
-                          border: "1px solid var(--glass-border-purple)",
+                          background: `radial-gradient(circle, ${T.accentColor}2E, transparent 70%)`,
+                          border: `1px solid ${T.accentColor}`,
                         }}
                       >
-                        <Sparkles size={32} style={{ color: "var(--glass-purple)" }} />
+                        <Sparkles size={32} style={{ color: T.accentColor }} />
                       </div>
-                      <h2 className="text-xl font-black" style={{ color: "var(--glass-text-1)" }}>
+                      <h2 className="text-xl font-black" style={{ color: tokens.text }}>
                         Create your first image
                       </h2>
-                      <p className="mt-2 text-[12px] leading-relaxed" style={{ color: "var(--glass-text-2)" }}>
+                      <p className="mt-2 text-[12px] leading-relaxed" style={{ color: tokens.textMuted }}>
                         Describe what you want to see, pick a style, and let LiTT forge it into reality.
                       </p>
                       <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
@@ -3921,7 +3976,8 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                           <button
                             key={chip.label}
                             onClick={() => { setPrompt(chip.prompt); setActiveTab("prompt"); }}
-                            className="glass-button-secondary px-3 py-2 text-[10px] font-bold rounded-lg"
+                            className="px-3 py-2 text-[10px] font-bold rounded-lg"
+                            style={{ backgroundColor: tokens.surface, border: `1px solid ${tokens.border}`, color: tokens.text }}
                           >
                             {chip.label}
                           </button>
@@ -3933,7 +3989,8 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                             key={action.label}
                             onClick={() => handleQuickAction(action.promptSuffix)}
                             disabled={isWorking || !prompt.trim()}
-                            className="glass-button-secondary px-2.5 py-1.5 text-[9px] font-bold rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
+                            className="px-2.5 py-1.5 text-[9px] font-bold rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
+                            style={{ backgroundColor: tokens.surface, border: `1px solid ${tokens.border}`, color: tokens.text }}
                           >
                             <Sparkles size={8} className="inline mr-1" />
                             {action.label}
@@ -3977,18 +4034,16 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
               className={`shrink-0 flex flex-col transition-all duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 right-0 z-10000 ${mobileRightOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}
               style={{
                 width: history.length === 0 && !historyOpen ? 44 : rightWidth,
-                borderLeft: `1px solid var(--glass-border)`,
-                backgroundColor: "var(--glass-surface-1)",
-                backdropFilter: "var(--glass-blur)",
-                WebkitBackdropFilter: "var(--glass-blur)",
+                borderLeft: `1px solid ${tokens.border}`,
+                backgroundColor: tokens.surface,
               }}
             >
               <button
                 onClick={() => setHistoryOpen((v) => !v)}
                 className="shrink-0 flex items-center justify-between px-3 h-9 text-[10px] font-bold uppercase tracking-widest"
                 style={{
-                  borderBottom: `1px solid var(--glass-border)`,
-                  color: "var(--glass-text-2)",
+                  borderBottom: `1px solid ${tokens.border}`,
+                  color: tokens.textMuted,
                 }}
               >
                 <div className="flex items-center gap-1.5">
@@ -4002,7 +4057,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                       e.stopPropagation();
                       setMobileRightOpen(false);
                     }}
-                    className="md:hidden p-1 rounded transition-all hover:bg-white/10"
+                    className="md:hidden p-1 rounded transition-all hover:bg-[rgba(127,127,127,0.14)]"
                     style={{ color: T.textMuted }}
                     aria-label="Close history"
                   >
@@ -4016,7 +4071,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                           e.stopPropagation();
                           setHistoryMenuOpen((v) => !v);
                         }}
-                        className="p-1 rounded transition-all hover:bg-white/10"
+                        className="p-1 rounded transition-all hover:bg-[rgba(127,127,127,0.14)]"
                         style={{ color: T.textMuted }}
                         aria-label="History options"
                         aria-haspopup="menu"
@@ -4051,7 +4106,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                                 setHistoryMenuOpen(false);
                                 removeFailedGenerations();
                               }}
-                              className="w-full text-left px-3 py-2 text-[10px] font-bold transition-colors hover:bg-white/5"
+                              className="w-full text-left px-3 py-2 text-[10px] font-bold transition-colors hover:bg-[rgba(127,127,127,0.12)]"
                               style={{ color: T.textMuted }}
                               role="menuitem"
                               data-testid="remove-failed-generations"
@@ -4089,7 +4144,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                   {history.length === 0 ? (
                     <div
                       className="col-span-2 py-8 text-center text-[10px]"
-                      style={{ color: "var(--glass-text-3)" }}
+                      style={{ color: tokens.textMuted }}
                     >
                       No history yet
                     </div>
@@ -4112,9 +4167,9 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-start pt-3 gap-2">
-                  <History size={14} style={{ color: "var(--glass-text-3)" }} />
+                  <History size={14} style={{ color: tokens.textMuted }} />
                   {history.length > 0 && (
-                    <span className="text-[9px] font-bold" style={{ color: "var(--glass-text-3)" }}>
+                    <span className="text-[9px] font-bold" style={{ color: tokens.textMuted }}>
                       {history.length}
                     </span>
                   )}
@@ -4126,9 +4181,10 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
           {/* ── Generation Log (bottom) ── */}
           {showLogs && (
             <div
-              className="shrink-0 border-t glass-toolbar"
+              className="shrink-0 border-t"
               style={{
-                borderColor: "var(--glass-border)",
+                borderColor: tokens.border,
+                backgroundColor: tokens.surface,
                 borderRadius: 0,
                 fontFamily: "monospace",
                 height: "140px",

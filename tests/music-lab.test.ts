@@ -237,16 +237,27 @@ describe("Music Lab Phase 3+4 — Real AI producer", () => {
     expect(content).not.toContain("enhancers[Math.floor");
   });
 
-  it("MusicTool handleProducerSend calls API (not canned keywords)", () => {
+  // RE-PINNED (ART-20261111-035, one-prompt rule): the Music pane's
+  // producer CHAT is retired — the pane carries no chat of its own, so
+  // MusicTool must not call the producer chat API at all. The route
+  // itself still exists server-side (pinned above); only the pane's
+  // chat client is gone. Conversational direction belongs to the one
+  // LiTT chat (generate_music intent → staged draft).
+  it("MusicTool has NO producer chat client (one-prompt contract)", () => {
     const content = read("src/app/(app)/studio/tools/MusicTool.tsx");
-    expect(content).toContain("/api/music/producer");
-    expect(content).toContain("isProducerLoading");
-    // Must NOT contain the old canned keyword matching
+    expect(content).not.toContain("/api/music/producer");
+    expect(content).not.toContain("handleProducerSend");
+    expect(content).not.toContain("producerInput");
+    // Must NOT contain the old canned keyword matching either
     expect(content).not.toContain(/\/(harder|aggressive|bang|808|trap)\//);
   });
 
-  it("Producer transform buttons show loading state", () => {
+  // RE-PINNED (ART-20261111-035): the one-tap transforms survive as
+  // synchronous local CONTROLS — they apply the parameter change they
+  // name directly, with no loading state and no chat round-trip.
+  it("Producer transforms are local controls (applyQuickTransform, no async chat state)", () => {
     const content = read("src/app/(app)/studio/tools/MusicTool.tsx");
-    expect(content).toContain("isProducerLoading");
+    expect(content).toContain("applyQuickTransform");
+    expect(content).not.toContain("isProducerLoading");
   });
 });

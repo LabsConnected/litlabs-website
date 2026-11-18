@@ -115,6 +115,37 @@ describe("image.generate save failures are narrated truthfully", () => {
     expect(summary).toBe("Image generated and saved to project");
   });
 
+  it("summarizeToolResult does not claim 'saved to project' when asset persistence failed (round 10 Q3b)", () => {
+    const summary = summarizeToolResult("image.generate", {
+      success: true,
+      providerId: "pollinations",
+      downloadUrl: "data:image/jpeg;base64,AAAA",
+      savedToProject: true,
+      projectPath: "public/assets/images/a-lion-abc.jpeg",
+      assetId: "asset-1",
+      assetPersistenceFailed: true,
+    });
+    expect(summary).not.toContain("saved to project");
+    expect(summary).toContain("asset record failed to persist");
+    // The exact path the write claimed — the next proof checks this
+    // path instead of guessing a directory.
+    expect(summary).toContain("public/assets/images/a-lion-abc.jpeg");
+    expect(summary.length).toBeLessThanOrEqual(200);
+  });
+
+  it("summarizeToolResult surfaces the projectPath on a clean save", () => {
+    const summary = summarizeToolResult("image.generate", {
+      success: true,
+      downloadUrl: "data:image/jpeg;base64,AAAA",
+      savedToProject: true,
+      projectPath: "public/assets/images/a-lion-abc.jpeg",
+      assetPersistenceFailed: false,
+    });
+    expect(summary).toBe(
+      "Image generated and saved to project (public/assets/images/a-lion-abc.jpeg)",
+    );
+  });
+
   it("summarizeToolResult summarizes chat-context media without the data URL", () => {
     const summary = summarizeToolResult("image.generate", {
       success: true,

@@ -144,8 +144,34 @@ interface RelaySubscriber {
 }
 
 const relaySubscribers = new Set<RelaySubscriber>();
-let relayTimer: ReturnType<typeof setInterval> | null = null;
+let relayTimer: ReturnType<typeof setTimeout> | null = null;
 let relayRefCount = 0;
+let relayStarted = false;
+let relayPollMs = 5000;
+let relayConsecutiveFailures = 0;
+
+/** Consecutive failures required before the relay poll starts backing off. */
+export const RELAY_BACKOFF_THRESHOLD = 3;
+/** Absolute cap for a backed-off relay poll delay, in milliseconds. */
+export const RELAY_BACKOFF_MAX_MS = 60_000;
+
+/**
+ * Delay before the next relay poll, given the base interval and how many
+ * polls in a row have failed. Below the threshold the base interval is
+ * used unchanged. At the threshold the interval stretches 6x, and beyond
+ * it 12x, never exceeding RELAY_BACKOFF_MAX_MS (and never dropping below
+ * the base interval). With the default 5s base that is exactly:
+ * 5s -> 30s -> 60s cap. The first success resets the failure count to 0,
+ * so polling returns to the base interval (see pollRelayOnce).
+ */
+export function computeRelayBackoffDelayMs(
+  baseMs: number,
+  consecutiveFailures: number,
+): number {
+  if (consecutiveFailures < RELAY_BACKOFF_THRESHOLD) return baseMs;
+  const multiplier = consecutiveFailures === RELAY_BACKOFF_THRESHOLD ? 6 : 12;
+  return Math.max(baseMs, Math.min(baseMs * multiplier, RELAY_BACKOFF_MAX_MS));
+}
 
 async function pollRelayOnce(): Promise<void> {
   try {
@@ -169,6 +195,8 @@ async function pollRelayOnce(): Promise<void> {
     const body = (await resp.json()) as { snapshot?: RuntimeState | null };
     const snapshot = body?.snapshot ?? null;
     if (snapshot) {
+      // First success resets the backoff to the base interval.
+      relayConsecutiveFailures = 0;
       lastSnapshot = snapshot;
       for (const sub of relaySubscribers) {
         sub.onSnapshot(snapshot);
@@ -178,6 +206,7 @@ async function pollRelayOnce(): Promise<void> {
       throw new Error("relay returned no snapshot");
     }
   } catch (err) {
+    relayConsecutiveFailures++;
     const message = err instanceof Error ? err.message : "relay failed";
     for (const sub of relaySubscribers) {
       sub.onStatus(false, message);
@@ -185,24 +214,50 @@ async function pollRelayOnce(): Promise<void> {
   }
 }
 
+function scheduleNextRelayPoll(): void {
+  if (!relayStarted) return;
+  if (relayTimer) clearTimeout(relayTimer);
+  relayTimer = setTimeout(() => {
+    relayTimer = null;
+    void runRelayPoll();
+  }, computeRelayBackoffDelayMs(relayPollMs, relayConsecutiveFailures));
+}
+
+async function runRelayPoll(): Promise<void> {
+  if (!relayStarted) return;
+  // Skip poll ticks while the tab is hidden — the feed-down state is
+  // already reported truthfully, and a hidden tab must not keep firing
+  // failing requests. Mirrors the pattern in useProjectRuntime.
+  if (typeof document !== "undefined" && document.hidden) {
+    scheduleNextRelayPoll();
+    return;
+  }
+  await pollRelayOnce();
+  scheduleNextRelayPoll();
+}
+
 function subscribeRelay(subscriber: RelaySubscriber, pollMs: number): void {
   relaySubscribers.add(subscriber);
   relayRefCount++;
-  if (!relayTimer) {
+  if (!relayStarted) {
+    relayStarted = true;
+    relayPollMs = pollMs;
+    relayConsecutiveFailures = 0;
     // Poll immediately so the feed resolves on mount, then on interval.
-    void pollRelayOnce();
-    relayTimer = setInterval(() => {
-      void pollRelayOnce();
-    }, pollMs);
+    void runRelayPoll();
   }
 }
 
 function unsubscribeRelay(subscriber: RelaySubscriber): void {
   relaySubscribers.delete(subscriber);
   relayRefCount--;
-  if (relayRefCount <= 0 && relayTimer) {
-    clearInterval(relayTimer);
-    relayTimer = null;
+  if (relayRefCount <= 0) {
+    relayStarted = false;
+    relayConsecutiveFailures = 0;
+    if (relayTimer) {
+      clearTimeout(relayTimer);
+      relayTimer = null;
+    }
     relayRefCount = 0;
   }
 }

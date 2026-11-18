@@ -83,7 +83,7 @@ export function ProjectDesignSurface({
 
   if (!projectId) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-center text-white/50">
+      <div className="flex h-full items-center justify-center p-8 text-center text-zinc-500">
         <p>Design has no active project. Select a project before editing.</p>
       </div>
     );
@@ -91,7 +91,7 @@ export function ProjectDesignSurface({
 
   if (runtime.loading && !runtime.state.projectId) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-white/60">
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-500">
         <Loader2 size={22} className="animate-spin" aria-hidden="true" />
         <p className="text-sm">Loading {capabilities.projectName ?? "project"} design…</p>
       </div>
@@ -101,16 +101,16 @@ export function ProjectDesignSurface({
   if (runtime.error || runtime.state.phase === "error" || runtime.state.phase === "workspace_not_provisioned" || runtime.state.phase === "workspace_not_ready") {
     return (
       <div className="flex h-full items-center justify-center p-8">
-        <div className="max-w-md rounded-2xl border border-red-400/20 bg-red-500/5 p-6 text-center">
-          <AlertTriangle className="mx-auto mb-3 text-red-300" size={24} aria-hidden="true" />
-          <h2 className="text-base font-bold text-white">Design view couldn&apos;t load this project.</h2>
-          <p className="mt-2 text-sm text-white/60">{runtime.error ?? "The project workspace is unavailable."}</p>
+        <div className="max-w-md rounded-2xl border border-red-600/25 bg-red-500/5 p-6 text-center">
+          <AlertTriangle className="mx-auto mb-3 text-red-600" size={24} aria-hidden="true" />
+          <h2 className="text-base font-bold text-zinc-900">Design view couldn&apos;t load this project.</h2>
+          <p className="mt-2 text-sm text-zinc-600">{runtime.error ?? "The project workspace is unavailable."}</p>
           <div className="mt-4 flex justify-center gap-2">
-            <button type="button" onClick={() => void runtime.refresh()} className="flex min-h-10 items-center gap-2 rounded-lg bg-white/10 px-4 text-sm font-semibold text-white">
+            <button type="button" onClick={() => void runtime.refresh()} className="flex min-h-10 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-sm font-semibold text-white">
               <RotateCw size={14} aria-hidden="true" /> Retry
             </button>
-            <a href={`/studio?tool=preview&project=${encodeURIComponent(projectId)}`} className="flex min-h-10 items-center rounded-lg border border-white/10 px-4 text-sm font-semibold text-white/80">Open Preview</a>
-            <a href={`/studio?tool=code&project=${encodeURIComponent(projectId)}`} className="flex min-h-10 items-center rounded-lg border border-white/10 px-4 text-sm font-semibold text-white/80">Open Code</a>
+            <a href={`/studio?tool=preview&project=${encodeURIComponent(projectId)}`} className="flex min-h-10 items-center rounded-lg border border-black/10 px-4 text-sm font-semibold text-zinc-700">Open Preview</a>
+            <a href={`/studio?tool=code&project=${encodeURIComponent(projectId)}`} className="flex min-h-10 items-center rounded-lg border border-black/10 px-4 text-sm font-semibold text-zinc-700">Open Code</a>
           </div>
         </div>
       </div>
@@ -125,13 +125,13 @@ export function ProjectDesignSurface({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="project-design-surface">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-4 py-2">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/10 px-4 py-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-300">Design</p>
-          <h2 className="truncate text-sm font-semibold text-white">{capabilities.projectName ?? "Active project"}</h2>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-600">Design</p>
+          <h2 className="truncate text-sm font-semibold text-zinc-900">{capabilities.projectName ?? "Active project"}</h2>
         </div>
         {selection && (
-          <span className="hidden max-w-[40%] truncate text-xs text-white/50 md:inline" title={selection.selector}>
+          <span className="hidden max-w-[40%] truncate text-xs text-zinc-500 md:inline" title={selection.selector}>
             Selected: {selection.content ?? selection.componentName ?? selection.elementId}
           </span>
         )}
@@ -139,8 +139,8 @@ export function ProjectDesignSurface({
 
       {/* Canvas toolbar — tools, snapping, undo/redo over the shared
           element-edit write path. */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-white/10 px-3 py-1.5" role="toolbar" aria-label="Design canvas tools">
-        <div className="flex items-center gap-0.5 rounded-lg border border-white/10 p-0.5" role="group" aria-label="Tool">
+      <div className="flex shrink-0 items-center gap-1 border-b border-black/10 px-3 py-1.5" role="toolbar" aria-label="Design canvas tools">
+        <div className="flex items-center gap-0.5 rounded-lg border border-black/10 p-0.5" role="group" aria-label="Tool">
           {toolButtons.map(({ id, label, icon: Icon, hint }) => (
             <button
               key={id}
@@ -151,8 +151,8 @@ export function ProjectDesignSurface({
               data-testid={`design-tool-${id}`}
               className="flex min-h-7 items-center gap-1 rounded-md px-2 text-[10px] font-bold transition-colors"
               style={{
-                background: tool === id ? "rgba(155,77,255,0.22)" : "transparent",
-                color: tool === id ? "#c4b5fd" : "rgba(255,255,255,0.55)",
+                background: tool === id ? "rgba(124,58,237,0.12)" : "transparent",
+                color: tool === id ? "#7c3aed" : "var(--text-muted)",
               }}
             >
               <Icon size={11} className="pointer-events-none" aria-hidden="true" />
@@ -168,14 +168,14 @@ export function ProjectDesignSurface({
           data-testid="design-snap-toggle"
           className="flex min-h-7 items-center gap-1 rounded-md border px-2 text-[10px] font-bold"
           style={{
-            borderColor: snap ? "rgba(155,77,255,0.4)" : "rgba(255,255,255,0.12)",
-            color: snap ? "#c4b5fd" : "rgba(255,255,255,0.55)",
+            borderColor: snap ? "rgba(124,58,237,0.45)" : "rgba(0,0,0,0.12)",
+            color: snap ? "#7c3aed" : "var(--text-muted)",
           }}
         >
           <Magnet size={11} className="pointer-events-none" aria-hidden="true" />
           Snap
         </button>
-        <div className="mx-1 h-4 w-px bg-white/10" aria-hidden="true" />
+        <div className="mx-1 h-4 w-px bg-black/10" aria-hidden="true" />
         <button
           type="button"
           onClick={() => void edits.undo()}
@@ -183,7 +183,7 @@ export function ProjectDesignSurface({
           title="Undo last element edit"
           aria-label="Undo"
           data-testid="design-undo"
-          className="grid h-7 w-7 place-items-center rounded-md text-white/60 transition-colors hover:bg-white/10 disabled:opacity-30"
+          className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-black/5 disabled:opacity-30"
         >
           <Undo2 size={12} aria-hidden="true" />
         </button>
@@ -194,17 +194,17 @@ export function ProjectDesignSurface({
           title="Redo element edit"
           aria-label="Redo"
           data-testid="design-redo"
-          className="grid h-7 w-7 place-items-center rounded-md text-white/60 transition-colors hover:bg-white/10 disabled:opacity-30"
+          className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-black/5 disabled:opacity-30"
         >
           <Redo2 size={12} aria-hidden="true" />
         </button>
         {edits.status === "conflict" && (
-          <span className="ml-auto truncate rounded-md border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold text-amber-200" data-testid="design-conflict-badge" title={edits.statusReason ?? undefined}>
+          <span className="ml-auto truncate rounded-md border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold text-amber-700" data-testid="design-conflict-badge" title={edits.statusReason ?? undefined}>
             File changed on disk — re-select to reload
           </span>
         )}
         {edits.status === "applying" && (
-          <span className="ml-auto flex items-center gap-1 text-[10px] text-white/50">
+          <span className="ml-auto flex items-center gap-1 text-[10px] text-zinc-500">
             <Loader2 size={10} className="animate-spin" aria-hidden="true" /> Saving…
           </span>
         )}

@@ -26,6 +26,7 @@ vi.mock("@/lib/projects/project-repository", () => ({
 vi.mock("@/lib/studio/workspace-recovery", () => ({
   ensureWorkspaceAlive: vi.fn(),
   provisionWorkspaceForProject: vi.fn(),
+  reprepareWorkspace: vi.fn(),
 }));
 
 vi.mock("@/lib/terminal-v1/secret-broker", () => ({
@@ -50,24 +51,42 @@ vi.mock("@/lib/terminal-config", () => ({
 
 vi.mock("@/lib/terminal-internal-client", () => ({
   startPreviewInternal: vi.fn(),
+  restartPreviewInternal: vi.fn(),
   getPreviewStatusInternal: vi.fn(),
   stopPreviewInternal: vi.fn(),
   buildPreviewProxyUrl: vi.fn((workspaceId: string) => `https://proxy.test/${workspaceId}`),
+  // Phase 2 §3.2: the route now consults sandbox availability for the
+  // deterministic refusal derivation. Default: not available (fail
+  // closed), which preserves every pre-Phase-2 expectation below.
+  getSandboxAvailability: vi.fn(async () => ({
+    provider: null,
+    routingEnabled: false,
+    verified: false,
+    allowed: false,
+    reason: "availability-unavailable",
+  })),
+  isSandboxExecutionAvailable: vi.fn(async () => false),
 }));
 
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";import { startPreviewInternal,
+  restartPreviewInternal,
   getPreviewStatusInternal,
+  isSandboxExecutionAvailable,
 } from "@/lib/terminal-internal-client";
-import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { ensureWorkspaceAlive, provisionWorkspaceForProject, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
 import { createPreviewToken } from "@/lib/projects/preview-token";
 
 const authMock = vi.mocked(auth);
 const getProjectMock = vi.mocked(getProject);
 const getPreviewStatusMock = vi.mocked(getPreviewStatusInternal);
 const startPreviewMock = vi.mocked(startPreviewInternal);
+const restartPreviewMock = vi.mocked(restartPreviewInternal);
 const provisionMock = vi.mocked(provisionWorkspaceForProject);
+const ensureAliveMock = vi.mocked(ensureWorkspaceAlive);
+const reprepareMock = vi.mocked(reprepareWorkspace);
 const createPreviewTokenMock = vi.mocked(createPreviewToken);
+const sandboxAvailableMock = vi.mocked(isSandboxExecutionAvailable);
 
 const staticProject = {
   id: "proj-1",
@@ -202,10 +221,12 @@ describe("studio-projects preview route — static guards", () => {
     expect(createPreviewTokenMock).not.toHaveBeenCalled();
   });
 
-  it("GET returns not_started when the terminal is unreachable", async () => {
-    // The static GET path regressed to waiting on the terminal service before
-    // returning static preview URLs. Prove that a missing terminal now returns
-    // not_started and does not call the dev-server status path.
+  it("GET returns unreachable when the terminal is unreachable", async () => {
+    // A failed runtime CHECK (terminal threw / timed out / not configured)
+    // says nothing about whether the preview was ever started — the static
+    // branch must report "unreachable", mirroring the dev-server branch,
+    // never not_started. Only an authoritative terminal 404 may mean
+    // not_started (see the index.html-missing test below).
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new Error("TerminalNotConfiguredError");
     }));
@@ -216,11 +237,32 @@ describe("studio-projects preview route — static guards", () => {
     );
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeStatus).toBe("unreachable");
     expect(body.previewUrl).toBeNull();
     expect(body.framework).toBe("static");
     expect(getPreviewStatusMock).not.toHaveBeenCalled();
-    // TerminalNotConfiguredError must not leave the studio panel stuck loading.
+    // No preview token may be minted off a failed runtime check.
+    expect(createPreviewTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("GET returns unreachable when the terminal answers a non-404 error", async () => {
+    // A 5xx from /ws-files/read is a failed check, not proof the file is
+    // missing — only a 404 authoritatively means "never started".
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "internal" }), { status: 500 })),
+    );
+
+    const res = await GET(
+      new Request("https://x.test/api/studio-projects/proj-1/preview") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("unreachable");
+    expect(body.previewUrl).toBeNull();
+    expect(body.runtimeError).toContain("500");
+    expect(getPreviewStatusMock).not.toHaveBeenCalled();
     expect(createPreviewTokenMock).not.toHaveBeenCalled();
   });
 
@@ -253,5 +295,323 @@ describe("studio-projects preview route — static guards", () => {
     );
     expect(res.status).toBe(400);
     expect(createPreviewTokenMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("studio-projects preview route — workspace failure code threading (wave-4)", () => {
+  // The exact string production stores as workspaceError when a repo-backed
+  // prepare hits the terminal-server's fail-closed 503.
+  const HOST_EXEC_STORED =
+    'Workspace prepare failed (503): {"error":"Host execution is disabled in production (workspace.prepare(git,install)); a verified sandbox is required","code":"HOST_EXECUTION_DISABLED"}';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user-1" } as never);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function getPreview() {
+    return GET(
+      new Request("https://x.test/api/studio-projects/proj-1/preview") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+  }
+
+  it("threads HOST_EXECUTION_DISABLED into runtimeErrorCode for a failed repo workspace", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: HOST_EXEC_STORED, framework: "nextjs",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBe("HOST_EXECUTION_DISABLED");
+  });
+
+  it("leaves generic workspace failures codeless", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "terminal down", framework: "nextjs",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBeNull();
+  });
+
+  // Deterministic derivation (follow-up to #901): a settled failure whose
+  // stored error carries no embedded code — e.g. "Provisioning timed out"
+  // from the stale-provisioning settle — still names the refusal when the
+  // project is repo-backed and this deployment cannot execute host work.
+  // Parsing the code back out of free text was the only channel #901 had,
+  // and production's stored text defeated it.
+  it("derives HOST_EXECUTION_DISABLED for a repo-backed failed workspace with a code-less stored error", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "Provisioning timed out", framework: "nextjs",
+      sourceType: "github",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBe("HOST_EXECUTION_DISABLED");
+  });
+
+  it("does not derive the refusal for a managed project with a code-less stored error", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "Provisioning timed out", framework: "nextjs",
+      sourceType: "blank",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBeNull();
+  });
+
+  // Phase 2 §3.2: when the terminal reports sandboxed execution
+  // available for this user, the same settled failure is retryable —
+  // the deterministic refusal must NOT be derived.
+  it("does not derive the refusal when the sandbox is available for the user", async () => {
+    sandboxAvailableMock.mockResolvedValue(true);
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "Provisioning timed out", framework: "nextjs",
+      sourceType: "github",
+    } as never);
+    const body = await (await getPreview()).json();
+    expect(body.runtimeStatus).toBe("not_started");
+    expect(body.runtimeErrorCode).toBeNull();
+    expect(sandboxAvailableMock).toHaveBeenCalledWith("user-1");
+  });
+
+  // Route honesty (console-errors diagnosis): when the POST provisioning
+  // branch fails with the host-execution refusal, the status must match
+  // the code the body carries — 503, not an unmapped 500.
+  function postPreview() {
+    return POST(
+      new Request("https://x.test/api/studio-projects/proj-1/preview", { method: "POST" }) as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+  }
+
+  it("POST returns 503 when provisioning hits HOST_EXECUTION_DISABLED", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: HOST_EXEC_STORED, framework: "nextjs",
+    } as never);
+    provisionMock.mockRejectedValue(new Error(HOST_EXEC_STORED));
+    const res = await postPreview();
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("failed");
+    expect(body.runtimeErrorCode).toBe("HOST_EXECUTION_DISABLED");
+  });
+
+  it("POST keeps generic provisioning failures at 500", async () => {
+    getProjectMock.mockResolvedValue({
+      id: "proj-1", userId: "user-1", workspaceId: null, workspaceRoot: null,
+      workspaceStatus: "failed", workspaceError: "terminal down", framework: "nextjs",
+    } as never);
+    provisionMock.mockRejectedValue(new Error("terminal down"));
+    const res = await postPreview();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.runtimeErrorCode).toBeNull();
+  });
+});
+
+describe("studio-projects preview route — workspace-not-found heal (round 5)", () => {
+  const githubProject = {
+    id: "proj-1",
+    userId: "user-1",
+    workspaceId: "ws-dead",
+    workspaceRoot: "/data/workspaces/user-1/proj-1",
+    workspaceStatus: "ready",
+    sourceType: "github",
+    framework: "nextjs",
+    developmentCommand: "pnpm dev",
+    packageManager: "pnpm",
+  };
+
+  function postPreview() {
+    return POST(
+      new Request("https://x.test/api/studio-projects/proj-1/preview", { method: "POST" }) as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user-1" } as never);
+    getProjectMock.mockResolvedValue({ ...githubProject } as never);
+    provisionMock.mockResolvedValue("ws-dead");
+    startPreviewMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("POST heals a workspace-level 404 from start and retries with the recovered ID", async () => {
+    startPreviewMock
+      .mockRejectedValueOnce(new Error('Preview start failed (404): {"error":"Workspace not found"}'))
+      .mockResolvedValueOnce({
+        status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 123,
+      } as never);
+    ensureAliveMock.mockResolvedValue({ workspaceId: "ws-healed", reprepared: true } as never);
+
+    const res = await postPreview();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("starting");
+    expect(ensureAliveMock).toHaveBeenCalledWith("proj-1", "user-1", "ws-dead");
+    expect(startPreviewMock).toHaveBeenCalledTimes(2);
+    expect(startPreviewMock.mock.calls[1][0]).toBe("ws-healed");
+    expect(reprepareMock).not.toHaveBeenCalled();
+  });
+
+  it("POST escalates to a full re-prepare when the bounded heal reports healFailed", async () => {
+    startPreviewMock
+      .mockRejectedValueOnce(new Error('Preview start failed (404): {"error":"Workspace not found"}'))
+      .mockResolvedValueOnce({
+        status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 123,
+      } as never);
+    ensureAliveMock.mockResolvedValue({ workspaceId: "ws-dead", reprepared: false, healFailed: true } as never);
+    reprepareMock.mockResolvedValue("ws-fresh");
+
+    const res = await postPreview();
+    expect(res.status).toBe(200);
+    expect(reprepareMock).toHaveBeenCalledWith("proj-1", "user-1");
+    expect(startPreviewMock).toHaveBeenCalledTimes(2);
+    expect(startPreviewMock.mock.calls[1][0]).toBe("ws-fresh");
+  });
+
+  it("POST does not heal or retry on a non-404 start failure", async () => {
+    startPreviewMock.mockRejectedValue(new Error("Preview start failed (500): boom"));
+
+    const res = await postPreview();
+    expect(res.status).toBe(500);
+    expect(startPreviewMock).toHaveBeenCalledTimes(1);
+    expect(ensureAliveMock).not.toHaveBeenCalled();
+    expect(reprepareMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Round 13 (2026-11-17): the panel's failed-state Restart sends
+ * { restart: true }, and the route must take the terminal's FORCE
+ * restart path (restartPreviewInternal → PreviewManager's
+ * forceRestart) instead of a plain start that can silently adopt a
+ * wedged in-flight runtime. A restart with no live runtime to
+ * restart falls back to a plain start; a bodyless POST is a plain
+ * start, exactly as before.
+ */
+describe("studio-projects preview route — force restart (round 13)", () => {
+  const githubProject = {
+    id: "proj-1",
+    userId: "user-1",
+    workspaceId: "ws-1",
+    workspaceRoot: "/data/workspaces/user-1/proj-1",
+    workspaceStatus: "ready",
+    sourceType: "github",
+    framework: "nextjs",
+    developmentCommand: "pnpm dev",
+    packageManager: "pnpm",
+  };
+
+  function postPreview(body?: unknown) {
+    return POST(
+      new Request("https://x.test/api/studio-projects/proj-1/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }) as unknown as import("next/server").NextRequest,
+      makeParams("proj-1"),
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user-1" } as never);
+    getProjectMock.mockResolvedValue({ ...githubProject } as never);
+    provisionMock.mockResolvedValue("ws-1");
+    startPreviewMock.mockReset();
+    restartPreviewMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("POST { restart: true } takes the force path and never plain-starts", async () => {
+    restartPreviewMock.mockResolvedValue({
+      status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 456,
+    } as never);
+
+    const res = await postPreview({ restart: true });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.runtimeStatus).toBe("starting");
+    expect(restartPreviewMock).toHaveBeenCalledTimes(1);
+    expect(restartPreviewMock.mock.calls[0][0]).toBe("ws-1");
+    expect(restartPreviewMock.mock.calls[0][1]).toBe("user-1");
+    expect(startPreviewMock).not.toHaveBeenCalled();
+  });
+
+  it("POST { restart: true } falls back to a plain start when no runtime exists to restart", async () => {
+    restartPreviewMock.mockRejectedValue(new Error("No preview runtime to restart"));
+    startPreviewMock.mockResolvedValue({
+      status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 789,
+    } as never);
+
+    const res = await postPreview({ restart: true });
+    expect(res.status).toBe(200);
+    expect(restartPreviewMock).toHaveBeenCalledTimes(1);
+    expect(startPreviewMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("POST { restart: true } LOGS the fallback when the force restart throws (round 14)", async () => {
+    // Round 14: the fallback used to be silent, so a "Restart" that
+    // quietly became "reuse the same dead runtime" was invisible in
+    // every surface. The fallback still happens — but it is logged.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    restartPreviewMock.mockRejectedValue(new Error("No preview runtime to restart"));
+    startPreviewMock.mockResolvedValue({
+      status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 790,
+    } as never);
+
+    const res = await postPreview({ restart: true });
+    expect(res.status).toBe(200);
+    expect(startPreviewMock).toHaveBeenCalledTimes(1);
+    const logged = errorSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((line) => line.includes("preview:force_restart_fallback_to_start"));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain("No preview runtime to restart");
+  });
+
+  it("POST without a body is a plain start and never touches the force path", async () => {
+    startPreviewMock.mockResolvedValue({
+      status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 101,
+    } as never);
+
+    const res = await postPreview();
+    expect(res.status).toBe(200);
+    expect(startPreviewMock).toHaveBeenCalledTimes(1);
+    expect(restartPreviewMock).not.toHaveBeenCalled();
+  });
+
+  it("POST { restart: false } is a plain start", async () => {
+    startPreviewMock.mockResolvedValue({
+      status: "starting", port: 3000, framework: "nextjs", command: "pnpm dev", startedAt: 102,
+    } as never);
+
+    const res = await postPreview({ restart: false });
+    expect(res.status).toBe(200);
+    expect(startPreviewMock).toHaveBeenCalledTimes(1);
+    expect(restartPreviewMock).not.toHaveBeenCalled();
   });
 });

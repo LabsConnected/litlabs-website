@@ -130,6 +130,16 @@ export async function getGenerationJobByProviderJobId(
 
 /**
  * Update a generation job's status.
+ *
+ * Round 14: returns whether the write landed. This used to discard
+ * the Supabase result entirely, so a failed "completed" flip was
+ * indistinguishable from success — image-service reported a clean
+ * completion while the row stayed "processing", invisible to the
+ * project-scope Media repository (the 2026-11-17 lion proof: the
+ * file saved, the panel never showed it). Callers that report
+ * success to a user must check the result (image-service does, via
+ * a completion read-back); the error is also logged here so the
+ * failure is never silent in server logs either.
  */
 export async function updateGenerationJobStatus(
   jobId: string,
@@ -141,9 +151,9 @@ export async function updateGenerationJobStatus(
     error?: string;
     refundStatus?: RefundStatus;
   },
-): Promise<void> {
+): Promise<boolean> {
   const admin = getSupabaseAdmin();
-  if (!admin) return;
+  if (!admin) return false;
 
   const patch: Record<string, unknown> = {
     status,
@@ -157,7 +167,15 @@ export async function updateGenerationJobStatus(
     ...(status === "completed" && { completed_at: new Date().toISOString() }),
   };
 
-  await admin.from("generation_jobs").update(patch).eq("id", jobId);
+  const { error } = await admin.from("generation_jobs").update(patch).eq("id", jobId);
+  if (error) {
+    console.error(
+      `[generation-jobs] status update failed jobId=${jobId} status=${status}:`,
+      error.message,
+    );
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -185,8 +203,8 @@ export async function failGenerationJob(
   jobId: string,
   error: string,
   refundStatus: RefundStatus = "none",
-): Promise<void> {
-  await updateGenerationJobStatus(jobId, "failed", {
+): Promise<boolean> {
+  return updateGenerationJobStatus(jobId, "failed", {
     error: error.slice(0, 1000),
     refundStatus,
   });
@@ -194,13 +212,14 @@ export async function failGenerationJob(
 
 /**
  * Mark a generation job as completed with an asset ID.
+ * Returns whether the completion write landed (round 14).
  */
 export async function completeGenerationJob(
   jobId: string,
   assetId: string | null,
   actualProviderCostCents?: number,
-): Promise<void> {
-  await updateGenerationJobStatus(jobId, "completed", {
+): Promise<boolean> {
+  return updateGenerationJobStatus(jobId, "completed", {
     assetId,
     actualProviderCostCents,
     refundStatus: "none",
@@ -211,28 +230,49 @@ export async function completeGenerationJob(
  * Update a generation job's metadata by merging new keys into the
  * existing JSONB metadata field. This is used by video status routes
  * to add the durable URL after the video is persisted to R2.
+ *
+ * Round 14: returns whether the write landed — the durableUrl merge
+ * is half of what makes a completed job visible to Media, so its
+ * failure must be surfaceable exactly like the status flip's.
  */
 export async function updateGenerationJobMetadata(
   jobId: string,
   metadataUpdates: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   const admin = getSupabaseAdmin();
-  if (!admin) return;
+  if (!admin) return false;
 
   // Fetch existing metadata first.
-  const { data } = await admin
+  const { data, error: fetchError } = await admin
     .from("generation_jobs")
     .select("metadata")
     .eq("id", jobId)
     .maybeSingle();
 
+  if (fetchError) {
+    console.error(
+      `[generation-jobs] metadata read failed jobId=${jobId}:`,
+      fetchError.message,
+    );
+    return false;
+  }
+
   const existingMetadata = (data?.metadata as Record<string, unknown>) ?? {};
   const merged = { ...existingMetadata, ...metadataUpdates };
 
-  await admin
+  const { error } = await admin
     .from("generation_jobs")
     .update({ metadata: merged })
     .eq("id", jobId);
+
+  if (error) {
+    console.error(
+      `[generation-jobs] metadata update failed jobId=${jobId}:`,
+      error.message,
+    );
+    return false;
+  }
+  return true;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────

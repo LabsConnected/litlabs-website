@@ -24,6 +24,12 @@ import {
   type ExecutionEvent,
   type ExecutionPhase,
 } from "../stores/useExecutionStore";
+import { toolActivityDotColor } from "./ExecutionBlock";
+import { deriveApprovalDetailsForTool } from "./ApprovalCard";
+import type {
+  RunOutcome,
+  ToolActivityRecord,
+} from "../lib/last-run-outcome";
 import { useStudioRuntime } from "../context/LiTTRuntimeContext";
 import { runtimeFreshnessLabel } from "@/lib/projects/runtime-state";
 
@@ -55,6 +61,17 @@ interface LiTTLiveActivityProps {
   onStop?: () => void;
   /** Called when the user clicks Rollback to the last checkpoint. */
   onRollback?: () => void;
+  /**
+   * The most recent settled run's recorded activity, derived by the
+   * parent from the persisted conversation. The execution store is
+   * live-only: after a reload it is empty and this panel would claim
+   * "No activity yet" even when a run happened and failed. When live
+   * events exist they always win — this is a fallback, never a merge.
+   */
+  lastRun?: {
+    outcome: RunOutcome;
+    records: ToolActivityRecord[];
+  } | null;
 }
 
 const PHASE_CONFIG: Record<ExecutionPhase, { label: string; icon: typeof Activity; color: string }> = {
@@ -86,11 +103,14 @@ export default function LiTTLiveActivity({
   onResolveApproval,
   onStop,
   onRollback,
+  lastRun,
 }: LiTTLiveActivityProps) {
   const events = useExecutionStore((s) => s.events);
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
+  const approvalError = useExecutionStore((s) => s.approvalError);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
   const changesSummary = useExecutionStore((s) => s.changesSummary);
   const collapseEvent = useExecutionStore((s) => s.collapseEvent);
@@ -360,7 +380,11 @@ export default function LiTTLiveActivity({
       {/* ── Scrollable Activity Feed ── */}
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2 studio-scroll">
         {events.length === 0 ? (
-          <EmptyState />
+          lastRun && !isRunning ? (
+            <LastRunSummary outcome={lastRun.outcome} records={lastRun.records} />
+          ) : (
+            <EmptyState />
+          )
         ) : (
           <>
             {/* Toolbar */}
@@ -387,11 +411,15 @@ export default function LiTTLiveActivity({
               />
             </div>
 
-            {/* Pending Approval Card */}
+            {/* Pending Approval Card — same store gate as the chat card;
+                phase/error flow through so a decision made in chat locks
+                this card instead of leaving a stale actionable duplicate. */}
             {pendingApproval && (
               <ApprovalCard
                 approval={pendingApproval}
                 onResolve={onResolveApproval}
+                phase={approvalPhase}
+                error={approvalError}
               />
             )}
 
@@ -421,6 +449,59 @@ export default function LiTTLiveActivity({
   );
 }
 
+/* ── Last Run (persisted fallback) ──────────────────────────────── */
+/**
+ * The last settled run's recorded activity, shown when the live
+ * execution store is empty (e.g. after a reload). These are the run's
+ * factual per-step records from the persisted conversation — the same
+ * records the transcript's Details expander shows — never a fabricated
+ * live feed.
+ */
+function LastRunSummary({
+  outcome,
+  records,
+}: {
+  outcome: RunOutcome;
+  records: ToolActivityRecord[];
+}) {
+  const failed = outcome === "failed";
+  return (
+    <div className="flex flex-col gap-1.5 py-3" data-testid="litt-last-run">
+      <div className="flex items-center gap-1.5 px-1">
+        {failed ? (
+          <XCircle size={12} className="pointer-events-none shrink-0" style={{ color: "var(--error)" }} />
+        ) : (
+          <CheckCircle2 size={12} className="pointer-events-none shrink-0" style={{ color: "var(--litt-primary)" }} />
+        )}
+        <span className="text-[11px] font-bold" style={{ color: "var(--text-secondary)" }}>
+          Last run · {failed ? "Failed" : "Completed"}
+        </span>
+      </div>
+      <div className="px-1 text-[9px] leading-tight" style={{ color: "var(--text-muted)" }}>
+        Recorded from the conversation. Live activity appears here while a run is in progress.
+      </div>
+      {records.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {records.map((record, index) => (
+            <li
+              key={`${record.toolId}-${index}`}
+              className="flex items-start gap-1.5 px-1 text-[10px] leading-4"
+              style={{ color: "var(--text-muted)" }}
+            >
+              <span
+                className="mt-1 inline-block h-1 w-1 shrink-0 rounded-full"
+                style={{ backgroundColor: toolActivityDotColor(record.success) }}
+                aria-hidden
+              />
+              <span className="min-w-0 flex-1">{record.summary}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /* ── Empty State ────────────────────────────────────────────────── */
 function EmptyState() {
   return (
@@ -442,13 +523,28 @@ function EmptyState() {
 }
 
 /* ── Approval Card ──────────────────────────────────────────────── */
+/**
+ * The Activity view of the SAME store gate the chat card renders. It
+ * mirrors the chat card's decision state: the subject comes from the
+ * frozen inputs (shared derivation with the canonical ApprovalCard),
+ * and once a decision is in flight — wherever it was clicked — the
+ * buttons lock and the status line shows the resume, so this surface
+ * never offers a second, stale decision for a gate already decided.
+ * Retry for a failed decision lives on the chat card.
+ */
 function ApprovalCard({
   approval,
   onResolve,
+  phase = "idle",
+  error = null,
 }: {
-  approval: { toolId: string; reason: string; pausedRunId?: string };
+  approval: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> };
   onResolve?: (decision: "approved" | "rejected") => void;
+  phase?: "idle" | "submitting" | "executing" | "failed";
+  error?: string | null;
 }) {
+  const details = deriveApprovalDetailsForTool(approval.toolId, approval.inputs);
+  const buttonsDisabled = phase === "submitting" || phase === "executing" || phase === "failed";
   return (
     <div
       className="rounded-xl border p-2.5"
@@ -466,13 +562,39 @@ function ApprovalCard({
       <div className="text-[10px] leading-tight pb-2" style={{ color: "var(--text-secondary)" }}>
         <span className="font-bold">{approval.toolId.replace(/_/g, " ")}</span>
         <div className="pt-0.5" style={{ color: "var(--text-muted)" }}>{approval.reason}</div>
+        {details.subject && (
+          <div className="pt-0.5" style={{ color: "var(--text-secondary)" }}>
+            {details.subject.label}: {details.subject.value}
+          </div>
+        )}
+        {details.destination && (
+          <div className="pt-0.5 font-mono" style={{ color: "var(--text-muted)" }}>
+            → {details.destination}
+          </div>
+        )}
       </div>
+      {phase === "submitting" && (
+        <div className="pb-1.5 text-[10px] font-bold" style={{ color: "var(--text-secondary)" }}>
+          Submitting approval…
+        </div>
+      )}
+      {phase === "executing" && (
+        <div className="pb-1.5 text-[10px] font-bold" style={{ color: "var(--text-secondary)" }}>
+          Approved — running…
+        </div>
+      )}
+      {phase === "failed" && (
+        <div className="pb-1.5 text-[10px] font-bold" style={{ color: "#fca5a5" }} role="alert">
+          Approval failed{error ? `: ${error}` : ""} — retry from the chat card.
+        </div>
+      )}
       {onResolve && (
         <div className="flex gap-1.5">
           <button
             type="button"
             onClick={() => onResolve("approved")}
-            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10"
+            disabled={buttonsDisabled}
+            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
             style={{
               borderColor: "var(--litt-primary)40",
               backgroundColor: "var(--litt-primary)10",
@@ -484,7 +606,8 @@ function ApprovalCard({
           <button
             type="button"
             onClick={() => onResolve("rejected")}
-            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10"
+            disabled={buttonsDisabled}
+            className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
             style={{
               borderColor: "var(--error)40",
               backgroundColor: "var(--error)10",

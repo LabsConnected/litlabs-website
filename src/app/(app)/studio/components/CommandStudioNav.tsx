@@ -10,12 +10,10 @@ import {
   MoreHorizontal,
   MessageSquare,
   Eye,
-  Activity,
   Puzzle,
   Network,
   Terminal,
   X,
-  Home,
   Settings as SettingsIcon,
   Plug,
 } from "lucide-react";
@@ -48,9 +46,9 @@ const MORE_MODES: { id: MoreMode; label: string; icon: typeof Puzzle; group: str
 /**
  * CommandStudioNav — premium icon rail (56px wide).
  *
- * Compact vertical icon rail with LiTT green active indicator, purple hover
- * glow, and a plan/usage footer pill. The "More" destination opens a drawer
- * of secondary tools.
+ * Compact vertical icon rail with LiTT green active coloring (no
+ * indicator bar), soft green hover treatment, and a plan/usage footer
+ * pill. The "More" destination opens a drawer of secondary tools.
  */
 export default function CommandStudioNav({
   active,
@@ -101,7 +99,7 @@ export default function CommandStudioNav({
                 }
                 onSelect(item.id);
               }}
-              className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-white/8"
+              className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-black/5 lg:h-8 lg:w-8"
               style={{
                 color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
                 backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -111,16 +109,11 @@ export default function CommandStudioNav({
               aria-label={item.label}
               aria-current={isActive ? "page" : undefined}
             >
-              {isActive && (
-                <span
-                  className="absolute -left-1 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full"
-                  style={{
-                    backgroundColor: "var(--litt-primary)",
-                    boxShadow: "0 0 6px var(--litt-primary)",
-                  }}
-                  aria-hidden
-                />
-              )}
+              {/* No left-edge active indicator bar (Larry, 2026-11-13:
+                  no highlighted bar over anything — the page opens
+                  clean). Active state is carried by the accent color,
+                  background tint, and aria-current, same as the mobile
+                  bottom nav. */}
               <Icon
                 size={17}
                 strokeWidth={isActive ? 2.2 : 1.7}
@@ -146,7 +139,7 @@ export default function CommandStudioNav({
         {/* LiTTBits balance footer — shows AI credits count */}
         <Link
           href="/wallet"
-          className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-white/8"
+          className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-black/5 lg:h-8 lg:w-8"
           style={{ color: "var(--text-muted)" }}
           title={`LiTTBits: ${balance.toLocaleString()}`}
           aria-label="View wallet"
@@ -188,7 +181,7 @@ export default function CommandStudioNav({
             height: "calc(100dvh - var(--studio-header-h))",
             backgroundColor: "var(--studio-elevated)",
             borderRight: "1px solid var(--studio-border-strong)",
-            boxShadow: "8px 0 32px rgba(0,0,0,0.5)",
+            boxShadow: "8px 0 32px rgba(14,60,26,0.18)",
             backdropFilter: "blur(12px)",
           }}
         >
@@ -202,7 +195,7 @@ export default function CommandStudioNav({
             <button
               type="button"
               onClick={() => setMoreOpen(false)}
-              className="grid h-7 w-7 place-items-center rounded-lg transition hover:bg-white/10"
+              className="grid h-7 w-7 place-items-center rounded-lg transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Close more tools"
             >
@@ -220,7 +213,7 @@ export default function CommandStudioNav({
                     onSelectMoreMode?.(m.id);
                     setMoreOpen(false);
                   }}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-black/5"
                   style={{ color: "var(--text-secondary)" }}
                 >
                   <Icon size={16} strokeWidth={1.7} className="pointer-events-none shrink-0" />
@@ -231,11 +224,11 @@ export default function CommandStudioNav({
 
             {/* System links */}
             <div className="my-1 h-px" style={{ backgroundColor: "var(--studio-border)" }} />
-            <a href="/settings" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5" style={{ color: "var(--text-secondary)" }}>
+            <a href="/settings" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-black/5" style={{ color: "var(--text-secondary)" }}>
               <SettingsIcon size={16} strokeWidth={1.7} className="pointer-events-none shrink-0" />
               <span className="text-xs font-bold">Settings</span>
             </a>
-            <a href="/settings/connections" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5" style={{ color: "var(--text-secondary)" }}>
+            <a href="/settings/connections" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-black/5" style={{ color: "var(--text-secondary)" }}>
               <Plug size={16} strokeWidth={1.7} className="pointer-events-none shrink-0" />
               <span className="text-xs font-bold">Connections</span>
             </a>
@@ -261,11 +254,15 @@ export function MobileCommandNav({
   surface?: MobileStudioSurface | null;
   onSelectSurface?: (surface: MobileStudioSurface) => void;
 }) {
+  // Phone bottom navigation (Studio Finish Spec, Larry 2026-11-14 —
+  // supersedes the 2026-11-13 removal): exactly Chat · Preview ·
+  // Files · More. Activity lives inside More (the Tools sheet) and in
+  // its own board panel; Settings lives inside More too. Every target
+  // is at least 44×44 CSS px.
   const surfaceItems: { id: MobileStudioSurface; label: string; icon: typeof MessageSquare }[] = [
     { id: "chat", label: "Chat", icon: MessageSquare },
     { id: "preview", label: "Preview", icon: Eye },
     { id: "files", label: "Files", icon: FolderOpen },
-    { id: "activity", label: "Activity", icon: Activity },
     { id: "more", label: "More", icon: MoreHorizontal },
   ];
 
@@ -276,8 +273,10 @@ export function MobileCommandNav({
       style={{
         height: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom))",
         paddingBottom: "env(safe-area-inset-bottom)",
-        backgroundColor: "rgba(7,5,13,0.85)",
-        borderTop: "1px solid rgba(255,255,255,0.07)",
+        // Theme-bound surface (charcoal in dark, light in light) — a
+        // hard-coded white bar stayed white over the dark Studio.
+        backgroundColor: "color-mix(in srgb, var(--studio-surface) 92%, transparent)",
+        borderTop: "1px solid var(--studio-border)",
         backdropFilter: "blur(20px)",
         WebkitBackdropFilter: "blur(20px)",
       }}
@@ -290,28 +289,24 @@ export function MobileCommandNav({
             key={item.id}
             type="button"
             onClick={() => onSelectSurface(item.id)}
-            className="relative flex min-h-10 flex-1 flex-col items-center justify-center gap-1 transition-colors"
+            className="relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 transition-colors"
             style={{ color: isActive ? "var(--color-accent)" : "var(--text-muted)" }}
             aria-label={item.label}
             aria-current={isActive ? "page" : undefined}
           >
-            {isActive && <span className="absolute top-0 h-0.5 w-8 rounded-b-full" style={{ backgroundColor: "var(--color-accent)", boxShadow: "0 0 8px var(--color-accent)" }} aria-hidden />}
+            {/* No active-tab highlight bar (Larry, 2026-11-13: the page must open clean — no bar over any nav button). Active state is carried by the accent color + aria-current. */}
             <Icon size={20} strokeWidth={isActive ? 2.3 : 1.8} className="pointer-events-none" />
             <span className="text-[10px] font-bold">{item.label}</span>
           </button>
         );
       }) : (
         <>
-          <Link href="/dashboard" className="flex flex-1 flex-col items-center justify-center gap-1 transition-colors" style={{ color: "var(--text-muted)" }} aria-label="Go to dashboard">
-            <Home size={20} strokeWidth={1.8} className="pointer-events-none" />
-            <span className="text-[10px] font-bold">Home</span>
-          </Link>
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.id;
             return (
-              <button key={item.id} type="button" onClick={() => onSelect(item.id)} className="relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors" style={{ color: isActive ? "var(--color-accent)" : "var(--text-muted)" }} aria-label={item.label} aria-current={isActive ? "page" : undefined}>
-                {isActive && <span className="absolute top-0 h-0.5 w-8 rounded-b-full" style={{ backgroundColor: "var(--color-accent)", boxShadow: "0 0 8px var(--color-accent)" }} aria-hidden />}
+              <button key={item.id} type="button" onClick={() => onSelect(item.id)} className="relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 transition-colors" style={{ color: isActive ? "var(--color-accent)" : "var(--text-muted)" }} aria-label={item.label} aria-current={isActive ? "page" : undefined}>
+                {/* No active-tab highlight bar (Larry, 2026-11-13: the page must open clean — no bar over any nav button). Active state is carried by the accent color + aria-current. */}
                 <Icon size={20} strokeWidth={isActive ? 2.3 : 1.8} className="pointer-events-none" />
                 <span className="text-[10px] font-bold">{item.label}</span>
               </button>

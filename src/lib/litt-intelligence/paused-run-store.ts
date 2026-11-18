@@ -48,6 +48,7 @@ import {
 import type { LLMMessage } from "./llm-tool-calling";
 import type { DeferredToolCall } from "./agent-loop-v2";
 import type { QualityFinale, QualityLoopSnapshot } from "./quality-loop-flow";
+import type { RunFailureContributor } from "./run-settlement";
 
 /**
  * How long a human has to decide on an approval gate.
@@ -121,6 +122,14 @@ export interface RunResult {
     pausedRunId?: string;
     reason: string;
   };
+  /**
+   * Round 11: every failure observed during the run (failed tool calls,
+   * unknown workspace verification, honest failure, model/route
+   * failure), recorded whether or not it decided the outcome — a
+   * capacity failure must not mask a tool defect in the record.
+   * Optional for backwards compatibility.
+   */
+  failureContributors?: RunFailureContributor[];
   /**
    * Quality-loop finale for ACT-mode runs that opted into the gated loop.
    * Durably persists the machine-readable answer to "is this actually good
@@ -917,6 +926,37 @@ export async function getRunOutcomeForPausedRun(
         runCompletedAt: run.completedAt,
       };
     }
+    // Claim/outcome divergence: the gate row's claim lifecycle reached
+    // terminal-failed (the executor released its claim as failed after
+    // its canonical settle failed, or the stale-run reaper retired a
+    // dead executor whose action_run settle attempt also failed), but
+    // the action_run itself never reached a terminal status and carries
+    // no outcome event for this gate. A failed claim is fenced —
+    // verifyRunClaim requires run_status='processing', so no executor
+    // can ever write this run's outcome again. Deriving "processing"
+    // here wedged the gate permanently: pollers polled a dead run,
+    // repeat approvals returned 202-processing forever, and the
+    // controlled-retry path (which requires a failed outcome) was
+    // unreachable (production hang, 2026-11-14: approvals recorded,
+    // run never resumed, nothing errored). The row's recorded failure
+    // is the only outcome this gate will ever have — report it.
+    if (record.runStatus === "failed") {
+      studioLog("paused_run:outcome_claim_divergence", {
+        userId,
+        actionRunId: record.actionRunId,
+        pausedRunId: record.id,
+        gateId: record.id,
+        actionRunStatus: run.status,
+        claimError: record.runError ?? undefined,
+      });
+      return {
+        runStatus: "failed",
+        runResult: null,
+        runError: record.runError ?? run.failureMessage,
+        runStartedAt: run.startedAt,
+        runCompletedAt: record.runCompletedAt ?? run.completedAt,
+      };
+    }
     return { ...EMPTY_OUTCOME, runStatus: "processing", runStartedAt: run.startedAt };
   } catch {
     return { ...EMPTY_OUTCOME, runStatus: record.runStatus };
@@ -936,6 +976,123 @@ export async function expireStaleRuns(): Promise<number> {
 
   if (error) return 0;
   return data?.length ?? 0;
+}
+
+/**
+ * Round 14 — give the reaper a clock.
+ *
+ * recoverStaleRun is precise (lease expiry = provable death; fresh
+ * lease + frozen progress past RUN_STALL_MS = genuine stall; legacy
+ * age rule for pre-lease rows), but until now it only ran when some
+ * READ happened to touch the run. A fenced or dead executor whose
+ * conversation nobody re-read stayed "processing" forever — the
+ * 2026-11-17 lion proof's approval card sat on "Approved — running…"
+ * with the run long finished-or-dead behind it. This sweep runs the
+ * SAME recovery on a timer instead of on a lucky read.
+ *
+ * Conservative by construction:
+ *  - The candidate queries are deliberately loose (lease lapsed OR
+ *    started before the legacy stale wall OR approved-but-never-
+ *    started past the wall); recoverStaleRun re-checks every row
+ *    against the precise rules and leaves healthy rows untouched.
+ *  - Bounded batches, oldest first; a row is recovered at most once
+ *    (the guarded write inside recoverStaleRun only flips the state
+ *    it read, so a racing live executor is never clobbered).
+ *  - Pending-gate expiry rides the same pass (expireStaleRuns had
+ *    no periodic caller either).
+ */
+export const STALE_RUN_SWEEP_INTERVAL_MS = 60_000;
+const STALE_RUN_SWEEP_BATCH = 50;
+
+export async function sweepStaleRuns(): Promise<{
+  expiredGates: number;
+  recoveredRuns: number;
+}> {
+  if (!supabaseAdmin) return { expiredGates: 0, recoveredRuns: 0 };
+
+  const expiredGates = await expireStaleRuns().catch(() => 0);
+
+  const nowIso = new Date().toISOString();
+  const staleCutoff = new Date(Date.now() - RUN_STALE_TIMEOUT_MS).toISOString();
+  const candidates = new Map<string, PausedRunRecord>();
+  const collect = (rows: PausedRunRow[] | null): void => {
+    for (const row of rows ?? []) {
+      const record = rowToRecord(row);
+      candidates.set(record.id, record);
+    }
+  };
+  const baseQuery = () =>
+    supabaseAdmin
+      .from(TABLE)
+      .select("*")
+      .eq("status", "approved")
+      .order("created_at", { ascending: true })
+      .limit(STALE_RUN_SWEEP_BATCH);
+
+  try {
+    // Provably dead executors: lease lapsed while still "processing".
+    const { data } = await baseQuery()
+      .eq("run_status", "processing")
+      .lt("lease_expires_at", nowIso);
+    collect(data as PausedRunRow[] | null);
+    // Legacy/stall candidates: processing since before the stale
+    // wall (recoverStaleRun applies the precise stall rule — a run
+    // with a fresh lease AND fresh progress passes through untouched).
+    const { data: legacy } = await baseQuery()
+      .eq("run_status", "processing")
+      .lt("run_started_at", staleCutoff);
+    collect(legacy as PausedRunRow[] | null);
+    // Approved but execution never started (process died between
+    // the decision and markRunProcessing).
+    const { data: neverStarted } = await baseQuery()
+      .is("run_status", null)
+      .lt("resolved_at", staleCutoff);
+    collect(neverStarted as PausedRunRow[] | null);
+  } catch {
+    // A failed candidate query skips this pass — the next interval
+    // retries. Never throw into the timer.
+  }
+
+  let recoveredRuns = 0;
+  for (const record of candidates.values()) {
+    try {
+      const after = await recoverStaleRun(record);
+      if (after.runStatus === "failed" && record.runStatus !== "failed") {
+        recoveredRuns++;
+      }
+    } catch {
+      // One bad row never blocks the rest of the sweep.
+    }
+  }
+  return { expiredGates, recoveredRuns };
+}
+
+const sweepGlobal = globalThis as unknown as {
+  __littStaleRunSweeper?: ReturnType<typeof setInterval>;
+};
+
+/**
+ * Start the periodic stale-run sweep (idempotent per process).
+ * Started from instrumentation register() at server boot; the
+ * interval is unref'd so it never keeps a process alive on its own.
+ * Returns true when this call started the timer.
+ */
+export function startStaleRunSweeper(): boolean {
+  if (sweepGlobal.__littStaleRunSweeper) return false;
+  const timer = setInterval(() => {
+    void sweepStaleRuns().catch(() => undefined);
+  }, STALE_RUN_SWEEP_INTERVAL_MS);
+  (timer as { unref?: () => void }).unref?.();
+  sweepGlobal.__littStaleRunSweeper = timer;
+  return true;
+}
+
+/** Stop the sweep (tests / graceful shutdown). */
+export function stopStaleRunSweeper(): void {
+  if (sweepGlobal.__littStaleRunSweeper) {
+    clearInterval(sweepGlobal.__littStaleRunSweeper);
+    sweepGlobal.__littStaleRunSweeper = undefined;
+  }
 }
 
 export const APPROVAL_TTL = APPROVAL_TTL_MS;

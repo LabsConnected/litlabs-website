@@ -81,13 +81,36 @@ class FakeMediaStreamSource {
   disconnect = vi.fn();
 }
 
+class FakeGainNode {
+  gain = { value: 0 };
+  context: FakeAudioContext | null = null;
+  connect = vi.fn();
+  disconnect = vi.fn();
+}
+
+class FakeBufferSource {
+  buffer: AudioBuffer | null = null;
+  onended: (() => void) | null = null;
+  connect = vi.fn();
+  disconnect = vi.fn();
+  start = vi.fn();
+  stop = vi.fn();
+}
+
 class FakeAudioContext {
+  static instances: FakeAudioContext[] = [];
   state: AudioContextState = "running";
   sampleRate: number;
   currentTime = 0;
-  destination = {} as AudioNode;
+  destination = {
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  } as unknown as AudioNode;
+  createdGains: FakeGainNode[] = [];
+  createdBufferSources: FakeBufferSource[] = [];
   constructor(opts: { sampleRate?: number } = {}) {
     this.sampleRate = opts.sampleRate ?? 24000;
+    FakeAudioContext.instances.push(this);
   }
   resume = vi.fn(async () => {
     this.state = "running";
@@ -113,15 +136,15 @@ class FakeAudioContext {
         getChannelData: () => new Float32Array(length),
       }) as unknown as AudioBuffer,
   );
+  createGain = vi.fn(() => {
+    const node = new FakeGainNode();
+    node.context = this;
+    this.createdGains.push(node);
+    return node as unknown as GainNode;
+  });
   createBufferSource = vi.fn(() => {
-    const src = {
-      buffer: null as AudioBuffer | null,
-      onended: null as (() => void) | null,
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      start: vi.fn(),
-      stop: vi.fn(),
-    };
+    const src = new FakeBufferSource();
+    this.createdBufferSources.push(src);
     return src as unknown as AudioBufferSourceNode;
   });
 }
@@ -231,6 +254,7 @@ async function doubleClose4001(
 describe("useInworldSession — TTS state machine", () => {
   beforeEach(() => {
     MockWebSocket.instances = [];
+    FakeAudioContext.instances = [];
     vi.stubGlobal("WebSocket", MockWebSocket);
     vi.stubGlobal("AudioContext", FakeAudioContext);
     vi.stubGlobal(
@@ -456,6 +480,47 @@ describe("useInworldSession — TTS state machine", () => {
     expect(result.current.didLastTtsPlayAudio()).toBe(true);
   });
 
+  it("routes scheduled TTS audio source → playback gain → destination", async () => {
+    const { result } = renderHook(() => useInworldSession({}));
+    const ws = await connectAndWait(result);
+
+    const speakPromise = act(async () => {
+      const p = result.current.speakText("Hello, world.");
+      await Promise.resolve();
+      await Promise.resolve();
+      // Two silent PCM16 samples, base64-encoded
+      ws.__fireMessage({
+        type: "response.output_audio.delta",
+        delta: btoa("\x00\x00\x01\x00"),
+      });
+      await Promise.resolve();
+      ws.__fireMessage({ type: "response.done" });
+      await p;
+    });
+    await speakPromise;
+
+    // Regression test for the dead-end playback gain (introduced by
+    // 44ed62be): chunks were scheduled into a master GainNode that was
+    // never connected to the context destination, so live sessions were
+    // silently mute while every state signal reported success. The graph
+    // must be source → master gain → destination, asserted by node
+    // identity — the previous mock had no createGain at all and
+    // structurally could not see this missing edge.
+    const playbackCtx = FakeAudioContext.instances.find(
+      (ctx) => ctx.createdGains.length > 0,
+    );
+    expect(playbackCtx).toBeDefined();
+    const gain = playbackCtx!.createdGains[0]!;
+    expect(gain.connect).toHaveBeenCalledTimes(1);
+    expect(gain.connect.mock.calls[0]![0]).toBe(playbackCtx!.destination);
+    expect(playbackCtx!.createdBufferSources.length).toBeGreaterThan(0);
+    for (const source of playbackCtx!.createdBufferSources) {
+      expect(source.connect.mock.calls[0]![0]).toBe(gain);
+    }
+    // The played flag is set by scheduling (asserted above), not receipt.
+    expect(result.current.didLastTtsPlayAudio()).toBe(true);
+  });
+
   it("errors from the server set state to 'error' and call onError", async () => {
     const onError = vi.fn();
     const { result } = renderHook(() => useInworldSession({ onError }));
@@ -643,5 +708,69 @@ describe("useInworldSession — TTS state machine", () => {
     expect(onTranscript).toHaveBeenCalledWith("hello LiTT", true, expect.objectContaining({
       speechDurationMs: expect.any(Number),
     }));
+  });
+});
+
+describe("useInworldSession — mid-session close notification (B-04)", () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    vi.stubGlobal(
+      "navigator",
+      Object.defineProperty({}, "mediaDevices", {
+        value: {
+          getUserMedia: vi.fn(async () => makeMockStream()),
+          enumerateDevices: vi.fn(async () => []),
+        },
+        configurable: true,
+      }),
+    );
+    process.env.NEXT_PUBLIC_VOICE_WS_URL = "ws://localhost:4002/voice";
+    useVoiceStore.getState().reset();
+    useVoiceStore.setState({ activeAgent: "litt" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    delete process.env.NEXT_PUBLIC_VOICE_WS_URL;
+  });
+
+  it("calls onClose when the socket closes mid-session (network drop)", async () => {
+    const onClose = vi.fn();
+    const { result } = renderHook(() => useInworldSession({ onClose }));
+    const ws = await connectAndWait(result);
+
+    act(() => ws.__fireClose(1006, ""));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose.mock.calls[0][0]).toMatch(/connection closed/i);
+  });
+
+  it("calls onClose with the auth message on a mid-session 4001 close", async () => {
+    const onClose = vi.fn();
+    const { result } = renderHook(() => useInworldSession({ onClose }));
+    const ws = await connectAndWait(result);
+
+    act(() => ws.__fireClose(4001, "Invalid or expired token"));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose.mock.calls[0][0]).toMatch(/Authentication failed/i);
+  });
+
+  it("does NOT call onClose for an intentional client disconnect", async () => {
+    const onClose = vi.fn();
+    const { result } = renderHook(() => useInworldSession({ onClose }));
+    const ws = await connectAndWait(result);
+
+    act(() => {
+      result.current.disconnect();
+    });
+    // Browsers fire the close event asynchronously after close() — the
+    // mock's close() doesn't, so fire it manually as the browser would.
+    act(() => ws.__fireClose(1000, "Client disconnect"));
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

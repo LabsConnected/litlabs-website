@@ -3,18 +3,27 @@
 /**
  * MusicTool — the Music studio workspace.
  *
- * Three-column layout:
+ * Two-column layout:
  *   LEFT  — Music rail (Create / Library / Playlists / Likes / Uploads)
  *   CENTER— Creation surface (Quick Create / Custom / Remix) +
  *           recent generations as rich TrackCards.
- *   RIGHT — LiTT Producer panel (AI producer chat + one-tap transformations).
+ *
+ * ONE-PROMPT contract (ART-20261111-035): this pane carries NO chat and
+ * NO prompt box. The old right-rail producer chat and the
+ * center "Describe your song" textarea are gone. A generation request
+ * arrives from the one LiTT chat (staged read-only via the P1-1
+ * initialPrompt channel) or is composed from the pane's non-text
+ * controls (genre presets, style/mood chips, sliders, toggles); the
+ * staged prompt is displayed as text, never typed into here. The old
+ * producer tricks survive as local controls (quick transforms) that
+ * adjust the same parameters directly.
  *
  * Playback routes through MusicPlayerContext so audio persists across tool
  * switches; the PersistentMusicPlayer bar (mounted in CommandStudio) shows
  * the transport.
  */
 
-import { useState, useEffect, useCallback, useMemo, type CSSProperties } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useMusicGeneration } from "@/hooks/use-music-generation";
 import { useMusicVault, type VaultTrack } from "@/hooks/use-music-vault";
@@ -44,7 +53,6 @@ import {
   Smile,
   Flame,
   Droplets,
-  Send,
   Moon,
 } from "lucide-react";
 import { apiFetch, type ApiJson } from "@/lib/api-response";
@@ -82,6 +90,15 @@ const GENRE_PRESETS = [
   "Chillwave retro synthwave",
 ];
 
+// Style is picked with chips (a control), never typed: the selected
+// tokens join into the same comma-joined `styles` string the generation
+// prompt has always consumed. Tokens staged from a track ("Use as
+// style") that are not in this list still render as removable chips.
+const STYLE_OPTIONS = [
+  "R&B", "Neo-Soul", "Cinematic", "Trap", "House", "Lo-Fi", "Synthwave",
+  "Orchestral", "Jazz", "Rock", "Ambient", "Techno", "EDM", "Hip Hop",
+];
+
 const SURPRISE_PROMPTS = [
   "Dark melodic trap, distorted 808s, eerie female hook, 128 BPM",
   "Sunset deep house with warm analog bass and a single lingering piano note",
@@ -94,7 +111,7 @@ const SURPRISE_PROMPTS = [
 type RailTab = "create" | "library" | "playlists" | "likes" | "uploads";
 type CreateTab = "quick" | "custom" | "remix";
 
-export default function MusicTool() {
+export default function MusicTool({ initialPrompt }: { initialPrompt?: string | null }) {
   const { resolvedColors: T } = useTheme();
   const accent = T.accentColor || "#a855f7";
   const { setActiveAssetId } = useStudioContext();
@@ -115,7 +132,17 @@ export default function MusicTool() {
 
   const [railTab, setRailTab] = useState<RailTab>("create");
   const [createTab, setCreateTab] = useState<CreateTab>("quick");
-  const [prompt, setPrompt] = useState("");
+  // The generation prompt is STAGED, never typed in this pane: it comes
+  // from the one chat (initialPrompt), a genre preset / surprise pick, a
+  // track action, or the prompt enhancer — and is shown read-only.
+  const [stagedPrompt, setStagedPrompt] = useState(initialPrompt ?? "");
+  const lastInitialPromptRef = useRef(initialPrompt);
+  useEffect(() => {
+    if (initialPrompt && initialPrompt !== lastInitialPromptRef.current) {
+      lastInitialPromptRef.current = initialPrompt;
+      setStagedPrompt(initialPrompt);
+    }
+  }, [initialPrompt]);
   const [title, setTitle] = useState("");
   const [styles, setStyles] = useState("");
   const [negativeStyles, setNegativeStyles] = useState("");
@@ -135,10 +162,9 @@ export default function MusicTool() {
   const [seed, setSeed] = useState<string>("");
   const [showLyrics, setShowLyrics] = useState(true);
   const [remixSource, setRemixSource] = useState<VaultTrack | null>(null);
-  const [producerMessages, setProducerMessages] = useState<{ role: "user" | "litt"; text: string }[]>([
-    { role: "litt", text: "I'm your LiTT Music Producer. Describe a vibe or pick a track and I'll suggest how to make it hit harder." },
-  ]);
-  const [producerInput, setProducerInput] = useState("");
+  // One-line pane feedback for track actions / transforms (the old
+  // producer chat's only remaining job) — a status line, not a chat.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const cost = duration === "concept"
     ? MUSIC_LBC_COST.concept
@@ -146,9 +172,30 @@ export default function MusicTool() {
       ? MUSIC_LBC_COST.instrumentalFull
       : MUSIC_LBC_COST.songFull;
 
+  // Generate needs SOME direction: a staged prompt, a style, or a mood.
+  // (The parameter chips/sliders always contribute BPM/key/etc., so they
+  // don't count — direction is what the old prompt box used to provide.)
+  const hasDirection = Boolean(stagedPrompt.trim() || styles.trim() || mood);
+
+  // Style selection state for the chips (the `styles` string itself is
+  // unchanged — tokens join with ", " exactly as the typed field did).
+  const styleTokens = useMemo(
+    () => styles.split(",").map((s) => s.trim()).filter(Boolean),
+    [styles],
+  );
+  const toggleStyle = useCallback((token: string) => {
+    setStyles((prev) => {
+      const tokens = prev.split(",").map((s) => s.trim()).filter(Boolean);
+      return (tokens.includes(token)
+        ? tokens.filter((t) => t !== token)
+        : [...tokens, token]
+      ).join(", ");
+    });
+  }, []);
+
   const generationPrompt = useMemo(() => {
     const parts = [
-      prompt.trim(),
+      stagedPrompt.trim(),
       mood ? `Mood: ${mood}.` : "",
       bpm ? `BPM: ${bpm}.` : "",
       musicalKey ? `Key: ${musicalKey}.` : "",
@@ -161,7 +208,7 @@ export default function MusicTool() {
       remixSource ? `Remix of "${remixSource.title}" — reinterpreting its vibe.` : "",
     ].filter(Boolean);
     return parts.join(" ").slice(0, 600);
-  }, [prompt, mood, bpm, musicalKey, createTab, title, styles, negativeStyles, weirdness, styleInfluence, promptStrength, creativity, seed, remixSource]);
+  }, [stagedPrompt, mood, bpm, musicalKey, createTab, title, styles, negativeStyles, weirdness, styleInfluence, promptStrength, creativity, seed, remixSource]);
 
   const handleGenerate = useCallback(() => {
     if (!generationPrompt || isGenerating) return;
@@ -215,18 +262,18 @@ export default function MusicTool() {
   const handleShare = useCallback(async (track: VaultTrack) => {
     try {
       await navigator.clipboard.writeText(`https://litlabs.net/track/${track.id}`);
-      setProducerMessages((m) => [...m, { role: "litt", text: `Share link copied for "${track.title}".` }]);
+      setNotice(`Share link copied for "${track.title}".`);
     } catch {
       // ignore
     }
   }, []);
 
   const handleDuplicate = useCallback((track: VaultTrack) => {
-    setPrompt(`Inspired by "${track.title}"`);
+    setStagedPrompt(`Inspired by "${track.title}"`);
     setRemixSource(track);
     setCreateTab("remix");
     setRailTab("create");
-    setProducerMessages((m) => [...m, { role: "litt", text: `Started a new variation from "${track.title}". Tweak the prompt and generate.` }]);
+    setNotice(`Started a new variation from "${track.title}" — staged above. Adjust the controls and generate.`);
   }, []);
 
   const handleUseAsStyle = useCallback((track: VaultTrack) => {
@@ -234,41 +281,41 @@ export default function MusicTool() {
     if (genre) setStyles(genre);
     if (track.bpm) setBpm(track.bpm);
     if (track.musical_key) setMusicalKey(track.musical_key);
-    setPrompt(`Generate a new track inspired by the sound of "${track.title}"`);
+    setStagedPrompt(`Generate a new track inspired by the sound of "${track.title}"`);
     setCreateTab("custom");
     setRailTab("create");
-    setProducerMessages((m) => [...m, { role: "litt", text: `Borrowed the style from "${track.title}" — BPM ${track.bpm ?? "?"}, key ${track.musical_key ?? "?"}. Adjust and generate.` }]);
+    setNotice(`Borrowed the style from "${track.title}" — BPM ${track.bpm ?? "?"}, key ${track.musical_key ?? "?"}. Adjust and generate.`);
   }, []);
 
   const handleRemix = useCallback((track: VaultTrack) => {
     setRemixSource(track);
     setCreateTab("remix");
     setRailTab("create");
-    setPrompt(`Remix "${track.title}" — give it a fresh interpretation with a new groove`);
-    setProducerMessages((m) => [...m, { role: "litt", text: `Remixing "${track.title}". I'll keep the identity but reshape the energy. Hit GENERATE when ready.` }]);
+    setStagedPrompt(`Remix "${track.title}" — give it a fresh interpretation with a new groove`);
+    setNotice(`Remixing "${track.title}" — the identity stays, the energy gets reshaped. Hit Generate when ready.`);
   }, []);
 
   const handleExtend = useCallback((track: VaultTrack) => {
     setRemixSource(track);
     setCreateTab("remix");
     setRailTab("create");
-    setPrompt(`Extend "${track.title}" — add an intro, verse, hook and outro`);
+    setStagedPrompt(`Extend "${track.title}" — add an intro, verse, hook and outro`);
     setDuration("full");
-    setProducerMessages((m) => [...m, { role: "litt", text: `Extending "${track.title}" to a full-length track. I'll add intro → verse → hook → outro structure.` }]);
+    setNotice(`Extending "${track.title}" to a full-length track with intro → verse → hook → outro structure.`);
   }, []);
 
   const handleEditLyrics = useCallback((track: VaultTrack) => {
     setShowLyrics(true);
     setCreateTab("custom");
     setRailTab("create");
-    setProducerMessages((m) => [...m, { role: "litt", text: `Editing lyrics for "${track.title}". Write your new words below, then regenerate.` }]);
+    setNotice(`Editing lyrics for "${track.title}" — write your new words in the lyrics editor, then regenerate.`);
   }, []);
 
   const [isEnhancing, setIsEnhancing] = useState(false);
 
   const handleImprovePrompt = useCallback(async () => {
-    if (!prompt.trim()) {
-      setPrompt("A soulful late-night R&B track with warm keys, deep bass, intimate vocals and a huge final chorus at 92 BPM");
+    if (!stagedPrompt.trim()) {
+      setStagedPrompt("A soulful late-night R&B track with warm keys, deep bass, intimate vocals and a huge final chorus at 92 BPM");
       return;
     }
     setIsEnhancing(true);
@@ -277,12 +324,12 @@ export default function MusicTool() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt: stagedPrompt }),
       });
       if (res.ok) {
         const data = await res.json();
         if (data.enhanced) {
-          setPrompt(data.enhanced);
+          setStagedPrompt(data.enhanced);
           // Auto-fill style fields if provided
           if (data.genre || data.subgenre) {
             const styles = [data.genre, data.subgenre].filter(Boolean).join(", ");
@@ -300,105 +347,35 @@ export default function MusicTool() {
     } finally {
       setIsEnhancing(false);
     }
-  }, [prompt]);
+  }, [stagedPrompt]);
 
   const handleSurprise = useCallback(() => {
     const pick = SURPRISE_PROMPTS[Math.floor(Math.random() * SURPRISE_PROMPTS.length)];
-    setPrompt(pick);
+    setStagedPrompt(pick);
   }, []);
 
-  const [isProducerLoading, setIsProducerLoading] = useState(false);
-
-  const handleProducerSend = useCallback(async () => {
-    const text = producerInput.trim();
-    if (!text) return;
-    setProducerMessages((m) => [...m, { role: "user", text }]);
-    setProducerInput("");
-    setIsProducerLoading(true);
-
-    try {
-      const res = await fetch("/api/music/producer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          prompt: text,
-          currentSettings: { mood, bpm, energy, instrumental, vocalType, styles, negativeStyles },
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        // Apply structured changes
-        if (data.bpm) setBpm(data.bpm);
-        if (data.energy) setEnergy(data.energy);
-        if (data.key && data.key !== "auto") setMusicalKey(data.key);
-        if (data.styles?.length) setStyles(data.styles.join(", "));
-        if (data.avoidStyles?.length) setNegativeStyles(data.avoidStyles.join(", "));
-        if (data.vocalDirection && !instrumental) {
-          setProducerMessages((m) => [...m, { role: "litt", text: data.producerNote || data.vocalDirection }]);
-        } else {
-          setProducerMessages((m) => [...m, { role: "litt", text: data.producerNote || "Got it — I've updated the settings. Hit Generate to hear it." }]);
-        }
-        if (data.enhancedPrompt) {
-          setPrompt(data.enhancedPrompt);
-        }
-      } else {
-        setProducerMessages((m) => [...m, { role: "litt", text: "I couldn't process that right now. Try rephrasing or hit Generate with your current settings." }]);
-      }
-    } catch {
-      setProducerMessages((m) => [...m, { role: "litt", text: "Connection issue — try again in a moment." }]);
-    } finally {
-      setIsProducerLoading(false);
-    }
-  }, [producerInput, mood, bpm, energy, instrumental, vocalType, styles, negativeStyles]);
-
-  const applyProducerTransform = useCallback(async (kind: "harder" | "catchier" | "emotional" | "variation") => {
-    const userText = kind === "harder" ? "Make it harder" : kind === "catchier" ? "Make it catchier" : kind === "emotional" ? "Make it more emotional" : "Generate a variation";
-    setProducerMessages((m) => [...m, { role: "user", text: userText }]);
-    setIsProducerLoading(true);
-
-    // Apply quick local changes for immediate feedback
+  // Quick transforms — the old producer panel's one-tap tricks, now
+  // plain local CONTROLS (one-prompt contract): each applies the exact
+  // parameter change it names, immediately and observably, with no chat
+  // round-trip. Anything conversational belongs in the one LiTT chat.
+  const applyQuickTransform = useCallback((kind: "harder" | "catchier" | "emotional" | "variation") => {
     if (kind === "harder") {
       setEnergy((e) => Math.min(10, e + 2));
       setMood("Aggressive");
+      setNotice("Staged harder: energy up, mood set to Aggressive. Generate to hear it.");
     } else if (kind === "catchier") {
       setEnergy((e) => Math.max(4, Math.min(8, e + 1)));
       setMood("Happy");
+      setNotice("Staged catchier: energy nudged up, mood set to Happy. Generate to hear it.");
     } else if (kind === "emotional") {
       setEnergy((e) => Math.max(2, e - 2));
       setMood("Sad");
+      setNotice("Staged more emotional: energy down, mood set to Sad. Generate to hear it.");
     } else {
       setWeirdness((w) => Math.min(100, w + 15));
+      setNotice("Staged a variation: variation amount raised. Generate to hear it.");
     }
-
-    try {
-      const res = await fetch("/api/music/producer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          prompt: userText,
-          currentSettings: { mood, bpm, energy, instrumental, vocalType, styles, negativeStyles },
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.bpm) setBpm(data.bpm);
-        if (data.energy) setEnergy(data.energy);
-        if (data.styles?.length) setStyles(data.styles.join(", "));
-        if (data.enhancedPrompt) setPrompt(data.enhancedPrompt);
-        setProducerMessages((m) => [...m, { role: "litt", text: data.producerNote || "Updated — generate to hear the change." }]);
-      } else {
-        setProducerMessages((m) => [...m, { role: "litt", text: "Updated settings locally. Generate to hear it." }]);
-      }
-    } catch {
-      setProducerMessages((m) => [...m, { role: "litt", text: "Updated settings locally. Generate to hear it." }]);
-    } finally {
-      setIsProducerLoading(false);
-    }
-  }, [mood, bpm, energy, instrumental, vocalType, styles, negativeStyles]);
+  }, []);
 
   // Refresh vault when generation completes.
   useEffect(() => {
@@ -577,7 +554,7 @@ export default function MusicTool() {
 
       {/* ── CENTER ───────────────────────────────────────────────── */}
       <main style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "clamp(12px, 2vw, 24px)" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto" }}>
+        <div style={{ maxWidth: 1040, margin: "0 auto" }}>
           {/* Header */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ ...labelStyle, color: accent, marginBottom: 6 }}>LiTTree Audio</div>
@@ -586,7 +563,7 @@ export default function MusicTool() {
             </h1>
             <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--text-secondary)" }}>
               {railTab === "create"
-                ? "Start with one sentence or shape the lyrics, voice, style and production controls yourself."
+                ? "Ask LiTT in the chat, or stage a track here with the preset, style, mood and production controls."
                 : `${libraryTracks.length} track${libraryTracks.length === 1 ? "" : "s"}`}
             </p>
           </div>
@@ -626,16 +603,26 @@ export default function MusicTool() {
                     </div>
                   )}
 
-                  {/* Big prompt */}
-                  <div style={{ ...labelStyle, marginBottom: 6 }}>{createTab === "remix" ? "Describe the remix / extension" : "Describe your song"}</div>
-                  <textarea
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="Dark melodic trap, distorted 808s, eerie female hook, 128 BPM…"
-                    rows={4}
-                    style={{ ...inputStyle, resize: "vertical", minHeight: 110, fontFamily: "inherit", fontSize: 15, lineHeight: 1.55 }}
-                    disabled={isBusy}
-                  />
+                  {/* Staged prompt — READ-ONLY (one-prompt contract).
+                      Requests arrive from the one chat or are composed
+                      from the controls in this card; this pane never
+                      takes typed prompt text. */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <div style={labelStyle}>{createTab === "remix" ? "Remix / extension — staged prompt" : "Staged prompt"}</div>
+                    {stagedPrompt.trim() && (
+                      <button onClick={() => setStagedPrompt("")} disabled={isBusy} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700 }} aria-label="Clear staged prompt">
+                        <X size={11} /> Clear
+                      </button>
+                    )}
+                  </div>
+                  <div
+                    data-testid="music-staged-prompt"
+                    style={{ ...inputStyle, minHeight: 74, fontSize: 14, lineHeight: 1.55, color: stagedPrompt.trim() ? "var(--text-primary)" : "var(--text-muted)", whiteSpace: "pre-wrap" }}
+                  >
+                    {stagedPrompt.trim()
+                      ? stagedPrompt
+                      : "Ask LiTT in the chat to make a track — or stage one here: pick a genre preset, style and mood below, then Generate."}
+                  </div>
 
                   {/* Prompt chips */}
                   <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
@@ -661,11 +648,40 @@ export default function MusicTool() {
                     </button>
                   </div>
 
+                  {/* Quick transforms — local parameter controls (the old
+                      producer panel's tricks, minus the chat round-trip). */}
+                  <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={labelStyle}>Quick transforms</span>
+                    {([
+                      { id: "harder" as const, label: "Make Harder", icon: Flame },
+                      { id: "catchier" as const, label: "Make Catchier", icon: Zap },
+                      { id: "emotional" as const, label: "More Emotional", icon: Droplets },
+                      { id: "variation" as const, label: "Variation", icon: Wand2 },
+                    ]).map((b) => {
+                      const Icon = b.icon;
+                      return (
+                        <button key={b.id} onClick={() => applyQuickTransform(b.id)} disabled={isBusy} style={chipBtn}>
+                          <Icon size={11} />
+                          {b.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Pane feedback line (replaces the old producer chat's
+                      status messages) — a notice, not a conversation. */}
+                  {notice && (
+                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 6 }}>
+                      <CheckCircle2 size={11} style={{ color: accent, flexShrink: 0 }} />
+                      {notice}
+                    </div>
+                  )}
+
                   {/* Genre presets (quick mode) */}
                   {createTab === "quick" && (
                     <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                       {GENRE_PRESETS.map((preset) => (
-                        <button key={preset} onClick={() => setPrompt(preset)} style={chipBtn} disabled={isBusy}>
+                        <button key={preset} onClick={() => setStagedPrompt(preset)} style={chipBtn} disabled={isBusy}>
                           <Sparkles size={10} />
                           {preset.split(" ").slice(0, 3).join(" ")}…
                         </button>
@@ -681,10 +697,29 @@ export default function MusicTool() {
                           <span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Title</span>
                           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled track" style={inputStyle} disabled={isBusy} />
                         </label>
-                        <label>
+                        <div>
                           <span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Style</span>
-                          <input value={styles} onChange={(e) => setStyles(e.target.value)} placeholder="R&B, neo-soul, cinematic" style={inputStyle} disabled={isBusy} />
-                        </label>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                            {[...STYLE_OPTIONS, ...styleTokens.filter((t) => !STYLE_OPTIONS.includes(t))].map((s) => {
+                              const active = styleTokens.includes(s);
+                              return (
+                                <button
+                                  key={s}
+                                  onClick={() => toggleStyle(s)}
+                                  disabled={isBusy}
+                                  style={{
+                                    ...chipBtn,
+                                    background: active ? `${accent}15` : "transparent",
+                                    borderColor: active ? accent : "var(--studio-border)",
+                                    color: active ? accent : "var(--text-muted)",
+                                  }}
+                                >
+                                  {s}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
 
                       <label>
@@ -844,7 +879,7 @@ export default function MusicTool() {
                   <div style={{ display: "flex", gap: 10, marginTop: 18, alignItems: "center" }}>
                     <button
                       onClick={handleGenerate}
-                      disabled={isBusy || !prompt.trim()}
+                      disabled={isBusy || !hasDirection}
                       style={{
                         flex: 1,
                         background: `linear-gradient(135deg, ${accent}, ${accent}cc)`,
@@ -853,8 +888,8 @@ export default function MusicTool() {
                         border: "none",
                         borderRadius: 12,
                         padding: "14px 24px",
-                        cursor: isBusy || !prompt.trim() ? "not-allowed" : "pointer",
-                        opacity: isBusy || !prompt.trim() ? 0.5 : 1,
+                        cursor: isBusy || !hasDirection ? "not-allowed" : "pointer",
+                        opacity: isBusy || !hasDirection ? 0.5 : 1,
                         fontSize: 15,
                         display: "flex",
                         alignItems: "center",
@@ -906,7 +941,7 @@ export default function MusicTool() {
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: 12, color: "#ef4444", fontWeight: 600 }}>{genError}</div>
                         {lbcRefunded && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Your {lbcCharged} LBC has been refunded.</div>}
-                        {!isBusy && prompt.trim() && (
+                        {!isBusy && hasDirection && (
                           <button onClick={handleGenerate} style={{ ...chipBtn, marginTop: 8, borderColor: "#ef4444", color: "#ef4444" }}>
                             <RefreshCw size={11} /> Retry
                           </button>
@@ -952,7 +987,7 @@ export default function MusicTool() {
                     <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)" }}>Generate a pair of versions, compare them, then keep building from the strongest idea.</div>
                   </div>
                 ) : (
-                  <div style={{ display: "grid", gap: 10 }}>
+                  <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
                     {vaultTracks.map((track) => (
                       <TrackCard
                         key={track.id}
@@ -1020,85 +1055,6 @@ export default function MusicTool() {
         </div>
       </main>
 
-      {/* ── RIGHT: LiTT PRODUCER ─────────────────────────────────── */}
-      <aside
-        style={{
-          width: 300,
-          minWidth: 300,
-          borderLeft: "1px solid var(--studio-border)",
-          background: "var(--studio-bg)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-        className="music-producer-panel"
-      >
-        <div style={{ padding: "14px 14px 10px", borderBottom: "1px solid var(--studio-border)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 8, background: `linear-gradient(135deg, ${accent}, ${accent}88)`, display: "grid", placeItems: "center" }}>
-              <Wand2 size={14} style={{ color: "#000" }} />
-            </div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text-primary)" }}>LiTT — Music Producer</div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)" }}>AI co-producer</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Messages */}
-        <div style={{ flex: 1, overflowY: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-          {producerMessages.map((m, i) => (
-            <div
-              key={i}
-              style={{
-                alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-                maxWidth: "92%",
-                padding: "8px 12px",
-                borderRadius: 12,
-                fontSize: 12,
-                lineHeight: 1.5,
-                background: m.role === "user" ? `${accent}18` : "var(--studio-surface)",
-                border: m.role === "user" ? `1px solid ${accent}30` : "1px solid var(--studio-border)",
-                color: "var(--text-primary)",
-              }}
-            >
-              {m.text}
-            </div>
-          ))}
-        </div>
-
-        {/* Quick transforms */}
-        <div style={{ padding: "8px 14px", display: "flex", gap: 5, flexWrap: "wrap", borderTop: "1px solid var(--studio-border)" }}>
-          {([
-            { id: "harder" as const, label: "Make Harder", icon: Flame },
-            { id: "catchier" as const, label: "Make Catchier", icon: Zap },
-            { id: "emotional" as const, label: "More Emotional", icon: Droplets },
-            { id: "variation" as const, label: "Variation", icon: Wand2 },
-          ]).map((b) => {
-            const Icon = b.icon;
-            return (
-              <button key={b.id} onClick={() => applyProducerTransform(b.id)} disabled={isProducerLoading} style={{ ...chipBtn, fontSize: 10, padding: "5px 9px", opacity: isProducerLoading ? 0.6 : 1 }}>
-                {isProducerLoading ? <Loader2 size={10} className="animate-spin" /> : <Icon size={10} />}
-                {b.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Input */}
-        <div style={{ padding: 12, borderTop: "1px solid var(--studio-border)", display: "flex", gap: 8 }}>
-          <input
-            value={producerInput}
-            onChange={(e) => setProducerInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleProducerSend(); }}
-            placeholder="Make this beat catchier…"
-            style={{ ...inputStyle, fontSize: 12 }}
-          />
-          <button onClick={handleProducerSend} disabled={isProducerLoading} style={{ background: `${accent}18`, border: `1px solid ${accent}30`, color: accent, borderRadius: 8, padding: "0 10px", cursor: "pointer", display: "grid", placeItems: "center", opacity: isProducerLoading ? 0.6 : 1 }} aria-label="Send to producer">
-            {isProducerLoading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-          </button>
-        </div>
-      </aside>
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
   STUDIO_PROJECTS_API,
   type CanonicalListProject,
 } from "@/lib/projects/canonical-project-list";
+import { describeProjectState } from "@/lib/projects/project-state";
 
 // ── Mission Control hook ───────────────────────────────────────────
 
@@ -91,11 +92,40 @@ export function mapCanonicalProjectToDashboard(
 ): DashboardProject {
   const ws = project.workspaceStatus ?? "";
   const rt = project.runtimeStatus ?? "";
-  let status: DashboardProject["status"] = "draft";
-  if (["failed", "error"].includes(ws) || rt === "failed") status = "failed";
-  else if (["provisioning", "preparing"].includes(ws) || rt === "starting") {
-    status = "building";
-  } else if (rt === "ready") status = "live";
+  // ONE derivation, shared with /projects: describeProjectState owns the
+  // state decision (including the staleness window). This mapper only
+  // translates its verdict into dashboard vocabulary. The previous
+  // hand-rolled chain called a ready runtime "live" — a ready runtime is
+  // a ready PREVIEW; nothing here carries deployment evidence, so the
+  // dashboard must never claim Live for a canonical project — and it
+  // called a 42-day-old provisioning row "building" because it never
+  // checked staleness.
+  const state = describeProjectState({
+    workspaceStatus: ws,
+    runtimeStatus: rt,
+    updatedAt: project.updatedAt ?? "",
+    workspaceError: project.workspaceError ?? null,
+    runtimeError: project.runtimeError ?? null,
+  });
+  const status: DashboardProject["status"] =
+    state.label === "Setup failed" || state.label === "Preview failed"
+      ? "failed"
+      : state.label === "Stalled"
+        ? "stalled"
+        : state.label === "Preparing"
+          ? "building"
+          : state.label === "Preview ready"
+            ? "preview"
+            : // "Saved" is describeProjectState's specific-state label
+              // for a prepared-but-idle workspace (Studio Finish Spec,
+              // Larry 2026-11-14 — it replaced the vague "Ready" this
+              // branch used to translate). It is the same healthy,
+              // prepared state /projects shows, so it maps to the
+              // dashboard's "ready" — never to "draft", which is the
+              // not-prepared state.
+              state.label === "Saved"
+              ? "ready"
+              : "draft";
 
   return {
     id: project.id,

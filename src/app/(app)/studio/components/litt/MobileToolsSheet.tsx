@@ -14,7 +14,7 @@
  */
 
 import type { ComponentType, CSSProperties } from "react";
-import { Activity, Film, FolderOpen, Hammer, Image as ImageIcon, Layout, Mic, Music, Play, Terminal, Plus, X } from "lucide-react";
+import { Activity, Film, FolderOpen, Hammer, Image as ImageIcon, Layout, Mic, Music, Play, Plug, Settings as SettingsIcon, Terminal, Plus, X } from "lucide-react";
 import type { StudioTask } from "@/lib/studio/task-types";
 
 const ACCENT = "var(--color-accent)";
@@ -100,7 +100,7 @@ const TOOL_ROWS: ToolRow[] = [
   },
   {
     id: "canvas",
-    label: "Open Canvas",
+    label: "Open Canvas & Design",
     description: "Visual canvas builder",
     icon: Layout,
     onOpen: (p) => p.onOpenCanvas,
@@ -321,6 +321,44 @@ export default function MobileToolsSheet(props: MobileToolsSheetProps) {
           onClick={row.onOpen(props)}
         />
       ))}
+      {/* Account — Settings lives here on the phone (inside More), not
+          in the top navigation (Studio Finish Spec, Larry 2026-11-14).
+          Real links to the real Settings pages, 56px touch rows. */}
+      <SectionHeader>Account</SectionHeader>
+      {[
+        { id: "settings", label: "Settings", description: "Profile, appearance, workspace", icon: SettingsIcon, href: "/settings" },
+        { id: "connections", label: "Connections", description: "Connected accounts and services", icon: Plug, href: "/settings/connections" },
+      ].map((row) => {
+        const Icon = row.icon;
+        return (
+          <a
+            key={row.id}
+            href={row.href}
+            aria-label={row.label}
+            data-testid={`mobile-tool-${row.id}`}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              width: "100%",
+              minHeight: 56,
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: `1px solid ${CARD_BORDER}`,
+              backgroundColor: TOOLS_BG,
+              textAlign: "left",
+              color: "var(--text-main)",
+              textDecoration: "none",
+            }}
+          >
+            <Icon size={18} strokeWidth={2} className="pointer-events-none shrink-0" style={{ color: ACCENT }} />
+            <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-main)" }}>{row.label}</span>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{row.description}</span>
+            </span>
+          </a>
+        );
+      })}
     </div>
   );
 }

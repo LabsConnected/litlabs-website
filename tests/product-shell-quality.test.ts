@@ -8,8 +8,12 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 describe("signed-in product shell quality", () => {
   it("marks active navigation destinations for assistive technology", () => {
     const source = read("src/components/AppShell.tsx");
-    // TopNavItem + desktop Wallet/Settings icon buttons
-    expect(source.match(/aria-current=\{active \? "page" : undefined\}/g)?.length).toBeGreaterThanOrEqual(2);
+    // TopNavItem marks the active destination. (The second occurrence
+    // this count used to require was the More menu's own toggle button;
+    // the header-nav change — Larry 2026-11-16 — deleted the More menu
+    // and promoted its destinations into the main nav, where each one
+    // now marks itself through TopNavItem.)
+    expect(source.match(/aria-current=\{active \? "page" : undefined\}/g)?.length).toBeGreaterThanOrEqual(1);
   });
 
   it("uses real health state in the top bar", () => {

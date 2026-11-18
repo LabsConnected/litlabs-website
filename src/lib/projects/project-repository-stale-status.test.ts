@@ -177,7 +177,13 @@ describe("reconcileStaleStartingStatus (via getProject)", () => {
     vi.mocked(getPreviewStatusInternal).mockResolvedValue(liveStatus("ready"));
     const project = await getProject("proj-1", "user-1");
     expect(getPreviewStatusInternal).toHaveBeenCalledWith("ws-proj-1", "user-1");
-    expect(buildPreviewProxyUrl).toHaveBeenCalledWith("ws-proj-1");
+    // Phase 2 §3.3: the reconcile mints a SCOPED preview URL (owner +
+    // project), and getProject's re-mint-on-read mints the same shape
+    // again for the returned project.
+    expect(buildPreviewProxyUrl).toHaveBeenCalledWith("ws-proj-1", {
+      userId: "user-1",
+      projectId: "proj-1",
+    });
     expect(dbState.updates).toHaveLength(1);
     expect(dbState.updates[0].runtime_status).toBe("ready");
     expect(dbState.updates[0].preview_url).toContain("ws-proj-1");

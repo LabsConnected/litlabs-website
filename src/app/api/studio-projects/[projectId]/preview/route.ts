@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProject, updateProjectRuntime } from "@/lib/projects/project-repository";
-import { ensureWorkspaceAlive, provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { ensureWorkspaceAlive, provisionWorkspaceForProject, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
 import { SecretBroker } from "@/lib/terminal-v1/secret-broker";
 import { extractClerkEnvFromSecrets } from "@/lib/preview-clerk-env";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
 import {
   startPreviewInternal,
+  restartPreviewInternal,
   getPreviewStatusInternal,
   stopPreviewInternal,
   buildPreviewProxyUrl,
+  isSandboxExecutionAvailable,
 } from "@/lib/terminal-internal-client";
 import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
 import { createPreviewToken } from "@/lib/projects/preview-token";
+import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE, isHostExecutionPermitted } from "@/lib/host-execution-guard";
+import { studioLog } from "@/lib/studio/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +42,43 @@ export async function GET(
   const project = await getProject(projectId, userId);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
+  // Wave-4 truth threading: when workspace preparation failed, recover the
+  // machine code embedded in the stored error (e.g. the terminal-server's
+  // fail-closed HOST_EXECUTION_DISABLED) so the preview pane can render
+  // the honest state instead of a generic failure. Null for every other
+  // project state.
+  //
+  // Deterministic fallback (follow-up to #901): settled failure messages
+  // can carry no embedded code at all ("Provisioning timed out" from the
+  // stale-provisioning settle) — yet a repo-backed project whose prepare
+  // settled failed on a deployment where host execution is not permitted
+  // can never be prepared there, so the refusal is derivable from the
+  // source kind + settled status + the deployment's own execution
+  // policy, without parsing free text. Managed projects are excluded: a
+  // restart can genuinely succeed for them. (Same derivation the
+  // workspace-state route performs for its channel.)
+  // Phase 2: the deterministic derivation below holds only while the
+  // sandbox is NOT available for this user — when the terminal reports
+  // sandboxed execution available, a settled failure is retryable, not
+  // a permanent refusal. The probe runs only for the exact derivation
+  // shape (settled failure, no embedded code, repo-backed, host guard
+  // refusing) and fails closed.
+  const sandboxAvailable =
+    (project.workspaceStatus === "failed" || project.workspaceStatus === "error") &&
+    project.sourceType === "github" &&
+    !isHostExecutionPermitted() &&
+    !extractEmbeddedErrorCode(project.workspaceError)
+      ? await isSandboxExecutionAvailable(userId)
+      : false;
+
+  const workspaceFailureCode =
+    project.workspaceStatus === "failed" || project.workspaceStatus === "error"
+      ? extractEmbeddedErrorCode(project.workspaceError) ??
+        (project.sourceType === "github" && !isHostExecutionPermitted() && !sandboxAvailable
+          ? HOST_EXECUTION_DISABLED_CODE
+          : null)
+      : null;
+
   if (!project.workspaceId) {
     // No workspace was ever provisioned for this project. This is the
     // "not_started" state — distinct from "stopped" (workspace exists but
@@ -46,6 +87,7 @@ export async function GET(
       runtimeStatus: "not_started",
       previewUrl: null,
       runtimeError: null,
+      runtimeErrorCode: workspaceFailureCode,
       framework: project.framework,
       developmentCommand: project.developmentCommand,
       packageManager: project.packageManager,
@@ -77,14 +119,33 @@ export async function GET(
           "X-Workspace-Id": project.workspaceId,
         },
         body: JSON.stringify({ path: "index.html", encoding: "utf-8" }),
-        signal: AbortSignal.timeout(10000),
+        // 15s, matching the preview serving route's /ws-files/read budget
+        // (src/app/api/preview/[projectId]/[[...path]]/route.ts).
+        signal: AbortSignal.timeout(15000),
       });
       if (!checkResp.ok) {
-        // index.html doesn't exist yet — workspace is empty
+        if (checkResp.status === 404) {
+          // The terminal authoritatively reports index.html missing —
+          // the workspace is empty and the preview was never started.
+          return NextResponse.json({
+            runtimeStatus: "not_started",
+            previewUrl: null,
+            runtimeError: null,
+            framework: "static",
+            developmentCommand: null,
+            packageManager: null,
+            logs: [],
+          });
+        }
+        // Any other error (5xx, auth, …) means the runtime CHECK failed —
+        // it says nothing about whether the preview was started. Report
+        // "unreachable", mirroring the dev-server branch below, so clients
+        // retry instead of concluding the preview doesn't exist.
         return NextResponse.json({
-          runtimeStatus: "not_started",
+          runtimeStatus: "unreachable",
           previewUrl: null,
-          runtimeError: null,
+          runtimeError: `Terminal file read failed (HTTP ${checkResp.status})`,
+          runtimeErrorCode: workspaceFailureCode,
           framework: "static",
           developmentCommand: null,
           packageManager: null,
@@ -107,12 +168,16 @@ export async function GET(
           });
         }
       }
-    } catch {
-      // Terminal unavailable — report not_started rather than broken ready
+    } catch (err) {
+      // The terminal is unreachable or too slow (fetch threw or timed
+      // out), or it isn't configured at all. That is a failed runtime
+      // CHECK, not evidence the preview was never started — report
+      // "unreachable", mirroring the dev-server branch below.
       return NextResponse.json({
-        runtimeStatus: "not_started",
+        runtimeStatus: "unreachable",
         previewUrl: null,
-        runtimeError: null,
+        runtimeError: err instanceof Error ? err.message : "Preview runtime unreachable",
+        runtimeErrorCode: workspaceFailureCode,
         framework: "static",
         developmentCommand: null,
         packageManager: null,
@@ -130,7 +195,7 @@ export async function GET(
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${terminalToken}`, "X-Workspace-Id": project.workspaceId! },
         body: JSON.stringify({ path, encoding: "utf-8" }),
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(15000),
       });
       if (!asset.ok) return null;
       const payload = (await asset.json().catch(() => null)) as { content?: unknown } | null;
@@ -181,6 +246,7 @@ export async function GET(
         runtimeStatus: "stopped",
         previewUrl: null,
         runtimeError: null,
+        runtimeErrorCode: workspaceFailureCode,
         framework: project.framework,
         developmentCommand: project.developmentCommand,
         packageManager: project.packageManager,
@@ -199,14 +265,14 @@ export async function GET(
     }
 
     const previewUrl = actuallyReady
-      ? buildPreviewProxyUrl(project.workspaceId)
+      ? buildPreviewProxyUrl(project.workspaceId, { userId, projectId })
       : null;
 
     return NextResponse.json({
       runtimeStatus: runtimeStatus.status,
       previewUrl,
       runtimeError: runtimeStatus.error,
-      runtimeErrorCode: runtimeStatus.errorCode,
+      runtimeErrorCode: runtimeStatus.errorCode ?? workspaceFailureCode,
       framework: runtimeStatus.framework ?? project.framework,
       developmentCommand: runtimeStatus.command ?? project.developmentCommand,
       packageManager: project.packageManager,
@@ -220,7 +286,7 @@ export async function GET(
       runtimeStatus: "unreachable",
       previewUrl: null,
       runtimeError: err instanceof Error ? err.message : "Preview runtime unreachable",
-      runtimeErrorCode: null,
+      runtimeErrorCode: workspaceFailureCode,
       framework: project.framework,
       developmentCommand: project.developmentCommand,
       packageManager: project.packageManager,
@@ -231,15 +297,29 @@ export async function GET(
 
 /**
  * POST /api/studio-projects/[projectId]/preview
- * Start (or restart) the preview dev server on the Railway terminal server.
+ * Start the preview dev server on the Railway terminal server.
  * Does NOT mark "ready" until the dev server passes an HTTP health probe.
+ *
+ * Round 13: a body of { restart: true } — sent by the panel's
+ * failed-state Restart — takes the terminal's FORCE restart path
+ * (stop + fresh start, bypassing the reuse-a-healthy/in-flight
+ * runtime gate) instead of a plain start. A plain start can silently
+ * adopt a wedged in-flight runtime, which made an explicit user
+ * Restart a no-op against the exact failure it was meant to clear.
+ * A missing/unparseable body is a plain start, exactly as before.
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth(_request);
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const forceRestart =
+    (await request
+      .json()
+      .then((body) => (body as { restart?: unknown } | null)?.restart === true)
+      .catch(() => false)) === true;
 
   const { projectId } = await params;
   const project = await getProject(projectId, userId);
@@ -276,11 +356,16 @@ export async function POST(
       previewUrl: null,
       runtimeError: message,
     });
+    const runtimeErrorCode = (err as { code?: string }).code ?? extractEmbeddedErrorCode(message);
     return NextResponse.json({
       error: message,
       runtimeStatus: "failed",
       runtimeError: message,
-    }, { status: 500 });
+      runtimeErrorCode,
+      // A designed host-execution refusal is a 503, not a 500: the
+      // status must match the code the body already carries, or
+      // clients and monitoring read a known refusal as breakage.
+    }, { status: runtimeErrorCode === HOST_EXECUTION_DISABLED_CODE ? 503 : 500 });
   }
 
   await updateProjectRuntime(projectId, userId, {
@@ -304,15 +389,65 @@ export async function POST(
       projectEnv = {};
     }
 
-    const result = await startPreviewInternal(workspaceId, userId, {
-      framework: project.framework ?? undefined,
-      command: project.developmentCommand ?? undefined,
-      packageManager: project.packageManager ?? undefined,
-      projectEnv,
-    });
+    const startOnce = (id: string) =>
+      startPreviewInternal(id, userId, {
+        framework: project.framework ?? undefined,
+        command: project.developmentCommand ?? undefined,
+        packageManager: project.packageManager ?? undefined,
+        projectEnv,
+      });
+
+    let result;
+    if (forceRestart) {
+      // Explicit user Restart on a failed preview: the terminal's
+      // force path tears the runtime down and starts fresh. If there
+      // is no live runtime to restart (e.g. the terminal restarted
+      // and lost it), fall through to a plain start — the user's
+      // intent is a working preview, not a specific mechanism.
+      // Round 14: the fallback is LOGGED, never silent. In the
+      // 2026-11-17 proof a "Restart" silently became a plain start
+      // whose reuse gate handed back the same runtime with the same
+      // dead preview address — indistinguishable from a real restart
+      // in every surface. The fallback is still the right recovery;
+      // it just has to be visible.
+      try {
+        result = await restartPreviewInternal(workspaceId, userId, { projectEnv });
+      } catch (restartErr) {
+        studioLog("preview:force_restart_fallback_to_start", {
+          projectId,
+          userId,
+          errorClass: restartErr instanceof Error ? restartErr.message : "unknown",
+        });
+        result = undefined;
+      }
+    }
+    try {
+      result ??= await startOnce(workspaceId);
+    } catch (startErr) {
+      // Workspace-level 404: the terminal server's registry does not
+      // hold the workspace the provisioning step just returned — the
+      // registry is in-memory (persisted to one JSON file), so a
+      // terminal restart whose boot load missed the persist file loses
+      // descriptors the DB still calls ready, and the mirror branch
+      // above can return the stale ID after a failed heal. The files
+      // route already heals exactly this miss and retries; preview
+      // start historically passed the 404 straight to the user
+      // ("Preview start failed (404): Workspace not found", round 5,
+      // 2026-11-15). Heal once and retry once with the recovered ID.
+      const isWorkspaceNotFound =
+        startErr instanceof Error &&
+        startErr.message.startsWith("Preview start failed (404)") &&
+        startErr.message.includes("Workspace not found");
+      if (!isWorkspaceNotFound) throw startErr;
+      const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
+      workspaceId = recovered.healFailed
+        ? await reprepareWorkspace(projectId, userId)
+        : recovered.workspaceId;
+      result = await startOnce(workspaceId);
+    }
 
     const previewUrl = result.status === "ready"
-      ? buildPreviewProxyUrl(workspaceId)
+      ? buildPreviewProxyUrl(workspaceId, { userId, projectId })
       : null;
 
     await updateProjectRuntime(projectId, userId, {
@@ -330,7 +465,7 @@ export async function POST(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Preview start failed";
-    const errorCode = (err as { code?: string }).code ?? null;
+    const errorCode = (err as { code?: string }).code ?? extractEmbeddedErrorCode(message);
     await updateProjectRuntime(projectId, userId, {
       runtimeStatus: "failed",
       previewUrl: null,
@@ -342,7 +477,9 @@ export async function POST(
       runtimeStatus: "failed",
       runtimeError: message,
       runtimeErrorCode: errorCode,
-    }, { status: 500 });
+      // Same mapping as the provisioning branch above: the designed
+      // host-execution refusal is a 503; other failures stay 500.
+    }, { status: errorCode === HOST_EXECUTION_DISABLED_CODE ? 503 : 500 });
   }
 }
 

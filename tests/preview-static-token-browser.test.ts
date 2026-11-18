@@ -221,7 +221,13 @@ it("confines the bearer to the minted asset manifest (the Codex 9da01ed0 P1)", a
 
   // Same-workspace linked documents must navigate through the same bearer
   // prefix; otherwise the opaque iframe loses its session and receives 401.
-  await frame.locator("#to-page2").click();
+  // Wait for the navigation to commit before reading the new document: a
+  // bare click returns before the frame navigates, and reading the old
+  // document anyway races the navigation (observed flaking under load).
+  await Promise.all([
+    frame.waitForURL(/\/page2\.html$/),
+    frame.locator("#to-page2").click(),
+  ]);
   expect(await frame.locator("h1").textContent()).toBe("Page 2");
   expect(await frame.locator("h1").getAttribute("data-p2")).toBe("yes");
   expect(frame.url()).toContain("/api/preview/owned-project/t/");
@@ -237,7 +243,14 @@ it("rejects dynamic unauthorized navigation and does not tokenize external links
   };
   const { context, frame } = await openPreview();
   expect(await frame.locator("#external-link").getAttribute("href")).toBe("https://evil.example/exfil.html");
-  await frame.locator("#secret-link").click();
+  // Wait for the unauthorized navigation to commit before reading the body:
+  // a bare click returns before the frame navigates, so reading immediately
+  // races the navigation and can observe the old document (the exact
+  // failure seen in CI on PR #876 and in local repeats).
+  await Promise.all([
+    frame.waitForURL(/\/secret\.html$/),
+    frame.locator("#secret-link").click(),
+  ]);
   expect(await frame.locator("body").textContent()).toContain("Unauthorized");
   expect(frame.url()).toContain("/api/preview/owned-project/secret.html");
   await context.close();

@@ -1,0 +1,626 @@
+/**
+ * E2B provider tests (SANDBOX-PLAN.md Phase 1).
+ *
+ * The E2B SDK is faked at the provider's E2bClient adapter boundary:
+ * no network, no API key, no vendor account. What is proven here is
+ * the provider logic the staging canary will rely on:
+ *   1. Lifecycle maps onto the SDK (create/start/stop/destroy/get).
+ *   2. Requested limits + identity metadata reach the SDK create call.
+ *   3. Sandbox env comes ONLY from the allowlist composer: identity
+ *      vars present, caller overrides of identity refused, and any
+ *      platform secret in the request refuses the create BEFORE the
+ *      SDK is touched.
+ *   4. execute maps results and exit codes; exposePort builds the
+ *      private endpoint from the SDK host.
+ *   5. health() reflects the probe and never leaks the API key.
+ */
+
+import { describe, it, expect } from "vitest";
+import {
+  clampSandboxTimeoutMs,
+  E2B_MAX_TIMEOUT_MS,
+  E2bSandboxProvider,
+  SANDBOX_EGRESS_DENY_OUT,
+  type E2bClient,
+  type E2bCreateOptions,
+  type E2bSandboxHandle,
+} from "../sandbox/e2b-provider";
+import type { CanaryProvider } from "../sandbox/provider";
+import {
+  assertNoPlatformSecrets,
+  buildSandboxEnv,
+  composeSandboxEnv,
+  SandboxEnvSecretError,
+  SANDBOX_ENV_ALLOWLIST,
+} from "../sandbox/env";
+
+const API_KEY = ["e2b", "test", "key", "must", "never", "leak"].join("_");
+
+class FakeE2bHandle implements E2bSandboxHandle {
+  readonly sandboxId: string;
+  private readonly createEnvs: Record<string, string>;
+  paused = false;
+  killed = false;
+  timeoutExtensions: number[] = [];
+  /** In-memory files for the Phase 2 transfer surface. */
+  readonly files = new Map<string, Uint8Array>();
+
+  constructor(sandboxId: string, envs: Record<string, string>) {
+    this.sandboxId = sandboxId;
+    this.createEnvs = envs;
+  }
+
+  async readFileBytes(path: string): Promise<Uint8Array> {
+    const data = this.files.get(path);
+    if (!data) throw new Error(`no such file: ${path}`);
+    return data;
+  }
+
+  async writeFileBytes(path: string, data: Uint8Array): Promise<void> {
+    this.files.set(path, data);
+  }
+
+  async listDir(path: string) {
+    const prefix = path.endsWith("/") ? path : `${path}/`;
+    const out = [];
+    for (const key of this.files.keys()) {
+      if (!key.startsWith(prefix)) continue;
+      const rest = key.slice(prefix.length);
+      if (rest.includes("/")) continue;
+      out.push({
+        name: rest,
+        path: key,
+        type: "file" as const,
+        size: this.files.get(key)!.length,
+        mode: 0o644,
+        mtimeMs: 0,
+      });
+    }
+    return out;
+  }
+
+  async removePath(path: string): Promise<void> {
+    this.files.delete(path);
+  }
+
+  async makeDir(_path: string): Promise<void> {}
+
+  async renamePath(oldPath: string, newPath: string): Promise<void> {
+    const data = this.files.get(oldPath);
+    if (data) {
+      this.files.set(newPath, data);
+      this.files.delete(oldPath);
+    }
+  }
+
+  readonly runCommandUsers: Array<string | undefined> = [];
+
+  async runCommand(
+    command: string,
+    opts: {
+      cwd?: string;
+      timeoutMs?: number;
+      stdin?: string;
+      envs?: Record<string, string>;
+      user?: string;
+    },
+  ) {
+    this.runCommandUsers.push(opts.user);
+    const env = { ...this.createEnvs, ...(opts.envs ?? {}) };
+    const printenv = command.match(/^printenv (\S+)$/);
+    if (printenv) {
+      const v = env[printenv[1]];
+      return v === undefined
+        ? { exitCode: 1, stdout: "", stderr: "" }
+        : { exitCode: 0, stdout: `${v}\n`, stderr: "" };
+    }
+    if (command === "false") return { exitCode: 1, stdout: "", stderr: "" };
+    if (command.startsWith("echo ")) {
+      return { exitCode: 0, stdout: `${command.slice(5)}\n`, stderr: "" };
+    }
+    return { exitCode: 0, stdout: "", stderr: "" };
+  }
+
+  getHost(port: number): string {
+    return `${this.sandboxId}-${port}.proxy.e2b.test`;
+  }
+
+  async setTimeout(timeoutMs: number): Promise<void> {
+    this.timeoutExtensions.push(timeoutMs);
+  }
+
+  async pause(): Promise<boolean> {
+    this.paused = true;
+    return true;
+  }
+
+  async kill(): Promise<boolean> {
+    this.killed = true;
+    return true;
+  }
+
+  async isRunning(): Promise<boolean> {
+    return !this.killed && !this.paused;
+  }
+}
+
+class FakeE2bClient implements E2bClient {
+  readonly creates: E2bCreateOptions[] = [];
+  readonly handles = new Map<string, FakeE2bHandle>();
+  connectCalls = 0;
+  probeError: Error | null = null;
+  private seq = 0;
+
+  async create(opts: E2bCreateOptions): Promise<E2bSandboxHandle> {
+    this.creates.push(opts);
+    this.seq += 1;
+    const handle = new FakeE2bHandle(`e2b-sbx-${this.seq}`, opts.envs);
+    this.handles.set(handle.sandboxId, handle);
+    return handle;
+  }
+
+  async connect(sandboxId: string): Promise<E2bSandboxHandle> {
+    this.connectCalls += 1;
+    const handle = this.handles.get(sandboxId);
+    if (!handle) throw new Error(`no such sandbox ${sandboxId}`);
+    handle.paused = false;
+    return handle;
+  }
+
+  async probe(): Promise<void> {
+    if (this.probeError) throw this.probeError;
+  }
+}
+
+function makeProvider(client: FakeE2bClient): E2bSandboxProvider {
+  return new E2bSandboxProvider({ apiKey: API_KEY, client, templateId: "litt-test-template" });
+}
+
+describe("E2bSandboxProvider — lifecycle", () => {
+  it("creates with limits, identity metadata, and allowlisted env; get echoes them", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+      limits: { cpuVcpus: 2, memoryMB: 2048 },
+    });
+
+    expect(instance.provider).toBe("e2b");
+    expect(instance.state).toBe("running");
+    expect(instance.limits.cpuVcpus).toBe(2);
+    expect(instance.limits.memoryMB).toBe(2048);
+
+    expect(client.creates).toHaveLength(1);
+    const createOpts = client.creates[0];
+    expect(createOpts.template).toBe("litt-test-template");
+    expect(createOpts.cpuCount).toBe(2);
+    expect(createOpts.memoryMB).toBe(2048);
+    expect(createOpts.metadata).toEqual({
+      littree_user_id: "user-1",
+      littree_project_id: "proj-1",
+      littree_workspace_id: "ws-1",
+    });
+    // Identity env present at create time; no platform secret keys at all.
+    expect(createOpts.envs.LITTREE_USER_ID).toBe("user-1");
+    expect(createOpts.envs.LITTREE_PROJECT_ID).toBe("proj-1");
+    expect(createOpts.envs.HOME).toBe("/workspace");
+    expect(JSON.stringify(createOpts)).not.toContain(API_KEY);
+
+    const fetched = await provider.get(instance.sandboxId);
+    expect(fetched?.limits.cpuVcpus).toBe(2);
+    expect(fetched?.limits.memoryMB).toBe(2048);
+  });
+
+  it("execute sees the final env with the real sandbox id, and maps exit codes", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+
+    const idResult = await provider.execute(instance.sandboxId, {
+      command: `printenv LITTREE_SANDBOX_ID`,
+    });
+    expect(idResult.exitCode).toBe(0);
+    expect(idResult.stdout.trim()).toBe(instance.sandboxId);
+
+    const echo = await provider.execute(instance.sandboxId, { command: "echo hello" });
+    expect(echo.exitCode).toBe(0);
+    expect(echo.stdout).toBe("hello\n");
+    expect(echo.durationMs).toBeGreaterThanOrEqual(0);
+
+    // Per-command user threading (preview EACCES fix): the lifecycle
+    // writability repair runs as root; ordinary commands must keep
+    // arriving with NO user so the SDK's default (non-root) user
+    // still applies to them.
+    const handle = client.handles.get(instance.sandboxId)!;
+    await provider.execute(instance.sandboxId, {
+      command: "chmod -R a+rwX /workspace",
+      user: "root",
+    });
+    expect(handle.runCommandUsers.at(-1)).toBe("root");
+    await provider.execute(instance.sandboxId, { command: "echo plain" });
+    expect(handle.runCommandUsers.at(-1)).toBeUndefined();
+
+    const fail = await provider.execute(instance.sandboxId, { command: "false" });
+    expect(fail.exitCode).toBe(1);
+  });
+
+  it("stop pauses (disk preserved), start reconnects, destroy kills and forgets", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    const handle = client.handles.get(instance.sandboxId)!;
+
+    await provider.stop(instance.sandboxId);
+    expect(handle.paused).toBe(true);
+    expect((await provider.get(instance.sandboxId))?.state).toBe("stopped");
+
+    await provider.start(instance.sandboxId);
+    expect(client.connectCalls).toBe(1);
+    expect(handle.timeoutExtensions.length).toBe(1);
+    expect((await provider.get(instance.sandboxId))?.state).toBe("running");
+
+    await provider.destroy(instance.sandboxId);
+    expect(handle.killed).toBe(true);
+    expect(await provider.get(instance.sandboxId)).toBeNull();
+  });
+
+  it("exposePort returns a private https endpoint built from the SDK host", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+
+    const endpoint = await provider.exposePort(instance.sandboxId, 3000);
+    expect(endpoint.port).toBe(3000);
+    expect(endpoint.url).toBe(`https://${instance.sandboxId}-3000.proxy.e2b.test`);
+    expect(endpoint.state).toBe("private");
+    expect(endpoint.previewToken.length).toBeGreaterThanOrEqual(16);
+    expect(Date.parse(endpoint.expiresAt)).toBeGreaterThan(Date.now());
+  });
+
+  it("connectTerminal refuses explicitly in Phase 1", async () => {
+    const provider = makeProvider(new FakeE2bClient());
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    await expect(
+      provider.connectTerminal(instance.sandboxId, { shell: "bash", cols: 80, rows: 24 }),
+    ).rejects.toThrow(/workspace\.exec only/);
+  });
+
+  it("satisfies the Phase 0 CanaryProvider subset structurally", () => {
+    const provider: CanaryProvider = makeProvider(new FakeE2bClient());
+    expect(provider.name).toBe("e2b");
+  });
+});
+
+/**
+ * Round 8 (2026-11-16 proof): the create-time timeoutMs is a HARD
+ * KILL in E2B despite the limits field being named "idle" — a
+ * workspace sandbox created at 11:34:41 was killed at exactly
+ * 11:49:41 (15:00), and because execute() never extended the clock
+ * and get() never verified liveness against E2B, every later
+ * operation (forward push, git evidence probe, preview) ran against
+ * the corpse. These tests pin the three-part fix: session-scale
+ * create lifetime, extension on exec activity, real liveness in
+ * get().
+ */
+describe("E2bSandboxProvider — lifetime and liveness (round 8)", () => {
+  it("creates with the session-scale lifetime (maxSessionMinutes), not the 15-minute idle value", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+
+    expect(client.creates).toHaveLength(1);
+    expect(client.creates[0].timeoutMs).toBe(60 * 60_000);
+    expect(client.creates[0].timeoutMs).not.toBe(15 * 60_000);
+  });
+
+  it("execute re-arms the session clock on activity", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    const handle = client.handles.get(instance.sandboxId)!;
+    expect(handle.timeoutExtensions).toEqual([]);
+
+    await provider.execute(instance.sandboxId, { command: "echo one" });
+    await provider.execute(instance.sandboxId, { command: "echo two" });
+
+    expect(handle.timeoutExtensions).toEqual([60 * 60_000, 60 * 60_000]);
+  });
+
+  /**
+   * Round 9: the production E2B account is Hobby, whose sandbox
+   * lifetime cap is 1 hour. A caller asking for more (the round-8
+   * session limit was 120 minutes) must be CLAMPED at the provider
+   * boundary, never passed through for E2B to reject.
+   */
+  it("clamps an over-cap create lifetime to the plan cap instead of requesting it", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+      limits: { maxSessionMinutes: 180 },
+    });
+
+    expect(client.creates).toHaveLength(1);
+    expect(client.creates[0].timeoutMs).toBe(E2B_MAX_TIMEOUT_MS);
+    expect(client.creates[0].timeoutMs).toBe(60 * 60_000);
+  });
+
+  it("clamps extendTimeout (preview keepalive) to the plan cap", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    const handle = client.handles.get(instance.sandboxId)!;
+
+    await provider.extendTimeout(instance.sandboxId, 120 * 60_000);
+
+    expect(handle.timeoutExtensions).toEqual([60 * 60_000]);
+  });
+
+  it("clampSandboxTimeoutMs passes under-cap values through and logs over-cap ones", () => {
+    const logs: string[] = [];
+    const log = (m: string) => logs.push(m);
+    expect(clampSandboxTimeoutMs(30 * 60_000, log)).toBe(30 * 60_000);
+    expect(logs).toEqual([]);
+    expect(clampSandboxTimeoutMs(120 * 60_000, log)).toBe(E2B_MAX_TIMEOUT_MS);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain("Clamping sandbox timeout");
+  });
+
+  it("get() returns null once E2B has killed the sandbox out-of-band, and forgets it", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    expect(await provider.get(instance.sandboxId)).not.toBeNull();
+
+    // E2B-side death (timeout kill): the handle reports not running
+    // while the provider's registry still holds the entry — exactly
+    // the corpse state the 2026-11-16 proof hit.
+    client.handles.get(instance.sandboxId)!.killed = true;
+
+    expect(await provider.get(instance.sandboxId)).toBeNull();
+    // Forgotten, not re-probed forever: still null on the next call,
+    // and execute now refuses with the typed not-found error instead
+    // of running against the corpse.
+    expect(await provider.get(instance.sandboxId)).toBeNull();
+    await expect(
+      provider.execute(instance.sandboxId, { command: "echo x" }),
+    ).rejects.toThrow(/Sandbox not found/);
+  });
+
+  it("get() still returns a paused (stopped) sandbox — pause is not death", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+
+    await provider.stop(instance.sandboxId);
+    // isRunning() is false for a paused sandbox; the liveness probe
+    // must not mistake that for a kill and forget a resumable box.
+    expect(client.handles.get(instance.sandboxId)!.paused).toBe(true);
+    const fetched = await provider.get(instance.sandboxId);
+    expect(fetched?.state).toBe("stopped");
+  });
+});
+
+describe("E2bSandboxProvider — egress policy", () => {
+  it("passes the metadata egress deny rule to the client on create", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+
+    expect(client.creates).toHaveLength(1);
+    // The whole link-local block: covers 169.254.169.254 (cloud
+    // metadata) and 169.254.170.2 (ECS metadata) alike. Phase 2
+    // lifecycle adds allowPublicTraffic: false (design note §3.2) —
+    // sandbox URLs are private; the traffic token never leaves the
+    // terminal process.
+    expect(client.creates[0].network).toEqual({
+      denyOut: ["169.254.0.0/16"],
+      allowPublicTraffic: false,
+    });
+    expect(client.creates[0].network.denyOut).toEqual([...SANDBOX_EGRESS_DENY_OUT]);
+  });
+
+  it("applies the deny rule to EVERY create, with a fresh array each time", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    // Different tenants, different limits, one with project env — the
+    // rule rides along regardless, because provider.create() is the
+    // single funnel for canary and real workspace sandboxes alike.
+    await provider.create({ workspaceId: "ws-1", userId: "user-1", projectId: "proj-1" });
+    await provider.create({
+      workspaceId: "ws-2",
+      userId: "user-2",
+      projectId: "proj-2",
+      limits: { cpuVcpus: 2, memoryMB: 2048 },
+      env: { PROJECT_FLAG: "on" },
+    });
+
+    expect(client.creates).toHaveLength(2);
+    for (const createOpts of client.creates) {
+      expect(createOpts.network).toEqual({
+        denyOut: ["169.254.0.0/16"],
+        allowPublicTraffic: false,
+      });
+    }
+    // Each create gets its own copy: mutating one sandbox's rule can
+    // never widen or narrow another's.
+    expect(client.creates[0].network.denyOut).not.toBe(client.creates[1].network.denyOut);
+    client.creates[0].network.denyOut.push("203.0.113.0/24");
+    expect(client.creates[1].network.denyOut).toEqual(["169.254.0.0/16"]);
+    expect(SANDBOX_EGRESS_DENY_OUT).toEqual(["169.254.0.0/16"]);
+  });
+});
+
+describe("E2bSandboxProvider — env enforcement", () => {
+  it("refuses a platform secret in the create env BEFORE any SDK call", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    await expect(
+      provider.create({
+        workspaceId: "ws-1",
+        userId: "user-1",
+        projectId: "proj-1",
+        env: { CLERK_SECRET_KEY: "sk_live_whatever" },
+      }),
+    ).rejects.toBeInstanceOf(SandboxEnvSecretError);
+    expect(client.creates).toHaveLength(0);
+  });
+
+  it("refuses the provider's own API key as a sandbox env var", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    await expect(
+      provider.create({
+        workspaceId: "ws-1",
+        userId: "user-1",
+        projectId: "proj-1",
+        env: { E2B_API_KEY: API_KEY },
+      }),
+    ).rejects.toBeInstanceOf(SandboxEnvSecretError);
+    expect(client.creates).toHaveLength(0);
+  });
+
+  it("caller env cannot override identity variables; project-scoped vars pass through", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+      env: { LITTREE_USER_ID: "attacker", PROJECT_FLAG: "on" },
+    });
+
+    const who = await provider.execute(instance.sandboxId, {
+      command: "printenv LITTREE_USER_ID",
+    });
+    expect(who.stdout.trim()).toBe("user-1");
+    const flag = await provider.execute(instance.sandboxId, {
+      command: "printenv PROJECT_FLAG",
+    });
+    expect(flag.stdout.trim()).toBe("on");
+  });
+
+  it("health reflects the probe and never leaks the API key", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+
+    const ok = await provider.health();
+    expect(ok.healthy).toBe(true);
+    expect(JSON.stringify(ok)).not.toContain(API_KEY);
+
+    client.probeError = new Error("401 unauthorized");
+    const bad = await provider.health();
+    expect(bad.healthy).toBe(false);
+    expect(JSON.stringify(bad)).not.toContain(API_KEY);
+  });
+
+  it("constructor refuses a missing API key", () => {
+    expect(() => new E2bSandboxProvider({ apiKey: "" })).toThrow(/E2B_API_KEY/);
+  });
+});
+
+describe("sandbox env allowlist (env.ts)", () => {
+  it("buildSandboxEnv emits only allowlisted keys", () => {
+    const env = buildSandboxEnv({
+      userId: "u",
+      projectId: "p",
+      workspaceId: "w",
+      sandboxId: "s",
+    });
+    for (const key of Object.keys(env)) {
+      expect(SANDBOX_ENV_ALLOWLIST).toContain(key);
+    }
+    expect(env.LITTREE_SANDBOX_ID).toBe("s");
+  });
+
+  it("assertNoPlatformSecrets throws on platform secrets, passes clean env", () => {
+    expect(() => assertNoPlatformSecrets({ PATH: "/usr/bin" })).not.toThrow();
+    expect(() => assertNoPlatformSecrets({ STRIPE_SECRET_KEY: "sk" })).toThrow(
+      SandboxEnvSecretError,
+    );
+    expect(() => assertNoPlatformSecrets({ E2B_API_KEY: "k" })).toThrow(
+      SandboxEnvSecretError,
+    );
+    // Empty values are inert (mirrors the web-side semantics).
+    expect(() => assertNoPlatformSecrets({ CLERK_SECRET_KEY: "" })).not.toThrow();
+  });
+
+  it("composeSandboxEnv: identity wins over caller values", () => {
+    const env = composeSandboxEnv({
+      userId: "real-user",
+      projectId: "p",
+      workspaceId: "w",
+      sandboxId: "s",
+      projectEnv: { LITTREE_USER_ID: "forged", MY_PROJECT_VAR: "1" },
+    });
+    expect(env.LITTREE_USER_ID).toBe("real-user");
+    expect(env.MY_PROJECT_VAR).toBe("1");
+  });
+
+  // Regression (2026-11-14 preview failure): the template prepares pnpm
+  // into /usr/local/share/corepack, but command processes only see this
+  // composed env — when COREPACK_HOME was missing here, Corepack looked
+  // under $HOME, found no prepared pnpm, and the preview dependency
+  // install died downloading pnpm from the registry (exit 243).
+  it("composeSandboxEnv: carries COREPACK_HOME pointing at the template's prepared cache, not overridable by project env", () => {
+    const env = composeSandboxEnv({
+      userId: "u",
+      projectId: "p",
+      workspaceId: "w",
+      sandboxId: "s",
+      projectEnv: { COREPACK_HOME: "/tmp/elsewhere" },
+    });
+    expect(env.COREPACK_HOME).toBe("/usr/local/share/corepack");
+  });
+});

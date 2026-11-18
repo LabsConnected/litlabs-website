@@ -4,7 +4,6 @@ import { useAppUser } from "@/hooks/useClerkAuth";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
   Terminal,
   FolderOpen,
   Bot,
@@ -19,7 +18,6 @@ import {
 } from "lucide-react";
 
 const navItems = [
-  { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { label: "LiTT Terminal", icon: Terminal, href: "/studio" },
   { label: "Files", icon: FolderOpen, href: "/studio" },
   { label: "Agents", icon: Bot, href: "/agents" },

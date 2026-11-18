@@ -125,7 +125,12 @@ const resolvedClerkKey = clerkKey || "pk_test_YnVpbGQtcGxhY2Vob2xkZXIubG9jYWwk";
 const fontUi = Space_Grotesk({ subsets: ["latin"], variable: "--font-next-ui" });
 const fontDisplay = Sora({ subsets: ["latin"], variable: "--font-next-display" });
 const fontCode = JetBrains_Mono({ subsets: ["latin"], variable: "--font-next-code" });
-const fontRetro = Pixelify_Sans({ subsets: ["latin"], variable: "--font-next-retro" });
+// Pixelify Sans is ONLY for Retro Vault / Emulator surfaces (globals.css
+// --font-retro contract). Preloading it from the root layout made every
+// page pay a font preload its initial render never uses — the browser's
+// "preloaded but not used" console warning. preload: false keeps the
+// @font-face (retro surfaces load it on demand) without the global preload.
+const fontRetro = Pixelify_Sans({ subsets: ["latin"], variable: "--font-next-retro", preload: false });
 
 // NOTE: this root layout intentionally declares NO `dynamic` segment
 // config. Marketing/public routes prerender statically (fast TTFB +

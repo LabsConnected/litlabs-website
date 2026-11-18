@@ -30,6 +30,10 @@ export type SiteExportResult =
   | { status: "conflict"; path: string; reason: string }
   | { status: "error"; reason: string };
 
+export type CanvasSiteSyncResult =
+  | SiteExportResult
+  | { status: "no-canvas"; path: string };
+
 async function filesAction(
   projectId: string,
   body: Record<string, unknown>,
@@ -105,4 +109,36 @@ export async function exportCanvasToSite(
     return { status: "error", reason: msg };
   }
   return { status: "written", path: SITE_ENTRY_FILE };
+}
+
+/** Parse stored canvas JSON; null when absent, malformed, or shapeless. */
+export function parseCanvasDocument(content: string | null): CanvasDocument | null {
+  if (!content) return null;
+  try {
+    const parsed = JSON.parse(content) as CanvasDocument;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!parsed.nodes || !Array.isArray(parsed.rootNodeIds)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compile the project's stored canvas document (.litt/canvas.json) into
+ * the served `index.html`. This is the compile step for the save/publish
+ * pipeline: callers that materialize the site (autosave, Publish) run it
+ * so canvas work becomes real output instead of only a builder mockup.
+ *
+ * Returns "no-canvas" when the project has no (valid) canvas document —
+ * file-built projects are unaffected. "conflict"/"error" mirror
+ * exportCanvasToSite: a user-authored index.html is never overwritten.
+ */
+export async function syncCanvasSiteFromFile(
+  projectId: string,
+): Promise<CanvasSiteSyncResult> {
+  const content = await readWorkspaceFile(projectId, CANVAS_DOC_FILE);
+  const doc = parseCanvasDocument(content);
+  if (!doc) return { status: "no-canvas", path: SITE_ENTRY_FILE };
+  return exportCanvasToSite(projectId, doc);
 }

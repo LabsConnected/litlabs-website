@@ -153,6 +153,28 @@ describe("LiTTMobileSheet (real component)", () => {
       expect(screen.queryByTestId("litt-mobile-tools-button")).not.toBeInTheDocument();
     });
 
+    it("renders on the light studio surface, not the old near-black sheet", () => {
+      renderSheet();
+      const sheet = screen.getByTestId("litt-mobile-sheet");
+      expect(sheet.style.backgroundColor).toBe("var(--studio-surface)");
+      expect(sheet.style.backgroundColor).not.toContain("0d0916");
+    });
+
+    it("renders the build status slot in the sheet chrome when provided", () => {
+      renderSheet({
+        buildStatusSlot: <button type="button" data-testid="build-status-control">Build status</button>,
+      });
+      const slot = screen.getByTestId("litt-mobile-build-status-slot");
+      expect(slot).toContainElement(screen.getByTestId("build-status-control"));
+      // Chrome, not content: the slot is outside the sheet's content panels.
+      expect(screen.getByTestId("litt-mobile-sheet-content")).not.toContainElement(slot);
+    });
+
+    it("omits the build status row when no slot is provided", () => {
+      renderSheet();
+      expect(screen.queryByTestId("litt-mobile-build-status-slot")).not.toBeInTheDocument();
+    });
+
     it("renders the slim project/branch context row when provided", () => {
       renderSheet({ projectName: "Ember Roast", branch: "main" });
       const context = screen.getByTestId("litt-mobile-context");

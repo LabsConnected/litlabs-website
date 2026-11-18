@@ -33,10 +33,15 @@ vi.mock("@/lib/github-app", () => ({
   getInstallationTokenForClone: vi.fn(),
 }));
 
+vi.mock("@/lib/studio/workspace-rehydration", () => ({
+  restoreWorkspaceFromLatestDeployment: vi.fn(),
+}));
+
 import { ensureWorkspaceAlive, normalizeFileError, provisionWorkspaceForProject, reprepareWorkspace, PROVISIONING_LOCK_DEAD_MS } from "@/lib/studio/workspace-recovery";
 import { getProject, updateProjectWorkspace, claimProvisioningLock, ensureCanonicalStudioProject, recoverStaleProvisioning, touchProvisioningHeartbeat } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal, prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
+import { restoreWorkspaceFromLatestDeployment } from "@/lib/studio/workspace-rehydration";
 import type { CanonicalProject } from "@/lib/projects/types";
 import type { WorkspaceGetResponse, WorkspacePrepareResponse } from "@/lib/terminal-internal-client";
 
@@ -79,6 +84,10 @@ describe("workspace-recovery", () => {
       // The shared provisioner checks the stale workspace again before
       // re-adopting its durable root.
       vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
+      // Post-recovery verification: the re-prepared descriptor resolves.
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-new", root: "/data/ws-new" }),
+      );
       // After re-prepare, getProject returns new workspace
       vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: "ws-new", workspaceStatus: "ready" }));
       vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
@@ -95,7 +104,12 @@ describe("workspace-recovery", () => {
     });
 
     it("throws when recovery fails and no workspace ID is available", async () => {
-      vi.mocked(getWorkspaceInternal).mockRejectedValue(new Error("Workspace not found"));
+      // The initial liveness check misses; after the re-prepare the
+      // post-recovery verification resolves the recovered descriptor.
+      vi.mocked(getWorkspaceInternal).mockRejectedValueOnce(new Error("Workspace not found"));
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-recovered", root: "/data/ws-recovered" }),
+      );
       vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: null, workspaceStatus: "not_prepared" }));
       vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
       vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
@@ -112,6 +126,236 @@ describe("workspace-recovery", () => {
       const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
       expect(result.workspaceId).toBe("ws-recovered");
       expect(result.reprepared).toBe(true);
+    });
+  });
+
+  describe("ensureWorkspaceAlive — registered-but-not-ready (round 9 fix B)", () => {
+    it("treats a descriptor that resolves with ready=false as lost and re-prepares", async () => {
+      // The descriptor is REGISTERED (loadPersisted kept it after a
+      // boot-time root miss) but reports ready=false. Before fix B,
+      // ensureWorkspaceAlive returned reprepared:false for it —
+      // "alive" — and callers stranded on the terminal's 409
+      // "Workspace not ready" forever.
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(
+        fakeWorkspace({ workspaceId: "ws-123", root: "/data/ws-123", ready: false } as Partial<WorkspaceGetResponse>),
+      );
+      // The shared provisioner checks the stale workspace again before
+      // re-adopting its durable root.
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
+      // Post-recovery verification: the re-prepared descriptor
+      // resolves, ready this time.
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-new", root: "/data/ws-new", ready: true } as Partial<WorkspaceGetResponse>),
+      );
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: "ws-new", workspaceStatus: "ready" }));
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-123");
+
+      expect(prepareWorkspaceInternal).toHaveBeenCalled();
+      expect(result.workspaceId).toBe("ws-new");
+      expect(result.reprepared).toBe(true);
+    });
+
+    it("reports healFailed when the re-prepared descriptor still resolves not-ready", async () => {
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(
+        fakeWorkspace({ workspaceId: "ws-123", root: "/data/ws-123", ready: false } as Partial<WorkspaceGetResponse>),
+      );
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
+      // Post-recovery verification: still registered, still not ready.
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-new", root: "/data/ws-new", ready: false } as Partial<WorkspaceGetResponse>),
+      );
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: "ws-new", workspaceStatus: "ready" }));
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-123");
+
+      expect(result.workspaceId).toBe("ws-new");
+      expect(result.reprepared).toBe(false);
+      expect(result.healFailed).toBe(true);
+    });
+  });
+
+  describe("ensureWorkspaceAlive — deployment restore on re-prepare", () => {
+    const restoreMock = vi.mocked(restoreWorkspaceFromLatestDeployment);
+
+    // Drive the same lost-workspace flow as the re-prepare test above:
+    // terminal check fails, the provisioner's re-check sees null, and
+    // every getProject read returns the given post-recovery project.
+    function setupLostWorkspace(project: Partial<CanonicalProject>) {
+      vi.mocked(getWorkspaceInternal).mockRejectedValueOnce(new Error("Workspace not found"));
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
+      // Post-recovery verification: the re-prepared descriptor resolves.
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-new", root: "/data/ws-new" }),
+      );
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({ workspaceId: "ws-new", workspaceStatus: "ready", ...project }),
+      );
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
+      );
+    }
+
+    it("restores the deployed snapshot after re-preparing a static managed project", async () => {
+      setupLostWorkspace({ framework: "static", sourceType: "blank" });
+      restoreMock.mockResolvedValue({ kind: "restored", deploymentId: "dep-1", fileCount: 4 });
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
+
+      expect(result.reprepared).toBe(true);
+      expect(result.restoredFromDeploymentId).toBe("dep-1");
+      expect(result.contentLoss).toBeUndefined();
+      expect(restoreMock).toHaveBeenCalledWith({
+        projectId: "proj-1",
+        userId: "user-1",
+        workspaceId: "ws-new",
+      });
+    });
+
+    it("flags content loss when the snapshot cannot be restored", async () => {
+      setupLostWorkspace({ framework: "static", sourceType: "blank" });
+      restoreMock.mockResolvedValue({
+        kind: "content-loss",
+        survivingDeploymentId: "dep-9",
+        reason: "snapshot incomplete",
+      });
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
+
+      expect(result.reprepared).toBe(true);
+      expect(result.contentLoss).toBe(true);
+      expect(result.survivingDeploymentId).toBe("dep-9");
+      expect(result.restoredFromDeploymentId).toBeUndefined();
+    });
+
+    it("leaves a never-deployed static project flag-free (scaffold is correct)", async () => {
+      setupLostWorkspace({ framework: "static", sourceType: "blank" });
+      restoreMock.mockResolvedValue({ kind: "no-deployments" });
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
+
+      expect(result.reprepared).toBe(true);
+      expect(result.restoredFromDeploymentId).toBeUndefined();
+      expect(result.contentLoss).toBeUndefined();
+    });
+
+    it("never restores over a repo-backed project (the repo is the source of truth)", async () => {
+      // A bare sourceType:"github" cannot provision at all ("no valid
+      // source"), so this drives the real mirror path: full repo fields,
+      // the provisioner's mirror refresh re-syncs from the repo.
+      vi.mocked(getWorkspaceInternal).mockRejectedValueOnce(new Error("Workspace not found"));
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-new", root: "/data/ws-new", ready: true } as Partial<WorkspaceGetResponse>),
+      );
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({
+          framework: "static",
+          sourceType: "github",
+          githubInstallationId: "inst-1",
+          githubOwner: "owner",
+          githubRepo: "repo",
+          workspaceId: "ws-new",
+          workspaceRoot: "/data/ws-new",
+          workspaceStatus: "ready",
+        } as unknown as Partial<CanonicalProject>),
+      );
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
+
+      expect(result.reprepared).toBe(true);
+      expect(restoreMock).not.toHaveBeenCalled();
+    });
+
+    it("never restores for non-static projects", async () => {
+      setupLostWorkspace({ framework: "nextjs", sourceType: "blank" });
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-stale");
+
+      expect(result.reprepared).toBe(true);
+      expect(restoreMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("ensureWorkspaceAlive — truthful reprepared signal", () => {
+    const mirrorProject = () =>
+      fakeProject({
+        sourceType: "github",
+        githubInstallationId: "inst-1",
+        githubOwner: "owner",
+        githubRepo: "repo",
+        workspaceId: "ws-gh",
+        workspaceRoot: "/data/ws-gh",
+        workspaceStatus: "ready",
+      } as unknown as Partial<CanonicalProject>);
+
+    it("reports healFailed (not reprepared) when the mirror heal fails and merely serves the dead ID", async () => {
+      // Every registry lookup misses: the descriptor is genuinely gone.
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(null);
+      vi.mocked(getProject).mockResolvedValue(mirrorProject());
+      vi.mocked(getInstallationTokenForClone).mockResolvedValue("tok" as never);
+      // The heal's one best-effort re-prepare attempt fails (terminal
+      // still restarting), so the mirror branch serves the existing —
+      // dead — workspace ID without throwing.
+      vi.mocked(prepareWorkspaceInternal).mockRejectedValue(new Error("terminal restarting"));
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-gh");
+
+      expect(result.workspaceId).toBe("ws-gh");
+      expect(result.reprepared).toBe(false);
+      expect(result.healFailed).toBe(true);
+      // #989 posture intact: a failed heal writes nothing — in
+      // particular it never demotes the row to "not_prepared".
+      expect(updateProjectWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("reports reprepared when the mirror heal re-registers the descriptor", async () => {
+      // ensure's check + the mirror branch's two liveness probes miss;
+      // the post-recovery verification then resolves the descriptor the
+      // heal re-registered (same ID, via the adoption hints).
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-gh", root: "/data/ws-gh", ready: true } as Partial<WorkspaceGetResponse>),
+      );
+      vi.mocked(getProject).mockResolvedValue(mirrorProject());
+      vi.mocked(getInstallationTokenForClone).mockResolvedValue("tok" as never);
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-gh", root: "/data/ws-gh" }) as unknown as WorkspacePrepareResponse,
+      );
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+
+      const result = await ensureWorkspaceAlive("proj-1", "user-1", "ws-gh");
+
+      expect(result.workspaceId).toBe("ws-gh");
+      expect(result.reprepared).toBe(true);
+      expect(result.healFailed).toBeUndefined();
+      // The heal persisted the re-registered workspace as ready.
+      expect(updateProjectWorkspace).toHaveBeenCalledWith(
+        "proj-1",
+        "user-1",
+        expect.objectContaining({ workspaceId: "ws-gh", workspaceStatus: "ready" }),
+      );
     });
   });
 
@@ -208,6 +452,7 @@ describe("workspace-recovery", () => {
       // working on the existing workspace — stale beats broken.
       vi.mocked(getProject).mockResolvedValue(
         fakeProject({
+          id: "proj-gh",
           sourceType: "github",
           githubInstallationId: 123,
           githubOwner: "LabsConnected",
@@ -232,6 +477,169 @@ describe("workspace-recovery", () => {
         "user-1",
         expect.objectContaining({ workspaceStatus: "failed" }),
       );
+    });
+
+    it("keeps serving a GitHub mirror workspace when the liveness check fails twice", async () => {
+      // Regression (gate flip, 2026-11-14): one failed liveness lookup
+      // demoted a healthy "ready" mirror project to "not_prepared" and
+      // forced a full cold re-provision. Every Studio surface derives the
+      // repo-workspace gate from that one DB field, so a transient
+      // terminal blip (restart, canary-cycle gap) latched the whole
+      // project into the gate until a re-prepare happened to complete.
+      // The mirror branch must retry the check once, make ONE best-effort
+      // heal attempt (preview-404 fix, 2026-11-14), and — when the heal
+      // also fails — keep serving the existing workspace without touching
+      // the status, exactly as #989 established.
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({
+          id: "proj-gh",
+          sourceType: "github",
+          githubInstallationId: 123,
+          githubOwner: "LabsConnected",
+          githubRepo: "litlabs-website",
+          workspaceId: "ws-gh",
+          workspaceRoot: "/data/ws-gh",
+          workspaceStatus: "ready",
+        }),
+      );
+      // Both the first lookup and the retry miss the workspace.
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(null);
+      // The single heal attempt fails too (terminal still unavailable).
+      vi.mocked(getInstallationTokenForClone).mockResolvedValue("tok-123");
+      vi.mocked(prepareWorkspaceInternal).mockRejectedValue(new Error("terminal unavailable"));
+
+      const result = await provisionWorkspaceForProject("proj-gh", "user-1");
+
+      expect(result).toBe("ws-gh");
+      // Exactly one retry — no lookup storm against the terminal.
+      expect(getWorkspaceInternal).toHaveBeenCalledTimes(2);
+      expect(getWorkspaceInternal).toHaveBeenCalledWith("ws-gh", "user-1");
+      // The status is NOT demoted and no cold re-provision is forced.
+      expect(updateProjectWorkspace).not.toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({ workspaceStatus: "not_prepared" }),
+      );
+      expect(updateProjectWorkspace).not.toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({ workspaceStatus: "failed" }),
+      );
+      expect(claimProvisioningLock).not.toHaveBeenCalled();
+      // Exactly ONE heal attempt, carrying the stored adoption hints so
+      // the terminal re-registers the same workspace instead of cloning
+      // a second one.
+      expect(prepareWorkspaceInternal).toHaveBeenCalledTimes(1);
+      expect(prepareWorkspaceInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceType: "github",
+          projectId: "proj-gh",
+          existingWorkspaceId: "ws-gh",
+          existingRoot: "/data/ws-gh",
+        }),
+      );
+    });
+
+    it("heals a GitHub mirror workspace by re-preparing when its descriptor is lost", async () => {
+      // Preview-404 fix (2026-11-14): the terminal's boot reload can drop
+      // a workspace descriptor whose root is not visible at the load
+      // instant; the DB still says "ready", so the gate stays green while
+      // preview start 404s forever. When both liveness lookups miss, the
+      // mirror branch makes one re-prepare attempt with the stored
+      // adoption hints; on success the fresh id/root are persisted and
+      // returned, and the status is never demoted on the way.
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({
+          id: "proj-gh",
+          sourceType: "github",
+          githubInstallationId: 123,
+          githubOwner: "LabsConnected",
+          githubRepo: "litlabs-website",
+          workspaceId: "ws-gh",
+          workspaceRoot: "/data/ws-gh",
+          workspaceStatus: "ready",
+        }),
+      );
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(null);
+      vi.mocked(getInstallationTokenForClone).mockResolvedValue("tok-123");
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-healed", root: "/data/ws-healed", branch: "main" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await provisionWorkspaceForProject("proj-gh", "user-1");
+
+      expect(result).toBe("ws-healed");
+      expect(prepareWorkspaceInternal).toHaveBeenCalledTimes(1);
+      expect(prepareWorkspaceInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceType: "github",
+          projectId: "proj-gh",
+          existingWorkspaceId: "ws-gh",
+          existingRoot: "/data/ws-gh",
+          githubToken: "tok-123",
+        }),
+      );
+      // The healed workspace is persisted in the mirror-refresh shape.
+      expect(updateProjectWorkspace).toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({
+          workspaceId: "ws-healed",
+          workspaceStatus: "ready",
+          workspaceRoot: "/data/ws-healed",
+          workspaceError: null,
+        }),
+      );
+      expect(updateProjectWorkspace).not.toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({ workspaceStatus: "not_prepared" }),
+      );
+      expect(updateProjectWorkspace).not.toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({ workspaceStatus: "failed" }),
+      );
+      expect(claimProvisioningLock).not.toHaveBeenCalled();
+    });
+
+    it("recovers a GitHub mirror workspace when the liveness retry succeeds", async () => {
+      // A single transient failure must not cost the mirror refresh: when
+      // the retry finds the workspace alive, the normal re-sync runs.
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({
+          id: "proj-gh",
+          sourceType: "github",
+          githubInstallationId: 123,
+          githubOwner: "LabsConnected",
+          githubRepo: "litlabs-website",
+          workspaceId: "ws-gh",
+          workspaceRoot: "/data/ws-gh",
+          workspaceStatus: "ready",
+        }),
+      );
+      // First lookup throws (terminal mid-restart, caught to null); the
+      // retry finds the workspace ready.
+      vi.mocked(getWorkspaceInternal)
+        .mockRejectedValueOnce(new Error("terminal restarting"))
+        .mockResolvedValue(
+          fakeWorkspace({ workspaceId: "ws-gh", root: "/data/ws-gh", ready: true } as unknown as WorkspaceGetResponse),
+        );
+      vi.mocked(getInstallationTokenForClone).mockResolvedValue("tok-123");
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-gh", root: "/data/ws-gh", branch: "main" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await provisionWorkspaceForProject("proj-gh", "user-1");
+
+      expect(result).toBe("ws-gh");
+      expect(getWorkspaceInternal).toHaveBeenCalledTimes(2);
+      // The retry success takes the normal mirror refresh path.
+      expect(prepareWorkspaceInternal).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceType: "github", existingWorkspaceId: "ws-gh" }),
+      );
+      expect(claimProvisioningLock).not.toHaveBeenCalled();
     });
 
     it("re-provisions when DB says ready but terminal server lost the workspace", async () => {
@@ -371,6 +779,26 @@ describe("workspace-recovery", () => {
       expect(updateProjectWorkspace).toHaveBeenCalledWith("proj-fail", "user-1", expect.objectContaining({
         workspaceStatus: "failed",
         workspaceError: "Disk full",
+      }));
+    });
+
+    it("preserves the HOST_EXECUTION_DISABLED code on the rethrown provisioning error (wave-4)", async () => {
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "blank", workspaceId: null, workspaceStatus: "not_prepared" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      const blocked = new Error(
+        'Workspace prepare failed (503): {"error":"Host execution is disabled in production","code":"HOST_EXECUTION_DISABLED"}',
+      ) as Error & { code?: string };
+      blocked.code = "HOST_EXECUTION_DISABLED";
+      vi.mocked(prepareWorkspaceInternal).mockRejectedValue(blocked);
+
+      const err = await provisionWorkspaceForProject("proj-blocked", "user-1").catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error & { code?: string }).code).toBe("HOST_EXECUTION_DISABLED");
+      expect(updateProjectWorkspace).toHaveBeenCalledWith("proj-blocked", "user-1", expect.objectContaining({
+        workspaceStatus: "failed",
       }));
     });
 

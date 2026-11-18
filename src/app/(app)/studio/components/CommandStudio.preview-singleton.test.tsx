@@ -265,7 +265,10 @@ const execState = vi.hoisted(() => {
     endRun: vi.fn(() => { state.pendingApproval = null; }),
     addEvent: vi.fn(),
     setPhase: vi.fn(),
-    setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; }),
+    // Mirrors the real store: a fresh gate always mounts at phase "idle"
+    // (useExecutionStore.setPendingApproval resets approvalPhase) — without
+    // this, a prior test's "executing" phase leaks into the next gate.
+    setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; state.approvalPhase = "idle"; }),
     resolveApproval: vi.fn(() => { state.pendingApproval = null; }),
     beginApprovalSubmit: vi.fn(() => { state.approvalPhase = "submitting"; }),
     approvalAccepted: vi.fn(() => { state.approvalPhase = "executing"; }),
@@ -516,30 +519,31 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // Drive to a known state: expanded. F1 workspace-first: expanding LiTT
-    // opens Slice B's floating overlay (no permanent column), not a column.
+    // Drive to a known state: expanded. F1 workspace-first, as amended
+    // by Larry's no-detached-pop-out ruling (2026-11-10): expanding LiTT
+    // widens the IN-FLOW column — Slice B's floating overlay is retired,
+    // so data-overlay stays "false" in both states.
     if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
       await user.click(screen.getByTestId("litt-hud-expand"));
       await settle();
     }
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "true");
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "false");
 
-    // Close the overlay — the canvas must stay mounted and take all
-    // remaining width. The overlay hides with display:none; the 64px rail
-    // returns in flow.
-    await user.click(screen.getByTestId("litt-panel-close"));
+    // Collapse — the canvas must stay mounted and take all remaining
+    // width; the 64px rail returns in flow.
+    await user.click(screen.getByTestId("litt-panel-collapse"));
     await settle();
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "false");
     expect(screen.getByTestId("studio-center-workspace")).toBeTruthy();
     expect(screen.queryByTestId("permanent-preview-column")).toBeNull();
 
-    // Expand again — overlay returns, canvas still mounted.
+    // Expand again — in-flow column returns, canvas still mounted.
     await user.click(screen.getByTestId("litt-hud-expand"));
     await settle();
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "true");
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "false");
     expect(screen.getByTestId("studio-center-workspace")).toBeTruthy();
   });
 
@@ -606,6 +610,37 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     expect(screen.queryByTestId("studio-completion")).toBeNull();
   });
 
+  it("keeps the user on the Chat tab when a send pauses at an approval gate", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    // Larry's approve-in-chat directive (2026-11-11): the run pauses, the
+    // actionable card lives IN the chat — the send flow must not yank the
+    // user over to the Live/Activity tab to hunt the Approve button. (The
+    // pre-fix flow switched to "live" with the comment "where the
+    // Approve/Reject control lives".)
+    sendMock.mockResolvedValueOnce({
+      accepted: true,
+      persisted: true,
+      reply: "I need your approval to run image.stock.",
+      pendingApproval: {
+        toolId: "image.stock",
+        reason: "Mutation requires approval in ACT mode",
+        pausedRunId: "paused-gate-1",
+        inputs: { projectId: "proj-1", query: "people enjoying food in a food court" },
+      },
+    });
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    await user.type(screen.getByTestId("studio-command-input"), "build a food court page");
+    await user.click(screen.getByTestId("studio-send-button"));
+    await waitFor(() => expect(sendMock).toHaveBeenCalled());
+    await settle();
+
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
+    expect(screen.queryByTestId("studio-completion")).toBeNull();
+  });
+
   it("does NOT show a Done completion card when the assistant asks a clarifying question", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     sendMock.mockResolvedValueOnce({
@@ -633,6 +668,11 @@ describe("CommandStudio — approval gate convergence", () => {
     convState.loadMessages.mockClear();
     convState.reportSendError.mockClear();
     execState.state.pendingApproval = null;
+    // Tests below mount gates by direct assignment, which in the real
+    // store only ever happens alongside approvalPhase "idle" (a fresh
+    // gate). Reset it so a prior test's submit/executing phase cannot
+    // leak into the next gate and disable its buttons.
+    execState.state.approvalPhase = "idle";
     execState.state.isRunning = false;
     execState.state.events = [];
     approvalWatch.onSettled = null;
@@ -660,7 +700,8 @@ describe("CommandStudio — approval gate convergence", () => {
       expect.objectContaining({ conversationId: "conv-1", pausedRunId: "paused-1" }),
     );
 
-    // The paused run surfaced Live (where the Approve/Reject card lives).
+    // The user inspects the Live tab while the gate is pending (the
+    // actionable card itself lives in Chat since the approve-in-chat fix).
     await user.click(screen.getByTestId("litt-tab-live"));
     await settle();
     expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
@@ -682,7 +723,7 @@ describe("CommandStudio — approval gate convergence", () => {
     expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
   });
 
-  it("stays on Live when the resumed run pauses on a nested gate", async () => {
+  it("surfaces the fresh gate IN CHAT when the resumed run pauses on a nested gate", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     convState.selectedConversationId = "conv-1";
     execState.state.pendingApproval = {
@@ -716,11 +757,16 @@ describe("CommandStudio — approval gate convergence", () => {
     });
     await settle();
 
-    // A new gate mounted — the user must see the fresh Approve/Reject card.
+    // A new gate mounted — the user must see the fresh Approve/Reject
+    // card. CHANGED under Larry's approve-in-chat directive (2026-11-11):
+    // this test previously pinned "stays on Live", the exact behavior
+    // Larry rejected ("LiTT needs to have approve in chat"). The card
+    // lives in the chat transcript now, so the surface follows it there.
     expect(execState.state.setPendingApproval).toHaveBeenCalledWith(
       expect.objectContaining({ toolId: "files.delete", pausedRunId: "paused-2" }),
     );
-    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
   });
 
   it("does NOT report 'could not be resumed' when the gate already settled before the click", async () => {
@@ -892,8 +938,12 @@ describe("CommandStudio — approval gate convergence", () => {
 });
 
 describe("CodeWorkspace — app preview", () => {
-  it("always mounts the app preview in App view (no external preview column exists)", async () => {
-    const user = userEvent.setup();
+  it("renders the ONE shared preview element in its preview region — it never mounts its own preview", async () => {
+    // Code-box build (mapping §1): the App view mode is gone. The live
+    // preview is a permanent region of the one box, and it renders the
+    // single shared element CommandStudio builds — CodeWorkspace must
+    // not mount a StudioPreviewPanel of its own.
+    const { default: StudioPreviewPanel } = await import("./StudioPreviewPanel");
     render(
       <CodeWorkspace
         projectId="project-1"
@@ -901,14 +951,39 @@ describe("CodeWorkspace — app preview", () => {
         branch="main"
         workspaceStatus="ready"
         writeAccess={true}
+        previewContent={
+          <StudioPreviewPanel
+            projectId="project-1"
+            projectName="Test Project"
+            repositoryName="owner/repo"
+            branch="main"
+            workspaceStatus="ready"
+          />
+        }
       />,
     );
-    await user.click(screen.getByTitle("App"));
     await settle();
-    // Canvas-first layout: there is no permanent right-column preview to
-    // defer to, so the App view always mounts its own preview panel.
+    expect(screen.queryByTitle("App")).toBeNull();
     expect(previewPanels()).toHaveLength(1);
-    expect(screen.queryByTestId("app-preview-external-notice")).toBeNull();
+    expect(
+      screen.getByTestId("code-preview-region").contains(previewPanels()[0]),
+    ).toBe(true);
+  });
+
+  it("mounts no preview at all when the shared element lives in the Preview panel", async () => {
+    render(
+      <CodeWorkspace
+        projectId="project-1"
+        repositoryName="owner/repo"
+        branch="main"
+        workspaceStatus="ready"
+        writeAccess={true}
+        previewPlaceholder={<div data-testid="preview-pointer-card" />}
+      />,
+    );
+    await settle();
+    expect(previewPanels()).toHaveLength(0);
+    expect(screen.getByTestId("preview-pointer-card")).toBeTruthy();
   });
 });
 
@@ -978,8 +1053,8 @@ describe("CommandStudio — mission panels live in the Activity dock", () => {
     await user.click(screen.getByRole("button", { name: "Collapse Mission" }));
     expect(screen.queryByTestId("mission-card-body-mission")).toBeNull();
 
-    // Switch to Files and back — all dock tab content stays mounted.
-    await user.click(screen.getByTestId("dock-tab-files"));
+    // Switch to Media and back — all dock tab content stays mounted.
+    await user.click(screen.getByTestId("dock-tab-media"));
     await user.click(screen.getByTestId("dock-tab-activity"));
     expect(screen.queryByTestId("mission-card-body-mission")).toBeNull();
     expect(screen.getByRole("button", { name: "Expand Mission" })).toBeTruthy();

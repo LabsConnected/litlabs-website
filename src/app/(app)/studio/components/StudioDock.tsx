@@ -10,7 +10,7 @@
  *
  * Controlled by the parent: tab state, height, and open state all come in
  * as props; the dock owns only its view (collapsed/normal/maximized) and
- * syncs it with the `open` prop. All five tab content slots stay mounted
+ * syncs it with the `open` prop. All tab content slots stay mounted
  * always; inactive ones render with display:none so the terminal PTY and
  * other tab state survive tab switches.
  */
@@ -25,7 +25,6 @@ import {
 import {
   Activity,
   Clapperboard,
-  FolderOpen,
   Maximize2,
   Minimize2,
   PanelBottom,
@@ -36,9 +35,10 @@ import {
 import { useStudioContextOptional } from "../context/StudioContext";
 import { SelectionInspectorPanel } from "./StudioInspector";
 
+// Files is NOT a dock tab anymore (Larry, 2026-11-13): project files
+// live in the LiTT panel's top-row Files tab (desktop + mobile sheet).
 export type StudioDockTab =
   | "activity"
-  | "files"
   | "terminal"
   | "inspector"
   | "media";
@@ -53,7 +53,6 @@ export interface StudioDockProps {
   height?: number;
   onHeightChange: (h: number) => void;
   activityContent: ReactNode;
-  filesContent: ReactNode;
   /** Keep mounted always (PTY stays alive) — rendered with display:none when inactive */
   terminalContent: ReactNode;
   inspectorContent: ReactNode;
@@ -82,7 +81,6 @@ const DOCK_TABS: {
   icon: typeof Activity;
 }[] = [
   { id: "activity", label: "Activity", icon: Activity },
-  { id: "files", label: "Files", icon: FolderOpen },
   { id: "terminal", label: "Terminal", icon: SquareTerminal },
   { id: "inspector", label: "Inspector", icon: ScanSearch },
   { id: "media", label: "Media", icon: Clapperboard },
@@ -97,7 +95,6 @@ export default function StudioDock({
   height = DOCK_DEFAULT,
   onHeightChange,
   activityContent,
-  filesContent,
   terminalContent,
   inspectorContent,
   mediaContent,
@@ -244,7 +241,6 @@ export default function StudioDock({
 
   const contents: Record<StudioDockTab, ReactNode> = {
     activity: activityContent,
-    files: filesContent,
     terminal: terminalContent,
     // F1 slice C — the Inspector tab is contextual: the active Studio
     // selection (from StudioContext, any surface) renders above the
@@ -274,8 +270,8 @@ export default function StudioDock({
       data-open={open ? "true" : "false"}
       className="flex shrink-0 flex-col rounded-none border-t"
       style={{
-        backgroundColor: "rgba(16,12,26,0.92)",
-        borderColor: "rgba(255,255,255,0.07)",
+        backgroundColor: "var(--studio-surface)",
+        borderColor: "var(--studio-border)",
         height: effectiveHeight,
         transition: view === "collapsed" ? "height 0.15s ease" : undefined,
       }}
@@ -288,7 +284,7 @@ export default function StudioDock({
       {view !== "collapsed" && (
         <div
           data-resize-grip="true"
-          className="group flex shrink-0 cursor-row-resize items-center justify-center py-0.5 transition hover:bg-white/5"
+          className="group flex shrink-0 cursor-row-resize items-center justify-center py-0.5 transition hover:bg-black/5"
           style={{ touchAction: "none" }}
           role="separator"
           aria-orientation="horizontal"
@@ -307,7 +303,7 @@ export default function StudioDock({
         >
           <div
             data-resize-grip="true"
-            className="h-0.5 w-8 rounded-full bg-white/15 transition group-hover:bg-white/30"
+            className="h-0.5 w-8 rounded-full bg-black/15 transition group-hover:bg-black/30"
           />
         </div>
       )}
@@ -316,13 +312,13 @@ export default function StudioDock({
           contextual tabs appear only after the developer drawer opens. */}
       <div
         className="flex shrink-0 items-center justify-between"
-        style={{ height: COLLAPSED_HEIGHT, backgroundColor: "#0d0916" }}
+        style={{ height: COLLAPSED_HEIGHT, backgroundColor: "var(--studio-surface)" }}
       >
         {view === "collapsed" ? (
           <button
             type="button"
             onClick={() => { setView("normal"); onToggle(); }}
-            className="flex h-full items-center gap-2 px-3 text-[11px] font-bold transition hover:bg-white/5"
+            className="flex h-full items-center gap-2 px-3 text-[11px] font-bold transition hover:bg-black/5"
             style={{ color: "var(--text-muted)" }}
             aria-label="Open developer tools"
             data-testid="dock-collapsed-toggle"
@@ -368,7 +364,7 @@ export default function StudioDock({
             <button
               type="button"
               onClick={handleMaximize}
-              className="grid h-7 w-7 place-items-center rounded-none transition hover:bg-white/8"
+              className="grid h-7 w-7 place-items-center rounded-lg transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label={view === "maximized" ? "Restore" : "Maximize"}
               title={view === "maximized" ? "Restore (Esc)" : "Maximize"}
@@ -382,7 +378,7 @@ export default function StudioDock({
             <button
               type="button"
               onClick={handleClose}
-              className="grid h-7 w-7 place-items-center rounded-none transition hover:bg-white/8"
+              className="grid h-7 w-7 place-items-center rounded-lg transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Close dock"
               title="Close"

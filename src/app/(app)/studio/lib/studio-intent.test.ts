@@ -52,8 +52,17 @@ describe("Studio intent routing", () => {
 
   it("opens Terminal only for explicit shell requests", () => {
     expect(detectIntent("Open the terminal")?.intent).toBe("open_terminal");
-    expect(detectIntent("Run pnpm test")?.intent).toBe("run_command");
     expect(detectIntent("Please review this code")).not.toMatchObject({ tool: "terminal" });
+  });
+
+  it("lets shell-command requests reach the agent loop", () => {
+    // Command execution runs through the agent's terminal.execute tool
+    // (kernel taskKind "exec"). A deterministic intent used to swallow
+    // "Run …" into a canned "Opening Terminal to run that command."
+    // line without executing anything (Step 6 fix, 2026-11-14), so
+    // these must NOT match an intent.
+    expect(detectIntent("Run pnpm test")).toBeNull();
+    expect(detectIntent("Run pwd && ls in the workspace and show me the output")).toBeNull();
   });
 });
 

@@ -17,7 +17,7 @@ import {
   type PausedRunRecord,
   type RunResult,
 } from "@/lib/litt-intelligence/paused-run-store";
-import { ProgressEmitter } from "@/lib/litt-intelligence/progress-events";
+import { ProgressEmitter, isSubstantiveProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, isFileWritingTool, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
@@ -35,6 +35,7 @@ import {
   snapshotQualityLoopSession,
   stripQualityVerdictSuffix,
 } from "@/lib/litt-intelligence/quality-loop-flow";
+import type { QualityTaskScope } from "@/lib/litt-intelligence/quality-loop";
 import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getCheckpoint } from "@/lib/missions/mission-repository";
 import {
@@ -64,8 +65,18 @@ import { attachActionRunToConversationTask, settleConversationTask } from "@/lib
  * resumed execution finishes — without this writeback a page refresh would
  * show a run that never resolved. If the original message can't be found
  * (deleted conversation etc.), the result is appended as a new message so
- * the work isn't invisible. Best-effort: the authoritative outcome is
- * already durable on the canonical action_run.
+ * the work isn't invisible.
+ *
+ * Round 14 — durability split, stated plainly: the settlement OUTCOME
+ * is durable independent of this write. settleResumedRunOutcome
+ * persists the full RunResult (final text included) on the canonical
+ * action_run's terminal event, and the paused-run row carries its own
+ * run_result — both land regardless of the transcript. This write is
+ * the transcript RENDERING of that outcome. It used to fail silently
+ * (one attempt, log-only), which is how the lion proof's chat showed
+ * nothing after a completed run. It now retries once and RETURNS
+ * whether the transcript reflects the outcome, so callers can log
+ * the lag explicitly instead of the failure disappearing.
  */
 async function writeResumedResultToTranscript(opts: {
   conversationId: string;
@@ -74,32 +85,38 @@ async function writeResumedResultToTranscript(opts: {
   pausedRunId: string;
   status: MessageStatus;
   content?: string;
-}): Promise<void> {
-  try {
-    const awaiting = await getAwaitingApprovalAssistantMessage(opts.conversationId, opts.userId);
-    if (awaiting) {
-      await updateMessageStatus(awaiting.id, opts.userId, opts.status, opts.content);
-      return;
+}): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const awaiting = await getAwaitingApprovalAssistantMessage(opts.conversationId, opts.userId);
+      if (awaiting) {
+        await updateMessageStatus(awaiting.id, opts.userId, opts.status, opts.content);
+        return true;
+      }
+      if (opts.content?.trim()) {
+        await insertMessage({
+          conversationId: opts.conversationId,
+          ownerId: opts.userId,
+          projectId: opts.projectId,
+          role: "assistant",
+          content: opts.content,
+          status: opts.status,
+          clientRequestId: `resume:${opts.pausedRunId}`,
+        });
+      }
+      return true;
+    } catch (err) {
+      if (attempt === 1) {
+        studioLog("approval:transcript_writeback_failed", {
+          conversationId: opts.conversationId,
+          userId: opts.userId,
+          pausedRunId: opts.pausedRunId,
+          errorClass: err instanceof Error ? err.message : "unknown",
+        });
+      }
     }
-    if (opts.content?.trim()) {
-      await insertMessage({
-        conversationId: opts.conversationId,
-        ownerId: opts.userId,
-        projectId: opts.projectId,
-        role: "assistant",
-        content: opts.content,
-        status: opts.status,
-        clientRequestId: `resume:${opts.pausedRunId}`,
-      });
-    }
-  } catch (err) {
-    studioLog("approval:transcript_writeback_failed", {
-      conversationId: opts.conversationId,
-      userId: opts.userId,
-      pausedRunId: opts.pausedRunId,
-      errorClass: err instanceof Error ? err.message : "unknown",
-    });
   }
+  return false;
 }
 
 /**
@@ -643,10 +660,18 @@ export async function POST(
       .catch(() => undefined);
   }, RUN_HEARTBEAT_MS);
   (heartbeat as NodeJS.Timeout).unref?.();
-  // Zero-cost progress signal: every loop event refreshes the timestamp
-  // the next heartbeat persists. A wedged loop stops producing events —
-  // that is what separates "slow but working" from "alive but stalled".
-  const runProgress = new ProgressEmitter(() => {
+  // Zero-cost progress signal: SUBSTANTIVE loop events refresh the
+  // timestamp the next heartbeat persists. Round 14: this used to
+  // refresh on every event, so a wrap-up route-retry storm
+  // (route_plan / model_routing / model_failed on repeat) refreshed
+  // the stall clock forever while the loop went nowhere — the
+  // watchdog above could never fire on exactly the runs it exists
+  // for. Only events that prove the loop's state advanced count now
+  // (isSubstantiveProgressEvent); a wedged loop stops producing
+  // those — that is what separates "slow but working" from "alive
+  // but stalled".
+  const runProgress = new ProgressEmitter((event) => {
+    if (!isSubstantiveProgressEvent(event)) return;
     lastProgressAt = new Date().toISOString();
     lastProgressAtMs = Date.now();
   });
@@ -716,6 +741,39 @@ export async function POST(
     ? await getProject(resolved.projectId, userId).catch(() => null)
     : null;
 
+  // The resumed run's task scope, passed EXPLICITLY (round-8
+  // diagnosis Q1, defense in depth): the persisted quality snapshot
+  // is the run's own record of the kernel-classified scope. A
+  // restored snapshot carries its scope by design, so this
+  // pass-through is the backstop for the fresh-session branch (a
+  // snapshot whose identity no longer matches is not restored) —
+  // without it that branch re-derives the scope from prose via
+  // classifyTaskScope, which has no media case, and a media run is
+  // gated as a "standard" build. Deliberately NOT derived from the
+  // gated tool: a build turn can pause on image.generate mid-build,
+  // and only the kernel signal (recorded in the snapshot) may set
+  // the scope — the tool that happened to gate proves nothing about
+  // the turn.
+  const resumeTaskScope: QualityTaskScope | undefined =
+    resolved.qualityLoopState?.taskScope;
+
+  // Media-only resume (round-8 diagnosis Q2): phase 1 disarms the
+  // build-capability guard for a media turn (launch-flow: mediaOnly)
+  // because the generation's persisted asset IS the deliverable —
+  // image.generate is not a file-writing tool, so the guard's
+  // "no successful file-writing operation" verdict is unreachable
+  // truth for such a run and fired even when generation succeeded.
+  // The resume mirrors that disarm when the run's recorded scope
+  // is media AND no file-writing call succeeded before the pause.
+  // An image-first BUILD keeps its guard twice over: its recorded
+  // scope is the build scope the kernel classified (not media),
+  // and any site writes it already landed show in priorToolCalls.
+  const resumeMediaOnly =
+    resumeTaskScope === "media" &&
+    !(resolved.priorToolCalls ?? []).some(
+      (call) => call.success && isFileWritingTool(call.toolId),
+    );
+
   const resumeConfig: Partial<AgentLoopConfig> = {
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
@@ -754,10 +812,14 @@ export async function POST(
     // existing build-intent test (the same one that enables the quality
     // loop below: act/auto mode with a project) as the second arming
     // condition, so an image-first build keeps its zero-write protection
-    // across the resume.
+    // across the resume. A media-only resume is the one exclusion
+    // (resumeMediaOnly above): its deliverable is the persisted
+    // generation, never a file write, so the guard could only ever
+    // misread it — phase 1 disarms it for media turns the same way.
     buildCapabilityGuard:
-      isFileWritingTool(resolved.toolId) ||
-      shouldEnableQualityLoop(resolved.executionMode, resolved.projectId)
+      !resumeMediaOnly &&
+      (isFileWritingTool(resolved.toolId) ||
+        shouldEnableQualityLoop(resolved.executionMode, resolved.projectId))
         ? { maxStepsWithoutFileWrite: 3 }
         : undefined,
     // Quality loop: resume with a fresh evidence session so the resumed
@@ -774,6 +836,10 @@ export async function POST(
             resolved.pausedMessages.find((m) => m.role === "user")?.content ?? "",
           ).slice(0, 2000),
           state: resolved.qualityLoopState,
+          // Explicit scope (see resumeTaskScope above): a restored
+          // snapshot ignores it by design; a missing snapshot must
+          // not fall back to prose classification.
+          taskScope: resumeTaskScope,
         }
       : undefined,
   };
@@ -884,12 +950,17 @@ export async function POST(
       let resumeFailure: string | undefined;
       let resumePreview: Awaited<ReturnType<typeof ensureProjectPreviewReady>> | null = null;
       if (!result.pendingApproval && !result.cancelled) {
-        if (result.modelFailed) {
+        if (result.modelFailed && !result.completedWithWarning) {
           // The resumed loop stopped because the model itself failed
           // (provider routes exhausted, budget spent, upstream error).
           // Surface that real reason — letting the artifact gate run here
           // would mask it behind a misleading "no runnable entry file"
           // error even though the approved mutation may have succeeded.
+          // Round 11 exception: when the loop settled
+          // completedWithWarning, the deliverable had already landed and
+          // passed the gate — the model failure hit only the closing
+          // summary, so it is recorded as a contributor on the run
+          // record (below), not promoted to the run's verdict.
           resumeFailure =
             result.modelFailureText ??
             `The resumed run could not complete: ${result.modelFailed}`;
@@ -907,7 +978,16 @@ export async function POST(
             ? ` (${failedCall.toolId}: ${failedCall.summary || "failed"})`
             : "";
           resumeFailure = `The approved workspace operation failed${detail}, so the project was not completed.`;
-        } else if (successfulMutation) {
+        } else if (successfulSiteFileMutation) {
+          // The artifact/preview gate runs only for a SITE-FILE
+          // mutation. The broader successfulMutation also fires for
+          // asset-only mutations (an approved image.generate, an
+          // image.stock fetch): those deliver a media file, not a
+          // site, and subjecting them to the website artifact gate
+          // failed a successful generation deterministically and
+          // replaced its reply with the gate's error
+          // (LION-RUN-DIAGNOSIS-2026-11-16 Q1/F1b). An asset-only
+          // resumed run settles on its own tool result below.
           // Scope the artifact gate with the resumed run's own workspace
           // evidence: a "changed" diff proves the approved mutation landed,
           // so the welcome-screen marker check (which only detects stalled
@@ -927,10 +1007,12 @@ export async function POST(
             resumeFailure = resumePreview.error ?? "The project files were not runnable after approval.";
           }
         }
-      } else if (result.pendingApproval && successfulMutation) {
+      } else if (result.pendingApproval && successfulSiteFileMutation) {
         // A nested approval is allowed to continue, but preview can already
         // be useful once the first file mutation has landed. Do not fail the
         // nested gate merely because a later file has not been written yet.
+        // Site-file mutations only, for the same reason as the settled
+        // branch above: an asset-only mutation has no site to preview.
         resumePreview = await ensureProjectPreviewReady(
           transport,
           { hadSuccessfulMutation: successfulSiteFileMutation, entryFileMutated: successfulEntryFileMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
@@ -950,13 +1032,23 @@ export async function POST(
         });
         // Canonical settle FIRST — the outcome is recorded on the action_run
         // (errors propagate; a silent divergence is worse than a loud
-        // failure). The claim is verified and released inside.
+        // failure). The claim is verified and released inside. The
+        // runResult carries EVERY failure contributor (round 11): the
+        // headline reason above is the display choice, not the whole
+        // record — a route failure must not erase a tool defect.
         await settleResumedRunOutcome({
           record: resolved,
           userId,
           status: "failed",
           eventType: "run.failed",
           patch: { currentActivity: "Task failed", failureCode: "TASK_FAILED", failureMessage: resumeFailure },
+          runResult: {
+            finalText: resumeFailure,
+            stepsUsed: result.stepsUsed,
+            toolCalls: result.toolCalls,
+            cancelled: false,
+            failureContributors: result.failureContributors,
+          },
           executionToken,
           logEvent: "approval:action_run_failure_settle_failed",
         });
@@ -981,10 +1073,38 @@ export async function POST(
         const qualitySession = restoreQualityLoopSession(qualityLoopState);
         const previewUrl = resumeConfig.isStaticWorkspace
           ? `/api/preview/${encodeURIComponent(resolved.projectId)}/`
-          : buildPreviewProxyUrl(transport.workspaceId);
+          : buildPreviewProxyUrl(transport.workspaceId, { userId, projectId: resolved.projectId });
         if (resumePreview?.ok) {
           noteBuildArtifacts(qualitySession, resumePreview.files);
           notePreviewReady(qualitySession, previewUrl);
+          if (resumeConfig.isStaticWorkspace && resolved.actionRunId) {
+            // The quality session is not the only ledger: the projection's
+            // Preview facet reads the action-event log, and the static
+            // branch of ensureProjectPreviewReady records no event there
+            // (the non-static path emits via startAndWaitForPreview), so a
+            // resumed static run kept whatever stale preview.failed an
+            // earlier probe wrote. Persist the ready fact into the event
+            // log so the facet can agree with the run's verdict.
+            // Best-effort: the settle below must not fail over an event
+            // write — the projection also reconciles facets against the
+            // run's terminal status.
+            try {
+              await appendActionEvent({
+                runId: resolved.actionRunId,
+                userId,
+                type: "preview.ready",
+                payload: { success: true, previewUrl, label: "Preview ready" },
+              });
+            } catch (error) {
+              studioLog("approval:preview_ready_event_failed", {
+                conversationId,
+                userId,
+                actionRunId: resolved.actionRunId,
+                pausedRunId,
+                errorClass: error instanceof Error ? error.message : "unknown",
+              });
+            }
+          }
         }
         // File the deployment the resumed run actually completed. The
         // approved project.deploy executed deployUserProject, which
@@ -1029,8 +1149,11 @@ export async function POST(
       // Reflect the final outcome on the transcript BEFORE marking the run
       // completed — a poller that sees "completed" can then loadMessages
       // and get the real persisted result. An honest loop failure is
-      // reported as failed, never completed.
-      await writeResumedResultToTranscript({
+      // reported as failed, never completed. Round 14: if the writeback
+      // still fails after its retry, say so in the log — the outcome
+      // itself stays durable via settleResumedRunOutcome's RunResult
+      // below; only the transcript rendering lags.
+      const transcriptWritten = await writeResumedResultToTranscript({
         conversationId,
         userId,
         projectId: resolved.projectId,
@@ -1044,11 +1167,21 @@ export async function POST(
               : "completed",
         content: (terminalFailure || finalText) || undefined,
       });
+      if (!transcriptWritten) {
+        studioLog("approval:settled_outcome_transcript_lagging", {
+          conversationId,
+          userId,
+          pausedRunId,
+        });
+      }
 
       const runResult: RunResult = {
         finalText,
         stepsUsed: result.stepsUsed,
         toolCalls: result.toolCalls,
+        // Round 11: all failure contributors ride the run record, on
+        // completed runs too — the warning state must stay diagnosable.
+        failureContributors: result.failureContributors,
         cancelled: result.cancelled,
         cancelReason: result.cancelReason,
         pendingApproval: result.pendingApproval
@@ -1366,6 +1499,9 @@ function resumedDeployPublicUrl(
  * is read from the workspace and must contain non-trivial content. An
  * unreadable or empty file files nothing — the gate keeps its honesty.
  */
+/** Round 14: a sandbox read in the settle path gets a hard bound. */
+const RESUMED_ARTIFACT_READ_TIMEOUT_MS = 10_000;
+
 async function fileResumedArtifactCheck(
   qualitySession: Parameters<typeof noteStaticArtifactCheck>[0],
   transport: { readFile(path: string): Promise<{ content: string } | string> },
@@ -1373,7 +1509,24 @@ async function fileResumedArtifactCheck(
 ): Promise<void> {
   try {
     const candidate = (resumePreview?.files ?? []).find((f) => /\.(html?|css|js)$/i.test(f)) ?? "index.html";
-    const file = await transport.readFile(candidate);
+    // Round 14: this read sits between the loop's return and the
+    // settlement writes. It used to be unbounded, so a hung sandbox
+    // read blocked settlement exactly like a hung checkpoint did.
+    // A timeout lands in the same honest bucket as a failed read:
+    // contentMatches null — the gate files nothing it could not see.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const file = await Promise.race([
+      transport.readFile(candidate),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("artifact read timed out")),
+          RESUMED_ARTIFACT_READ_TIMEOUT_MS,
+        );
+        (timer as { unref?: () => void }).unref?.();
+      }),
+    ]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
     const content = typeof file === "string" ? file : file?.content;
     noteStaticArtifactCheck(qualitySession, {
       path: candidate,

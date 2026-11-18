@@ -13,6 +13,7 @@
  */
 import { type ReactNode } from "react";
 import { ChevronRight, MousePointer2, Sparkles, X } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext";
 
 export interface InspectorSelection {
   label?: string;
@@ -46,6 +47,7 @@ export default function ContextInspector({
   /** Fallback inspector (plan/checks/telemetry). */
   defaultContent: ReactNode;
 }) {
+  const { tokens } = useTheme();
   if (!open) {
     return (
       <button
@@ -55,7 +57,7 @@ export default function ContextInspector({
         title="Open inspector"
         data-testid="studio-inspector-open"
         className="glass-shell flex w-5 shrink-0 items-center justify-center border-l"
-        style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.6)" }}
+        style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: tokens.surface }}
       >
         <ChevronRight
           size={12}
@@ -73,7 +75,7 @@ export default function ContextInspector({
       aria-label="Inspector"
       data-testid="studio-context-inspector"
       className="glass-shell flex w-[300px] shrink-0 flex-col border-l xl:w-[320px]"
-      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.85)" }}
+      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: tokens.surface }}
     >
       <div
         className="flex h-9 shrink-0 items-center gap-2 border-b px-3"
@@ -88,7 +90,7 @@ export default function ContextInspector({
           onClick={onToggle}
           aria-label="Close inspector"
           title="Close inspector"
-          className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-white/5"
+          className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-[rgba(127,127,127,0.12)]"
           style={{ color: "var(--text-muted)" }}
         >
           <ChevronRight size={13} className="pointer-events-none" />
@@ -115,7 +117,7 @@ export default function ContextInspector({
                 onClick={onClearSelection}
                 aria-label="Clear selection"
                 title="Clear selection"
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-white/5"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-[rgba(127,127,127,0.12)]"
                 style={{ color: "var(--text-muted)" }}
               >
                 <X size={12} className="pointer-events-none" />

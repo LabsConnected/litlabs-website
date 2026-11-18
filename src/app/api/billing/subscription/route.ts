@@ -4,7 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { PLANS, type PlanId } from "@/config/plans";
 import { getCreditBalances } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { isOwnerClerkId, getActiveSimulation, type SimulatedPlan } from "@/lib/owner";
+import { isBillingExempt, isOwnerClerkId, getActiveSimulation, type SimulatedPlan } from "@/lib/owner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +22,7 @@ async function handler(req: NextRequest) {
         plan: PLANS.starter,
         subscription: null,
         balances: { monthly: 0, purchased: 0, beta_promotional: 0, total: 0 },
+        billingExempt: false,
       });
     }
 
@@ -36,6 +37,7 @@ async function handler(req: NextRequest) {
         plan: PLANS.starter,
         subscription: null,
         balances: { monthly: 0, purchased: 0, beta_promotional: 0, total: 0 },
+        billingExempt: false,
       });
     }
 
@@ -93,6 +95,11 @@ async function handler(req: NextRequest) {
       subscription: sub ?? null,
       balances,
       isOwner: owner,
+      // Display signal only: the billing-exempt owner (not simulating a
+      // customer tier) is metered but never debited, so clients render
+      // "DEV ∞" per the owner display doctrine in src/lib/owner.ts instead
+      // of the raw ledger balance. Ledger contents are unchanged.
+      billingExempt: isBillingExempt(clerkId, simulation),
       simulation,
       testMode: simulation !== null && simulation !== "owner",
       simulatedZeroBalance,

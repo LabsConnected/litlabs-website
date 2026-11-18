@@ -33,12 +33,14 @@ export interface SandboxResourceLimits {
 }
 
 export const DEFAULT_SANDBOX_LIMITS: SandboxResourceLimits = {
-  cpuVcpus: 1,
-  memoryMB: 1024,
+  cpuVcpus: 2,
+  memoryMB: 2048,
   processLimit: 100,
   diskGB: 5,
   idleTimeoutMinutes: 15,
-  maxSessionMinutes: 120,
+  // Mirror of terminal-server/sandbox/provider.ts: 60 matches the
+  // E2B Hobby plan's 1-hour sandbox lifetime cap (round 9).
+  maxSessionMinutes: 60,
 };
 
 // ─── Sandbox Usage ───────────────────────────────────────────────
@@ -152,6 +154,17 @@ export interface ExecuteCommandInput {
   stdin?: string;
   timeoutMs?: number;
   cwd?: string;
+  /**
+   * Per-command PROJECT env (Phase 2, design note §1.6): variables
+   * that apply to this one command only, layered over the sandbox's
+   * composed base env. Identity variables in it are ignored (identity
+   * always wins), and providers refuse any value equal to one of the
+   * platform's own secrets (env-allowlist.ts value-based check) — a
+   * project's own secrets under the same NAMES are fine. Mirrors the
+   * terminal-server contract (terminal-server/sandbox/provider.ts)
+   * per the seam rule; the two MUST stay in sync.
+   */
+  env?: Record<string, string>;
 }
 
 export interface ExecuteCommandResult {

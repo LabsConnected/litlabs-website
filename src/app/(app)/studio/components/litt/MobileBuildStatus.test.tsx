@@ -91,6 +91,13 @@ describe("MobileBuildStatusBar", () => {
     expect(screen.queryByTestId("mobile-build-approval")).not.toBeInTheDocument();
   });
 
+  it("renders on the light studio surface — no dark bar (clean-open)", () => {
+    renderBar();
+    const bar = screen.getByTestId("mobile-build-status");
+    expect(bar.style.backgroundColor).toBe("var(--studio-surface)");
+    expect(bar.style.backgroundColor).not.toContain("16,12,26");
+  });
+
   it("clicking the bar calls onOpen", () => {
     const { onOpen } = renderBar();
 
@@ -104,5 +111,30 @@ describe("MobileBuildStatusBar", () => {
 
     rerender(<MobileBuildStatusBar open onOpen={vi.fn()} />);
     expect(screen.getByTestId("mobile-build-status")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  // Approve-in-chat (2026-11-11): after Larry approved in the chat card,
+  // this bar kept reading "Approval waiting" while the card said
+  // "Approved — running...". A landed decision (approvalPhase
+  // submitting/executing) is not a waiting gate.
+  it("drops the Approval waiting badge once the decision lands", () => {
+    renderBar();
+
+    act(() => {
+      useExecutionStore.getState().setPendingApproval({
+        toolId: "image.stock",
+        reason: "Mutation requires approval in ACT mode",
+        pausedRunId: "paused-1",
+      });
+    });
+    expect(screen.getByTestId("mobile-build-approval")).toBeInTheDocument();
+
+    act(() => {
+      useExecutionStore.getState().beginApprovalSubmit();
+      useExecutionStore.getState().approvalAccepted();
+    });
+
+    expect(screen.queryByTestId("mobile-build-approval")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approval waiting")).not.toBeInTheDocument();
   });
 });

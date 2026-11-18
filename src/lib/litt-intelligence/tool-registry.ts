@@ -193,6 +193,22 @@ export async function maybeAutoInsertGeneratedImage(
         savedToProject: true,
         projectPath: saved.path,
         sitePath: saved.sitePath,
+        // Round 14: a UI-only chat payload survives the strip. The
+        // markdown was removed because the MODEL must never re-emit
+        // it — but dropping it also dropped the only inline-render
+        // channel, so a saved image never appeared in chat (the
+        // 2026-11-17 lion proof). chatImage carries no instruction
+        // for the model; the agent loop reads it from the result
+        // (readChatImageOutcome) and appends the render markdown to
+        // the settled final text itself. downloadUrl already rides
+        // the result, so this exposes nothing new to the model.
+        chatImage: {
+          url: r.downloadUrl,
+          prompt:
+            typeof r.title === "string" && r.title.length > 0
+              ? r.title
+              : "Generated image",
+        },
         siteReference:
           `The image is already saved in the project at ${saved.sitePath}. ` +
           `Reference it in the site's HTML as <img src="${saved.sitePath}" /> — ` +
@@ -1643,14 +1659,26 @@ export function registerInternalTools(): void {
           + "Write the project's files first — the deployment publishes what is "
           + "in the workspace, and requires an index.html. The live URL is "
           + "fetched and verified before this reports success, so only report "
-          + "the site as live if this tool returned a publicUrl.",
+          + "the site as live if this tool returned a publicUrl. "
+          + "Targets: omit `target` (or pass \"litt\") to publish on LiTT "
+          + "Hosting — the default. Pass target \"netlify\" ONLY when the user "
+          + "asked to deploy to Netlify; that publishes to the user's own "
+          + "connected Netlify account and fails honestly if none is connected.",
         source: "internal",
         version: "1.0.0",
-        // No projectId, userId, provider, account or service inputs: identity
-        // and target come from the authorized server-side transport, so the
-        // model cannot deploy another tenant's project or aim this at LiTT's
-        // own infrastructure.
-        inputSchema: { type: "object", properties: {}, required: [] },
+        // No projectId, userId, account or service inputs: identity comes
+        // from the authorized server-side transport, so the model cannot
+        // deploy another tenant's project or aim this at LiTT's own
+        // infrastructure. The only input is the publish TARGET the user
+        // chose; the credential for it is resolved server-side from the
+        // transport's owner, never from inputs.
+        inputSchema: {
+          type: "object",
+          properties: {
+            target: { type: "string", enum: ["litt", "netlify"] },
+          },
+          required: [],
+        },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
         requiredPermissions: ["deploy:create"],

@@ -3,56 +3,67 @@
 import { HEALTH_LEVEL_COLOR, terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import Link from "next/link";
 import { useWallet } from "@/context/WalletContext";
 import StudioProjectPicker from "./StudioProjectPicker";
-import GlobalLittStudioEntry from "@/components/global-litt/GlobalLittStudioEntry";
 import {
   useStudioModelStore,
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
-import { resolveSelectedModelHealth } from "../lib/model-health";
+import {
+  STUDIO_LAYOUT_MODE_OPTIONS,
+  type StudioLayoutMode,
+} from "../stores/useBoardSettingsStore";
+import {
+  resolveSelectedModelHealth,
+  summarizeProviderHealth,
+  type ProviderHealthSummary,
+} from "../lib/model-health";
 import {
   Eye,
   Rocket,
   CircleAlert,
   CircleCheck,
   CircleDot,
-  Bell,
   PanelBottom,
   MoreHorizontal,
   Plus,
+  Share2,
   Terminal,
   Trash2,
   Edit2,
   Download,
   Eraser,
-  Settings,
 } from "lucide-react";
-import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
+import { copyToClipboard } from "@/lib/studio/message-copy";
 import {
   runtimePhaseLabel,
+  HOST_EXECUTION_UNAVAILABLE_LABEL,
+  HOST_EXECUTION_UNAVAILABLE_SHORT,
   type ProjectRuntimeState,
 } from "@/lib/projects/runtime-state";
+import { HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
-  available: { color: "#72f238", label: "Available" },
+  available: { color: "#177a36", label: "Available" },
   degraded: { color: "#e3b341", label: "Degraded" },
   unavailable: { color: "#ef4444", label: "Unavailable" },
-  locked: { color: "#6f7485", label: "Not configured" },
+  locked: { color: "#52684f", label: "Not configured" },
+  unknown: { color: "#8a8f98", label: "Checking" },
 };
 
 export type StudioTopBarMode = "plan" | "act" | "auto";
-export type StudioTopBarDockTab = "activity" | "files" | "terminal" | "inspector" | "media";
+// No "files": the dock's Files tab is retired (Larry, 2026-11-13) —
+// files open in the LiTT panel's top-row Files tab, not the dock.
+export type StudioTopBarDockTab = "activity" | "terminal" | "inspector" | "media";
 
 const MODE_META: { id: StudioTopBarMode; label: string; desc: string; color: string; tint: string; border: string }[] = [
-  { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "#3b82f6", tint: "rgba(59,130,246,0.12)", border: "rgba(59,130,246,0.35)" },
-  { id: "act", label: "ACT", desc: "Make changes; approvals may be required", color: "#8b5cf6", tint: "rgba(139,92,246,0.12)", border: "rgba(139,92,246,0.35)" },
+  { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "#52684f", tint: "#e4f2d6", border: "#6e9a57" },
+  { id: "act", label: "ACT", desc: "Make changes; approvals may be required", color: "#177a36", tint: "rgba(23,122,54,0.10)", border: "rgba(23,122,54,0.35)" },
   { id: "auto", label: "AUTO", desc: "LiTT chooses when to plan and when to act", color: "var(--color-accent)", tint: "color-mix(in srgb, var(--color-accent) 10%, transparent)", border: "color-mix(in srgb, var(--color-accent) 32%, transparent)" },
 ];
 
 /**
- * CommandStudioHeader — the single top command bar (52px).
+ * CommandStudioHeader — the single top command bar (height = --studio-header-h).
  *
  * One bar owns: brand + project switcher · segmented PLAN/ACT/AUTO ·
  * truthful agent-status pill (idle / working / approval needed) · preview
@@ -87,11 +98,15 @@ export default function CommandStudioHeader({
   capabilities,
   busy = false,
   approvalPending = false,
+  lastRunFailed = false,
   executionMode = "auto",
   onExecutionModeChange,
+  layoutMode,
+  onLayoutModeChange,
+  onReconnectWorkspaceAction,
 }: {
   onPreviewAction?: () => void;
-  /** Toggles the bottom dock (Activity/Files/Terminal/Inspector/Media). */
+  /** Toggles the bottom dock (Activity/Terminal/Inspector/Media). */
   onToggleDockAction?: () => void;
   /** Opens the dock on a specific tab (used by the status popover + overflow menu). */
   onOpenDockTabAction?: (tab: StudioTopBarDockTab) => void;
@@ -124,9 +139,32 @@ export default function CommandStudioHeader({
   busy?: boolean;
   /** True while an approval gate is waiting on the user. */
   approvalPending?: boolean;
+  /**
+   * True when the conversation's most recent settled run failed. The
+   * ambient runtime label stays available in the status popover, but the
+   * pill must not read green "Ready" over a failed run.
+   */
+  lastRunFailed?: boolean;
   /** Execution mode — shown as a segmented PLAN/ACT/AUTO control. */
   executionMode?: StudioTopBarMode;
   onExecutionModeChange?: (mode: StudioTopBarMode) => void;
+  /**
+   * The crossbreed layout switch (Amendment 8): the effective Studio
+   * layout. Rendered as a Board | Regular segmented control in the
+   * header — visible in BOTH layouts, so a user who flips to Regular
+   * can always flip back. Absent props = no switch (non-studio
+   * destinations, mobile).
+   */
+  layoutMode?: StudioLayoutMode;
+  onLayoutModeChange?: (mode: StudioLayoutMode) => void;
+  /**
+   * Workspace chip click (Kimi wiring item 6): runs the real guarded
+   * workspace prepare (CommandStudio's handlePrepareWorkspace). The
+   * chip is deliberately SEPARATE from the agent-status pill — the
+   * pill blends agent/runtime state; this chip reports the workspace
+   * alone and reconnects it.
+   */
+  onReconnectWorkspaceAction?: () => void | Promise<void>;
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
@@ -135,7 +173,9 @@ export default function CommandStudioHeader({
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
-  const [notifCount, setNotifCount] = useState<number | null>(null);
+  const [workspaceReconnecting, setWorkspaceReconnecting] = useState(false);
+  // Share (Kimi wiring item 16): transient "Link copied" confirmation.
+  const [shareCopied, setShareCopied] = useState(false);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   const overflowTriggerRef = useRef<HTMLButtonElement>(null);
   const [statusRect, setStatusRect] = useState<DOMRect | null>(null);
@@ -148,24 +188,6 @@ export default function CommandStudioHeader({
     if (overflowTriggerRef.current) {
       setOverflowRect(overflowTriggerRef.current.getBoundingClientRect());
     }
-  }, []);
-
-  // Poll unread notification count (truthful; falls back to null on error).
-  useEffect(() => {
-    let cancelled = false;
-    const fetchNotifs = async () => {
-      try {
-        const res = await fetch("/api/notifications/count", { credentials: "include" });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setNotifCount(typeof data.count === "number" ? data.count : null);
-      } catch {
-        if (!cancelled) setNotifCount(null);
-      }
-    };
-    void fetchNotifs();
-    const id = window.setInterval(fetchNotifs, 45_000);
-    return () => { cancelled = true; window.clearInterval(id); };
   }, []);
 
   useEffect(() => {
@@ -182,7 +204,11 @@ export default function CommandStudioHeader({
   const writesAllowed = capabilities.writeAccess;
   const modelHealth = resolveSelectedModelHealth(selectedModel, providerHealth);
   const hasAi = modelHealth === "available" || modelHealth === "degraded";
-  const providerCount = hasAi ? 1 : 0;
+  // The popover's AI Providers row reports the actual per-provider health
+  // map — which providers are usable right now. (hasAi above is a
+  // different, narrower truth: the SELECTED model's route health, used
+  // for the status pill. It must never be dressed up as a provider count.)
+  const providerSummary = summarizeProviderHealth(providerHealth);
 
   // "ready" already implies executionAvailable (workspace mounted AND
   // terminal server reachable) — the canonical hook derives them together,
@@ -196,6 +222,11 @@ export default function CommandStudioHeader({
         // Canonical terminal wording — same label the operator bar and
         // Mission hints render (lib/studio/terminal-health.ts).
         ? terminalHealthOf(capabilities).label
+      : runtime.error?.code === HOST_EXECUTION_DISABLED_CODE
+        // Wave-4 truth: a repo-backed workspace refused by the hosted
+        // service's fail-closed execution policy is not a transient
+        // "not ready" — name the actual state.
+        ? HOST_EXECUTION_UNAVAILABLE_LABEL
       : runtime.phase !== "ready"
         ? runtimePhaseLabel(runtime.phase)
         : modelHealth === undefined
@@ -217,17 +248,23 @@ export default function CommandStudioHeader({
 
   // Status pill: approval gates and agent work take precedence over the
   // ambient runtime label — both are truthful, derived from live state.
+  // A settled failed run outranks the ambient label too: "Runtime
+  // verified / Ready" describes the runtime, not the last run, and
+  // showing it green over a failed run reads as a contradiction.
   const pill = approvalPending
     ? { label: "Approval needed", short: "Approval", color: "#e3b341", pulse: true }
     : busy
       ? { label: "Agent working", short: "Working", color: "var(--color-accent)", pulse: true }
-      : {
+      : lastRunFailed
+        ? { label: "Last run failed", short: "Failed", color: "#ef4444", pulse: false }
+        : {
           label: statusLabel,
-          short: statusLabel === "Runtime verified" ? "Ready"
+          short: statusLabel === "Runtime verified" ? "Verified"
             : statusLabel === "Runtime verified · provider degraded" ? "Degraded"
             : statusLabel === "Runtime status checking" ? "Checking"
             : statusLabel === "No project selected" ? "No project"
             : statusLabel === "AI provider unavailable" ? "No AI"
+            : statusLabel === HOST_EXECUTION_UNAVAILABLE_LABEL ? HOST_EXECUTION_UNAVAILABLE_SHORT
             : statusLabel,
           color: statusColor,
           pulse: false,
@@ -235,32 +272,21 @@ export default function CommandStudioHeader({
 
   return (
     <header
-      className="no-scrollbar flex h-[52px] shrink-0 items-center gap-1.5 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b px-3 sm:gap-2 sm:px-4 sm:overflow-hidden"
+      className="no-scrollbar flex h-[var(--studio-header-h)] shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b px-2.5 sm:gap-1.5 sm:px-3 sm:overflow-hidden"
       style={{
-        backgroundColor: "#0d0916",
-        borderColor: "rgba(255,255,255,0.07)",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.35)",
+        backgroundColor: "var(--studio-surface)",
+        borderColor: "var(--studio-border)",
+        boxShadow: "0 4px 20px rgba(14,60,26,0.08)",
       }}
       data-testid="studio-header"
     >
       {/* Brand */}
-      <div className="flex shrink-0 items-center gap-2 pr-1" data-testid="studio-brand">
-        <div
-          className="grid h-7 w-7 place-items-center rounded-lg"
-          style={{
-            background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 25%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
-            border: "1px solid color-mix(in srgb, var(--color-accent) 35%, transparent)",
-            boxShadow: "0 0 12px color-mix(in srgb, var(--color-accent) 25%, transparent)",
-          }}
-          aria-hidden="true"
-        >
-          <span className="text-[11px] font-black text-accent">L</span>
-        </div>
-        <span className="hidden text-[13px] font-bold tracking-tight text-white md:inline">
-          LiTT <span className="text-accent">Studio</span>
-        </span>
-      </div>
-
+      {/* No brand block in the project header (Larry's directive,
+          2026-11-10): the bar is his projects and the repo workspace
+          status — the app-level top bar above carries the brand.
+          The Global LiTT header entry was removed 2026-11-13 (Larry):
+          the persistent left chat already covers that role. The
+          Global LiTT backend, routes, and overlay are untouched. */}
       <StudioProjectPicker
         projectId={capabilities.projectId}
         projectName={capabilities.projectName}
@@ -270,8 +296,100 @@ export default function CommandStudioHeader({
         onProjectRenamed={(projectId, name) => onProjectRenamedAction?.(projectId, name)}
       />
 
-      {/* Global LiTT — persistent operator, separate from ordinary projects */}
-      <GlobalLittStudioEntry />
+      {/* Share (Kimi wiring item 16): copies the current Studio URL —
+          the active project rides in ?project= (CommandStudio keeps
+          the param durable), so the link lands on this project. */}
+      {capabilities.projectId && (
+        <button
+          type="button"
+          data-testid="studio-share-button"
+          className="flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold transition-all hover:bg-black/5 active:scale-95 lg:min-h-6"
+          style={{
+            borderColor: "var(--studio-border)",
+            color: shareCopied ? "#177a36" : "var(--text-secondary)",
+            backgroundColor: "var(--studio-surface)",
+          }}
+          aria-label={shareCopied ? "Studio link copied" : "Copy link to this Studio project"}
+          title={shareCopied ? "Link copied" : "Copy link to this Studio project"}
+          onClick={() => {
+            if (typeof window === "undefined") return;
+            void copyToClipboard(window.location.href).then((ok) => {
+              if (!ok) return;
+              setShareCopied(true);
+              window.setTimeout(() => setShareCopied(false), 1600);
+            });
+          }}
+        >
+          {shareCopied ? <CircleCheck size={11} aria-hidden /> : <Share2 size={11} aria-hidden />}
+          <span className="hidden md:inline">{shareCopied ? "Copied" : "Share"}</span>
+        </button>
+      )}
+
+      {/* Workspace chip (Kimi wiring item 6) — the workspace's OWN
+          status, separate from the blended agent-status pill beside
+          it. Clicking while not ready runs the real reconnect
+          (guarded workspace prepare); while ready it is a plain
+          indicator. Renders only when a project is selected. */}
+      {capabilities.projectId && (() => {
+        const ws = runtime.workspaceStatus;
+        const chip = workspaceReconnecting
+          ? { color: "#e3b341", label: "Workspace reconnecting…", short: "Reconnecting", pulse: true }
+          : ws === "ready"
+            ? { color: "#48EE38", label: "Workspace ready", short: "Workspace ready", pulse: false }
+            : ws === "provisioning" || ws === "preparing"
+              ? { color: "#e3b341", label: "Workspace provisioning", short: "Provisioning", pulse: true }
+              : ws === "error" || ws === "failed"
+                ? { color: "#EF4444", label: "Workspace error — click to reconnect", short: "Workspace error", pulse: false }
+                : ws === "unavailable"
+                  ? { color: "#e3b341", label: HOST_EXECUTION_UNAVAILABLE_SHORT, short: "Unavailable", pulse: false }
+                  : runtimeLoading || ws === null
+                    ? { color: "#8a8f98", label: "Workspace status checking", short: "Checking", pulse: true }
+                    : { color: "#e3b341", label: "Workspace not connected — click to reconnect", short: "Not connected", pulse: false };
+        const clickable = ws !== "ready" && Boolean(onReconnectWorkspaceAction) && !workspaceReconnecting;
+        const chipClass =
+          "flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold lg:min-h-6";
+        const chipStyle = {
+          borderColor: `${chip.color}32`,
+          backgroundColor: `${chip.color}08`,
+          color: chip.color,
+        } as const;
+        const chipInner = (
+          <>
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${chip.pulse ? "animate-pulse" : ""}`}
+              aria-hidden
+              style={{ backgroundColor: chip.color, boxShadow: `0 0 4px ${chip.color}` }}
+            />
+            <span className="hidden md:inline">{chip.short}</span>
+          </>
+        );
+        return clickable ? (
+          <button
+            type="button"
+            onClick={() => {
+              setWorkspaceReconnecting(true);
+              void Promise.resolve(onReconnectWorkspaceAction?.()).finally(() => setWorkspaceReconnecting(false));
+            }}
+            className={`${chipClass} transition-all hover:bg-black/5 active:scale-95`}
+            style={chipStyle}
+            aria-label={chip.label}
+            title={chip.label}
+            data-testid="workspace-status-chip"
+          >
+            {chipInner}
+          </button>
+        ) : (
+          <span
+            className={chipClass}
+            style={chipStyle}
+            aria-label={chip.label}
+            title={chip.label}
+            data-testid="workspace-status-chip"
+          >
+            {chipInner}
+          </span>
+        );
+      })()}
 
       {/* Agent-status pill — truthful: working / approval needed / ambient runtime.
           Clicking opens the full workspace-status popover. */}
@@ -279,10 +397,10 @@ export default function CommandStudioHeader({
         ref={statusTriggerRef}
         type="button"
         onClick={() => setStatusOpen((v) => !v)}
-        className="flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95"
+        className="flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold transition-all hover:bg-black/5 active:scale-95 lg:min-h-6"
         style={{
-          borderColor: `${pill.color}45`,
-          backgroundColor: `${pill.color}0f`,
+          borderColor: `${pill.color}32`,
+          backgroundColor: `${pill.color}08`,
           color: pill.color,
         }}
         aria-label={pill.label}
@@ -293,7 +411,7 @@ export default function CommandStudioHeader({
         <span
           className={`h-1.5 w-1.5 rounded-full ${pill.pulse ? "animate-pulse" : ""}`}
           aria-hidden
-          style={{ backgroundColor: pill.color, boxShadow: `0 0 6px ${pill.color}` }}
+          style={{ backgroundColor: pill.color, boxShadow: `0 0 4px ${pill.color}` }}
         />
         <span className="hidden sm:inline">{pill.short}</span>
       </button>
@@ -303,7 +421,7 @@ export default function CommandStudioHeader({
             rect={statusRect}
             onClose={() => setStatusOpen(false)}
             onOpenTerminalAction={() => onOpenDockTabAction?.("terminal")}
-            providerCount={providerCount}
+            providerSummary={providerSummary}
             repoConnected={capabilities.repository === "connected"}
             repoName={capabilities.repositoryName}
             ptyState={capabilities.terminalStatus}
@@ -313,19 +431,59 @@ export default function CommandStudioHeader({
             modelHealth={modelHealth}
             fallbackNotice={fallbackNotice}
             walletBalance={walletLoading ? null : balance}
-            connectionSummary={capabilities.connectionSummary}
           />,
           document.body,
         )}
 
       <div className="flex-1" />
 
+      {/* Crossbreed layout switch (Amendment 8) — Board | Regular.
+          Lives in the one header both layouts share, so it is always
+          reachable whichever layout is active. */}
+      {layoutMode && onLayoutModeChange && (
+        <div
+          role="tablist"
+          aria-label="Studio layout"
+          data-testid="studio-layout-switch"
+          className="flex shrink-0 items-center gap-0.5 rounded-lg border p-0.5"
+          style={{ borderColor: "var(--studio-border)" }}
+        >
+          {STUDIO_LAYOUT_MODE_OPTIONS.map((option) => {
+            const selected = layoutMode === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                data-testid={`studio-layout-mode-${option.value}`}
+                onClick={() => onLayoutModeChange(option.value)}
+                className="min-h-8 shrink-0 whitespace-nowrap rounded-md px-2.5 text-[11px] font-bold transition-all active:scale-95 lg:min-h-7"
+                style={{
+                  color: selected ? "var(--text-main)" : "var(--text-dim)",
+                  backgroundColor: selected
+                    ? "color-mix(in srgb, var(--color-accent) 12%, transparent)"
+                    : "transparent",
+                }}
+                title={
+                  option.value === "board"
+                    ? "Board layout — every surface a movable panel"
+                    : "Regular layout — chat beside the workspace"
+                }
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Preview quick action — only when the runtime is actually verified. */}
       {mutationActionsAllowed && runtimeReady && (
         <button
           type="button"
           onClick={onPreviewAction}
-          className="hidden shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-[11px] font-bold text-on-accent shadow-accent-glow transition-all hover:bg-accent-strong active:scale-95 sm:flex"
+          className="hidden min-h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-[11px] font-bold text-on-accent shadow-accent-glow transition-all hover:bg-accent-strong active:scale-95 sm:flex lg:min-h-7"
           title="Open the live preview"
           aria-label="Preview"
           data-testid="preview-quick-action"
@@ -335,49 +493,41 @@ export default function CommandStudioHeader({
         </button>
       )}
 
-      {/* New chat */}
-      <button
-        type="button"
-        onClick={onNewChatAction}
-        disabled={busy}
-        className="flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1.5 text-[11px] font-bold text-accent transition-all hover:bg-accent/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-        aria-label="New chat"
-        title="Start a new chat"
-      >
-        <Plus size={13} aria-hidden />
-        <span className="hidden lg:inline">New Chat</span>
-      </button>
+      {/* New chat — only where a chat panel does not own it. In the
+          board-only Studio, New Chat lives inside the board's chat
+          panel and CommandStudio passes no onNewChatAction, so this
+          button (and the overflow menu's item) simply do not render. */}
+      {onNewChatAction && (
+        <button
+          type="button"
+          onClick={onNewChatAction}
+          disabled={busy}
+          className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1 text-[11px] font-bold text-accent transition-all hover:bg-accent/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 lg:min-h-8"
+          aria-label="New chat"
+          title="Start a new chat"
+        >
+          <Plus size={13} aria-hidden />
+          <span className="hidden lg:inline">New Chat</span>
+        </button>
+      )}
 
-      {/* Notifications — wired to /api/notifications/count */}
-      <Link
-        href="/dashboard"
-        className="relative hidden min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-all hover:bg-white/10 sm:grid"
-        style={{ color: "var(--text-secondary)" }}
-        aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}
-        title="Notifications"
-      >
-        <Bell size={14} />
-        {notifCount ? (
-          <span
-            className="absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full px-1 text-[8px] font-black"
-            style={{ backgroundColor: "#ef4444", color: "#fff" }}
-          >
-            {notifCount > 99 ? "99+" : notifCount}
-          </span>
-        ) : null}
-      </Link>
+      {/* Notifications bell + Owner badge moved UP to the app top bar
+          (beside the LiTT status) in the board-only cleanup — they are
+          no longer duplicated in this header. */}
 
-      {/* Dock toggle — the single entry point to Activity/Files/Terminal/Inspector/Media */}
+      {/* Dock toggle — classic layouts only; the board has no dock, so
+          CommandStudio passes no onToggleDockAction there. */}
+      {onToggleDockAction && (
       <button
         type="button"
         onClick={onToggleDockAction}
-        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95"
+        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[11px] font-bold transition-all hover:bg-black/5 active:scale-95 lg:min-h-8"
         style={{
-          borderColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.07)",
+          borderColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "var(--studio-border)",
           color: dockOpen ? "var(--color-accent)" : "var(--text-secondary)",
           backgroundColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent",
         }}
-        title="Toggle the dock — activity, files, terminal, inspector, media"
+        title="Toggle the dock — activity, terminal, inspector, media"
         aria-label={dockOpen ? "Close dock" : "Open dock"}
         aria-pressed={dockOpen}
         data-testid="studio-dock-toggle"
@@ -385,13 +535,14 @@ export default function CommandStudioHeader({
         <PanelBottom size={14} className="pointer-events-none" />
         <span className="hidden lg:inline">Dock</span>
       </button>
+      )}
 
-      {/* Overflow — conversation actions, deploy, terminal, settings */}
+      {/* Overflow — conversation actions, deploy, terminal, run mode */}
       <button
         ref={overflowTriggerRef}
         type="button"
         onClick={() => setOverflowOpen((v) => !v)}
-        className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-all hover:bg-white/10"
+        className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-all hover:bg-black/5"
         style={{ color: "var(--text-muted)" }}
         aria-label="More actions"
         aria-expanded={Boolean(overflowOpen)}
@@ -419,14 +570,9 @@ export default function CommandStudioHeader({
             hasConversation={Boolean(hasConversation)}
             previewDisabled={!runtimeReady}
             busy={busy}
-            settingsHref={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
           />,
           document.body,
         )}
-
-      {/* Owner / test-role selector — inline in the header action cluster.
-          Self-hides for non-owners, so it adds zero clutter for regular users. */}
-      <OwnerTestModeIndicator placement="inline" />
     </header>
   );
 }
@@ -471,7 +617,7 @@ function WorkspaceStatusPopover({
   rect,
   onClose,
   onOpenTerminalAction,
-  providerCount,
+  providerSummary,
   repoConnected,
   repoName,
   ptyState,
@@ -481,12 +627,11 @@ function WorkspaceStatusPopover({
   modelHealth,
   fallbackNotice,
   walletBalance,
-  connectionSummary,
 }: {
   rect: DOMRect;
   onClose: () => void;
   onOpenTerminalAction?: () => void;
-  providerCount: number;
+  providerSummary: ProviderHealthSummary;
   repoConnected: boolean;
   repoName: string | null;
   ptyState: string;
@@ -497,7 +642,6 @@ function WorkspaceStatusPopover({
   modelHealth: ProviderHealth | undefined;
   fallbackNotice: string | null;
   walletBalance: number | null;
-  connectionSummary: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -544,13 +688,22 @@ function WorkspaceStatusPopover({
       style={{
         left,
         top,
-        backgroundColor: "rgba(24,18,38,0.96)",
-        borderColor: "rgba(255,255,255,0.13)",
+        // Portaled to <body> — outside .studio-shell, so the palette
+        // is carried explicitly from the theme's published root
+        // variables (ThemeProvider sets them from the resolved skin),
+        // which follow the effective mode: the light Signature whites
+        // in Light, Larry's charcoal in Dark.
+        backgroundColor: "var(--box-bg)",
+        borderColor: "var(--border-color)",
+        color: "var(--text-color)",
+        ["--text-primary" as string]: "var(--text-color)",
+        ["--text-secondary" as string]: "color-mix(in srgb, var(--text-color) 76%, var(--bg-color))",
+        ["--text-muted" as string]: "color-mix(in srgb, var(--text-color) 58%, var(--bg-color))",
       }}
     >
       <div
         className="flex items-center justify-between border-b px-3 py-2"
-        style={{ borderColor: "rgba(255,255,255,0.07)" }}
+        style={{ borderColor: "var(--border-color)" }}
       >
         <span className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-secondary)" }}>
           Workspace status
@@ -558,19 +711,29 @@ function WorkspaceStatusPopover({
         <span
           className="h-1.5 w-1.5 rounded-full"
           style={{
-            backgroundColor: providerCount ? "var(--color-accent)" : "var(--text-muted)",
-            boxShadow: providerCount ? "0 0 4px var(--color-accent)" : "none",
+            backgroundColor: providerSummary.availableCount ? "var(--color-accent)" : "var(--text-muted)",
+            boxShadow: providerSummary.availableCount ? "0 0 4px var(--color-accent)" : "none",
           }}
           aria-hidden
         />
       </div>
-      <div className="max-h-[60dvh] overflow-y-auto divide-y" style={{ borderColor: "rgba(255,255,255,0.07)" }}>
+      <div className="max-h-[60dvh] overflow-y-auto divide-y" style={{ borderColor: "var(--border-color)" }}>
         <StatusRow
           label="AI Providers"
-          value={providerCount ? `${providerCount} connected` : "None connected"}
-          ok={providerCount > 0}
-          warn={providerCount === 0}
-          detail={connectionSummary}
+          value={
+            !providerSummary.known
+              ? "Checking…"
+              : providerSummary.availableCount > 0
+                ? `${providerSummary.availableCount} of ${providerSummary.totalCount} available`
+                : "None available"
+          }
+          ok={providerSummary.availableCount > 0}
+          warn={providerSummary.known && providerSummary.availableCount === 0}
+          detail={
+            providerSummary.known
+              ? providerSummary.detail
+              : "Provider health has not been verified yet"
+          }
         />
         <StatusRow
           label="Selected Model"
@@ -650,7 +813,6 @@ function OverflowMenu({
   hasConversation,
   previewDisabled,
   busy,
-  settingsHref,
 }: {
   rect: DOMRect;
   onClose: () => void;
@@ -669,7 +831,6 @@ function OverflowMenu({
   hasConversation: boolean;
   previewDisabled: boolean;
   busy: boolean;
-  settingsHref: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -698,28 +859,41 @@ function OverflowMenu({
       style={{
         top,
         right,
-        backgroundColor: "rgba(24,18,38,0.96)",
-        borderColor: "rgba(255,255,255,0.13)",
+        // Portaled to <body> — outside .studio-shell, so the palette
+        // is carried explicitly from the theme's published root
+        // variables (ThemeProvider sets them from the resolved skin),
+        // which follow the effective mode: the light Signature whites
+        // in Light, Larry's charcoal in Dark.
+        backgroundColor: "var(--box-bg)",
+        borderColor: "var(--border-color)",
+        color: "var(--text-color)",
+        ["--text-primary" as string]: "var(--text-color)",
+        ["--text-secondary" as string]: "color-mix(in srgb, var(--text-color) 76%, var(--bg-color))",
+        ["--text-muted" as string]: "color-mix(in srgb, var(--text-color) 58%, var(--bg-color))",
       }}
     >
       {/* Section: Conversation */}
       <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
         Conversation
       </div>
-      <button
-        type="button"
-        onClick={() => { onClose(); onNewChatAction?.(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5"
-        style={{ color: "var(--text-primary)" }}
-      >
-        <Plus size={13} className="pointer-events-none text-accent" />
-        New Chat
-      </button>
+      {/* New Chat renders only where the chat panel does not own it
+          (board-only Studio: it lives in the board chat panel). */}
+      {onNewChatAction && (
+        <button
+          type="button"
+          onClick={() => { onClose(); onNewChatAction(); }}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5"
+          style={{ color: "var(--text-primary)" }}
+        >
+          <Plus size={13} className="pointer-events-none text-accent" />
+          New Chat
+        </button>
+      )}
       <button
         type="button"
         disabled={disabled}
         onClick={() => { onClose(); onRenameChatAction?.(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-30"
         style={{ color: "var(--text-primary)" }}
       >
         <Edit2 size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
@@ -729,13 +903,13 @@ function OverflowMenu({
         type="button"
         disabled={disabled}
         onClick={() => { onClose(); onExportChatAction?.(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-30"
         style={{ color: "var(--text-primary)" }}
       >
         <Download size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Export
       </button>
-      <div className="h-px mx-3" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
+      <div className="h-px mx-3" style={{ backgroundColor: "var(--border-color)" }} />
       <button
         type="button"
         disabled={disabled}
@@ -744,7 +918,7 @@ function OverflowMenu({
           onClose();
           onClearChatAction?.();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-30"
         style={{ color: "var(--text-primary)" }}
       >
         <Eraser size={13} className="pointer-events-none" style={{ color: "#e3b341" }} />
@@ -758,7 +932,7 @@ function OverflowMenu({
           onClose();
           onDeleteChatAction?.();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-30"
         style={{ color: "#f87171" }}
       >
         <Trash2 size={13} className="pointer-events-none" />
@@ -766,7 +940,7 @@ function OverflowMenu({
       </button>
 
       {/* Section: Workspace */}
-      <div className="h-px" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
+      <div className="h-px" style={{ backgroundColor: "var(--border-color)" }} />
       <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
         Workspace
       </div>
@@ -774,7 +948,7 @@ function OverflowMenu({
         type="button"
         disabled={previewDisabled}
         onClick={() => { onClose(); onPreviewAction?.(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40"
         style={{ color: "var(--text-primary)" }}
       >
         <Eye size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
@@ -785,7 +959,7 @@ function OverflowMenu({
           type="button"
           disabled={exportBusy}
           onClick={() => { onClose(); onExportProjectAction(); }}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40"
           style={{ color: "var(--text-primary)" }}
           title="Download the project's source files as a ZIP"
           data-testid="header-export-project"
@@ -799,7 +973,7 @@ function OverflowMenu({
           type="button"
           disabled={disabled}
           onClick={() => { onClose(); onDeployAction(); }}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40"
           style={{ color: "var(--text-primary)" }}
           title="Ask LiTT to deploy this project to a live public URL"
         >
@@ -811,7 +985,7 @@ function OverflowMenu({
         <button
           type="button"
           onClick={() => { onClose(); onOpenDockTabAction("terminal"); }}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5"
           style={{ color: "var(--text-primary)" }}
           aria-label="Terminal"
         >
@@ -821,7 +995,7 @@ function OverflowMenu({
       )}
       {onExecutionModeChange && (
         <>
-          <div className="h-px" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
+          <div className="h-px" style={{ backgroundColor: "var(--border-color)" }} />
           <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
             Run mode
           </div>
@@ -850,16 +1024,8 @@ function OverflowMenu({
           </div>
         </>
       )}
-      <div className="h-px" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
-      <Link
-        href={settingsHref}
-        onClick={onClose}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5"
-        style={{ color: "var(--text-primary)" }}
-      >
-        <Settings size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
-        Settings
-      </Link>
+      {/* No Settings item here (Larry, board-only cleanup 2026-11-14):
+          Settings is a primary-nav destination, not a menu duplicate. */}
     </div>
   );
 }

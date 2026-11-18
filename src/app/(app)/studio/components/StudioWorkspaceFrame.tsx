@@ -11,7 +11,6 @@ import {
   Eye,
   CircleCheck,
   ShieldCheck,
-  Globe,
   AlertTriangle,
 } from "lucide-react";
 import type { InspectorTab } from "../lib/studio-destinations";
@@ -23,8 +22,8 @@ import { StudioActivityPanel } from "./StudioActivityPanel";
 import StudioHealthPanel from "./StudioHealthPanel";
 import StudioPreviewPanel from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
-import StudioBrowserJobsPanel from "./StudioBrowserJobsPanel";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { describeProjectState } from "@/lib/projects/project-state";
 
 interface DeploymentSummary {
   id: string;
@@ -38,6 +37,16 @@ interface HostingSummary {
   name: string;
   configured: boolean;
   reason?: string | null;
+}
+
+/** Canonical project state as carried by the deployments response. */
+interface ProjectStateSummary {
+  workspaceStatus: string;
+  runtimeStatus: string;
+  workspaceError: string | null;
+  runtimeError: string | null;
+  previewUrl: string | null;
+  updatedAt: string;
 }
 
 /**
@@ -132,12 +141,14 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
   const { getToken } = useClerkAuth();
   const [deployment, setDeployment] = useState<DeploymentSummary | null>(null);
   const [hosting, setHosting] = useState<HostingSummary | null>(null);
+  const [projectState, setProjectState] = useState<ProjectStateSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!projectId) {
       setDeployment(null);
       setHosting(null);
+      setProjectState(null);
       return;
     }
     let cancelled = false;
@@ -152,10 +163,11 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
           signal: AbortSignal.timeout(15000),
         });
         if (!res.ok) return;
-        const data = await res.json().catch(() => null) as { deployment?: DeploymentSummary | null; hosting?: HostingSummary | null } | null;
+        const data = await res.json().catch(() => null) as { deployment?: DeploymentSummary | null; hosting?: HostingSummary | null; project?: ProjectStateSummary | null } | null;
         if (!cancelled) {
           setDeployment(data?.deployment ?? null);
           setHosting(data?.hosting ?? null);
+          setProjectState(data?.project ?? null);
         }
       } catch {
         // Non-fatal — the section simply shows the last known state.
@@ -176,20 +188,64 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
 
   if (!projectId) return null;
 
+  // Specific states only — no vague "Ready" (Studio Finish Spec,
+  // Larry 2026-11-14): Saving / Saved / Building / Build failed /
+  // Published name the actual step the project is in.
   const statusLabel =
     loading && !deployment ? "Checking…" :
-    !deployment ? "Not deployed yet" :
-    deployment.status === "ready" ? (deployment.urlVerified ? "Live" : "Ready — verifying") :
-    deployment.status === "failed" ? "Failed" :
-    deployment.status === "building" ? "Building…" :
-    deployment.status === "deploying" ? "Deploying…" :
+    !deployment ? "Not published yet" :
+    deployment.status === "ready" ? (deployment.urlVerified ? "Published" : "Publishing — verifying the live URL") :
+    deployment.status === "failed" ? "Publish failed" :
+    deployment.status === "building" ? "Building" :
+    deployment.status === "deploying" ? "Publishing" :
     deployment.status;
   const tone = deployment?.status === "ready" && deployment.urlVerified ? "ok"
     : deployment?.status === "failed" ? "warn" : "muted";
 
+  // Preview truth from the canonical project state — the SAME derivation
+  // /projects renders (describeProjectState). Deployment (the record
+  // above) and preview (the workspace runtime) are different facts: a
+  // project can be preview-ready and never deployed, and this section
+  // must say both instead of collapsing them into "Not deployed yet /
+  // No preview yet".
+  const preview = projectState
+    ? describeProjectState({
+        workspaceStatus: projectState.workspaceStatus,
+        runtimeStatus: projectState.runtimeStatus,
+        updatedAt: projectState.updatedAt,
+        workspaceError: projectState.workspaceError,
+        runtimeError: projectState.runtimeError,
+      })
+    : null;
+  const previewTone = !preview
+    ? "muted"
+    : preview.label === "Preview ready" || preview.label === "Saved"
+      ? "ok"
+      : preview.label === "Setup failed" || preview.label === "Preview failed"
+        ? "warn"
+        : "muted";
+
   return (
     <InspectorSection title="Deployment">
       <InspectorRow label="Status" value={statusLabel} tone={tone} />
+      {preview ? (
+        <InspectorRow label="Preview" value={preview.label} tone={previewTone} />
+      ) : null}
+      {projectState?.previewUrl && projectState.runtimeStatus === "ready" ? (
+        <div className="flex items-start justify-between gap-3 border-b py-2 last:border-0" style={{ borderColor: "var(--studio-border)" }}>
+          <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>Preview URL</span>
+          <a
+            href={projectState.previewUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="max-w-[62%] truncate text-right text-[10px] font-bold underline"
+            style={{ color: "var(--litt-primary)" }}
+            title={projectState.previewUrl}
+          >
+            {projectState.previewUrl.replace(/^https?:\/\//, "")}
+          </a>
+        </div>
+      ) : null}
       {hosting ? (
         <InspectorRow
           label="Hosting"
@@ -257,7 +313,6 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
   { id: "preview", label: "Preview", icon: Eye },
   { id: "checks", label: "Checks", icon: CircleCheck },
   { id: "approvals", label: "Approvals", icon: ShieldCheck },
-  { id: "browser", label: "Browser", icon: Globe },
 ];
 
 export interface StudioInspectorData {
@@ -361,11 +416,7 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
   }
 
   if (tab === "approvals") {
-    return <StudioHealthPanel mode="approvals" projectId={capabilities.projectId} refreshKey={data.workspaceRevision} />;
-  }
-
-  if (tab === "browser") {
-    return <StudioBrowserJobsPanel projectId={capabilities.projectId} conversationId={data.conversationId ?? null} />;
+    return <StudioHealthPanel mode="approvals" projectId={capabilities.projectId} conversationId={data.conversationId ?? null} refreshKey={data.workspaceRevision} />;
   }
 
   return (
@@ -374,7 +425,7 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
         <InspectorRow label="Project" value={capabilities.projectName ?? "No project selected"} tone={capabilities.projectId ? "ok" : "warn"} />
         <InspectorRow label="Agent" value={data.activeAgentName} />
         <InspectorRow label="Model" value={data.modelLabel} tone={data.modelHealth === "available" ? "ok" : data.modelHealth ? "warn" : "muted"} />
-        <InspectorRow label="Status" value={data.busy ? "Agent working" : messages.length ? "Ready" : "Awaiting prompt"} tone={data.busy ? "ok" : "muted"} />
+        <InspectorRow label="Status" value={data.busy ? "Building" : messages.length ? "Saved" : "Awaiting prompt"} tone={data.busy ? "ok" : "muted"} />
       </InspectorSection>
       <InspectorSection title="Project context">
         <InspectorRow label="Source" value={describeSourceRows(capabilities).source} />
@@ -399,6 +450,7 @@ export function StudioInspector({
   children,
   data,
   embedded = false,
+  excludeTabs,
 }: {
   open: boolean;
   onToggle: () => void;
@@ -406,6 +458,13 @@ export function StudioInspector({
   onTabChange: (t: InspectorTab) => void;
   children?: React.ReactNode;
   data?: StudioInspectorData;
+  /**
+   * Tabs to leave out of the strip (board-only rebuild: on the board,
+   * Checks / Files / Preview have their own panels, so the board's
+   * Inspector excludes those duplicate tabs). Callers are responsible
+   * for not passing an excluded tab as activeTab.
+   */
+  excludeTabs?: InspectorTab[];
   /**
    * When true, skip this component's own collapse handle, mobile
    * backdrop, and mobile "Workspace inspector" header — the parent
@@ -427,7 +486,7 @@ export function StudioInspector({
         className="flex shrink-0 items-center gap-0.5 border-b px-1.5"
         style={{ borderColor: "var(--studio-border)" }}
       >
-        {INSPECTOR_TABS.map((t) => {
+        {INSPECTOR_TABS.filter((t) => !excludeTabs?.includes(t.id)).map((t) => {
           const Icon = t.icon;
           const isActive = activeTab === t.id;
           return (
@@ -450,7 +509,7 @@ export function StudioInspector({
         })}
       </div>
       <div
-        className={activeTab === "browser" ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto p-2.5"}
+        className="min-h-0 flex-1 overflow-y-auto p-2.5"
         role="region"
         aria-label={`${activeTab} inspector`}
       >

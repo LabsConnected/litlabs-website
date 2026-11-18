@@ -1,11 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ChevronDown, CircleCheck, Clock3, Loader2, Play, RefreshCw, ShieldCheck, Zap } from "lucide-react";
+import { AlertCircle, ChevronDown, CircleCheck, Clock3, FileCode2, Loader2, Play, RefreshCw, ShieldCheck, Zap } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
+import { parseFileRef } from "@/lib/studio/file-ref";
+import {
+  useBoardPanelStatusStore,
+  type BoardPanelStatus,
+} from "../stores/useBoardPanelStatusStore";
 import { useProjectRuntime } from "../hooks/useProjectRuntime";
-import { runtimePhaseLabel, runtimeRecoveryActions } from "@/lib/projects/runtime-state";
+import { HOST_EXECUTION_UNAVAILABLE_LABEL, runtimePhaseLabel, runtimeRecoveryActions } from "@/lib/projects/runtime-state";
+import { HOST_EXECUTION_DISABLED_CODE } from "@/lib/host-execution-guard";
 import { formatSourceSummary } from "@/lib/projects/project-source";
+import { isOptimisticConversationId } from "../lib/optimistic-conversation";
+import type { ActionRunDisplayState } from "./ActionRunStatusPanel";
 
 type CheckId = "build" | "typecheck" | "lint" | "test" | "security" | "accessibility" | "performance";
 type CheckStatus = "not_run" | "running" | "passed" | "failed" | "unavailable" | "not_configured";
@@ -32,6 +41,38 @@ interface PendingApproval {
   createdAt?: string;
   expiresAt?: string | null;
 }
+
+/**
+ * A V2 agent-loop approval gate, read from the action-run projection's
+ * pendingApprovals (the paused-run store). The checks payload's
+ * PendingApproval above is the LEGACY mission_approvals queue — a
+ * different store that V2 gates never write to.
+ */
+interface RunPendingApproval {
+  id: string;
+  toolId: string;
+  reason: string;
+}
+
+interface RunProjectionResponse {
+  projection?: {
+    displayState?: ActionRunDisplayState;
+    pendingApprovals?: Array<{ id?: unknown; toolId?: unknown; reason?: unknown }>;
+  } | null;
+}
+
+// Mirrors ACTIVE_STATES in ActionRunStatusPanel: display states in which
+// the run is still live, so its pending gates can appear or resolve
+// underneath the panel.
+const RUN_ACTIVE_DISPLAY_STATES: ReadonlySet<ActionRunDisplayState> = new Set([
+  "queued",
+  "starting",
+  "running",
+  "waiting_for_user",
+  "awaiting_approval",
+  "paused",
+  "stopping",
+]);
 
 interface HealthPayload {
   checks: HealthCheck[];
@@ -72,14 +113,51 @@ function statusLabel(status: CheckStatus): string {
   return status[0].toUpperCase() + status.slice(1).replace("_", " ");
 }
 
+/**
+ * Kimi wiring item 4: the clickable file:line chip on a check card.
+ * The reference is parsed from the check's OWN error/output text — when
+ * neither names a file, no chip renders (nothing is invented). Clicking
+ * dispatches the same studio:open-file event the canvas uses; the Code
+ * panel opens the file and, with a line present, reveals it.
+ */
+function CheckFileRefChip({ check, projectId }: { check: HealthCheck; projectId: string }) {
+  const ref = parseFileRef(check.error) ?? parseFileRef(check.output);
+  if (!ref) return null;
+  const label = ref.line ? `${ref.path}:${ref.line}` : ref.path;
+  return (
+    <button
+      type="button"
+      data-testid={`check-file-ref-${check.id}`}
+      onClick={() => {
+        window.dispatchEvent(
+          new CustomEvent(STUDIO_EVENT_OPEN_FILE, {
+            detail: { projectId, path: ref.path, line: ref.line, source: "checks" },
+          }),
+        );
+      }}
+      className="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-1 font-mono text-[9px] font-bold transition hover:bg-white/8"
+      style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
+      title={`Open ${label} in Code`}
+    >
+      <FileCode2 size={10} className="shrink-0" />
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
 export default function StudioHealthPanel({
   mode,
   projectId,
+  conversationId = null,
   refreshKey = 0,
   runTrigger = 0,
 }: {
   mode: "checks" | "approvals";
   projectId: string | null;
+  /** Conversation whose action-run projection carries the V2 approval
+      gates (approvals mode). Null when no conversation is in scope — the
+      panel then shows only the legacy mission approvals queue. */
+  conversationId?: string | null;
   refreshKey?: number;
   /** Incremented externally to trigger run-all checks */
   runTrigger?: number;
@@ -92,6 +170,13 @@ export default function StudioHealthPanel({
   const [running, setRunning] = useState<CheckId | null>(null);
   const [runningAll, setRunningAll] = useState(false);
   const [resolving, setResolving] = useState<string | null>(null);
+  // V2 run gates from the action-run projection. `runApprovalsKnown`
+  // stays false until the projection has actually been read (or there is
+  // no conversation to read one from), so the panel never claims "No
+  // pending approvals" on the strength of the legacy store alone.
+  const [runApprovals, setRunApprovals] = useState<RunPendingApproval[]>([]);
+  const [runApprovalsKnown, setRunApprovalsKnown] = useState(false);
+  const [runActive, setRunActive] = useState(false);
 
   const authHeaders = useCallback(async (json = false): Promise<HeadersInit> => {
     const token = await getToken?.();
@@ -129,6 +214,58 @@ export default function StudioHealthPanel({
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (refreshKey > 0) void load(); }, [load, refreshKey]);
+
+  /**
+   * Read the conversation's action-run projection — the store V2
+   * agent-loop gates actually live in (paused runs). Read-only: decisions
+   * stay in the chat's approval flow; this section only reports them.
+   */
+  const loadRunApprovals = useCallback(async () => {
+    if (!conversationId || isOptimisticConversationId(conversationId)) return;
+    try {
+      const response = await fetch(`/api/studio/conversations/${encodeURIComponent(conversationId)}/action-run`, { cache: "no-store", credentials: "include", headers: await authHeaders() });
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => null)) as RunProjectionResponse | null;
+      const projection = data?.projection ?? null;
+      const pending = Array.isArray(projection?.pendingApprovals) ? projection.pendingApprovals : [];
+      setRunApprovals(
+        pending
+          .filter((approval): approval is { id: string; toolId?: unknown; reason?: unknown } => Boolean(approval && typeof approval.id === "string"))
+          .map((approval) => ({
+            id: approval.id,
+            toolId: typeof approval.toolId === "string" && approval.toolId ? approval.toolId : "Action",
+            reason: typeof approval.reason === "string" ? approval.reason : "",
+          })),
+      );
+      setRunActive(Boolean(projection?.displayState && RUN_ACTIVE_DISPLAY_STATES.has(projection.displayState)));
+      setRunApprovalsKnown(true);
+    } catch {
+      // Keep the last known gates — a failed refresh must not blank the
+      // section back into a false "No pending approvals."
+    }
+  }, [authHeaders, conversationId]);
+
+  // Approvals mode: load the run gates with the panel, and keep polling
+  // them while the run is live (the status panel's cadence) — previously
+  // this section fetched the legacy store once on mount and never again,
+  // so it was stale by construction during a live run.
+  useEffect(() => {
+    if (mode !== "approvals") return;
+    if (!conversationId || isOptimisticConversationId(conversationId)) {
+      setRunApprovals([]);
+      setRunActive(false);
+      setRunApprovalsKnown(true);
+      return;
+    }
+    setRunApprovalsKnown(false);
+    void loadRunApprovals();
+  }, [mode, conversationId, loadRunApprovals, refreshKey]);
+
+  useEffect(() => {
+    if (mode !== "approvals" || !runActive) return;
+    const timer = setInterval(() => { void loadRunApprovals(); }, 2000);
+    return () => clearInterval(timer);
+  }, [mode, runActive, loadRunApprovals]);
 
   const runAllChecks = useCallback(async () => {
     if (!projectId) return;
@@ -216,21 +353,68 @@ export default function StudioHealthPanel({
     error: null,
   }), [payload.checks]);
 
+  // Kimi wiring item 2: publish the checks summary as this panel's own
+  // board-header status (checks mode only — approvals mode publishes
+  // nothing). Derived from the same payload the cards render.
+  const setPanelStatus = useBoardPanelStatusStore((s) => s.setPanelStatus);
+  useEffect(() => {
+    if (mode !== "checks") return;
+    const failedCount = checks.filter((check) => check.status === "failed").length;
+    const passedCount = checks.filter((check) => check.status === "passed").length;
+    const anyRunning = runningAll || running !== null || checks.some((check) => check.status === "running");
+    const status: BoardPanelStatus = anyRunning
+      ? { tone: "working", label: "Checks running", pulse: true }
+      : failedCount > 0
+        // Kimi wiring item 11: the failed count also rides as the
+        // toolbar badge, so it is visible when the panel is closed.
+        ? { tone: "error", label: `${failedCount} check${failedCount === 1 ? "" : "s"} failing`, badge: failedCount }
+        : passedCount > 0
+          ? { tone: "ready", label: "Checks passing" }
+          : { tone: "idle", label: "No checks run yet" };
+    setPanelStatus("health", status);
+  }, [mode, checks, running, runningAll, setPanelStatus]);
+  useEffect(() => () => setPanelStatus("health", null), [setPanelStatus]);
+
   if (!projectId) return <div className="flex h-full min-h-40 items-center justify-center px-4 text-center text-[10px]" style={{ color: "var(--text-muted)" }}>{mode === "checks" ? "Select a project to run checks." : "Select a project to view approvals."}</div>;
 
   if (mode === "approvals") {
+    const legacyApprovals = payload.pendingApprovals;
+    const approvalsEmpty = legacyApprovals.length === 0 && runApprovals.length === 0;
     return (
       <div className="space-y-3" data-testid="studio-approvals-panel">
-        <div className="flex items-center justify-between"><div><div className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: "var(--text-secondary)" }}>Pending approvals</div><div className="mt-1 text-[9px]" style={{ color: "var(--text-muted)" }}>Server-enforced actions for this project.</div></div><button type="button" onClick={() => void load()} disabled={loading} className="grid h-10 w-10 place-items-center rounded-lg hover:bg-white/8 disabled:opacity-40" aria-label="Refresh approvals"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button></div>
+        <div className="flex items-center justify-between"><div><div className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: "var(--text-secondary)" }}>Pending approvals</div><div className="mt-1 text-[9px]" style={{ color: "var(--text-muted)" }}>Server-enforced actions for this project.</div></div><button type="button" onClick={() => { void load(); void loadRunApprovals(); }} disabled={loading} className="grid h-10 w-10 place-items-center rounded-lg hover:bg-white/8 disabled:opacity-40" aria-label="Refresh approvals"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button></div>
         {error && <div className="rounded-lg border px-2.5 py-2 text-[9px]" style={{ borderColor: "rgba(239,68,68,0.3)", color: "#fca5a5" }}>{error}</div>}
-        {loading ? <div className="flex items-center justify-center gap-2 py-8 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={13} className="animate-spin" /> Loading approvals…</div> : payload.pendingApprovals.length === 0 ? <div className="flex flex-col items-center gap-2 py-8 text-[10px]" style={{ color: "var(--text-muted)" }}><ShieldCheck size={20} style={{ color: "var(--litt-primary)" }} /> No pending approvals.</div> : <div className="space-y-2">{payload.pendingApprovals.map((approval) => <div key={approval.id} className="rounded-xl border p-2.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}><div className="flex items-center justify-between"><span className="text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{approval.actionType ?? "Action"}</span>{approval.riskLevel && <span className="rounded px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ backgroundColor: approval.riskLevel === "high" ? "rgba(239,68,68,0.15)" : "rgba(227,179,65,0.15)", color: approval.riskLevel === "high" ? "#fca5a5" : "#e3b341" }}>{approval.riskLevel}</span>}</div>{approval.affectedFiles && approval.affectedFiles.length > 0 && <div className="mt-1.5 space-y-0.5">{approval.affectedFiles.slice(0, 5).map((file) => <div key={file} className="truncate font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>{file}</div>)}</div>}{approval.diff && <details className="mt-1.5"><summary className="cursor-pointer text-[8px] font-bold" style={{ color: "var(--text-secondary)" }}>View diff</summary><pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg border p-2 text-[7px] leading-3" style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)" }}>{approval.diff}</pre></details>}<div className="mt-2 flex gap-2"><button type="button" onClick={() => void resolveApproval(approval.id, "approved")} disabled={resolving !== null} className="flex-1 rounded-lg px-2 py-1.5 text-[9px] font-bold transition-colors hover:opacity-80 disabled:opacity-40" style={{ backgroundColor: "rgba(182,255,74,0.1)", color: "var(--litt-primary)" }}>Approve</button><button type="button" onClick={() => void resolveApproval(approval.id, "denied")} disabled={resolving !== null} className="flex-1 rounded-lg px-2 py-1.5 text-[9px] font-bold transition-colors hover:opacity-80 disabled:opacity-40" style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "#fca5a5" }}>Deny</button></div></div>)}</div>}
+        {loading && approvalsEmpty ? <div className="flex items-center justify-center gap-2 py-8 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={13} className="animate-spin" /> Loading approvals…</div> : approvalsEmpty ? (runApprovalsKnown ? <div className="flex flex-col items-center gap-2 py-8 text-[10px]" style={{ color: "var(--text-muted)" }}><ShieldCheck size={20} style={{ color: "var(--litt-primary)" }} /> No pending approvals.</div> : <div className="flex items-center justify-center gap-2 py-8 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={13} className="animate-spin" /> Checking the current run…</div>) : <div className="space-y-3">{runApprovals.length > 0 && <div className="space-y-2">{runApprovals.map((approval) => <div key={approval.id} className="rounded-xl border p-2.5" style={{ borderColor: "rgba(227,179,65,0.35)", backgroundColor: "var(--studio-card)" }}><div className="flex items-center justify-between gap-2"><span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{approval.toolId}</span><span className="shrink-0 rounded px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ backgroundColor: "rgba(227,179,65,0.15)", color: "#e3b341" }}>Waiting in chat</span></div>{approval.reason && <div className="mt-1.5 text-[9px] leading-4" style={{ color: "var(--text-secondary)" }}>{approval.reason}</div>}<div className="mt-1.5 text-[8px] leading-3" style={{ color: "var(--text-muted)" }}>LiTT is paused on this step — approve or deny it in the chat to continue the run.</div></div>)}</div>}{legacyApprovals.length > 0 && <div className="space-y-2">{legacyApprovals.map((approval) => <div key={approval.id} className="rounded-xl border p-2.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}><div className="flex items-center justify-between"><span className="text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{approval.actionType ?? "Action"}</span>{approval.riskLevel && <span className="rounded px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ backgroundColor: approval.riskLevel === "high" ? "rgba(239,68,68,0.15)" : "rgba(227,179,65,0.15)", color: approval.riskLevel === "high" ? "#fca5a5" : "#e3b341" }}>{approval.riskLevel}</span>}</div>{approval.affectedFiles && approval.affectedFiles.length > 0 && <div className="mt-1.5 space-y-0.5">{approval.affectedFiles.slice(0, 5).map((file) => <div key={file} className="truncate font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>{file}</div>)}</div>}{approval.diff && <details className="mt-1.5"><summary className="cursor-pointer text-[8px] font-bold" style={{ color: "var(--text-secondary)" }}>View diff</summary><pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg border p-2 text-[7px] leading-3" style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)" }}>{approval.diff}</pre></details>}<div className="mt-2 flex gap-2"><button type="button" onClick={() => void resolveApproval(approval.id, "approved")} disabled={resolving !== null} className="flex-1 rounded-lg px-2 py-1.5 text-[9px] font-bold transition-colors hover:opacity-80 disabled:opacity-40" style={{ backgroundColor: "rgba(182,255,74,0.1)", color: "var(--litt-primary)" }}>Approve</button><button type="button" onClick={() => void resolveApproval(approval.id, "denied")} disabled={resolving !== null} className="flex-1 rounded-lg px-2 py-1.5 text-[9px] font-bold transition-colors hover:opacity-80 disabled:opacity-40" style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "#fca5a5" }}>Deny</button></div></div>)}</div>}</div>}
       </div>
     );
   }
 
   // Runtime status banner — shows recovery actions instead of "workspace is not ready"
   const showRuntimeBanner = runtime.phase !== "ready" && runtime.phase !== "idle" && runtime.phase !== "resolving";
-  const recoveryActions = runtimeRecoveryActions(runtime.phase);
+  // Repo gate: a HOST_EXECUTION_DISABLED runtime is a deliberate product
+  // state (repo workspaces not offered on the hosted service yet), not a
+  // failure — neutral styling, the gate label instead of the phase's
+  // failure wording, and NO recovery actions: every offered retry would
+  // be refused by the same policy.
+  const hostExecGated = runtime.error?.code === HOST_EXECUTION_DISABLED_CODE;
+  const recoveryActions = hostExecGated ? [] : runtimeRecoveryActions(runtime.phase);
+
+  // Kimi wiring item 4: run provenance from the payload itself — the
+  // latest check timestamp is the last run; the newest checkpoint's
+  // gitSha is the revision it ran against. Files changed since that run
+  // (the payload's own changedFiles list) make the results stale.
+  // Nothing renders for a fact the payload does not carry.
+  const lastRunAt = payload.checks.reduce<string | null>(
+    (max, check) => (check.timestamp && (!max || check.timestamp > max) ? check.timestamp : max),
+    null,
+  );
+  const latestCheckpoint = payload.checkpoints.reduce<{ gitSha?: string; createdAt?: string } | undefined>(
+    (best, checkpoint) =>
+      checkpoint.createdAt && (!best?.createdAt || checkpoint.createdAt > best.createdAt) ? checkpoint : best,
+    undefined,
+  );
+  const lastRevision = latestCheckpoint?.gitSha ?? null;
+  const resultsStale = lastRunAt !== null && payload.changedFiles.length > 0;
 
   return (
     <div className="space-y-3" data-testid="studio-health-panel">
@@ -266,11 +450,11 @@ export default function StudioHealthPanel({
 
       {/* Runtime status banner with recovery actions */}
       {showRuntimeBanner && (
-        <div className="rounded-xl border px-2.5 py-2.5" style={{ borderColor: "rgba(239,68,68,0.25)", backgroundColor: "rgba(239,68,68,0.04)" }}>
+        <div className="rounded-xl border px-2.5 py-2.5" style={hostExecGated ? { borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" } : { borderColor: "rgba(239,68,68,0.25)", backgroundColor: "rgba(239,68,68,0.04)" }}>
           <div className="flex items-start gap-2">
-            <AlertCircle size={13} className="mt-0.5 shrink-0" style={{ color: "#fca5a5" }} />
+            <AlertCircle size={13} className="mt-0.5 shrink-0" style={{ color: hostExecGated ? "var(--text-muted)" : "#fca5a5" }} />
             <div className="min-w-0 flex-1">
-              <div className="text-[10px] font-bold" style={{ color: "#fca5a5" }}>{runtimePhaseLabel(runtime.phase)}</div>
+              <div className="text-[10px] font-bold" style={{ color: hostExecGated ? "var(--text-primary)" : "#fca5a5" }}>{hostExecGated ? HOST_EXECUTION_UNAVAILABLE_LABEL : runtimePhaseLabel(runtime.phase)}</div>
               <div className="mt-0.5 text-[9px] leading-4" style={{ color: "var(--text-muted)" }}>
                 {runtime.error?.message ?? "The workspace is not fully connected."}
               </div>
@@ -307,6 +491,19 @@ export default function StudioHealthPanel({
       )}
 
       {error && <div className="flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[9px]" style={{ borderColor: "rgba(239,68,68,0.3)", color: "#fca5a5" }}><AlertCircle size={12} className="shrink-0" />{error}</div>}
+
+      {/* Stale pill (Kimi wiring item 4): files changed after the last
+          run, so these results describe older code. */}
+      {resultsStale && (
+        <div
+          className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[9px] font-bold"
+          style={{ borderColor: "rgba(227,179,65,0.35)", color: "#e3b341", backgroundColor: "rgba(227,179,65,0.06)" }}
+          data-testid="checks-stale-pill"
+        >
+          <AlertCircle size={11} className="shrink-0" />
+          Results may be stale — files changed since this run
+        </div>
+      )}
       <div className="space-y-1.5">
         {checks.map((check) => (
           <div key={check.id} className="rounded-xl border px-2.5 py-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
@@ -322,6 +519,7 @@ export default function StudioHealthPanel({
             </div>
             <div className="mt-1 text-[9px] leading-4" style={{ color: "var(--text-muted)" }}>{check.source} · {formatTime(check.timestamp)}</div>
             {check.error && <div className="mt-1 text-[9px] leading-4" style={{ color: check.status === "unavailable" ? "#e3b341" : "#fca5a5" }}>{check.error}</div>}
+            {projectId && <CheckFileRefChip check={check} projectId={projectId} />}
             {check.suggestedFix && <div className="mt-1 text-[9px] leading-4" style={{ color: "#a78bfa" }}>Fix: {check.suggestedFix}</div>}
             {check.output && (
               <details className="mt-1.5">
@@ -344,6 +542,16 @@ export default function StudioHealthPanel({
           {payload.checkpoints.length ? <div className="space-y-1">{payload.checkpoints.slice(0, 4).map((checkpoint, index) => <div key={checkpoint.id ?? `${checkpoint.gitSha}-${index}`} className="flex items-center gap-2 rounded-md border px-2 py-1.5" style={{ borderColor: "var(--studio-border)" }}><span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: "var(--text-secondary)" }}>{checkpoint.label ?? checkpoint.gitSha ?? "Checkpoint"}</span><span className="shrink-0 text-[8px]" style={{ color: "var(--text-muted)" }}>{formatTime(checkpoint.createdAt)}</span></div>)}</div> : <div className="text-[9px]" style={{ color: "var(--text-muted)" }}>No checkpoints reported.</div>}
         </div>
       </div>
+
+      {/* Run provenance footer (Kimi wiring item 4) — only the facts
+          the payload carries: last run time, and the revision when a
+          checkpoint recorded one. */}
+      {lastRunAt && (
+        <div className="text-[9px]" style={{ color: "var(--text-muted)" }} data-testid="checks-footer">
+          Last run {formatTime(lastRunAt)}
+          {lastRevision ? <> · revision <span className="font-mono">{lastRevision.slice(0, 7)}</span></> : null}
+        </div>
+      )}
     </div>
   );
 }

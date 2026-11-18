@@ -5,6 +5,30 @@ import { dedupeTasksByConversation, type StudioTask, type UpdateStudioTaskInput 
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { isOptimisticConversationId } from "../lib/optimistic-conversation";
 
+/**
+ * The tasks route's association verdict: POST returns 403 with this exact
+ * message when the project/conversation association is not available to
+ * the user (project not visible, conversation bound to another project).
+ * That is an intentional binding check, not a transient failure — the
+ * same POST can never succeed for the same pair, so the verdict is
+ * cached for the session (mirrors the TERMINAL_DISABLED cache in
+ * terminal-client) and repeat adoptions resolve locally instead of
+ * re-issuing a doomed request on every remount.
+ */
+export const TASK_ASSOCIATION_UNAVAILABLE_MESSAGE =
+  "Project, conversation, or task association is not available";
+
+const associationUnavailableKeys = new Set<string>();
+
+function associationKey(projectId: string, conversationId?: string | null): string {
+  return `${projectId}\u0000${conversationId ?? ""}`;
+}
+
+/** Test/reset hook — parity with clearTerminalTokenCache. */
+export function clearStudioTaskAssociationCache(): void {
+  associationUnavailableKeys.clear();
+}
+
 export function useStudioTasks(projectId: string | null) {
   const { getToken } = useClerkAuth();
   const [tasks, setTasks] = useState<StudioTask[]>([]);
@@ -66,6 +90,11 @@ export function useStudioTasks(projectId: string | null) {
     // guaranteed 403. The canonical conversation id arrives when the
     // conversation POST resolves; callers retry then.
     if (isOptimisticConversationId(input.conversationId)) return null;
+    // A pair that already drew the association 403 this session can never
+    // succeed — resolve locally instead of re-issuing the doomed POST on
+    // every remount (each one is a console 403).
+    const key = associationKey(projectId, input.conversationId);
+    if (associationUnavailableKeys.has(key)) return null;
     let res: Response;
     try {
       res = await fetch("/api/studio/tasks", {
@@ -77,7 +106,22 @@ export function useStudioTasks(projectId: string | null) {
     } catch {
       return null;
     }
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as { error?: unknown } | null;
+      if (res.status === 403 && body?.error === TASK_ASSOCIATION_UNAVAILABLE_MESSAGE) {
+        // Handled outcome: the intentional binding check. Cache the
+        // verdict and stay quiet — no console error, no state change.
+        associationUnavailableKeys.add(key);
+        return null;
+      }
+      // A real failure must not be swallowed silently like the handled
+      // verdict — surface it, and do NOT cache (a later call retries).
+      console.error(
+        `[useStudioTasks] createTask failed (${res.status})`,
+        typeof body?.error === "string" ? body.error : "",
+      );
+      return null;
+    }
     const data = await res.json() as { task?: StudioTask };
     if (!data.task) return null;
     // Dedupe by conversation as well as task id: a raced double-adoption

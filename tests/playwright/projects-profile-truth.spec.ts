@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Issue #602 — Projects / Dashboard / Profile share GET /api/studio-projects.
+ * Issue #602 — Projects / Studio prime landing / Profile share GET /api/studio-projects.
  * Runs in authenticated-chromium when Clerk test users exist.
  *
  * Mocks the canonical list so the three surfaces cannot drift even when
@@ -34,11 +34,11 @@ async function mockStudioProjects(page: import("@playwright/test").Page) {
 }
 
 test.describe("P0 project truth across surfaces", () => {
-  test("dashboard recent projects lists the canonical studio project", async ({
+  test("studio prime landing recent projects lists the canonical studio project", async ({
     page,
   }) => {
     await mockStudioProjects(page);
-    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await page.goto("/studio", { waitUntil: "domcontentloaded" });
     await expect(page.getByText(COFFEE.name, { exact: false })).toBeVisible({
       timeout: 20_000,
     });
@@ -85,9 +85,9 @@ test.describe("P0 project truth across surfaces", () => {
 test.describe("P0 nav aliases @ 390px", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("dashboard still lists canonical projects at 390px", async ({ page }) => {
+  test("studio prime landing still lists canonical projects at 390px", async ({ page }) => {
     await mockStudioProjects(page);
-    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await page.goto("/studio", { waitUntil: "domcontentloaded" });
     await expect(page.getByText(COFFEE.name, { exact: false })).toBeVisible({
       timeout: 20_000,
     });

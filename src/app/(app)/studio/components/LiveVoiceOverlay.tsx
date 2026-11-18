@@ -49,7 +49,7 @@ export interface LiveVoiceOverlayProps {
 type LiTTRealtimeState = "idle" | "listening" | "thinking" | "speaking" | "error";
 
 const STATE_LABELS: Record<LiTTRealtimeState, string> = {
-  idle: "LiTT is ready",
+  idle: "Idle",
   listening: "Listening",
   thinking: "Thinking",
   speaking: "Speaking",

@@ -27,6 +27,8 @@ import {
   isUntrustedLocalRequest,
   isHostExecutionPermitted,
   isProductionLike,
+  extractEmbeddedErrorCode,
+  errorCarriesHostExecutionDisabled,
 } from "../src/lib/host-execution-guard";
 import { isProductionLike as terminalIsProductionLike } from "../terminal-server/isolation-policy";
 
@@ -380,5 +382,41 @@ describe("container hardening", () => {
     const text = readFileSync(path, "utf-8");
     expect(text).toMatch(/^FROM node:22-bookworm-slim\s*$/m);
     expect(text).not.toMatch(/book-slim/);
+  });
+});
+
+describe("embedded error-code extraction (wave-4 truth threading)", () => {
+  // The exact string production stores as workspaceError after a repo-backed
+  // prepare hits the terminal-server's fail-closed 503: the client embeds
+  // the raw JSON body in the Error message, and the sanitizer keeps it.
+  const storedPrepareFailure =
+    'Workspace prepare failed (503): {"error":"Host execution is disabled in production (workspace.prepare(git,install)); a verified sandbox is required","code":"HOST_EXECUTION_DISABLED"}';
+
+  it("extracts the code from a stored prepare-failure message", () => {
+    expect(extractEmbeddedErrorCode(storedPrepareFailure)).toBe(HOST_EXECUTION_DISABLED_CODE);
+  });
+
+  it("extracts a bare code token", () => {
+    expect(extractEmbeddedErrorCode("HOST_EXECUTION_DISABLED")).toBe(HOST_EXECUTION_DISABLED_CODE);
+  });
+
+  it("returns null for generic failures and empty input", () => {
+    expect(extractEmbeddedErrorCode("Workspace prepare failed (500): boom")).toBeNull();
+    expect(extractEmbeddedErrorCode("terminal down")).toBeNull();
+    expect(extractEmbeddedErrorCode(null)).toBeNull();
+    expect(extractEmbeddedErrorCode(undefined)).toBeNull();
+    expect(extractEmbeddedErrorCode("")).toBeNull();
+  });
+
+  it("errorCarriesHostExecutionDisabled sees .code, the guard error, and message text", () => {
+    const coded = new Error("Workspace prepare failed (503)") as Error & { code?: string };
+    coded.code = HOST_EXECUTION_DISABLED_CODE;
+    expect(errorCarriesHostExecutionDisabled(coded)).toBe(true);
+    expect(errorCarriesHostExecutionDisabled(new HostExecutionDisabledError("workspace.prepare"))).toBe(true);
+    expect(errorCarriesHostExecutionDisabled(new Error(storedPrepareFailure))).toBe(true);
+    expect(errorCarriesHostExecutionDisabled(new Error("terminal down"))).toBe(false);
+    expect(errorCarriesHostExecutionDisabled("HOST_EXECUTION_DISABLED")).toBe(true);
+    expect(errorCarriesHostExecutionDisabled(null)).toBe(false);
+    expect(errorCarriesHostExecutionDisabled(undefined)).toBe(false);
   });
 });

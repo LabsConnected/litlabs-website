@@ -185,7 +185,7 @@ describe("Files is not a workspace stage", () => {
     expect(typeMatch![1]).not.toContain('"files"');
   });
 
-  it("Files lives in the unified dock (not the workspace tab strip)", async () => {
+  it("Files lives in the LiTT panel's top-row tabs (not the workspace tab strip, not the dock)", async () => {
     const fs = await import("fs");
     const path = await import("path");
     const studio = fs.readFileSync(
@@ -196,12 +196,20 @@ describe("Files is not a workspace stage", () => {
       path.resolve("src/app/(app)/studio/components/StudioDock.tsx"),
       "utf-8",
     );
+    const panel = fs.readFileSync(
+      path.resolve("src/app/(app)/studio/components/LiTTPanel.tsx"),
+      "utf-8",
+    );
     // The old workspace-strip Files button is gone…
     expect(studio).not.toContain("workspace-tab-files");
-    // …Files is a first-class dock tab wired to the dock…
-    expect(studio).toContain('handleOpenDockTab("files")');
-    expect(dock).toContain('id: "files"');
+    // …the dock's Files tab is retired (Larry, 2026-11-13): files
+    // intents route to the LiTT panel's top-row Files tab instead…
+    expect(studio).not.toContain('handleOpenDockTab("files")');
+    expect(studio).toContain("handleOpenFilesPanel");
+    expect(dock).not.toContain('id: "files"');
     expect(dock).toContain("dock-tab-");
+    // …and Files is a first-class tab in the panel's top row.
+    expect(panel).toContain('data-testid="litt-tab-files"');
   });
 });
 

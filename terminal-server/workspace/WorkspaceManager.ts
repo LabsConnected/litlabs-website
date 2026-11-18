@@ -9,7 +9,37 @@ import {
   buildWelcomeReactVite,
 } from "./welcome-screen";
 import { writeScaffoldManifest } from "./scaffold";
+import { writeFileAtomic } from "./atomic-write";
 
+/**
+ * The sandbox binding for a workspace (Phase 2 lifecycle, design
+ * note §2.2). One optional block on the existing descriptor — the
+ * registry stays a bare JSON array, so a rollback to the previous
+ * terminal build preserves bindings instead of erasing them
+ * (loadPersisted keeps each object whole).
+ *
+ * NEVER persisted here: the provider's traffic token, the provider
+ * URL, the GitHub token, project secrets. The traffic token comes
+ * back from the provider on connect/expose; the rest never belong
+ * on disk at all.
+ */
+export interface WorkspaceSandboxBinding {
+  /** Provider name, e.g. "e2b". */
+  provider: string;
+  sandboxId: string;
+  /** Template build the sandbox was created from. */
+  templateId: string;
+  state: "provisioning" | "running" | "paused" | "lost";
+  createdAt: string;
+  /** ISO time of the last completed sandbox → volume sync-back. */
+  lastSyncBackAt: string | null;
+  /** HEAD sha inside the sandbox at the last sync-back. */
+  lastSyncedHead: string | null;
+  /** Volume paths not yet pushed into a live sandbox (§1.3). */
+  pendingForward: string[];
+  /** Sandbox-side port the preview dev server listens on. */
+  previewPort: number | null;
+}
 
 export interface WorkspaceDescriptor {
   workspaceId: string;
@@ -19,6 +49,8 @@ export interface WorkspaceDescriptor {
   branch: string;
   commitSha: string;
   ready: boolean;
+  /** Phase 2 lifecycle binding. Absent = no sandbox for this workspace. */
+  sandbox?: WorkspaceSandboxBinding;
 }
 
 export interface PrepareInput {
@@ -40,6 +72,49 @@ export interface PrepareInput {
 /** Managed workspaces are always initialised on this branch. */
 const DEFAULT_BRANCH = "main";
 
+/**
+ * Environment handed to package-manager child processes (dependency
+ * install and the TypeScript pre-install in prepareWorkspace).
+ *
+ * The host path historically spread the terminal's ENTIRE process
+ * environment into these calls (`{ ...process.env, ... }`). Package
+ * scripts are repo-controlled code: they must never receive the
+ * terminal's platform secrets (Clerk/Supabase/Stripe keys, the E2B
+ * API key, internal service keys) just because an install ran. Only
+ * the benign variables a package manager actually needs are passed,
+ * plus NODE_ENV=development (forced, as before, so devDependencies
+ * are installed despite the service running NODE_ENV=production).
+ * The sandbox install path (design note §4.4) uses the same rule via
+ * sandbox/env.ts; this is the host path's equivalent — the whole-env
+ * spread must not be ported anywhere.
+ */
+export const PACKAGE_SCRIPT_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "TERM",
+  "LANG",
+  "LC_ALL",
+  "SHELL",
+  "TMPDIR",
+  "USER",
+  "LOGNAME",
+  "PNPM_HOME",
+] as const;
+
+export function buildPackageScriptEnv(
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const env: Record<string, string> = {};
+  for (const key of PACKAGE_SCRIPT_ENV_ALLOWLIST) {
+    const value = source[key];
+    if (value) env[key] = value;
+  }
+  // Constructed as one literal: this repo augments NodeJS.ProcessEnv with
+  // NODE_ENV required and read-only, so the forced value must be present
+  // at construction rather than assigned afterward.
+  return { ...env, NODE_ENV: "development" };
+}
+
 const workspaces = new Map<string, WorkspaceDescriptor>();
 
 const PERSIST_PATH = resolve(
@@ -47,33 +122,156 @@ const PERSIST_PATH = resolve(
   ".workspaces.json",
 );
 
-function loadPersisted(): void {
+interface RegistryLoadResult {
+  fileFound: boolean;
+  loaded: number;
+}
+
+function loadPersisted(): RegistryLoadResult {
   try {
-    if (!existsSync(PERSIST_PATH)) return;
-    const data = JSON.parse(readFileSync(PERSIST_PATH, "utf-8")) as WorkspaceDescriptor[];
-    for (const ws of data) {
-      if (ws.workspaceId && ws.root && existsSync(ws.root)) {
-        workspaces.set(ws.workspaceId, ws);
-      }
+    if (!existsSync(PERSIST_PATH)) {
+      // Distinguishable in the boot log from "the file existed and its
+      // entries were kept": a registry file that is not visible at the
+      // load instant (volume mount timing) starts the process with an
+      // EMPTY registry while the web DB still points at the lost ids —
+      // every lookup then 404s "Workspace not found" until a heal
+      // re-registers, and the next persist seals the loss by
+      // overwriting the file with only the current map (round 5,
+      // 2026-11-15). First-ever boot also lands here; the line is the
+      // evidence that tells the two apart (deploy history + whether
+      // workspaces existed before the restart).
+      console.error(
+        `[WorkspaceManager] No persisted workspace registry found at ${PERSIST_PATH} — ` +
+          "starting with an empty registry",
+      );
+      return { fileFound: false, loaded: 0 };
     }
-  } catch {
-    // Corrupt or missing file — start fresh
+    const data = JSON.parse(readFileSync(PERSIST_PATH, "utf-8")) as WorkspaceDescriptor[];
+    let loaded = 0;
+    for (const ws of data) {
+      if (!ws.workspaceId || !ws.root) {
+        console.error(
+          "[WorkspaceManager] Dropping malformed persisted workspace entry " +
+            `(missing workspaceId/root): ${JSON.stringify(ws).slice(0, 200)}`,
+        );
+        continue;
+      }
+      if (!existsSync(ws.root)) {
+        // The root is not visible at this instant (volume mount timing
+        // during a restart is the known cause). Do NOT silently delete
+        // the descriptor: the web DB still points at this workspaceId,
+        // and deleting it makes every registry lookup (preview start,
+        // files, exec) 404 "Workspace not found" while the Studio gate
+        // keeps reporting the project ready — with no code path able
+        // to re-register it. Keep the descriptor registered as
+        // ready=false instead: lookups then answer an honest "not
+        // ready" (preview start 409s), the descriptor survives the
+        // next persist, and a later prepare with the stored id can
+        // re-register the workspace in place.
+        console.error(
+          `[WorkspaceManager] Persisted workspace ${ws.workspaceId} root not visible at load (${ws.root}); ` +
+            "keeping descriptor registered as ready=false",
+        );
+        workspaces.set(ws.workspaceId, { ...ws, ready: false });
+        loaded++;
+        continue;
+      }
+      workspaces.set(ws.workspaceId, ws);
+      loaded++;
+    }
+    // The successful load used to log NOTHING, so a boot that loaded
+    // the registry was indistinguishable in the logs from one that
+    // started empty — during the 2026-11-16 round-9 diagnosis the
+    // absence of any registry line was itself a multi-hour question.
+    // State the outcome plainly: how many descriptors, and which ids.
+    console.log(
+      `[WorkspaceManager] Loaded ${loaded} persisted workspace(s) from ${PERSIST_PATH}: ` +
+        (Array.from(workspaces.keys()).join(", ") || "(none)"),
+    );
+    return { fileFound: true, loaded };
+  } catch (err) {
+    // Corrupt or unreadable file — start fresh, but SAY SO: this catch
+    // used to swallow parse errors silently, so a registry file that
+    // existed but failed to parse looked exactly like a healthy empty
+    // registry while every lookup 404'd (round 9 observability gap).
+    console.error(
+      `[WorkspaceManager] FAILED to load persisted workspace registry at ${PERSIST_PATH}: ` +
+        (err instanceof Error ? err.message : String(err)) +
+        " — starting with an empty registry",
+    );
+    return { fileFound: true, loaded: 0 };
   }
 }
 
 function persistWorkspaces(): void {
   try {
     const data = Array.from(workspaces.values());
-    writeFileSync(PERSIST_PATH, JSON.stringify(data), "utf-8");
-  } catch {
-    // Non-fatal — persistence is best-effort
+    // Atomic + loud (design note §2.2): the registry now carries
+    // sandbox bindings, and a silently lost binding is a leaked,
+    // billed sandbox. writeFileAtomic replaces the file by rename,
+    // so a crash mid-write can never truncate the registry; a failed
+    // persist is logged, never swallowed.
+    writeFileAtomic(PERSIST_PATH, JSON.stringify(data));
+  } catch (err) {
+    console.error(
+      `[WorkspaceManager] FAILED to persist workspace registry to ${PERSIST_PATH}: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
   }
 }
 
 loadPersisted();
 
+/**
+ * One registry-load retry, called by the server once it is listening
+ * (before boot reconcile runs). The import-time load above can run
+ * before the volume mount is visible, in which case it finds no file
+ * and starts empty even though the registry exists on disk. When the
+ * registry is still empty at listen time, load once more: by then the
+ * mount has had the whole boot sequence to settle. A registry that
+ * already holds descriptors is never reloaded (the in-memory map is
+ * the live state; reloading could resurrect stale entries over it).
+ * Returns the descriptor count after the retry.
+ */
+export function retryRegistryLoadOnceAtListen(): number {
+  if (workspaces.size > 0) return workspaces.size;
+  const result = loadPersisted();
+  console.error(
+    `[WorkspaceManager] Registry load retry at listen: fileFound=${result.fileFound}, ` +
+      `loaded=${result.loaded} — registry now holds ${workspaces.size} workspace(s)`,
+  );
+  return workspaces.size;
+}
+
 export function getWorkspace(workspaceId: string): WorkspaceDescriptor | undefined {
   return workspaces.get(workspaceId);
+}
+
+/** Every registered descriptor (boot reconcile iterates these). */
+export function listAllWorkspaceDescriptors(): WorkspaceDescriptor[] {
+  return Array.from(workspaces.values());
+}
+
+/** Insert or replace a descriptor and persist. */
+export function upsertWorkspaceDescriptor(descriptor: WorkspaceDescriptor): void {
+  workspaces.set(descriptor.workspaceId, descriptor);
+  persistWorkspaces();
+}
+
+/**
+ * Set or clear a workspace's sandbox binding and persist. Returns
+ * false when the workspace is not registered.
+ */
+export function updateWorkspaceSandboxBinding(
+  workspaceId: string,
+  binding: WorkspaceSandboxBinding | undefined,
+): boolean {
+  const ws = workspaces.get(workspaceId);
+  if (!ws) return false;
+  if (binding) ws.sandbox = binding;
+  else delete ws.sandbox;
+  persistWorkspaces();
+  return true;
 }
 
 export function getWorkspaceRoot(workspaceId: string, userId?: string): string | null {
@@ -82,9 +280,84 @@ export function getWorkspaceRoot(workspaceId: string, userId?: string): string |
   return ws?.root ?? null;
 }
 
+/**
+ * Sandbox prepare dispatch (Phase 2 lifecycle, design note §4.1/§5).
+ *
+ * The sandbox workspace executor registers itself here at server
+ * boot. When it reports itself available for the requesting user
+ * (the §4.6 predicate: real provider + fresh green canary + owner),
+ * prepareWorkspace's host body is replaced wholesale by the sandbox
+ * sequence — clone and install happen inside the sandbox. When it is
+ * not available, prepare falls through to the host body below,
+ * untouched, whose first act is the existing host-execution guard.
+ * Registration lives here (rather than the executor importing this
+ * module's prepare) so the dependency runs one way:
+ * executor → WorkspaceManager, never the reverse.
+ */
+export interface SandboxPrepareHandler {
+  isAvailableFor(userId: string): boolean;
+  prepare(input: PrepareInput): Promise<WorkspaceDescriptor>;
+}
+
+let sandboxPrepareHandler: SandboxPrepareHandler | null = null;
+
+export function registerSandboxPrepareHandler(
+  handler: SandboxPrepareHandler | null,
+): void {
+  sandboxPrepareHandler = handler;
+}
+
+/** Whether the sandbox prepare path would route for this user right now. */
+export function sandboxPrepareAvailableFor(userId: string): boolean {
+  return sandboxPrepareHandler?.isAvailableFor(userId) ?? false;
+}
+
+/**
+ * The prepare route's idempotency decision: may an existing descriptor
+ * be served as-is instead of running prepare?
+ *
+ * Only when nothing needs repair. A descriptor whose sandbox binding
+ * is live (running/paused with an id) is complete — serve it. But a
+ * READY descriptor whose binding is lost, was cleared by boot
+ * reconcile, or was never created is NOT complete when the sandbox
+ * path is available for the user: serving it as-is certifies a
+ * workspace with no sandbox behind it, and the heal that called
+ * prepare goes away believing the binding was restored (round 9,
+ * 2026-11-16: boot reconcile cleared the binding, every heal prepare
+ * was answered from this short-circuit shape or the host path, and
+ * the workspace stayed sandbox-less). In that state the request must
+ * fall through to prepareWorkspace, whose sandbox branch recreates
+ * and rebinds via the executor's ensure path.
+ *
+ * When the sandbox path is NOT available for the user, the existing
+ * descriptor remains the honest answer: the fallthrough would run the
+ * host body, which refuses with 503 in production even though the
+ * volume workspace is fully usable for file operations. Gate-closed
+ * deployments keep their exact previous behavior.
+ */
+export function shouldServeExistingWorkspace(
+  existing: WorkspaceDescriptor,
+  userId: string,
+): boolean {
+  if (!existing.ready) return false;
+  const binding = existing.sandbox;
+  const bindingLive =
+    !!binding &&
+    binding.sandboxId !== "" &&
+    (binding.state === "running" || binding.state === "paused");
+  if (bindingLive) return true;
+  return !sandboxPrepareAvailableFor(userId);
+}
+
 export async function prepareWorkspace(
   input: PrepareInput,
 ): Promise<WorkspaceDescriptor> {
+  // Sandbox branch first: availability is the executor's predicate,
+  // evaluated per request. A closed gate changes nothing below.
+  if (sandboxPrepareHandler?.isAvailableFor(input.userId)) {
+    return sandboxPrepareHandler.prepare(input);
+  }
+
   // Durable, project-identified root — see managedWorkspaceRoot(). A
   // GitHub-backed workspace must also resolve to the same path across
   // provisions, otherwise the "already cloned, just fetch" branch below
@@ -156,7 +429,7 @@ export async function prepareWorkspace(
         cwd: root,
         stdio: "pipe",
         timeout: 300_000,
-        env: { ...process.env, NODE_ENV: "development" },
+        env: buildPackageScriptEnv(),
       });
     } catch {
       // Non-fatal — the workspace is still usable for file browsing and
@@ -184,7 +457,7 @@ export async function prepareWorkspace(
             cwd: root,
             stdio: "pipe",
             timeout: 120_000,
-            env: { ...process.env, NODE_ENV: "development" },
+            env: buildPackageScriptEnv(),
           });
         } catch {
           // Non-fatal — Next.js will attempt its own auto-install.

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 import { SafeEmailText } from "@/components/SafeEmail";
+import "@/app/public-pages-tlc.css";
 
 export const metadata: Metadata = buildMetadata({
   title: "Privacy Policy",
@@ -12,7 +13,7 @@ export const metadata: Metadata = buildMetadata({
 export default function PrivacyPage() {
   return (
     <div
-      className="min-h-screen pb-20 font-mono text-xs"
+      className="litt-legal min-h-screen pb-20 font-mono text-xs"
       style={{ backgroundColor: "var(--bg-color)", color: "var(--text-color)" }}
     >
       <div className="max-w-3xl mx-auto px-4 py-12">
@@ -30,7 +31,7 @@ export default function PrivacyPage() {
             🛡️ Privacy Policy
           </div>
           <p className="text-[10px] opacity-60 uppercase tracking-widest">
-            Last Updated: November 7, 2026
+            Last Updated: November 10, 2026
           </p>
         </div>
 
@@ -79,8 +80,8 @@ export default function PrivacyPage() {
               <li>
                 <strong>Uploaded Media &amp; Attachments:</strong>{" "}Files,
                 images, audio, and other media you upload or generate are
-                stored in Cloudflare R2 object storage and linked to your
-                account.
+                stored in object storage (Supabase Storage for this website;
+                Cloudflare R2 where configured) and linked to your account.
               </li>
               <li>
                 <strong>Voice Data:</strong>{" "}When you use voice features in
@@ -158,7 +159,7 @@ export default function PrivacyPage() {
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
                 <strong>Google Gemini:</strong>{" "}Primary LLM and image
-                generation (free tier).
+                generation.
               </li>
               <li>
                 <strong>OpenRouter:</strong>{" "}Fallback LLM routing with
@@ -240,8 +241,9 @@ export default function PrivacyPage() {
                 ledger, subscriptions, and marketplace data.
               </li>
               <li>
-                <strong>File storage:</strong>{" "}Cloudflare R2 stores uploaded
-                and generated media (images, audio, video, assets).
+                <strong>File storage:</strong>{" "}Supabase Storage stores
+                uploaded and generated media for this website (images, audio,
+                video, assets); Cloudflare R2 is used where configured.
               </li>
               <li>
                 <strong>Payment data:</strong>{" "}Processed by Stripe. We do not
@@ -281,8 +283,8 @@ export default function PrivacyPage() {
                 and marketplace transactions.
               </li>
               <li>
-                <strong>Cloudflare R2:</strong>{" "}Object storage for media and
-                assets.
+                <strong>Supabase Storage &amp; Cloudflare R2:</strong>{" "}Object
+                storage for media and assets.
               </li>
               <li>
                 <strong>Railway:</strong>{" "}Application hosting, terminal

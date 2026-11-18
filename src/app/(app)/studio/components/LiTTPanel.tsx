@@ -2,7 +2,8 @@
 
 /**
  * LiTT panel — left side of the Ultra Vision shell, desktop/laptop tier
- * (lg breakpoint and up). One agent, two views: Chat | Activity.
+ * (lg breakpoint and up). One agent, views: Chat | Activity | Files |
+ * Components (Files/Components tabs added 2026-11-13 per Larry).
  *
  * Chat: conversation transcript + composer
  * Activity: real-time execution telemetry (tool calls, diffs, checks, approvals)
@@ -32,19 +33,29 @@
  */
 
 import type { ReactNode } from "react";
-import { MessageSquare, Activity, PanelLeftClose, X } from "lucide-react";
+import { MessageSquare, Activity, FolderOpen, Component, PanelLeftClose, X } from "lucide-react";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 import LiTTAmbientHUD from "./litt/LiTTAmbientHUD";
-import ChatDockSwitcher, { type ChatDockPosition } from "./ChatDockSwitcher";
 import type { DeviceStatus } from "@/lib/litt/live/types";
 
-export type LiTTTab = "chat" | "live";
+export type LiTTTab = "chat" | "live" | "files" | "components";
 
 interface LiTTPanelProps {
   /** Chat tab content — transcript + composer */
   chatContent: ReactNode;
   /** Live tab content — execution activity (LiTTLiveActivity) */
   liveContent: ReactNode;
+  /**
+   * Files / Components tab content — the StudioProjectFiles surface.
+   * When provided, the tab row gains Files and Components tabs beside
+   * Chat and Activity (Larry's placement decision, 2026-11-13: out of
+   * the bottom dock / context drawer, into this top row — desktop and
+   * mobile sheet alike). At this base Files and Components are one
+   * combined surface (the dock/drawer header literally reads
+   * "Files / Components"), so both tabs show this single slot — it is
+   * mounted exactly once here, never duplicated per tab.
+   */
+  filesContent?: ReactNode;
   /** Controlled active tab */
   activeTab: LiTTTab;
   onTabChange: (tab: LiTTTab) => void;
@@ -70,18 +81,12 @@ interface LiTTPanelProps {
    * spec's 300–500px range is reachable at common desktop viewports.
    */
   expandedMaxWidth?: string;
-  /**
-   * Chat dock position — when provided (with onDockPositionChange), the
-   * tab header renders the Left/Bottom dock switcher. The legacy path
-   * does not pass these, so its header is unchanged.
-   */
-  dockPosition?: ChatDockPosition;
-  onDockPositionChange?: (position: ChatDockPosition) => void;
 }
 
 export default function LiTTPanel({
   chatContent,
   liveContent,
+  filesContent,
   activeTab,
   onTabChange,
   collapsed,
@@ -92,8 +97,6 @@ export default function LiTTPanel({
   microphoneStatus,
   expandedWidth = 320,
   expandedMaxWidth,
-  dockPosition,
-  onDockPositionChange,
 }: LiTTPanelProps) {
   return (
     <aside
@@ -113,17 +116,17 @@ export default function LiTTPanel({
               right: 12,
               bottom: 104,
               width: `min(${expandedWidth}px, calc(100vw - 24px))`,
-              backgroundColor: "#0d0916",
-              border: "1px solid rgba(255,255,255,0.1)",
+              backgroundColor: "var(--studio-elevated)",
+              border: "1px solid var(--studio-border-strong)",
               boxShadow:
-                "0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(168,255,47,0.08), 0 8px 32px rgba(0,0,0,0.5)",
+                "0 24px 80px rgba(14,60,26,0.18), 0 0 0 1px rgba(23,122,54,0.12), 0 8px 32px rgba(14,60,26,0.12)",
             }
           : {
               width: collapsed ? 64 : `clamp(300px, ${expandedWidth}px, ${expandedMaxWidth ?? "min(640px, 26vw)"})`,
               minWidth: collapsed ? 64 : 280,
               maxWidth: collapsed ? 64 : "36vw",
-              backgroundColor: "#0d0916",
-              borderRight: "1px solid rgba(255,255,255,0.07)",
+              backgroundColor: "var(--studio-surface)",
+              borderRight: "1px solid var(--studio-border)",
               backdropFilter: "blur(12px)",
             }
       }
@@ -152,8 +155,8 @@ export default function LiTTPanel({
         <div
           className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5"
           style={{
-            borderColor: "rgba(255,255,255,0.07)",
-            backgroundColor: "rgba(24,18,38,0.96)",
+            borderColor: "var(--studio-border)",
+            backgroundColor: "var(--studio-surface)",
           }}
         >
           {/* LiTT identity mark — canonical brand logo (F1 brand consolidation).
@@ -189,15 +192,44 @@ export default function LiTTPanel({
             <Activity size={12} className="pointer-events-none" />
             Activity
           </button>
+          {filesContent ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onTabChange("files")}
+                className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                style={{
+                  color: activeTab === "files" ? "var(--color-accent)" : "var(--text-muted)",
+                  backgroundColor: activeTab === "files" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+                }}
+                aria-pressed={activeTab === "files"}
+                data-testid="litt-tab-files"
+              >
+                <FolderOpen size={12} className="pointer-events-none" />
+                Files
+              </button>
+              <button
+                type="button"
+                onClick={() => onTabChange("components")}
+                className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                style={{
+                  color: activeTab === "components" ? "var(--color-accent)" : "var(--text-muted)",
+                  backgroundColor: activeTab === "components" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+                }}
+                aria-pressed={activeTab === "components"}
+                data-testid="litt-tab-components"
+              >
+                <Component size={12} className="pointer-events-none" />
+                Components
+              </button>
+            </>
+          ) : null}
           <div className="flex-1" />
-          {dockPosition && onDockPositionChange && (
-            <ChatDockSwitcher position={dockPosition} onChange={onDockPositionChange} />
-          )}
           {overlay ? (
             <button
               type="button"
               onClick={onCollapse}
-              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
+              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Close LiTT panel"
               data-testid="litt-panel-close"
@@ -209,7 +241,7 @@ export default function LiTTPanel({
             <button
               type="button"
               onClick={onCollapse}
-              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
+              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Collapse LiTT panel"
               data-testid="litt-panel-collapse"
@@ -246,6 +278,19 @@ export default function LiTTPanel({
           >
             {liveContent}
           </div>
+          {filesContent ? (
+            <div
+              className="absolute inset-0 flex flex-col overflow-hidden"
+              style={{
+                visibility: activeTab === "files" || activeTab === "components" ? "visible" : "hidden",
+                pointerEvents: activeTab === "files" || activeTab === "components" ? "auto" : "none",
+              }}
+              data-active={activeTab === "files" || activeTab === "components"}
+              data-testid="litt-files-panel"
+            >
+              {filesContent}
+            </div>
+          ) : null}
         </div>
       </div>
     </aside>

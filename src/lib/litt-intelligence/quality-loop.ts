@@ -133,7 +133,29 @@ export const STAGE_REQUIREMENTS: Record<QualityStage, StageRequirement> = {
  * Scope can narrow which stages apply; it can never fabricate evidence
  * for the stages that remain, and it never excuses a failed stage.
  */
-export type QualityTaskScope = "trivial" | "standard" | "full";
+/**
+ * Task scopes the quality gate can run under.
+ * - "full" / "standard" / "trivial": work that CHANGES the project —
+ *   derived from the request text by classifyTaskScope below.
+ * - "inspection": a read-only workspace-inspection turn. This scope is
+ *   NEVER derived from prose here; it is assigned only from the
+ *   kernel's classification signal (kernel taskKind "inspection",
+ *   threaded route → agent loop → session creation). A read produces
+ *   no build/test evidence BY NATURE — gating it on those stages
+ *   failed every correct listing run (live defect, ART-20261111-041).
+ *   Its required stages are exactly the cognitive stages the loop
+ *   files from the request itself; the read's tool output is judged
+ *   as the run's evidence by the completion path, not by this gate.
+ * - "media": a media-generation turn (kernel taskKind "media", same
+ *   threading). A generation produces a media file, not a site build —
+ *   gating it on build/test stages failed a successful image
+ *   generation whose only "mutation" was the generation tool itself
+ *   (live defect, LION-RUN-DIAGNOSIS-2026-11-16 Q1). Its required
+ *   stages match inspection's set for the same reason: the cognitive
+ *   stages are filed from the request itself, and the generation's
+ *   tool result is judged by the completion path, not by this gate.
+ */
+export type QualityTaskScope = "trivial" | "standard" | "full" | "inspection" | "media";
 
 /**
  * Stages that must pass with recorded evidence for each task scope.
@@ -152,6 +174,19 @@ export const REQUIRED_STAGES_BY_SCOPE: Record<QualityTaskScope, readonly Quality
   standard: ["understand", "plan", "build", "test"],
   // A new product surface. The complete pipeline, as originally designed.
   full: ["understand", "plan", "design", "build", "run", "inspect", "critique", "test"],
+  // Read-only workspace inspection (kernel-classified): the run must
+  // not mutate, so build/test evidence can never exist. The gate
+  // requires exactly the cognitive stages the loop files from the
+  // request itself; whether the read actually answered is judged from
+  // the tool results by the completion path.
+  inspection: ["understand", "plan"],
+  // Media generation (kernel-classified): the run's deliverable is a
+  // generated media file. Build/test evidence for a site the user
+  // never asked to build can never exist, so — exactly as with
+  // inspection — the gate requires only the cognitive stages; whether
+  // the generation actually delivered is judged from the tool results
+  // by the completion path.
+  media: ["understand", "plan"],
 };
 
 /**
@@ -260,6 +295,16 @@ export interface QualityLoopState {
    * Narrows required stages via {@link requiredStagesFor}.
    */
   isStaticWorkspace?: boolean;
+  /**
+   * Latest static-lane visual audit outcome, recorded by
+   * noteStaticVisualAudit (quality-loop-flow.ts) from the enrichment
+   * pass's post-build audit: the placeholder image references still
+   * present in the built page. While placeholderRefs is non-empty the
+   * TEST stage cannot pass — a build that ships placeholder imagery is
+   * not visually complete, no matter what other evidence exists
+   * (production defect 2026-11-11). Absent until the first audit.
+   */
+  visualAudit?: { placeholderRefs: string[] };
   startedAt: string;
   updatedAt: string;
 }

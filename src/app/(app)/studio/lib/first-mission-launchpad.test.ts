@@ -24,6 +24,59 @@ const project = {
   sourceType: "blank" as const,
 };
 
+describe("unresolved runtime gate — unknown is not disconnected", () => {
+  it("renders the neutral checking state for a never-resolved runtime, even when an error and an unavailable provider ride the inputs", () => {
+    // First-load window: the runtime is still the INITIAL placeholder
+    // (epoch lastCheckedAt — no resolve has ever completed), but a caller
+    // can already supply runtimeLoading=false, a stale error, and a
+    // provider verdict. None of that is settled truth about THIS project:
+    // no failure or connection claim may render from it.
+    const result = deriveFirstMissionLaunchpadState({
+      runtime: { ...INITIAL_RUNTIME_STATE },
+      runtimeLoading: false,
+      runtimeError: "Runtime resolve failed (500)",
+      providerHealth: "unavailable",
+    });
+    expect(result.key).toBe("checking");
+    expect(result.title).not.toMatch(/attention|connect/i);
+    expect(result.description).not.toMatch(/fail|connection|attention/i);
+    expect(result.primaryAction).toBeNull();
+  });
+
+  it("never reaches the terminal_unreachable claim from a never-resolved runtime", () => {
+    const result = deriveFirstMissionLaunchpadState({
+      runtime: runtime({
+        ...project,
+        phase: "terminal_unreachable",
+        workspaceId: "workspace-1",
+        workspaceStatus: "provisioning",
+        workspaceProvisioned: false,
+        executionAvailable: false,
+        lastCheckedAt: new Date(0).toISOString(),
+      }),
+      runtimeLoading: false,
+      providerHealth: "available",
+    });
+    expect(result.key).toBe("checking");
+  });
+
+  it("still renders the settled blocked state once a failed resolve has actually completed", () => {
+    // A completed-but-failed resolve is stamped (real lastCheckedAt) —
+    // the gate must not swallow genuine settled failures.
+    const result = deriveFirstMissionLaunchpadState({
+      runtime: {
+        ...INITIAL_RUNTIME_STATE,
+        lastCheckedAt: "2026-08-31T00:00:00.000Z",
+      },
+      runtimeLoading: false,
+      runtimeError: "Runtime resolve failed (500)",
+      providerHealth: "available",
+    });
+    expect(result.key).toBe("blocked");
+    expect(result.description).toBe("Runtime resolve failed (500)");
+  });
+});
+
 const cases: Array<{
   name: string;
   input: FirstMissionLaunchpadInput;
@@ -106,7 +159,11 @@ const cases: Array<{
     action: "configure_provider",
   },
   {
-    name: "connects a terminal after provider and workspace verification",
+    // A ready workspace + available provider is a working state: terminal
+    // command execution being unavailable (on the hosted service it is
+    // disabled by design) must NOT gate the first mission behind a
+    // "connect" step. The Terminal fact reports it; the launchpad proceeds.
+    name: "does not gate a ready workspace on terminal execution",
     input: {
       runtime: runtime({
         ...project,
@@ -115,6 +172,23 @@ const cases: Array<{
         workspaceStatus: "ready",
         workspaceProvisioned: true,
         readAccess: true,
+      }),
+      runtimeLoading: false,
+      providerHealth: "available",
+    },
+    key: "verified",
+    action: "prepare_inspection",
+  },
+  {
+    name: "keeps the terminal state when the workspace itself is not ready",
+    input: {
+      runtime: runtime({
+        ...project,
+        phase: "terminal_unreachable",
+        workspaceId: "workspace-1",
+        workspaceStatus: "provisioning",
+        workspaceProvisioned: false,
+        readAccess: false,
       }),
       runtimeLoading: false,
       providerHealth: "available",
@@ -238,6 +312,49 @@ describe("deriveFirstMissionLaunchpadState", () => {
 
     expect(result.key).toBe("checking");
     expect(result.primaryAction).toBeNull();
+  });
+
+  it("never claims a ready workspace needs a 'live connection' when only terminal execution is unavailable", () => {
+    const result = deriveFirstMissionLaunchpadState({
+      runtime: runtime({
+        ...project,
+        phase: "terminal_unreachable",
+        workspaceId: "workspace-1",
+        workspaceStatus: "ready",
+        workspaceProvisioned: true,
+        readAccess: true,
+        executionAvailable: false,
+      }),
+      runtimeLoading: false,
+      providerHealth: "available",
+    });
+
+    expect(result.key).toBe("verified");
+    expect(result.description).not.toMatch(/live connection/i);
+    // The unavailability is still reported — as the Terminal fact, which is
+    // the state it actually describes.
+    const terminalFact = result.facts.find((fact) => fact.label === "Terminal");
+    expect(terminalFact?.status).toBe("unavailable");
+  });
+
+  it("scopes the residual terminal state to command execution, not a general 'live connection'", () => {
+    const result = deriveFirstMissionLaunchpadState({
+      runtime: runtime({
+        ...project,
+        phase: "terminal_unreachable",
+        workspaceId: "workspace-1",
+        workspaceStatus: "provisioning",
+        workspaceProvisioned: false,
+        readAccess: false,
+        executionAvailable: false,
+      }),
+      runtimeLoading: false,
+      providerHealth: "available",
+    });
+
+    expect(result.key).toBe("terminal_unreachable");
+    expect(result.description).not.toMatch(/needs a live connection/i);
+    expect(result.description.toLowerCase()).toContain("command");
   });
 
   it("does not derive readiness from project existence", () => {

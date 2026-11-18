@@ -3,8 +3,11 @@ import { auth } from "@/lib/auth";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getProject } from "@/lib/projects/project-repository";
 import type { ProjectRuntimeState, RuntimePhase, ProjectRuntimeError } from "@/lib/projects/runtime-state";
+import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state";
 import { describeProjectSource } from "@/lib/projects/project-source";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE, isHostExecutionPermitted } from "@/lib/host-execution-guard";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 
 const FAILED_RECOVERY_BACKOFF_MS = 30_000;
 const STALE_PROVISIONING_MS = 45_000;
@@ -64,7 +67,7 @@ export async function GET(request: NextRequest) {
       ...makeState("idle", {
         code: "NO_PROJECT",
         message: "No project selected. Create or select a project to begin.",
-        recoveryHref: "/dashboard",
+        recoveryHref: "/studio",
       }),
       lastCheckedAt: new Date().toISOString(),
     } satisfies ProjectRuntimeState);
@@ -77,7 +80,7 @@ export async function GET(request: NextRequest) {
       ...makeState("error", {
         code: "PROJECT_NOT_FOUND",
         message: "Project could not be resolved. It may have been deleted.",
-        recoveryHref: "/dashboard",
+        recoveryHref: "/studio",
       }),
       projectId: current.projectId,
       projectName: current.projectName,
@@ -102,42 +105,96 @@ export async function GET(request: NextRequest) {
   // the same backoff used by GET /workspace, and only observes a healthy
   // provisioning owner while its heartbeat keeps updated_at fresh. This
   // prevents every 15s poll from creating another worker.
+  // Repo gate (B2): on the hosted service a GitHub-backed project's
+  // workspace prepare is fail-closed BY DESIGN (terminal isolation
+  // policy — deliberately no override), so the gate is knowable from
+  // project facts alone: GitHub-owned source + an environment where
+  // host execution is not permitted. A gated project is a deliberate
+  // product state, not a failure: recovery is never scheduled for it
+  // (each attempt would only re-earn the same refusal and re-stamp the
+  // project "failed"), and its runtime state reports the gate from the
+  // first poll — no doomed prepare has to happen first.
+  // Phase 2: the gate opens when the terminal server reports sandboxed
+  // execution CURRENTLY available for this user — recovery scheduling
+  // resumes and the runtime state stops reporting the gate. The probe
+  // runs only when the host guard would refuse, and fails closed, so a
+  // sandbox that is off (or unreachable) keeps today's behavior
+  // exactly; an already-provisioned project is never re-locked either
+  // way (its files stay browsable — reads were never gated here).
+  // Stored-refusal fix (2026-11-14): compute sandbox availability
+  // once and reuse it for both the repo gate and the stored-error
+  // reporting clause below — a stored HOST_EXECUTION_DISABLED from a
+  // pre-sandbox prepare must not keep reporting the gate after the
+  // sandbox opens. The probe runs only where the host guard would
+  // refuse, and fails closed.
+  const sandboxAvailable = !isHostExecutionPermitted()
+    ? await isSandboxExecutionAvailable(userId)
+    : false;
+  const repoGate =
+    source.kind === "github" &&
+    !isHostExecutionPermitted() &&
+    !sandboxAvailable;
+
   const updatedAtMs = Date.parse(project.updatedAt);
   const ageMs = Number.isNaN(updatedAtMs) ? Number.POSITIVE_INFINITY : Date.now() - updatedAtMs;
   const recoveryDue =
     project.workspaceStatus === "not_prepared" ||
     (project.workspaceStatus === "failed" && ageMs > FAILED_RECOVERY_BACKOFF_MS) ||
     (project.workspaceStatus === "provisioning" && ageMs > STALE_PROVISIONING_MS);
-  if (recoveryDue) scheduleWorkspaceRecovery(project.id, userId);
+  if (recoveryDue && !repoGate) scheduleWorkspaceRecovery(project.id, userId);
 
   // Determine workspace phase
   let phase: RuntimePhase;
   let error: ProjectRuntimeError | undefined;
 
+  // Wave-4 truth: a prepare refused with HOST_EXECUTION_DISABLED is not a
+  // transient failure — repo-backed workspaces cannot open on the hosted
+  // service until a verified sandbox exists, and retrying can never
+  // succeed. Name the code, use the honest message, and offer no retry.
+  // The gate now also applies from first principles (repoGate above):
+  // any not-ready workspace state of a gated project reports the gate,
+  // including a fresh project that has never attempted a prepare.
+  const hostExecBlocked =
+    workspaceStatus !== "ready" &&
+    (repoGate ||
+      ((workspaceStatus === "failed" || workspaceStatus === "error") &&
+        !sandboxAvailable &&
+        extractEmbeddedErrorCode(project.workspaceError) === HOST_EXECUTION_DISABLED_CODE));
+
   if (!workspaceId) {
     phase = "workspace_not_provisioned";
     const isPreparing = workspaceStatus === "provisioning" || workspaceStatus === "preparing";
     const isFailed = workspaceStatus === "failed" || workspaceStatus === "error";
-    error = {
-      code: isFailed ? "WORKSPACE_PROVISIONING_FAILED" : isPreparing ? "WORKSPACE_PROVISIONING" : "WORKSPACE_NOT_PROVISIONED",
-      message: isFailed
-        ? (project.workspaceError ?? "Workspace preparation failed. Retry to try again.")
-        : isPreparing
-          ? "Workspace is preparing. This will update automatically."
-          : `Source for "${project.name}" has not been provisioned yet. LiTT will prepare it — no GitHub repository is required.`,
-      recoveryAction: isFailed ? "retry_workspace" : "provision_workspace",
-      ...(isFailed ? { recoveryHref: "/settings" } : {}),
-    };
+    error = hostExecBlocked
+      ? {
+          code: HOST_EXECUTION_DISABLED_CODE,
+          message: HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+        }
+      : {
+          code: isFailed ? "WORKSPACE_PROVISIONING_FAILED" : isPreparing ? "WORKSPACE_PROVISIONING" : "WORKSPACE_NOT_PROVISIONED",
+          message: isFailed
+            ? (project.workspaceError ?? "Workspace preparation failed. Retry to try again.")
+            : isPreparing
+              ? "Workspace is preparing. This will update automatically."
+              : `Source for "${project.name}" has not been provisioned yet. LiTT will prepare it — no GitHub repository is required.`,
+          recoveryAction: isFailed ? "retry_workspace" : "provision_workspace",
+          ...(isFailed ? { recoveryHref: "/settings" } : {}),
+        };
   } else if (workspaceStatus !== "ready") {
     phase = "workspace_not_ready";
-    error = {
-      code: "WORKSPACE_NOT_READY",
-      message:
-        project.workspaceError ??
-        `Workspace status is "${workspaceStatus ?? "unknown"}". The workspace may still be initializing or may have failed.`,
-      recoveryAction: "retry_workspace",
-      recoveryHref: "/settings",
-    };
+    error = hostExecBlocked
+      ? {
+          code: HOST_EXECUTION_DISABLED_CODE,
+          message: HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+        }
+      : {
+          code: "WORKSPACE_NOT_READY",
+          message:
+            project.workspaceError ??
+            `Workspace status is "${workspaceStatus ?? "unknown"}". The workspace may still be initializing or may have failed.`,
+          recoveryAction: "retry_workspace",
+          recoveryHref: "/settings",
+        };
   } else {
     // Workspace is ready — terminal connection is client-side
     phase = "ready";
@@ -156,7 +213,10 @@ export async function GET(request: NextRequest) {
     sourceType: project.sourceType ?? (repository ? "github" : "blank"),
     sourceKind: source.kind,
     sourceLabel: source.label,
-    sourceStatus: source.status,
+    // A gated project reports the gate, never "error": the source view
+    // already maps the stored-refusal case; the first-principles gate
+    // covers fresh projects with no stored refusal yet.
+    sourceStatus: hostExecBlocked ? "unavailable" : source.status,
     versionControl: source.versionControl,
     githubConnected: source.githubConnected,
     workspaceId,

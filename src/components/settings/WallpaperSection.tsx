@@ -12,7 +12,15 @@ import {
   type Wallpaper,
 } from "@/lib/wallpapers";
 import { Check, Upload, X, Sparkles, ChevronRight } from "lucide-react";
-import Link from "next/link";
+
+/** Built-in wallpaper prompt options (Larry's direction, 2026-11-14:
+ * "Generate with LiTT" comes with built-in prompts/options). */
+const WALLPAPER_GENERATE_PRESETS: { label: string; prompt: string }[] = [
+  { label: "Forest dawn", prompt: "Calm forest canopy at dawn, soft green light through mist" },
+  { label: "Nebula", prompt: "Deep-space nebula in violet and teal over a dark starfield" },
+  { label: "Mountains", prompt: "Minimal mountain silhouettes at dusk, layered ridges, calm sky" },
+  { label: "Waves", prompt: "Abstract flowing waves in emerald and charcoal, smooth and calm" },
+];
 
 const EFFECTS: { id: WallpaperEffect; label: string }[] = [
   { id: "none", label: "None" },
@@ -31,6 +39,42 @@ export function WallpaperSection() {
   const effect = profile.wallpaperEffect ?? "none";
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [wallpaperPrompt, setWallpaperPrompt] = useState(WALLPAPER_GENERATE_PRESETS[0].prompt);
+  const [generatingWallpaper, setGeneratingWallpaper] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [generateDone, setGenerateDone] = useState(false);
+
+  const handleGenerateWallpaper = useCallback(async () => {
+    const prompt = wallpaperPrompt.trim();
+    if (!prompt || generatingWallpaper) return;
+    setGeneratingWallpaper(true);
+    setGenerateError(null);
+    setGenerateDone(false);
+    try {
+      const res = await fetch("/api/media/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: `Desktop wallpaper, wide scenic background: ${prompt}`,
+          generationMode: "auto-free",
+          aspectRatio: "16:9",
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { success?: boolean; downloadUrl?: string; error?: string }
+        | null;
+      if (!res.ok || !data?.success || !data.downloadUrl) {
+        setGenerateError(data?.error ?? "Generation failed — please try again.");
+        return;
+      }
+      updateProfile({ wallpaper: "custom", customWallpaperUrl: data.downloadUrl });
+      setGenerateDone(true);
+    } catch {
+      setGenerateError("Generation failed — check your connection and try again.");
+    } finally {
+      setGeneratingWallpaper(false);
+    }
+  }, [wallpaperPrompt, generatingWallpaper, updateProfile]);
   const [failedPreviews, setFailedPreviews] = useState<Set<string>>(new Set());
   const [ambientOpen, setAmbientOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -112,14 +156,14 @@ export function WallpaperSection() {
       <div>
         <div className="flex items-end justify-between gap-4">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: "#a855f7" }}>
+            <div className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: "#9333ea" }}>
               LiTT Originals
             </div>
-            <div className="mt-1 text-sm font-bold text-white/80">
+            <div className="mt-1 text-sm font-bold text-zinc-800">
               Cinematic scenes built for your workspace
             </div>
           </div>
-          <div className="hidden text-[10px] text-white/40 sm:block">
+          <div className="hidden text-[10px] text-zinc-500 sm:block">
             Premium collection
           </div>
         </div>
@@ -143,18 +187,18 @@ export function WallpaperSection() {
 
       {/* ── My Wallpapers — custom uploads ───────────────────────────── */}
       <div
-        className="rounded-xl border border-dashed border-white/10 p-4 transition-all hover:border-white/20"
+        className="rounded-xl border border-dashed border-black/10 p-4 transition-all hover:border-black/20"
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
       >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-bold text-white/80">My Wallpapers</div>
-            <p className="text-[10px] text-white/40">
+            <div className="text-xs font-bold text-zinc-800">My Wallpapers</div>
+            <p className="text-[10px] text-zinc-500">
               Drag and drop or browse — JPG, PNG, WebP, AVIF up to 10 MB
             </p>
             {uploadError && (
-              <p className="mt-1 text-[10px] text-red-400">{uploadError}</p>
+              <p className="mt-1 text-[10px] text-red-600">{uploadError}</p>
             )}
           </div>
           <div className="flex shrink-0 gap-2">
@@ -173,7 +217,7 @@ export function WallpaperSection() {
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
               className="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition-all disabled:opacity-40"
-              style={{ borderColor: "rgba(245,158,11,0.2)", color: "#f59e0b" }}
+              style={{ borderColor: "rgba(180,83,9,0.3)", color: "#b45309" }}
             >
               <Upload size={12} className="pointer-events-none" />
               {uploading ? "Uploading…" : "Browse"}
@@ -182,7 +226,7 @@ export function WallpaperSection() {
               <button
                 type="button"
                 onClick={handleRemove}
-                className="flex items-center gap-1.5 rounded-lg border border-red-400/20 px-3 py-2 text-xs font-bold text-red-300 transition-all hover:bg-red-400/10"
+                className="flex items-center gap-1.5 rounded-lg border border-red-400/20 px-3 py-2 text-xs font-bold text-red-600 transition-all hover:bg-red-400/10"
               >
                 <X size={12} className="pointer-events-none" />
                 Remove
@@ -192,7 +236,7 @@ export function WallpaperSection() {
         </div>
         {isCustom && (
           <div
-            className="mt-3 aspect-video overflow-hidden rounded-lg border border-white/5"
+            className="mt-3 aspect-video overflow-hidden rounded-lg border border-black/5"
             style={{
               backgroundImage: `linear-gradient(rgba(0,0,0,${overlayOpacity}), rgba(0,0,0,${overlayOpacity + 0.2})), url(${profile.customWallpaperUrl})`,
               backgroundSize: fit,
@@ -204,22 +248,68 @@ export function WallpaperSection() {
       </div>
 
       {/* ── Generate with LiTT ───────────────────────────────────────── */}
-      <Link
-        href="/studio?tool=image&intent=wallpaper"
-        className="flex items-center justify-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-xs font-bold text-amber-300 transition-all hover:bg-amber-400/10"
-      >
-        <Sparkles size={14} className="pointer-events-none" />
-        Generate wallpaper with LiTT
-      </Link>
+      {/* Board-only rebuild (Larry 2026-11-14): this used to be a bare
+          link to /studio?tool=image&intent=wallpaper — the intent was read
+          by no code, so nothing ever generated. It now generates for real
+          via /api/media/generate and sets the result as the wallpaper
+          through the same updateProfile write path as uploads. Built-in
+          prompt options are offered so nobody has to guess a prompt. */}
+      <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {WALLPAPER_GENERATE_PRESETS.map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              data-testid="wallpaper-generate-preset"
+              disabled={generatingWallpaper}
+              onClick={() => setWallpaperPrompt(preset.prompt)}
+              className="rounded-full border border-amber-400/30 px-2.5 py-1 text-[11px] font-bold text-amber-800 transition-all hover:bg-amber-400/10 disabled:opacity-50"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-2.5 flex items-center gap-2">
+          <input
+            type="text"
+            data-testid="wallpaper-generate-prompt"
+            value={wallpaperPrompt}
+            onChange={(e) => setWallpaperPrompt(e.target.value)}
+            placeholder="Describe your wallpaper…"
+            disabled={generatingWallpaper}
+            className="min-w-0 flex-1 rounded-lg border border-black/10 bg-white/70 px-3 py-2 text-xs text-zinc-800 outline-none disabled:opacity-50"
+          />
+          <button
+            type="button"
+            data-testid="wallpaper-generate"
+            disabled={generatingWallpaper || !wallpaperPrompt.trim()}
+            onClick={() => void handleGenerateWallpaper()}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-white transition-all hover:bg-amber-600 disabled:opacity-50"
+          >
+            <Sparkles size={14} className="pointer-events-none" />
+            {generatingWallpaper ? "Generating…" : "Generate wallpaper with LiTT"}
+          </button>
+        </div>
+        {generateError && (
+          <p data-testid="wallpaper-generate-error" className="mt-2 text-[11px] font-semibold text-red-600">
+            {generateError}
+          </p>
+        )}
+        {generateDone && !generateError && (
+          <p data-testid="wallpaper-generate-done" className="mt-2 text-[11px] font-semibold text-emerald-700">
+            Wallpaper generated and set.
+          </p>
+        )}
+      </div>
 
       {/* ── Ambient & Minimal — collapsed by default ─────────────────── */}
       <details
-        className="group rounded-xl border border-white/8"
-        style={{ backgroundColor: "rgba(255,255,255,0.02)" }}
+        className="group rounded-xl border border-black/8"
+        style={{ backgroundColor: "rgba(0,0,0,0.02)" }}
         open={ambientOpen}
         onToggle={(e) => setAmbientOpen((e.target as HTMLDetailsElement).open)}
       >
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-xs font-black text-white/50 transition hover:text-white/70">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-xs font-black text-zinc-500 transition hover:text-zinc-700">
           <ChevronRight
             size={14}
             className="pointer-events-none transition group-open:rotate-90"
@@ -227,7 +317,7 @@ export function WallpaperSection() {
           Ambient &amp; minimal styles
           <span className="font-normal opacity-60">({ambientWallpapers.length})</span>
         </summary>
-        <div className="grid grid-cols-2 gap-3 border-t border-white/5 p-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 border-t border-black/5 p-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {ambientWallpapers.map((wp) => (
             <WallpaperCard
               key={wp.id}
@@ -247,7 +337,7 @@ export function WallpaperSection() {
       <div className="grid gap-4 sm:grid-cols-2">
         {/* Fit mode */}
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
             Fit mode
           </span>
           <div className="mt-1.5 flex gap-2">
@@ -258,9 +348,9 @@ export function WallpaperSection() {
                 onClick={() => updateProfile({ wallpaperFit: f })}
                 className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize transition-all"
                 style={{
-                  borderColor: fit === f ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.06)",
-                  backgroundColor: fit === f ? "rgba(245,158,11,0.06)" : "transparent",
-                  color: fit === f ? "#f59e0b" : "rgba(255,255,255,0.5)",
+                  borderColor: fit === f ? "rgba(180,83,9,0.35)" : "rgba(0,0,0,0.12)",
+                  backgroundColor: fit === f ? "rgba(245,158,11,0.08)" : "transparent",
+                  color: fit === f ? "#b45309" : "rgba(0,0,0,0.6)",
                 }}
               >
                 {f}
@@ -271,7 +361,7 @@ export function WallpaperSection() {
 
         {/* Background effect */}
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
             Background effect
           </span>
           <div className="mt-1.5 flex flex-wrap gap-2">
@@ -282,9 +372,9 @@ export function WallpaperSection() {
                 onClick={() => updateProfile({ wallpaperEffect: eff.id })}
                 className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize transition-all"
                 style={{
-                  borderColor: effect === eff.id ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.06)",
-                  backgroundColor: effect === eff.id ? "rgba(245,158,11,0.06)" : "transparent",
-                  color: effect === eff.id ? "#f59e0b" : "rgba(255,255,255,0.5)",
+                  borderColor: effect === eff.id ? "rgba(180,83,9,0.35)" : "rgba(0,0,0,0.12)",
+                  backgroundColor: effect === eff.id ? "rgba(245,158,11,0.08)" : "transparent",
+                  color: effect === eff.id ? "#b45309" : "rgba(0,0,0,0.6)",
                 }}
               >
                 {eff.label}
@@ -295,7 +385,7 @@ export function WallpaperSection() {
 
         {/* Overlay darkness */}
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
             Overlay darkness: {Math.round(overlayOpacity * 100)}%
           </span>
           <input
@@ -311,7 +401,7 @@ export function WallpaperSection() {
 
         {/* Blur */}
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
             Background blur: {blurPx}px
           </span>
           <input
@@ -326,12 +416,12 @@ export function WallpaperSection() {
         </div>
 
         {/* Active wallpaper info */}
-        <div className="flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-3 py-2.5">
+        <div className="flex items-center justify-between rounded-lg border border-black/5 bg-black/[0.03] px-3 py-2.5">
           <div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
               Active
             </div>
-            <div className="text-xs font-bold text-white/80">
+            <div className="text-xs font-bold text-zinc-800">
               {isCustom ? "Custom upload" : activeWallpaper.name}
             </div>
           </div>
@@ -339,7 +429,7 @@ export function WallpaperSection() {
             <button
               type="button"
               onClick={handleRemove}
-              className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-bold text-white/50 transition-all hover:text-white/80"
+              className="rounded-lg border border-black/10 px-2.5 py-1.5 text-[10px] font-bold text-zinc-500 transition-all hover:text-zinc-800"
             >
               Remove
             </button>
@@ -369,7 +459,7 @@ function WallpaperCard({ wp, isActive, previewFailed, onSelect, onPreviewFailed,
       aria-pressed={isActive}
       className="group relative overflow-hidden rounded-xl border text-left transition-all hover:-translate-y-0.5"
       style={{
-        borderColor: isActive ? "rgba(168,85,247,0.4)" : "rgba(255,255,255,0.06)",
+        borderColor: isActive ? "rgba(168,85,247,0.4)" : "rgba(0,0,0,0.12)",
         boxShadow: isActive ? "0 0 0 1px rgba(168,85,247,0.3), 0 8px 24px rgba(168,85,247,0.1)" : undefined,
       }}
     >

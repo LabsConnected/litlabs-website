@@ -351,6 +351,22 @@ export function buildActionRunProjection(input: {
     }
     running.clear();
   }
+  if (run.status === "completed") {
+    // Terminal reconciliation: facets are latest-event-wins, so a failure
+    // recorded by a superseded event — an early preview probe, a quality
+    // verdict computed before resume evidence landed — would otherwise
+    // keep a completed run presenting failed facets forever (production
+    // run d205502f: header COMPLETED, Agent and Preview chips failed).
+    // The settled run row is the terminal verdict and outranks facet
+    // events: a facet may stay failed only when its failure IS the
+    // failure the run itself recorded.
+    for (const facet of Object.values(capabilities)) {
+      if (facet.status !== "failed") continue;
+      const facetFailure = "message" in facet ? facet.message : facet.error;
+      const isRecordedFailure = run.failureMessage != null && facetFailure === run.failureMessage;
+      if (!isRecordedFailure) facet.status = "completed";
+    }
+  }
 
   return {
     run,

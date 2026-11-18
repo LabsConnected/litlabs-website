@@ -23,6 +23,11 @@
       width: 100% !important;
       height: 100% !important;
       display: block !important;
+      /* Keep the game's native aspect ratio inside the filled element:
+         without this the 4:3 picture is stretched to the 16:10 stage and
+         EmulatorJS's viewport math clips the edges. object-fit: contain
+         letterboxes the bitmap instead — full picture, centered. */
+      object-fit: contain !important;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
     }
@@ -61,13 +66,20 @@
     /* EmulatorJS .ejs_popup_container defaults to position:absolute; top:0
        with a very tall .ejs_popup_body, causing the save/load dialog to
        appear at the very top of the iframe instead of centered. */
+    /* CONTRACT — do not re-add a display rule here: EmulatorJS shows and
+       hides every popup (Netplay, Cheats, Control, save-state drop) purely
+       through INLINE display styles (display:none when hidden). A stylesheet
+       `display: … !important` on .ejs_popup_container beats those inline
+       styles, which makes all four popups permanently visible, stacked
+       full-screen over the game, and leaves the Start button underneath
+       them unclickable. Positioning/z-index overrides below are safe;
+       display and visibility are not. */
     .ejs_popup_container {
       position: fixed !important;
       top: 0 !important;
       left: 0 !important;
       width: 100% !important;
       height: 100% !important;
-      display: flex !important;
       flex-direction: column !important;
       justify-content: center !important;
       align-items: center !important;
@@ -804,8 +816,11 @@
 
         if (cmd === "command.start") {
           try {
-            if (window.EJS_emulator && typeof window.EJS_emulator.start === "function") {
-              window.EJS_emulator.start();
+            // EmulatorJS has no EJS_emulator.start() method — its only start
+            // entry point is the on-screen start button, so click it.
+            var startButton = document.querySelector(".ejs_start_button");
+            if (startButton) {
+              startButton.click();
             }
           } catch (e) {
             send("runtime.error", { message: "start failed: " + e.message });

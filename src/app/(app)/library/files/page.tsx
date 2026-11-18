@@ -104,7 +104,7 @@ export default function LibraryFilesPage() {
             <ImageIcon size={16} /> Showcase
           </Link>
           <Link
-            href="/dashboard#dashboard-guided-start"
+            href="/studio#dashboard-guided-start"
             className="flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold"
             style={{ borderColor: T.borderColor + "40", color: T.textColor }}
           >

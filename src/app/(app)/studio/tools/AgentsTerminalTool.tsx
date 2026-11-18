@@ -19,6 +19,11 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { AGENTS } from "@/lib/agents";
+import { attemptWorkspacePrepare } from "@/lib/studio/host-exec-session";
+import {
+  HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+  HOST_EXECUTION_UNAVAILABLE_SHORT,
+} from "@/lib/projects/runtime-state";
 import SystemTopologyPanel from "@/components/studio/SystemTopologyPanel";
 import { TerminalPanel } from "@/components/litt-terminal/TerminalPanel";
 
@@ -130,7 +135,7 @@ export default function AgentsTerminalTool() {
   >([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState<
-    "idle" | "preparing" | "ready" | "error"
+    "idle" | "preparing" | "ready" | "error" | "unavailable"
   >("idle");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [ptyConnected, setPtyConnected] = useState(false);
@@ -148,23 +153,26 @@ export default function AgentsTerminalTool() {
       .catch(() => {});
   }, [ptyMode]);
 
-  // Prepare workspace when a project is selected
+  // Prepare workspace when a project is selected. Goes through the
+  // session guard: a project that already returned HOST_EXECUTION_DISABLED
+  // settles straight into "unavailable" without another request.
   const prepareWorkspace = useCallback(async (projectId: string) => {
     setWorkspaceStatus("preparing");
     setWorkspaceError(null);
-    try {
-      const res = await fetch(
-        `/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`,
-        { method: "POST", credentials: "include" },
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || "Workspace preparation failed");
-      }
+    const outcome = await attemptWorkspacePrepare(projectId, () =>
+      fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, {
+        method: "POST",
+        credentials: "include",
+      }),
+    );
+    if (outcome.kind === "ready") {
       setWorkspaceStatus("ready");
-    } catch (err) {
+    } else if (outcome.kind === "unavailable") {
+      setWorkspaceStatus("unavailable");
+      setWorkspaceError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+    } else {
       setWorkspaceStatus("error");
-      setWorkspaceError(err instanceof Error ? err.message : "Unknown error");
+      setWorkspaceError(outcome.message);
     }
   }, []);
 
@@ -821,6 +829,14 @@ export default function AgentsTerminalTool() {
                     {workspaceError ?? "Error"}
                   </span>
                 )}
+                {workspaceStatus === "unavailable" && (
+                  <span
+                    className="text-[9px] text-amber-400 font-mono truncate"
+                    title={workspaceError ?? ""}
+                  >
+                    {HOST_EXECUTION_UNAVAILABLE_SHORT}
+                  </span>
+                )}
                 {workspaceStatus === "idle" && !selectedProjectId && (
                   <span className="text-[9px] text-neutral-500 font-mono">
                     Choose a project to provision a workspace
@@ -847,7 +863,9 @@ export default function AgentsTerminalTool() {
                           ? "Provisioning isolated workspace on terminal server…"
                           : workspaceStatus === "error"
                             ? (workspaceError ?? "Workspace preparation failed")
-                            : "Select a project to launch a real shell"}
+                            : workspaceStatus === "unavailable"
+                              ? HOST_EXECUTION_UNAVAILABLE_MESSAGE
+                              : "Select a project to launch a real shell"}
                       </div>
                     </div>
                   </div>
