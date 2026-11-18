@@ -60,6 +60,27 @@ describe("BoardSettingsMenu (Amendment 5)", () => {
     }
   });
 
+  it("opens as a surface sized to its content, not the old tiny scroll box (Larry, 2026-11-17)", () => {
+    renderMenu();
+    openMenu();
+    const menu = screen.getByTestId("board-settings-menu");
+    // The old surface was w-64 (256px) capped at max-h-[70vh] — a tiny
+    // box Larry had to scroll just to find a setting.
+    expect(menu.className).not.toContain("w-64");
+    expect(menu.className).not.toContain("max-h-[70vh]");
+    // Sized to its content: 360px wide, clamped to the viewport width
+    // on small windows so it never clips off-screen, and a generous
+    // viewport-relative height cap.
+    expect(menu.className).toContain("w-[min(360px,calc(100vw-24px))]");
+    expect(menu.className).toContain("max-h-[calc(100vh-96px)]");
+    // Internal scrolling remains only as the fallback for viewports
+    // too short to fit the content.
+    expect(menu.className).toContain("overflow-y-auto");
+    // Still anchored to its trigger, opening directly below it.
+    expect(menu.className).toContain("right-0");
+    expect(menu.className).toContain("top-[calc(100%+8px)]");
+  });
+
   it("writes every control through to the board settings store", () => {
     renderMenu();
     openMenu();

@@ -12,6 +12,18 @@
  * StudioBoard immediately; the open-behavior settings are consumed by
  * the board layout store through the store's plain getter
  * (getBoardOpenBehavior) at integration time.
+ *
+ * Placement + sizing (Larry, 2026-11-17): this menu and its trigger
+ * stay IN THE BOARD — the trigger lives in StudioBoard's pill toolbar,
+ * not up in the site header by the project name (an earlier placement
+ * he reversed). The surface is sized to its content: 360px wide
+ * (clamped to the viewport on small windows, the same
+ * w-[min(360px,calc(100vw-24px))] pattern as StudioShell's floating
+ * inspector) with a max-height of calc(100vh - 96px), so under normal
+ * desktop conditions every section shows at once. overflow-y-auto
+ * remains ONLY as the fallback for viewports too short to fit the
+ * content — it must not go back to a small fixed cap (the old
+ * w-64 / max-h-[70vh] box forced scrolling to find anything).
  */
 
 import { useState, type ReactNode } from "react";
@@ -100,7 +112,7 @@ export default function BoardSettingsMenu() {
       {open && (
         <div
           data-testid="board-settings-menu"
-          className="absolute right-0 top-[calc(100%+8px)] max-h-[70vh] w-64 overflow-y-auto rounded-xl border p-1.5 shadow-lg"
+          className="absolute right-0 top-[calc(100%+8px)] max-h-[calc(100vh-96px)] w-[min(360px,calc(100vw-24px))] overflow-y-auto rounded-xl border p-1.5 shadow-lg"
           style={{ backgroundColor: tokens.surface, borderColor: tokens.border }}
         >
           <Section title="Studio layout">
