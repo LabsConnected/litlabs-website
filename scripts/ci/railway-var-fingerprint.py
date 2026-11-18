@@ -112,7 +112,8 @@ def main():
         cmd += ["--environment", env_name]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        print(f"SERVICE={service} ERROR variable-list-failed")
+        err = (proc.stderr or proc.stdout or "").strip().replace("\n", " ")[:200]
+        print(f"SERVICE={service} ERROR variable-list-failed rc={proc.returncode} {err}")
         return 0
     try:
         data = json.loads(proc.stdout)
